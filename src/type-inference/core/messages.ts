@@ -1,4 +1,4 @@
-import type { Block, Expression, Program, Statement } from "../../ast.js";
+import type { Block, Expression, ObjectProperty, Program, Statement } from "../../ast.js";
 import { parse } from "../../parser.js";
 import { someNode } from "../../project-globals.js";
 import {
@@ -50,7 +50,7 @@ import {
 import { hasIdentity, VALUE_KIND_NAMES, VALUE_KINDS } from "../../value-kinds.js";
 import { fits } from "./admission.js";
 import { REFERENCE } from "./contract.js";
-import { propertyName } from "./program.js";
+import { propertyName, propertyStep } from "./program.js";
 import type { ContextWord, ItemTag } from "./items.js";
 import type {
   BudgetStop,
@@ -63,6 +63,7 @@ import type {
   SiteExpectation,
   StaticRule,
   StoreRoot,
+  StoreStep,
   WorkPlace,
   WrittenTypeError,
 } from "./result.js";
@@ -93,6 +94,12 @@ export interface MessageSource {
   readonly statement: (use: SourceSite, read: SourceSite) => SourceSite | null;
   /** Whether a site is the place an assignment on its line stores into, or a receiver on its path (`inTarget`). */
   readonly target: (site: SourceSite) => boolean;
+  /**
+   * Where the value at `site` lands (#1468), by the syntax around it: the variable a `let`, a `global` or an `=` gives
+   * it to, and the steps from that variable to it (a property an object literal or the assignment's target names, a
+   * list literal's element); `null` where it lands any other way.
+   */
+  readonly landing: (site: SourceSite) => Landing | null;
   /**
    * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
@@ -312,6 +319,79 @@ function acts(node: Expression): boolean {
  * once, its statements on one line by their line, each parsed once, and its diagnostics' sites in start order, each
  * on first need.
  */
+/** Where a value lands (`MessageSource.landing`): the variable it is given to, and the steps from it to the value. */
+export interface Landing {
+  readonly root: string;
+  readonly steps: readonly StoreStep[];
+}
+
+/** A value a statement gives its variable (`MessageSource.landing`): the value, the variable and its steps. */
+interface Given {
+  readonly value: Expression;
+  readonly root: string;
+  readonly steps: readonly StoreStep[];
+}
+
+/** The variable and the properties an assignment's target names (`box.inner`), else `null`. */
+function targetSteps(target: Expression): Landing | null {
+  const steps: StoreStep[] = [];
+  let at = target;
+  while (at.kind === "propertyAccessExpression") {
+    steps.unshift({ property: at.property.name });
+    at = at.object;
+  }
+  return at.kind === "identifier" ? { root: at.name, steps } : null;
+}
+
+/** The value a `let`, a `global` or an `=` statement gives its variable, else `null`. */
+function givenBy(statement: Statement): Given | null {
+  if (statement.kind === "letStatement")
+    return { value: statement.initializer, root: statement.name.name, steps: [] };
+  if (statement.kind === "globalStatement")
+    return { value: statement.initial, root: statement.name.name, steps: [] };
+  if (statement.kind !== "assignmentStatement" || statement.operator !== "=") return null;
+  const target = targetSteps(statement.target);
+  return target === null ? null : { value: statement.value, ...target };
+}
+
+/**
+ * Where the expression at `site` lands among the values statements give (`MessageSource.landing`, in their start order):
+ * in the last value that starts at or before it, the statement's variable and steps, then each list literal's element
+ * and object literal's property down to it, through parentheses; `null` inside any other expression, or outside that
+ * value (a site after a statement in a handler block that a value holds).
+ */
+function landingOf(given: readonly Given[], site: SourceSite): Landing | null {
+  let low = 0;
+  let high = given.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (given[middle]!.value.span.start.offset <= site.start) low = middle + 1;
+    else high = middle;
+  }
+  const found = given[low - 1];
+  if (found === undefined) return null;
+  const holds = (expression: Expression): boolean =>
+    expression.span.start.offset <= site.start && site.end <= expression.span.end.offset;
+  const steps = [...found.steps];
+  let at: Expression | undefined = found.value;
+  while (at !== undefined && holds(at)) {
+    if (at.span.start.offset === site.start && at.span.end.offset === site.end)
+      return { root: found.root, steps };
+    if (at.kind === "parenthesizedExpression") at = at.expression;
+    else if (at.kind === "listLiteral") {
+      steps.push({ collection: "list" });
+      at = at.elements.find(holds);
+    } else if (at.kind === "objectLiteral") {
+      const property: ObjectProperty | undefined = at.properties.find((entry) =>
+        holds(entry.value),
+      );
+      if (property !== undefined) steps.push({ property: property.name.name });
+      at = property?.value;
+    } else return null;
+  }
+  return null;
+}
+
 export function messageSource(
   sources: readonly string[],
   diagnostics: readonly CheckedDiagnostic[],
@@ -454,8 +534,33 @@ export function messageSource(
       ? null
       : { file: use.file, start: held.span.start.offset, end: held.span.end.offset };
   };
+  // the values statements give their variables, each file's in start order, gathered once
+  const givens = new Map<number, Given[]>();
+  const landing = (site: SourceSite): Landing | null => {
+    let found = givens.get(site.file);
+    if (found === undefined) {
+      const list: Given[] = [];
+      someNode(programOf(site.file), (node) => {
+        if (node.kind !== "program" && node.kind !== "block") return false;
+        // EVIDENCE: invariant: a parser-owned node whose kind is `program` or `block` holds its statements.
+        for (const statement of (node as Program | Block).statements)
+          // (a global with `default:` gives its value through the assignment it holds)
+          for (const each of statement.kind === "globalStatement" && statement.assignment !== null
+            ? [statement, statement.assignment]
+            : [statement]) {
+            const given = givenBy(each);
+            if (given !== null) list.push(given);
+          }
+        return false;
+      });
+      list.sort((a, b) => a.value.span.start.offset - b.value.span.start.offset);
+      givens.set(site.file, (found = list));
+    }
+    return landingOf(found, site);
+  };
   return {
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
+    landing,
     target: (site) =>
       statementsOf(site.file)
         .get(line(site) - 1)
@@ -2557,6 +2662,121 @@ function checkFix(
     : `${check}, or give a fallback after 'otherwise'.`;
 }
 
+/** A literal of each place type a load's default may give a property it adds (`fallbackValue`'s). */
+function defaultLiteral(type: readonly ItemTag[]): string | null {
+  const kinds = type.filter((kind) => kind !== "null");
+  const every = (...names: ItemTag[]): boolean =>
+    kinds.length > 0 && kinds.every((kind) => names.includes(kind));
+  return every("integer", "number")
+    ? "0"
+    : every("string")
+      ? '""'
+      : every("boolean")
+        ? "false"
+        : null;
+}
+
+/**
+ * The load `text` with its default given the property at `path` (properties only), of `literal`: added to the object
+ * literal of the default, or to the object literal of a property on the way, with what it lacks of the way below it;
+ * `null` where the value is no load with an object literal default, or the way passes a property whose default is no
+ * object literal, or the default already has the property.
+ */
+function defaultGiven(text: string, path: readonly string[], literal: string): string | null {
+  const parsed = parsedExpression(text);
+  if (parsed === null || parsed.expression.kind !== "loadExpression") return null;
+  let object = parsed.expression.defaultValue;
+  for (const [index, name] of path.entries()) {
+    if (object?.kind !== "objectLiteral") return null;
+    const found = object.properties.find((property) => property.name.name === name);
+    if (found === undefined) {
+      // (the rest of the way, nested from this property on)
+      const value = path
+        .slice(index + 1)
+        .reduceRight((inner, step) => `{${step}: ${inner}}`, literal);
+      const last = object.properties.at(-1);
+      const at =
+        (last === undefined ? object.span.start.offset + 1 : last.span.end.offset) - parsed.at;
+      return `${text.slice(0, at)}${last === undefined ? "" : ", "}${name}: ${value}${text.slice(at)}`;
+    }
+    if (index === path.length - 1) return null;
+    object = found.value;
+  }
+  return null;
+}
+
+/**
+ * #1468: the fix of a store's place below the warned value, a property of what the value holds (ADR 0021 rule 1.4), by
+ * where the value lands (`MessageSource.landing`): the property in the default, where the value is a load whose default
+ * is an object literal, the place a property of its object or of an object in it, and a literal of the place's type is
+ * written (`defaultLiteral`), as `codeAt` proves it in the load's place; else the check of that property in words, of a
+ * stable path itself, of any other value kept in a variable first. Where no landing is proved, the words name the value
+ * and the place. `null` where the place is the value itself or its element, whose own check is the fix.
+ */
+function propertyFix(
+  rule: StoreRule,
+  text: string,
+  test: Test,
+  site: SourceSite,
+  source: MessageSource,
+  diagnosed: Diagnosed,
+): string | null {
+  if (!rule.steps.some((step) => "property" in step)) return null;
+  const landing = source.landing(site);
+  const above = landing?.steps ?? [];
+  const same = (a: StoreStep, b: StoreStep): boolean =>
+    "property" in a
+      ? "property" in b && a.property === b.property
+      : "collection" in b && a.collection === b.collection;
+  if (
+    landing === null ||
+    rule.root === null ||
+    rule.root.kind === "result" ||
+    landing.root !== rule.root.name ||
+    above.length > rule.steps.length ||
+    !above.every((step, index) => same(step, rule.steps[index]!))
+  )
+    return `Check that '${text}' gives ${rule.into} ${described(rule.type.filter((kind) => kind !== "null"))} first.`;
+  const below = rule.steps.slice(above.length);
+  if (!below.some((step) => "property" in step)) return null;
+  const path = below.map((step) =>
+    "property" in step
+      ? propertyStep(step.property)
+      : step.collection === "dict"
+        ? "entry"
+        : "element",
+  );
+  const literal = defaultLiteral(rule.type);
+  const given =
+    literal === null || !below.every((step) => "property" in step)
+      ? null
+      : defaultGiven(text, path.map(propertyName), literal);
+  // (the load in its place, its key and its default the author's own as written; the property's literal is a value of
+  // the fix's own, in a place no division reads: the load's value is an object, given to a variable)
+  const code =
+    given === null
+      ? null
+      : codeAt(
+          {
+            code: given,
+            takes: [],
+            diagnosed,
+            reads: "own",
+            holds: [site],
+            rulesOut: null,
+            gives: ["object"],
+            elements: [],
+            writes: true,
+          },
+          { takes: null, binds: "whole", elements: null, divides: false },
+        );
+  if (code !== null)
+    return `Give ${pathPhrase({ code: "" }, path)} ${described(rule.type.filter((kind) => kind !== "null"))} in the default, as in '${code}'.`;
+  return stablePath(text)
+    ? `Check that ${pathPhrase({ code: text }, path)} ${test.words} first.`
+    : `Keep '${text}' in a new variable and check that ${pathPhrase({ words: "it" }, path)} ${test.words} first.`;
+}
+
 /** The literals an example may write beside a named value as the source writes them. */
 const LITERAL_OPERAND: ReadonlySet<Expression["kind"]> = new Set([
   "numberLiteral",
@@ -2719,6 +2939,12 @@ function warningFix(
   // property an object may lack fails at its read, before any test)
   if (kinds.includes("unknown") && fits.length === 0) {
     const test = typeTest(ruleKinds(rule));
+    // (a store's place below the value, a property of what it holds: that property's fix, #1468)
+    const property =
+      rule.rule === "store" && test !== null && !isLiteral(text) && context !== "missing"
+        ? propertyFix(rule, text, test, site, source, diagnosed)
+        : null;
+    if (property !== null) return property;
     return test === null || isLiteral(text) || context === "missing"
       ? ""
       : (inPlace(test) ?? checkFix(subject, test, null, { source, site, diagnosed }));

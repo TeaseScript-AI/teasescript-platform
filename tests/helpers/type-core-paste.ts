@@ -467,6 +467,9 @@ const CODE = /(?:such as|with|Use|Write|write) '([^']+)'( on a line of its own)?
 /** A warning's fallback (ADR 0021 rule 1.9), which stands in place of its subject. */
 const FALLBACK = /give a fallback, as in '([^']+)'/;
 
+/** A warning's load with the property a store types given in its default (#1468), in place of the warned load. */
+const DEFAULT_GIVEN = /in the default, as in '([^']+)'/;
+
 /**
  * The declaration a list join's fix offers whole (#1268, TABLE r4.146): its head, the name it declares, and its text
  * from the `=` on, which stand in the source's own declaration, with any type it writes.
@@ -480,8 +483,8 @@ const literally = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, 
 /**
  * The code forms the core's errors in `source` offer at or inside `[start, end)`, each pasted at its position: in place
  * of the diagnosed expression, or as a line of its own before the case's line, the list it changes in place of the
- * expression; a declaration in place of the source's own; a warning's fallback in place of its subject; whether the
- * expression gets any diagnostic.
+ * expression; a declaration in place of the source's own; a warning's fallback in place of its subject, and its load
+ * with a default given in place of the load; whether the expression gets any diagnostic.
  */
 export function pastedForms(
   source: string,
@@ -517,6 +520,13 @@ export function pastedForms(
             source.slice(0, diagnostic.site.start) +
             fallback +
             source.slice(diagnostic.site.start + subject.length),
+        });
+      const given = DEFAULT_GIVEN.exec(message)?.[1];
+      if (given !== undefined)
+        forms.push({
+          code: given,
+          source:
+            source.slice(0, diagnostic.site.start) + given + source.slice(diagnostic.site.end),
         });
       continue;
     }
