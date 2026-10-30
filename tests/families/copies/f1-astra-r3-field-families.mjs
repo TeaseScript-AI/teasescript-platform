@@ -166,11 +166,15 @@ export const sizes = [4, 8, 64, 128, 256, 512];
 export const shapes = workShapes;
 export const cases = [
   ...semanticCases().map(({ name, files }) => [name, files]),
+  // charge-series.mjs --mode=axes and instrument.mjs --extra=layered --sizes=8,16,32 analyse with the default globals
   ...[64, 128].flatMap((stores) =>
-    [64, 128].map((reads) => [`axes/${stores}/${reads}`, axes(stores, reads)]),
+    [64, 128].map((reads) => [`axes/${stores}/${reads}`, axes(stores, reads), ["hostValue"]]),
   ),
-  // instrument.mjs --extra=layered --sizes=8,16,32
-  ...[16, 32].map((k) => [`r3-layered-copies@${k}`, workShapes["r3-layered-copies"](k)]),
+  ...[8, 16, 32].map((k) => [
+    `instrument/r3-layered-copies@${k}`,
+    workShapes["r3-layered-copies"](k),
+    ["hostValue"],
+  ]),
 ];
 export const checks = ["publication"];
 
@@ -189,6 +193,6 @@ export const recorded = {
       "R/astra-m4-f1-review-r3-evidence/reproduce.sh:32, 39",
     ],
   ],
-  sources: 137,
-  sha256: "5d1339d2f6617ce6726cf4cef305e3af3a6397e3bc8d8e8b16c38bda606968cf",
+  sources: 138,
+  sha256: "9bea96f742c999ae981a3e5acd77cefecf1ba5192869e70cb91c688e514c3613",
 };

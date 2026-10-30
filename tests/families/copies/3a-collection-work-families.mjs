@@ -678,7 +678,8 @@ Object.assign(FAMILIES, {
 });
 
 export const shapes = FAMILIES;
-export const sizes = [32, 64, 128, 256];
+// 2 is the measurement's warm-up (checkpoint-8/acct/measure.mjs:55), analysed before each family's sizes
+export const sizes = [2, 32, 64, 128, 256];
 // chain-all.sh:16's $ATTR, as runs/attrib-final-p0/units.txt lists it at 512
 const attributed = [
   "c7-save-restore",
@@ -739,6 +740,6 @@ export const recorded = {
       "R/3a-newcore/checkpoint-8/runs/chain-all.sh:18",
     ],
   ],
-  sources: 581,
-  sha256: "c49009d8e357ded6dda2592810d3860f7f7a420e2ddb64fcc319269c5ca107cc",
+  sources: 718,
+  sha256: "1685d08db1c7c2f9a3fdaa84f8f1a1aa76c2a240f4dd256f1c2e30c54baa509c",
 };

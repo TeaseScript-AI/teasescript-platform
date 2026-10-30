@@ -189,19 +189,17 @@ const generated = [
 ];
 export const checks = ["publication"];
 
-// The programs its auxiliary drivers built from this library (trace.mjs, validate.mjs and order.mjs in
-// R/astra-m4-f1-review-r2-evidence/), as their results record them.
-const captured = [
-  [
-    "136",
-    "let t:integer=1\nlet root={f0:{left:t,right:1},f1:{left:t,right:1},f2:{left:t,right:1},f3:{left:t,right:1},f4:{left:t,right:1},f5:{left:t,right:1},f6:{left:t,right:1},f7:{left:t,right:1},f8:{left:t,right:1},f9:{left:t,right:1},f10:{left:t,right:1},f11:{left:t,right:1},f12:{left:t,right:1},f13:{left:t,right:1},f14:{left:t,right:1},f15:{left:t,right:1}}\nlet a=root\nlet b=a\nb.f0.right=2\nb.f1.right=2\nb.f2.right=2\nb.f3.right=2\nb.f4.right=2\nb.f5.right=2\nb.f6.right=2\nb.f7.right=2\nb.f8.right=2\nb.f9.right=2\nb.f10.right=2\nb.f11.right=2\nb.f12.right=2\nb.f13.right=2\nb.f14.right=2\nb.f15.right=2\nlet r0=b.f0\nlet r1=b.f1\nlet r2=b.f2\nlet r3=b.f3\nlet r4=b.f4\nlet r5=b.f5\nlet r6=b.f6\nlet r7=b.f7\nlet r8=b.f8\nlet r9=b.f9\nlet r10=b.f10\nlet r11=b.f11\nlet r12=b.f12\nlet r13=b.f13\nlet r14=b.f14\nlet r15=b.f15\nexit",
-  ],
-  [
-    "137",
-    "let t:integer=1\nlet root={f0:{left:t,right:1},f1:{left:t,right:1},f2:{left:t,right:1},f3:{left:t,right:1},f4:{left:t,right:1},f5:{left:t,right:1},f6:{left:t,right:1},f7:{left:t,right:1},f8:{left:t,right:1},f9:{left:t,right:1},f10:{left:t,right:1},f11:{left:t,right:1},f12:{left:t,right:1},f13:{left:t,right:1},f14:{left:t,right:1},f15:{left:t,right:1},f16:{left:t,right:1},f17:{left:t,right:1},f18:{left:t,right:1},f19:{left:t,right:1},f20:{left:t,right:1},f21:{left:t,right:1},f22:{left:t,right:1},f23:{left:t,right:1},f24:{left:t,right:1},f25:{left:t,right:1},f26:{left:t,right:1},f27:{left:t,right:1},f28:{left:t,right:1},f29:{left:t,right:1},f30:{left:t,right:1},f31:{left:t,right:1}}\nlet a=root\nlet b=a\nb.f0.right=2\nb.f1.right=2\nb.f2.right=2\nb.f3.right=2\nb.f4.right=2\nb.f5.right=2\nb.f6.right=2\nb.f7.right=2\nb.f8.right=2\nb.f9.right=2\nb.f10.right=2\nb.f11.right=2\nb.f12.right=2\nb.f13.right=2\nb.f14.right=2\nb.f15.right=2\nb.f16.right=2\nb.f17.right=2\nb.f18.right=2\nb.f19.right=2\nb.f20.right=2\nb.f21.right=2\nb.f22.right=2\nb.f23.right=2\nb.f24.right=2\nb.f25.right=2\nb.f26.right=2\nb.f27.right=2\nb.f28.right=2\nb.f29.right=2\nb.f30.right=2\nb.f31.right=2\nlet r0=b.f0\nlet r1=b.f1\nlet r2=b.f2\nlet r3=b.f3\nlet r4=b.f4\nlet r5=b.f5\nlet r6=b.f6\nlet r7=b.f7\nlet r8=b.f8\nlet r9=b.f9\nlet r10=b.f10\nlet r11=b.f11\nlet r12=b.f12\nlet r13=b.f13\nlet r14=b.f14\nlet r15=b.f15\nlet r16=b.f16\nlet r17=b.f17\nlet r18=b.f18\nlet r19=b.f19\nlet r20=b.f20\nlet r21=b.f21\nlet r22=b.f22\nlet r23=b.f23\nlet r24=b.f24\nlet r25=b.f25\nlet r26=b.f26\nlet r27=b.f27\nlet r28=b.f28\nlet r29=b.f29\nlet r30=b.f30\nlet r31=b.f31\nexit",
-  ],
-];
-export const cases = [...generated, ...captured];
+// Its auxiliary drivers' inputs, each analysed with the default globals (coreRequest's hostValue): trace.mjs's
+// forest-overlap-ancestor at 8 to 64, and order.mjs's selection of the cases (every seventh, three-file and r1-).
+const traced = [8, 16, 32, 64].map((k) => [
+  `trace/forest-overlap-ancestor@${k}`,
+  workShapes["forest-overlap-ancestor"](k),
+  ["hostValue"],
+]);
+const ordered = Array.from(caseList())
+  .filter(({ name }, i) => i % 7 === 0 || name === "three-file" || name.startsWith("r1-"))
+  .map(({ name, files }) => [`order/${name}`, files, ["hostValue"]]);
+export const cases = [...generated, ...traced, ...ordered];
 
 // the globals the recorded run passed
 export const globals = ["hostValue", "hostInit"];
@@ -214,6 +212,6 @@ export const recorded = {
       "R/astra-m4-f1-review-r2-evidence/ (each run's results)",
     ],
   ],
-  sources: 139,
-  sha256: "e9a95ec7af07e5bbef7125cefeda1d36e41a315efa5b4b4b858e0576d26e52e3",
+  sources: 159,
+  sha256: "cc98d4493f5478c7ad073b6438402f85be29f5dcbf9232d6cbcb08f96331900d",
 };
