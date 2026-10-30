@@ -1,5 +1,5 @@
 // node tests/families/run.mjs <area> <base> <head> [--sizes 4,8] [--allowances natural,16,256] [--shard i/N]
-//   [--timeout 60] [--memory 2048] [--out differences.jsonl]
+//   [--timeout 180] [--memory 2048] [--out differences.jsonl]
 // Runs every generator of tests/families/<area>/ (or of the folder an absolute <area> names) against two built trees (a
 // checkout with `dist/`, or `dist/` itself), in the four modes (source and reversed order, the sharing on and off), and
 // compares what the sources publish (`publication`, part by part: a difference names the first part that differs,
@@ -163,7 +163,9 @@ if (process.argv[2] === "--child") {
     .split(",")
     .map((text) => (text === "natural" ? null : Number(text)));
   const [shard, shards] = (option("shard") ?? "0/1").split("/").map(Number);
-  const timeout = Number(option("timeout") ?? 60) * 1000;
+  // 180 s by default, 60 s in CI (GitHub Actions sets `CI`), whose runs are the runner's own tests (owner, 2026-10-30)
+  const seconds = Number(option("timeout") ?? (process.env.CI === "true" ? 60 : 180));
+  const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? 2048);
   const out = option("out");
   if (out !== undefined) writeFileSync(out, "");
@@ -300,7 +302,7 @@ if (process.argv[2] === "--child") {
     for (const key of counts) total[key] += row[key];
   }
   child?.kill();
-  console.log(JSON.stringify({ ...total, node: process.version }));
+  console.log(JSON.stringify({ ...total, timeout: seconds, node: process.version }));
   process.exitCode =
     total.differences + total.stalled + total.exceptions + total.unanswered === 0 ? 0 : 1;
 }
