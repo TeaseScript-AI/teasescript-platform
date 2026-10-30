@@ -19,7 +19,7 @@ import {
   type Item,
   type ItemTag,
 } from "../items.js";
-import { conversionCategory } from "../method-categories.js";
+import { conversionCategory, dictList } from "../method-categories.js";
 import { stepName } from "../program.js";
 import type { Work } from "../solver.js";
 import { stands } from "./fresh.js";
@@ -264,6 +264,12 @@ interface CopyTask {
 }
 
 /**
+ * What stands at a frontier's path beside its own content, each followed as a copy: a copy task, or, at a `values` step,
+ * the frontier one step above, a dictionary whose `values` list's element is its own (#1452).
+ */
+type Standing = CopyTask | { readonly values: HostFrontier };
+
+/**
  * What stands at a path of a place by its own stores' structure, made once from its owner path's by one step (as the
  * syntax decision's frontier is, `cheapFrontier`): the literal cells of the values there by the step that enters them
  * (admission's store walk, `expand`), the node of the place's stored paths there, the copies standing there, and the
@@ -276,7 +282,7 @@ interface HostFrontier {
   readonly node: StoreNode | null;
   /** Its place and path where the place has a decision that stopped, else `null`. */
   readonly at: { readonly place: PlaceId; readonly path: readonly string[] } | null;
-  readonly copies: CopyTask[];
+  readonly copies: Standing[];
   host: IngressNode | undefined;
   /** Its owner path's frontier and the step below it, whose copies stand here one step below; `null` at a root. */
   readonly owner: { readonly frontier: HostFrontier; readonly step: string } | null;
@@ -290,7 +296,7 @@ interface HostFrontiers {
   readonly places: Map<PlaceId, StoreNode>;
   readonly roots: Map<PlaceId, HostFrontier>;
   readonly reads: Map<PlaceId, HostFrontier>;
-  readonly copied: Map<CopyTask, HostFrontier>;
+  readonly copied: Map<Standing, HostFrontier>;
   /** The host data each place's component of the place-level copy graph reaches (`placeIngress`), `null` for none. */
   readonly unions: Map<PlaceId, IngressNode | null>;
 }
@@ -502,10 +508,12 @@ function enterStores(walk: Consumers, at: HostFrontier): void {
       }
       for (const task of list.copies) {
         program.work.charge("checks");
-        at.copies.push({
-          value: task.value,
-          strip: keptSteps(program.work, task.strip, ["element"]),
-        });
+        // (the values entered there stand as copy tasks alone)
+        if ("value" in task)
+          at.copies.push({
+            value: task.value,
+            strip: keptSteps(program.work, task.strip, ["element"]),
+          });
       }
       at.host = program.scope.ingress.union(at.host, element.host);
     }
@@ -536,7 +544,10 @@ function locate(walk: Consumers, place: PlaceId, path: readonly string[]): HostF
 
 /**
  * A frontier's own content one step below, made once: its cells and its stored paths there, the copies standing there
- * and the host data standing at it; the stop alone below a decision of its place that stopped (r4.186).
+ * and the host data standing at it; the stop alone below a decision of its place that stopped (r4.186). At a `values`
+ * step, which reads a dictionary's values list where its receiver is one and an object's own property where it is an
+ * object, both: its own content and the frontier above it, standing there as a copy whose element is the
+ * dictionary's (#1452). A dictionary's `keys` list holds text no store's host data reaches (TABLE r4.47).
  */
 function stepOwn(walk: Consumers, from: HostFrontier, step: string): HostFrontier {
   const { program } = walk.pass;
@@ -557,6 +568,10 @@ function stepOwn(walk: Consumers, from: HostFrontier, step: string): HostFrontie
     step,
   });
   from.steps.set(step, at);
+  if (dictList(step) === "values") {
+    program.work.charge("checks");
+    at.copies.push({ values: from });
+  }
   const cells: Expansion[] = [];
   for (const part of from.cells.get(step) ?? []) {
     program.work.charge("checks");
@@ -628,8 +643,9 @@ function readFrontier(walk: Consumers, value: PlaceId): HostFrontier {
   return found;
 }
 
-/** A copy task's frontier: its read's, at its strip; made once. */
-function copyFrontier(walk: Consumers, task: CopyTask): HostFrontier {
+/** A copy task's frontier: its read's, at its strip; made once. A dictionary standing at its `values` list: its own. */
+function copyFrontier(walk: Consumers, task: Standing): HostFrontier {
+  if ("values" in task) return task.values;
   const { copied } = frontiersOf(walk);
   let found = copied.get(task);
   if (found === undefined) {

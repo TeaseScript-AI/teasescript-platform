@@ -22,13 +22,14 @@ import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracl
  * stand for, each carrying its obligation). A generated family over the holder: a list's element, an object's
  * property, a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's
  * store, a parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll` (and the owner
- * reviewer's seven `addAll` texts), the copy graph's topology (a ring, two places copying each other, a ring with a tail), and the finishing read's other sources
- * (a typed parse, a written type). The other axes are its depth; the consumer (an interpolation, a `say`, a repeat count,
- * an arithmetic operand, a fallback's left in requirement mode, a written store); the stores around the read (none, a
- * replacement before it, one after it); and the stop's kind (a program stop alone, or with a demand allowance that stops
- * a decision, `heldDemands`). Each case runs with independent host globals whose values its own predicate sorts
- * (`needs` and the holder's literal), never the checker's, and is judged at every settled stop in four modes
- * (`heldProblems`). CI runs anchors of it; the whole family is a worker run outside CI.
+ * reviewer's seven `addAll` texts), a dictionary's values list through a copy and an object's own `values` property
+ * (#1452), the copy graph's topology (a ring, two places copying each other, a ring with a tail), and the finishing
+ * read's other sources (a typed parse, a written type). The other axes are its depth; the consumer (an interpolation, a `say`, a repeat count, an arithmetic operand, a fallback's left in
+ * requirement mode, a written store); the stores around the read (none, a replacement before it, one after it); and the
+ * stop's kind (a program stop alone, or with a demand allowance that stops a decision, `heldDemands`). Each case runs
+ * with independent host globals whose values its own predicate sorts (`needs` and the holder's literal), never the
+ * checker's, and is judged at every settled stop in four modes (`heldProblems`). CI runs anchors of it; the whole
+ * family is a worker run outside CI.
  */
 
 /** A holder at a depth: the lines that store the host data, the read's text, and what its literal requires of the data. */
@@ -201,6 +202,24 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
       `let xs: ${"integer" + "[]".repeat(depth)} = ${nest(depth - 1, "[hostValue, 4]", (text) => `[${text}]`)}`,
     ],
     read: `xs${"[0]".repeat(depth)}`,
+    integer: true,
+  }),
+  // (a dictionary's values list, read through a copy, whose element is the dictionary's, #1452; and an object's own
+  // `values` property beside it)
+  dictValues: (depth) => ({
+    lines: [
+      `let xs = ${nest(depth - 1, "dict {a: hostValue, b: 4}", (text) => `dict {a: ${text}}`)}`,
+      "let root = {f: xs.values}",
+    ],
+    read: `root.f[0]${".values[0]".repeat(depth - 1)}`,
+    integer: true,
+  }),
+  objectValues: (depth) => ({
+    lines: [
+      `let o = ${nest(depth, "[hostValue, 4]", (text) => `{values: ${text}}`)}`,
+      "let root = {f: o.values}",
+    ],
+    read: `root.f${".values".repeat(depth - 1)}[0]`,
     integer: true,
   }),
   addAll: (depth) => ({
@@ -400,13 +419,20 @@ export function heldFamily(few = false): HeldCase[] {
             'say "AFTER"',
             "exit",
           ];
-          // (an add, a function, a loop and a typed parse of host text are judged at the analysis: outside the candidate
-          // route, or a value the predicate does not model)
+          // (an add, a function, a loop, a dictionary and a typed parse of host text are judged at the analysis: outside
+          // the candidate route, or a value the predicate does not model)
           const slice =
             consumer.slice &&
-            !["add", "addAll", "parameter", "default", "loop", "result", "typed"].includes(
-              holderName,
-            ) &&
+            ![
+              "add",
+              "addAll",
+              "parameter",
+              "default",
+              "loop",
+              "result",
+              "typed",
+              "dictValues",
+            ].includes(holderName) &&
             !FIXED_HOLDERS.has(holderName);
           // (the read's global holds the value; the other one, independent of it, a value every holder takes)
           const read = variant === "overwritten" ? "hostOther" : "hostValue";
