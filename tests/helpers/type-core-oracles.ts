@@ -12,9 +12,10 @@ import {
   coreResult,
 } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
+import { BudgetExhausted, withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
 import { asked, checkedResult } from "../../src/type-inference/core/consumer.js";
 import { Consumers, withConsumerOrder } from "../../src/type-inference/core/consumers.js";
+import type { FlowNode } from "../../src/type-inference/core/flow-graph.js";
 import { ingressLeaves, type Item, writerKey } from "../../src/type-inference/core/items.js";
 import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
 import {
@@ -206,32 +207,68 @@ function itemText(item: Item): string {
 }
 
 /**
- * Every occurrence's answer (each item by `itemText`, its items in `order`), route, place and obligations, with its
- * element's and its properties' answers where it holds a collection or an object: one at a time, as asked.
+ * `node`'s occurrence answer (each item by `itemText`, as `items` lists them), route, place and obligations, with its
+ * element's and its properties' answers where it holds a collection or an object; `null` where it is no occurrence.
  */
+function occurrenceAnswer(
+  answers: Answers,
+  node: FlowNode,
+  items: (list: readonly Item[]) => string[],
+): unknown[] | null {
+  const at = answers.at(node);
+  if (at === null) return null;
+  const tags = new Set(at.items.map((item) => item.tag));
+  return [
+    node.id,
+    at.route,
+    at.place,
+    items(at.items),
+    at.obligations,
+    tags.has("list") || tags.has("set") || tags.has("dict")
+      ? items(answers.project(node, "element"))
+      : null,
+    tags.has("object")
+      ? [...answers.properties(node)].map(([name, answer]) => [name, items(answer)])
+      : null,
+  ];
+}
+
+/** Every occurrence's answer (`occurrenceAnswer`, its items in `order`): one at a time, as asked. */
 function* occurrenceAnswers(
   answers: Answers,
   order: (items: string[]) => string[],
 ): Generator<unknown> {
   const items = (list: readonly Item[]): string[] => order(list.map(itemText));
   for (const node of answers.graph.nodes) {
-    const at = answers.at(node);
-    if (at === null) continue;
-    const tags = new Set(at.items.map((item) => item.tag));
-    yield [
-      node.id,
-      at.route,
-      at.place,
-      items(at.items),
-      at.obligations,
-      tags.has("list") || tags.has("set") || tags.has("dict")
-        ? items(answers.project(node, "element"))
-        : null,
-      tags.has("object")
-        ? [...answers.properties(node)].map(([name, answer]) => [name, items(answer)])
-        : null,
-    ];
+    const answer = occurrenceAnswer(answers, node, items);
+    if (answer !== null) yield answer;
   }
+}
+
+/**
+ * Every occurrence's answer (`occurrenceAnswer`, its items in their order), each mapped by `each` as it is made, up to
+ * the node whose questions pass the analysis's allowance after it finished: the oracle's own stop (#1499 charges its
+ * property-name walk), not the analysis's. That node and every one after it stay unanswered (`unanswered`, their
+ * count), never asked again on the stopped answers, whose `unknown` answers would agree wherever both trees stop alike.
+ */
+function answeredOccurrences<Occurrence>(
+  answers: Answers,
+  each: (text: string) => Occurrence,
+): { readonly occurrences: readonly Occurrence[]; readonly unanswered: number } {
+  const nodes = answers.graph.nodes;
+  const items = (list: readonly Item[]): string[] => list.map(itemText);
+  const occurrences: Occurrence[] = [];
+  for (const [index, node] of nodes.entries()) {
+    let answer: unknown[] | null;
+    try {
+      answer = occurrenceAnswer(answers, node, items);
+    } catch (error) {
+      if (!(error instanceof BudgetExhausted)) throw error;
+      return { occurrences, unanswered: nodes.length - index };
+    }
+    if (answer !== null) occurrences.push(each(JSON.stringify(answer)));
+  }
+  return { occurrences, unanswered: 0 };
 }
 
 /** Every occurrence's answer (`occurrenceAnswers`), all of them. */
@@ -461,17 +498,22 @@ export interface PublicationParts {
   /** `publishedAnswers`'s text and record. */
   readonly answers: string;
   readonly record: string;
-  /** Every occurrence's answer, one part each, in their order. */
+  /** Every occurrence's answer, one part each, in their order, up to the oracle's own stop (`unanswered`). */
   readonly occurrences: readonly string[];
   /** The candidate route's plan or rejection. */
   readonly route: string;
+  /**
+   * The nodes the oracle's own questions left unanswered (`answeredOccurrences`), apart from the parts: 0 when it
+   * answered all. A publication with any is neither agreement nor an exception (#1439): a comparison rejects it.
+   */
+  readonly unanswered: number;
 }
 
 /**
  * A publication's elements as JSON texts, each occurrence's text mapped by `each` as it is made, so that a caller who
- * keeps less than the text never holds them all. Every question the finished analysis is asked spends its allowance and
- * stops there (`asked`, which makes the occurrences again on the stopped answers), as the backend's do. `null` when the
- * files do not parse or resolve.
+ * keeps less than the text never holds them all. The answers' questions to the finished analysis spend its allowance and
+ * stop there (`asked`), as the backend's do; the occurrences' questions end at the oracle's own stop
+ * (`answeredOccurrences`). `null` when the files do not parse or resolve.
  */
 function publishedElements<Occurrence>(
   files: readonly SourceFile[],
@@ -483,6 +525,7 @@ function publishedElements<Occurrence>(
   readonly record: string;
   readonly occurrences: readonly Occurrence[];
   readonly route: string;
+  readonly unanswered: number;
 } | null {
   const request = coreRequest(files, globals);
   if (request === null) return null;
@@ -493,16 +536,13 @@ function publishedElements<Occurrence>(
     const answers = analyseCore(request);
     const published = publishedAnswers(answers, bindings, request);
     const route = publishedRoute(files, globals);
+    const { occurrences, unanswered } = answeredOccurrences(answers, each);
     return {
       answers: JSON.stringify(published.text),
       record: JSON.stringify(published.record),
-      occurrences: asked(answers, (answers) =>
-        Array.from(
-          occurrenceAnswers(answers, (items) => items),
-          (occurrence) => each(JSON.stringify(occurrence)),
-        ),
-      ),
+      occurrences,
       route: JSON.stringify(route.text),
+      unanswered,
     };
   });
 }
@@ -522,6 +562,13 @@ export function publicationParts(
 /** A text's sha256, in hexadecimal. */
 const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
 
+/** A publication's parts by their hashes (`publicationHashes`), with the nodes its oracle left unanswered apart. */
+export interface PublicationHashes {
+  readonly parts: readonly string[];
+  /** `PublicationParts`'s `unanswered`: a publication with any is never agreement. */
+  readonly unanswered: number;
+}
+
 /**
  * What `files` publish in `mode` (`publicationParts`), each part by its sha256 in the whole's order, an occurrence's
  * hashed as it is made: no more than one occurrence's text is held, so a publication of any size is compared part by
@@ -533,22 +580,27 @@ export function publicationHashes(
   files: readonly SourceFile[],
   mode: Mode,
   globals: readonly string[],
-): readonly string[] | null {
+): PublicationHashes | null {
   const elements = publishedElements(files, mode, globals, sha256);
   return elements === null
     ? null
-    : [
-        sha256(elements.answers),
-        sha256(elements.record),
-        ...elements.occurrences,
-        sha256(elements.route),
-      ];
+    : {
+        parts: [
+          sha256(elements.answers),
+          sha256(elements.record),
+          ...elements.occurrences,
+          sha256(elements.route),
+        ],
+        unanswered: elements.unanswered,
+      };
 }
 
 /**
  * What `files` publish in `mode`, exactly (the G3 and #1405 evidence's publication): the answers (`publishedAnswers`'s
  * text and record), every occurrence's answer in its order, and the candidate route's plan or rejection, as one JSON
- * array (`publicationParts` joined); `null` when the files do not parse or resolve.
+ * array (`publicationParts` joined), with a fifth element `{"unanswered": <count>}` where the oracle's own questions
+ * stopped (`answeredOccurrences`), so that text never equals a publication answered in full; `null` when the files do
+ * not parse or resolve.
  *
  * @public (the generator corpus's runner reads it from a built tree, not by an import)
  */
@@ -558,9 +610,9 @@ export function publication(
   globals: readonly string[],
 ): string | null {
   const parts = publicationParts(files, mode, globals);
-  return parts === null
-    ? null
-    : `[${parts.answers},${parts.record},[${parts.occurrences.join(",")}],${parts.route}]`;
+  if (parts === null) return null;
+  const unanswered = parts.unanswered === 0 ? "" : `,{"unanswered":${parts.unanswered}}`;
+  return `[${parts.answers},${parts.record},[${parts.occurrences.join(",")}],${parts.route}${unanswered}]`;
 }
 
 /** Which admission decisions an analysis stops, and when; its restarts and how it ended. */

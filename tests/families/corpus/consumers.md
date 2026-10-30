@@ -1,0 +1,22 @@
+# The desktop corpus: consumers
+
+Kits and data on the desktop worker, under `desktop:~/work/evidence/corpus/<area>/` with one README per area unless an
+entry names another path, indexed here and not imported: run each from its own folder there (`../README.md`, "Kept
+outside the repository").
+
+- `desktop:~/work/evidence/corpus/consumers/sol-1455-r1/`: Sol's r1 of #1455 (#1436, object presence): the
+  natural-budget family (`review-family.mjs` over `review-cases.json` and `opaque-cases.json`), every-allowance stops
+  (`stops.mjs`), checkpoint restores (`checkpoints.mjs`) and the builder spot check (`spot.mjs`). Head `3f0bcb1bd`,
+  base `2960937a1`; `SHA256SUMS` sha256 `a42f4ef4…`. Its family and checkpoints run on `main` `2960937a1`.
+
+## Known problems
+
+- `consumers/sol-1437-r5/probe.mjs` (`controls`, `chain-work`) hooks `readSnapshot(contentSource(walk, value))` in the
+  consumers' signatures, which `main` no longer has (the read's class comes from `contract.readClass`): its alias
+  bypass needs a redesign. The folder's other scripts run on `main`.
+- `consumers/sol-1437-r7/identity-r7.mjs mutant` recreates #1437's B1 by caching a JSON proof's root and items, and
+  anchors on the items expression that `main` extended with the unread (stopped) branch. Its other flavors run.
+- `consumers/sol-1437-r6/spot.mjs` refuses a tree whose sources differ from its review's head (`source-hashes.json`),
+  by design: it reproduces that review on its pinned build only.
+- `consumers/sol-1437-r7/spot-r7.mjs`, which the folder's README lists, is in no archive (not on the workers, not in
+  the builder's r7 evidence): the r7 spot check cannot be rerun.

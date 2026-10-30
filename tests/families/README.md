@@ -27,9 +27,13 @@ process and its pipes to close, so a descendant holding its stderr delays the ne
 spawns one). A run that throws on either tree is an exception, never compared, because identical exceptions on both
 trees are not agreement (#1439): the runner prints it on stderr with its source, mode and check, writes it with each
 stack to `--out` and counts it apart from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in
-CI). It prints one JSON line per generator and a total (sources, unparsed, stalled, exceptions, modes, runs,
-differences), and exits 1 when any run differs or throws or any source stalls. Run large sizes as one capped job per
-area or shard on a worker.
+CI). A publication is had only up to the oracle's own stop: where its questions after a finished analysis pass the
+allowance, the nodes from that one on stay unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on
+either tree is neither compared nor an exception: the runner writes it to `--out` and counts it apart. It prints one
+JSON line per generator and a total (sources, unparsed, stalled, exceptions, unanswered, modes, runs, differences), and
+exits 1 when any run differs, throws or leaves nodes unanswered, or any source stalls. Run large sizes as one capped job
+per area or shard on a worker. Some recorded large inputs exceed the default timeout on unchanged trees. Report stalls
+and publication exceptions separately; neither establishes agreement.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
@@ -112,85 +116,9 @@ and `bin/metrics.mjs` print their usage. The tool's own tests: `node --test test
 
 ## Kept outside the repository
 
-Data, indexed here and not imported: run each from its own folder on the desktop worker.
-
-- `desktop:~/work/evidence/corpus/tooling/property-families/`: the owner's reviewer's property-family pilot (#1442;
-  `property-family-pilot.zip`, sha256 `59ea4c55…`), whose portable parts are `tests/families/property/`. It also holds
-  the pilot's phase-A evidence, its JSON schemas and its five historical calibrations (`calibration/`, not blinded;
-  #1411's is test infrastructure). It is untrusted input, never imported into a build.
-
-- `desktop:~/work/evidence/corpus/copies/astra-1423/`: Astra's r1 of #1423 (G3 part 2). It holds generators
-  (`cases.mjs`, `families.mjs`, `stop-cases.mjs`, `route-cases.mjs`, `growth.mjs`), fixed case lists, and their
-  publication, stop-set and growth harnesses. Its `README.md` gives the pins.
-- `desktop:~/work/evidence/corpus/stops/owner-s8/`: the owner's independent S8 reviews. It holds the 75-source
-  domain matrix, the every-allowance sweeps, the cache lifecycle probe and the JSON and load matrix. It is untrusted
-  input, never imported into a build.
-- `desktop:~/work/evidence/corpus/stops/owner-s8/compiler-enclosing-evidence/`: the owner's reviewer's second bundle
-  (164 files, PR #1434). It holds the 75-source domain generator, a 134-text complete-requirement matrix with an
-  implementation-independent predicate, the relocation-only replay driver (`replay.mjs`, `check-run.py`),
-  `cost-probe.mjs` and the raw results, and its `README.md` gives the replay commands. It is the standard oracle for
-  the stops area: it runs before a builder's first review there.
-- `desktop:~/work/evidence/corpus/consumers/sol-1455-r1/`: Sol's r1 of #1455 (#1436, object presence): the
-  natural-budget family (`review-family.mjs` over `review-cases.json` and `opaque-cases.json`), every-allowance stops
-  (`stops.mjs`), checkpoint restores (`checkpoints.mjs`) and the builder spot check (`spot.mjs`). Head `3f0bcb1bd`,
-  base `2960937a1`; `SHA256SUMS` sha256 `a42f4ef4…`. Its family and checkpoints run on `main` `2960937a1`.
-- `desktop:~/work/evidence/1463/retained/`: copies of the generators, case files and records that modules cite from
-  agents' scratch folders on the main LXC (`/tmp/agent-work/...`, under the same paths), with `SHA256SUMS`.
-- `desktop:~/work/evidence/corpus/tooling/`: one master copy of each kit that briefs hand out, the split kit (`split/`,
-  with `cycles.cjs`) and the #1423 probe kit (`g3-probe/`, with `queue-final.sh`). Its `README.md` says what each
-  master fixes.
-
-These kits read `tests/helpers/type-core-oracles` with `publishedAnswers(answers, bindings, request)` and run on trees
-from `main` `2960937a1` (#1446): `copies/astra-1423/` (`publication.mjs`, `route-check.mjs`), `copies/astra-1441/`,
-`copies/astra-1443/builder-probe/`, `copies/sol-1437-r2/`, `copies/sol-1441-r1/`, `copies/sol-1443-r1/`,
-`consumers/astra-1437/` (Astra's `seam-stops.mjs`, the spot publications and the proof scripts),
-`consumers/owner-s9b/` and `stops/astra-1434/`; `consumers/sol-1437-r5/`, `-r6/` and `-r7/` read `stopIdentity` from
-there too. Each folder's `PORTED-1446.md` names the ported files; each original stays beside its port as
-`<file>.pre-1446`. Their `publication.mjs`, like the master's in `tooling/g3-probe/`, fails on an exception since #1439,
-the #1446 port beside it as `publication.mjs.pre-1439`. The `sol-1437` kits still name their review's folders: retarget
-those as their READMEs say.
-
-Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, one README per area):
-
-- `stops/astra-1405/lifecycle.mjs` loads on no tree since the consumers split (#1367). It drives `narrowingPass` and
-  patches the consumers' private `#valueRun` and `#syntaxRead`, none of which exist on `main`, and the anchor of its
-  `no-restart` mutant is gone, so it needs a rewrite against the current pass, not a port.
-- Sol's S8 runner (`~/work/evidence/i1416/<head>/s8-run.sh`) runs `ownership-maps.mjs`, a draft cut off inside its
-  first loop, so it parses on no tree. `place-maps` writes the `ownership.json` its classifier reads: leave the
-  probe out.
-- The made-units probe (`stops/uncharged-making/`) attributes code to source lines. Across trees whose line numbers
-  differ, compare per site by a stable key (function name and step), not by line.
-- `consumers/sol-1437-r5/probe.mjs` (`controls`, `chain-work`) hooks `readSnapshot(contentSource(walk, value))` in the
-  consumers' signatures, which `main` no longer has (the read's class comes from `contract.readClass`): its alias
-  bypass needs a redesign. The folder's other scripts run on `main`.
-- `consumers/sol-1437-r7/identity-r7.mjs mutant` recreates #1437's B1 by caching a JSON proof's root and items, and
-  anchors on the items expression that `main` extended with the unread (stopped) branch. Its other flavors run.
-- `consumers/sol-1437-r6/spot.mjs` refuses a tree whose sources differ from its review's head (`source-hashes.json`),
-  by design: it reproduces that review on its pinned build only.
-- `consumers/sol-1437-r7/spot-r7.mjs`, which the folder's README lists, is in no archive (not on the workers, not in
-  the builder's r7 evidence): the r7 spot check cannot be rerun.
-- Four drivers that #1249's reviews ran are in no archive (not on the workers, not in their evidence folders), so their
-  runs cannot be reproduced and no module stands for them: `repro-ring.mjs`, `repro-many-fed.mjs` and
-  `r3-product-head.mjs` (the report archive's `astra-m4-i1249-review-r2-evidence/builder/tools/run.sh:4`–`6`), and
-  `probe/famsum.mjs` (`astra-m4-i1249-review-evidence/design-r5.md:797`).
-- #1310's first paste family run on `c1` (`1310/4a11b0553…/run/outc1/paste-*`, `tools/c1-check.sh:13`: 6,507 cases,
-  495 forms) ran on an uncommitted state of the paste helper, which no archive keeps, so its forms cannot be pasted
-  again: `messages/1310-paste-family.mjs` holds the PR's thirteen other runs.
-- #1188's case sets `rel-cases` (450 programs), `contain-cases` (36), `dead-cell-cases` (4) and `dead-reach-cases` (80),
-  and the standalone witnesses of #1261's Sol reviews r1 to r5 (308, `sol-m4-i1188-held-nodes-r1-evidence`), reach the
-  corpus only through later runs that read them. Their texts survive (the #1188 sets' copies under `1463/retained/`),
-  but no record names the run that wrote them or the globals it passed, so no module stands for them.
-- #1272's review r2 also ran `pair.mjs` over 155 of its builder's probe files (`1310/98dcbbae9…/tools/probe-paths.txt`);
-  135 of them are in no archive, so no module stands for those runs (its focused pairs are
-  `joins/1272-astra-r2-pair-focused`).
-- Three of #1210's review `work.mjs` commands (`astra-m4-i1210-review-evidence/comment-0.md:87`–`88`, `comment-1.md:82`)
-  ran an earlier `work.mjs` no archive keeps; `copies/1210-astra-work.mjs` holds the runs of the kept one.
-- #1293's review r3 (`desktop:~/work/evidence/1293/7d6c5fb2f/review-r3/`): its first `matrix.mjs` run used a version
-  of the driver it then overwrote, whose source and arguments no archive keeps; its focused gate's cells run ended out of
-  memory before saving which inputs it reached, and its candidate suite's inputs depend on answers no log keeps. The
-  matrix's second run is `rings/1293-r3-matrix-cases`; the gates' inputs are the repository's tests' own.
-- Some recorded large inputs exceed the default timeout on unchanged trees. Report stalls and publication exceptions
-  separately; neither establishes agreement.
+The desktop corpus's kits and data, and their known problems, are indexed per area in `corpus/<area>.md` (`tooling`,
+`copies`, `stops`, `consumers` and `rings`, and `limits` for those of no one area), not imported: run each from its own
+folder on the desktop worker. A new kit's entry goes to its area's file.
 
 ## The oracle library's next step
 

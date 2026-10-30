@@ -8,8 +8,10 @@
 // child process: a source that takes longer than `--timeout` seconds, more than `--memory` MB of heap, or that ends the
 // process (a fatal V8 error) is counted as stalled, with the reason, and the next source runs in a fresh process. A run
 // that throws on either tree is an exception, never compared (#1439): printed to stderr with its source, mode and
-// check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. Prints one JSON
-// line per generator and a total: sources, unparsed, stalled, exceptions, modes, runs, differences.
+// check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. A publication whose
+// oracle left nodes unanswered at its own budget stop (`publicationHashes`'s `unanswered`) on either tree is never
+// compared either, and is counted apart (`unanswered`) and kept in `--out`. Prints one JSON line per generator and a
+// total: sources, unparsed, stalled, exceptions, unanswered, modes, runs, differences.
 import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
@@ -46,23 +48,34 @@ function attempt(run) {
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 
 /**
- * A publication's parts, each by its hash, in the whole's order (#1503): the tree's `publicationHashes`, which hashes
- * each part as it is made and never holds the whole, or an older library's `publication` split into the same parts;
- * `null` when the files do not parse or resolve.
+ * A publication's parts, each by its hash, in the whole's order (#1503), and the nodes its oracle left unanswered
+ * (`unanswered`): the tree's `publicationHashes`, which hashes each part as it is made and never holds the whole, as
+ * this library writes it or as a library before `unanswered` did (its parts alone), or an older library's
+ * `publication` split into the same parts, with the count its fifth element holds where it has one; `null` when the
+ * files do not parse or resolve.
  */
 function partHashes(oracle, files, mode, globals) {
-  if (typeof oracle.publicationHashes === "function")
-    return oracle.publicationHashes(files, mode, globals);
+  if (typeof oracle.publicationHashes === "function") {
+    const hashes = oracle.publicationHashes(files, mode, globals);
+    return Array.isArray(hashes) ? { parts: hashes, unanswered: 0 } : hashes;
+  }
   const whole = oracle.publication(files, mode, globals);
   if (whole === null) return null;
-  const [answers, record, occurrences, route] = JSON.parse(whole);
-  return [answers, record, ...occurrences, route].map((part) => hash(JSON.stringify(part)));
+  const [answers, record, occurrences, route, stopped] = JSON.parse(whole);
+  return {
+    parts: [answers, record, ...occurrences, route].map((part) => hash(JSON.stringify(part))),
+    unanswered: stopped?.unanswered ?? 0,
+  };
 }
 
-/** A run's result by its hash, with a publication's part hashes (`parts`), and whether the files did not parse. */
+/**
+ * A run's result by its hash (a publication's by its parts'), with a publication's part hashes (`parts`) and unanswered
+ * nodes, and whether the files did not parse.
+ */
 const digest = (value) => ({
-  hash: hash(textOf(value)),
-  parts: Array.isArray(value) ? value : null,
+  hash: hash(textOf(value?.parts ?? value)),
+  parts: value?.parts ?? null,
+  unanswered: value?.unanswered ?? 0,
   unparsed: value === null,
 });
 
@@ -111,6 +124,8 @@ if (process.argv[2] === "--child") {
         const outcome = { mode: label, check };
         if ("thrown" in was || "thrown" in is)
           outcome.thrown = { base: was.thrown, head: is.thrown };
+        else if (was.value.unanswered > 0 || is.value.unanswered > 0)
+          outcome.unanswered = { base: was.value.unanswered, head: is.value.unanswered };
         else if (was.value.hash !== is.value.hash)
           outcome.difference = {
             base: was.value.hash.slice(0, 16),
@@ -237,7 +252,15 @@ if (process.argv[2] === "--child") {
   const generators = readdirSync(folder)
     .filter((name) => name.endsWith(".mjs"))
     .sort();
-  const counts = ["sources", "unparsed", "stalled", "exceptions", "runs", "differences"];
+  const counts = [
+    "sources",
+    "unparsed",
+    "stalled",
+    "exceptions",
+    "unanswered",
+    "runs",
+    "differences",
+  ];
   const zeros = () => Object.fromEntries(counts.map((key) => [key, 0]));
   const total = { area, generators: 0, ...zeros(), modes: 4 };
   for (const name of generators) {
@@ -253,10 +276,13 @@ if (process.argv[2] === "--child") {
       const inputs = { files: source.files, globals: source.globals };
       // the runs that ended count, those of a source that stalls or throws after them included
       row.runs += reply.runs.length;
-      for (const { thrown: exception, difference, ...run } of reply.runs)
+      for (const { thrown: exception, unanswered, difference, ...run } of reply.runs)
         if (exception !== undefined) {
           row.exceptions += 1;
           thrown({ generator: name, source: source.name, ...run, thrown: exception }, source);
+        } else if (unanswered !== undefined) {
+          row.unanswered += 1;
+          record({ generator: name, source: source.name, ...run, unanswered, ...inputs });
         } else if (difference !== undefined) {
           row.differences += 1;
           record({ generator: name, source: source.name, ...run, ...difference, ...inputs });
@@ -275,5 +301,6 @@ if (process.argv[2] === "--child") {
   }
   child?.kill();
   console.log(JSON.stringify({ ...total, node: process.version }));
-  process.exitCode = total.differences + total.stalled + total.exceptions === 0 ? 0 : 1;
+  process.exitCode =
+    total.differences + total.stalled + total.exceptions + total.unanswered === 0 ? 0 : 1;
 }
