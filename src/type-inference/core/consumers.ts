@@ -169,6 +169,7 @@ export class Consumers {
       readonly state: "none" | "some" | "all";
       readonly literal: Writer | null;
       readonly unknown: boolean;
+      readonly outside: boolean;
     }
   >();
   readonly defaults = new Map<string, { readonly key: Key; readonly at: FlowNode } | null>();
