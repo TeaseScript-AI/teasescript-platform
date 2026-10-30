@@ -12,6 +12,11 @@ import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder, withoutRecords } from "../src/type-inference/core/consumers.js";
+import {
+  FRONTIER_COPIES,
+  FRONTIER_DEPTH,
+  withFrontierBound,
+} from "../src/type-inference/core/consumers/finishing.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -20,6 +25,17 @@ import { REASON, type Item } from "../src/type-inference/core/items.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import {
+  heldDemands,
+  heldFamily,
+  heldProblems,
+  heldStops,
+  heldUnstopped,
+  HELD_MODES,
+  randomCopyGraph,
+  topologySources,
+  phaseEnds,
+} from "./helpers/type-core-held-host.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { inMode, keptErrors, MODES, stopIdentity } from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
@@ -285,33 +301,6 @@ const host = (hostValue: SerializableRuntimeValue, hostOther: SerializableRuntim
   hostValue,
   hostOther,
 });
-
-/**
- * A mode's settled phases, each with its lowest and highest stopping allowance, found by bisection: below the analysis's
- * total `phaseOf` (an analysis stopped at the allowance: its phase where admission had settled, else `null`) names
- * contiguous ranges, the publication's above the walk's, down to the first stop that is not settled. A phase found twice
- * is not contiguous and fails.
- */
-function phaseEnds(
-  total: number,
-  phaseOf: (allowance: number) => string | null,
-): Map<string, readonly [number, number]> {
-  const ends = new Map<string, readonly [number, number]>();
-  for (let high = total - 1; high > 0;) {
-    const phase = phaseOf(high);
-    if (phase === null) break;
-    assert.ok(!ends.has(phase), `${phase} again below ${high + 1}`);
-    let low = 1;
-    for (let top = high; low < top;) {
-      const middle = (low + top) >> 1;
-      if (phaseOf(middle) === phase) top = middle;
-      else low = middle + 1;
-    }
-    ends.set(phase, [low, high]);
-    high = low - 1;
-  }
-  return ends;
-}
 
 /**
  * TABLE r4.90, r4.99, r4.108: what a phase settled is never discarded by a later one, and a stop changes nothing of the
@@ -2057,6 +2046,208 @@ test("the named exception for #1216 stands at its counted stops", () => {
     for (let allowance = low; allowance <= high; allowance += 1)
       if (has(analyse(allowance))) count += 1;
   assert.equal(count, exception.settled);
+});
+
+/**
+ * #1432, #1415 (S3 §5; S8's mark-ownership rule; TABLE r4.113): after a settled program stop, a read the finishing walk
+ * answers by a domain holds the host data its key's stores hold, as the unstopped read does, so its consumer owes its
+ * check (a mark carrying the unstopped obligation) and the store's boundary forms. The generated family's anchors
+ * (`heldFamily`: each holder at depth 1, read by a repeat count and by an interpolation) at every twelfth stop of each
+ * settled phase and its last, forward with the sharing and reversed without it; the whole family runs outside CI.
+ */
+test("a settled stop keeps the checks of the host data a place's stores hold (#1432, #1415)", () => {
+  for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!])
+    for (const c of heldFamily(true)) {
+      const { run: unstopped, problems } = heldUnstopped(c, mode);
+      assert.deepEqual(problems, [], `${c.name}, ${mode.name}`);
+      const stops = heldStops(c, mode, 12);
+      assert.ok(
+        stops.some((stop) => stop.phase === "walk"),
+        `${c.name}, ${mode.name}`,
+      );
+      for (const { allowance, phase } of stops)
+        assert.deepEqual(
+          heldProblems(c, mode, allowance, unstopped),
+          [],
+          `${c.name}, ${mode.name}, ${phase} @${allowance}`,
+        );
+    }
+});
+
+/**
+ * #1445, TABLE r4.208: after a settled stop, a domain read's host data is followed at most two copies deep and over at
+ * most eight copies met (`FRONTIER_DEPTH`, `FRONTIER_COPIES`); past them the read answers its place's component's.
+ * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same reads where no walk is cut, the same
+ * stop guard (r4.186), the same writers where a read's walk is not cut and a superset where it is; whole, the same
+ * checks, diagnostics and marks where no read is cut, and where one is, every exact check's obligation (its kind,
+ * target, requirement, site and boundary flag) kept or owned by a mark. A cut may word a check for external data and so
+ * need no read of its receiver (TABLE r4.208's reworded class, #1449's wording difference at a stop). The topologies at
+ * k = 4 (rings and chains of own stores are cut there) and six random copy graphs (two with readers of two places),
+ * forward with sharing and reversed without, near the first settled stop and at the last, without a demand cap and
+ * under the largest that stops a decision. The same check runs at scale, in all four modes, on the workers.
+ */
+test("after a settled stop a read's bounded host frontier names its exact writers, or more where it is cut (#1445)", () => {
+  const sources = [
+    ...topologySources(4),
+    ...[1, 2, 3, 4, 5, 6].map((seed) => ({
+      name: `random ${seed}`,
+      // (seeds 5 and 6 with four readers of two places each, Codex r5's B1)
+      source: randomCopyGraph(seed, 6, 4, 18, seed > 4 ? 4 : 0),
+    })),
+  ];
+  const answered = (answers: Answers) => ({
+    checks: answers.checks,
+    diagnostics: answers.diagnostics.map(stopIdentity),
+    deferred: answers.budget.deferred.map(stopIdentity),
+  });
+  const bound = { depth: FRONTIER_DEPTH, copies: FRONTIER_COPIES };
+  const exactly = { depth: Infinity, copies: Infinity };
+  const seen = { cut: 0, whole: 0, guarded: 0, decisionStops: 0 };
+  for (const { name, source } of sources) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null, name);
+    for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!]) {
+      // (the largest demand allowance under which a decision stops)
+      for (const demand of [undefined, ...heldDemands({ source }, mode).slice(0, 1)]) {
+        const analyse = (allowance?: number): Answers =>
+          mode.run(() => {
+            const capped = () =>
+              demand === undefined
+                ? analyseCore(request)
+                : withTestDemandAllowance(demand, () => analyseCore(request));
+            return allowance === undefined ? capped() : withTestAllowance(allowance, capped);
+          });
+        const total = analyse().budget.total;
+        // (a settled stop within a 64th of the first: the settled phases, the walk and the publication, are the last)
+        let [first, top] = [1, total - 1];
+        while (top - first > total >> 6) {
+          const middle = (first + top) >> 1;
+          if (analyse(middle).budget.settled) top = middle;
+          else first = middle + 1;
+        }
+        for (const allowance of new Set([top, total - 1])) {
+          const where = `${name}, ${mode.name}, demand ${demand} @${allowance}`;
+          const bounded = withFrontierBound(bound, () => analyse(allowance));
+          const exact = withFrontierBound(exactly, () => analyse(allowance));
+          assert.ok(bounded.result.budget.settled, where);
+          const cut = [...bounded.reads.values()].some((read) => read.cut);
+          // (the same reads without a cut; with one, its conservative checks may read more, and where a consumer owes
+          // the check of external data it needs no read of its receiver: TABLE r4.208's reworded class)
+          if (!cut)
+            assert.deepEqual(
+              [...bounded.reads.keys()].sort(),
+              [...exact.reads.keys()].sort(),
+              where,
+            );
+          for (const [read, mine] of bounded.reads) {
+            const theirs = exact.reads.get(read);
+            if (theirs === undefined) continue;
+            assert.equal(mine.guarded, theirs.guarded, `${where} ${read}`);
+            const missing = [...theirs.writers].filter((writer) => !mine.writers.has(writer));
+            assert.equal(missing.length, 0, `${where} ${read}: a writer the exact walk names`);
+            if (!mine.cut) assert.equal(mine.writers.size, theirs.writers.size, `${where} ${read}`);
+            if (mine.guarded) seen.guarded += 1;
+            else if (mine.cut) seen.cut += 1;
+            else seen.whole += 1;
+          }
+          if (bounded.result.budget.decisions.some((d) => d.stopped)) seen.decisionStops += 1;
+          if (!cut) assert.deepEqual(answered(bounded.result), answered(exact.result), where);
+          else {
+            // (a check by its obligation, its wording aside: a cut may word the same check for external data)
+            const obligation = (check: (typeof exact.result.checks)[number]) =>
+              JSON.stringify({ ...check, on: undefined });
+            const kept = new Set(
+              [
+                ...bounded.result.checks,
+                ...bounded.result.budget.deferred.map((mark) => mark.obligation),
+              ].map(obligation),
+            );
+            for (const check of exact.result.checks)
+              assert.ok(kept.has(obligation(check)), `${where}: ${JSON.stringify(check)}`);
+          }
+        }
+      }
+    }
+  }
+  assert.ok(
+    Object.values(seen).every((count) => count > 0),
+    JSON.stringify(seen),
+  );
+});
+
+/**
+ * #1453 and TABLE r4.208: after a settled stop, a read whose walk is cut answers its place's component's host data, so it
+ * keeps every check: through 257 copies of a host object (the store's record-level boundary, `copy-type root against
+ * object`, which #1453 lost at 256), through 33 copies each storing its own property, and in a ring of 64 copies. In
+ * each, at its first settled stop, its last and halfway between, in both orders, every check of the unstopped compile is
+ * kept or owned by a mark, and some read's walk is cut.
+ */
+test("a read past the bounded walk keeps every check: #1453's 257 copies, copies each storing, and a ring", () => {
+  const chain = (length: number, store: boolean) =>
+    [
+      "let root = {f: hostValue, g: 1}",
+      ...Array.from(
+        { length },
+        (_, i) => `let c${i} = ${i ? `c${i - 1}` : "root"}${store ? `\nc${i}.g = ${i}` : ""}`,
+      ),
+      'say "BEFORE"',
+      `repeat c${length - 1}.f {say "ok"}`,
+      'say "AFTER"',
+    ].join("\n");
+  const ring = [
+    ...Array.from({ length: 64 }, (_, i) => `let c${i} = {f: hostValue}`),
+    ...Array.from({ length: 64 }, (_, i) => `c${i} = c${(i + 1) % 64}`),
+    ...Array.from({ length: 64 }, (_, i) => `repeat c${i}.f {}`),
+  ].join("\n");
+  const bound = { depth: FRONTIER_DEPTH, copies: FRONTIER_COPIES };
+  for (const [name, text] of [
+    ["257 copies", chain(257, false)],
+    ["33 copies, each storing", chain(33, true)],
+    ["a ring of 64", ring],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source: `${text}\nexit\n` }], ["hostValue"]);
+    assert.ok(request !== null, name);
+    for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!]) {
+      const analyse = (allowance?: number): Answers =>
+        mode.run(() =>
+          allowance === undefined
+            ? analyseCore(request)
+            : withTestAllowance(allowance, () => analyseCore(request)),
+        );
+      const unstopped = analyse();
+      if (name !== "a ring of 64")
+        assert.ok(
+          unstopped.checks.some((check) =>
+            JSON.stringify(check).includes('"kind":"copy-type","target":"root"'),
+          ),
+          name,
+        );
+      const total = unstopped.budget.total;
+      // (the first settled stop, where the most reads are left to the finishing walk)
+      let first = 1;
+      for (let top = total - 1; first < top;) {
+        const middle = (first + top) >> 1;
+        if (analyse(middle).budget.settled) top = middle;
+        else first = middle + 1;
+      }
+      let cut = false;
+      for (const allowance of new Set(
+        [0, 1, 2].map((i) => first + (((total - 1 - first) * i) >> 1)),
+      )) {
+        const where = `${name}, ${mode.name} @${allowance}`;
+        const { result, reads } = withFrontierBound(bound, () => analyse(allowance));
+        assert.ok(result.budget.settled, where);
+        cut ||= [...reads.values()].some((read) => read.cut);
+        const kept = new Set(result.checks.map((check) => JSON.stringify(check)));
+        const owned = new Set(
+          result.budget.deferred.map((mark) => JSON.stringify(mark.obligation)),
+        );
+        for (const check of unstopped.checks.map((each) => JSON.stringify(each)))
+          assert.ok(kept.has(check) || owned.has(check), `${where}: ${check}`);
+      }
+      assert.ok(cut, `${name}, ${mode.name}: no read's walk is cut`);
+    }
+  }
 });
 
 /**

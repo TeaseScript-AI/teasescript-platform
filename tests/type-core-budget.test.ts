@@ -23,6 +23,7 @@ import { operationItems } from "../src/type-inference/core/operator-table.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { ItemSource } from "./helpers/type-core-items.js";
+import { frontierGrowthProblems } from "./helpers/type-core-held-host.js";
 
 // The work budget (TABLE §8; the reference model's `budget-check.mjs`, checks 1 and 2): the counters sum to the charged
 // total, and an analysis stops at exactly the unit that crosses its allowance. This proves the accounting, not that
@@ -437,4 +438,36 @@ test("a linked record list stops at the allowance with its count checked when it
     );
     assert.ok(stop.deferred.includes("integer-check last(chain(3)) budget"));
   }
+});
+
+/**
+ * #1445, TABLE r4.208: after a settled program stop, the finishing read's host data (`heldIngress`) is followed by a walk
+ * bounded by constants (`FRONTIER_DEPTH` copies deep, `FRONTIER_COPIES` copies met), past which the read answers its
+ * place's component's host data, made once per component; so each read's work is bounded and the finishing work stays
+ * linear in the program's size by construction (`frontierGrowthProblems`). The shapes: the copy graph's topologies
+ * (`topologySources`: chains, rings, fans, diamonds, shared bases, nested cycles, two-way copies, chains of own stores,
+ * Codex r5's readers of unrelated lineages and lineage ties, Sol's staggered pairs and branch readers, the owner
+ * reviewer's overlapping ancestor and two-holder ladder), and a place's many stores (Astra r1's B1), plainly, through
+ * copies and through a selection (Codex r3's B1). Here at the smaller size pair, one doubling (8 → 16; chains 16 → 32,
+ * diamonds 4 → 8, a shared base read at every field 2 → 4); the worker-side probe runs the same gate at the larger pair
+ * (16 → 32), with the uncharged-work probe beside it.
+ */
+test("a settled stop finishes the host data of every copy-graph topology in linear work", () => {
+  // (a shared base read at every field grows as k², and the diamonds' admission grows faster on `main` already, #1466:
+  // their sizes are smaller)
+  assert.deepEqual(
+    frontierGrowthProblems((shape) =>
+      shape === "shared-deltas"
+        ? [2, 4]
+        : shape === "diamond"
+          ? [4, 8]
+          : // (a chain's read follows up to `FRONTIER_COPIES` = 8 of its links, keeping the furthest found for the next
+            // read: read deepest first, from 8 → 16 the reads' work ramps up toward that bound, which reads as growth
+            // though each read's work is bounded)
+            shape === "chain" || shape === "chain-own"
+            ? [16, 32]
+            : [8, 16],
+    ),
+    [],
+  );
 });
