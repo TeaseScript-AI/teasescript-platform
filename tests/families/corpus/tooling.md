@@ -16,3 +16,7 @@ outside the repository").
   (#1514), and counts a disagreeing row whose text `publication.mjs` omitted as `unclassifiable: text omitted` and
   exits 1 (#1515); `g3-probe/canary-1515.sh`, which runs `canary-1514.sh`, checks that, and its originals stay beside it
   as `disagree-kind.py.pre-1514` and `.pre-1515` (`PORTED-1514.md`, `PORTED-1515.md`).
+- `desktop:~/work/evidence/corpus/tooling/astra-1486/`: Astra's r1 of #1486 (its `README.md` gives the commands),
+  whose `progress.mjs` records any value a publication throws, as `unprintable <type>` where its conversion to text
+  throws, through the folder's `describeCaught.mjs` (#1523; `canary-1523.sh`, `progress.mjs.pre-1523`,
+  `PORTED-1523.md`).
