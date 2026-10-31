@@ -4,7 +4,7 @@ import {
   isKeyId,
   keyIdPath,
   keptKeyBelowIn,
-  keyWalk,
+  keptKeyWalk,
   someStep,
   stepsArray,
   stepsOfId,
@@ -14,7 +14,6 @@ import { keptArray, keptParts, keptSlice, keptSteps } from "./budget.js";
 import { carried, type Dispatch } from "./carriers.js";
 import { heldReference, type IndexNode } from "./contract.js";
 import { keyPath, recordPath } from "./definitions.js";
-import { REASON } from "./items.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
 import type { Work } from "./solver.js";
@@ -26,13 +25,38 @@ export type PropertyNamesTask =
   | { readonly literal: PlaceId; readonly path: readonly string[] };
 
 /**
+ * A task the search has taken up (`propertyNames`), with the one that scheduled it and how many of that one's last
+ * steps its own path keeps untouched: neither cut, changed nor read by the step between them (#1493's pump bound).
+ */
+interface Visit {
+  readonly kind: "key" | "value" | "literal";
+  readonly at: PlaceId;
+  readonly path: readonly string[];
+  readonly from: Visit | null;
+  readonly kept: number;
+}
+
+/** A task to take up, the visit that scheduled it, and how many of that visit's last steps it keeps untouched. */
+interface Scheduled {
+  readonly task: PropertyNamesTask;
+  readonly from: Visit | null;
+  readonly kept: number;
+}
+
+/**
  * The names of a value's known properties (S3 §1): those the keys below its sources store, and those the objects of
  * its literals and of the values its collections' adds insert have at its path. One worklist of sources, each once: a value read further at a path is followed
  * through its projections and the operations that pass a value on (the value side's transfers) to a copied key, a
  * call's result key or a literal; a key to its prefixes' stores and their sources' own stores; a literal to the
- * reads and calls standing at its path or above it. A key's copied sources are followed only where its answer may hold
- * an object, one the stop left undecided included (#1493). Each task it schedules and each prefix it visits is charged, and every key, path and identity it
- * keeps, through the kept helpers.
+ * reads and calls standing at its path or above it. Each task it schedules and each prefix it visits is charged, and
+ * every key, path and identity it keeps, through the kept helpers.
+ *
+ * #1493: a step reads and cuts only a bounded front of its task's path (a stored prefix, a literal's depth, a
+ * carrier's two steps) and keeps the rest. So a search that never ends meets a pump: a task of an earlier one's place
+ * whose path is that one's with steps inserted above a tail no step between them touched. From there the same steps
+ * repeat forever, each turn a step longer (a feedback copy `w = r.z` gives `w|`, `w|z`, `w|z.z`, ...), so a pumped
+ * task's own names are taken but its sources are not followed. A search that ends without the bound meets no pump, so
+ * its names are as before; whatever the answer at a key is, stopped or not.
  */
 export function propertyNames(
   pass: CorePass,
@@ -44,15 +68,47 @@ export function propertyNames(
   const { program, contract, definitions } = pass;
   const work = program.work;
   const names = new Set<string>();
-  const pending: PropertyNamesTask[] = [start];
+  const pending: Scheduled[] = [{ task: start, from: null, kept: 0 }];
   const seen = new Set<string>();
   const dispatch: Dispatch = {
     kinds: (of) => new Set(run(contract.contractOfValue(of)).map((item) => item.tag)),
     reference: (receiver) => heldReference(run(contract.valueReceiver(receiver))),
     joined: (operand) => pass.lists.joined(operand),
   };
+  /** Whether a visit pumps one before it: the same place, a longer path, that one's head before its untouched tail. */
+  const pumps = (visit: Visit): boolean => {
+    let tail = visit.kept;
+    for (let above = visit.from; above !== null; above = above.from) {
+      work.charge("checks");
+      if (
+        above.kind === visit.kind &&
+        above.at === visit.at &&
+        visit.path.length > above.path.length
+      ) {
+        const head = above.path.length - Math.min(tail, above.path.length);
+        work.charge("checks", head);
+        let same = true;
+        for (let index = 0; index < head && same; index += 1)
+          same = visit.path[index] === above.path[index];
+        if (same) return true;
+      }
+      tail = Math.min(tail, above.kept);
+    }
+    return false;
+  };
+  /** A path's record steps (`recordPath`), and how many of its last steps they keep unchanged. */
+  const recorded = (
+    path: readonly string[],
+  ): { readonly path: readonly string[]; readonly kept: number } => {
+    const record = recordPath(path);
+    if (record === path) return { path, kept: path.length };
+    let kept = 0;
+    while (kept < path.length && path[path.length - 1 - kept] === record[record.length - 1 - kept])
+      kept += 1;
+    return { path: record, kept };
+  };
   while (pending.length > 0) {
-    const task = pending.pop()!;
+    const { task, from, kept } = pending.pop()!;
     const id =
       "key" in task
         ? keptParts(work, "k", task.key)
@@ -63,6 +119,20 @@ export function propertyNames(
     work.charge("checks");
     if (seen.has(id)) continue;
     seen.add(id);
+    // (a key's path and place through its walk, `keptKeyWalk`: a text's kept, a cursor's steps through the charged
+    // boundary and copied out once, G3 stage 1)
+    const walk = "key" in task ? keptKeyWalk(contract, task.key) : null;
+    const visit: Visit =
+      "key" in task
+        ? { kind: "key", at: walk!.place, path: stepsArray(walk!.path), from, kept }
+        : "literal" in task
+          ? { kind: "literal", at: task.literal, path: task.path, from, kept }
+          : { kind: "value", at: task.value, path: task.path, from, kept };
+    // (a pumped task's own names are taken, its sources not followed)
+    const follows = !pumps(visit);
+    const schedule = (next: PropertyNamesTask, untouched: number): void => {
+      if (follows) pending.push({ task: next, from: visit, kept: Math.max(0, untouched) });
+    };
     if ("value" in task) {
       const { path } = task;
       const at = task.value;
@@ -77,17 +147,21 @@ export function propertyNames(
             someStep(stepsOfId(contract, source), (step) => dictList(step) !== undefined)
           : keyPath(source).some((step) => dictList(step) !== undefined))
       ) {
-        pending.push({ key: keptKeyBelowIn(contract, source, recordPath(path)) });
+        const record = recorded(path);
+        schedule({ key: keptKeyBelowIn(contract, source, record.path) }, record.kept);
         continue;
       }
       if (program.hasOf.has(at)) {
-        pending.push({ literal: at, path: keptArray(work, recordPath(path)) });
+        const record = recorded(path);
+        schedule({ literal: at, path: keptArray(work, record.path) }, record.kept);
         continue;
       }
       // the carrier table's operands, after the value side's decisions (`carriers.ts`: F12, F27, r4.46 (2), F17b,
       // C10, F10, F7, a list's `+`, V30 §19's choice; nothing through an operation that keeps its own value, F19a)
-      for (const [operand, rest] of carried(program, at, path, dispatch))
-        pending.push({ value: operand, path: keptArray(work, rest) });
+      // (a carrier reads its path's first two steps at most, and keeps the rest)
+      if (follows)
+        for (const [operand, rest] of carried(program, at, path, dispatch))
+          schedule({ value: operand, path: keptArray(work, rest) }, path.length - 2);
       continue;
     }
     if ("literal" in task) {
@@ -105,48 +179,42 @@ export function propertyNames(
         for (const name of object.names) names.add(propertyName(name));
       }
       // the reads and calls standing at the path or above it, followed at the rest of the path (`standsAlong`)
-      for (const kind of ["reads", "others"] as const)
-        for (const { depth, entries } of contract.standsAlong(task.literal, task.path, kind))
-          for (const entry of entries)
-            pending.push({ value: entry.value, path: keptSlice(work, task.path, depth) });
+      if (follows)
+        for (const kind of ["reads", "others"] as const)
+          for (const { depth, entries } of contract.standsAlong(task.literal, task.path, kind))
+            for (const entry of entries)
+              schedule(
+                { value: entry.value, path: keptSlice(work, task.path, depth) },
+                task.path.length - depth,
+              );
       continue;
     }
     const key = task.key;
-    // (a cursor's steps through the charged boundary, its prefixes its ancestors, no key below it a definition's: its
-    // family's shape requires it, G3 stage 1)
-    const walk = keyWalk(contract, key);
-    const { path } = walk;
+    const path = visit.path;
     for (const below of isKeyId(key) ? [] : definitions.keysBelow(key)) {
       const step = keyPath(below)[path.length];
       if (step !== undefined && step !== "element") names.add(propertyName(step));
     }
-    // (#1493: a key whose answer proves it holds no object has no object a source copies into it to name properties of:
-    // its own stores above name all it has. A feedback copy `w = r.z` stops here, where its path would otherwise grow by
-    // a step each turn. A key a stop left undecided, a typed parse's nested path, proves nothing: its sources name its
-    // properties as before, so a stop keeps the check the unstopped analysis makes, TABLE r4.100)
-    if (
-      !run(contract.contractOf(key)).some(
-        (item) => item.tag === "object" || (item.reasons & REASON.budget) !== 0,
-      )
-    )
-      continue;
-    // (the tasks keep their paths: a cursor's steps copied out once)
-    const steps = stepsArray(path);
+    if (!follows) continue;
     for (let length = 0; length <= path.length; length += 1) {
       work.charge("checks");
-      const rest = steps.slice(length);
-      const stores = contract.prefixStores(walk.prefix(length));
+      const rest = path.slice(length);
+      const stores = contract.prefixStores(walk!.prefix(length));
       // the sources' own stores below their roots
       for (const sub of contract.subSources(stores))
-        pending.push({ key: keptKeyBelowIn(contract, sub, rest) });
+        schedule({ key: keptKeyBelowIn(contract, sub, rest) }, rest.length);
       for (const entry of stores.list) {
         const at = keptSteps(work, entry.at ?? [], rest);
-        if (entry.key !== undefined) pending.push({ key: keptKeyBelowIn(contract, entry.key, at) });
-        else if (entry.value !== undefined) pending.push({ value: entry.value, path: at });
+        if (entry.key !== undefined)
+          schedule({ key: keptKeyBelowIn(contract, entry.key, at) }, rest.length);
+        else if (entry.value !== undefined) schedule({ value: entry.value, path: at }, rest.length);
         // an added value stands at the collection's element, an `addAll`'s at its own (as `entryAt` reads it), never
         // at the collection itself
         else if (entry.elem !== undefined && rest[0] === "element")
-          pending.push({ value: entry.elem, path: keptSteps(work, entry.at ?? [], rest.slice(1)) });
+          schedule(
+            { value: entry.elem, path: keptSteps(work, entry.at ?? [], rest.slice(1)) },
+            rest.length - 1,
+          );
       }
     }
   }

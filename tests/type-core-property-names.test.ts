@@ -2,17 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import {
+  BudgetExhausted,
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../src/type-inference/core/budget.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
+import { propertyStep } from "../src/type-inference/core/program.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { MODES, inMode } from "./helpers/type-core-oracles.js";
 
 /*
  * #1493: a property-name search follows a value's copied sources. A copy fed back into the object it came from
  * (`w = r.z`, with `r` holding copies of `w`) gave the search a key one step longer on every turn, its identity never seen
- * before, so it never ended and its pending keys and paths filled the heap. A key's sources are followed now only where
- * its answer holds an object: its own stores still name their properties first, so data from outside the script keeps a
- * property the script stores into it, and an unknown or stopped answer names its own stores alone.
+ * before, so it never ended and its pending keys and paths filled the heap. It ends now at a pump: a task of an earlier
+ * one's place whose path inserts steps above a tail no step between them touched, the turn the search would repeat
+ * forever. A search that ended before ends as before, whatever the answers at its keys, stopped or not.
  */
 
 /** The copies of `w` fed back into it through `r.z`, at width `k`: the issue's shape (#1493). */
@@ -70,9 +75,28 @@ test("a copy fed back into the object it came from ends its property-name search
       .names,
     ["f", "z"],
   );
+  // (a copy fed back below a property, `w.a = r.a.q` with `r` a copy of `w`: each turn inserts `q` between the head
+  // `a` and the tail `t`, `w|a.t`, `w|a.q.t`, ...; asked by the place, in every mode)
+  const below = "let w={a:{t:{k:1},q:{t:{k:2}}}}\nlet r=w\nw.a=r.a.q\nsay w\nexit";
+  const request = coreRequest([{ path: "main.tease", source: below }], ["hostValue"]);
+  assert.ok(request !== null);
+  for (const mode of MODES)
+    assert.deepEqual(
+      inMode(mode, () => {
+        const answers = analyseCore(request);
+        const node = answers.graph.nodes.find(
+          (each) => each.expression?.kind === "identifier" && each.expression.name === "w",
+        );
+        const place = node === undefined ? null : answers.at(node)?.place;
+        assert.ok(place !== null && place !== undefined);
+        return [...answers.placeProperties(place.id, ["a", "t"].map(propertyStep))].sort();
+      }),
+      ["k"],
+      JSON.stringify(mode),
+    );
 });
 
-test("a key's own stores name their properties whatever its answer, its sources only where it holds an object (#1493)", () => {
+test("a key's own stores name their properties whatever its answer, its copies reach them whatever theirs (#1493)", () => {
   // (data from outside the script keeps a property the script stores into it)
   assert.deepEqual(namesOf("let w=hostValue\nw.extra=1\nexit", "w").names, ["extra"]);
   // (an object beside data from outside: the object's properties)
@@ -81,6 +105,40 @@ test("a key's own stores name their properties whatever its answer, its sources 
   assert.deepEqual(namesOf("let w=hostValue\nlet s=w\nexit", "w").names, []);
   // (a copy of a copy of an object: its properties, through each copy's source)
   assert.deepEqual(namesOf("let a={x:1}\nlet b=a\nb.y=2\nlet c=b\nexit", "b").names, ["x", "y"]);
+  // Codex r1's B1: a store reached through a copy whose answer holds no object (data from outside, an opaque value), at
+  // the copy and below a property, a copy of a property, and a property copied from another of the same variable's;
+  // by the read and by its place, in every mode
+  for (const [source, name, steps, names] of [
+    ["let a=hostValue\na.extra=1\nlet b=a\nsay b\nexit", "b", [], ["extra"]],
+    ["let a={x:1}.first\na.extra=1\nlet b=a\nsay b\nexit", "b", [], ["extra"]],
+    ["let a={p:hostValue}\na.p.extra=1\nlet b=a\nsay b.p\nexit", "b", ["p"], ["extra"]],
+    ["let a={p:hostValue}\na.p.extra=1\nlet b=a.p\nsay b\nexit", "b", [], ["extra"]],
+    [
+      "let t=hostValue\nt.k=1\nlet p={a:hostValue,x:{y:hostValue}}\np.x.y=t\np.a=p.x.y\nlet r=p.a\nsay r\nexit",
+      "r",
+      [],
+      ["k"],
+    ],
+  ] as const)
+    for (const mode of MODES) {
+      const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+      assert.ok(request !== null, source);
+      const found = inMode(mode, () => {
+        const answers = analyseCore(request);
+        const node = answers.graph.nodes.find(
+          (each) => each.expression?.kind === "identifier" && each.expression.name === name,
+        );
+        const place = node === undefined ? null : answers.at(node)?.place;
+        assert.ok(node !== undefined && place !== null && place !== undefined, source);
+        return {
+          read: steps.length === 0 ? [...answers.properties(node).keys()].sort() : names,
+          place: [
+            ...answers.placeProperties(place.id, [...place.path, ...steps.map(propertyStep)]),
+          ].sort(),
+        };
+      });
+      assert.deepEqual(found, { read: names, place: names }, `${source} ${JSON.stringify(mode)}`);
+    }
 });
 
 test("a stopped analysis's property-name search ends with names its own stores and literals give (#1493)", () => {
@@ -102,6 +160,43 @@ test("a stopped analysis's property-name search ends with names its own stores a
       `${JSON.stringify(stopped.names)} within ${JSON.stringify(full)}`,
     );
   }
+});
+
+test("a demand stop with a question stop after it ends the search, its names within the unstopped ones (#1493)", () => {
+  // Codex r1's B2: the decisions of `w` and `r` stop at their demand allowance, every key below them unknown by budget;
+  // the question about `s` passes the program's allowance, and is asked again of the stopped answers
+  const source = "let w={f:1,z:null}\nlet s=w\nlet r={f:null,z:null}\nr=s\nw=r.z\nlet c=r\nexit";
+  const full = namesOf(source, "s").names;
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+  assert.ok(request !== null);
+  let retried = 0;
+  for (const mode of MODES) {
+    const found = inMode(mode, () =>
+      withTestDemandAllowance(16, () =>
+        withTestAllowance(4000, () => {
+          let answers = analyseCore(request);
+          assert.ok(answers.budget.decisions.some((decision) => decision.stopped));
+          const node = answers.graph.nodes.find(
+            (each) => each.expression?.kind === "identifier" && each.expression.name === "s",
+          );
+          assert.ok(node !== undefined);
+          try {
+            return [...answers.properties(node).keys()];
+          } catch (error) {
+            if (!(error instanceof BudgetExhausted)) throw error;
+            retried += 1;
+            answers = answers.stoppedAt(error.limit);
+            return [...answers.properties(node).keys()];
+          }
+        }),
+      ),
+    );
+    assert.ok(
+      found.every((name) => full.includes(name)),
+      `${JSON.stringify(found)} within ${JSON.stringify(full)} ${JSON.stringify(mode)}`,
+    );
+  }
+  assert.ok(retried > 0, "a question stops and is asked again");
 });
 
 test("the first property `${...}` shows of a copy comes from its source's literal, in every mode (#1493)", () => {
