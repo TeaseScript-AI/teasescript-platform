@@ -19,6 +19,7 @@ const ARENA = [
   "pathChildren",
   "pathFirstSteps",
   "pathMembers",
+  "pathProperties",
 ] as const;
 
 /** What one call walked, made and charged (`probeMade`). */
