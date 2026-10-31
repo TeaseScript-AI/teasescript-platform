@@ -1,5 +1,8 @@
 // node tests/families/writes.mjs [<checkout>]
-// Every filesystem write of the stored baselines' tools (#1542), computed rather than listed, and denied by default.
+// The filesystem writes of the stored baselines' tools (#1542) as their source shows them: an advisory check, which
+// catches the plain forms of a write outside the gate. It is no proof that the tools write nowhere else; that is
+// enforced at the boundary, by the sandbox each store runs in (`sx-sandbox`, tools/corpus/baseline.sh), whose only
+// writable places are the baseline's folder and the process's scratch.
 // The modules are the node entry points tools/corpus/baseline.sh runs and every module they import by a relative name.
 // In them, a site is every call through a binding of `fs`, `fs/promises`, `child_process` or `process`, every import of
 // another module (`module`, `vm`, `worker_threads` among them) and every module loader, unless its exact form is one of
@@ -7,9 +10,10 @@
 // (`<file>:<line>:<column>`) and has a kind:
 // - `gate`: in the gate's `try` that holds the lock (baselines.mjs), in a function passed to `gate`, or in a function
 //   only those call;
-// - `outside`: each path it writes is `pathOf(…, "outside")` or `pathOf(…, "beside")`, which hold only paths checked at
-//   run time to lie outside every baseline (baselines.mjs), or one plain name inside the latter, through constants;
-// - `creation`: a folder made beside the baselines in that function, renamed onto `pathOf(…, "baseline")`;
+// - `outside`: each path it writes is `pathOf(…, "outside")`, a path checked at run time to lie outside every baseline
+//   (baselines.mjs), through constants;
+// - `creation`: in `owned`, each path it writes is `pathOf(…, "baseline")` or one plain name in it (its MANIFEST, made
+//   while the folder holds nothing else);
 // - `unproven`: none of these, as is every other site.
 // Any other use of a binding (passed on, exported, aliased by `let`, destructured other than into plain names, indexed
 // by a computed or quoted name) is an escape. Prints the sites, escapes and allowed forms used as one JSON object.
@@ -651,8 +655,8 @@ export function inventory(checkout = process.cwd()) {
     }
   }
 
-  // where a path written outside the gate comes from: `pathOf(…, "outside")`, `pathOf(…, "beside")`, one plain name
-  // inside the latter, or no path (`undefined`), through constants only; else null
+  // where a path written outside the gate comes from: `pathOf(…, "outside")`, `pathOf(…, "baseline")` or one plain
+  // name inside the latter, or no path (`undefined`), through constants only; else null
   const pathOfCall = (expression, kind) => {
     const node = strip(expression);
     if (!ts.isCallExpression(node)) return undefined;
@@ -666,34 +670,20 @@ export function inventory(checkout = process.cwd()) {
       ? strip(node.arguments[0])
       : undefined;
   };
-  const listed = (expression) => {
-    const node = strip(expression);
-    if (ts.isIdentifier(node)) {
-      const declaration = local(node)?.valueDeclaration;
-      return (
-        declaration !== undefined && isConstant(declaration) && listed(declaration.initializer)
-      );
-    }
-    if (!ts.isCallExpression(node)) return false;
-    if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "filter")
-      return listed(node.expression.expression);
-    const fn = valueOf(node.expression);
-    return fn?.name !== undefined && opOf(fn.name) === "readdir" && node.arguments.length === 1;
+  const ours = (call, name) => {
+    const declaration = target(local(strip(call.expression)))?.declarations?.[0];
+    return (
+      declaration !== undefined &&
+      nameNodeOf(declaration.initializer ?? declaration)?.text === name &&
+      path.basename(declaration.getSourceFile().fileName) === "baselines.mjs"
+    );
   };
   const plainName = (expression) => {
     const node = strip(expression);
     const name = literal(node);
     if (name !== undefined) return /^[^/]+$/.test(name) && ![".", ".."].includes(name);
-    const declaration = ts.isIdentifier(node) ? local(node)?.valueDeclaration : undefined;
-    const loop = declaration?.parent?.parent;
-    return (
-      declaration !== undefined &&
-      ts.isVariableDeclaration(declaration) &&
-      loop !== undefined &&
-      ts.isForOfStatement(loop) &&
-      loop.initializer === declaration.parent &&
-      listed(loop.expression)
-    );
+    // (a temporary file of a plain name: `<name>.<writer>.tmp`)
+    return ts.isCallExpression(node) && ours(node, "temporaryName") && plainName(node.arguments[0]);
   };
   const joins = (call) =>
     ts.isPropertyAccessExpression(call.expression) &&
@@ -707,20 +697,16 @@ export function inventory(checkout = process.cwd()) {
     try {
       if (ts.isIdentifier(node) && node.text === "undefined" && isGlobal(node)) return ["none"];
       if (pathOfCall(node, "outside") !== undefined) return ["outside"];
-      if (pathOfCall(node, "beside") !== undefined) return ["beside"];
+      if (pathOfCall(node, "baseline") !== undefined) return ["baseline"];
       if (
         ts.isCallExpression(node) &&
         joins(node) &&
-        node.arguments.length >= 2 &&
-        node.arguments.slice(1).every(plainName)
+        node.arguments.length === 2 &&
+        plainName(node.arguments[1])
       )
-        return originOf(node.arguments[0])?.every((origin) => origin === "beside")
-          ? ["beside"]
+        return originOf(node.arguments[0])?.every((origin) => origin === "baseline")
+          ? ["baseline"]
           : null;
-      if (ts.isConditionalExpression(node)) {
-        const [yes, no] = [node.whenTrue, node.whenFalse].map(originOf);
-        return yes === null || no === null ? null : [...new Set([...yes, ...no])];
-      }
       const declaration = ts.isIdentifier(node) ? local(node)?.valueDeclaration : undefined;
       return declaration !== undefined && isConstant(declaration)
         ? originOf(declaration.initializer)
@@ -729,33 +715,15 @@ export function inventory(checkout = process.cwd()) {
       seen.delete(node);
     }
   };
-  const madeIn = (fn, folder) =>
-    calls.some(
-      ({ call, of, name }) =>
-        of !== "processes" &&
-        opOf(name) === "mkdir" &&
-        contextOf(call) === fn &&
-        call.arguments[0] !== undefined &&
-        pathOfCall(call.arguments[0], "beside") !== undefined &&
-        ts.isIdentifier(pathOfCall(call.arguments[0], "beside")) &&
-        local(pathOfCall(call.arguments[0], "beside")) === local(folder),
-    );
   const kindOf = (call, op) => {
     if (inGate(call)) return "gate";
     const origins = (WRITERS.get(op) ?? [0]).map((index) =>
       call.arguments[index] === undefined ? null : originOf(call.arguments[index]),
     );
-    if (origins.every((origin) => origin !== null)) return "outside";
-    const [from, to] = call.arguments;
-    const folder = from === undefined ? undefined : pathOfCall(from, "beside");
-    if (
-      op === "rename" &&
-      folder !== undefined &&
-      ts.isIdentifier(folder) &&
-      madeIn(contextOf(call), folder) &&
-      to !== undefined &&
-      pathOfCall(to, "baseline") !== undefined
-    )
+    if (origins.some((origin) => origin === null)) return "unproven";
+    const all = new Set(origins.flat());
+    if ([...all].every((origin) => origin === "outside" || origin === "none")) return "outside";
+    if ([...all].every((origin) => origin === "baseline") && named(call) === "owned")
       return "creation";
     return "unproven";
   };

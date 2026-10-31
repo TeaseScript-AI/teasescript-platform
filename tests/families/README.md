@@ -50,19 +50,23 @@ with other results.
 shard of an area, each source's results as one line, in the baseline of its `src/` tree,
 `<folder>/<src tree>/<area>/<i>of<N>.runs.jsonl`, where `<src tree>` is `git rev-parse <commit>:src`. Every commit with
 that tree and the same oracle library, lockfile and Node shares the baseline; one that differs in any of them stores
-none there (base and head run instead). `baselines.mjs` reads and writes the baseline: a folder it made with its
-`MANIFEST` first (what its runs depend on, the commits stored there, each area's `PLAN`), holding only paths it writes,
-each named exactly as it names them; a folder holding another path is neither written into nor removed, and the refusal
-names the path. Each area's `PLAN`
-binds its shards' sources in their order and its checks, and a writer that would run another is refused (exit 2). A
-shard counts only once its total line verifies its contents and its sources. One running writer at a time stores it, and
-any writer replaces one that does not verify. Every write into the baseline goes through one gate in `baselines.mjs`,
-which holds the baseline's lock. `node tests/families/writes.mjs` lists the tools' writes, computed from their modules
-and denied by default: the runner's test fails for any call through `fs`, `child_process` or `process`, and any module
-loader, that is neither one of the forms it lists as writing nothing, nor in the gate, nor a write of a path checked to
-lie outside every baseline. Such paths, the store's folder and `--out` among them, are resolved as the system resolves
-them, refused in a baseline or a folder of baselines, and taken by the writers only in that checked form; `--out` is
-a new file, never one truncated. `prune` retires a baseline once none of its trees remains.
+none there (base and head run instead). `baselines.mjs` reads and writes the baseline: a folder whose `MANIFEST` it
+wrote while the folder held nothing else (what its runs depend on, the commits stored there, each area's `PLAN`),
+holding only paths it writes, each named exactly as it names them; a folder holding another path is not written into,
+and the refusal names the path. Each area's `PLAN` binds its shards' sources in their order and its checks, and a
+writer that would run another is refused (exit 2). One rule says whether a stored shard counts, and status, the store
+and `--baseline` all read shards through it: its total line names its own baseline's inputs (the `MANIFEST`'s `src/`
+tree, oracle library, lockfile and Node; any commit of that tree), the `PLAN` and the shard's planned sources, which
+are its lines in their order, and hashes every line before it. A shard that would count but names other inputs makes
+the baseline hold runs of other inputs (exit 2); one that does not verify leaves the area damaged (exit 1), and the
+next writer of that shard replaces it. `--baseline` reads an area only where it is complete under that rule, and is
+refused as status refuses it otherwise. One running writer at a time stores a shard. Every write into the baseline
+but its `MANIFEST`'s making goes through one gate in `baselines.mjs`, which holds the baseline's lock. A store writes
+into its tree's baseline only (and its `--out`), and runs where only that folder and its scratch are writable:
+`sx-sandbox --write ~/work/baselines/<src tree> --write <scratch> -- node … --store ~/work/baselines …`, with
+`TMPDIR=<scratch>`, as the hook queues its jobs; a write anywhere else fails (EROFS). `node tests/families/writes.mjs`
+lists the writes the tools' source shows, an advisory check for the plain forms of a write outside the gate. Nothing
+removes a baseline.
 `bash tools/corpus/baseline.sh status <commit>` says in one line what each area of the commit's tree holds, and exits 0
 only when each one is complete. Before a base run, ask it: compare the head with a complete area through `--baseline`,
 and store an area that is not from the base tree's own runner and areas

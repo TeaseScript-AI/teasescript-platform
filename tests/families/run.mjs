@@ -16,22 +16,14 @@
 // each run is judged against the stored base result of the same source, mode and check (a source with each run it
 // does not hold is kept in `--out` as `uncompared`, never agreement); `--store` runs one tree of a commit (sx-tree's,
 // with `src/` and `.sha`) at the runner's defaults and stores one shard of each source's results, one JSON line each, in
-// the baseline of its `src/` tree (`baselines.mjs`), whose area folder's `*.runs.jsonl` files `--baseline` then reads.
+// the baseline of its `src/` tree (`baselines.mjs`), whose area folder `--baseline` then reads, only where the area is
+// complete under the rule status shares (`storedRuns`); it is refused as status refuses it otherwise (exit 1 or 2).
 // Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, uncompared, modes,
 // runs, differences.
 import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  appendFileSync,
-  createReadStream,
-  existsSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   beginShard,
@@ -44,6 +36,7 @@ import {
   planned,
   planOf,
   readFrom,
+  storedRuns,
 } from "./baselines.mjs";
 import { generatorsOf, placeOf, sourceKey } from "./sources.mjs";
 
@@ -350,34 +343,27 @@ if (process.argv[2] === "--child") {
     ...generator,
     sources: sources.filter((_, index) => index % shards === shard),
   }));
-  /** The stored runs of this shard's sources (each its line), by their place, from the baseline's `*.runs.jsonl`. */
+  /**
+   * The stored runs of this shard's sources (each its line), by their place, from the baseline area: read only through
+   * the rule status shares (`storedRuns`), never its files directly; an area that does not verify whole is refused as
+   * status refuses it (#1542, the owner's reviewer)
+   */
   const stored = new Map();
   if (baseline !== undefined) {
-    const files = existsSync(baseline)
-      ? readdirSync(baseline).filter((file) => file.endsWith(".runs.jsonl"))
-      : [];
-    if (files.length === 0) {
-      console.error(`no stored runs (*.runs.jsonl) in ${baseline}`);
-      process.exit(2);
+    const runs = storedRuns(baseline);
+    if (runs.refused !== undefined) {
+      console.error(runs.refused);
+      process.exit(runs.status);
     }
     const places = new Set(
       generators.flatMap(({ name, sources }) => sources.map((source) => placeOf(name, source))),
     );
-    for (const file of files.sort())
-      for await (const line of createInterface({
-        input: createReadStream(path.join(baseline, file)),
-      })) {
-        const { generator, source, key } = JSON.parse(line);
-        const place = JSON.stringify([generator, source, key]);
-        // (a stored shard's last line, its total, is no source's)
-        if (!places.has(place)) continue;
-        // a source stored twice with other results has no one baseline
-        if (stored.has(place) && stored.get(place) !== line) {
-          console.error(`${place} is stored twice, with other results, in ${baseline}`);
-          process.exit(2);
-        }
-        stored.set(place, line);
-      }
+    // (each source is in one shard only: a shard counts only with its planned sources)
+    for (const line of runs.lines) {
+      const { generator, source, key } = JSON.parse(line);
+      const place = JSON.stringify([generator, source, key]);
+      if (places.has(place)) stored.set(place, line);
+    }
   }
   // `--store`: this shard of the area in the baseline of the tree's `src/` tree (`baselines.mjs`), which the tree must
   // share (its oracle library, lockfile and Node) and whose PLAN the area's sources must have; a shard that verifies, or
@@ -483,7 +469,7 @@ if (process.argv[2] === "--child") {
     // the shard whole, its total last, with what made it
     const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));
     const made = { ...ended, ...storing.made, runner: runner.digest("hex") };
-    const published = await endShard(storing, storing.lines, made);
+    const published = await endShard(storing.claim, storing.lines, made);
     // (foreign contents or a retired baseline, found at publication: nothing is published)
     if (published.refused !== undefined) refused(published.refused);
     Object.assign(ended, { stored: storing.file, verified: published.verified });

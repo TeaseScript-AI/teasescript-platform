@@ -5,15 +5,24 @@
 # The stored baseline (owner, 2026-10-30; keyed by the `src/` tree, #1541): the corpus runner's runs of one tree, stored
 # so that a pull request runs only its head against them (`run.mjs <area> <head> --baseline <baseline>/<area>`).
 # tests/families/baselines.mjs reads and writes every baseline, ~/work/baselines/<src tree>/: its MANIFEST (what its runs
-# depend on, the commits stored there, each area's PLAN), shards that count only once verified, `state` and `prune`.
-# Builders store with `run.mjs <area> <tree> --store ~/work/baselines --shard i/16`. `status` prints `state --read-only`
-# of the commit's shared tree (`sx-tree` builds it once where it is missing) as one line, and exits as it does: 0 only
-# when every area is complete, 2 where the baseline is not this tool's or holds runs of other inputs.
+# depend on, the commits stored there, each area's PLAN), shards that count only once verified, and `state`. Nothing
+# removes a baseline. Builders store with `run.mjs <area> <tree> --store ~/work/baselines --shard i/16`, under
+# `sx-sandbox --write ~/work/baselines/<src tree> --write <scratch>` (below). `status` prints `state --read-only` of the
+# commit's shared tree (`sx-tree` builds it once where it is missing) as one line, and exits as it does: 0 only when
+# every area is complete, 2 where the baseline is not this tool's or holds runs of other inputs.
+#
+# The sandbox (#1542, orchestrator 2's contract; `sx-sandbox`, bubblewrap): a store writes into its tree's baseline,
+# ~/work/baselines/<src tree>/ (`git rev-parse <commit>:src`), and nothing else, its locks and temporary files and the
+# MANIFEST it makes there included; a process may also write its TMPDIR scratch, and its own `--out`. The hook runs in
+# a sandbox whose only writable places are that baseline and ~/queue/pending (the wrapper orchestrator 2 installs as
+# the hook runs `sx-sandbox --write ~/work/baselines/<src tree> --write ~/queue/pending -- baseline.sh <tree> <sha>`),
+# and queues each job so that it runs in one whose only writable places are that baseline and its own scratch in
+# /dev/shm, its TMPDIR, removed when the job ends. A write anywhere else fails with EROFS. Reads are not limited.
 #
 # The hook, installed on a worker as ~/work/trees/hooks/baseline, which `sx-tree` runs with each new `main`'s tree and
-# SHA, fills what builders did not store; it writes nothing itself, every write being the state module's. It retires
-# what `prune` finds (and names a baseline it keeps for foreign contents), makes or joins the tree's baseline (`state`,
-# which appends the commit) and returns at once where the baseline is not this tool's, holds foreign contents or the
+# SHA, fills what builders did not store; it writes nothing itself, every write being the state module's. It makes or
+# joins the tree's baseline (`state`, which appends the commit) and returns at once where the baseline is not this
+# tool's, holds foreign contents or the
 # runs of other inputs, every area is complete or a writer is storing one. Else `queue` leaves a copy of this script in
 # the baseline for its jobs, so that a later install does not change a fill already queued, and undoes the tree's
 # SUPERSEDED (the tree is the current one again); then the hook queues one job per shard to store that has no job
@@ -30,8 +39,9 @@
 # superseded. A decision that could not be written fails the job.
 #
 # A tree whose runner has no baselines.mjs (from before #1541) is skipped, unless BASELINE_RUNNER names a built
-# checkout that has one. BASELINE_PRIORITY (7), BASELINE_MEM (3G, each job's memory cap) and BASELINE_REPO (the clone
-# that resolves the current tree, else sx-tree's) override the defaults.
+# checkout that has one. BASELINE_PRIORITY (7), BASELINE_MEM (3G, each job's memory cap), BASELINE_REPO (the clone
+# that resolves the current tree, else sx-tree's) and BASELINE_SANDBOX (sx-sandbox, as each job finds it) override the
+# defaults.
 set -uo pipefail
 root=$HOME/work/baselines
 repo=${BASELINE_REPO:-$HOME/src/teasescript-platform}
@@ -106,8 +116,6 @@ fail() {
   echo "baseline $sha: $*" >&2
   exit 1
 }
-node "$modules/baselines.mjs" prune "$root" | jq -r 'if .pruned then "baseline \(.pruned): removed with its trees"
-  else "baseline \(.kept): kept for its foreign contents: \(.foreign | join(", "))" end' || fail "pruning $root failed"
 lines=$(node "$modules/baselines.mjs" state "$tree" "$root")
 status=$?
 baseline=$(tail -n 1 <<< "$lines")
@@ -132,6 +140,13 @@ if ! copied=$(node "$modules/baselines.mjs" queue "$out" "$0"); then
   echo "baseline $sha: no fill, $(jq -r .refused <<< "$copied" 2> /dev/null)"
   exit 0
 fi
+# each job runs the copy under the sandbox (above): only the baseline and the job's own scratch, its TMPDIR, are
+# writable; the scratch is removed when the job ends
+job='scratch=/dev/shm/baseline-job-$$
+"${BASELINE_SANDBOX:-sx-sandbox}" --write "$1" --write "$scratch" -- env TMPDIR="$scratch" bash "$1/baseline.sh" --job "$@"
+ended=$?
+rm -rf -- "$scratch"
+exit "$ended"'
 # the jobs of the tree pending or running, by name (their files are <priority>-<time>-<name>.job): a shard with one is
 # not queued again
 waiting=$({ sx-queue status --pending && sx-queue status --running; } 2> /dev/null |
@@ -143,7 +158,7 @@ while IFS=$'\t' read -r folder n shards; do
   for i in ${shards//,/ }; do
     grep -qxF -- "baseline-${src:0:9}-$area-$i" <<< "$waiting" && continue
     if SX_HEAVY_MEM=${BASELINE_MEM:-3G} sx-queue add --owner baseline --priority "${BASELINE_PRIORITY:-7}" --dir "$out" \
-      --name "baseline-${src:0:9}-$area-$i" -- bash "$out/baseline.sh" --job "$out" "$tree" "$runner" "$folder" "$i" \
+      --name "baseline-${src:0:9}-$area-$i" -- bash -c "$job" baseline-job "$out" "$tree" "$runner" "$folder" "$i" \
       "$n" "$repo" > /dev/null; then
       queued=$((queued + 1))
     else

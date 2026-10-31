@@ -1,42 +1,43 @@
 // node tests/families/baselines.mjs state <tree> <folder> [--read-only]
-// node tests/families/baselines.mjs prune <folder>
 // node tests/families/baselines.mjs start <baseline> <current src tree>
 // node tests/families/baselines.mjs queue <baseline> <script>
 // The corpus runner's stored baselines (#1541): every read and write of <folder>/<src tree>/ is here. A baseline holds
 // the runs of the trees of one `src/` tree (`git rev-parse <commit>:src`) whose runs depend on the same inputs beside it:
 // the oracle library as built (`dist/tests/helpers/type-core-oracles.js` and the helpers it imports), the lockfile and
-// Node. Its folder is this tool's only when this tool made it with its MANIFEST already inside (written in a folder of
-// its own in <folder>, then renamed into place). The MANIFEST names the src tree and those inputs, which every writer
-// must share, then, appended and never rewritten, each commit stored there and each area with its PLAN's hash, recorded
-// before the area is made. This tool knows each path it writes: the MANIFEST, the hook's markers and copy, and in each
-// recorded area its PLAN and its planned shards' files and claims, with their temporary files. Any other path is
-// foreign.
+// Node. Its folder (absent, or empty: a sandbox makes it before the store runs, #1542) is this tool's only once this
+// tool wrote its MANIFEST into it while it held nothing else. The MANIFEST names the src tree and those inputs, which
+// every writer must share, then, appended and never rewritten, each commit stored there and each area with its PLAN's
+// hash, recorded before the area is made. This tool knows each path it writes: the MANIFEST, the hook's markers and
+// copy, and in each recorded area its PLAN and its planned shards' files and claims, with their temporary files. Any
+// other path is foreign. A store writes nothing outside its baseline's folder (and its own `--out`), so that it runs
+// with only that folder writable (`sx-sandbox`, tools/corpus/baseline.sh).
 //
-// Nothing is written into a baseline but through `gate`: the folder must be this tool's (its MANIFEST's first line,
-// read before anything else), the gate holds the baseline's lock (`flock` on a descriptor of its folder) and checks
-// that no foreign path is there, then writes; a writer whose baseline was retired while it waited starts a new one. A
-// folder holding
-// a foreign path is neither written into (the writer is refused, exit 2, naming the path) nor removed. The gate removes
-// the temporary files a writer that ended (killed) left. An area's PLAN,
-// made by its first writer, binds its run: each shard's sources in their order, each generator's checks, the
-// allowances and limits; a writer that would run another is refused ("another plan"). A recorded area not made yet,
-// or made without its PLAN, is the next writer's to finish. A shard counts only once verified: its last line, its
-// total, names the PLAN, its sources and the hash of every line before it. One running writer at a time stores a shard
-// (its claim) and publishes it whole: a new shard by a hard link, so the first stays, one that does not verify by a
-// rename over it.
+// Nothing is written into a baseline but the MANIFEST at its making and then through `gate`: the folder must be this
+// tool's (its MANIFEST's first line, read before anything else), the gate holds the baseline's lock (`flock` on a
+// descriptor of its folder) and checks that no foreign path is there, then writes. A folder holding a foreign path is
+// not written into (the writer is refused, exit 2, naming the path). The gate removes the temporary files a writer
+// that ended (killed) left. An area's PLAN, made by its first writer, binds its run: each shard's sources in their
+// order, each generator's checks, the allowances and limits; a writer that would run another is refused ("another
+// plan"). A recorded area not made yet, or made without its PLAN, is the next writer's to finish. One running writer at
+// a time stores a shard (its claim) and publishes it whole: a new shard by a hard link, so the first stays, one that
+// does not count by a rename over it.
+//
+// One rule says whether a stored shard counts (`shardIn`), and status, the store (which skips a shard that counts and
+// replaces one that does not) and the comparison (`storedRuns`, `run.mjs --baseline`) all read shards through it: its
+// last line, its total, names its own baseline's inputs (its MANIFEST's src tree, oracle library, lockfile and Node),
+// the area's PLAN and the shard's planned sources, which are its lines in their order, and hashes every line before it.
+// A shard that would count but names other inputs than its MANIFEST makes its baseline hold runs of other inputs, which
+// status and the comparison refuse (exit 2), naming it; a store of that shard replaces it.
 //
 // `state` prints each area of a built tree (the folders of tests/families/ with generators, and tools/corpus/fixture/)
 // as one JSON line: `complete`, `another plan` (its PLAN is not the tree's), `storing` (a running writer's claim),
-// `damaged` (a stored shard that does not verify), `partial` or `absent`, with the shards to store; then a line for the
+// `damaged` (a stored shard that does not count), `partial` or `absent`, with the shards to store; then a line for the
 // baseline. It makes or joins the baseline and appends the tree's commit, unless `--read-only`, and plans an area that is
 // already complete again only with `--read-only`. It exits 0 when every area is complete, 1 when one is not, 2 when the
-// folder is not this tool's, holds a foreign path or holds the runs of other inputs. `start` is a fill job's first
-// decision (`tools/corpus/baseline.sh`): STARTED where the baseline is the current tree's or the fill began, else
-// SUPERSEDED (the current tree). `queue` copies the hook's script into the baseline for its jobs and undoes SUPERSEDED.
-// `prune` retires each baseline none of whose trees remains and into which no writer stores: through the gate it
-// decides from the MANIFEST and renames the folder to a `.pruning-` folder of its own, then removes that. A folder this
-// tool made outside a baseline (`.pruning-`, `.creating-`) is removed once its writer ended, if it holds this tool's
-// MANIFEST and no foreign path; any other folder in <folder> is kept, and one kept for a foreign path is named.
+// folder is not this tool's, holds a foreign path or holds the runs of other inputs (than the tree's, or than its own
+// MANIFEST names). `start` is a fill job's first decision (`tools/corpus/baseline.sh`): STARTED where the baseline is
+// the current tree's or the fill began, else SUPERSEDED (the current tree). `queue` copies the hook's script into the
+// baseline for its jobs and undoes SUPERSEDED. Nothing here removes a baseline.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -138,6 +139,18 @@ export function identityOf(tree) {
   };
 }
 
+/** What a baseline's runs depend on, as its MANIFEST's header (`text`, below) names it. */
+const identityIn = (text) =>
+  Object.fromEntries(
+    text
+      .split("\n")
+      .slice(1, 5)
+      .map((line) => line.split(" "))
+      .filter(
+        ([key, value]) => ["src", "oracles", "lock", "node"].includes(key) && value !== undefined,
+      ),
+  );
+
 const headerOf = ({ src, oracles, lock, node }) =>
   `baseline 3\nsrc ${src}\noracles ${oracles}\nlock ${lock}\nnode ${node}\n`;
 
@@ -158,8 +171,6 @@ const writerName = (pid, start) => `${pid}-${start}`;
 const shardName = (shard, shards) => `${shard}of${shards}.runs.jsonl`;
 const claimName = (shard, shards) => `.${shard}of${shards}.claim`;
 const temporaryName = (name, writer) => `${name}.${writer}.tmp`;
-const creatingName = (src, writer) => `.${src}.creating-${writer}`;
-const retiredName = (src, writer) => `.pruning-${src}-${writer}`;
 
 /** This process, as its claims and temporary files and folders name it (`<pid>-<start time>`). */
 export const WRITER = writerName(process.pid, startOf(process.pid));
@@ -182,17 +193,6 @@ function temporaryOf(name) {
   const writer = parts === null ? undefined : writerOf(parts[2]);
   return writer !== undefined && temporaryName(parts[1], writer) === name
     ? { name: parts[1], writer }
-    : undefined;
-}
-
-/** The writer of a folder this tool made beside its baselines (`.creating-`, `.pruning-`), else undefined. */
-function leftoverOf(name) {
-  const parts =
-    /^\.(.+)\.creating-(\d+-\d+)$/.exec(name) ?? /^\.pruning-(.+)-(\d+-\d+)$/.exec(name);
-  const writer = parts === null ? undefined : writerOf(parts[2]);
-  if (writer === undefined || !isBaselineName(parts[1])) return undefined;
-  return [creatingName(parts[1], writer), retiredName(parts[1], writer)].includes(name)
-    ? writer
     : undefined;
 }
 
@@ -222,8 +222,7 @@ export function isOwned(dir) {
 
 /** Whether this tool writes `name` at a baseline's top: its MANIFEST, the hook's markers and copy, their temporary files. */
 const isTopFile = (name) =>
-  name === "MANIFEST" ||
-  ["STARTED", "SUPERSEDED", "baseline.sh"].includes(temporaryOf(name)?.name ?? name);
+  ["MANIFEST", "STARTED", "SUPERSEDED", "baseline.sh"].includes(temporaryOf(name)?.name ?? name);
 
 /** Whether this tool writes `name` in an area of `shards` shards: its PLAN, each shard's file and claim, their temporary files. */
 function isAreaFile(name, shards) {
@@ -263,8 +262,8 @@ function foreignIn(dir, text) {
   return foreign.sort();
 }
 
-/** What `gate` returns where the baseline was retired (renamed by `prune`) while this process waited for its lock. */
-const RETIRED = Symbol("retired");
+/** What `gate` returns where the baseline's folder was gone or replaced once this process held its lock. */
+const RETIRED = Symbol("replaced");
 
 /**
  * `action(text)`, given the MANIFEST's text: the one way anything is written into a baseline (`dir`). The folder must be
@@ -283,6 +282,9 @@ async function gate(baseline, action) {
   } catch {
     return RETIRED;
   }
+  // (a baseline path stands for the folder it was issued for, never another one found at its path later)
+  const issued = checked.get(baseline).ino;
+  if (issued !== undefined && issued !== before) return RETIRED;
   const holder = spawn(
     "bash",
     ["-c", 'exec 9< "$0" && flock 9 && echo held && exec cat > /dev/null', dir],
@@ -367,14 +369,21 @@ function realOf(file) {
 }
 
 // A path the writers below take, made only here: `outside` (a path, as the system resolves it, that lies in no baseline
-// and no folder of baselines it was checked against), `beside` (a folder of this tool's beside the baselines of such a
-// folder, which no baseline is nor holds) or `baseline` (a baseline's folder in such a folder). `pathOf` gives its
-// path, and refuses anything else before any filesystem call, so that no writer can write by a path's unchecked
-// spelling.
+// and no folder of baselines it was checked against) or `baseline` (a baseline's folder in such a folder). `pathOf`
+// gives its path, and refuses anything else before any filesystem call, so that no writer can write by a path's
+// unchecked spelling.
+// A `baseline` path names the folder it was issued for (its inode, where it exists then): the gate refuses it for any
+// other folder found at that path later.
 const checked = new WeakMap();
 function checkedPath(real, kind) {
   const value = Object.freeze({});
-  checked.set(value, { real, kind });
+  let ino;
+  try {
+    ino = kind === "baseline" ? statSync(real).ino : undefined;
+  } catch {
+    // (a baseline not made yet)
+  }
+  checked.set(value, { real, kind, ino });
   return value;
 }
 
@@ -395,11 +404,7 @@ export function outside(file, roots, refuse) {
   const real = realOf(file);
   const within = (folder) => real === folder || real.startsWith(`${folder}${path.sep}`);
   const root = roots.find((folder) => within(realOf(folder)));
-  let baseline;
-  for (let folder = real; baseline === undefined; folder = path.dirname(folder)) {
-    if (isOwned(folder)) baseline = folder;
-    if (path.dirname(folder) === folder) break;
-  }
+  const baseline = baselineHolding(real);
   const why =
     baseline !== undefined
       ? `${file} lies in the baseline ${baseline}: give a path outside it`
@@ -411,11 +416,22 @@ export function outside(file, roots, refuse) {
   throw new Error(why);
 }
 
-/** The folder `name` of this tool's beside the baselines in `root` (an `outside` path): `.`-named, which no baseline is. */
-export function beside(root, name) {
-  if (!/^\.[^/]+$/.test(name) || name === "..")
-    throw new Error(`${name} is no name of a folder beside the baselines`);
-  return checkedPath(path.join(pathOf(root, "outside"), name), "beside");
+/** The baseline (a folder that carries this tool's MANIFEST) that `real` lies in or is, else undefined. */
+function baselineHolding(real) {
+  for (let folder = real; ; folder = path.dirname(folder)) {
+    if (isOwned(folder)) return folder;
+    if (path.dirname(folder) === folder) return undefined;
+  }
+}
+
+/** Why the `outside` path `root` no longer is one (a link put in its way, or a baseline round it), else undefined. */
+function stale(root) {
+  const real = pathOf(root, "outside");
+  if (realOf(real) !== real) return `${real} resolves elsewhere since it was checked`;
+  const baseline = baselineHolding(real);
+  return baseline === undefined
+    ? undefined
+    : `${real} lies in the baseline ${baseline} since it was checked`;
 }
 
 /** The baseline `name` (a `src/` tree's id) in `root` (an `outside` path). */
@@ -440,44 +456,51 @@ export function readFrom(folder) {
 
 /**
  * The baseline of a tree's identity in `root`, made where it does not exist (unless `line` is null): its MANIFEST
- * written in a `.creating-` folder of this writer's, which is then renamed into place (onto no folder or an empty one;
- * a folder holding anything stays as it is). Then joined through the gate, `line` appended to its MANIFEST once; one
- * retired while this writer waited is made anew. `refused` says why it is not this tool's, holds foreign paths or holds
- * the runs of other inputs.
+ * written into its folder, made if absent, while the folder holds nothing else (a folder holding anything stays as it
+ * is), by a temporary file linked into place so that one writer's MANIFEST wins. Then joined through the gate, `line`
+ * appended to its MANIFEST once. `refused` says why it is not this tool's, holds foreign paths or holds the runs of
+ * other inputs.
  */
 export async function owned(root, identity, line) {
-  const baseline = baselineIn(root, identity.src);
-  const dir = pathOf(baseline, "baseline");
+  const dir = pathOf(baselineIn(root, identity.src), "baseline");
   const header = headerOf(identity);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (line !== null && !existsSync(path.join(dir, "MANIFEST"))) {
-      mkdirSync(pathOf(root, "outside"), { recursive: true });
-      const creating = beside(root, creatingName(identity.src, WRITER));
-      mkdirSync(pathOf(creating, "beside"));
-      writeFileSync(path.join(pathOf(creating, "beside"), "MANIFEST"), header);
+  const why = stale(root);
+  if (why !== undefined) return { dir, refused: why };
+  if (line !== null && !existsSync(path.join(dir, "MANIFEST"))) {
+    const made = baselineIn(root, identity.src);
+    mkdirSync(pathOf(made, "baseline"), { recursive: true });
+    if (
+      readdirSync(pathOf(made, "baseline")).every((name) => temporaryOf(name)?.name === "MANIFEST")
+    ) {
+      const tmp = path.join(pathOf(made, "baseline"), temporaryName("MANIFEST", WRITER));
+      writeFileSync(tmp, header);
       try {
-        renameSync(pathOf(creating, "beside"), pathOf(baseline, "baseline"));
+        linkSync(tmp, path.join(pathOf(made, "baseline"), "MANIFEST"));
       } catch (error) {
-        rmSync(pathOf(creating, "beside"), { recursive: true, force: true });
-        if (error.code !== "ENOTEMPTY" && error.code !== "EEXIST") throw error;
+        if (error.code !== "EEXIST") throw error;
+      } finally {
+        rmSync(tmp, { force: true });
       }
     }
-    if (!existsSync(dir)) return { baseline, dir, absent: true };
-    const joined = await gate(baseline, (text) => {
-      if (!text.startsWith(header)) {
-        const [ours, theirs] = [header, text].map((part) => part.split("\n").slice(1, 5));
-        const differs = ours
-          .filter((field, index) => field !== theirs[index])
-          .map((field) => field.split(" ")[0]);
-        return { refused: `${dir} holds runs of another ${differs.join(", ")} than this tree's` };
-      }
-      if (line !== null && !text.split("\n").includes(line))
-        appendFileSync(path.join(dir, "MANIFEST"), `${line}\n`);
-      return {};
-    });
-    if (joined !== RETIRED) return { baseline, dir, ...joined };
   }
-  return { baseline, dir, refused: `${dir} was retired each time this writer joined it` };
+  if (!existsSync(dir)) return { dir, absent: true };
+  // (issued for the folder found now: another one at this path later is another baseline)
+  const baseline = baselineIn(root, identity.src);
+  const joined = await gate(baseline, (text) => {
+    if (!text.startsWith(header)) {
+      const [ours, theirs] = [header, text].map((part) => part.split("\n").slice(1, 5));
+      const differs = ours
+        .filter((field, index) => field !== theirs[index])
+        .map((field) => field.split(" ")[0]);
+      return { refused: `${dir} holds runs of another ${differs.join(", ")} than this tree's` };
+    }
+    if (line !== null && !text.split("\n").includes(line))
+      appendFileSync(path.join(dir, "MANIFEST"), `${line}\n`);
+    return {};
+  });
+  if (joined === RETIRED)
+    return { dir, refused: `${dir} was replaced while this writer joined it` };
+  return { baseline, dir, ...joined };
 }
 
 /**
@@ -512,27 +535,59 @@ function parsePlan(text) {
 /** The file of a shard. */
 export const shardFile = (dir, shard, shards) => path.join(dir, shardName(shard, shards));
 
-/** Whether a stored shard verifies: its last line, its total, names `plan` and `places`, and hashes every line before it. */
-export function verified(file, plan, places) {
-  let body;
-  try {
-    body = readFileSync(file);
-  } catch {
-    return false;
-  }
+/**
+ * A stored shard as the one rule reads it, which status, the store (which skips a shard that counts and replaces one
+ * that does not) and the comparison (`storedRuns`) share: `lines` (each source's runs) where it counts; `other` (the
+ * inputs it names otherwise) where it would count but names other inputs than its own baseline's MANIFEST (`identity`:
+ * its src tree, oracle library, lockfile and Node; any commit of that tree, never the tree run against it), which makes
+ * the baseline hold runs of other inputs; else nothing (absent or damaged). It counts where its last line, its total,
+ * names `identity`, the area's PLAN (`plan`) and the shard's planned sources (`places`), which are its lines in their
+ * order, and hashes every line before it.
+ */
+function shardIn(body, plan, places, identity) {
+  if (body === undefined) return {};
   const cut = body.lastIndexOf(10, body.length - 2);
   let total;
+  let lines;
   try {
     ({ total } = JSON.parse(body.subarray(cut + 1).toString()));
+    lines = body
+      .subarray(0, cut + 1)
+      .toString()
+      .split("\n")
+      .slice(0, -1);
+    const listed = lines.map((line) => {
+      const { generator, source, key } = JSON.parse(line);
+      return JSON.stringify([generator, source, key]);
+    });
+    if (hash(listed.join("\n")) !== places) return {};
   } catch {
-    return false;
+    return {};
   }
-  return (
-    total?.plan === plan &&
-    total?.places === places &&
-    total?.lines === hash(body.subarray(0, cut + 1))
+  if (
+    total?.plan !== plan ||
+    total?.places !== places ||
+    total?.lines !== hash(body.subarray(0, cut + 1))
+  )
+    return {};
+  const other = ["src", "oracles", "lock", "node"].filter(
+    (key) => identity[key] === undefined || total[key] !== identity[key],
   );
+  return other.length > 0 ? { other } : { lines };
 }
+
+/** A file's bytes, or undefined. */
+function bytesOf(file) {
+  try {
+    return readFileSync(file);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether the stored shard `file` counts (`shardIn`). */
+export const verified = (file, plan, places, identity) =>
+  shardIn(bytesOf(file), plan, places, identity).lines !== undefined;
 
 /** Whether a running writer claims a shard of the area of `shards` shards in `dir`, or the shard `shard` only. */
 function claimedIn(dir, shards, shard) {
@@ -563,8 +618,16 @@ function claimed(file) {
  * before its folder and PLAN are made, which a writer interrupted in between leaves to the next. The PLAN's hash and
  * each shard's hash of places, or why it is refused: another plan recorded, or the baseline's state.
  */
+/** `area` where it is an area's name (one plain path component), else this throws before any filesystem call. */
+function areaName(area) {
+  if (typeof area !== "string" || !/^[^/]+$/.test(area) || [".", ".."].includes(area))
+    throw new TypeError(`${String(area)} is no area's name`);
+  return area;
+}
+
 export async function planned(baseline, area, plan) {
   const top = pathOf(baseline, "baseline");
+  areaName(area);
   const id = hash(plan);
   const { shards, places } = parsePlan(plan);
   const outcome = await gate(baseline, (text) => {
@@ -579,55 +642,120 @@ export async function planned(baseline, area, plan) {
     created(path.join(top, area, "PLAN"), plan);
     return {};
   });
-  if (outcome === RETIRED) return { refused: `${top} was retired while this writer planned it` };
+  if (outcome === RETIRED) return { refused: `${top} was replaced while this writer planned it` };
   return outcome.refused === undefined ? { plan: id, shards, places } : outcome;
 }
 
+// A claim on a shard (`beginShard`), which only `endShard` takes, once: the shard's paths are made from it and from its
+// baseline path, never from a caller's argument.
+const claims = new WeakMap();
+
 /**
- * A shard to store (through the gate): `skipped` where it verifies or a running writer stores it, else this process's
- * claim; `refused` where the baseline refuses the writer.
+ * A shard to store (through the gate): `skipped` where it counts or a running writer stores it, else this process's
+ * `claim` on it (above) and its `file`; `refused` where the baseline refuses the writer.
  */
 export async function beginShard(baseline, area, shard, shards, plan, places) {
   const top = pathOf(baseline, "baseline");
-  const dir = path.join(top, area);
+  const dir = path.join(top, areaName(area));
   const file = shardFile(dir, shard, shards);
-  const outcome = await gate(baseline, () => {
-    if (verified(file, plan, places)) return { skipped: "stored" };
+  const outcome = await gate(baseline, (text) => {
+    if (verified(file, plan, places, identityIn(text))) return { skipped: "stored" };
     if (!claimed(path.join(dir, claimName(shard, shards))))
       return { skipped: "being stored by another writer" };
-    return {};
+    const claim = Object.freeze({});
+    claims.set(claim, { baseline, area, shard, shards, plan, places });
+    return { claim };
   });
-  if (outcome === RETIRED) return { refused: `${top} was retired while this writer began a shard` };
-  return { baseline, dir, file, shard, shards, plan, places, ...outcome };
+  if (outcome === RETIRED)
+    return { refused: `${top} was replaced while this writer began a shard` };
+  return { file, ...outcome };
 }
 
 /**
- * The shard published whole through the gate, its lines (`lines`) then its total last: a new one by a hard link, one
- * that does not verify by a rename over it, one another writer published meanwhile kept; the claim released. Whether
- * the shard then verifies, or why the baseline refused it.
+ * The shard of the claim `claim` (above) published whole through the gate, its lines (`lines`) then its total last: a
+ * new one by a hard link, one that does not count by a rename over it, one another writer published meanwhile kept;
+ * the claim released. Whether the shard then counts, or why the baseline refused it.
  */
-export async function endShard({ baseline, dir, file, shard, shards, plan, places }, lines, total) {
+export async function endShard(claim, lines, total) {
+  const held = claims.get(claim);
+  if (held === undefined) throw new TypeError(`${String(claim)} is no claim this tool gave`);
+  claims.delete(claim);
+  const { baseline, area, shard, shards, plan, places } = held;
   const top = pathOf(baseline, "baseline");
+  const dir = path.join(top, area);
+  const file = shardFile(dir, shard, shards);
   const body = lines.join("");
   const ended = `${JSON.stringify({ total: { ...total, plan, places, lines: hash(body) } })}\n`;
-  const outcome = await gate(baseline, () => {
+  const outcome = await gate(baseline, (text) => {
+    const identity = identityIn(text);
     const tmp = temporaryName(file, WRITER);
     writeFileSync(tmp, body + ended);
     try {
       linkSync(tmp, file);
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      if (!verified(file, plan, places)) renameSync(tmp, file);
+      if (!verified(file, plan, places, identity)) renameSync(tmp, file);
     }
     rmSync(tmp, { force: true });
-    const claim = path.join(dir, claimName(shard, shards));
-    if (existsSync(claim) && readFileSync(claim, "utf8").trim() === WRITER)
-      rmSync(claim, { force: true });
-    return {};
+    const claimFile = path.join(dir, claimName(shard, shards));
+    if (existsSync(claimFile) && readFileSync(claimFile, "utf8").trim() === WRITER)
+      rmSync(claimFile, { force: true });
+    return { verified: verified(file, plan, places, identity) };
   });
   if (outcome === RETIRED)
-    return { refused: `${top} was retired while this writer stored into it` };
-  return outcome.refused === undefined ? { verified: verified(file, plan, places) } : outcome;
+    return { refused: `${top} was replaced while this writer stored into it` };
+  return outcome;
+}
+
+/** The refusal for a shard (`file`) that names other inputs (`other`) than its baseline's MANIFEST. */
+const otherInputs = (dir, file, other) =>
+  `${dir} holds runs of another ${other.join(", ")} than its MANIFEST names: ${path.relative(dir, file)}`;
+
+/**
+ * The runs stored in the baseline area `folder` (`--baseline`, as the system resolves it), read only through the rule
+ * of `shardIn`, as status reads them: an area recorded in the MANIFEST of a baseline of this tool that holds no foreign
+ * path and is named by its MANIFEST's src tree, its PLAN the recorded one and every planned shard counting. Its lines
+ * (each source's, the totals left out); else why not, with the exit status status gives it: 2 where the folder is no
+ * area of such a baseline, the baseline holds a foreign path or a shard of other inputs, 1 where the area is not
+ * complete (not recorded, its PLAN not the recorded one, a shard absent or damaged).
+ */
+export function storedRuns(folder) {
+  const real = realOf(folder);
+  const [dir, area] = [path.dirname(real), path.basename(real)];
+  if (!isOwned(dir))
+    return {
+      status: 2,
+      refused: `${folder} is no area of a baseline of this tool: ${dir} has no MANIFEST of this tool`,
+    };
+  const text = readFileSync(path.join(dir, "MANIFEST"), "utf8");
+  const foreign = foreignIn(dir, text);
+  if (foreign.length > 0)
+    return {
+      status: 2,
+      refused: `${dir} holds foreign contents, which this tool did not write: ${foreign.join(", ")}`,
+    };
+  const identity = identityIn(text);
+  if (identity.src !== path.basename(dir))
+    return { status: 2, refused: `${dir}'s MANIFEST names another src tree than its folder` };
+  const record = recorded(text).get(area);
+  const plan = bytesOf(path.join(real, "PLAN"))?.toString();
+  if (record === undefined || plan === undefined || hash(plan) !== record.plan)
+    return {
+      status: 1,
+      refused: `${folder} is no complete area: ${record === undefined ? "not recorded in its baseline" : "its PLAN is not the recorded one"}`,
+    };
+  const { shards, places } = parsePlan(plan);
+  const lines = [];
+  let incomplete;
+  for (let shard = 0; shard < shards; shard += 1) {
+    const file = shardFile(real, shard, shards);
+    const read = shardIn(bytesOf(file), record.plan, places[shard], identity);
+    if (read.other !== undefined) return { status: 2, refused: otherInputs(dir, file, read.other) };
+    if (read.lines === undefined)
+      incomplete ??= `${folder} is no complete area: ${shardName(shard, shards)} ${existsSync(file) ? "does not verify" : "is absent"}`;
+    else lines.push(...read.lines);
+  }
+  return incomplete === undefined ? { lines } : { status: 1, refused: incomplete };
 }
 
 /** A built tree's areas: the folders of tests/families/ with generators, and tools/corpus/fixture/. */
@@ -663,9 +791,8 @@ async function state(tree, root, readOnly) {
     refusal(`${tree} has no area of the runner`);
     return 2;
   }
-  const records = own.absent
-    ? new Map()
-    : recorded(readFileSync(path.join(own.dir, "MANIFEST"), "utf8"));
+  const manifest = own.absent ? "" : readFileSync(path.join(own.dir, "MANIFEST"), "utf8");
+  const records = recorded(manifest);
   let complete = true;
   let storing = false;
   for (const folder of areas) {
@@ -682,9 +809,15 @@ async function state(tree, root, readOnly) {
       line = { area, folder, state: "absent", shards: record.shards, verified: 0, store: "all" };
     else {
       const { shards, places } = parsePlan(stored);
-      const good = places.map((place, shard) =>
-        verified(shardFile(dir, shard, shards), record.plan, place),
+      const read = places.map((place, shard) =>
+        shardIn(bytesOf(shardFile(dir, shard, shards)), record.plan, place, identityIn(manifest)),
       );
+      const other = read.findIndex((shard) => shard.other !== undefined);
+      if (other >= 0) {
+        refusal(otherInputs(own.dir, shardFile(dir, other, shards), read[other].other));
+        return 2;
+      }
+      const good = read.map((shard) => shard.lines !== undefined);
       const count = good.filter(Boolean).length;
       if (
         (readOnly || count < shards) &&
@@ -743,7 +876,7 @@ async function start(baseline, current) {
     replaced(marker("SUPERSEDED"), `${current}\n`);
     return { decision: "superseded", by: current };
   });
-  console.log(JSON.stringify(outcome === RETIRED ? { refused: `${dir} was retired` } : outcome));
+  console.log(JSON.stringify(outcome === RETIRED ? { refused: `${dir} was replaced` } : outcome));
   return outcome === RETIRED || outcome.refused !== undefined ? 2 : 0;
 }
 
@@ -756,73 +889,8 @@ async function queue(baseline, script) {
     rmSync(path.join(dir, "SUPERSEDED"), { force: true });
     return { queued: dir };
   });
-  console.log(JSON.stringify(outcome === RETIRED ? { refused: `${dir} was retired` } : outcome));
+  console.log(JSON.stringify(outcome === RETIRED ? { refused: `${dir} was replaced` } : outcome));
   return outcome === RETIRED || outcome.refused !== undefined ? 2 : 0;
-}
-
-/**
- * A folder this tool made outside a baseline (`.pruning-…` or `.creating-…`, named by its writer) removed once that
- * writer ended (`writer`, or this process where it is null), where it is empty or holds this tool's MANIFEST and no
- * foreign path; else kept, and named (as is one so named but not by a writer of this tool, `writer` undefined).
- */
-function recover(folder, writer) {
-  const dir = pathOf(folder, "beside");
-  if (writer === undefined) {
-    console.log(JSON.stringify({ kept: dir, foreign: ["(not named by a writer of this tool)"] }));
-    return;
-  }
-  if (writer !== null && running(writer)) return;
-  const entries = readdirSync(dir);
-  if (entries.length > 0) {
-    const text = isOwned(dir) ? readFileSync(path.join(dir, "MANIFEST"), "utf8") : null;
-    const foreign = text === null ? ["(no MANIFEST of this tool)"] : foreignIn(dir, text);
-    if (foreign.length > 0) {
-      console.log(JSON.stringify({ kept: dir, foreign }));
-      return;
-    }
-    // the MANIFEST last, so that a removal cut short leaves a folder still this tool's, for the next call to finish
-    for (const entry of entries.filter((name) => name !== "MANIFEST"))
-      rmSync(path.join(dir, entry), { recursive: true, force: true });
-    rmSync(path.join(dir, "MANIFEST"), { force: true });
-  }
-  rmdirSync(dir);
-}
-
-/**
- * Each baseline of this tool in `root` none of whose trees remains and into which no writer stores, retired: decided
- * through the gate from its MANIFEST and renamed there to a `.pruning-` folder of this writer's, which is then removed
- * as `recover` removes one; a baseline the gate refuses for a foreign path is kept and named. A folder that is not this
- * tool's is not touched.
- */
-async function prune(root) {
-  const folder = pathOf(root, "outside");
-  if (!existsSync(folder)) return;
-  for (const entry of readdirSync(folder, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    // (a folder named as this tool names one beside its baselines, which may be another's: `recover` decides)
-    if (/^\.(?:pruning-|.*\.creating-)/.test(entry.name)) {
-      recover(beside(root, entry.name), leftoverOf(entry.name));
-      continue;
-    }
-    if (!isBaselineName(entry.name) || !isOwned(path.join(folder, entry.name))) continue;
-    const baseline = baselineIn(root, entry.name);
-    const dir = pathOf(baseline, "baseline");
-    const retired = beside(root, retiredName(entry.name, WRITER));
-    const outcome = await gate(baseline, (text) => {
-      const trees = [...text.matchAll(/^commit \S+ (.+)$/gm)].map(([, tree]) => tree);
-      if (trees.length === 0 || trees.some((tree) => existsSync(tree))) return null;
-      const areas = [...recorded(text)];
-      if (areas.some(([area, { shards }]) => claimedIn(path.join(dir, area), shards))) return null;
-      renameSync(pathOf(baseline, "baseline"), pathOf(retired, "beside"));
-      return { pruned: dir };
-    });
-    if (outcome?.foreign !== undefined)
-      console.log(JSON.stringify({ kept: dir, foreign: outcome.foreign }));
-    else if (outcome?.pruned !== undefined) {
-      recover(retired, null);
-      console.log(JSON.stringify(outcome));
-    }
-  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -836,7 +904,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   };
   if (command === "state" && second !== undefined)
     process.exitCode = await state(path.resolve(first), outside(second, [], refused), readOnly);
-  else if (command === "prune" && first !== undefined) await prune(outside(first, [], refused));
   else if (command === "start" && second !== undefined)
     process.exitCode = await start(baselineAt(first, refused), second);
   else if (command === "queue" && second !== undefined)
@@ -844,7 +911,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   else {
     console.error(
       "usage: node tests/families/baselines.mjs state <tree> <folder> [--read-only]\n" +
-        "       node tests/families/baselines.mjs prune <folder>\n" +
         "       node tests/families/baselines.mjs start <baseline> <current src tree>\n" +
         "       node tests/families/baselines.mjs queue <baseline> <script>",
     );
