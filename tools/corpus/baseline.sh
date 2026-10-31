@@ -26,8 +26,13 @@
 # queue the baseline again. A baseline goes with its tree: once `sx-tree --prune` removed the tree, the next call
 # removes it.
 #
+# One baseline runs and one waits (lead, 2026-10-31): a call for the newest `main` (~/work/trees/main/current) first
+# withdraws every other baseline's shards that have not started (`sx-queue cancel`); its running shards finish, and a
+# baseline that lost shards is marked WITHDRAWN, its areas without SHA256SUMS. Jobs run at priority 7, of which the
+# queue runs at most two at once, so a baseline takes at most two slots.
+#
 # The tree's own runner runs its own areas. A tree whose runner cannot store runs (from before this script) is skipped,
-# unless BASELINE_RUNNER names a built checkout whose runner and fixture area run it instead. BASELINE_PRIORITY (6),
+# unless BASELINE_RUNNER names a built checkout whose runner and fixture area run it instead. BASELINE_PRIORITY (7),
 # BASELINE_MEM (3G, each job's memory cap) and BASELINE_SLOTS (the queue workers' slots but the one sx-heavy keeps for
 # direct runs, else the CPU count) override the defaults.
 set -uo pipefail
@@ -121,6 +126,18 @@ fail() {
   echo "baseline $sha: $*" >&2
   exit 1
 }
+if [ "$(readlink "$HOME/work/trees/main/current" 2> /dev/null)" = "$sha" ]; then
+  for manifest in "$HOME"/work/baselines/*/MANIFEST; do
+    earlier=$(basename "$(dirname "$manifest")")
+    [[ $earlier =~ ^[0-9a-f]{40}$ && $earlier != "$sha" ]] || continue
+    withdrawn=$(sx-queue cancel "baseline-${earlier:0:9}-*" | sed -n 's/^\([0-9]*\) pending job(s) cancelled$/\1/p')
+    [ -n "$withdrawn" ] || fail "the shards of $earlier could not be withdrawn; call again"
+    if [ "$withdrawn" -gt 0 ]; then
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $withdrawn shards, for $sha" >> "$(dirname "$manifest")/WITHDRAWN"
+      echo "baseline $earlier: $withdrawn shards withdrawn for $sha"
+    fi
+  done
+fi
 
 if [ ! -e "$out/MANIFEST" ]; then
   # a folder holding only this script's own files: an earlier version's state, whose jobs may run, is not overwritten
@@ -132,7 +149,7 @@ if [ ! -e "$out/MANIFEST" ]; then
     esac
   done
   shopt -u nullglob dotglob
-  priority=${BASELINE_PRIORITY:-6}
+  priority=${BASELINE_PRIORITY:-7}
   memory=${BASELINE_MEM:-3G}
   slots=${BASELINE_SLOTS:-$(systemctl --user show sx-queue-worker@1.service -p Environment --value 2> /dev/null |
     tr ' ' '\n' | sed -n 's/^SX_HEAVY_SLOTS=//p')}
