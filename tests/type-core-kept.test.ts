@@ -118,7 +118,7 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "exact-path.ts #stopAt spread": [2, "the spans per prefix of a path, no path"],
   "items.ts union composite": [2, "two item ids"],
   // a diagnostic's sentences (#1195), made for the author after the analysis, never kept by it
-  "messages.ts choiceSubject step": [
+  "messages/words.ts choiceSubject step": [
     1,
     "a choice object and the property its button returns, named in a sentence",
   ],
