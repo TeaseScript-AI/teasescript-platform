@@ -126,7 +126,10 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a choice object and the property its button returns, named in a sentence",
   ],
-  "messages.ts elementOf join": [1, "a collection's code in a sentence, its property names joined"],
+  "messages/stores.ts elementOf join": [
+    1,
+    "a collection's code in a sentence, its property names joined",
+  ],
   "messages.ts errorSentence step": [8, "a sentence's period before its fix, no path"],
   "messages/site.ts landingOf spread": [
     1,
