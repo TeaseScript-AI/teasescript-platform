@@ -8,6 +8,11 @@ outside the repository").
   natural-budget family (`review-family.mjs` over `review-cases.json` and `opaque-cases.json`), every-allowance stops
   (`stops.mjs`), checkpoint restores (`checkpoints.mjs`) and the builder spot check (`spot.mjs`). Head `3f0bcb1bd`,
   base `2960937a1`; `SHA256SUMS` sha256 `a42f4ef4…`. Its family and checkpoints run on `main` `2960937a1`.
+- `desktop:~/work/evidence/corpus/consumers/sol-1465-r1/`: Sol's r1 of #1465 (its `README.md` gives the commands).
+  `dimensions.mjs` keeps a publication or run that throws apart, as the mode's `exception` beside a null route, and
+  exits 1 on it, and `judge.py` fails a row with such a mode on either tree, counts it apart and exits 1, so modes or
+  trees that throw alike never pass as agreeing (#1523). Its `canary-1523.sh` checks that; its changed files stay
+  beside them as `<file>.pre-1523` (`PORTED-1523.md`).
 
 ## Known problems
 

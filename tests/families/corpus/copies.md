@@ -11,3 +11,7 @@ outside the repository").
   runners keep an exception apart, unhashed, and exit 1 on it, and Astra's `run.mjs` and Sol's `compare.py` count it
   apart and reject it, never as an equal publication (#1494). Each folder's `canary-1494.sh` checks that; its changed
   files stay beside it as `<file>.pre-1494` (`PORTED-1494.md`).
+- `desktop:~/work/evidence/corpus/copies/sol-1437-r2/` and `copies/sol-1437-r3/`: Sol's r2 and r3 of #1437 (each
+  `README.md` gives the commands). `delta.mjs` and `dispatch.mjs` keep a prediction that throws apart, in
+  `exceptions`, never in `agree` or the mismatches, and exit 1 on it (#1523). Each folder's `canary-1523.sh` checks
+  that; its changed files stay beside it as `<file>.pre-1523` (`PORTED-1523.md`).
