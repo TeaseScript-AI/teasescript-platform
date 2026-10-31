@@ -512,7 +512,14 @@ const TYPE_VALUE = [
     `class ProbeInstantiated extends (probe.probeInstantiated<number>)(${SELF}.admission) {}\n    void ProbeInstantiated;`,
     1,
   ],
-  // (an interface emits nothing, its computed keys included, as a type literal's; the key's value read beside them)
+  // (an `implements` heritage names a type: here the interface merged with the moved derivation, Codex r1 N1)
+  [
+    "Admission.probeInstantiated",
+    "class ProbeImplements implements probe.probeInstantiated<number> {}\n    void ProbeImplements;",
+    0,
+  ],
+  // (an interface emits nothing, its computed keys included, as a type literal's; the key's value read beside them,
+  // and a class's computed key, which is evaluated, Codex r1 N2)
   [
     "Admission.probeKey",
     `interface ProbeKeyed {\n      [${SELF}.admission.probeKey]: number;\n    }\n    let keyed: ProbeKeyed | undefined;\n    void keyed;`,
@@ -524,6 +531,11 @@ const TYPE_VALUE = [
     0,
   ],
   ["Admission.probeKey", `void ${SELF}.admission.probeKey;`, 1],
+  [
+    "Admission.probeKey",
+    `class ProbeKeyedClass {\n      [${SELF}.admission.probeKey] = 1;\n    }\n    void ProbeKeyedClass;`,
+    1,
+  ],
 ];
 /** Writes and deletions of a listed getter, no read: each unproved (Codex r6 B4, r7 B2). */
 const WRITES = [
@@ -662,7 +674,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
         .map(unlisted)
         .join(
           "\n\n",
-        )}\n\nexport function probeBaseMoved(admission: Admission) {\n  void admission;\n  return class {};\n}\n\nexport function probeInstantiated<T>(admission: Admission) {\n  void admission;\n  return class {\n    value?: T;\n  };\n}\n\n// (an overloaded derivation, Codex r6 B3)\nexport function probeOverloaded(admission: Admission): number;\nexport function probeOverloaded(admission: Admission): number {\n  void admission;\n  return 0;\n}\n`,
+        )}\n\nexport function probeBaseMoved(admission: Admission) {\n  void admission;\n  return class {};\n}\n\nexport function probeInstantiated<T>(admission: Admission) {\n  void admission;\n  return class {\n    value?: T;\n  };\n}\n\nexport interface probeInstantiated<T> {\n  value?: T;\n}\n\n// (an overloaded derivation, Codex r6 B3)\nexport function probeOverloaded(admission: Admission): number;\nexport function probeOverloaded(admission: Admission): number {\n  void admission;\n  return 0;\n}\n`,
     },
     new Map([...READS, ["probeKnown", "a getter read"], ["probeSetOnly", "a setter alone"]]),
   );
