@@ -24,12 +24,8 @@
 # QUEUED is not queued again. A call that could not queue or read the plan exits 1, and calling it again queues the
 # shards anew. A folder with no MANIFEST of this script holding anything but its own files is refused: remove it to
 # queue the baseline again. A baseline goes with its tree: once `sx-tree --prune` removed the tree, the next call
-# removes it.
-#
-# One baseline runs and one waits (lead, 2026-10-31): a call for the newest `main` (~/work/trees/main/current) first
-# withdraws every other baseline's shards that have not started (`sx-queue cancel`); its running shards finish, and a
-# baseline that lost shards is marked WITHDRAWN, its areas without SHA256SUMS. Jobs run at priority 7, of which the
-# queue runs at most two at once, so a baseline takes at most two slots.
+# removes it. Jobs run at priority 7, of which the queue runs at most two at once (lead, 2026-10-31): a baseline takes
+# at most two slots, and each `main`'s is queued in order, so they may lag `main`.
 #
 # The tree's own runner runs its own areas. A tree whose runner cannot store runs (from before this script) is skipped,
 # unless BASELINE_RUNNER names a built checkout whose runner and fixture area run it instead. BASELINE_PRIORITY (7),
@@ -126,18 +122,6 @@ fail() {
   echo "baseline $sha: $*" >&2
   exit 1
 }
-if [ "$(readlink "$HOME/work/trees/main/current" 2> /dev/null)" = "$sha" ]; then
-  for manifest in "$HOME"/work/baselines/*/MANIFEST; do
-    earlier=$(basename "$(dirname "$manifest")")
-    [[ $earlier =~ ^[0-9a-f]{40}$ && $earlier != "$sha" ]] || continue
-    withdrawn=$(sx-queue cancel "baseline-${earlier:0:9}-*" | sed -n 's/^\([0-9]*\) pending job(s) cancelled$/\1/p')
-    [ -n "$withdrawn" ] || fail "the shards of $earlier could not be withdrawn; call again"
-    if [ "$withdrawn" -gt 0 ]; then
-      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $withdrawn shards, for $sha" >> "$(dirname "$manifest")/WITHDRAWN"
-      echo "baseline $earlier: $withdrawn shards withdrawn for $sha"
-    fi
-  done
-fi
 
 if [ ! -e "$out/MANIFEST" ]; then
   # a folder holding only this script's own files: an earlier version's state, whose jobs may run, is not overwritten
