@@ -36,6 +36,36 @@ interface Visit {
   readonly kept: number;
 }
 
+/**
+ * Test-only (`withNameRecords`): what the searches did, all of them together: the tasks they took up (a seen one too),
+ * the prefixes they visited, the earlier tasks their pump checks walked and the longest such walk, and the units of
+ * `checks` the ledger counted meanwhile.
+ */
+export interface NameRecords {
+  tasks: number;
+  prefixes: number;
+  ancestors: number;
+  depth: number;
+  checks: number;
+}
+
+let recording: NameRecords | null = null;
+
+/** Test-only: `run`'s result and what the property-name searches inside it did (`NameRecords`). */
+export function withNameRecords<T>(run: () => T): {
+  readonly result: T;
+  readonly records: Readonly<NameRecords>;
+} {
+  if (recording !== null) throw new Error("Name records are already being recorded.");
+  const records: NameRecords = { tasks: 0, prefixes: 0, ancestors: 0, depth: 0, checks: 0 };
+  recording = records;
+  try {
+    return { result: run(), records };
+  } finally {
+    recording = null;
+  }
+}
+
 /** A task to take up, the visit that scheduled it, and how many of that visit's last steps it keeps untouched. */
 interface Scheduled {
   readonly task: PropertyNamesTask;
@@ -51,12 +81,16 @@ interface Scheduled {
  * reads and calls standing at its path or above it. Each task it schedules and each prefix it visits is charged, and
  * every key, path and identity it keeps, through the kept helpers.
  *
- * #1493: a step reads and cuts only a bounded front of its task's path (a stored prefix, a literal's depth, a
- * carrier's two steps) and keeps the rest. So a search that never ends meets a pump: a task of an earlier one's place
- * whose path is that one's with steps inserted above a tail no step between them touched. From there the same steps
- * repeat forever, each turn a step longer (a feedback copy `w = r.z` gives `w|`, `w|z`, `w|z.z`, ...), so a pumped
- * task's own names are taken but its sources are not followed. A search that ends without the bound meets no pump, so
- * its names are as before; whatever the answer at a key is, stopped or not.
+ * #1493, the pump bound: each task records the task that scheduled it (`from`) and how many of that one's last steps
+ * its path keeps untouched (`kept`): a key's step at a stored prefix keeps the rest below it (an add's one step less), a
+ * literal's at a depth the rest below that depth, a carrier's all but the two steps it reads, and a record path the
+ * steps it leaves unchanged. A task pumps an earlier one on its chain where both are of one kind and place, its path is
+ * longer, and it starts with that one's head: that one's path without the last steps no task between them touched (the
+ * least `kept` on the way). Its own names are taken; its sources are not followed. Since every step reads and cuts a
+ * bounded front of its path and pushes a bounded head, a chain of tasks that never ends holds such a pair, and from it
+ * the same steps repeat forever, each turn longer (a feedback copy `w = r.z`: `w|`, `w|z`, `w|z.z`, ...); a search that
+ * ends without the bound meets none, so its names are as before, whatever the answer at a key is, stopped or not. The
+ * check walks the chain, each earlier task charged.
  */
 export function propertyNames(
   pass: CorePass,
@@ -70,6 +104,7 @@ export function propertyNames(
   const names = new Set<string>();
   const pending: Scheduled[] = [{ task: start, from: null, kept: 0 }];
   const seen = new Set<string>();
+  const checksBefore = recording === null ? 0 : (work.counts().get("checks") ?? 0);
   const dispatch: Dispatch = {
     kinds: (of) => new Set(run(contract.contractOfValue(of)).map((item) => item.tag)),
     reference: (receiver) => heldReference(run(contract.valueReceiver(receiver))),
@@ -78,8 +113,13 @@ export function propertyNames(
   /** Whether a visit pumps one before it: the same place, a longer path, that one's head before its untouched tail. */
   const pumps = (visit: Visit): boolean => {
     let tail = visit.kept;
+    let depth = 0;
     for (let above = visit.from; above !== null; above = above.from) {
       work.charge("checks");
+      if (recording !== null) {
+        recording.ancestors += 1;
+        recording.depth = Math.max(recording.depth, (depth += 1));
+      }
       if (
         above.kind === visit.kind &&
         above.at === visit.at &&
@@ -117,6 +157,7 @@ export function propertyNames(
           : keptParts(work, `v${task.value}`, task.path);
     // (each task it schedules, a seen one too, whose identity it made)
     work.charge("checks");
+    if (recording !== null) recording.tasks += 1;
     if (seen.has(id)) continue;
     seen.add(id);
     // (a key's path and place through its walk, `keptKeyWalk`: a text's kept, a cursor's steps through the charged
@@ -198,6 +239,7 @@ export function propertyNames(
     if (!follows) continue;
     for (let length = 0; length <= path.length; length += 1) {
       work.charge("checks");
+      if (recording !== null) recording.prefixes += 1;
       const rest = path.slice(length);
       const stores = contract.prefixStores(walk!.prefix(length));
       // the sources' own stores below their roots
@@ -218,5 +260,6 @@ export function propertyNames(
       }
     }
   }
+  if (recording !== null) recording.checks += (work.counts().get("checks") ?? 0) - checksBefore;
   return names;
 }

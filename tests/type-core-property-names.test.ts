@@ -9,6 +9,7 @@ import {
 } from "../src/type-inference/core/budget.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { propertyStep } from "../src/type-inference/core/program.js";
+import { withNameRecords } from "../src/type-inference/core/property-names.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { MODES, inMode } from "./helpers/type-core-oracles.js";
 
@@ -197,6 +198,39 @@ test("a demand stop with a question stop after it ends the search, its names wit
     );
   }
   assert.ok(retried > 0, "a question stops and is asked again");
+});
+
+test("the search charges each task it takes up, each prefix it visits and each earlier task its pump check walks (#1493)", () => {
+  // (the uncharged-work probe's gate, kept here: the ledger's `checks` during a search cover its tasks, a seen one
+  // too, its prefixes and its pump checks' walks, which stay within the longest one per task)
+  const asks: readonly (readonly [string, string, readonly string[] | null])[] = [
+    [feedback(8), "w", null],
+    [feedback(16), "w", null],
+    ["let w={a:{t:{k:1},q:{t:{k:2}}}}\nlet r=w\nw.a=r.a.q\nsay w\nexit", "w", ["a", "t"]],
+    ["let a=hostValue\na.extra=1\nlet b=a\nsay b\nexit", "b", null],
+  ];
+  for (const [source, name, steps] of asks)
+    for (const mode of MODES) {
+      const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+      assert.ok(request !== null);
+      const records = inMode(mode, () => {
+        const answers = analyseCore(request);
+        const node = answers.graph.nodes.find(
+          (each) => each.expression?.kind === "identifier" && each.expression.name === name,
+        );
+        const place = node === undefined ? null : answers.at(node)?.place;
+        assert.ok(node !== undefined && place !== null && place !== undefined);
+        return withNameRecords(() =>
+          steps === null
+            ? answers.properties(node)
+            : answers.placeProperties(place.id, steps.map(propertyStep)),
+        ).records;
+      });
+      const label = `${source.slice(0, 40)} ${JSON.stringify(mode)} ${JSON.stringify(records)}`;
+      assert.ok(records.tasks > 0, label);
+      assert.ok(records.checks >= records.tasks + records.prefixes + records.ancestors, label);
+      assert.ok(records.ancestors <= records.tasks * records.depth, label);
+    }
 });
 
 test("the first property `${...}` shows of a copy comes from its source's literal, in every mode (#1493)", () => {
