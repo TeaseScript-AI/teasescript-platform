@@ -281,6 +281,31 @@ test("the search charges each task it takes up, each prefix it visits and each s
         ]);
       }
     }
+  // (the corpus's mutual feedback through `q`, `a.q=b` and `b.q=a`, asked 64 properties down as the candidate route's
+  // descent asks it: each step of its chains is shorter than the one before, so no earlier task can be pumped and the
+  // check walks none; walking them made each such search quadratic in its depth, its descent past the allowance)
+  const mutual =
+    'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.f=hostValue\nb.q=a\nb=b\na.q=b\nc.f=hostValue\nexit';
+  const request = coreRequest([{ path: "main.tease", source: mutual }], ["hostValue"]);
+  assert.ok(request !== null);
+  for (const mode of MODES) {
+    const { result, records } = inMode(mode, () => {
+      const answers = analyseCore(request);
+      const node = answers.graph.nodes.find(
+        (each) => each.expression?.kind === "identifier" && each.expression.name === "a",
+      );
+      const place = node === undefined ? null : answers.at(node)?.place;
+      assert.ok(place !== null && place !== undefined);
+      return withNameRecords(() => [
+        ...answers.placeProperties(
+          place.id,
+          Array.from({ length: 64 }, () => propertyStep("q")),
+        ),
+      ]);
+    });
+    assert.deepEqual(result.sort(), ["f", "g", "q"], JSON.stringify(mode));
+    assert.equal(records.ancestors, 0, `${JSON.stringify(mode)} ${JSON.stringify(records)}`);
+  }
   // (at depths 4, 16 and 64 the tasks, the earlier tasks walked and the longest chain stay the same, and the head steps
   // grow by the path's own growth: the head term grows no faster than the path)
   for (const [mode, [t4, a4, d4, h4, t16, a16, d16, h16, t64, a64, d64, h64]] of heads) {

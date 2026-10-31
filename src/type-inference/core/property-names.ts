@@ -34,6 +34,8 @@ interface Visit {
   readonly path: readonly string[];
   readonly from: Visit | null;
   readonly kept: number;
+  /** The shortest path on its chain, its own included: no task above one no longer than it can be pumped by it. */
+  readonly shortest: number;
 }
 
 /**
@@ -100,9 +102,10 @@ interface Scheduled {
  * bounded front of its path and pushes a bounded head, a chain of tasks that never ends holds such a pair, and from it
  * the same steps repeat forever, each turn longer (a feedback copy `w = r.z`: `w|`, `w|z`, `w|z.z`, ...); a search that
  * ends without the bound meets none, so its names are as before, whatever the answer at a key is, stopped or not. The
- * check walks the new task's chain once, one charge per earlier task, and compares heads only with earlier tasks of its
- * kind and place, one charge per step of the head: at most the new tasks times the longest chain in visits, plus head
- * steps each no longer than the earlier task's path.
+ * check walks the new task's chain, one charge per earlier task, until no earlier task with a shorter path is left above
+ * (each task records the shortest path on its chain), and compares heads only with earlier tasks of its kind and place,
+ * one charge per step of the head: at most the new tasks times the longest chain in visits, plus head steps each no
+ * longer than the earlier task's path.
  */
 export function propertyNames(
   pass: CorePass,
@@ -126,7 +129,12 @@ export function propertyNames(
   const pumps = (visit: Visit): boolean => {
     let tail = visit.kept;
     let depth = 0;
-    for (let above = visit.from; above !== null; above = above.from) {
+    // (only an earlier task with a shorter path can be pumped: the walk ends where none is left above)
+    for (
+      let above = visit.from;
+      above !== null && above.shortest < visit.path.length;
+      above = above.from
+    ) {
       work.charge("checks");
       if (recording !== null) {
         recording.ancestors += 1;
@@ -176,12 +184,15 @@ export function propertyNames(
     // (a key's path and place through its walk, `keptKeyWalk`: a text's kept, a cursor's steps through the charged
     // boundary and copied out once, G3 stage 1)
     const walk = "key" in task ? keptKeyWalk(contract, task.key) : null;
-    const visit: Visit =
-      "key" in task
-        ? { kind: "key", at: walk!.place, path: stepsArray(walk!.path), from, kept }
-        : "literal" in task
-          ? { kind: "literal", at: task.literal, path: task.path, from, kept }
-          : { kind: "value", at: task.value, path: task.path, from, kept };
+    const taken: readonly string[] = "key" in task ? stepsArray(walk!.path) : task.path;
+    const visit: Visit = {
+      kind: "key" in task ? "key" : "literal" in task ? "literal" : "value",
+      at: "key" in task ? walk!.place : "literal" in task ? task.literal : task.value,
+      path: taken,
+      from,
+      kept,
+      shortest: Math.min(taken.length, from?.shortest ?? taken.length),
+    };
     if (recording !== null) recording.longest = Math.max(recording.longest, visit.path.length);
     // (a pumped task's own names are taken, its sources not followed)
     const follows = !pumps(visit);
