@@ -118,7 +118,7 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "exact-path.ts #stopAt spread": [2, "the spans per prefix of a path, no path"],
   "items.ts union composite": [2, "two item ids"],
   // a diagnostic's sentences (#1195), made for the author after the analysis, never kept by it
-  "messages.ts choiceSubject step": [
+  "messages/words.ts choiceSubject step": [
     1,
     "a choice object and the property its button returns, named in a sentence",
   ],
@@ -126,16 +126,25 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a choice object and the property its button returns, named in a sentence",
   ],
-  "messages.ts elementOf join": [1, "a collection's code in a sentence, its property names joined"],
-  "messages.ts errorSentence step": [8, "a sentence's period before its fix, no path"],
-  "messages.ts landingOf spread": [
+  "messages/stores.ts elementOf join": [
+    1,
+    "a collection's code in a sentence, its property names joined",
+  ],
+  "messages/errors.ts errorSentence step": [8, "a sentence's period before its fix, no path"],
+  "messages/site.ts landingOf spread": [
     1,
     "the way from a variable to a warned value, made once for a fix after the analysis and dropped",
   ],
-  "messages.ts mixedSentence join": [1, "an object's property names in a sentence, joined"],
-  "messages.ts memberFix step": [2, "a receiver and its member as the fix's code"],
-  "messages.ts memberWarningFix step": [1, "a receiver and its property as the fix's code"],
-  "messages.ts shownFix step": [1, "an object's code and its first property as the fix's code"],
+  "messages/errors.ts mixedSentence join": [1, "an object's property names in a sentence, joined"],
+  "messages/errors.ts memberFix step": [2, "a receiver and its member as the fix's code"],
+  "messages/warnings.ts memberWarningFix step": [
+    1,
+    "a receiver and its property as the fix's code",
+  ],
+  "messages/errors.ts shownFix step": [
+    1,
+    "an object's code and its first property as the fix's code",
+  ],
   "operator-table.ts DURATIONS composite": [2, "the operator table's constant text"],
   "result.ts targetName join": [1, "a target's name, made by the tests alone"],
   "result.ts targetName spread": [1, "a target's name, made by the tests alone"],
