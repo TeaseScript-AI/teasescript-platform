@@ -782,10 +782,12 @@ function landedOwn(admission: Admission, place: PlaceId, path: Steps): boolean {
 /**
  * The paths copies land in a place at or below `prefix` (`Inheritance`), each once: its own landings and, through each
  * copy, its source's at or below the copy's strip, written where the copy lands them; on an explicit stack, each
- * source, prefix and way of writing its paths once. Each place and prefix is listed once per pass (`landedBelows`): a
- * walk that reaches one listed takes its listing, written where it lands it, instead of walking below it again, and
- * one an earlier walk took is listed before it is taken, so a chain of copies asked at each link, in either order,
- * walks each link once (#1547).
+ * source, prefix and way of writing its paths once. Each place and prefix is listed at most once per pass
+ * (`landedBelows`): one asked, and one a walk reaches after an earlier walk took it, whose listing that walk makes as it
+ * goes, writing each path both where the walk lands it and where the place lands it; inside it, a place and prefix an
+ * earlier walk took is walked once as part of it, never listed on its own. A walk that reaches one listed takes its
+ * listing, written where it lands it, so a chain of copies asked at each link walks each link once, and one walked by
+ * two asks costs what two walks do (#1547).
  */
 export function landedBelow(
   admission: Admission,
@@ -797,91 +799,102 @@ export function landedBelow(
   if (known !== undefined) return known.texts;
   const { cycleOf, fed, wholes } = inheritance(admission);
   const work = admission.pass.program.work;
-  // a task: a place, the prefix its paths are taken at or below, and how its path is written in the place asked:
-  // its first `drop` steps replaced by `prepend`
+  // how a task's paths are written in a listing: their first `drop` steps replaced by `prepend`
+  type Frame = { readonly drop: number; readonly prepend: readonly string[] };
+  // a task: a place, the prefix its paths are taken at or below, how they are written in the place asked and, while a
+  // listing is made on the way (`making`), in that listing's place
   type Task = {
     readonly place: PlaceId;
     readonly below: readonly string[];
-    readonly drop: number;
-    readonly prepend: readonly string[];
+    readonly asked: Frame;
+    readonly made: Frame | null;
   };
-  // a listing being made, of its root's place and prefix: its tasks, and its paths so far, each text with its steps
-  const listing = (place: PlaceId, below: readonly string[], key: string) => {
-    const root: Task = { place, below, drop: 0, prepend: [] };
-    return {
-      key,
-      root,
-      tasks: [root],
-      out: new Map<string, readonly string[]>(),
-      seen: new Set<string>(),
+  // a listing being made: its place and prefix, its paths so far, each text with its steps, and the tasks it has taken
+  type Listing = {
+    readonly key: string;
+    readonly out: Map<string, readonly string[]>;
+    readonly seen: Set<string>;
+  };
+  const listing = (key: string): Listing => ({ key, out: new Map(), seen: new Set() });
+  const root = listing(key);
+  const first: Task = { place, below: prefix, asked: { drop: 0, prepend: [] }, made: null };
+  const tasks: (Task | null)[] = [first];
+  // (the listing made on the way, closed where its task's own tasks end: the `null` below them)
+  let making: Listing | null = null;
+  const done = (made: Listing): readonly string[] => {
+    const found = {
+      texts: keptArray(admission.work, [...made.out.keys()]),
+      paths: keptArray(admission.work, [...made.out.values()]),
     };
+    admission.landedBelows.set(made.key, found);
+    return found.texts;
   };
-  const listings = [listing(place, prefix, key)];
-  const open = new Set<string>([key]);
-  for (;;) {
-    const made = listings.at(-1)!;
-    const task = made.tasks.pop();
-    if (task === undefined) {
-      listings.pop();
-      open.delete(made.key);
-      const found = {
-        texts: keptArray(admission.work, [...made.out.keys()]),
-        paths: keptArray(admission.work, [...made.out.values()]),
-      };
-      admission.landedBelows.set(made.key, found);
-      if (listings.length === 0) return found.texts;
+  const land = (made: Listing, frame: Frame, path: readonly string[], text?: string): void => {
+    if (frame.drop === 0 && frame.prepend.length === 0 && text !== undefined) {
+      if (!made.out.has(text)) made.out.set(text, path);
+      return;
+    }
+    const steps = keptSteps(admission.work, frame.prepend, path.slice(frame.drop));
+    const written = keptText(admission.work, steps);
+    if (!made.out.has(written)) made.out.set(written, steps);
+  };
+  // (a copy's source's frame: the copy's path written as the frame writes it, the source's strip dropped)
+  const through = (frame: Frame, copy: InheritedCopy): Frame =>
+    frame.drop <= copy.path.length
+      ? {
+          drop: copy.strip.length,
+          prepend: keptSteps(admission.work, frame.prepend, copy.path.slice(frame.drop)),
+        }
+      : { drop: copy.strip.length + frame.drop - copy.path.length, prepend: frame.prepend };
+  while (tasks.length > 0) {
+    const task = tasks.pop()!;
+    if (task === null) {
+      done(making!);
+      making = null;
       continue;
     }
-    const { out, seen, tasks } = made;
-    const at = task === made.root ? made.key : keptParts(admission.work, task.place, task.below);
-    const id = keptParts(admission.work, at, task.drop, task.prepend);
-    if (seen.has(id)) continue;
-    const land = (text: string, steps: readonly string[]): void => {
-      if (!out.has(text)) out.set(text, steps);
-    };
+    const at = task === first ? key : keptParts(admission.work, task.place, task.below);
+    const id = (frame: Frame): string => keptParts(admission.work, at, frame.drop, frame.prepend);
+    const asked = root.seen.has(id(task.asked)) ? null : task.asked;
+    let made =
+      making !== null && task.made !== null && !making.seen.has(id(task.made)) ? task.made : null;
+    if (asked === null && made === null) continue;
     // (a place and prefix listed: its paths, written where the task lands them)
     const listed = admission.landedBelows.get(at);
     if (listed !== undefined) {
-      seen.add(id);
-      const same = task.drop === 0 && task.prepend.length === 0;
+      if (asked !== null) root.seen.add(id(asked));
+      if (made !== null) making!.seen.add(id(made));
       for (let index = 0; index < listed.texts.length; index += 1) {
         work.charge("indexSteps");
-        if (same) land(listed.texts[index]!, listed.paths[index]!);
-        else {
-          const steps = keptSteps(
-            admission.work,
-            task.prepend,
-            listed.paths[index]!.slice(task.drop),
-          );
-          land(keptText(admission.work, steps), steps);
-        }
+        const [path, text] = [listed.paths[index]!, listed.texts[index]!];
+        if (asked !== null) land(root, asked, path, text);
+        if (made !== null) land(making!, made, path, text);
       }
       continue;
     }
-    // (a place and prefix an earlier walk took: listed first, then taken as listed; one being listed, which no walk
-    // reaches from itself, walked as before)
-    if (task !== made.root && !open.has(at) && admission.landingWalks.has(at)) {
-      tasks.push(task);
-      listings.push(listing(task.place, task.below, at));
-      open.add(at);
-      continue;
+    // (a place and prefix an earlier walk took, outside any listing made on the way: listed as this walk goes)
+    if (making === null && task !== first && admission.landingWalks.has(at)) {
+      making = listing(at);
+      made = { drop: 0, prepend: [] };
+      tasks.push(null);
     }
     admission.landingWalks.add(at);
-    seen.add(id);
+    if (asked !== null) root.seen.add(id(asked));
+    if (made !== null) making!.seen.add(id(made));
     const add = (path: readonly string[]): void => {
       if (!isPrefix(task.below, path)) return;
-      const steps = keptSteps(admission.work, task.prepend, path.slice(task.drop));
-      land(keptText(admission.work, steps), steps);
+      if (asked !== null) land(root, asked, path);
+      if (made !== null) land(making!, made, path);
     };
     const emit = (path: readonly string[]): void => {
       work.charge("indexSteps");
       add(path);
     };
     // (a place that lands through its parent lands its root and what the copy it lands through does, `landsThrough`)
-    const through = landsThrough(admission, task.place, task.below);
-    if (through !== task.place) {
+    const parent = landsThrough(admission, task.place, task.below);
+    if (parent !== task.place) {
       emit([]);
-      tasks.push({ ...task, place: through });
+      tasks.push({ place: parent, below: task.below, asked: task.asked, made });
       continue;
     }
     // (a cycle's landed paths, and the copies at, above or below the prefix, from indexes by path: never every one
@@ -903,23 +916,15 @@ export function landedBelow(
           ? copy.strip
           : null;
       if (below === null) continue;
-      tasks.push(
-        task.drop <= copy.path.length
-          ? {
-              place: copy.from,
-              below,
-              drop: copy.strip.length,
-              prepend: keptSteps(admission.work, task.prepend, copy.path.slice(task.drop)),
-            }
-          : {
-              place: copy.from,
-              below,
-              drop: copy.strip.length + task.drop - copy.path.length,
-              prepend: task.prepend,
-            },
-      );
+      tasks.push({
+        place: copy.from,
+        below,
+        asked: through(task.asked, copy),
+        made: made === null ? null : through(made, copy),
+      });
     }
   }
+  return done(root);
 }
 
 /** The members of a place's cycle of copies (`Inheritance.order`), once per pass. */
