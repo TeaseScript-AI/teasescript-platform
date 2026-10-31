@@ -2297,6 +2297,193 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
+ * #1466's stack of k diamonds of copies (`topologySources`' `diamond`; TABLE r4.224, r4.227): each copies one object
+ * into two places, stores into one of them and replaces the next place by the other, every next place read; and its
+ * siblings: both places stored, the replacing order reversed, every second right place a shared ancestor, the next place
+ * written `object` with a misfitting store, the reads guarded, and the branches of unequal depth (Astra's design review).
+ * A read below the shared layers is answered once per layer and path from the layers below it (`prefix-index.ts`), so
+ * each grows as k log k where `main` grew as k³. Beside them, Codex r1's B1 dimension: k copies of one record, each
+ * storing its own property below one step, joined into one place and read at each property, directly and through a
+ * copy of the place, so each read asks only the layer that holds its property (#1078).
+ */
+function diamonds(
+  k: number,
+  { both = false, reverse = false, shared = false, typed = false, guarded = false } = {},
+): readonly SourceFile[] {
+  return main(
+    lines(
+      "let d0 = {f: hostValue, g: 1}",
+      ...(shared ? ["let shared = d0"] : []),
+      rows(k, (i) => {
+        const [first, second] = reverse ? [`r${i}`, `l${i}`] : [`l${i}`, `r${i}`];
+        return lines(
+          `let l${i} = d${i}`,
+          `let r${i} = ${shared && i % 2 === 1 ? "shared" : `d${i}`}`,
+          `l${i}.g = ${typed ? '"bad"' : "hostValue"}`,
+          ...(both ? [`r${i}.g = hostValue`] : []),
+          `let d${i + 1}${typed ? ": object" : ""} = ${first}`,
+          `d${i + 1} = ${second}`,
+        );
+      }),
+      rows(k, (i) =>
+        guarded ? `if d${i + 1}.g != null { repeat d${i + 1}.g {} }` : `repeat d${i + 1}.g {}`,
+      ),
+      "exit",
+    ),
+  );
+}
+
+/** k copies of one record joined into one place (or a copy of it), each storing and read at its own property below `g`. */
+function wideJoin(k: number, copied: boolean): readonly SourceFile[] {
+  const place = copied ? "copy" : "joined";
+  return main(
+    lines(
+      "let seed = {g: {z: 1}}",
+      rows(k, (i) => `let arm${i} = seed\narm${i}.g.p${i} = hostValue`),
+      "let joined = arm0",
+      rows(k - 1, (i) => `joined = arm${i + 1}`),
+      ...(copied ? ["let copy = joined"] : []),
+      rows(k, (i) => `repeat ${place}.g.p${i} {}`),
+      "exit",
+    ),
+  );
+}
+
+/**
+ * Codex r2's sibling: k copies of one record, each storing its own property below `depth` steps, joined in pairs `levels`
+ * times (pairs, then pairs of pairs), then all into one place, read at each property directly or through `copies`
+ * copies of the place; a read asks only the layer that lists its property's first step, never a joining one.
+ */
+function nestedJoin(k: number, { levels = 2, depth = 1, copies = 0 } = {}): readonly SourceFile[] {
+  const path = `${"g.".repeat(depth)}p`;
+  const out = [
+    `let seed = ${"{g: ".repeat(depth)}{z: 1}${"}".repeat(depth)}`,
+    rows(k, (i) => `let arm${i} = seed\narm${i}.${path}${i} = hostValue`),
+  ];
+  let tops = Array.from({ length: k }, (_, i) => `arm${i}`);
+  for (let level = 1; level <= levels; level++) {
+    const pairs = Array.from({ length: tops.length / 2 }, (_, i) => `join${level}_${i}`);
+    out.push(
+      rows(
+        pairs.length,
+        (i) => `let ${pairs[i]} = ${tops[2 * i]}\n${pairs[i]} = ${tops[2 * i + 1]}`,
+      ),
+    );
+    tops = pairs;
+  }
+  out.push(`let place = ${tops[0]}`, ...tops.slice(1).map((top) => `place = ${top}`));
+  let read = "place";
+  for (let i = 1; i <= copies; i++) {
+    out.push(`let copy${i} = ${read}`);
+    read = `copy${i}`;
+  }
+  return main(
+    lines(
+      ...out,
+      rows(k, (i) => `repeat ${read}.${path}${i} {}`),
+      "exit",
+    ),
+  );
+}
+
+export const LAYER_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "diamonds",
+    measures: "#1466: a stack of k diamonds of copies",
+    program: (k) => diamonds(k),
+  },
+  {
+    name: "diamonds-both",
+    measures: "#1466: each diamond storing into both places",
+    program: (k) => diamonds(k, { both: true }),
+  },
+  {
+    name: "diamonds-reversed",
+    measures: "#1466: each next place replaced by the stored one",
+    program: (k) => diamonds(k, { reverse: true }),
+  },
+  {
+    name: "diamonds-shared",
+    measures: "#1466: every second right place a copy of one shared ancestor",
+    program: (k) => diamonds(k, { shared: true }),
+  },
+  {
+    name: "diamonds-typed",
+    measures: "#1466: every next place written `object`, each stored place's property misfitting",
+    program: (k) => diamonds(k, { typed: true }),
+  },
+  {
+    name: "diamonds-guarded",
+    measures: "#1466: every read guarded",
+    program: (k) => diamonds(k, { guarded: true }),
+  },
+  {
+    name: "wide-join",
+    measures:
+      "Codex r1's B1: k copies each storing its own property below one step, joined, read at each",
+    program: (k) => wideJoin(k, false),
+  },
+  {
+    name: "wide-join-copied",
+    measures: "Codex r1's B1, one layer down: the same join read through a copy of the place",
+    program: (k) => wideJoin(k, true),
+  },
+  {
+    name: "nested-join",
+    measures:
+      "Codex r2's sibling: the copies joined in pairs of pairs, then into one place, read at each",
+    program: (k) => nestedJoin(k),
+  },
+  {
+    name: "nested-join-copied",
+    measures: "Codex r2's sibling: the pairs of pairs read through a copy of the place",
+    program: (k) => nestedJoin(k, { copies: 1 }),
+  },
+  {
+    name: "nested-join-deep",
+    measures: "Codex r2's sibling: the pairs of pairs, each property below three steps",
+    program: (k) => nestedJoin(k, { depth: 3 }),
+  },
+  {
+    name: "nested-join-deep-copied",
+    measures:
+      "Codex r2's sibling: the pairs of pairs, each property below three steps, read through two copies",
+    program: (k) => nestedJoin(k, { depth: 3, copies: 2 }),
+  },
+  {
+    name: "nested-join-witness",
+    measures:
+      "Codex r2's witness: the copies joined in pairs, then into one place, read through a copy",
+    program: (k) => nestedJoin(k, { levels: 1, copies: 1 }),
+  },
+  {
+    name: "diamonds-unequal-depth",
+    measures:
+      "#1466, Astra's design review: branches of one to two and two to four copies, both stored",
+    program: (k) =>
+      main(
+        lines(
+          "let d0 = {f: hostValue, g: 1}",
+          rows(k, (i) => {
+            const left = Array.from({ length: 1 + (i % 2) }, (_, j) => `l${i}x${j}`);
+            const right = Array.from({ length: 2 + (i % 3) }, (_, j) => `r${i}x${j}`);
+            return lines(
+              ...left.map((name, j) => `let ${name} = ${j === 0 ? `d${i}` : left[j - 1]}`),
+              ...right.map((name, j) => `let ${name} = ${j === 0 ? `d${i}` : right[j - 1]}`),
+              `${left.at(-1)}.g = hostValue`,
+              `${right.at(-1)}.g = hostValue`,
+              `let d${i + 1} = ${left.at(-1)}`,
+              `d${i + 1} = ${right.at(-1)}`,
+            );
+          }),
+          rows(k, (i) => `repeat d${i + 1}.g {}`),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
  * Admission's hot-candidate discovery by touch tries (#1188, its design note's §1.3 and §4.1): one family per context
  * that listed a contribution again before the tries, each beside a wide typed root. A place merging two copies, each
  * then copied beside a second wide record; a literal of a plain wide record beside k such merges (Sol r2); k

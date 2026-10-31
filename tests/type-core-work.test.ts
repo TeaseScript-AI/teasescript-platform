@@ -22,6 +22,7 @@ import {
   HOT_CANDIDATE_FAMILIES,
   INHERITED_FIELD_FAMILIES,
   JOIN_REACH_FAMILIES,
+  LAYER_FAMILIES,
   MIXED_ADD_PRODUCTS,
   NARROWING_FAMILIES,
   NESTED_OBJECT_SELECTIONS,
@@ -171,6 +172,41 @@ function steepCounters(
 
 test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters([...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS]), []);
+});
+
+/**
+ * #1466: a stack of k diamonds of copies, its siblings and a wide join read at sparse paths (`LAYER_FAMILIES`), each
+ * read answered once per layer and path from the layers below it that may hold its property, at one small doubling, in
+ * either order and with the sharing off too: the total and
+ * the contract's own counter (`invSteps`), which `main` grew as k³ there (7.85 per doubling from 16 to 32). The support's
+ * other counters carry its log factor, which reads above the counters' bound at these sizes. The series to k = 64 in
+ * four modes is the PR's evidence, outside CI.
+ */
+test("a stack of diamonds of copies and its siblings grow with the program in either order (#1466)", () => {
+  for (const unshared of [false, true]) {
+    const measure = (at: Sized, reversed: boolean): Measured => {
+      const { total, counts } = analysed(at, reversed, unshared).budget;
+      const kept = ["syntaxNodes", "invSteps"] as const;
+      return { total, counts: new Map(kept.map((counter) => [counter, counts.get(counter) ?? 0])) };
+    };
+    assert.deepEqual(steepCounters(LAYER_FAMILIES, unshared, measure, [16, 32]), []);
+  }
+});
+
+/**
+ * #1466, Codex r2's sibling: a read below nested joins asks only the layer listing its property's first step, never a
+ * joining layer it passes through, so the summaries' demands are one per property: k, at each size and in either order
+ * (r4.227's bound for these families, a regression oracle of the selection).
+ */
+test("a read below nested joins asks only the layers listing its path (#1466)", () => {
+  for (const family of LAYER_FAMILIES.filter((each) => each.name.startsWith("nested-join")))
+    for (const k of [8, 16, 32, 64])
+      for (const reversed of [false, true])
+        assert.equal(
+          analysed(sized(family, k), reversed).budget.facts.layerDemands,
+          k,
+          `${family.name} at ${k}${reversed ? " reversed" : ""}`,
+        );
 });
 
 /**

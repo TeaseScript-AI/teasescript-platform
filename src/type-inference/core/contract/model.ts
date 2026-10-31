@@ -2,9 +2,9 @@ import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Definition, Key } from "../definitions.js";
 import type { Callable, FlowNode } from "../flow-graph.js";
 import type { IngressNode, Item, ItemTag, Writer } from "../items.js";
-import type { Work } from "../solver.js";
+import type { Proof, ProofDemand, Work } from "../solver.js";
 import type { IndexObject } from "./literal-index.js";
-import { type CanonicalKey, type Steps } from "./key-ids.js";
+import { type CanonicalKey, type KeyId, type Steps } from "./key-ids.js";
 
 // The shapes the contract side's indexes, identities, holders and classes are made of.
 
@@ -96,33 +96,114 @@ export interface EntryGroup {
 
 /**
  * The sources a prefix's reads take apart from its entries (§8 r4.15: a replaced alias source's own stores below its
- * root, kept apart by their first step), as a layer over the one its prefix inherits: an alias shares its source's
- * layer and adds only its own sources (r4.38), so k aliases each adding a field are k small layers, never k maps of up
- * to k fields. A layer knows its depth and its ancestors 2^i layers up, and its root which layers on it list each
- * first step at each depth, so a read asks those layers only.
+ * root, kept apart by their first step), as a layer over the one its prefix inherits and the ones its source joins:
+ * an alias shares its source's layers and adds only its own sources (r4.38), so k aliases each adding a field are k
+ * small layers, never k maps of up to k fields, and a join of two copies references both, never a flattened list
+ * (r4.46 (3)). A read below a layer is answered once per layer and path (`layerSupport`, `layerDemand`), from its own
+ * sources and its parent's and joins' answers (#1466).
  */
 export interface SubLayer {
   /** Its own sources by their first step. */
   readonly own: ReadonlyMap<string, ReadonlySet<Key>>;
   readonly parent: SubLayer | null;
-  readonly depth: number;
-  readonly jumps: readonly SubLayer[];
-  /** The layer at depth 0 it stands on, `null` for that one itself. */
-  readonly root: SubLayer | null;
-  /** The one source every source of it and its ancestors is, if there is one. */
+  /** The further layers its source joins, in the order its source's stores join them. */
+  readonly joins: readonly SubLayer[];
+  /** The one source every source of it and its ancestors is, if there is one (`null` where it joins a layer). */
   readonly only: Key | null;
-  /** At its root: per first step and depth, the layers on it that list the step. */
-  readonly byStep: Map<string, Map<number, Set<SubLayer>>>;
+  /** The place and path another pass finds it by (`replayLayer`); `null` where no pass can find it again. */
+  readonly origin: LayerOrigin | null;
+  /** Per path id read below it, its support and its summary's demand, each made once (`layerSupport`, `layerDemand`). */
+  readonly paths: Map<number, LayerPath>;
+  /** Its number in the pass, its key in a set of layers (`SubLayer.self`). */
+  readonly id: number;
+  /** Its parent's depth and one; 0 for none. */
+  readonly depth: number;
+  /** Its layers 2^i parents down, for finding a layer on its parent chain (`ancestorAt`). */
+  readonly jumps: readonly SubLayer[];
+  /** Its leaf in a set of layers (`front`). */
+  readonly self: SupportNode;
+  /** The layers whose maps its own unites: its parent, unless one it joins has the parent on its chain, and its joins. */
+  readonly through: readonly SubLayer[];
+  /**
+   * Per step, the nearest layers listing it at or below it, as a map of steps to sets of layers (`SupportNode.value`):
+   * itself for its own steps, else the sets of the layers it reads through, so a read under a step asks the layers
+   * that list it, never one it passes through; made with it from theirs.
+   */
+  front: SupportNode | null;
 }
 
 /**
- * A prefix's layers under a step (`Contract.relevantSubs`), by their positions among the layers it inherits or joins:
- * the sources each lists there in its own map, by the positions listing them, and the layers one of whose ancestors
- * lists the step.
+ * The listing layers a read under a step may ask below a prefix or a listing layer (`selectAt`): those its layers' maps
+ * name for the step (`SubLayer.front`), the sources each lists there by the layers listing them, and those with listing
+ * layers below them.
  */
 export interface StepLayers {
+  /** The listing layers found under the step, each with the position of the prefix's layer it was found under. */
+  readonly found: readonly { readonly layer: SubLayer; readonly at: number }[];
   readonly own: ReadonlyMap<Key, readonly number[]>;
-  readonly deep: readonly number[];
+  /** The found layers with listing layers below them, whose summaries hold those layers' too. */
+  readonly nested: readonly number[];
+}
+
+/**
+ * A layer's logical identity (#1466, TABLE r4.227): an alias's the original place whose root it replaces, a projected
+ * copy's the place and the path it is copied below, both as a cursor (`place#id`), so a summary's demand names its
+ * layer by the program and the path, never by the order the analysis made layers in.
+ */
+export interface LayerOrigin {
+  readonly kind: "alias" | "projected";
+  readonly key: KeyId;
+}
+
+/** What a layer answers at one path, each made where first asked. */
+export interface LayerPath {
+  /** The sources there with a store at the path, as a support of source keys (`layerSupport`). */
+  support?: SupportNode | null;
+  /** The demand of its summary there (`layerDemand`). */
+  demand?: ProofDemand<LayerProof>;
+}
+
+/**
+ * A node of a layer answer's exact support (#1466): a persistent binary radix tree over source keys, by the bits of
+ * their UTF-16 code units, each led by a bit that ends the key, so its leaves stand in the keys' order. Leaves are one
+ * per source and content, branches one per bit and children (`supportLeaf`, `supportBranch`): two nodes are equal
+ * exactly where they hold the same sources with the same content. A summary's node keeps what each consumer reads:
+ * the merged items in the sources' order, the distinct sources with items counted to two, and the presence steps.
+ */
+export interface SupportNode {
+  readonly id: number;
+  /** The bit its children part at; a leaf's `Infinity`. */
+  readonly bit: number;
+  /** A leaf's source; a branch's first leaf's. */
+  readonly key: Key;
+  readonly left: SupportNode | null;
+  readonly right: SupportNode | null;
+  /** A summary's merged items in its sources' order; `null` for a support of sources alone. */
+  readonly items: readonly Item[] | null;
+  /** Its sources whose items are not all `empty`, counted to two. */
+  readonly count: number;
+  /** A summary's presence: per incoming state (lacks 1, has 2), what reading its sources in order makes of it. */
+  readonly presence: readonly PresenceStep[] | null;
+  /** A step map's leaf: the set of layers its step maps to (`SubLayer.front`). */
+  readonly value?: SupportNode | null;
+  /** A set of layers' leaf: its layer's number (`SubLayer.id`). */
+  readonly layer?: number;
+}
+
+/**
+ * C5c's presence after reading some sources in order (`propertyPresence`): whether one lacks the property (1) and one
+ * has it (2), whether one gave an unknown, and the earliest literal that lacks it; reading stops once both hold.
+ */
+export interface PresenceStep {
+  readonly mask: number;
+  readonly unknown: boolean;
+  readonly literal: Writer | null;
+}
+
+/** A layer summary's proof (`layerDemand`): its support, `null` where the summary declined. */
+export interface LayerProof extends Proof {
+  readonly root: SupportNode | null;
+  readonly declined: boolean;
 }
 
 /** What a prefix stores into the keys below it. */
@@ -457,6 +538,15 @@ export interface ContractFacts {
   ringComponents: number;
   ringPorts: number;
   ringStops: number;
+  /**
+   * #1466: the layer answers' support nodes made (leaves and branches, each once per pass), the links they and the
+   * layers' answers keep (a branch's two children, a union's memo, a layer's answer at a path), the summary demands
+   * made, and the sources the exact enumeration listed (`relevantSubs`, its output's size).
+   */
+  supportNodes: number;
+  supportEdges: number;
+  layerDemands: number;
+  listedSources: number;
 }
 
 /** A key whose admission decision stopped at its demand allowance (`Contract.stop`). */
