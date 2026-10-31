@@ -2328,7 +2328,7 @@ test("a read made again keeps its earlier cut in the bounded frontier's record (
 });
 
 /**
- * #1453 and TABLE r4.208:after a settled stop, a read whose walk is cut answers its place's component's host data, so it
+ * #1453 and TABLE r4.208: after a settled stop, a read whose walk is cut answers its place's component's host data, so it
  * keeps every check: through 257 copies of a host object (the store's record-level boundary, `copy-type root against
  * object`, which #1453 lost at 256), through 33 copies each storing its own property, and in a ring of 64 copies. In
  * each, at its first settled stop, its last and halfway between, in both orders, every check of the unstopped compile is
