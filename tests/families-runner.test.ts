@@ -15,6 +15,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 const runner = resolve(process.cwd(), "tests/families/run.mjs");
+const baselines = resolve(process.cwd(), "tests/families/baselines.mjs");
 
 /** A built tree's oracle library that throws in every mode where a source says `throw`, as #1439's stale caller did. */
 const library = `export const MODES = [false, true].flatMap((reversed) =>
@@ -251,43 +252,63 @@ export function publicationHashes(files) {
  * after a file its name begins, an executable, a link, and an empty folder, which git leaves out.
  */
 const SRC = "da445cc8e80d8e4082809c34579aaed8451b7efc";
-function writeSrc(tree: string): void {
+function writeSrc(tree: string, extra = ""): void {
   mkdirSync(join(tree, "src", "a"), { recursive: true });
   mkdirSync(join(tree, "src", "empty"));
-  writeFileSync(join(tree, "src", "a.ts"), "a\n");
+  writeFileSync(join(tree, "src", "a.ts"), `a\n${extra}`);
   writeFileSync(join(tree, "src", "a", "b.ts"), "b\n");
   writeFileSync(join(tree, "src", "run.sh"), "x\n", { mode: 0o755 });
   symlinkSync("a.ts", join(tree, "src", "link.ts"));
 }
 
-test("the corpus runner stores a tree in the baseline of its src/ tree, which judges a head as the base tree beside it does", () => {
+test("the corpus runner stores a tree in the baseline of its src/ tree, verified shard by shard, which judges a head as the base tree beside it does", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
-    // the base as two commits with one `src/` tree, and the head
-    const [base, alias, head] = ["base", "alias", "head"].map((name, index) => {
-      const tree = join(directory, name);
-      mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
-      writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+    // the base as two commits with one `src/` tree and oracle library, one with another library, and the head
+    const tree = (name: string, sha: string, library = "oracles\n", extra = "") => {
+      const folder = join(directory, name);
+      mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
+      mkdirSync(join(folder, "tests", "helpers"), { recursive: true });
+      writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(folder, "package-lock.json"), "{}\n");
+      writeFileSync(join(folder, "tests", "helpers", "type-core-oracles.ts"), library);
       writeFileSync(
-        join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+        join(folder, "dist", "tests", "helpers", "type-core-oracles.js"),
         storable(name === "head"),
       );
-      writeFileSync(join(tree, ".sha"), `${String(index + 1).repeat(40)}\n`);
-      writeSrc(tree);
-      return tree;
-    });
-    const area = join(directory, "area");
-    mkdirSync(area);
-    writeFileSync(
-      join(area, "stored.mjs"),
-      `export const cases = ${JSON.stringify(["same", "changed", "throws", "stopped", "ends"].map((name) => [name, name]))};\n`,
-    );
+      writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
+      writeSrc(folder, extra);
+      mkdirSync(join(folder, "tests", "families", "area"), { recursive: true });
+      writeFileSync(join(folder, "tests", "families", "area", "stored.mjs"), generator(names));
+      return folder;
+    };
+    const names = ["same", "changed", "throws", "stopped", "ends"];
+    const generator = (order: string[]) =>
+      `export const cases = ${JSON.stringify(order.map((name) => [name, name]))};\n`;
+    const base = tree("base", "1");
+    const alias = tree("alias", "2");
+    const other = tree("other", "3", "another oracle library\n");
+    const head = tree("head", "4");
+    const area = join(base, "tests", "families", "area");
     const root = join(directory, "baselines");
     const baseline = join(root, SRC, "area");
-    const store = (tree: string, ...args: string[]) =>
-      spawnSync(process.execPath, [runner, area, tree, "--store", root, ...args], {
+    const store = (from: string, ...args: string[]) =>
+      spawnSync(process.execPath, [runner, args[0]!, from, "--store", ...args.slice(1)], {
         encoding: "utf8",
       });
+    const into = (from: string, shard: string, ...more: string[]) =>
+      store(from, area, root, "--shard", shard, ...more);
+    const state = (from: string, folder = root) =>
+      spawnSync(process.execPath, [baselines, "state", from, folder, "--read-only"], {
+        encoding: "utf8",
+      });
+    const states = (result: { stdout: string }) =>
+      result.stdout
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter(({ area: name }) => name !== undefined)
+        .map(({ area: name, state: what, verified: count }) => `${name} ${what} ${count}`);
     const out = join(directory, "out.jsonl");
     const run = (...args: string[]) => {
       const result = spawnSync(process.execPath, [runner, area, ...args, "--out", out], {
@@ -308,51 +329,75 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, which ju
 
     // one shard from one commit, the other from the other: while a running writer claims it, the second is left to
     // it; a writer that ended (another start time) claims it no longer, and its temporary file goes
-    assert.equal(store(base!, "--shard", "0/2").status, 1);
+    assert.equal(into(base, "0/2").status, 1);
     assert.deepEqual(readdirSync(baseline).sort(), ["0of2.runs.jsonl", "PLAN"]);
+    assert.deepEqual(states(state(alias)), ["area partial 1"]);
     const stat = readFileSync("/proc/self/stat", "utf8");
     const started = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
     writeFileSync(join(baseline, ".1of2.claim"), `${process.pid} ${started}\n`);
-    const held = store(alias!, "--shard", "1/2");
-    assert.equal(held.status, 0);
-    assert.match(held.stdout, /"skipped":"being stored by another writer"/);
+    assert.match(into(alias, "1/2").stdout, /"skipped":"being stored by another writer"/);
     writeFileSync(join(baseline, ".1of2.claim"), `${process.pid} 1\n`);
     writeFileSync(join(baseline, `.1of2.runs.jsonl.${process.pid}-1.tmp`), "partial\n");
-    assert.equal(store(alias!, "--shard", "1/2").status, 1);
-    const files = ["0of2.runs.jsonl", "1of2.runs.jsonl", "PLAN", "SHA256SUMS"];
+    assert.equal(into(alias, "1/2").status, 1);
+    const files = ["0of2.runs.jsonl", "1of2.runs.jsonl", "PLAN"];
     assert.deepEqual(readdirSync(baseline).sort(), files);
-    for (const line of readFileSync(join(baseline, "SHA256SUMS"), "utf8").trim().split("\n")) {
-      const [sum, file] = line.split("  ");
-      assert.equal(
-        createHash("sha256")
-          .update(readFileSync(join(baseline, file!)))
-          .digest("hex"),
-        sum,
-      );
-    }
-    // one baseline, named by the `src/` tree and naming both commits; a stored shard is not run again
-    const again = store(alias!, "--shard", "0/2");
+    // one baseline, named by the `src/` tree, with what its runs depend on, both commits and the area's PLAN
+    const again = into(alias, "0/2");
     assert.equal(again.status, 0);
     assert.match(again.stdout, /"skipped":"stored"/);
     assert.deepEqual(readdirSync(root), [SRC]);
-    assert.deepEqual(readFileSync(join(root, SRC, "MANIFEST"), "utf8").split("\n"), [
-      "baseline 3",
-      `src ${SRC}`,
+    const manifest = readFileSync(join(root, SRC, "MANIFEST"), "utf8").split("\n");
+    assert.deepEqual(manifest.slice(0, 2), ["baseline 3", `src ${SRC}`]);
+    assert.match(
+      manifest.slice(2, 5).join("\n"),
+      /^oracles [0-9a-f]{64}\nlock [0-9a-f]{40}\nnode v/,
+    );
+    assert.deepEqual(manifest.slice(5), [
       `commit ${"1".repeat(40)} ${base}`,
+      `area area 2 ${createHash("sha256")
+        .update(readFileSync(join(baseline, "PLAN")))
+        .digest("hex")}`,
       `commit ${"2".repeat(40)} ${alias}`,
       "",
     ]);
-    // another count of shards, another set of sources, or runs other than the defaults: refused, nothing written
-    assert.equal(store(base!, "--shard", "0/3").status, 2);
-    writeFileSync(join(area, "more.mjs"), 'export const cases = [["more", "more"]];\n');
-    assert.equal(store(base!, "--shard", "0/2").status, 2);
-    rmSync(join(area, "more.mjs"));
-    assert.equal(store(base!, "--shard", "0/2", "--timeout", "5").status, 2);
+    const complete = state(alias);
+    assert.equal(complete.status, 0);
+    assert.deepEqual(states(complete), ["area complete 2"]);
+
+    // refused, nothing written: another count of shards; the same sources in another order (#1542 r1: the second
+    // writer's shard would hold the first's sources again); another oracle library; other than the defaults; a folder
+    // this tool did not make, whose contents `prune` leaves
+    assert.match(into(base, "0/3").stderr, /is planned otherwise/);
+    const reordered = join(directory, "reordered", "area");
+    mkdirSync(reordered, { recursive: true });
+    writeFileSync(join(reordered, "stored.mjs"), generator([...names].reverse()));
+    assert.equal(store(alias, reordered, root, "--shard", "1/2").status, 2);
+    assert.match(into(other, "0/2").stderr, /holds runs of another oracles than this tree's/);
+    assert.equal(into(base, "0/2", "--timeout", "5").status, 2);
     assert.deepEqual(readdirSync(baseline).sort(), files);
+    const elsewhere = join(directory, "elsewhere");
+    mkdirSync(join(elsewhere, SRC, "data"), { recursive: true });
+    writeFileSync(join(elsewhere, SRC, "data", "kept"), "x\n");
+    assert.match(store(base, area, elsewhere).stderr, /is not this tool's/);
+    const gone = tree("gone", "5", "oracles\n", "gone\n");
+    assert.equal(store(gone, area, elsewhere).status, 1);
+    rmSync(gone, { recursive: true });
+    spawnSync(process.execPath, [baselines, "prune", elsewhere], { encoding: "utf8" });
+    assert.deepEqual(readdirSync(elsewhere), [SRC]);
+    assert.deepEqual(readdirSync(join(elsewhere, SRC)), ["data"]);
+
+    // a shard cut short (#1542 r1) no longer verifies, and any writer replaces it
+    const second = join(baseline, "1of2.runs.jsonl");
+    writeFileSync(second, readFileSync(second, "utf8").split("\n").slice(0, -2).join("\n"));
+    const damaged = state(base);
+    assert.equal(damaged.status, 1);
+    assert.deepEqual(states(damaged), ["area damaged 1"]);
+    assert.equal(into(base, "1/2").status, 1);
+    assert.deepEqual(states(state(base)), ["area complete 2"]);
 
     // the head against the stored base and against the base tree run beside it
-    const beside = run(base!, head!);
-    const against = run(head!, "--baseline", baseline);
+    const beside = run(base, head);
+    const against = run(head, "--baseline", baseline);
     assert.deepEqual(counts(beside), [5, 1, 4, 4, 0, 16, 4]);
     assert.deepEqual(counts(against), counts(beside));
     assert.equal(against.status, 1);
@@ -377,7 +422,7 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, which ju
       if (same !== undefined) same.runs["src-on publication"].value.hash = "0".repeat(64);
       writeFileSync(file, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
     }
-    const mutated = run(head!, "--baseline", baseline);
+    const mutated = run(head, "--baseline", baseline);
     assert.equal(mutated.status, 1);
     assert.deepEqual(counts(mutated), [5, 1, 4, 4, 4, 16, 1]);
     assert.deepEqual(
@@ -396,7 +441,7 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, which ju
     // the unaltered result in a second file: a source stored twice with other results is no baseline
     const same = lines.find((line) => JSON.parse(line).source === "same");
     writeFileSync(join(baseline, "z.runs.jsonl"), `${same}\n`);
-    const twice = spawnSync(process.execPath, [runner, area, head!, "--baseline", baseline], {
+    const twice = spawnSync(process.execPath, [runner, area, head, "--baseline", baseline], {
       encoding: "utf8",
     });
     assert.equal(twice.status, 2);
