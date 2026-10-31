@@ -22,6 +22,9 @@ outside the repository").
   do its subset replays (`builder-scripts/families-subset.mjs`, `families-subset2.mjs`) and fixture hashes
   (`builder-scripts/fixture-pub.mjs`, #1514). Its `canary-1514.sh`, which runs `canary-1510.sh`, checks that; its
   changed files stay beside them as `<file>.pre-1510` and `<file>.pre-1514` (`PORTED-1510.md`, `PORTED-1514.md`).
+- `desktop:~/work/evidence/corpus/stops/2b-1511-r1/`: Codex's r1 of #1511 (its `README.md` gives the commands), whose
+  fixture hashes (`builder-scripts/fixture-pub.mjs`) keep an exception apart, unhashed, and exit 1 on it (#1516);
+  `canary-1516.sh` checks that, and the original stays beside it as `fixture-pub.mjs.pre-1516` (`PORTED-1516.md`).
 
 ## Known problems
 
