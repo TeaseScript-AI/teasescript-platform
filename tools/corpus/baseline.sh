@@ -128,10 +128,14 @@ if [ "${1:-}" = status ]; then
   fi
   out=$root/$src
   areas=()
-  for area in $(git -C "$repo" ls-tree -d --name-only "$commit:tests/families"); do
+  for area in $(git -C "$repo" ls-tree -d --name-only "$commit:tests/families" 2> /dev/null); do
     git -C "$repo" ls-tree --name-only "$commit:tests/families/$area" | grep -q '\.mjs$' && areas+=("$area")
   done
   git -C "$repo" cat-file -e "$commit:tools/corpus/fixture" 2> /dev/null && areas+=(fixture)
+  if [ "${#areas[@]}" -eq 0 ]; then
+    echo "baseline $commit: it has no area of the runner" >&2
+    exit 2
+  fi
   complete=() states=()
   for area in "${areas[@]}"; do
     dir=$out/$area
