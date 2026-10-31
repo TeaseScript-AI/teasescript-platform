@@ -362,6 +362,17 @@ let frontierBound: { readonly depth: number; readonly copies: number } = {
 /** Test-only: each read's walk, by its value and path (`withFrontierBound`), or `null`. */
 let frontierReads: Map<string, FrontierRead> | null = null;
 
+/**
+ * Test-only: records a read's walk where the seam records (`withFrontierBound`), never over a cut recorded for the same
+ * value and path: a later read of it follows the chain its cut compressed (`sameOf`) and may not be cut, but the
+ * analysis kept the cut's answer (#1509).
+ */
+function recordRead(value: PlaceId, rest: readonly string[], found: () => FrontierRead): void {
+  if (frontierReads === null) return;
+  const read = `${value}\u0000${rest.join("\u0000")}`;
+  if (frontierReads.get(read)?.cut !== true) frontierReads.set(read, found());
+}
+
 /** Test-only: what a read's walk found (`withFrontierBound`). */
 export interface FrontierRead {
   /** Whether the read answered the stop alone (r4.186) before its walk. */
@@ -943,21 +954,19 @@ function placeIngress(walk: Consumers, start: PlaceId): IngressNode | undefined 
 function heldIngress(walk: Consumers, value: PlaceId, rest: readonly string[]): readonly Item[] {
   const { program, contract, definitions } = walk.pass;
   if (!walk.settled || program.work.stopped === null || definitions.ingress.size === 0) return [];
-  // (the test seam's key for the read, made only where the seam records, `withFrontierBound`)
-  const read = (): string => `${value}\u0000${rest.join("\u0000")}`;
   if (contract.anyStopped) {
     const key = readKey(walk, value);
     if (
       key === null ||
       walk.admission.decisionStopped(keyPlace(key), joinSteps(keyPath(key), rest))
     ) {
-      frontierReads?.set(read(), {
+      recordRead(value, rest, () => ({
         guarded: true,
         cut: false,
         writers: new Set(),
         copies: 0,
         depth: 0,
-      });
+      }));
       return [];
     }
   }
@@ -970,7 +979,7 @@ function heldIngress(walk: Consumers, value: PlaceId, rest: readonly string[]): 
   const structural = hostIngress(walk, value)?.[0] ?? null;
   const domain = place === null ? found.host : placeIngress(walk, place);
   const node = program.scope.ingress.union(structural?.ingress, domain);
-  frontierReads?.set(read(), {
+  recordRead(value, rest, () => ({
     guarded: false,
     cut: found.cut,
     writers: new Set(
@@ -978,7 +987,7 @@ function heldIngress(walk: Consumers, value: PlaceId, rest: readonly string[]): 
     ),
     copies: found.copies,
     depth: found.depth,
-  });
+  }));
   if (node === undefined) return [];
   const item: Item = { ...unknownItem(REASON.external), ingress: node };
   // (what the stores bring is its mark's content, `Consumers.boundariesAt`, #1448; a host read's own ingress, in it too,

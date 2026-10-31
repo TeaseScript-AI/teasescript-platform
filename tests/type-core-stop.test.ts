@@ -16,6 +16,7 @@ import {
   FRONTIER_COPIES,
   FRONTIER_DEPTH,
   withFrontierBound,
+  type FrontierRead,
 } from "../src/type-inference/core/consumers/finishing.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
@@ -2178,17 +2179,50 @@ test("a domain read's store boundaries are its owning mark's content (#1448)", (
   }
 });
 
+/** An analysis and its reads' walks (`withFrontierBound`). */
+type Walked = { readonly result: Answers; readonly reads: ReadonlyMap<string, FrontierRead> };
+
+/**
+ * A bounded frontier's analysis against the exact walk's at one stop (TABLE r4.208), whole, and whether a read's walk was
+ * cut (`withFrontierBound` keeps a cut when the read is made again, #1509): where none was, the same reads, checks,
+ * diagnostics and marks; where one was, every exact check's obligation (its kind, target, requirement, site and boundary
+ * flag) kept or owned by a mark. A cut read answers its place's component's host data, a superset of what its walk
+ * names, so its consumers may owe checks the exact walk does not, never fewer: those may read more, and one worded for
+ * external data needs no read of its receiver (TABLE r4.208's reworded class, #1449's wording difference at a stop).
+ */
+function boundedKeepsExact(bounded: Walked, exact: Walked, where: string): boolean {
+  const cut = [...bounded.reads.values()].some((read) => read.cut);
+  if (!cut) {
+    const whole = ({ result, reads }: Walked) => ({
+      reads: [...reads.keys()].sort(),
+      checks: result.checks,
+      diagnostics: result.diagnostics.map(stopIdentity),
+      deferred: result.budget.deferred.map(stopIdentity),
+    });
+    assert.deepEqual(whole(bounded), whole(exact), where);
+    return cut;
+  }
+  const obligation = (check: Answers["checks"][number]) =>
+    JSON.stringify({ ...check, on: undefined });
+  const kept = new Set(
+    [
+      ...bounded.result.checks,
+      ...bounded.result.budget.deferred.map((mark) => mark.obligation),
+    ].map(obligation),
+  );
+  for (const check of exact.result.checks)
+    assert.ok(kept.has(obligation(check)), `${where}: ${JSON.stringify(check)}`);
+  return cut;
+}
+
 /**
  * #1445, TABLE r4.208: after a settled stop, a domain read's host data is followed at most two copies deep and over at
  * most eight copies met (`FRONTIER_DEPTH`, `FRONTIER_COPIES`); past them the read answers its place's component's.
- * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same reads where no walk is cut, the same
- * stop guard (r4.186), the same writers where a read's walk is not cut and a superset where it is; whole, the same
- * checks, diagnostics and marks where no read is cut, and where one is, every exact check's obligation (its kind,
- * target, requirement, site and boundary flag) kept or owned by a mark. A cut may word a check for external data and so
- * need no read of its receiver (TABLE r4.208's reworded class, #1449's wording difference at a stop). The topologies at
- * k = 4 (rings and chains of own stores are cut there) and six random copy graphs (two with readers of two places),
- * forward with sharing and reversed without, near the first settled stop and at the last, without a demand cap and
- * under the largest that stops a decision. The same check runs at scale, in all four modes, on the workers.
+ * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same stop guard (r4.186), the same writers
+ * where a read's walk is not cut and a superset where it is; whole, `boundedKeepsExact`. The topologies at k = 4 (rings
+ * and chains of own stores are cut there) and six random copy graphs (two with readers of two places), forward with
+ * sharing and reversed without, near the first settled stop and at the last, without a demand cap and under the largest
+ * that stops a decision. The same check runs at scale, in all four modes, on the workers.
  */
 test("after a settled stop a read's bounded host frontier names its exact writers, or more where it is cut (#1445)", () => {
   const sources = [
@@ -2199,11 +2233,6 @@ test("after a settled stop a read's bounded host frontier names its exact writer
       source: randomCopyGraph(seed, 6, 4, 18, seed > 4 ? 4 : 0),
     })),
   ];
-  const answered = (answers: Answers) => ({
-    checks: answers.checks,
-    diagnostics: answers.diagnostics.map(stopIdentity),
-    deferred: answers.budget.deferred.map(stopIdentity),
-  });
   const bound = { depth: FRONTIER_DEPTH, copies: FRONTIER_COPIES };
   const exactly = { depth: Infinity, copies: Infinity };
   const seen = { cut: 0, whole: 0, guarded: 0, decisionStops: 0 };
@@ -2234,15 +2263,6 @@ test("after a settled stop a read's bounded host frontier names its exact writer
           const bounded = withFrontierBound(bound, () => analyse(allowance));
           const exact = withFrontierBound(exactly, () => analyse(allowance));
           assert.ok(bounded.result.budget.settled, where);
-          const cut = [...bounded.reads.values()].some((read) => read.cut);
-          // (the same reads without a cut; with one, its conservative checks may read more, and where a consumer owes
-          // the check of external data it needs no read of its receiver: TABLE r4.208's reworded class)
-          if (!cut)
-            assert.deepEqual(
-              [...bounded.reads.keys()].sort(),
-              [...exact.reads.keys()].sort(),
-              where,
-            );
           for (const [read, mine] of bounded.reads) {
             const theirs = exact.reads.get(read);
             if (theirs === undefined) continue;
@@ -2255,20 +2275,7 @@ test("after a settled stop a read's bounded host frontier names its exact writer
             else seen.whole += 1;
           }
           if (bounded.result.budget.decisions.some((d) => d.stopped)) seen.decisionStops += 1;
-          if (!cut) assert.deepEqual(answered(bounded.result), answered(exact.result), where);
-          else {
-            // (a check by its obligation, its wording aside: a cut may word the same check for external data)
-            const obligation = (check: (typeof exact.result.checks)[number]) =>
-              JSON.stringify({ ...check, on: undefined });
-            const kept = new Set(
-              [
-                ...bounded.result.checks,
-                ...bounded.result.budget.deferred.map((mark) => mark.obligation),
-              ].map(obligation),
-            );
-            for (const check of exact.result.checks)
-              assert.ok(kept.has(obligation(check)), `${where}: ${JSON.stringify(check)}`);
-          }
+          boundedKeepsExact(bounded, exact, where);
         }
       }
     }
@@ -2280,7 +2287,48 @@ test("after a settled stop a read's bounded host frontier names its exact writer
 });
 
 /**
- * #1453 and TABLE r4.208: after a settled stop, a read whose walk is cut answers its place's component's host data, so it
+ * #1509: a read made again keeps its earlier cut in `withFrontierBound`'s record. Ten copies of a list holding host data,
+ * read after a settled stop under a demand allowance that stops a decision: the first read of `c9` is cut past eight
+ * copies and answers its place's component's host data, which owes the element's boundary and a null check the exact
+ * walk does not; `c9` is read again through the chain the cut compressed (`sameOf`), two copies, uncut. In each mode, at
+ * the first settled stop under the largest such allowance, the record says a read was cut, so `boundedKeepsExact`
+ * demands the exact checks' obligations, not equality.
+ */
+test("a read made again keeps its earlier cut in the bounded frontier's record (#1509)", () => {
+  const source = [
+    "let c0: list = [hostValue, 4]",
+    ...Array.from({ length: 9 }, (_, i) => `let c${i + 1} = c${i}`),
+    'say "BEFORE"',
+    'repeat c9[0] {say "ok"}',
+    'say "AFTER"',
+    "exit\n",
+  ].join("\n");
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  for (const mode of HELD_MODES) {
+    const demand = heldDemands({ source }, mode)[0];
+    assert.ok(demand !== undefined, mode.name);
+    const capped = () => withTestDemandAllowance(demand, () => analyseCore(request));
+    const analyse = (allowance: number): Answers =>
+      mode.run(() => withTestAllowance(allowance, capped));
+    let first = 1;
+    for (let top = mode.run(capped).budget.total - 1; first < top;) {
+      const middle = (first + top) >> 1;
+      if (analyse(middle).budget.settled) top = middle;
+      else first = middle + 1;
+    }
+    const where = `${mode.name}, demand ${demand} @${first}`;
+    const bounded = withFrontierBound({ depth: FRONTIER_DEPTH, copies: FRONTIER_COPIES }, () =>
+      analyse(first),
+    );
+    const exact = withFrontierBound({ depth: Infinity, copies: Infinity }, () => analyse(first));
+    assert.ok(bounded.result.budget.settled, where);
+    assert.ok(boundedKeepsExact(bounded, exact, where), `${where}: no read's walk is cut`);
+  }
+});
+
+/**
+ * #1453 and TABLE r4.208:after a settled stop, a read whose walk is cut answers its place's component's host data, so it
  * keeps every check: through 257 copies of a host object (the store's record-level boundary, `copy-type root against
  * object`, which #1453 lost at 256), through 33 copies each storing its own property, and in a ring of 64 copies. In
  * each, at its first settled stop, its last and halfway between, in both orders, every check of the unstopped compile is
