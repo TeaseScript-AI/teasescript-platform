@@ -2,7 +2,8 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { hash } from "../lib/json.mjs";
-import { typeSignature, expectedPlanType, fits } from "../lib/model.mjs";
+import { typeSignature, expectedPlanType, fits, typeText } from "../lib/model.mjs";
+import { certificate } from "../lib/certificate.mjs";
 
 /** Observation adapter only. Expected values/types come from the independent family. */
 export async function loadCompiler(root) {
@@ -92,7 +93,14 @@ export function configured(api, mode, policy, call) {
   return fn();
 }
 const prefix = (a, b) => a.length <= b.length && a.every((v, i) => v === b[i]);
-export function scopeOf(api, request, answer, c) {
+/**
+ * Which stop the store meets, by the compiler's own decisions, and whether its row is judged. A stop at or above the
+ * store's path leaves it out of scope (#1440), but under the plan's rule 1440 (`lib/rules.mjs`) a store the source
+ * certifies (`lib/certificate.mjs`, recorded as `certified`) is judged on its whole domain, as
+ * `tests/helpers/type-core-enclosing.ts` judges its certified cases; neither judges a store into an inferred place
+ * before admission settled (#1252).
+ */
+export function scopeOf(api, request, answer, c, rules = []) {
   const p = new api.CoreProgram(request);
   const place = p.places.find(
     (x) => x.kind.kind === "binding" && x.kind.name === c.destination.binding,
@@ -109,10 +117,20 @@ export function scopeOf(api, request, answer, c) {
       ? "strictly-above"
       : "none";
   const unsettled = answer.budget.exhausted !== null && !answer.budget.settled;
+  const inherited = unsettled && !c.destination.written;
+  let certified;
+  if (relation === "at-or-below" && rules.includes("1440")) {
+    const type = certificate(c.source, c.site);
+    if (type !== null && typeText(type) !== typeText(c.type))
+      throw new Error(`Certificate and generator disagree: ${c.id}`);
+    certified = type !== null;
+  }
   const reason =
     relation === "at-or-below"
-      ? "exact-target-stop-1440"
-      : unsettled && !c.destination.written
+      ? certified && !inherited
+        ? null
+        : "exact-target-stop-1440"
+      : inherited
         ? "unsettled-inherited-domain-1252"
         : null;
   return {
@@ -123,6 +141,7 @@ export function scopeOf(api, request, answer, c) {
         ? "settled"
         : "unstopped",
     reason,
+    ...(certified === undefined ? {} : { certified }),
     stops: stopped,
     target: [
       place.label,
@@ -188,13 +207,13 @@ export function judgeRuns(api, plan, c, { full = true } = {}) {
 export function observe(api, config, { keepPlan = false } = {}) {
   const started = performance.now(),
     cpu = process.cpuUsage();
-  const { case: c, mode, policy } = config;
+  const { case: c, mode, policy, rules = [] } = config;
   const request = api.coreRequest([{ path: "main.tease", source: c.source }], c.globals);
   if (!request) throw new Error(`Generated source does not parse/resolve: ${c.id}`);
   const a0 = performance.now();
   const answer = configured(api, mode, policy, () => api.analyseCore(request));
   const analysisMs = performance.now() - a0;
-  const scope = scopeOf(api, request, answer, c);
+  const scope = scopeOf(api, request, answer, c, rules);
   const marks = [...answer.diagnostics, ...answer.budget.deferred].filter(
     (d) =>
       d.class === "warning-runtime-check" &&
@@ -265,7 +284,8 @@ export function observe(api, config, { keepPlan = false } = {}) {
       "complete-planned-type",
       `${actualType} != ${typeSignature(expectedPlanType(c.type))}`,
     );
-    if (scope.relation === "strictly-above")
+    // (a store above a stop, or a certified one at it, owns one mark at its own site)
+    if (scope.relation !== "none")
       check(
         marks.length === 1,
         "owned-stop-warning",
@@ -296,6 +316,8 @@ export function observe(api, config, { keepPlan = false } = {}) {
       workerPeakRssKiB: process.resourceUsage().maxRSS,
     },
     ...(keepPlan ? { plan: compiled.plan } : {}),
-    ...(failures.length ? { reproduction: { case: c, mode, policy } } : {}),
+    ...(failures.length
+      ? { reproduction: { case: c, mode, policy, ...(config.rules ? { rules } : {}) } }
+      : {}),
   };
 }

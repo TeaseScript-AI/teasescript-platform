@@ -1,9 +1,12 @@
 import { generate, interactionGroups, render } from "../families/s8-stores.mjs";
 import { select, profiles } from "./selection.mjs";
 import { hash, requireInteger } from "./json.mjs";
-export function makePlan(profile = "quick", seed = 1442) {
+import { checkRules } from "./rules.mjs";
+/** A plan; `rules` (`rules.mjs`) are recorded only where it names any, so a plan without them is as before them. */
+export function makePlan(profile = "quick", seed = 1442, rules = []) {
   if (!profiles[profile]) throw new Error(`Unknown profile: ${profile}`);
   requireInteger(seed, "seed", 0, 0xffffffff);
+  rules = checkRules(rules);
   const p = profiles[profile],
     { selected, coverage } = select(generate(seed), interactionGroups, p.sources, seed);
   const body = {
@@ -11,6 +14,7 @@ export function makePlan(profile = "quick", seed = 1442) {
     family: "s8-stores",
     profile,
     seed,
+    ...(rules.length ? { rules } : {}),
     coverage,
     cases: selected,
     modes: p.modes,
@@ -24,7 +28,7 @@ export function validatePlan(plan) {
     throw new Error("Unsupported plan schema/family/profile");
   const { planHash, ...body } = plan;
   if (hash(body) !== planHash) throw new Error("Plan digest mismatch");
-  const expected = makePlan(plan.profile, plan.seed);
+  const expected = makePlan(plan.profile, plan.seed, plan.rules ?? []);
   if (hash(expected) !== hash(plan))
     throw new Error("Plan does not match the frozen generator/profile; regenerate explicitly");
   for (const c of plan.cases)
@@ -40,7 +44,7 @@ export function configurations(plan, shard = { index: 0, total: 1 }) {
     for (const mode of plan.modes)
       for (const policy of plan.policies) {
         const id = hash({ caseId: c.id, mode, policy }).slice(0, 24);
-        result.push({ id, case: c, mode, policy });
+        result.push({ id, case: c, mode, policy, ...(plan.rules ? { rules: plan.rules } : {}) });
       }
   });
   return result;

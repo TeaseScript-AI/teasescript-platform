@@ -39,6 +39,7 @@ export function mergeShards(parts) {
       schemaVersion: 1,
       ...summarize(ordered, configurations(plan).length),
       planHash: plan.planHash,
+      rules: plan.rules ?? [],
       provenance: baseline.provenance,
       resultsHash: hash(ordered),
       shards: parts.length,
