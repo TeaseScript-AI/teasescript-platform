@@ -36,6 +36,7 @@ import {
   randomCopyGraph,
   topologySources,
   phaseEnds,
+  type HeldCase,
 } from "./helpers/type-core-held-host.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { inMode, keptErrors, MODES, stopIdentity } from "./helpers/type-core-oracles.js";
@@ -2062,6 +2063,87 @@ test("a settled stop keeps the checks of the host data a place's stores hold (#1
         stops.some((stop) => stop.phase === "walk"),
         `${c.name}, ${mode.name}`,
       );
+      for (const { allowance, phase } of stops)
+        assert.deepEqual(
+          heldProblems(c, mode, allowance, unstopped),
+          [],
+          `${c.name}, ${mode.name}, ${phase} @${allowance}`,
+        );
+    }
+});
+
+/**
+ * #1501 (the owner's reviewer's control on #1536): host data stored into an unrestricted written element keeps its
+ * boundary (`copy-type xs.element`, against `unknown`, at `hostValue`) at the walk's settled stops in source order, owned or
+ * kept, its domain's `unknown` being opaque; before the finishing read took that reason the walk's stops lost it (895).
+ */
+test("a settled stop keeps the boundary of host data an unrestricted written element holds, at the walk's stops (#1501)", () => {
+  const c = heldFamily(true).find((each) => each.name === "writtenList-1-repeat-plain")!;
+  assert.equal(
+    c.source,
+    'let xs: list = [hostValue, 4]\nsay "BEFORE"\nrepeat xs[0] {say "ok"}\nsay "AFTER"\nexit\n',
+  );
+  const mode = HELD_MODES[0]!;
+  const { run: unstopped } = heldUnstopped(c, mode);
+  // the reviewer's own stop: forward order, program allowance 895, a settled walk stop, where the boundary of
+  // `hostValue` (16:25) was lost
+  const boundary = unstopped.answers.checks.find(
+    (check) =>
+      check.target === "xs.element" &&
+      check.boundary &&
+      check.site.start === 16 &&
+      check.site.end === 25,
+  );
+  assert.deepEqual(boundary?.against, ["unknown"]);
+  const request = coreRequest(
+    [{ path: "main.tease", source: c.source }],
+    ["hostValue", "hostOther"],
+  )!;
+  const { stoppedIn, settled } = mode.run(() =>
+    withTestAllowance(895, () => analyseCore(request)),
+  ).budget;
+  assert.deepEqual({ stoppedIn, settled }, { stoppedIn: "walk", settled: true });
+  assert.deepEqual(heldProblems(c, mode, 895, unstopped), [], "walk @895");
+  // (and every eighth of the walk's stops, where the finishing read answers the repeat count's domain)
+  const stops = heldStops(c, mode, 8).filter((stop) => stop.phase === "walk");
+  assert.ok(stops.length > 0);
+  for (const { allowance } of stops)
+    assert.deepEqual(heldProblems(c, mode, allowance, unstopped), [], `walk @${allowance}`);
+});
+
+/**
+ * #1501: after a settled stop the finishing read follows a domain's host data where its contract's `unknown` carries no
+ * reason but the opaque one, as a written open domain's does (the held family's `writtenList` and its siblings above).
+ * The same reason marks a reference's member, a speaker's property and a handle: a stop of a read of one changes nothing
+ * of its unstopped analysis (judged at the analysis, as the candidate route declines speakers).
+ */
+test("a settled stop changes nothing of a read of a reference's member, a speaker's property or a handle (#1501)", () => {
+  const cases: HeldCase[] = (
+    [
+      [
+        "reference member",
+        "speaker vera { mood: 1 }\nvera.mood = hostValue\nlet alias = vera",
+        "alias.mood",
+      ],
+      ["speaker property", "speaker vera { mood: hostValue }", "vera.mood"],
+      [
+        "reference union",
+        'speaker vera { length: 2 }\nlet pool: dict = dict{a: [hostValue], b: vera}\nlet alias = pool.get("a", default: vera)',
+        "alias.length",
+      ],
+      ["handle", "let alias = timer async hidden 1 s {}", "alias.length"],
+    ] as const
+  ).map(([name, setup, read]) => ({
+    name,
+    source: `${setup}\nsay "BEFORE"\nrepeat ${read} {say "ok"}\nsay "AFTER"\nexit\n`,
+    slice: false,
+    values: [],
+  }));
+  for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!])
+    for (const c of cases) {
+      const { run: unstopped } = heldUnstopped(c, mode);
+      const stops = heldStops(c, mode, 12);
+      assert.ok(stops.length > 0, `${c.name}, ${mode.name}`);
       for (const { allowance, phase } of stops)
         assert.deepEqual(
           heldProblems(c, mode, allowance, unstopped),
