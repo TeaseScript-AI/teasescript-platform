@@ -377,8 +377,9 @@ function* contractLength(
 
 /**
  * F18: a load's or `fromJson`'s expected type, possible: the declared type, or the written type of the place its
- * value lands in directly (V30 §12); an untyped load's at a property its default lacks, stored data that may be absent,
- * and at one below a collection, its default's kinds beside `missing`; `null` without one.
+ * value lands in directly (V30 §12); at a property its default lacks, where its reader fills the default's and keeps the
+ * others (an untyped load, or below a written `object`), data that may be absent; an untyped load's at one below a
+ * collection, its default's kinds beside `missing`; `null` without one.
  */
 export function* expectedOf(
   contract: Contract,
@@ -410,7 +411,10 @@ export function* expectedOf(
   // V30 §13 (JSON): below a written `object` the value keeps every key, and has each one its default names, of the
   // default's type, where its reader takes a missing or misfitting key from the default: JSON's at every level, a stored
   // value's in its root object and the objects nested in it, never in an element of a collection, which a stored value
-  // keeps as it is when it fits (`matchesValueType`). There the default answers (#1436; the lead's ruling on r2's B1)
+  // keeps as it is when it fits (`matchesValueType`). There the default answers (#1436; the lead's ruling on r2's B1).
+  // `#`, the presence rule's property no literal lists (`unlistedObject`), keeps the default's answer too: the reader
+  // fills each property the default names, `null` ones included, so only a property the default may lack owes a check,
+  // carried by its own answer: data that may be absent, ADR 0021 1.8 (#1470, as #1459's untyped load)
   if (
     term === null &&
     fallback !== undefined &&
@@ -418,11 +422,10 @@ export function* expectedOf(
     belowObject(written, rest)
   ) {
     const named = withoutEmpty(yield* contract.defaultKinds(fallback, rest));
-    if (
-      named.length > 0 &&
-      !named.some((item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0)
-    )
-      return [...named, ...emptyAt(rest)];
+    if (rest.at(-1) === "#") return named;
+    if (named.some((item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0))
+      return [unknownItem(REASON.external | REASON.missing), ...emptyAt(rest)];
+    if (named.length > 0) return [...named, ...emptyAt(rest)];
   }
   const nullDefault =
     rest.length === 0 && fallback !== undefined && (yield* contract.onlyNull(fallback)).length > 0;
