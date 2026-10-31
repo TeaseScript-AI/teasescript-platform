@@ -192,8 +192,9 @@ export function quietKinds(
 }
 
 /**
- * A property step no literal lists: no property's name is `#`. An untyped load answers it as its default does
- * (`expectedOf`): each property its stored object may hold beside the default's owes its own check (#1459).
+ * A property step no literal lists: no property's name is `#`. A load or parse answers it as its default does where its
+ * reader fills the default's properties (`expectedOf`): each property its object may hold beside them owes its own
+ * check (#1459, #1470).
  */
 const UNLISTED: readonly string[] = Object.freeze(["#"]);
 
