@@ -2302,7 +2302,9 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
  * siblings: both places stored, the replacing order reversed, every second right place a shared ancestor, the next place
  * written `object` with a misfitting store, the reads guarded, and the branches of unequal depth (Astra's design review).
  * A read below the shared layers is answered once per layer and path from the layers below it (`prefix-index.ts`), so
- * each grows as k log k where `main` grew as k³.
+ * each grows as k log k where `main` grew as k³. Beside them, Codex r1's B1 dimension: k copies of one record, each
+ * storing its own property below one step, joined into one place and read at each property, directly and through a
+ * copy of the place, so each read asks only the layer that holds its property (#1078).
  */
 function diamonds(
   k: number,
@@ -2326,6 +2328,22 @@ function diamonds(
       rows(k, (i) =>
         guarded ? `if d${i + 1}.g != null { repeat d${i + 1}.g {} }` : `repeat d${i + 1}.g {}`,
       ),
+      "exit",
+    ),
+  );
+}
+
+/** k copies of one record joined into one place (or a copy of it), each storing and read at its own property below `g`. */
+function wideJoin(k: number, copied: boolean): readonly SourceFile[] {
+  const place = copied ? "copy" : "joined";
+  return main(
+    lines(
+      "let seed = {g: {z: 1}}",
+      rows(k, (i) => `let arm${i} = seed\narm${i}.g.p${i} = hostValue`),
+      "let joined = arm0",
+      rows(k - 1, (i) => `joined = arm${i + 1}`),
+      ...(copied ? ["let copy = joined"] : []),
+      rows(k, (i) => `repeat ${place}.g.p${i} {}`),
       "exit",
     ),
   );
@@ -2361,6 +2379,17 @@ export const LAYER_FAMILIES: readonly WorkFamily[] = [
     name: "diamonds-guarded",
     measures: "#1466: every read guarded",
     program: (k) => diamonds(k, { guarded: true }),
+  },
+  {
+    name: "wide-join",
+    measures:
+      "Codex r1's B1: k copies each storing its own property below one step, joined, read at each",
+    program: (k) => wideJoin(k, false),
+  },
+  {
+    name: "wide-join-copied",
+    measures: "Codex r1's B1, one layer down: the same join read through a copy of the place",
+    program: (k) => wideJoin(k, true),
   },
   {
     name: "diamonds-unequal-depth",
