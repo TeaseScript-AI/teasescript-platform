@@ -57,10 +57,12 @@ names the path. Each area's `PLAN`
 binds its shards' sources in their order and its checks, and a writer that would run another is refused (exit 2). A
 shard counts only once its total line verifies its contents and its sources. One running writer at a time stores it, and
 any writer replaces one that does not verify. Every write into the baseline goes through one gate in `baselines.mjs`,
-which holds the baseline's lock; `node tests/families/writes.mjs` lists the tools' writes, computed from their modules,
-and the runner's test fails for one neither in the gate nor proven outside every baseline, and for a child process of
-a form not on its list of those proven to create and change no path. `--out` is refused in a
-baseline or a folder of baselines. `prune` retires a baseline once none of its trees remains.
+which holds the baseline's lock. `node tests/families/writes.mjs` lists the tools' writes, computed from their modules
+and denied by default: the runner's test fails for any call through `fs`, `child_process` or `process`, and any module
+loader, that is neither one of the forms it lists as writing nothing, nor in the gate, nor a write of a path checked to
+lie outside every baseline. Such paths, the store's folder and `--out` among them, are resolved as the system resolves
+them, refused in a baseline or a folder of baselines, and taken by the writers only in that checked form; `--out` is
+a new file, never one truncated. `prune` retires a baseline once none of its trees remains.
 `bash tools/corpus/baseline.sh status <commit>` says in one line what each area of the commit's tree holds, and exits 0
 only when each one is complete. Before a base run, ask it: compare the head with a complete area through `--baseline`,
 and store an area that is not from the base tree's own runner and areas

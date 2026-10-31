@@ -27,6 +27,7 @@ import {
   existsSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -37,11 +38,12 @@ import {
   DEFAULTS,
   endShard,
   identityOf,
-  isOwned,
   outside,
   owned,
+  pathOf,
   planned,
   planOf,
+  readFrom,
 } from "./baselines.mjs";
 import { generatorsOf, placeOf, sourceKey } from "./sources.mjs";
 
@@ -243,23 +245,25 @@ if (process.argv[2] === "--child") {
   const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? DEFAULTS.memory);
   // the runner's own file lies outside every baseline: not in the folder it stores into or reads, nor in the folder of
-  // baselines of the baseline it reads, nor in any baseline (#1542 r4)
-  const reads =
-    baseline === undefined
-      ? []
-      : [
-          baseline,
-          ...(isOwned(path.dirname(path.resolve(baseline)))
-            ? [path.resolve(baseline, "../..")]
-            : []),
-        ];
+  // baselines of the baseline it reads, nor in any baseline (#1542 r4, r5), all as the system resolves them; it is a new
+  // file, never the old one truncated, so that another link to the old one keeps what it holds
   const out =
     option("out") === undefined
       ? undefined
-      : outside(option("out"), [...(store === undefined ? [] : [store]), ...reads], refused);
-  if (out !== undefined) writeFileSync(out, "");
+      : outside(
+          option("out"),
+          [
+            ...(store === undefined ? [] : [pathOf(store, "outside")]),
+            ...(baseline === undefined ? [] : readFrom(baseline)),
+          ],
+          refused,
+        );
+  if (out !== undefined) {
+    rmSync(pathOf(out, "outside"), { force: true });
+    writeFileSync(pathOf(out, "outside"), "", { flag: "wx" });
+  }
   const record = (line) => {
-    if (out !== undefined) appendFileSync(out, `${JSON.stringify(line)}\n`);
+    if (out !== undefined) appendFileSync(pathOf(out, "outside"), `${JSON.stringify(line)}\n`);
   };
   /** An exception: on stderr with each message (its first line), in `--out` with each stack and the source. */
   const thrown = (line, source) => {
@@ -387,9 +391,9 @@ if (process.argv[2] === "--child") {
     const top = await owned(store, identity, `commit ${commit} ${tree}`);
     if (top.refused !== undefined) refused(top.refused);
     const name = path.basename(folder);
-    const plan = await planned(top.dir, name, planOf(name, every, shards));
+    const plan = await planned(top.baseline, name, planOf(name, every, shards));
     if (plan.refused !== undefined) refused(plan.refused);
-    storing = await beginShard(top.dir, name, shard, shards, plan.plan, plan.places[shard]);
+    storing = await beginShard(top.baseline, name, shard, shards, plan.plan, plan.places[shard]);
     if (storing.refused !== undefined) refused(storing.refused);
     if (storing.skipped !== undefined) {
       const { file, skipped } = storing;

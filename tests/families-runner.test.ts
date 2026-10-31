@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -704,7 +705,7 @@ import { unlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
 import { execSync, spawn } from "node:child_process";
-import { beside, outside } from "./baselines.mjs";
+import { beside, outside, pathOf } from "./baselines.mjs";
 const { appendFileSync } = everything;
 const renamed = promisify(fs.rename);
 const truncated = fs.truncateSync;
@@ -726,7 +727,7 @@ export async function scribble(file, flag) {
 }
 export { written };
 export function climb(root) {
-  const away = beside(outside(root, [], () => {}), ".x");
+  const away = pathOf(beside(outside(root, [], () => {}), ".x"), "beside");
   everything.rmSync(path.join(away, "..", "y"));
   everything.rmSync(path.join(beside(root, ".y"), "z"));
   process.getBuiltinModule("node:fs").rmdirSync(root);
@@ -736,6 +737,15 @@ export function climb(root) {
   spawn("bash", ["-c", 'touch "$0"', root], { stdio: "ignore" });
   execSync("touch notes");
   return [rm, Worker];
+}
+const { "writeFileSync": quoted } = everything;
+const options = { flag: "w" };
+const load = process.getBuiltinModule;
+export function r5(file = "notes") {
+  quoted(file, "");
+  fs.readFileSync(file, options);
+  load("node:child_process").spawnSync("touch", [file]);
+  written(file, "");
 }
 `,
     );
@@ -750,8 +760,8 @@ if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
     writeFileSync(
       state,
       readFileSync(state, "utf8").replace(
-        "async function gate(dir, action) {\n",
-        'async function gate(dir, action) {\n  rmSync(path.join(dir, "early"), { force: true });\n',
+        '  const dir = pathOf(baseline, "baseline");\n',
+        '  const dir = pathOf(baseline, "baseline");\n  rmSync(path.join(dir, "early"), { force: true });\n',
       ),
     );
     const copied = await inventoryOf(directory);
@@ -763,6 +773,7 @@ if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
         "tests/families/baselines.mjs rmSync",
         "tests/families/run.mjs writeFileSync",
         ...[
+          "import node:worker_threads",
           "writeFileSync",
           "rmSync",
           "linkSync",
@@ -777,15 +788,21 @@ if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
           "rmSync",
           "rmSync",
           "rmdirSync",
+          "eval",
           "spawn",
           "spawn",
           "execSync",
+          // (#1542 r5: an aliased loader, options in a variable, a default parameter)
+          "process.getBuiltinModule",
+          "readFileSync",
+          "writeFileSync",
         ].map((write) => `tests/families/sources.mjs ${write}`),
       ],
     );
     assert.deepEqual(
       copied.escapes.map(({ code }) => code),
-      ['import { Worker } from "node:worker_threads";', "fs", "written", "fs", 'eval("0")'],
+      // (#1542 r5: a quoted key)
+      ["fs", "written", "{ promises: { rm } } = fs", '{ "writeFileSync": quoted } = everything'],
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -996,9 +1013,68 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     const inRoot = outTo(join(fourth, "differences.jsonl"));
     assert.equal(inRoot.status, 2);
     assert.match(inRoot.stderr, /differences\.jsonl lies in the baselines folder /);
+    // (#1542 r5) `--out`, a hard link to a file in a baseline, is a new file, never that file truncated
+    const hard = join(directory, "notes-hard.jsonl");
+    linkSync(notes, hard);
+    assert.equal(outTo(hard).status, 2);
+    assert.equal(readFileSync(notes, "utf8"), "another agent's\n");
     rmSync(notes);
-    // prune then removes the baseline, and keeps a folder beside it named as no writer of this tool names one, though
-    // empty
+    const plan = join(held, "area", "PLAN");
+    const planned = readFileSync(plan, "utf8");
+    linkSync(plan, join(directory, "plan-hard.jsonl"));
+    assert.equal(outTo(join(directory, "plan-hard.jsonl")).status, 0);
+    assert.equal(readFileSync(plan, "utf8"), planned);
+    // (#1542 r5) `--baseline` through a link is resolved before its folder of baselines is derived
+    symlinkSync(join(held, "area"), join(directory, "area-alias"));
+    const aliased = run(
+      runner,
+      join(keeper, "tests", "families", "area"),
+      keeper,
+      "--baseline",
+      join(directory, "area-alias"),
+      "--out",
+      join(fourth, "notes.jsonl"),
+    );
+    assert.equal(aliased.status, 2);
+    assert.match(aliased.stderr, /notes\.jsonl lies in the baselines folder /);
+    assert.equal(existsSync(join(fourth, "notes.jsonl")), false);
+    // (#1542 r5) a folder of baselines spelled through a link and `..` is written where the system resolves it, never
+    // where its spelling collapses to: here into the baseline's own area
+    mkdirSync(join(directory, "elsewhere", "child"), { recursive: true });
+    symlinkSync(join(directory, "elsewhere", "child"), join(held, "escape"));
+    const spelled = `${join(held, "escape")}/../area`;
+    assert.equal(store(keeper, spelled, "0/1").status, 0);
+    assert.equal(run(baselines, "state", keeper, `${join(held, "escape")}/../folder`).status, 1);
+    assert.deepEqual(readdirSync(join(held, "area")).sort(), ["0of1.runs.jsonl", "PLAN"]);
+    assert.equal(existsSync(join(held, "folder")), false);
+    assert.deepEqual(readdirSync(join(directory, "elsewhere")).sort(), ["area", "child", "folder"]);
+    rmSync(join(held, "escape"));
+    // (and a writer given a path this tool did not check refuses it before any filesystem call)
+    const state = await import(pathToFileURL(baselines).href);
+    const fail = (why: string) => {
+      throw new Error(why);
+    };
+    const raw = join(directory, "raw");
+    for (const write of [
+      () => state.owned(raw, { src: "1".repeat(40) }, "commit x y"),
+      () => state.planned(raw, "area", "plan 1\n"),
+      () => state.beginShard(raw, "area", 0, 1, "", ""),
+      () => state.endShard({ baseline: raw }, [], {}),
+      () => state.beside(raw, ".x"),
+      // (and a checked path of another kind: a folder beside the baselines given as a folder of baselines)
+      () =>
+        state.owned(
+          state.beside(state.outside(join(directory, "kinds"), [], fail), ".x"),
+          { src: "1".repeat(40) },
+          "commit x y",
+        ),
+    ])
+      await assert.rejects(async () => write(), /is no \w+ path this tool checked/);
+    assert.equal(existsSync(raw), false);
+    assert.equal(existsSync(join(directory, "kinds")), false);
+    // prune then removes the baseline once its trees are gone, and keeps a folder beside it named as no writer of this
+    // tool names one, though empty
+    rmSync(keeper, { recursive: true });
     const padded = join(fourth, `.pruning-${"a".repeat(40)}-01-1`);
     mkdirSync(padded);
     const pruned = run(baselines, "prune", fourth).stdout;

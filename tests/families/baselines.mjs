@@ -51,7 +51,6 @@ import {
   readFileSync,
   readlinkSync,
   readSync,
-  realpathSync,
   renameSync,
   rmdirSync,
   rmSync,
@@ -274,7 +273,8 @@ const RETIRED = Symbol("retired");
  * and only where the folder holds no foreign path (else `refused`, naming the paths); `RETIRED` where the folder was
  * gone or replaced once the lock was held.
  */
-async function gate(dir, action) {
+async function gate(baseline, action) {
+  const dir = pathOf(baseline, "baseline");
   if (!isOwned(dir))
     return { refused: `${dir} is not this tool's: it has no MANIFEST of this tool` };
   let before;
@@ -366,9 +366,30 @@ function realOf(file) {
   return real;
 }
 
+// A path the writers below take, made only here: `outside` (a path, as the system resolves it, that lies in no baseline
+// and no folder of baselines it was checked against), `beside` (a folder of this tool's beside the baselines of such a
+// folder, which no baseline is nor holds) or `baseline` (a baseline's folder in such a folder). `pathOf` gives its
+// path, and refuses anything else before any filesystem call, so that no writer can write by a path's unchecked
+// spelling.
+const checked = new WeakMap();
+function checkedPath(real, kind) {
+  const value = Object.freeze({});
+  checked.set(value, { real, kind });
+  return value;
+}
+
+/** The path of a checked path of `kind` (above); anything else throws. */
+export function pathOf(value, kind) {
+  const entry = checked.get(value);
+  if (entry === undefined || entry.kind !== kind)
+    throw new TypeError(`${String(value)} is no ${kind} path this tool checked`);
+  return entry.real;
+}
+
 /**
- * `file`, a path to write outside every baseline, where it lies (its links followed) in none of the baselines folders
- * `roots` and in no folder that carries this tool's MANIFEST, nor is one; else `refuse(why)`, which ends the process.
+ * `file` as an `outside` path (its real path, above), where it lies (its links followed) in none of the baselines
+ * folders `roots` and in no folder that carries this tool's MANIFEST, nor is one; else `refuse(why)`, which ends the
+ * process.
  */
 export function outside(file, roots, refuse) {
   const real = realOf(file);
@@ -385,16 +406,36 @@ export function outside(file, roots, refuse) {
       : root !== undefined
         ? `${file} lies in the baselines folder ${root}: give a path outside it`
         : undefined;
-  if (why === undefined) return file;
+  if (why === undefined) return checkedPath(real, "outside");
   refuse(why);
   throw new Error(why);
 }
 
-/** `name` in the baselines folder `root`: a folder of this tool's beside its baselines (`.`-named), which no baseline is. */
+/** The folder `name` of this tool's beside the baselines in `root` (an `outside` path): `.`-named, which no baseline is. */
 export function beside(root, name) {
   if (!/^\.[^/]+$/.test(name) || name === "..")
     throw new Error(`${name} is no name of a folder beside the baselines`);
-  return path.join(root, name);
+  return checkedPath(path.join(pathOf(root, "outside"), name), "beside");
+}
+
+/** The baseline `name` (a `src/` tree's id) in `root` (an `outside` path). */
+function baselineIn(root, name) {
+  if (!isBaselineName(name)) throw new Error(`${name} is no baseline's name`);
+  return checkedPath(path.join(pathOf(root, "outside"), name), "baseline");
+}
+
+/** The baseline that `file` names, as the system resolves it, in a folder of baselines that lies in no baseline. */
+function baselineAt(file, refuse) {
+  const real = realOf(file);
+  if (!isBaselineName(path.basename(real)))
+    refuse(`${file} is no baseline: its name is no src/ tree's`);
+  return baselineIn(outside(path.dirname(real), [], refuse), path.basename(real));
+}
+
+/** The folders a run that reads the baseline area `folder` (`--baseline`) must not write in, as the system resolves them. */
+export function readFrom(folder) {
+  const real = realOf(folder);
+  return [real, ...(isOwned(path.dirname(real)) ? [path.dirname(path.dirname(real))] : [])];
 }
 
 /**
@@ -405,23 +446,24 @@ export function beside(root, name) {
  * the runs of other inputs.
  */
 export async function owned(root, identity, line) {
-  const dir = path.join(root, identity.src);
+  const baseline = baselineIn(root, identity.src);
+  const dir = pathOf(baseline, "baseline");
   const header = headerOf(identity);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (line !== null && !existsSync(path.join(dir, "MANIFEST"))) {
-      mkdirSync(root, { recursive: true });
+      mkdirSync(pathOf(root, "outside"), { recursive: true });
       const creating = beside(root, creatingName(identity.src, WRITER));
-      mkdirSync(creating);
-      writeFileSync(path.join(creating, "MANIFEST"), header);
+      mkdirSync(pathOf(creating, "beside"));
+      writeFileSync(path.join(pathOf(creating, "beside"), "MANIFEST"), header);
       try {
-        renameSync(creating, dir);
+        renameSync(pathOf(creating, "beside"), pathOf(baseline, "baseline"));
       } catch (error) {
-        rmSync(creating, { recursive: true, force: true });
+        rmSync(pathOf(creating, "beside"), { recursive: true, force: true });
         if (error.code !== "ENOTEMPTY" && error.code !== "EEXIST") throw error;
       }
     }
-    if (!existsSync(dir)) return { dir, absent: true };
-    const joined = await gate(dir, (text) => {
+    if (!existsSync(dir)) return { baseline, dir, absent: true };
+    const joined = await gate(baseline, (text) => {
       if (!text.startsWith(header)) {
         const [ours, theirs] = [header, text].map((part) => part.split("\n").slice(1, 5));
         const differs = ours
@@ -433,9 +475,9 @@ export async function owned(root, identity, line) {
         appendFileSync(path.join(dir, "MANIFEST"), `${line}\n`);
       return {};
     });
-    if (joined !== RETIRED) return { dir, ...joined };
+    if (joined !== RETIRED) return { baseline, dir, ...joined };
   }
-  return { dir, refused: `${dir} was retired each time this writer joined it` };
+  return { baseline, dir, refused: `${dir} was retired each time this writer joined it` };
 }
 
 /**
@@ -521,10 +563,11 @@ function claimed(file) {
  * before its folder and PLAN are made, which a writer interrupted in between leaves to the next. The PLAN's hash and
  * each shard's hash of places, or why it is refused: another plan recorded, or the baseline's state.
  */
-export async function planned(top, area, plan) {
+export async function planned(baseline, area, plan) {
+  const top = pathOf(baseline, "baseline");
   const id = hash(plan);
   const { shards, places } = parsePlan(plan);
-  const outcome = await gate(top, (text) => {
+  const outcome = await gate(baseline, (text) => {
     const record = recorded(text).get(area);
     if (record === undefined)
       appendFileSync(path.join(top, "MANIFEST"), `area ${area} ${shards} ${id}\n`);
@@ -544,17 +587,18 @@ export async function planned(top, area, plan) {
  * A shard to store (through the gate): `skipped` where it verifies or a running writer stores it, else this process's
  * claim; `refused` where the baseline refuses the writer.
  */
-export async function beginShard(top, area, shard, shards, plan, places) {
+export async function beginShard(baseline, area, shard, shards, plan, places) {
+  const top = pathOf(baseline, "baseline");
   const dir = path.join(top, area);
   const file = shardFile(dir, shard, shards);
-  const outcome = await gate(top, () => {
+  const outcome = await gate(baseline, () => {
     if (verified(file, plan, places)) return { skipped: "stored" };
     if (!claimed(path.join(dir, claimName(shard, shards))))
       return { skipped: "being stored by another writer" };
     return {};
   });
   if (outcome === RETIRED) return { refused: `${top} was retired while this writer began a shard` };
-  return { top, dir, file, shard, shards, plan, places, ...outcome };
+  return { baseline, dir, file, shard, shards, plan, places, ...outcome };
 }
 
 /**
@@ -562,10 +606,11 @@ export async function beginShard(top, area, shard, shards, plan, places) {
  * that does not verify by a rename over it, one another writer published meanwhile kept; the claim released. Whether
  * the shard then verifies, or why the baseline refused it.
  */
-export async function endShard({ top, dir, file, shard, shards, plan, places }, lines, total) {
+export async function endShard({ baseline, dir, file, shard, shards, plan, places }, lines, total) {
+  const top = pathOf(baseline, "baseline");
   const body = lines.join("");
   const ended = `${JSON.stringify({ total: { ...total, plan, places, lines: hash(body) } })}\n`;
-  const outcome = await gate(top, () => {
+  const outcome = await gate(baseline, () => {
     const tmp = temporaryName(file, WRITER);
     writeFileSync(tmp, body + ended);
     try {
@@ -684,8 +729,9 @@ async function state(tree, root, readOnly) {
  * A fill job's first decision for the baseline `dir` (through the gate): STARTED where the baseline is the current
  * tree's (SUPERSEDED undone) or the fill already began, else SUPERSEDED, naming the current tree. The decision printed.
  */
-async function start(dir, current) {
-  const outcome = await gate(dir, () => {
+async function start(baseline, current) {
+  const dir = pathOf(baseline, "baseline");
+  const outcome = await gate(baseline, () => {
     const marker = (name) => path.join(dir, name);
     if (path.basename(dir) === current) {
       rmSync(marker("SUPERSEDED"), { force: true });
@@ -702,8 +748,9 @@ async function start(dir, current) {
 }
 
 /** The hook's `script` copied into the baseline `dir` for its jobs, and SUPERSEDED undone (through the gate). */
-async function queue(dir, script) {
-  const outcome = await gate(dir, () => {
+async function queue(baseline, script) {
+  const dir = pathOf(baseline, "baseline");
+  const outcome = await gate(baseline, () => {
     copyFileSync(script, path.join(dir, temporaryName("baseline.sh", WRITER)));
     renameSync(path.join(dir, temporaryName("baseline.sh", WRITER)), path.join(dir, "baseline.sh"));
     rmSync(path.join(dir, "SUPERSEDED"), { force: true });
@@ -718,7 +765,8 @@ async function queue(dir, script) {
  * writer ended (`writer`, or this process where it is null), where it is empty or holds this tool's MANIFEST and no
  * foreign path; else kept, and named (as is one so named but not by a writer of this tool, `writer` undefined).
  */
-function recover(dir, writer) {
+function recover(folder, writer) {
+  const dir = pathOf(folder, "beside");
   if (writer === undefined) {
     console.log(JSON.stringify({ kept: dir, foreign: ["(not named by a writer of this tool)"] }));
     return;
@@ -747,23 +795,25 @@ function recover(dir, writer) {
  * tool's is not touched.
  */
 async function prune(root) {
-  if (!existsSync(root)) return;
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
+  const folder = pathOf(root, "outside");
+  if (!existsSync(folder)) return;
+  for (const entry of readdirSync(folder, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     // (a folder named as this tool names one beside its baselines, which may be another's: `recover` decides)
     if (/^\.(?:pruning-|.*\.creating-)/.test(entry.name)) {
       recover(beside(root, entry.name), leftoverOf(entry.name));
       continue;
     }
-    const dir = path.join(root, entry.name);
-    if (!isBaselineName(entry.name) || !isOwned(dir)) continue;
+    if (!isBaselineName(entry.name) || !isOwned(path.join(folder, entry.name))) continue;
+    const baseline = baselineIn(root, entry.name);
+    const dir = pathOf(baseline, "baseline");
     const retired = beside(root, retiredName(entry.name, WRITER));
-    const outcome = await gate(dir, (text) => {
+    const outcome = await gate(baseline, (text) => {
       const trees = [...text.matchAll(/^commit \S+ (.+)$/gm)].map(([, tree]) => tree);
       if (trees.length === 0 || trees.some((tree) => existsSync(tree))) return null;
       const areas = [...recorded(text)];
       if (areas.some(([area, { shards }]) => claimedIn(path.join(dir, area), shards))) return null;
-      renameSync(dir, retired);
+      renameSync(pathOf(baseline, "baseline"), pathOf(retired, "beside"));
       return { pruned: dir };
     });
     if (outcome?.foreign !== undefined)
@@ -779,7 +829,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [command, ...args] = process.argv.slice(2);
   const readOnly = args.includes("--read-only");
   const [first, second] = args.filter((arg) => !arg.startsWith("--"));
-  /** A folder of baselines that lies in a baseline, refused (exit 2). */
+  /** A folder that lies in a baseline, or no baseline where one is named, refused (exit 2). */
   const refused = (why) => {
     console.error(why);
     process.exit(2);
@@ -788,9 +838,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exitCode = await state(path.resolve(first), outside(second, [], refused), readOnly);
   else if (command === "prune" && first !== undefined) await prune(outside(first, [], refused));
   else if (command === "start" && second !== undefined)
-    process.exitCode = await start(path.resolve(first), second);
+    process.exitCode = await start(baselineAt(first, refused), second);
   else if (command === "queue" && second !== undefined)
-    process.exitCode = await queue(path.resolve(first), path.resolve(second));
+    process.exitCode = await queue(baselineAt(first, refused), path.resolve(second));
   else {
     console.error(
       "usage: node tests/families/baselines.mjs state <tree> <folder> [--read-only]\n" +
