@@ -20,7 +20,7 @@ export function corpusModule(plan, where) {
   const recorded = {
     commands: [
       [
-        `node tests/families/property/bin/pilot.mjs plan --family ${plan.family} --profile ${plan.profile} --seed ${plan.seed} --out <plan>; bin/pilot.mjs run --plan <plan> --build <tree> per tree`,
+        `node tests/families/property/bin/pilot.mjs plan --family ${plan.family} --profile ${plan.profile} --seed ${plan.seed}${plan.rules ? ` --rules ${plan.rules.join(",")}` : ""} --out <plan>; bin/pilot.mjs run --plan <plan> --build <tree> per tree`,
         where,
       ],
     ],

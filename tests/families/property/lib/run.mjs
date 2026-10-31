@@ -6,6 +6,28 @@ import { writeJson, hash } from "./json.mjs";
 import { summarize, STATUSES } from "./status.mjs";
 import { ProcessClient } from "./process-client.mjs";
 import { verifyBuild } from "./build.mjs";
+import { RULES, ruleControl, ruleHolds } from "./rules.mjs";
+
+/** Each rule's control on this tree (`rules.mjs`), judged under its rule, with whether it shows the rule. */
+async function controls(client, rules, remainingMs) {
+  const result = [];
+  for (const rule of rules) {
+    const config = ruleControl(rule),
+      row = await client.run(config, remainingMs);
+    result.push({
+      rule,
+      holds: ruleHolds(rule, row),
+      caseId: config.case.id,
+      mode: config.mode.id,
+      policy: config.policy,
+      status: row.status,
+      relation: row.scope?.relation ?? null,
+      phase: row.scope?.phase ?? null,
+      plannedType: row.plannedType ?? null,
+    });
+  }
+  return result;
+}
 
 export async function runCampaign(plan, build, out, options = {}) {
   const commandStarted = performance.now();
@@ -13,7 +35,8 @@ export async function runCampaign(plan, build, out, options = {}) {
   const provenance = verifyBuild(build, options.allowRuntimeMismatch);
   const preflightMs = performance.now() - commandStarted;
   const configs = configurations(plan, options.shard),
-    budget = options.deadlineMs ?? plan.deadlineMs;
+    budget = options.deadlineMs ?? plan.deadlineMs,
+    rules = plan.rules ?? [];
   const started = performance.now();
   const client = new ProcessClient(build, { timeoutMs: options.caseTimeoutMs ?? 15000 });
   mkdirSync(out, { recursive: false });
@@ -29,28 +52,38 @@ export async function runCampaign(plan, build, out, options = {}) {
   };
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
-  const metadata = {
-    schemaVersion: 1,
-    kind: "campaign",
-    family: plan.family,
-    planHash: plan.planHash,
-    profile: plan.profile,
-    seed: plan.seed,
-    provenance,
-    shard: options.shard ?? { index: 0, total: 1 },
-    expected: configs.length,
-    coverage: plan.coverage,
-    startedAt: new Date().toISOString(),
-    runnerPolicy: {
-      workers: 1,
-      deadlineMs: budget,
-      caseTimeoutMs: options.caseTimeoutMs ?? 15000,
-      hardRssCap: "external scheduler only",
-    },
-  };
-  writeJson(join(out, "metadata.json"), metadata);
-  writeFileSync(jsonl, "");
+  let checked;
   try {
+    checked = await controls(client, rules, budget);
+    const metadata = {
+      schemaVersion: 1,
+      kind: "campaign",
+      family: plan.family,
+      planHash: plan.planHash,
+      profile: plan.profile,
+      seed: plan.seed,
+      rules,
+      controls: checked,
+      provenance,
+      shard: options.shard ?? { index: 0, total: 1 },
+      expected: configs.length,
+      coverage: plan.coverage,
+      startedAt: new Date().toISOString(),
+      runnerPolicy: {
+        workers: 1,
+        deadlineMs: budget,
+        caseTimeoutMs: options.caseTimeoutMs ?? 15000,
+        hardRssCap: "external scheduler only",
+      },
+    };
+    writeJson(join(out, "metadata.json"), metadata);
+    // (no row is judged by a rule this tree's compiler does not hold: the campaign stops before its first row)
+    const failed = checked.find((x) => !x.holds);
+    if (failed)
+      throw new Error(
+        `The plan names rule ${failed.rule}, ${RULES[failed.rule].title}, but its control on this tree (${provenance.commit ?? `tree ${provenance.tree}`}) does not show it: ${failed.caseId} (${failed.mode}, ${JSON.stringify(failed.policy)}) is ${failed.status}, its store ${failed.relation ?? "unjudged"} its stop (${failed.phase ?? "no phase"}), checked as ${failed.plannedType ?? "nothing"}. Plan without --rules ${failed.rule} for this tree.`,
+      );
+    writeFileSync(jsonl, "");
     for (const config of configs) {
       const remaining = budget - (performance.now() - started);
       let row;
@@ -91,6 +124,8 @@ export async function runCampaign(plan, build, out, options = {}) {
     schemaVersion: 1,
     ...summarize(rows, configs.length),
     planHash: plan.planHash,
+    rules,
+    controls: checked,
     buildCommit: provenance.commit,
     elapsedMs: performance.now() - started,
     preflightMs,
@@ -106,7 +141,7 @@ export async function runCampaign(plan, build, out, options = {}) {
   writeJson(join(out, "summary.json"), summary);
   writeFileSync(
     join(out, "summary.md"),
-    `# ${plan.family}: ${summary.verdict}\n\nBuild: ${provenance.commit}\nNode: ${provenance.executionNode} (required ${provenance.requiredNode})\n\n${Object.entries(
+    `# ${plan.family}: ${summary.verdict}\n\nBuild: ${provenance.commit}\nRules: ${rules.join(", ") || "none"}\nNode: ${provenance.executionNode} (required ${provenance.requiredNode})\n\n${Object.entries(
       summary.counts,
     )
       .map(([k, v]) => `${k}: ${v}`)

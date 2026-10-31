@@ -95,23 +95,30 @@ A module reproduces what its run passed to the compiler, at the run's arguments,
 ## A property family
 
 `tests/families/property/` holds the S8 stopped-store family of #1442: 90 sources generated over declared dimensions
-(`families/s8-stores.mjs`), a predicate of what fits each written type that reads no compiler code (`lib/model.mjs`),
-and a tool that compiles and runs each source in eight modes (the consumers' and the solver's order apart, the sharing
-on and off) at each of its profile's allowances. A run fails when a fitting value does not reach `AFTER`, a forbidden
-one is not rejected at the store before it, the plan's check at the store is not the complete type, the host's input
-changes, or a store above a stop lacks its one owned mark. Which stop a store meets is read from the compiler's own
-decisions. Besides PASS and FAIL a row is UNSUPPORTED (the candidate route rejects the source), OUT_OF_SCOPE (a stop at
-or above the store's own path, #1440, or a store into an inferred place before admission settled, #1252: only its
-fitting runs and the host's input are judged), ERROR, TIMEOUT, CANCELLED or NOT_RUN. Any non-PASS row prevents a green
-campaign: FAIL takes precedence, then ERROR for ERROR/TIMEOUT/CANCELLED, otherwise INCOMPLETE for exclusions or
-NOT_RUN. `s8-stores.mjs` is the family's sources as a module of this corpus, which `check.mjs` checks and
+(`families/s8-stores.mjs`), predicates of what fits each written type and of what the source proves at a store, which
+read no compiler code (`lib/model.mjs`, `lib/certificate.mjs`), and a tool that compiles and runs each source in eight
+modes (the consumers' and the solver's order apart, the sharing on and off) at each of its profile's allowances. A run
+fails when a fitting value does not reach `AFTER`, a forbidden one is not rejected at the store before it, the plan's
+check at the store is not the complete type, the host's input changes, or a store above a stop, or one judged at or
+below it, lacks its one owned mark. Which stop a store meets is read from the compiler's own decisions. Besides PASS
+and FAIL a row is UNSUPPORTED (the candidate route rejects the source), OUT_OF_SCOPE (a stop at or above the store's
+own path, #1440, or a store into an inferred place before admission settled, #1252: only its fitting runs and the
+host's input are judged), ERROR, TIMEOUT, CANCELLED or NOT_RUN. A plan made with `--rules 1440` (`lib/rules.mjs`; none
+by default, so a run on any pinned tree is judged as before) judges a store at or below a stop on its whole domain
+where the source proves its type apart from the stop, as #1440 (`39b864aa2`) certifies it: the destination's written
+type, or a written binding its start value reads directly or through object literal properties, but not a store into
+an inferred place before admission settled; such a store's row records whether the source proves it (`certified`).
+Before its first row, the run checks a fixed control on its tree (a property a copy decides, at demand allowance 1)
+and stops, exit 2, where the store at that stop is not checked against its whole type, as on a tree before #1440. Any
+non-PASS row prevents a green campaign: FAIL takes precedence, then ERROR for ERROR/TIMEOUT/CANCELLED, otherwise
+INCOMPLETE for exclusions or NOT_RUN. `s8-stores.mjs` is the family's sources as a module of this corpus, which `check.mjs` checks and
 `run.mjs property` compares; the behavioural verdict stays the tool's. Its runs are not in CI.
 
 A pair of commits, from the repository root on a worker, as one capped job:
 
 ```sh
 node tests/families/property/bin/prepost.mjs <repository> <pre> <post> <new folder> [--profile quick|focused|deep] \
-  [--seed 1442] [--case-timeout-ms 15000] [--library 7ef341030]
+  [--seed 1442] [--case-timeout-ms 15000] [--library 7ef341030] [--rules 1440]
 ```
 
 It builds both commits from the repository's objects with its `node_modules` (`bin/prepare-build.mjs`), runs the

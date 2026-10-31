@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // node bin/prepost.mjs /existing/repo PRE POST /new/output [--profile quick|focused|deep] [--seed N]
-//   [--case-timeout-ms N] [--library REF]
+//   [--case-timeout-ms N] [--library REF] [--rules 1440]
 // One pre/post evaluation: builds PRE and POST (`prepare-build.mjs`, which gives a tree before #1427 the corpus runner's
 // oracle library from REF of `--library`), plans the profile, runs it on both builds, compares them, and, where both
 // trees hold the oracle library, runs the unextended corpus runner over the committed module (`tests/families/run.mjs
@@ -97,12 +97,13 @@ const profile = option("profile", "focused");
 const seed = option("seed", "1442");
 const caseTimeout = option("case-timeout-ms", "15000");
 const library = option("library", undefined);
+const rules = option("rules", undefined);
 const [repo, pre, post, outArg, ...extra] = args;
 const out = outArg === undefined ? undefined : resolve(outArg);
 try {
   if (!repo || !pre || !post || !out || extra.length > 0)
     throw new Error(
-      "Usage: node bin/prepost.mjs /existing/repo PRE POST /new/output [--profile P] [--seed N] [--case-timeout-ms N] [--library REF]",
+      "Usage: node bin/prepost.mjs /existing/repo PRE POST /new/output [--profile P] [--seed N] [--case-timeout-ms N] [--library REF] [--rules 1440]",
     );
   mkdirSync(out, { recursive: false });
   const node = process.execPath;
@@ -130,6 +131,7 @@ try {
     seed,
     "--out",
     join(out, "plan.json"),
+    ...(rules === undefined ? [] : ["--rules", rules]),
   ]);
   if (planned.code !== 0) throw new Error(`plan failed: ${planned.stderr}`);
   const plan = readJson(join(out, "plan.json"));
@@ -153,8 +155,11 @@ try {
       ],
       { file: join(out, side, "results.jsonl"), text: '"status":"FAIL"' },
     );
+    // (with the run's own message, such as a rule's control that does not hold on this tree)
     if (!existsSync(join(out, side, "summary.json")))
-      throw new Error(`run ${side} left no summary`);
+      throw new Error(
+        `run ${side} left no summary: ${ran.stderr.trim().split("\n")[0] || `exit ${ran.code}`}`,
+      );
     summaries[side] = readJson(join(out, side, "summary.json"));
     firstFailures[side] = ran.record.firstMatchMs;
   }
@@ -233,6 +238,7 @@ try {
     family: plan.family,
     profile: plan.profile,
     seed: plan.seed,
+    rules: plan.rules ?? [],
     planHash: plan.planHash,
     node: process.versions.node,
     builds,
@@ -261,7 +267,7 @@ try {
       `Compared: ${report.comparison.fixed} fixed, ${report.comparison.failingOnPreNotPassingOnPost} failing on pre and not run to PASS on post, ${report.comparison.regressed} regressed, ${report.comparison.unchanged} unchanged, ${report.comparison.incomparable} incomparable`,
       `Runner: ${runner.status}${runner.total ? `, ${runner.total.differences} differences, ${runner.total.stalled} stalled` : ""}${runner.reason ? ` (${runner.reason})` : ""}${runner.sameLibrary === false ? " (the two trees' oracle libraries differ: a difference may be the projection's)" : ""}`,
       "",
-      `Profile ${plan.profile}, seed ${plan.seed}, plan ${plan.planHash}, Node ${process.versions.node}.`,
+      `Profile ${plan.profile}, seed ${plan.seed}, rules ${report.rules.join(", ") || "none"}, plan ${plan.planHash}, Node ${process.versions.node}.`,
       "Counts are configurations, not bugs; UNSUPPORTED and OUT_OF_SCOPE rows are incomplete coverage, never PASS.",
       "",
     ].join("\n"),

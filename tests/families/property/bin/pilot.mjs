@@ -9,7 +9,7 @@ const [command, ...argv] = process.argv.slice(2),
 try {
   const allowed =
     command === "plan"
-      ? ["profile", "seed", "out", "family"]
+      ? ["profile", "seed", "out", "family", "rules"]
       : command === "run"
         ? [
             "plan",
@@ -37,11 +37,16 @@ try {
     if (!options.out) throw new Error("--out is required");
     if (options.family && options.family !== "s8-stores")
       throw new Error(`Unknown family: ${options.family}`);
-    const plan = makePlan(options.profile ?? "quick", Number(options.seed ?? 1442));
+    const plan = makePlan(
+      options.profile ?? "quick",
+      Number(options.seed ?? 1442),
+      options.rules === undefined ? [] : options.rules.split(","),
+    );
     writeJson(resolve(options.out), plan);
     console.log(
       JSON.stringify({
         planHash: plan.planHash,
+        rules: plan.rules ?? [],
         sources: plan.cases.length,
         configurations: plan.cases.length * plan.modes.length * plan.policies.length,
         coverage: plan.coverage,
@@ -74,7 +79,7 @@ try {
     process.exitCode = exitCode(summary);
   } else
     throw new Error(
-      "Usage: node bin/pilot.mjs plan --out plan.json [--profile quick|focused|deep] [--seed N]\n       node bin/pilot.mjs run --plan plan.json --build /built/checkout --out /new/output [--allow-runtime-mismatch] [--shard 0/2]",
+      "Usage: node bin/pilot.mjs plan --out plan.json [--profile quick|focused|deep] [--seed N] [--rules 1440]\n       node bin/pilot.mjs run --plan plan.json --build /built/checkout --out /new/output [--allow-runtime-mismatch] [--shard 0/2]",
     );
 } catch (error) {
   console.error(error.stack);

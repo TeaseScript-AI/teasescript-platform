@@ -9,16 +9,17 @@ import { corpusModule } from "../lib/export.mjs";
 import { mergeShards } from "../lib/merge.mjs";
 const plan = makePlan("quick");
 const pilot = fileURLToPath(new URL("../bin/pilot.mjs", import.meta.url));
-function parts() {
+function parts(shardPlan = plan, controls = undefined) {
   return [0, 1].map((index) => ({
-    plan,
+    plan: shardPlan,
     metadata: {
-      planHash: plan.planHash,
+      planHash: shardPlan.planHash,
       provenance: { commit: "same", executionNode: "26.5.0" },
       shard: { index, total: 2 },
+      ...(controls ? { controls: structuredClone(controls) } : {}),
     },
     summary: { elapsedMs: 1 },
-    rows: configurations(plan, { index, total: 2 }).map((c) => ({
+    rows: configurations(shardPlan, { index, total: 2 }).map((c) => ({
       id: c.id,
       status: "PASS",
       executions: 1,
@@ -42,6 +43,19 @@ test("corpus export contains every selected source, no imports, and the record t
   const keys = new Set(sourcesOf(exported).map(sourceKey));
   assert.equal(exported.recorded.sources, keys.size);
   assert.equal(exported.recorded.sha256, setKey(keys));
+});
+test("an export records the plan's rules in its command, and a plan without any as before", () => {
+  const command = (rules) =>
+    JSON.parse(
+      vm.runInNewContext(
+        corpusModule(makePlan("quick", 1442, rules), "where recorded").replaceAll(
+          "export const ",
+          "const ",
+        ) + "\nJSON.stringify(recorded)",
+      ),
+    ).commands[0][0];
+  assert.match(command(["1440"]), / --seed 1442 --rules 1440 --out <plan>;/);
+  assert.match(command([]), / --seed 1442 --out <plan>;/);
 });
 test("the committed corpus module holds the focused plan's sources, as its record says", async () => {
   const focused = makePlan("focused", 1442);
@@ -78,6 +92,20 @@ test("shard merge rejects missing, duplicate, wrong plan and different provenanc
   const missing = parts();
   missing[0].rows.pop();
   assert.throws(() => mergeShards(missing), /missing/);
+});
+test("a ruled merge keeps each shard's control and refuses a shard without a holding one", () => {
+  const ruled = makePlan("quick", 1442, ["1440"]);
+  const control = { rule: "1440", holds: true, caseId: "s8-8f9a96245b875b1d" };
+  const merged = mergeShards(parts(ruled, [control]).reverse());
+  assert.deepEqual(merged.summary.rules, ["1440"]);
+  assert.deepEqual(
+    merged.summary.controls,
+    [0, 1].map((shard) => ({ shard, ...control })),
+  );
+  assert.deepEqual(mergeShards(parts()).summary.controls, []);
+  for (const controls of [undefined, [], [{ ...control, holds: false }], [control, control]])
+    assert.throws(() => mergeShards(parts(ruled, controls)), /holding control/);
+  assert.throws(() => mergeShards(parts(plan, [control])), /holding control/);
 });
 test("timeouts remain non-PASS after shard merge", () => {
   const p = parts();
