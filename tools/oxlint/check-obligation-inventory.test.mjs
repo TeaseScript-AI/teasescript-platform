@@ -492,6 +492,39 @@ const VALUES = [
     `class ProbeMovedBase extends probe.probeBaseMoved(${SELF}.admission) {}\n    void ProbeMovedBase;`,
   ],
 ];
+/** The type/value boundary (#1401): [the label, the statement, how many unproved references it holds]. */
+const TYPE_VALUE = [
+  // (an instantiation expression is a value, its type arguments types: a member's, a namespace's moved derivation's,
+  // called in an `extends` expression)
+  ["Admission.probeCtor", `const Ctor = ${SELF}.admission.probeCtor<number>;\n    void Ctor;`, 1],
+  [
+    "Admission.probeCtor",
+    `const KeyedCtor = ${SELF}.admission.probeCtor<typeof ${SELF}.admission.probeKey>;\n    void KeyedCtor;`,
+    1,
+  ],
+  [
+    "Admission.probeInstantiated",
+    "const make = probe.probeInstantiated<number>;\n    void make;",
+    1,
+  ],
+  [
+    "Admission.probeInstantiated",
+    `class ProbeInstantiated extends (probe.probeInstantiated<number>)(${SELF}.admission) {}\n    void ProbeInstantiated;`,
+    1,
+  ],
+  // (an interface emits nothing, its computed keys included, as a type literal's; the key's value read beside them)
+  [
+    "Admission.probeKey",
+    `interface ProbeKeyed {\n      [${SELF}.admission.probeKey]: number;\n    }\n    let keyed: ProbeKeyed | undefined;\n    void keyed;`,
+    0,
+  ],
+  [
+    "Admission.probeKey",
+    `type ProbeKeyedLiteral = { [${SELF}.admission.probeKey]: number };\n    let keyedLiteral: ProbeKeyedLiteral | undefined;\n    void keyedLiteral;`,
+    0,
+  ],
+  ["Admission.probeKey", `void ${SELF}.admission.probeKey;`, 1],
+];
 /** Writes and deletions of a listed getter, no read: each unproved (Codex r6 B4, r7 B2). */
 const WRITES = [
   `${SELF}.admission.probeKnown = 1;`,
@@ -562,6 +595,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
               "  get probeKnown(): number {\n    return 0;\n  }\n\n  set probeKnown(value: number) {\n    void value;\n  }\n\n",
               "  set probeSetOnly(value: number) {\n    void value;\n  }\n\n",
               "  probeUnionRead = 0;\n\n  probeBase = class {};\n\n",
+              '  probeCtor = class<T> {\n    value?: T;\n  };\n\n  public readonly probeKey = "probeKey";\n\n',
             ].join("") + MEMBERS,
           ),
       ],
@@ -600,7 +634,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
           `import * as probe from "${FRESH_TO_ADMISSION}/probe.js";\n` +
           text.replace(
             FRESH_START,
-            `${FRESH_START}${[...ROUTES, ...VALUES, ...WRITES.map((write) => [, write])].map(([, statement]) => `    ${statement}\n`).join("")}    ${SELF}.admission.probeOpaque();\n    void ${SELF}.admission.probeKnown;\n    probeOverloaded(${SELF}.admission);\n    runAliased(${SELF}.admission);\n    freshDecoy();\n    freshShared(${SELF});\n`,
+            `${FRESH_START}${[...ROUTES, ...VALUES, ...TYPE_VALUE, ...WRITES.map((write) => [, write])].map(([, statement]) => `    ${statement}\n`).join("")}    ${SELF}.admission.probeOpaque();\n    void ${SELF}.admission.probeKnown;\n    probeOverloaded(${SELF}.admission);\n    runAliased(${SELF}.admission);\n    freshDecoy();\n    freshShared(${SELF});\n`,
           ) +
           // (an unrecognised decoy; a recognised one of a derivation's name)
           "\nfunction freshDecoy(): void {}\nfunction freshShared(walk: Consumers): void {\n  void walk;\n}\n" +
@@ -628,7 +662,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
         .map(unlisted)
         .join(
           "\n\n",
-        )}\n\nexport function probeBaseMoved(admission: Admission) {\n  void admission;\n  return class {};\n}\n\n// (an overloaded derivation, Codex r6 B3)\nexport function probeOverloaded(admission: Admission): number;\nexport function probeOverloaded(admission: Admission): number {\n  void admission;\n  return 0;\n}\n`,
+        )}\n\nexport function probeBaseMoved(admission: Admission) {\n  void admission;\n  return class {};\n}\n\nexport function probeInstantiated<T>(admission: Admission) {\n  void admission;\n  return class {\n    value?: T;\n  };\n}\n\n// (an overloaded derivation, Codex r6 B3)\nexport function probeOverloaded(admission: Admission): number;\nexport function probeOverloaded(admission: Admission): number {\n  void admission;\n  return 0;\n}\n`,
     },
     new Map([...READS, ["probeKnown", "a getter read"], ["probeSetOnly", "a setter alone"]]),
   );
@@ -638,6 +672,12 @@ test("a creating consumer's direct calls must be listed; every other form of a g
   }
   expectStart(messages, UNPROVED_AT("Admission.routeAlias"));
   for (const [label] of VALUES) expectStart(messages, UNPROVED_AT(label));
+  for (const label of new Set(TYPE_VALUE.map(([label]) => label)))
+    expectCount(
+      messages,
+      UNPROVED_AT(label),
+      TYPE_VALUE.reduce((sum, [at, , n]) => sum + (at === label ? n : 0), 0),
+    );
   expectStart(messages, "Unproved: Admission.probeOpaque is called but is no derivation");
   expectCount(messages, UNPROVED_AT("Admission.probeOpaque"), 2);
   // (the listed getter's dot read is quiet, as a listed read; its destructuring, writes and deletions are not)
