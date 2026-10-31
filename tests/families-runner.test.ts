@@ -405,12 +405,16 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     assert.match(last(seen).refused, /foreign contents/);
     rmSync(gone, { recursive: true });
     rmSync(foreign, { recursive: true });
+    // (and a folder with another tool's MANIFEST, which `prune` leaves as it is, no lock written into it)
+    mkdirSync(join(elsewhere, "other"));
+    writeFileSync(join(elsewhere, "other", "MANIFEST"), "sha 1\ntree /gone\n");
     const pruned = spawnSync(process.execPath, [baselines, "prune", elsewhere], {
       encoding: "utf8",
     });
     assert.match(pruned.stdout, /"pruned"/);
     assert.match(pruned.stdout, /"kept":.*"foreign":\["other-agent\/"\]/);
-    assert.deepEqual(readdirSync(elsewhere).sort(), [SRC, held.split("/").at(-1)].sort());
+    assert.deepEqual(readdirSync(elsewhere).sort(), [SRC, held.split("/").at(-1), "other"].sort());
+    assert.deepEqual(readdirSync(join(elsewhere, "other")), ["MANIFEST"]);
     assert.deepEqual(readdirSync(join(elsewhere, SRC)), ["data"]);
     assert.equal(readFileSync(join(held, "other-agent", "data"), "utf8"), "x\n");
 
