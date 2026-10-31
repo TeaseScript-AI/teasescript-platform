@@ -228,11 +228,12 @@ function laterSources(
   const held = typedTags === null ? settled(() => contract.contractOfValueAt(value, rest)) : null;
   // (a domain that admits every kind, one whose nearest written prefix does, directly, through copies or a dictionary's
   // values list, holds the host data its key's stores hold, as an admitted or a syntax domain does below, #1450; a
-  // restricted one holds its kinds, its stores' boundaries checking them): a contract by its plain `unknown`
+  // restricted one holds its kinds, its stores' boundaries checking them): a contract by an `unknown` no reason but the
+  // opaque one explains (a written open domain's carries it, #1501)
   if (held !== null) {
     if (requirement) return required(withoutEmpty(held).map((item) => item.tag));
     const domain = markDomain(walk, value, held);
-    return held.some((item) => item.tag === "unknown" && item.reasons === 0)
+    return held.some((item) => item.tag === "unknown" && (item.reasons & ~REASON.opaque) === 0)
       ? [...domain, ...heldIngress(walk, value, rest)]
       : domain;
   }
