@@ -141,9 +141,9 @@ export interface StepNode {
 }
 
 /**
- * A prefix's layers under a step (`Contract.relevantSubs`), by their positions among the layers it inherits or joins:
- * the sources each lists there in its own map, by the positions listing them, and those with a layer below them that
- * lists the step.
+ * The layers below a prefix or a layer under a step (`selectAt`), by their positions (a prefix's tops, a layer's parent
+ * and joins): the sources each one's entry lists there, by the positions listing them, and the positions whose entry
+ * has a layer below it that lists the step.
  */
 export interface StepLayers {
   readonly own: ReadonlyMap<Key, readonly number[]>;

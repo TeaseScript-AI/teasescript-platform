@@ -647,14 +647,18 @@ function holds(contract: Contract, layer: SubLayer, step: string): boolean {
   return at !== null && at.key === step;
 }
 
-/** The layers a layer's answer under `step` reads below its own sources: its parent's and its joins' entries holding it. */
-function nextAt(contract: Contract, layer: SubLayer, step: string): SubLayer[] {
-  const out: SubLayer[] = [];
-  for (const child of [layer.parent, ...layer.joins]) {
-    const entry = entryAt(contract, child, step);
-    if (entry !== null && holds(contract, entry, step)) out.push(entry);
+/** A layer's layers below it by position: its parent (`null` for none), then the layers it joins in order. */
+function childAt(layer: SubLayer, at: number): SubLayer | null {
+  return at === 0 ? layer.parent : layer.joins[at - 1]!;
+}
+
+/** Whether a layer below `entry`, its parent's or a join's entry (`entryAt`), lists `step`. */
+function holdsBelow(contract: Contract, entry: SubLayer, step: string): boolean {
+  for (let at = 0; at <= entry.joins.length; at += 1) {
+    const below = entryAt(contract, childAt(entry, at), step);
+    if (below !== null && holds(contract, below, step)) return true;
   }
-  return out;
+  return false;
 }
 
 /** Whether a source has a store of its own at a prefix of `ref` below its root (`ownPaths`). */
@@ -970,7 +974,7 @@ function layerSupport(
     if (done(layer)) continue;
     if (!ready) {
       stack.push([layer, true]);
-      for (const child of nextAt(contract, layer, step))
+      for (const child of childrenAt(contract, layer, ref))
         if (!done(child)) stack.push([child, false]);
       continue;
     }
@@ -979,41 +983,55 @@ function layerSupport(
       contract.pass.program.work.charge("invSteps");
       if (ownHas(contract, sub, ref)) root = union(contract, root, supportLeaf(contract, sub));
     }
-    for (const child of nextAt(contract, layer, step))
+    for (const child of childrenAt(contract, layer, ref))
       root = union(contract, root, child.paths.get(path)!.support ?? null);
     atPath(contract, layer, path).support = root;
   }
   return top.paths.get(path)!.support ?? null;
 }
 
-/** The layers a prefix inherits or joins, each with its stores that brought it: the one it inherits first. */
-function topsOf(stores: PrefixStores): PrefixStores["also"] {
-  return stores.subs === null
-    ? stores.also
-    : [{ layer: stores.subs, defs: stores.inheritedBy }, ...stores.also];
+/** How many layers a prefix inherits or joins (`topAt`). */
+function topCount(stores: PrefixStores): number {
+  return (stores.subs === null ? 0 : 1) + stores.also.length;
 }
 
 /**
- * The layers a prefix inherits or joins that may hold a source at `ref`, in their order, the others holding none: per
- * layer the first read under a step finds the sources it lists there and whether a layer below it lists the step
- * (`stepLayers`, `nextAt`); every read takes those of the latter, and of the former those listing a source with a
- * store at a prefix of its path, found per prefix from the smaller of those sources and the sources with a store there
- * (`subsByPath`). So k copies joined into one place, each storing its own property below one step, are not each asked
- * per read of one of those properties (#1078).
+ * A prefix's layer at a position among those it inherits or joins, with its stores that brought it: the one it inherits
+ * first, by index, so a read takes the layers it selects without copying the others.
  */
-function topsAt(contract: Contract, stores: PrefixStores, ref: PathRef): PrefixStores["also"] {
-  const tops = topsOf(stores);
+function topAt(stores: PrefixStores, at: number): PrefixStores["also"][number] {
+  if (stores.subs === null) return stores.also[at]!;
+  return at === 0 ? { layer: stores.subs, defs: stores.inheritedBy } : stores.also[at - 1]!;
+}
+
+/**
+ * Of `count` layers in order, a prefix's tops (`topAt`) or a layer's parent and joins (`childAt`), the positions whose
+ * entries (`entryAt`) may hold a source at `ref`, the others holding none: per owner, the first read under a step finds
+ * the sources each entry lists there and whether a layer below it lists the step (`stepLayers`, `holdsBelow`); every read
+ * takes those of the latter, and of the former those listing a source with a store at a prefix of its path, found per
+ * prefix from the smaller of those sources and the sources with a store there (`subsByPath`). So k copies joined into
+ * one place, each storing its own property below one step, are not each asked per read of one of those properties
+ * (#1078), whether a prefix joins them or a layer below it does.
+ */
+function selectAt(
+  contract: Contract,
+  owner: PrefixStores | SubLayer,
+  count: number,
+  layerAt: (at: number) => SubLayer | null,
+  ref: PathRef,
+): number[] {
   const work = contract.pass.program.work;
   const step = ref.at(0);
-  let bySteps = contract.stepLayers.get(stores);
-  if (bySteps === undefined) contract.stepLayers.set(stores, (bySteps = new Map()));
+  let bySteps = contract.stepLayers.get(owner);
+  if (bySteps === undefined) contract.stepLayers.set(owner, (bySteps = new Map()));
   let known = bySteps.get(step);
   if (known === undefined) {
     const own = new Map<Key, number[]>();
     const deep: number[] = [];
-    for (let at = 0; at < tops.length; at += 1) {
-      const { layer } = tops[at]!;
-      for (const sub of layer.own.get(step) ?? []) {
+    for (let at = 0; at < count; at += 1) {
+      const entry = entryAt(contract, layerAt(at), step);
+      if (entry === null) continue;
+      for (const sub of entry.own.get(step) ?? []) {
         work.charge("invSteps");
         ownPaths(contract, sub);
         contract.keep(1);
@@ -1021,7 +1039,7 @@ function topsAt(contract: Contract, stores: PrefixStores, ref: PathRef): PrefixS
         if (listed === undefined) own.set(sub, [at]);
         else listed.push(at);
       }
-      if (nextAt(contract, layer, step).length > 0) deep.push(at);
+      if (holdsBelow(contract, entry, step)) deep.push(at);
     }
     contract.keep(1 + deep.length);
     bySteps.set(step, (known = { own, deep }));
@@ -1046,7 +1064,22 @@ function topsAt(contract: Contract, stores: PrefixStores, ref: PathRef): PrefixS
       }
   }
   work.charge("invSteps", walked.size);
-  return [...walked].sort((a, b) => a - b).map((at) => tops[at]!);
+  return [...walked].sort((a, b) => a - b);
+}
+
+/** The layers a prefix inherits or joins that may hold a source at `ref` (`selectAt`), with their stores, in order. */
+function topsAt(contract: Contract, stores: PrefixStores, ref: PathRef): PrefixStores["also"] {
+  return selectAt(contract, stores, topCount(stores), (at) => topAt(stores, at).layer, ref).map(
+    (at) => topAt(stores, at),
+  );
+}
+
+/** The entries below a layer, its parent's and its joins', that may hold a source at `ref` (`selectAt`), in order. */
+function childrenAt(contract: Contract, layer: SubLayer, ref: PathRef): SubLayer[] {
+  const step = ref.at(0);
+  return selectAt(contract, layer, 1 + layer.joins.length, (at) => childAt(layer, at), ref).map(
+    (at) => entryAt(contract, childAt(layer, at), step)!,
+  );
 }
 
 /**
@@ -1101,7 +1134,8 @@ export function relevantSubs(
 export function subSources(stores: PrefixStores): Key[] {
   const out = new Set<Key>();
   const seen = new Set<SubLayer>();
-  const stack = [...topsOf(stores)].reverse().map((top) => top.layer);
+  const stack: SubLayer[] = [];
+  for (let at = topCount(stores) - 1; at >= 0; at -= 1) stack.push(topAt(stores, at).layer);
   for (let layer = stack.pop(); layer !== undefined; layer = stack.pop()) {
     if (seen.has(layer)) continue;
     seen.add(layer);
@@ -1181,7 +1215,7 @@ function* layerMade(
       return { items: [], proof: DECLINED };
     root = union(contract, root, summaryLeaf(contract, sub, items));
   }
-  for (const child of nextAt(contract, layer, rest.at(0))) {
+  for (const child of childrenAt(contract, layer, rest)) {
     if (child.origin === null) return { items: [], proof: DECLINED };
     const { proof } = yield* contract.pass.solver.proven(layerDemand(contract, child, path));
     if (proof === null || proof.declined) return { items: [], proof: DECLINED };
