@@ -13,6 +13,7 @@ import { propertyName, propertyStep, siteKey, stepName } from "../program.js";
 import { propertyNames, type PropertyNamesTask } from "../property-names.js";
 import {
   contextOf,
+  offendingKinds,
   provenanceOf,
   type ContextDetail,
   type CoreDiagnostic,
@@ -400,6 +401,74 @@ function loadOrigin(
   return { load, holder: kind.name, path };
 }
 
+/**
+ * A consumer's warning as an owner: whether it was made (`warning`'s result), and the items it stands for. Only the
+ * finishing walk declares one: elsewhere every warning is made.
+ */
+export type Owner = readonly [made: boolean, items: () => readonly Item[]];
+
+/**
+ * Which items a stop's discharge left out with their owners (`withoutRecords`): what a domain's item's boundary requests
+ * ask (`Consumers.boundariesAt`, #1448). An item is left out when its owner was: each item has one owner per request.
+ * `warnGroups`' groups partition the items, or the soft owner is the one; `memberChecks`' unknown warning exists only
+ * where `extra` is empty, and every caller passes at most one extra; `operations` keys an operand's unknown items under
+ * one owner. Several live owners stand across consumers, each sending its own request (Sol's design §2): a caller that
+ * would declare overlapping owners needs every one of them left out. Each owner looked at once and a left-out owner's
+ * items, charged.
+ */
+export function leftOutBy(walk: Consumers, owners: readonly Owner[]): (item: Item) => boolean {
+  if (owners.length === 0) return () => false;
+  walk.pass.program.work.charge("checks", owners.length);
+  const left = new Set<Item>();
+  for (const [made, items] of owners) {
+    if (made) continue;
+    const owned = items();
+    walk.pass.program.work.charge("checks", owned.length);
+    for (const item of owned) left.add(item);
+  }
+  return left.size === 0 ? () => false : (item) => left.has(item);
+}
+
+/**
+ * Warns for each offending group of `items` (`offendingKinds`, one warning per kind or fan) with `owe`, each the owner of
+ * its group's items; or, given a soft owner, once for it, its warning standing for every item (`leftOutBy`).
+ */
+export function warnGroups(
+  walk: Consumers,
+  items: readonly Item[],
+  owe: (item: Item) => boolean,
+  soft: Item | null = null,
+): (item: Item) => boolean {
+  const owners: Owner[] = [];
+  if (soft !== null) {
+    const made = owe(soft);
+    if (walk.finishing) owners.push([made, () => items]);
+    return leftOutBy(walk, owners);
+  }
+  const key = (item: Item): string => (item.fan === undefined ? item.tag : `fan ${item.fan}`);
+  let groups: Item[][] | undefined;
+  // (each group's items, made once if asked: `offendingKinds` makes its groups in the order their keys first come)
+  const group = (index: number) => (): readonly Item[] => {
+    if (groups === undefined) {
+      // (each item grouped once, charged)
+      walk.pass.program.work.charge("checks", items.length);
+      const byKey = new Map<string, Item[]>();
+      for (const item of items) {
+        const each = byKey.get(key(item));
+        if (each === undefined) byKey.set(key(item), [item]);
+        else each.push(item);
+      }
+      groups = [...byKey.values()];
+    }
+    return groups[index]!;
+  };
+  for (const [index, { item }] of offendingKinds(items).entries()) {
+    const made = owe(item);
+    if (walk.finishing) owners.push([made, group(index)]);
+  }
+  return leftOutBy(walk, owners);
+}
+
 /** S4: a possible null owes a null-check at every consumer, against what the place needs; `fits` as `warning`'s. */
 export function nullWarning(
   walk: Consumers,
@@ -413,8 +482,8 @@ export function nullWarning(
   against: readonly RequiredKind[] = ["non-null"],
   receiver: ContextDetail["receiver"] = null,
   read?: PlaceId,
-): void {
-  warning(
+): boolean {
+  return warning(
     walk,
     kind,
     site,
