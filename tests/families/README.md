@@ -55,11 +55,11 @@ none there (base and head run instead). `baselines.mjs` reads and writes the bas
 a folder holding another path is neither written into nor removed, and the refusal names the path. Each area's `PLAN`
 binds its shards' sources in their order and its checks, and a writer that would run another is refused (exit 2). A
 shard counts only once its total line verifies its contents and its sources. One running writer at a time stores it, and
-any writer replaces one that does not verify. Joining the baseline, planning an area, publishing a shard and retiring
-the baseline (`prune`, once none of its trees remains) hold its lock. `bash tools/corpus/baseline.sh status <commit>`
-says in one line what each area of the commit's tree holds, and exits 0 only when each one is complete. Before a base
-run, ask it: compare the head with a complete area through `--baseline`, and store an area that is not from the base
-tree's own runner and areas
+any writer replaces one that does not verify. Every write into the baseline goes through one gate in `baselines.mjs`,
+which holds the baseline's lock; `prune` retires a baseline once none of its trees remains.
+`bash tools/corpus/baseline.sh status <commit>` says in one line what each area of the commit's tree holds, and exits 0
+only when each one is complete. Before a base run, ask it: compare the head with a complete area through `--baseline`,
+and store an area that is not from the base tree's own runner and areas
 (`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/16`, one job per shard,
 the fixture area as `<base tree>/tools/corpus/fixture`), so that it serves every later run on that tree. The script,
 installed as the desktop's `~/work/trees/hooks/baseline`, fills each new `main`'s tree at low priority where nobody
