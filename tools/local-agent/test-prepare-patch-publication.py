@@ -241,6 +241,33 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(counts, [10, 5])
         self.assertEqual(b"".join(parts), patch)
 
+    def test_preferred_boundaries_keep_tokenizer_calls_linear(self) -> None:
+        # Issue #185: re-splitting the whole remaining suffix for every preferred boundary
+        # made tokenizer calls grow about 4x per doubling of the parts here; linear is 2x.
+        def parts_and_calls(files: int) -> tuple[int, int]:
+            patch = b"".join(
+                b"diff --git a/f%d.txt b/f%d.txt\n@@ -1,9 +1,9 @@\n" % (index, index)
+                + b"".join(b"+line %d of file %d\n" % (line, index) for line in range(9))
+                for index in range(files)
+            )
+            calls = 0
+
+            def count_tokens(value: bytes) -> int:
+                nonlocal calls
+                calls += 1
+                return len(value)
+
+            parts, _ = SUPPORT.split_utf8_patch(
+                patch, maximum_bytes=256, target_tokens=128, count_tokens=count_tokens
+            )
+            self.assertEqual(b"".join(parts), patch)
+            return len(parts), calls
+
+        parts, calls = parts_and_calls(32)
+        doubled_parts, doubled_calls = parts_and_calls(64)
+        self.assertGreaterEqual(doubled_parts, 2 * parts)
+        self.assertLess(doubled_calls, 2.5 * calls)
+
     def test_transfer_branch_matches_workflow_contract(self) -> None:
         repository = self.root / "branch-repository"
         repository.mkdir()
