@@ -834,6 +834,21 @@ function layersIn(contract: Contract, set: SupportNode | null): SubLayer[] {
   return out;
 }
 
+/** A step map's steps, each with its set of layers (`SupportNode.value`), in the steps' order: each node visited and charged. */
+function mapEntries(
+  contract: Contract,
+  map: SupportNode | null,
+): (readonly [string, SupportNode | null])[] {
+  const out: (readonly [string, SupportNode | null])[] = [];
+  const stack = map === null ? [] : [map];
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    contract.pass.program.work.charge("invSteps");
+    if (node.left === null) out.push([node.key, node.value ?? null]);
+    else stack.push(node.right!, node.left);
+  }
+  return out;
+}
+
 /** The nearest layers below `layer` that list `step`, as one set: one lookup in its map below its own steps (`under`). */
 function listingBelow(contract: Contract, layer: SubLayer, step: string): SupportNode | null {
   return mapGet(contract, layer.under, step);
@@ -1362,28 +1377,8 @@ function topsAt(
   path: () => number,
 ): PrefixStores["also"] {
   const work = contract.pass.program.work;
-  // (a further step none of a prefix's several layers lists is found in their maps' union by one lookup, never by each;
-  // the union made once, at the second step the prefix is asked under)
-  const steps = contract.stepLayers.get(stores);
-  if (
-    topCount(stores) > 1 &&
-    steps !== undefined &&
-    !steps.has(ref.at(0)) &&
-    mapGet(contract, topsFront(contract, stores), ref.at(0)) === null
-  )
-    return [];
-  const find = (): LayerFound[] => {
-    const out: LayerFound[] = [];
-    for (let at = 0, count = topCount(stores); at < count; at += 1) {
-      const { layer: top, defs } = topAt(stores, at);
-      // (a layer listing the step is its own nearest listing layer there)
-      if (top.own.has(ref.at(0))) out.push({ layer: top, defs });
-      else
-        for (const layer of layersIn(contract, mapGet(contract, top.under, ref.at(0))))
-          out.push({ layer, defs });
-    }
-    return out;
-  };
+  const find = prefixFound(contract, stores, ref.at(0));
+  if (find === null) return [];
   const layers = stepLayersOf(contract, stores, find, ref.at(0));
   const texts = prefixTexts(contract, ref);
   const holding = holdingAt(contract, layers.own, ref, texts);
@@ -1409,16 +1404,89 @@ function childrenAt(contract: Contract, layer: SubLayer, ref: PathRef, path: num
     : layersIn(contract, holdersIn(contract, set, ref, path, prefixTexts(contract, ref)));
 }
 
-/** The union of a prefix's layers' maps (`SubLayer.front`), made once per prefix and kept with it. */
-function topsFront(contract: Contract, stores: PrefixStores): SupportNode | null {
-  const known = contract.topsFronts.get(stores);
-  if (known !== undefined) return known;
-  let front: SupportNode | null = null;
-  for (let at = 0, count = topCount(stores); at < count; at += 1)
-    front = union(contract, front, topAt(stores, at).layer.front);
-  contract.topsFronts.set(stores, front);
-  contract.keep(1);
-  return front;
+/** A position's key in a tagged map: two code units, so the keys' bits order the positions as numbers. */
+function positionKey(at: number): string {
+  return String.fromCharCode(at >>> 16, at & 0xffff);
+}
+
+/**
+ * A layer's step map with each step's set of layers tagged by the position `at` of the layer among a prefix's (`topAt`):
+ * each leaf's set under the position's key (`positionKey`), the map's shape kept. Once per node and position, so a map sharing nodes with
+ * one tagged before (a copy's over its original's) is tagged at its new nodes alone; on an explicit stack.
+ */
+function tagged(contract: Contract, map: SupportNode | null, at: number): SupportNode | null {
+  if (map === null) return null;
+  const known = (node: SupportNode): SupportNode | undefined =>
+    contract.taggedMaps.get(node.id)?.get(at);
+  const remember = (node: SupportNode, made: SupportNode): void => {
+    let byPosition = contract.taggedMaps.get(node.id);
+    if (byPosition === undefined) contract.taggedMaps.set(node.id, (byPosition = new Map()));
+    byPosition.set(at, made);
+    contract.keep(1);
+  };
+  const stack: (readonly [SupportNode, boolean])[] = [[map, false]];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    const [node, ready] = next;
+    if (known(node) !== undefined) continue;
+    if (node.bit === Infinity) {
+      remember(node, mapLeaf(contract, node.key, mapLeaf(contract, positionKey(at), node.value!)));
+      continue;
+    }
+    if (!ready) {
+      stack.push([node, true], [node.right!, false], [node.left!, false]);
+      continue;
+    }
+    remember(node, supportBranch(contract, node.bit, known(node.left!)!, known(node.right!)!));
+  }
+  return known(map)!;
+}
+
+/**
+ * A prefix's listing layers under `step`, by its per-step map, the only selection of its layers: the listing layers
+ * its layers' maps name for the step (`SubLayer.front`), each with the stores that brought the layer it was found
+ * under, in their order; `null` where none lists the step. One layer's map is its own (the layer itself where it lists
+ * the step). Several layers' map is the union of theirs, each tagged by its position (`tagged`), made once per prefix
+ * (`Contract.prefixSteps`) from tags and unions made once per node: a lookup under any step, listed or not, finds the
+ * positions listing it and their sets, in the positions' order, never a visit to each layer.
+ */
+function prefixFound(
+  contract: Contract,
+  stores: PrefixStores,
+  step: string,
+): (() => readonly LayerFound[]) | null {
+  const count = topCount(stores);
+  if (count === 0) return null;
+  if (count === 1) {
+    const { layer: top, defs } = topAt(stores, 0);
+    if (top.own.has(step)) return () => [{ layer: top, defs }];
+    const set = mapGet(contract, top.under, step);
+    return set === null ? null : () => layersIn(contract, set).map((layer) => ({ layer, defs }));
+  }
+  let map = contract.prefixSteps.get(stores);
+  if (map === undefined) {
+    // (united in halves of the positions, so the positions' sets under a step join at one branch per two halves)
+    let level = Array.from({ length: count }, (_, at) =>
+      tagged(contract, topAt(stores, at).layer.front, at),
+    );
+    while (level.length > 1) {
+      const next: (SupportNode | null)[] = [];
+      for (let at = 0; at < level.length; at += 2)
+        next.push(at + 1 < level.length ? union(contract, level[at]!, level[at + 1]!) : level[at]!);
+      level = next;
+    }
+    map = level[0]!;
+    contract.prefixSteps.set(stores, map);
+    contract.keep(1);
+  }
+  const positions = mapGet(contract, map, step);
+  if (positions === null) return null;
+  return () =>
+    mapEntries(contract, positions)
+      .map(([key, set]) => [key.charCodeAt(0) * 0x10000 + key.charCodeAt(1), set] as const)
+      .flatMap(([at, set]) => {
+        const { defs } = topAt(stores, at);
+        return layersIn(contract, set).map((layer) => ({ layer, defs }));
+      });
 }
 
 /** A path's id, made and charged once on its first asking (`pathOf`). */

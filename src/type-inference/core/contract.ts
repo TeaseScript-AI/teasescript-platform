@@ -245,8 +245,12 @@ export class Contract {
   readonly stepLayers = new WeakMap<PrefixStores | SupportNode, Map<string, StepLayers>>();
   /** Per set of listing layers and path id, the layers in it or below it holding a source at the path (`holdersIn`). */
   readonly holdersBelow = new WeakMap<SupportNode, Map<number, SupportNode | null>>();
-  /** Per prefix of several layers, the union of their maps (`topsFront`). */
-  readonly topsFronts = new WeakMap<PrefixStores, SupportNode | null>();
+  /**
+   * Per prefix of several layers, its per-step map: the union of its layers' maps, each tagged by its position
+   * (`prefixFound`); per map node and position, its tagged node (`tagged`).
+   */
+  readonly prefixSteps = new WeakMap<PrefixStores, SupportNode | null>();
+  readonly taggedMaps = new Map<number, Map<number, SupportNode>>();
   readonly aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly projectedLayers = new Map<string, SubLayer | null>();
   /**
