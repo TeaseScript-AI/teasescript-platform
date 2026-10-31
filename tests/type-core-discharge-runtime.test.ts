@@ -512,6 +512,45 @@ test("a get's and a conversion's selected default is checked against the result'
   }
 });
 
+test("a default read through an element is checked where it is selected, also with no store around it, in three layers, in both orders (C10, #1538)", () => {
+  // (C10 names such a default by its key path, `xs.element`, §10.5 r4.10, never by its text `xs[0]`)
+  const rows: readonly (readonly [
+    source: string,
+    call: string,
+    fits: SerializableRuntimeValue,
+    said: readonly string[],
+    bad: SerializableRuntimeValue,
+  ])[] = [
+    [
+      'let xs: list = [hostValue, 4]\nlet fixed: number[] = [1.5]\nsay "BEFORE"\nsay fixed.get(9, default: xs[0])\nsay "AFTER"\nexit\n',
+      "fixed.get(9, default: xs[0])",
+      2.5,
+      ["BEFORE", "2.5", "AFTER"],
+      "text",
+    ],
+    [
+      'let xs = hostValue\nlet counts: integer[] = [1]\nsay "BEFORE"\nrepeat counts.get(9, default: xs[0]) {\n  say "ok"\n}\nsay "AFTER"\nexit\n',
+      "counts.get(9, default: xs[0])",
+      { kind: "list", items: [2] },
+      ["BEFORE", "ok", "ok", "AFTER"],
+      { kind: "list", items: ["text"] },
+    ],
+  ];
+  for (const [source, call, fits, said, bad] of rows) {
+    const site = at(source, "xs[0]");
+    const known = decision(source);
+    assert.ok(known.diagnostics.includes(`warning-runtime-check written-target @${site}`), source);
+    assert.ok(known.checks.includes(`copy-type xs.element [integer, number] @${site}`), source);
+    const plan = candidatePlan(source);
+    assert.ok(
+      contentOf(plan).includes(`fallbackCheck call@${at(source, call)} integer|number`),
+      `${source}: ${JSON.stringify(contentOf(plan))}`,
+    );
+    assert.deepEqual(ran(runWith(plan, fits)), halted(said), source);
+    assert.deepEqual(ran(runWith(plan, bad)), failed(`TSR058@${site}`, ["BEFORE"]), source);
+  }
+});
+
 test("fromJson reads its JSON as its expected type on both lowerings, a wrong kind giving the default and an object repaired per field (F18, ADR 0021 rule 2.6)", () => {
   for (const files of ["", ", files: false"]) {
     const scalar = `let n = fromJson(hostValue, default: 0${files})\nsay n\nexit\n`;
