@@ -193,6 +193,9 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(len(parts), 4)
         self.assertTrue(all(len(part) <= 100 for part in parts))
         self.assertTrue(all(count is not None and count <= 100 for count in counts))
+        # The markers at 51 and 102 still leave room for the remaining parts.
+        self.assertTrue(parts[1].startswith(b"diff --git "))
+        self.assertTrue(parts[2].startswith(b"diff --git "))
 
     def test_byte_fallback_preserves_minimum_count_across_utf8_boundaries(self) -> None:
         patch = b"xx\n" + ("é" * 5).encode()
@@ -240,6 +243,70 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(parts, [patch[:10], patch[10:]])
         self.assertEqual(counts, [10, 5])
         self.assertEqual(b"".join(parts), patch)
+
+    def test_part_count_holds_when_a_longer_part_costs_fewer_tokens(self) -> None:
+        # Token merges at a part's edges: a part costs `weight` tokens more when it starts
+        # with `dear_start` and less when it ends with `cheap_end`, so a longer part can be
+        # cheaper. The preferred boundaries must neither change the greedy count nor abort
+        # the split, whether the merge changes the parts after a boundary, the part before
+        # it, or leaves the greedy search no part where the plan has one.
+        cases = [
+            (b"b\naba\nax\nabx", 3, b"b", b"ab", 2, 6),
+            (b"xxx\nb\nbaaab", 9, b"b", b"b", 2, 3),
+            (b"a\nxxab\naa\n", 4, b"x", b"xa", 3, 4),
+        ]
+        for patch, maximum_bytes, dear_start, cheap_end, weight, part_count in cases:
+
+            def count_tokens(
+                value: bytes,
+                dear_start: bytes = dear_start,
+                cheap_end: bytes = cheap_end,
+                weight: int = weight,
+            ) -> int:
+                cost = len(value) + weight * (
+                    value.startswith(dear_start) - value.endswith(cheap_end)
+                )
+                return max(1, cost)
+
+            with self.subTest(patch=patch):
+                parts, counts = SUPPORT.split_utf8_patch(
+                    patch,
+                    maximum_bytes=maximum_bytes,
+                    target_tokens=3,
+                    count_tokens=count_tokens,
+                )
+                self.assertEqual(b"".join(parts), patch)
+                self.assertEqual(len(parts), part_count)
+                self.assertTrue(all(len(part) <= maximum_bytes for part in parts))
+                self.assertEqual(counts, [count_tokens(part) for part in parts])
+                self.assertTrue(all(count <= 3 for count in counts))
+
+    def test_preferred_boundaries_keep_tokenizer_calls_linear(self) -> None:
+        # Issue #185: re-splitting the whole remaining suffix for every preferred boundary
+        # made tokenizer calls grow about 4x per doubling of the parts here; linear is 2x.
+        def parts_and_calls(files: int) -> tuple[int, int]:
+            patch = b"".join(
+                b"diff --git a/f%d.txt b/f%d.txt\n@@ -1,9 +1,9 @@\n" % (index, index)
+                + b"".join(b"+line %d of file %d\n" % (line, index) for line in range(9))
+                for index in range(files)
+            )
+            calls = 0
+
+            def count_tokens(value: bytes) -> int:
+                nonlocal calls
+                calls += 1
+                return len(value)
+
+            parts, _ = SUPPORT.split_utf8_patch(
+                patch, maximum_bytes=256, target_tokens=128, count_tokens=count_tokens
+            )
+            self.assertEqual(b"".join(parts), patch)
+            return len(parts), calls
+
+        parts, calls = parts_and_calls(32)
+        doubled_parts, doubled_calls = parts_and_calls(64)
+        self.assertGreaterEqual(doubled_parts, 2 * parts)
+        self.assertLess(doubled_calls, 2.5 * calls)
 
     def test_transfer_branch_matches_workflow_contract(self) -> None:
         repository = self.root / "branch-repository"

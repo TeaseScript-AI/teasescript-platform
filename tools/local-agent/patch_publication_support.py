@@ -213,6 +213,13 @@ def utf8_boundary_at_or_before(value: bytes, offset: int, *, floor: int) -> int:
     return offset
 
 
+def utf8_boundary_at_or_after(value: bytes, offset: int, *, ceiling: int) -> int:
+    offset = max(offset, 0)
+    while offset < ceiling and (value[offset] & 0xC0) == 0x80:
+        offset += 1
+    return offset
+
+
 def preferred_boundaries(value: bytes, *, start: int, end: int) -> list[int]:
     preferred_start = start + (end - start) // 2
     boundaries: list[int] = []
@@ -287,47 +294,84 @@ def largest_bounded_end(
     )
 
 
-def suffix_fits_in_parts(
+def smallest_bounded_start(
     patch: bytes,
     *,
-    start: int,
-    maximum_parts: int,
-    maximum_bytes: int,
-    target_tokens: int | None,
-    count_tokens: Callable[[bytes], int] | None,
-) -> bool:
-    if start >= len(patch):
-        return True
-    if maximum_parts < 1:
-        return False
-    if len(patch) - start > maximum_parts * maximum_bytes:
-        return False
-
-    offset = start
-    for _ in range(maximum_parts):
-        try:
-            offset = largest_bounded_end(
-                patch,
-                start=offset,
-                maximum_bytes=maximum_bytes,
-                target_tokens=target_tokens,
-                count_tokens=count_tokens,
-            )
-        except PreparationError:
-            return False
-        if offset >= len(patch):
-            return True
-    return False
-
-
-def minimum_part_count(
-    patch: bytes,
-    *,
+    end: int,
     maximum_bytes: int,
     target_tokens: int | None,
     count_tokens: Callable[[bytes], int] | None,
 ) -> int:
-    count = 0
+    hard_start = utf8_boundary_at_or_after(patch, end - maximum_bytes, ceiling=end)
+    if hard_start >= end:
+        fail("part byte ceiling is too small to preserve a UTF-8 code point")
+    if target_tokens is None or count_tokens is None:
+        return hard_start
+    if count_tokens(patch[hard_start:end]) <= target_tokens:
+        return hard_start
+
+    low = hard_start + 1
+    high = end - 1
+    best = end
+    while low <= high:
+        probe = (low + high) // 2
+        middle = utf8_boundary_at_or_after(patch, probe, ceiling=end)
+        if middle > high:
+            high = probe - 1
+            continue
+        if count_tokens(patch[middle:end]) <= target_tokens:
+            best = middle
+            high = probe - 1
+        else:
+            low = middle + 1
+    if best == end:
+        fail(
+            "target token count is too small to hold one UTF-8 code point; "
+            "increase --target-part-tokens"
+        )
+    return best
+
+
+def suffix_part_starts(
+    patch: bytes,
+    *,
+    part_count: int,
+    maximum_bytes: int,
+    target_tokens: int | None,
+    count_tokens: Callable[[bytes], int] | None,
+) -> list[int] | None:
+    """Plan the parts backwards from the end, each as long as the ceilings allow.
+
+    starts[k] is where the last k parts begin, so the plan leaves its spare room
+    at the front. Return None unless the plan covers the patch in part_count parts.
+    """
+    starts = [len(patch)]
+    while len(starts) <= part_count and starts[-1] > 0:
+        try:
+            starts.append(
+                smallest_bounded_start(
+                    patch,
+                    end=starts[-1],
+                    maximum_bytes=maximum_bytes,
+                    target_tokens=target_tokens,
+                    count_tokens=count_tokens,
+                )
+            )
+        except PreparationError:
+            return None
+    if len(starts) != part_count + 1 or starts[-1] != 0:
+        return None
+    return starts
+
+
+def greedy_part_ends(
+    patch: bytes,
+    *,
+    maximum_bytes: int,
+    target_tokens: int | None,
+    count_tokens: Callable[[bytes], int] | None,
+) -> list[int]:
+    ends: list[int] = []
     offset = 0
     while offset < len(patch):
         offset = largest_bounded_end(
@@ -337,10 +381,10 @@ def minimum_part_count(
             target_tokens=target_tokens,
             count_tokens=count_tokens,
         )
-        count += 1
-        if count > MAX_PART_COUNT:
+        ends.append(offset)
+        if len(ends) > MAX_PART_COUNT:
             fail(f"patch requires more than {MAX_PART_COUNT} parts")
-    return count
+    return ends
 
 
 def split_utf8_patch(
@@ -356,35 +400,71 @@ def split_utf8_patch(
     if target_tokens is not None and count_tokens is None:
         fail("internal error: token target supplied without a token counter")
 
-    remaining_parts = minimum_part_count(
+    greedy_ends = greedy_part_ends(
         patch,
         maximum_bytes=maximum_bytes,
         target_tokens=target_tokens,
         count_tokens=count_tokens,
     )
+    remaining_parts = len(greedy_ends)
+    # plan_starts[k] begins a plan of k fitting parts that ends the patch. With k
+    # parts after the current one, the current part ends at a preferred boundary
+    # or the greedy end only when the current part fits up to there and the part
+    # from there to plan_starts[k - 1] fits too, and at plan_starts[k] otherwise,
+    # so the minimum count always holds. The greedy split is the plan when the
+    # backward one needs another count.
+    plan_starts = suffix_part_starts(
+        patch,
+        part_count=remaining_parts,
+        maximum_bytes=maximum_bytes,
+        target_tokens=target_tokens,
+        count_tokens=count_tokens,
+    ) or [*reversed(greedy_ends), 0]
+
+    def fits(start: int, end: int) -> bool:
+        return end - start <= maximum_bytes and (
+            target_tokens is None
+            or count_tokens is None
+            or count_tokens(patch[start:end]) <= target_tokens
+        )
+
+    def continues_plan(boundary: int, parts_after: int) -> bool:
+        if parts_after == 0:
+            return boundary == len(patch)
+        next_start = plan_starts[parts_after - 1]
+        return boundary < next_start and fits(boundary, next_start)
+
     parts: list[bytes] = []
     token_counts: list[int | None] = []
     offset = 0
     while offset < len(patch):
-        end = largest_bounded_end(
-            patch,
-            start=offset,
-            maximum_bytes=maximum_bytes,
-            target_tokens=target_tokens,
-            count_tokens=count_tokens,
+        boundaries: list[int] = []
+        try:
+            greedy_end = largest_bounded_end(
+                patch,
+                start=offset,
+                maximum_bytes=maximum_bytes,
+                target_tokens=target_tokens,
+                count_tokens=count_tokens,
+            )
+        except PreparationError:
+            # The greedy search can miss every part that the plan's next part
+            # shows to exist when a longer part costs fewer tokens.
+            greedy_end = None
+        else:
+            if greedy_end < len(patch):
+                boundaries = preferred_boundaries(patch, start=offset, end=greedy_end)
+            if greedy_end not in boundaries:
+                boundaries.append(greedy_end)
+        end = next(
+            (
+                boundary
+                for boundary in boundaries
+                if continues_plan(boundary, remaining_parts - 1)
+                and (boundary == greedy_end or fits(offset, boundary))
+            ),
+            plan_starts[remaining_parts - 1],
         )
-        if end < len(patch):
-            for candidate in preferred_boundaries(patch, start=offset, end=end):
-                if suffix_fits_in_parts(
-                    patch,
-                    start=candidate,
-                    maximum_parts=remaining_parts - 1,
-                    maximum_bytes=maximum_bytes,
-                    target_tokens=target_tokens,
-                    count_tokens=count_tokens,
-                ):
-                    end = candidate
-                    break
         part = patch[offset:end]
         ensure_utf8(part, label="generated part")
         token_count = count_tokens(part) if count_tokens is not None else None
