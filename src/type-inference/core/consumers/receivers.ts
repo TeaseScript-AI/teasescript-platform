@@ -16,7 +16,7 @@ import { finishingKeyRead } from "./finishing.js";
 import { hasMethod } from "./kinds.js";
 import type { Offending } from "./model.js";
 import { keyLabel, ownSpan, quietKinds, receiverKinds, unlistedObject } from "./names.js";
-import { nullWarning, obligation, propertiesOf } from "./warnings.js";
+import { leftOutBy, nullWarning, obligation, propertiesOf, type Owner } from "./warnings.js";
 
 // C5a–c, F19a: a method's or a member's receiver, and the receiver of every store through a member and every add.
 
@@ -39,8 +39,9 @@ export function methodReceiver(
   }
   const kinds = receiverKinds(walk, receiver, node);
   const label = keyLabel(walk, receiver);
-  // C9: the receiver's external data brings its boundary checks, whichever member check follows
-  walk.admission.boundariesAt(
+  // C9: the receiver's external data brings its boundary checks, whichever member check follows; a domain's those the
+  // member check's warning owns
+  const send = walk.boundariesBefore(
     kinds,
     obligation(
       "null-check",
@@ -51,7 +52,7 @@ export function methodReceiver(
     ),
   );
   defaultNull(walk, receiver, node, site, `.${name}()`, "call");
-  memberChecks(
+  const leftOut = memberChecks(
     walk,
     site,
     label,
@@ -64,6 +65,7 @@ export function methodReceiver(
     [],
     receiver,
   );
+  send(leftOut);
 }
 
 /**
@@ -72,7 +74,9 @@ export function methodReceiver(
  * a possible null, each kind without the member, each reference, an unknown receiver (its `on` names the kinds that
  * have the member, A7 r4.10), and the `extra` ones (an object without the property, an object's own selection). An
  * `extra` one is the property's own answer at the access and explains its unknown kind, which an unknown receiver is
- * too: that receiver owes no second warning there, and its own absence is its own access's (#1469).
+ * too: that receiver owes no second warning there, and its own absence is its own access's (#1469). Gives which receiver
+ * items a stop's discharge left out with their owners (`leftOutBy`, #1448): the receiver's unknown items are owned by
+ * its one unknown warning, or by the `extra` one that stands for it.
  */
 export function memberChecks(
   walk: Consumers,
@@ -87,7 +91,7 @@ export function memberChecks(
   extra: readonly Offending[] = [],
   receiverPlace?: PlaceId,
   elements?: readonly ItemTag[],
-): void {
+): (item: Item) => boolean {
   const rule: DiagnosticRule = {
     rule: "member",
     receiver,
@@ -115,7 +119,7 @@ export function memberChecks(
       rule,
       (definite(nulls) ? nulls : lacking).map((item) => item.tag),
     );
-    return;
+    return () => false;
   }
   const has = `has ${what} before the ${use}`;
   const offending: Offending[] = [
@@ -125,22 +129,23 @@ export function memberChecks(
     ...offendingKinds(others.filter((item) => REFERENCE.has(item.tag))).map(
       ({ item }): Offending => [{ ...item, context: "unmodelled" }, has],
     ),
-    ...others
-      .filter((item) => extra.length === 0 && (isOpaque(item) || isExternal(item)))
-      .slice(0, 1)
-      .map((item): Offending => {
-        // the kinds that have the member in words: `an object`, `text (string) or a list`
-        const takers = MEMBER_KINDS.filter((kind) => takes(kind));
-        return [
-          item,
-          `is ${takers.length === 0 ? "a value" : described(takers)} with ${what} before the ${use}`,
-        ];
-      }),
   ];
+  const unknown = others.filter((item) => isOpaque(item) || isExternal(item));
+  const unknownEntry = (extra.length === 0 ? unknown.slice(0, 1) : []).map((item): Offending => {
+    // the kinds that have the member in words: `an object`, `text (string) or a list`
+    const takers = MEMBER_KINDS.filter((kind) => takes(kind));
+    return [
+      item,
+      `is ${takers.length === 0 ? "a value" : described(takers)} with ${what} before the ${use}`,
+    ];
+  });
+  offending.push(...unknownEntry);
   // (a reference's members are the runtime's: a speaker or handle is a kind a test narrows to, with no fallback)
   const having = others.filter((item) => REFERENCE.has(item.tag) || takes(item.tag));
-  for (const [item, on] of [...offending, ...extra])
-    nullWarning(
+  const owners: Owner[] = [];
+  for (const [index, entry] of [...offending, ...extra].entries()) {
+    const [item, on] = entry;
+    const made = nullWarning(
       walk,
       "member-read",
       site,
@@ -153,6 +158,10 @@ export function memberChecks(
       detail,
       receiverPlace,
     );
+    if (walk.finishing && (entry === unknownEntry[0] || index >= offending.length))
+      owners.push([made, () => unknown]);
+  }
+  return leftOutBy(walk, owners);
 }
 
 /**

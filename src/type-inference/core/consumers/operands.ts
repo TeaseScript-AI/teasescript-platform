@@ -5,7 +5,6 @@ import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
 import {
-  offendingKinds,
   type CountUse,
   type DiagnosticKind,
   type DiagnosticRule,
@@ -14,7 +13,7 @@ import {
 import { error } from "./diagnostics.js";
 import { TEXT } from "./kinds.js";
 import { keyLabel, kindsOf, ownSpan, quietKinds } from "./names.js";
-import { obligation, warning } from "./warnings.js";
+import { obligation, warnGroups, warning } from "./warnings.js";
 
 // C2, C3, C11, C12, C13: an operand's items against the kinds that fit, a whole number, an index by its receiver.
 
@@ -106,12 +105,17 @@ export function consume(
     (rule.rule === "argument" || rule.rule === "key" || rule.rule === "iterable")
       ? knownMisfits
       : offending;
-  if (owedBy !== null) owe(owedBy, obligationKind);
-  else for (const { item } of offendingKinds(warned)) owe(item, obligationKind);
-  // C9: the operand's external data brings its boundary checks
-  walk.admission.boundariesAt(
+  // C9: the operand's external data brings its boundary checks, a domain's those its group's warning owns (a soft owner's
+  // one warning, every offending item's)
+  walk.boundariesAt(
     items,
     obligation(obligationKind, at, label, required, on(obligationKind)),
+    warnGroups(
+      walk,
+      owedBy === null ? warned : offending,
+      (item) => owe(item, obligationKind),
+      owedBy,
+    ),
   );
 }
 
@@ -173,12 +177,9 @@ export function integerOnly(
     );
   const nullItem = offending.find((item) => item.tag === "null");
   if (nullItem !== undefined) owe(nullItem, "null-check", "not null");
-  if (owedBy !== null) owe(owedBy, "integer-check", "a whole number");
-  else
-    for (const { item } of offendingKinds(offending.filter((found) => found.tag !== "null")))
-      owe(item, "integer-check", "a whole number");
-  // C9: the count's or index's external data brings its boundary checks
-  walk.admission.boundariesAt(
+  // C9: the count's or index's external data brings its boundary checks, a domain's those its group's warning owns (a soft
+  // owner's one warning, every offending item's)
+  walk.boundariesAt(
     items,
     obligation(
       "integer-check",
@@ -186,6 +187,12 @@ export function integerOnly(
       target,
       ["integer"],
       `check that the ${what} is a whole number when it runs`,
+    ),
+    warnGroups(
+      walk,
+      offending.filter((found) => found.tag !== "null"),
+      (item) => owe(item, "integer-check", "a whole number"),
+      owedBy,
     ),
   );
 }
