@@ -13,8 +13,9 @@
 // foreign.
 //
 // Nothing is written into a baseline but through `gate`: the folder must be this tool's (its MANIFEST's first line,
-// read before anything else), the gate holds the baseline's lock (`flock` on its folder) and checks that no foreign
-// path is there, then writes; a writer whose baseline was retired while it waited starts a new one. A folder holding
+// read before anything else), the gate holds the baseline's lock (`flock` on a descriptor of its folder) and checks
+// that no foreign path is there, then writes; a writer whose baseline was retired while it waited starts a new one. A
+// folder holding
 // a foreign path is neither written into (the writer is refused, exit 2, naming the path) nor removed. The gate removes
 // the temporary files a writer that ended (killed) left. An area's PLAN,
 // made by its first writer, binds its run: each shard's sources in their order, each generator's checks, the
@@ -268,9 +269,10 @@ const RETIRED = Symbol("retired");
 
 /**
  * `action(text)`, given the MANIFEST's text: the one way anything is written into a baseline (`dir`). The folder must be
- * this tool's; the action runs while this process holds the baseline's lock (`flock` on the folder, held by a child
- * that ends with this process) and only where the folder holds no foreign path (else `refused`, naming the paths);
- * `RETIRED` where the folder was gone or replaced once the lock was held.
+ * this tool's; the action runs while this process holds the baseline's lock (`flock` on a descriptor of the folder,
+ * opened for reading, never created: a folder gone by then fails to open; held by a child that ends with this process)
+ * and only where the folder holds no foreign path (else `refused`, naming the paths); `RETIRED` where the folder was
+ * gone or replaced once the lock was held.
  */
 async function gate(dir, action) {
   if (!isOwned(dir))
@@ -281,9 +283,11 @@ async function gate(dir, action) {
   } catch {
     return RETIRED;
   }
-  const holder = spawn("flock", [dir, "-c", "echo held && exec cat > /dev/null"], {
-    stdio: ["pipe", "pipe", "ignore"],
-  });
+  const holder = spawn(
+    "bash",
+    ["-c", 'exec 9< "$0" && flock 9 && echo held && exec cat > /dev/null', dir],
+    { stdio: ["pipe", "pipe", "ignore"] },
+  );
   const held = await new Promise((resolve) => {
     holder.stdout.once("data", () => resolve(true));
     holder.once("error", () => resolve(false));
