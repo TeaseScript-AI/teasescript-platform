@@ -492,7 +492,10 @@ const VALUES = [
     `class ProbeMovedBase extends probe.probeBaseMoved(${SELF}.admission) {}\n    void ProbeMovedBase;`,
   ],
 ];
-/** The type/value boundary (#1401): [the label, the statement, how many unproved references it holds]. */
+/**
+ * The type/value boundary (#1401, #1527): [the label, the statement, how many unproved references it holds, the
+ * top-level declarations it names, if any].
+ */
 const TYPE_VALUE = [
   // (an instantiation expression is a value, its type arguments types: a member's, a namespace's moved derivation's,
   // called in an `extends` expression)
@@ -534,6 +537,56 @@ const TYPE_VALUE = [
   [
     "Admission.probeKey",
     `class ProbeKeyedClass {\n      [${SELF}.admission.probeKey] = 1;\n    }\n    void ProbeKeyedClass;`,
+    1,
+  ],
+  // (code that emits nothing, #1527, under a member of its own so that no report it gives can stand in for an evaluated
+  // one's, Codex r1 N1: a `declare` and an `abstract` member's computed key, an overload signature's and an ambient
+  // function's destructured parameter; the member's value read beside them)
+  ["Admission.probeErased", `void ${SELF}.admission.probeErased;`, 1],
+  [
+    "Admission.probeErased",
+    `class ProbeDeclared {\n      declare [${SELF}.admission.probeErased]: number;\n    }\n    void ProbeDeclared;`,
+    0,
+  ],
+  [
+    "Admission.probeErased",
+    `abstract class ProbeAbstract {\n      abstract [${SELF}.admission.probeErased]: number;\n    }\n    void ProbeAbstract;`,
+    0,
+  ],
+  [
+    "Admission.probeErased",
+    "void probeSignature;",
+    0,
+    "function probeSignature({ probeErased }: Admission): void;\nfunction probeSignature(admission: Admission): void {\n  void admission;\n}\n",
+  ],
+  [
+    "Admission.probeErased",
+    "void probeAmbient;",
+    0,
+    "declare function probeAmbient({ probeErased }: Admission): void;\n",
+  ],
+  // (evaluated: an overload signature's key beside its implementation's, of which only the implementation's runs; an
+  // abstract class's method implementation's key; a decorator's expression; an `override` key with neither body nor
+  // initializer, Codex r1 N2)
+  [
+    "Admission.probeKey",
+    `class ProbeOverloadedKey {\n      [${SELF}.admission.probeKey](): void;\n      [${SELF}.admission.probeKey](): void {}\n    }\n    void ProbeOverloadedKey;`,
+    1,
+  ],
+  [
+    "Admission.probeKey",
+    `abstract class ProbeKeyedMethod {\n      [${SELF}.admission.probeKey](): void {}\n    }\n    void ProbeKeyedMethod;`,
+    1,
+  ],
+  [
+    "Admission.probeKey",
+    `class ProbeDecorated {\n      @probeDecorate(${SELF}.admission.probeKey) value = 0;\n    }\n    void ProbeDecorated;`,
+    1,
+    "function probeDecorate(key: string) {\n  return (value: unknown, context: DecoratorContext): void => {\n    void [key, value, context];\n  };\n}\n",
+  ],
+  [
+    "Admission.probeKey",
+    `class ProbeKeyedBase {\n      probeKey?: number;\n    }\n    class ProbeKeyedOverride extends ProbeKeyedBase {\n      override [${SELF}.admission.probeKey]?: number;\n    }\n    void ProbeKeyedOverride;`,
     1,
   ],
 ];
@@ -607,7 +660,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
               "  get probeKnown(): number {\n    return 0;\n  }\n\n  set probeKnown(value: number) {\n    void value;\n  }\n\n",
               "  set probeSetOnly(value: number) {\n    void value;\n  }\n\n",
               "  probeUnionRead = 0;\n\n  probeBase = class {};\n\n",
-              '  probeCtor = class<T> {\n    value?: T;\n  };\n\n  public readonly probeKey = "probeKey";\n\n',
+              '  probeCtor = class<T> {\n    value?: T;\n  };\n\n  public readonly probeKey = "probeKey";\n\n  public readonly probeErased = "probeErased";\n\n',
             ].join("") + MEMBERS,
           ),
       ],
@@ -651,6 +704,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
           // (an unrecognised decoy; a recognised one of a derivation's name)
           "\nfunction freshDecoy(): void {}\nfunction freshShared(walk: Consumers): void {\n  void walk;\n}\n" +
           RECORDING.map(consumerFunction).join("") +
+          TYPE_VALUE.map(([, , , declarations = ""]) => declarations).join("") +
           // (a parameter's destructuring; references outside every consumer derivation)
           `export function probeParameter({ diagnostics }: Consumers): void {\n  diagnostics.push(${PUSHED});\n}\n` +
           "interface ProbeView {\n  admission: Admission;\n}\n" +

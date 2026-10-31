@@ -15,7 +15,8 @@ import { Project, ts } from "ts-morph";
  * derivation moved to a function. A reference is every name whose symbol is one, or an alias of one: an import, a
  * namespace's member, a destructuring's key in a declaration or an assignment, a shorthand property; in a value
  * position, a class's `extends` expression and an instantiation expression's (`f<T>`) included, not a type's (an
- * annotation, a type argument, an `implements` heritage, an interface, its computed keys included). The check
+ * annotation, a type argument, an `implements` heritage) nor in code that emits nothing (an interface, a function-like
+ * declaration without a body, a `declare` or `abstract` member, their computed keys included). The check
  * recognises a closed list of its forms: a direct call of a derivation, `R.m(…)` or `f(…)` as written, and an exact
  * forwarder's call; inside a derivation of admission's, a push `R.readChecks.push(…)`, a call `boundaryCheck(…)` or a
  * call of a parameter named `error` (each creating an obligation); inside a consumer derivation, a push onto a
@@ -846,11 +847,20 @@ export function obligationInventoryDiagnostics(program, root, files) {
   /**
    * Whether a node is a type's, no value (#1401): a type node (an annotation, a type argument), except an expression
    * with type arguments outside an `implements` heritage or an interface's, which is an instantiation expression `f<T>`
-   * or a class's `extends` expression (Codex r7 B1), a value whose type arguments are types; and an interface, which
-   * emits nothing, its computed keys included. Anything else is a value's.
+   * or a class's `extends` expression (Codex r7 B1), a value whose type arguments are types; and code that emits
+   * nothing (#1527): an interface, a function-like declaration without a body (an overload signature, an ambient
+   * function) and a `declare` or `abstract` member, their computed keys and parameters included. Anything else is a
+   * value's: a class field's, an accessor's and a method implementation's computed key are evaluated.
    */
   const typeOnly = (node) =>
     ts.isInterfaceDeclaration(node) ||
+    (ts.isFunctionLike(node) && node.body === undefined) ||
+    (ts.isClassElement(node) &&
+      (ts.getModifiers(node) ?? []).some(
+        (modifier) =>
+          modifier.kind === ts.SyntaxKind.DeclareKeyword ||
+          modifier.kind === ts.SyntaxKind.AbstractKeyword,
+      )) ||
     (ts.isExpressionWithTypeArguments(node)
       ? ts.isHeritageClause(node.parent) &&
         !(node.parent.token === ts.SyntaxKind.ExtendsKeyword && ts.isClassLike(node.parent.parent))
