@@ -38,14 +38,16 @@ interface Visit {
 
 /**
  * Test-only (`withNameRecords`): what the searches did, all of them together: the tasks they took up (a seen one too),
- * the prefixes they visited, the earlier tasks their pump checks walked and the longest such walk, and the units of
- * `checks` the ledger counted meanwhile.
+ * the prefixes they visited, the earlier tasks their pump checks walked and the longest such walk, the head steps those
+ * checks compared, the longest path a task held, and the units of `checks` the ledger counted meanwhile.
  */
 export interface NameRecords {
   tasks: number;
   prefixes: number;
   ancestors: number;
   depth: number;
+  heads: number;
+  longest: number;
   checks: number;
 }
 
@@ -57,7 +59,15 @@ export function withNameRecords<T>(run: () => T): {
   readonly records: Readonly<NameRecords>;
 } {
   if (recording !== null) throw new Error("Name records are already being recorded.");
-  const records: NameRecords = { tasks: 0, prefixes: 0, ancestors: 0, depth: 0, checks: 0 };
+  const records: NameRecords = {
+    tasks: 0,
+    prefixes: 0,
+    ancestors: 0,
+    depth: 0,
+    heads: 0,
+    longest: 0,
+    checks: 0,
+  };
   recording = records;
   try {
     return { result: run(), records };
@@ -90,7 +100,9 @@ interface Scheduled {
  * bounded front of its path and pushes a bounded head, a chain of tasks that never ends holds such a pair, and from it
  * the same steps repeat forever, each turn longer (a feedback copy `w = r.z`: `w|`, `w|z`, `w|z.z`, ...); a search that
  * ends without the bound meets none, so its names are as before, whatever the answer at a key is, stopped or not. The
- * check walks the chain, each earlier task charged.
+ * check walks the new task's chain once, one charge per earlier task, and compares heads only with earlier tasks of its
+ * kind and place, one charge per step of the head: at most the new tasks times the longest chain in visits, plus head
+ * steps each no longer than the earlier task's path.
  */
 export function propertyNames(
   pass: CorePass,
@@ -127,6 +139,7 @@ export function propertyNames(
       ) {
         const head = above.path.length - Math.min(tail, above.path.length);
         work.charge("checks", head);
+        if (recording !== null) recording.heads += head;
         let same = true;
         for (let index = 0; index < head && same; index += 1)
           same = visit.path[index] === above.path[index];
@@ -169,6 +182,7 @@ export function propertyNames(
         : "literal" in task
           ? { kind: "literal", at: task.literal, path: task.path, from, kept }
           : { kind: "value", at: task.value, path: task.path, from, kept };
+    if (recording !== null) recording.longest = Math.max(recording.longest, visit.path.length);
     // (a pumped task's own names are taken, its sources not followed)
     const follows = !pumps(visit);
     const schedule = (next: PropertyNamesTask, untouched: number): void => {

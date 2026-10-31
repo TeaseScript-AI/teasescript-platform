@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isDeepStrictEqual } from "node:util";
+
+import type { Expression } from "../src/ast.js";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import {
@@ -52,6 +55,14 @@ function namesOf(source: string, name: string, mode = MODES[0]!) {
       settled: answers.budget.settled,
     };
   });
+}
+
+/** The variable and the properties a read names (`b.p`), else `null`. */
+function readChain(expression: Expression | undefined): readonly string[] | null {
+  if (expression?.kind === "identifier") return [expression.name];
+  if (expression?.kind !== "propertyAccessExpression") return null;
+  const above = readChain(expression.object);
+  return above === null ? null : [...above, expression.property.name];
 }
 
 test("a copy fed back into the object it came from ends its property-name search, in every mode (#1493)", () => {
@@ -108,7 +119,7 @@ test("a key's own stores name their properties whatever its answer, its copies r
   assert.deepEqual(namesOf("let a={x:1}\nlet b=a\nb.y=2\nlet c=b\nexit", "b").names, ["x", "y"]);
   // Codex r1's B1: a store reached through a copy whose answer holds no object (data from outside, an opaque value), at
   // the copy and below a property, a copy of a property, and a property copied from another of the same variable's;
-  // by the read and by its place, in every mode
+  // by the read itself (`b`, `b.p`) and by its place, in every mode
   for (const [source, name, steps, names] of [
     ["let a=hostValue\na.extra=1\nlet b=a\nsay b\nexit", "b", [], ["extra"]],
     ["let a={x:1}.first\na.extra=1\nlet b=a\nsay b\nexit", "b", [], ["extra"]],
@@ -131,8 +142,14 @@ test("a key's own stores name their properties whatever its answer, its copies r
         );
         const place = node === undefined ? null : answers.at(node)?.place;
         assert.ok(node !== undefined && place !== null && place !== undefined, source);
+        // (the read itself: the variable's, or its property's, `b.p`)
+        const read = answers.graph.nodes.find((each) => {
+          const chain = readChain(each.expression);
+          return chain !== null && isDeepStrictEqual(chain, [name, ...steps]);
+        });
+        assert.ok(read !== undefined, `${source}: the read of ${[name, ...steps].join(".")}`);
         return {
-          read: steps.length === 0 ? [...answers.properties(node).keys()].sort() : names,
+          read: [...answers.properties(read).keys()].sort(),
           place: [
             ...answers.placeProperties(place.id, [...place.path, ...steps.map(propertyStep)]),
           ].sort(),
@@ -200,15 +217,33 @@ test("a demand stop with a question stop after it ends the search, its names wit
   assert.ok(retried > 0, "a question stops and is asked again");
 });
 
-test("the search charges each task it takes up, each prefix it visits and each earlier task its pump check walks (#1493)", () => {
-  // (the uncharged-work probe's gate, kept here: the ledger's `checks` during a search cover its tasks, a seen one
-  // too, its prefixes and its pump checks' walks, which stay within the longest one per task)
+test("the search charges each task it takes up, each prefix it visits and each step its pump check walks or compares (#1493)", () => {
+  // (the uncharged-work probe's gate, kept here: the ledger's `checks` during a search are its tasks, a seen one too,
+  // its prefixes, its pump checks' earlier tasks and their head steps; those stay within the longest chain per task,
+  // and the head steps within the longest path per earlier task walked)
+  const nested = (depth: number): string => {
+    const path = ".p".repeat(depth);
+    return [
+      "let t=hostValue",
+      "t.k=1",
+      `let p=${"{p:".repeat(depth)}{a:hostValue,x:{y:hostValue}}${"}".repeat(depth)}`,
+      `p${path}.x.y=t`,
+      `p${path}.a=p${path}.x.y`,
+      `let r=p${path}.a`,
+      "say r",
+      "exit",
+    ].join("\n");
+  };
   const asks: readonly (readonly [string, string, readonly string[] | null])[] = [
     [feedback(8), "w", null],
     [feedback(16), "w", null],
     ["let w={a:{t:{k:1},q:{t:{k:2}}}}\nlet r=w\nw.a=r.a.q\nsay w\nexit", "w", ["a", "t"]],
     ["let a=hostValue\na.extra=1\nlet b=a\nsay b\nexit", "b", null],
+    // (Codex r2's witness: a property copied from another of the same variable's, `depth` properties down, whose pump
+    // check compares one head as long as that path)
+    ...[4, 16, 64].map((depth) => [nested(depth), "r", null] as const),
   ];
+  const heads = new Map<string, number[]>();
   for (const [source, name, steps] of asks)
     for (const mode of MODES) {
       const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
@@ -228,9 +263,30 @@ test("the search charges each task it takes up, each prefix it visits and each e
       });
       const label = `${source.slice(0, 40)} ${JSON.stringify(mode)} ${JSON.stringify(records)}`;
       assert.ok(records.tasks > 0, label);
-      assert.ok(records.checks >= records.tasks + records.prefixes + records.ancestors, label);
+      assert.equal(
+        records.checks,
+        records.tasks + records.prefixes + records.ancestors + records.heads,
+        label,
+      );
       assert.ok(records.ancestors <= records.tasks * records.depth, label);
+      assert.ok(records.heads <= records.ancestors * records.longest, label);
+      if (name === "r" && source.startsWith("let t=hostValue")) {
+        const key = JSON.stringify(mode);
+        heads.set(key, [
+          ...(heads.get(key) ?? []),
+          records.tasks,
+          records.ancestors,
+          records.depth,
+          records.heads,
+        ]);
+      }
     }
+  // (at depths 4, 16 and 64 the tasks, the earlier tasks walked and the longest chain stay the same, and the head steps
+  // grow by the path's own growth: the head term grows no faster than the path)
+  for (const [mode, [t4, a4, d4, h4, t16, a16, d16, h16, t64, a64, d64, h64]] of heads) {
+    assert.deepEqual([t16, a16, d16, t64, a64, d64], [t4, a4, d4, t4, a4, d4], mode);
+    assert.deepEqual([h16! - h4!, h64! - h16!], [12, 48], mode);
+  }
 });
 
 test("the first property `${...}` shows of a copy comes from its source's literal, in every mode (#1493)", () => {
