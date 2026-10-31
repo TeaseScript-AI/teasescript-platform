@@ -245,11 +245,13 @@ export class Contract {
   readonly aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly projectedLayers = new Map<string, SubLayer | null>();
   /**
-   * #1466: the layers' answers' support nodes, each made once per pass (`prefix-index.ts`): a source's leaf, a step's,
-   * a summary's leaf by its source and content, a branch by its bit and children, and the union of each two nodes asked.
+   * #1466: the layers' answers' support nodes, each made once per pass (`prefix-index.ts`): a source's leaf, a summary's
+   * leaf by its source and content, a branch by its bit and children, and the union of each two nodes asked.
    */
   readonly supportLeaves = new Map<Key, SupportNode>();
-  readonly stepLeaves = new Map<string, SupportNode>();
+  /** A step map's leaves by step and set (`SubLayer.front`); the layers made, by their numbers (`SubLayer.id`). */
+  readonly mapLeaves = new Map<string, Map<number, SupportNode>>();
+  readonly layersById: SubLayer[] = [];
   readonly summaryLeaves = new Map<Key, Map<string, SupportNode>>();
   readonly supportBranches = new Map<number, Map<number, Map<number, SupportNode>>>();
   readonly supportUnions = new Map<number, Map<number, SupportNode>>();

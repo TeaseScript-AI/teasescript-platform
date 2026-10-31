@@ -54,7 +54,6 @@ import type {
   PrefixFrame,
   PrefixStores,
   PresenceStep,
-  StepNode,
   SubLayer,
   SubSource,
   SupportNode,
@@ -522,7 +521,9 @@ function projectedLayer(contract: Contract, place: PlaceId, projection: Steps): 
 
 /**
  * A prefix's layer: its own sources over the layer it inherits and the layers its source joins; none if it adds
- * neither, its parent then standing for it with its origin.
+ * neither, its parent then standing for it with its origin. A join already on the parent's chain adds nothing the
+ * parent does not and is left out, and a parent on a join's chain adds nothing to its map (`through`), so copies joined
+ * again over one ancestor, in either order, stay a chain of the layers that list their steps.
  */
 function layerOf(
   contract: Contract,
@@ -531,36 +532,76 @@ function layerOf(
   joins: readonly SubLayer[],
   origin: LayerOrigin | null,
 ): SubLayer | null {
-  if (own.size === 0 && joins.length === 0) return parent;
   const work = contract.pass.program.work;
-  work.charge("invSteps", 1 + joins.length);
+  const kept: SubLayer[] = [];
+  const seen = new Set<SubLayer>();
+  let covered = false;
+  for (const joined of joins) {
+    work.charge("invSteps");
+    if (joined === parent || seen.has(joined) || onChain(contract, parent, joined)) continue;
+    seen.add(joined);
+    kept.push(joined);
+    if (!covered && parent !== null) covered = onChain(contract, joined, parent);
+  }
+  if (own.size === 0 && kept.length === 0) return parent;
+  work.charge("invSteps", 1 + kept.length);
   let only: Key | null | undefined = parent === null ? undefined : parent.only;
   for (const [, set] of own)
     for (const sub of set) {
       work.charge("invSteps");
       only = only === undefined || only === sub ? sub : null;
     }
+  const jumps: SubLayer[] = [];
+  if (parent !== null) {
+    jumps.push(parent);
+    for (let level = 0; jumps[level]!.jumps[level] !== undefined; level += 1) {
+      work.charge("invSteps");
+      jumps.push(jumps[level]!.jumps[level]!);
+    }
+  }
+  const id = contract.layersById.length;
   const layer: SubLayer = {
     own,
     parent,
-    joins,
+    joins: kept,
     only: joins.length === 0 ? (only ?? null) : null,
     origin,
     paths: new Map(),
+    id,
     depth: parent === null ? 0 : parent.depth + 1,
-    listers: parent?.listers ?? null,
-    joined: parent?.joined ?? null,
-    steps: parent?.steps ?? null,
+    jumps,
+    self: setLeaf(contract, id),
+    through: covered || parent === null ? kept : [parent, ...kept],
+    front: null,
   };
-  // (it is its own nearest layer for the steps it lists, and where it joins further layers; the steps below it are
-  // its parent's and joins' shared, with its own)
-  for (const step of own.keys()) {
-    layer.listers = stepAdded(contract, layer.listers, step, layer);
-    layer.steps = union(contract, layer.steps, stepLeaf(contract, step));
-  }
-  for (const joined of joins) layer.steps = union(contract, layer.steps, joined.steps);
-  if (joins.length > 0) layer.joined = layer;
+  contract.layersById.push(layer);
+  // (its steps map to itself; every other step to the listing layers the maps it reads through name for it)
+  let front: SupportNode | null = null;
+  for (const child of layer.through) front = union(contract, front, child.front);
+  for (const step of own.keys()) front = mapWith(contract, front, step, layer.self);
+  layer.front = front;
   return layer;
+}
+
+/** A layer's ancestor at a depth no greater than its own: by its jumps, one per power of two. */
+function ancestorAt(contract: Contract, layer: SubLayer, depth: number): SubLayer {
+  let at = layer;
+  while (at.depth > depth) {
+    contract.pass.program.work.charge("invSteps");
+    let level = 0;
+    while (at.jumps[level + 1] !== undefined && at.jumps[level + 1]!.depth >= depth) level += 1;
+    at = at.jumps[level]!;
+  }
+  return at;
+}
+
+/** Whether `layer` is `parent` or one of its parents (`ancestorAt`). */
+function onChain(contract: Contract, parent: SubLayer | null, layer: SubLayer): boolean {
+  return (
+    parent !== null &&
+    layer.depth <= parent.depth &&
+    ancestorAt(contract, parent, layer.depth) === layer
+  );
 }
 
 /** The layers a layer answers through below its own sources: its parent, then the layers it joins, in order. */
@@ -590,75 +631,99 @@ function ownPaths(contract: Contract, sub: Key): ReadonlySet<string> {
   return paths;
 }
 
-/** A step map (`StepNode`) with `step` mapped to `layer`: the nodes on the step's path made again, the rest shared. */
-function stepAdded(
-  contract: Contract,
-  map: StepNode | null,
-  step: string,
-  layer: SubLayer,
-): StepNode {
-  const node = (bit: number, left: StepNode | null, right: StepNode | null): StepNode => {
-    contract.keep(1);
-    return { bit, step: left?.step ?? step, left, right, layer: left === null ? layer : null };
+/** A layer's leaf in a set of layers, by its number (`SubLayer.self`). */
+function setLeaf(contract: Contract, id: number): SupportNode {
+  return {
+    id: made(contract, 0),
+    bit: Infinity,
+    key: `#${id}`,
+    left: null,
+    right: null,
+    items: null,
+    count: 0,
+    presence: null,
+    layer: id,
   };
-  const path: (readonly [StepNode, boolean])[] = [];
+}
+
+/** A step map's leaf: `step` mapped to a set of layers, once per step and set. */
+function mapLeaf(contract: Contract, step: string, value: SupportNode): SupportNode {
+  let bySet = contract.mapLeaves.get(step);
+  if (bySet === undefined) contract.mapLeaves.set(step, (bySet = new Map()));
+  const known = bySet.get(value.id);
+  if (known !== undefined) return known;
+  const leaf: SupportNode = {
+    id: made(contract, 0),
+    bit: Infinity,
+    key: step,
+    left: null,
+    right: null,
+    items: null,
+    count: 0,
+    presence: null,
+    value,
+  };
+  bySet.set(value.id, leaf);
+  return leaf;
+}
+
+/** A step map with `step` mapped to `value` instead: the nodes on the step's path made again, the rest shared. */
+function mapWith(
+  contract: Contract,
+  map: SupportNode | null,
+  step: string,
+  value: SupportNode,
+): SupportNode {
+  const leaf = mapLeaf(contract, step, value);
+  const path: (readonly [SupportNode, boolean])[] = [];
   let at = map;
-  while (at !== null && at.bit !== Infinity && firstDifference(contract, step, at.step) >= at.bit) {
+  while (at !== null && at.bit !== Infinity && firstDifference(contract, step, at.key) >= at.bit) {
     const right = bitOf(step, at.bit) === 1;
     path.push([at, right]);
     at = right ? at.right : at.left;
   }
-  let added = node(Infinity, null, null);
-  const split = at === null ? Infinity : firstDifference(contract, step, at.step);
-  if (split !== Infinity)
-    added = bitOf(step, split) === 0 ? node(split, added, at) : node(split, at, added);
+  let node = leaf;
+  const split = at === null ? Infinity : firstDifference(contract, step, at.key);
+  if (at !== null && split !== Infinity)
+    node =
+      bitOf(step, split) === 0
+        ? supportBranch(contract, split, leaf, at)
+        : supportBranch(contract, split, at, leaf);
   for (let index = path.length - 1; index >= 0; index -= 1) {
     const [above, right] = path[index]!;
-    added = right ? node(above.bit, above.left, added) : node(above.bit, added, above.right);
+    node = right
+      ? supportBranch(contract, above.bit, above.left!, node)
+      : supportBranch(contract, above.bit, node, above.right!);
   }
-  return added;
+  return node;
 }
 
-/** The layer a step map holds for `step`, or `null`: down the step's bits, each node charged. */
-function listerOf(contract: Contract, map: StepNode | null, step: string): SubLayer | null {
+/** The set of layers a step map names for `step`, or `null`: down the step's bits, each node charged. */
+function mapGet(contract: Contract, map: SupportNode | null, step: string): SupportNode | null {
   let at = map;
   for (; at !== null && at.bit !== Infinity; at = bitOf(step, at.bit) === 0 ? at.left : at.right)
     contract.pass.program.work.charge("invSteps");
-  return at !== null && at.step === step ? at.layer : null;
+  return at !== null && at.key === step ? (at.value ?? null) : null;
 }
 
-/**
- * The layer a read under `step` asks for `layer` and the layers below it by parents: the nearest of them that lists
- * the step or joins further layers, whose answer is theirs; `null` where none does.
- */
-function entryAt(contract: Contract, layer: SubLayer | null, step: string): SubLayer | null {
-  if (layer === null) return null;
-  const lister = listerOf(contract, layer.listers, step);
-  const joined = layer.joined;
-  if (lister === null || joined === null) return lister ?? joined;
-  return lister.depth >= joined.depth ? lister : joined;
-}
-
-/** Whether `layer` or a layer below it lists `step`: down the step's bits in its steps (`SubLayer.steps`). */
-function holds(contract: Contract, layer: SubLayer, step: string): boolean {
-  let at = layer.steps;
-  for (; at !== null && at.bit !== Infinity; at = bitOf(step, at.bit) === 0 ? at.left : at.right)
+/** A set of layers' layers, each node visited and charged. */
+function layersIn(contract: Contract, set: SupportNode | null): SubLayer[] {
+  const out: SubLayer[] = [];
+  const stack = set === null ? [] : [set];
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     contract.pass.program.work.charge("invSteps");
-  return at !== null && at.key === step;
-}
-
-/** A layer's layers below it by position: its parent (`null` for none), then the layers it joins in order. */
-function childAt(layer: SubLayer, at: number): SubLayer | null {
-  return at === 0 ? layer.parent : layer.joins[at - 1]!;
-}
-
-/** Whether a layer below `entry`, its parent's or a join's entry (`entryAt`), lists `step`. */
-function holdsBelow(contract: Contract, entry: SubLayer, step: string): boolean {
-  for (let at = 0; at <= entry.joins.length; at += 1) {
-    const below = entryAt(contract, childAt(entry, at), step);
-    if (below !== null && holds(contract, below, step)) return true;
+    if (node.left === null) out.push(contract.layersById[node.layer!]!);
+    else stack.push(node.right!, node.left);
   }
-  return false;
+  return out;
+}
+
+/** The nearest layers below `layer`, through the layers it reads through (`through`), that list `step`, as one set. */
+function listingBelow(contract: Contract, layer: SubLayer, step: string): SupportNode | null {
+  let set: SupportNode | null = null;
+  for (const child of layer.through)
+    set = union(contract, set, mapGet(contract, child.front, step));
+  return set;
 }
 
 /** Whether a source has a store of its own at a prefix of `ref` below its root (`ownPaths`). */
@@ -736,24 +801,6 @@ function supportLeaf(contract: Contract, sub: Key): SupportNode {
   return leaf;
 }
 
-/** A step's leaf in a layer's steps (`SubLayer.steps`), once per step. */
-function stepLeaf(contract: Contract, step: string): SupportNode {
-  const known = contract.stepLeaves.get(step);
-  if (known !== undefined) return known;
-  const leaf: SupportNode = {
-    id: made(contract, 0),
-    bit: Infinity,
-    key: step,
-    left: null,
-    right: null,
-    items: null,
-    count: 0,
-    presence: null,
-  };
-  contract.stepLeaves.set(step, leaf);
-  return leaf;
-}
-
 /**
  * A source's leaf in a summary, once per source and content: its items in their order with everything a reader can
  * tell apart, its ingress stores by their nodes (C9), the text charged as its items' signature is and kept where new.
@@ -817,8 +864,13 @@ function supportBranch(
   return branch;
 }
 
-/** One source in both nodes: a summary's two contents of it merged in the order the nodes were made. */
+/**
+ * One key in both nodes: a step map's step with the union of its two sets of layers; a summary's source with its two
+ * contents merged in the order the nodes were made.
+ */
 function mergedLeaf(contract: Contract, a: SupportNode, b: SupportNode): SupportNode {
+  if (a.value !== undefined)
+    return mapLeaf(contract, a.key, union(contract, a.value, b.value ?? null)!);
   const [first, then] = a.id < b.id ? [a, b] : [b, a];
   return summaryLeaf(
     contract,
@@ -1004,34 +1056,39 @@ function topAt(stores: PrefixStores, at: number): PrefixStores["also"][number] {
   return at === 0 ? { layer: stores.subs, defs: stores.inheritedBy } : stores.also[at - 1]!;
 }
 
+/** A listing layer a read may ask, with the position of the prefix's layer it was found under (`topAt`). */
+interface Found {
+  readonly layer: SubLayer;
+  readonly at: number;
+}
+
 /**
- * Of `count` layers in order, a prefix's tops (`topAt`) or a layer's parent and joins (`childAt`), the positions whose
- * entries (`entryAt`) may hold a source at `ref`, the others holding none: per owner, the first read under a step finds
- * the sources each entry lists there and whether a layer below it lists the step (`stepLayers`, `holdsBelow`); every read
- * takes those of the latter, and of the former those listing a source with a store at a prefix of its path, found per
- * prefix from the smaller of those sources and the sources with a store there (`subsByPath`). So k copies joined into
- * one place, each storing its own property below one step, are not each asked per read of one of those properties
- * (#1078), whether a prefix joins them or a layer below it does.
+ * Of the listing layers a read under `ref`'s first step may ask below `owner` (`find`: those the maps of its layers
+ * name for the step, `SubLayer.front`), those that may hold a source at `ref`, in order: per owner, the first read under
+ * a step finds them, the sources each lists there and those with listing layers below them, whose summaries hold
+ * theirs (`stepLayers`); every read takes those, and of the rest those listing a source with a store at a prefix of its
+ * path, found per prefix from the smaller of those sources and the sources with a store there (`subsByPath`). A layer
+ * that lists no source under the step is never asked; so k copies joined into one place, each storing its own property
+ * below one step, are not each asked per read of one of those properties (#1078), however their joins nest.
  */
 function selectAt(
   contract: Contract,
   owner: PrefixStores | SubLayer,
-  count: number,
-  layerAt: (at: number) => SubLayer | null,
+  find: () => readonly Found[],
   ref: PathRef,
-): number[] {
+): Found[] {
   const work = contract.pass.program.work;
   const step = ref.at(0);
   let bySteps = contract.stepLayers.get(owner);
   if (bySteps === undefined) contract.stepLayers.set(owner, (bySteps = new Map()));
   let known = bySteps.get(step);
   if (known === undefined) {
+    const found = find();
     const own = new Map<Key, number[]>();
-    const deep: number[] = [];
-    for (let at = 0; at < count; at += 1) {
-      const entry = entryAt(contract, layerAt(at), step);
-      if (entry === null) continue;
-      for (const sub of entry.own.get(step) ?? []) {
+    const nested: number[] = [];
+    for (let at = 0; at < found.length; at += 1) {
+      const { layer } = found[at]!;
+      for (const sub of layer.own.get(step) ?? []) {
         work.charge("invSteps");
         ownPaths(contract, sub);
         contract.keep(1);
@@ -1039,13 +1096,13 @@ function selectAt(
         if (listed === undefined) own.set(sub, [at]);
         else listed.push(at);
       }
-      if (holdsBelow(contract, entry, step)) deep.push(at);
+      if (listingBelow(contract, layer, step) !== null) nested.push(at);
     }
-    contract.keep(1 + deep.length);
-    bySteps.set(step, (known = { own, deep }));
+    contract.keep(1 + found.length + nested.length);
+    bySteps.set(step, (known = { found, own, nested }));
   }
-  const { own, deep } = known;
-  const walked = new Set(deep);
+  const { found, own, nested } = known;
+  const walked = new Set(nested);
   let text = "";
   for (let length = 1; length <= ref.length && own.size > 0; length += 1) {
     work.charge("invSteps");
@@ -1064,22 +1121,36 @@ function selectAt(
       }
   }
   work.charge("invSteps", walked.size);
-  return [...walked].sort((a, b) => a - b);
+  return [...walked].sort((a, b) => a - b).map((at) => found[at]!);
 }
 
-/** The layers a prefix inherits or joins that may hold a source at `ref` (`selectAt`), with their stores, in order. */
+/**
+ * The listing layers a prefix's read at `ref` asks (`selectAt`), each with the stores that brought the prefix's layer it
+ * was found under, in order.
+ */
 function topsAt(contract: Contract, stores: PrefixStores, ref: PathRef): PrefixStores["also"] {
-  return selectAt(contract, stores, topCount(stores), (at) => topAt(stores, at).layer, ref).map(
-    (at) => topAt(stores, at),
-  );
+  const step = ref.at(0);
+  const find = (): Found[] => {
+    const out: Found[] = [];
+    for (let at = 0, count = topCount(stores); at < count; at += 1)
+      for (const layer of layersIn(contract, mapGet(contract, topAt(stores, at).layer.front, step)))
+        out.push({ layer, at });
+    return out;
+  };
+  return selectAt(contract, stores, find, ref).map(({ layer, at }) => ({
+    layer,
+    defs: topAt(stores, at).defs,
+  }));
 }
 
-/** The entries below a layer, its parent's and its joins', that may hold a source at `ref` (`selectAt`), in order. */
+/** The listing layers below a listing layer that its read at `ref` asks (`selectAt`), in order. */
 function childrenAt(contract: Contract, layer: SubLayer, ref: PathRef): SubLayer[] {
-  const step = ref.at(0);
-  return selectAt(contract, layer, 1 + layer.joins.length, (at) => childAt(layer, at), ref).map(
-    (at) => entryAt(contract, childAt(layer, at), step)!,
-  );
+  const find = (): Found[] =>
+    layersIn(contract, listingBelow(contract, layer, ref.at(0))).map((each) => ({
+      layer: each,
+      at: 0,
+    }));
+  return selectAt(contract, layer, find, ref).map((found) => found.layer);
 }
 
 /**
@@ -1103,10 +1174,7 @@ export function relevantSubs(
   const found = new Map<Key, ReadonlySet<Definition | null>>();
   const owned = new Map<Key, Set<Definition | null>>();
   for (const { layer, defs } of tops)
-    for (const sub of sourcesOf(
-      contract,
-      layerSupport(contract, entryAt(contract, layer, ref.at(0))!, ref, path),
-    )) {
+    for (const sub of sourcesOf(contract, layerSupport(contract, layer, ref, path))) {
       const brought = found.get(sub);
       if (brought === undefined || brought === defs) {
         found.set(sub, defs);
@@ -1234,7 +1302,7 @@ interface LayersAt {
 }
 
 /**
- * The layers a summary of a prefix's layers at `rest` reads (`topsAt`), each its top's entry (`entryAt`), found without
+ * The listing layers a summary of a prefix's layers at `rest` reads (`topsAt`), found without
  * a demand: none where no layer may hold a source there; `undefined` where the prefix's stores are cut at an open copy
  * cycle or a layer has no origin, so the consumer reads each source by itself (`relevantSubs`).
  */
@@ -1245,8 +1313,7 @@ function layersAt(contract: Contract, stores: PrefixStores, rest: Rest): LayersA
   if (tops.length === 0) return { layers: [], path: 0 };
   if (stores.cut) return undefined;
   const layers: LayersAt["layers"][number][] = [];
-  for (const { layer: top, defs } of tops) {
-    const layer = entryAt(contract, top, ref.at(0))!;
+  for (const { layer, defs } of tops) {
     if (layer.origin === null) return undefined;
     layers.push({ layer, defs });
   }
