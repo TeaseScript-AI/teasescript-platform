@@ -37,6 +37,11 @@ export { pathPhrase } from "./messages/words.js";
  * semicolons, no implementation terms, and "type", never "kind" (`docs/DIAGNOSTICS.md`, "Messages").
  */
 
+/**
+ * The message source of a project's files and of their analysis's diagnostics: each file's text, its lines counted
+ * once, its statements on one line by their line, each parsed once, and its diagnostics' sites in start order, each
+ * on first need.
+ */
 export function messageSource(
   sources: readonly string[],
   diagnostics: readonly CheckedDiagnostic[],

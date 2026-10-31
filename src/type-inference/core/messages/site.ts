@@ -251,11 +251,6 @@ function acts(node: Expression): boolean {
   }
 }
 
-/**
- * The message source of a project's files and of their analysis's diagnostics: each file's text, its lines counted
- * once, its statements on one line by their line, each parsed once, and its diagnostics' sites in start order, each
- * on first need.
- */
 /** Where a value lands (`MessageSource.landing`): the variable it is given to, and the steps from it to the value. */
 export interface Landing {
   readonly root: string;
