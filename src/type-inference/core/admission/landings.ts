@@ -17,6 +17,7 @@ import {
   joinSteps,
   keep,
   keepText,
+  keptArray,
   keptParts,
   keptSplit,
   keptSteps,
@@ -781,33 +782,96 @@ function landedOwn(admission: Admission, place: PlaceId, path: Steps): boolean {
 /**
  * The paths copies land in a place at or below `prefix` (`Inheritance`), each once: its own landings and, through each
  * copy, its source's at or below the copy's strip, written where the copy lands them; on an explicit stack, each
- * source, prefix and way of writing its paths once.
+ * source, prefix and way of writing its paths once. Each place and prefix is listed once per pass (`landedBelows`): a
+ * walk that reaches one listed takes its listing, written where it lands it, instead of walking below it again, and
+ * one an earlier walk took is listed before it is taken, so a chain of copies asked at each link, in either order,
+ * walks each link once (#1547).
  */
 export function landedBelow(
   admission: Admission,
   place: PlaceId,
   prefix: readonly string[],
-): string[] {
+): readonly string[] {
+  const key = keptParts(admission.work, place, prefix);
+  const known = admission.landedBelows.get(key);
+  if (known !== undefined) return known.texts;
   const { cycleOf, fed, wholes } = inheritance(admission);
   const work = admission.pass.program.work;
-  const out = new Set<string>();
-  const seen = new Set<string>();
   // a task: a place, the prefix its paths are taken at or below, and how its path is written in the place asked:
   // its first `drop` steps replaced by `prepend`
-  const tasks: {
+  type Task = {
     readonly place: PlaceId;
     readonly below: readonly string[];
     readonly drop: number;
     readonly prepend: readonly string[];
-  }[] = [{ place, below: prefix, drop: 0, prepend: [] }];
-  while (tasks.length > 0) {
-    const task = tasks.pop()!;
-    const id = keptParts(admission.work, task.place, task.below, task.drop, task.prepend);
+  };
+  // a listing being made, of its root's place and prefix: its tasks, and its paths so far, each text with its steps
+  const listing = (place: PlaceId, below: readonly string[], key: string) => {
+    const root: Task = { place, below, drop: 0, prepend: [] };
+    return {
+      key,
+      root,
+      tasks: [root],
+      out: new Map<string, readonly string[]>(),
+      seen: new Set<string>(),
+    };
+  };
+  const listings = [listing(place, prefix, key)];
+  const open = new Set<string>([key]);
+  for (;;) {
+    const made = listings.at(-1)!;
+    const task = made.tasks.pop();
+    if (task === undefined) {
+      listings.pop();
+      open.delete(made.key);
+      const found = {
+        texts: keptArray(admission.work, [...made.out.keys()]),
+        paths: keptArray(admission.work, [...made.out.values()]),
+      };
+      admission.landedBelows.set(made.key, found);
+      if (listings.length === 0) return found.texts;
+      continue;
+    }
+    const { out, seen, tasks } = made;
+    const at = task === made.root ? made.key : keptParts(admission.work, task.place, task.below);
+    const id = keptParts(admission.work, at, task.drop, task.prepend);
     if (seen.has(id)) continue;
+    const land = (text: string, steps: readonly string[]): void => {
+      if (!out.has(text)) out.set(text, steps);
+    };
+    // (a place and prefix listed: its paths, written where the task lands them)
+    const listed = admission.landedBelows.get(at);
+    if (listed !== undefined) {
+      seen.add(id);
+      const same = task.drop === 0 && task.prepend.length === 0;
+      for (let index = 0; index < listed.texts.length; index += 1) {
+        work.charge("indexSteps");
+        if (same) land(listed.texts[index]!, listed.paths[index]!);
+        else {
+          const steps = keptSteps(
+            admission.work,
+            task.prepend,
+            listed.paths[index]!.slice(task.drop),
+          );
+          land(keptText(admission.work, steps), steps);
+        }
+      }
+      continue;
+    }
+    // (a place and prefix an earlier walk took: listed first, then taken as listed; one being listed, which no walk
+    // reaches from itself, walked as before)
+    if (task !== made.root && !open.has(at) && admission.landingWalks.has(at)) {
+      tasks.push(task);
+      listings.push(listing(task.place, task.below, at));
+      open.add(at);
+      continue;
+    }
+    admission.landingWalks.add(at);
     seen.add(id);
     const add = (path: readonly string[]): void => {
-      if (isPrefix(task.below, path))
-        out.add(keptText(admission.work, joinSteps(task.prepend, path.slice(task.drop))));
+      if (!isPrefix(task.below, path)) return;
+      const steps = keptSteps(admission.work, task.prepend, path.slice(task.drop));
+      land(keptText(admission.work, steps), steps);
     };
     const emit = (path: readonly string[]): void => {
       work.charge("indexSteps");
@@ -856,7 +920,6 @@ export function landedBelow(
       );
     }
   }
-  return [...out];
 }
 
 /** The members of a place's cycle of copies (`Inheritance.order`), once per pass. */

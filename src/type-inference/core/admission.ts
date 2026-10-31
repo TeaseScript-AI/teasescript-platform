@@ -380,6 +380,15 @@ export class Admission {
   >();
   readonly cycleLandings = new WeakMap<ReadonlySet<string>, ByPath<readonly string[]>>();
   cycleMembers: Map<number, PlaceId[]> | null = null;
+  /**
+   * Per place and prefix, the paths copies land at or below it in their order, each text with its steps (`landedBelow`),
+   * once per pass; and each place and prefix a walk of them took, listed when another walk reaches it.
+   */
+  readonly landedBelows = new Map<
+    string,
+    { readonly texts: readonly string[]; readonly paths: readonly (readonly string[])[] }
+  >();
+  readonly landingWalks = new Set<string>();
   /** Per place, its seeds' paths at or below each prefix (`seedsUnder`), and its stores taken again (`#retakenOf`). */
   readonly seedIndex = new Map<PlaceId, Map<string, string[]>>();
   /** Per key, its decision before it is recorded (`decided`); the keys `decide` took (`lazily`). */
