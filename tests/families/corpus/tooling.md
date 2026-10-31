@@ -12,4 +12,6 @@ outside the repository").
   agents' scratch folders on the main LXC (`/tmp/agent-work/...`, under the same paths), with `SHA256SUMS`.
 - `desktop:~/work/evidence/corpus/tooling/`: one master copy of each kit that briefs hand out, the split kit (`split/`,
   with `cycles.cjs`) and the #1423 probe kit (`g3-probe/`, with `queue-final.sh`). Its `README.md` says what each
-  master fixes.
+  master fixes. `g3-probe/disagree-kind.py` counts a row's exceptions apart and rejects them, never classifying them
+  (#1514); `g3-probe/canary-1514.sh` checks that, and its original stays beside it as `disagree-kind.py.pre-1514`
+  (`PORTED-1514.md`).

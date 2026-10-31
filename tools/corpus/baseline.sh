@@ -18,14 +18,23 @@
 #
 # A shard's job may be queued more than once: it runs while no other job runs that shard and the shard is not yet
 # complete, else it ends at once, so a later job also reruns a failed shard. ~/work/baselines/<sha>/MANIFEST is the
-# plan, written once, whole or not at all: each shard with its tree, runner, priority and memory, and what was planned
-# with this script's and the runner's hashes. A call queues each planned shard not yet complete, as MANIFEST has it
-# (BASELINE_* and the runner then no longer apply), and writes QUEUED once every one was accepted; a baseline with
-# QUEUED is not queued again. A call that could not queue or read the plan exits 1, and calling it again queues the
-# shards anew. A folder with no MANIFEST of this script holding anything but its own files is refused: remove it to
-# queue the baseline again. A baseline goes with its tree: once `sx-tree --prune` removed the tree, the next call
-# removes it. Jobs run at priority 7, of which the queue runs at most two at once (lead, 2026-10-31): a baseline takes
-# at most two slots, and each `main`'s is queued in order, so they may lag `main`.
+# plan, written once, whole or not at all: each shard with its tree, runner, priority and memory, the clone in which a
+# job judges commits (`repo`: BASELINE_REPO, else sx-tree's), and what was planned with this script's and the runner's
+# hashes. A call queues each planned shard not yet complete, as MANIFEST has it (BASELINE_* and the runner then no
+# longer apply), and writes QUEUED once every one was accepted; a baseline with QUEUED is not queued again. A call that
+# could not queue or read the plan exits 1, and calling it again queues the shards anew. A folder with no MANIFEST of
+# this script holding anything but its own files is refused: remove it to queue the baseline again. A baseline goes
+# with its tree: once `sx-tree --prune` removed the tree, the next call removes it. Jobs run at priority 7, of which the
+# queue runs at most two at once (lead, 2026-10-31): a baseline takes at most two slots, and each `main`'s is queued in
+# order, so they may lag `main`.
+#
+# A baseline none of whose shards has started is skipped when a newer `main`'s is queued (lead, 2026-10-31). The first
+# job of a baseline to start a shard decides for all of them, under the folder's .start.lock: when another folder of
+# ~/work/baselines/ has QUEUED and its MANIFEST plans a commit that descends from this baseline's on the clone's
+# origin/main, it writes SUPERSEDED (that commit) and every job of the baseline ends at once without running; else it
+# writes STARTED and every shard runs, as above. A marker that could not be written fails the shard
+# (`failed SUPERSEDED` or `failed STARTED`) and leaves the decision to the next job. A superseded baseline gets no
+# SHA256SUMS, so a pull request on its commit runs base and head.
 #
 # The tree's own runner runs its own areas. A tree whose runner cannot store runs (from before this script) is skipped,
 # unless BASELINE_RUNNER names a built checkout whose runner and fixture area run it instead. BASELINE_PRIORITY (7),
@@ -57,6 +66,24 @@ publish() {
     mv "$dir/SHA256SUMS.tmp" "$dir/SHA256SUMS"
 }
 
+# the commit of a newer `main`'s baseline queued beside the baseline in folder $1, if any (see above)
+superseding() {
+  local own=${1##*/} repo other sha
+  repo=$(sed -n 's/^repo //p' "$1/MANIFEST" 2> /dev/null)
+  [ -n "$repo" ] || return 1
+  for other in "${1%/*}"/*/; do
+    other=${other%/} && sha=${other##*/}
+    [[ $sha =~ ^[0-9a-f]{40}$ ]] && [ "$sha" != "$own" ] && [ -e "$other/QUEUED" ] &&
+      [ "$(sed -n 's/^sha //p' "$other/MANIFEST" 2> /dev/null)" = "$sha" ] || continue
+    if git -C "$repo" merge-base --is-ancestor "$own" "$sha" 2> /dev/null &&
+      git -C "$repo" merge-base --is-ancestor "$sha" refs/remotes/origin/main 2> /dev/null; then
+      echo "$sha"
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [ "${1:-}" = --job ]; then
   # one shard, run by its queued job: --job <baseline folder> <tree> <runner> <area> <area folder> <i> <N>
   out=$2 tree=$3 runner=$4 area=$5 folder=$6 i=$7 n=$8
@@ -68,6 +95,25 @@ if [ "${1:-}" = --job ]; then
   exec {lock}>> "$dir/.lock"
   # a complete shard is not run again, but its job still writes the area's SHA256SUMS where they are missing
   if ! grep -q '^complete ' "$name.exit" 2> /dev/null; then
+    # whether the baseline runs, decided by its first job and bound by the marker (see above)
+    exec {start}>> "$out/.start.lock"
+    flock "$start"
+    if [ ! -e "$out/STARTED" ] && [ ! -e "$out/SUPERSEDED" ]; then
+      marker=STARTED value=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      if newer=$(superseding "$out"); then marker=SUPERSEDED value=$newer; fi
+      if ! { echo "$value" > "$out/$marker.tmp" && mv "$out/$marker.tmp" "$out/$marker"; }; then
+        exec {start}>&-
+        flock "$lock"
+        { echo "failed $marker" > "$name.exit.tmp" && mv "$name.exit.tmp" "$name.exit"; } || exit 1
+        publish "$dir" "$n"
+        exit 1
+      fi
+    fi
+    exec {start}>&-
+    if [ -e "$out/SUPERSEDED" ]; then
+      echo "baseline ${out##*/}: $area $i/$n superseded by $(cat "$out/SUPERSEDED")"
+      exit 0
+    fi
     node "$runner/tests/families/run.mjs" "$folder" "$tree" --store "$name.runs.jsonl" --shard "$i/$n" \
       --out "$name.out.jsonl" > "$name.stdout" 2> "$name.stderr"
     status=$?
@@ -135,6 +181,8 @@ if [ ! -e "$out/MANIFEST" ]; then
   shopt -u nullglob dotglob
   priority=${BASELINE_PRIORITY:-7}
   memory=${BASELINE_MEM:-3G}
+  repo=${BASELINE_REPO:-$HOME/src/teasescript-platform}
+  [ -n "${BASELINE_REPO:-}" ] || [ -d "$repo" ] || repo=$HOME/src/wqaed401/teasescript-platform
   slots=${BASELINE_SLOTS:-$(systemctl --user show sx-queue-worker@1.service -p Environment --value 2> /dev/null |
     tr ' ' '\n' | sed -n 's/^SX_HEAVY_SLOTS=//p')}
   if [[ $slots =~ ^[0-9]+$ ]] && [ -z "${BASELINE_SLOTS:-}" ]; then slots=$((slots - 1)); fi
@@ -173,6 +221,7 @@ if [ ! -e "$out/MANIFEST" ]; then
     echo "runner $runner"
     echo "priority $priority"
     echo "memory $memory"
+    echo "repo $repo"
     echo "commit $(cat "$runner/.sha" 2> /dev/null || git -C "$runner" rev-parse HEAD 2> /dev/null)"
     echo "run.mjs sha256 $(sha256sum < "$runner/tests/families/run.mjs" | cut -d' ' -f1)"
     echo "baseline.sh sha256 $(sha256sum < "$out/baseline.sh" | cut -d' ' -f1)"
