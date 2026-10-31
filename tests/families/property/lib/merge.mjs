@@ -1,13 +1,17 @@
 import { configurations, validatePlan } from "./plan.mjs";
 import { hash } from "./json.mjs";
 import { summarize } from "./status.mjs";
-/** Merge only exhaustive, non-overlapping shards from the same plan and compiler execution environment. */
+/**
+ * Merge only exhaustive, non-overlapping shards from the same plan and compiler execution environment, each with the
+ * checked control of every rule its plan names (`rules.mjs`), which the merged summary keeps per shard.
+ */
 export function mergeShards(parts) {
   if (!parts.length) throw new Error("No shards supplied");
   const plan = validatePlan(parts[0].plan),
     baseline = parts[0].metadata;
   const rows = new Map(),
-    shards = new Set();
+    shards = new Set(),
+    controls = [];
   for (const part of parts) {
     validatePlan(part.plan);
     if (part.plan.planHash !== plan.planHash || part.metadata.planHash !== plan.planHash)
@@ -18,6 +22,13 @@ export function mergeShards(parts) {
     const shard = part.metadata.shard;
     if (shards.has(shard.index)) throw new Error("Duplicate shard");
     shards.add(shard.index);
+    const checked = part.metadata.controls ?? [];
+    if (
+      hash(checked.map((x) => x.rule)) !== hash(plan.rules ?? []) ||
+      checked.some((x) => x.holds !== true)
+    )
+      throw new Error("Shard lacks a holding control for each rule of its plan");
+    controls.push(...checked.map((x) => ({ shard: shard.index, ...x })));
     const configs = configurations(plan, shard),
       ids = new Set(configs.map((c) => c.id));
     if (part.rows.length !== configs.length) throw new Error("Shard has missing rows");
@@ -40,6 +51,7 @@ export function mergeShards(parts) {
       ...summarize(ordered, configurations(plan).length),
       planHash: plan.planHash,
       rules: plan.rules ?? [],
+      controls: controls.sort((a, b) => a.shard - b.shard),
       provenance: baseline.provenance,
       resultsHash: hash(ordered),
       shards: parts.length,
