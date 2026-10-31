@@ -18,6 +18,7 @@ import {
   mergeItems,
 } from "../src/type-inference/core/items.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
+import { withLabelRecords } from "../src/type-inference/core/contract/labels.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { operationItems } from "../src/type-inference/core/operator-table.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
@@ -408,9 +409,17 @@ test("a stop at the first unit finishes a deeply nested literal and a read as de
   };
   for (const [shape, make] of Object.entries(shapes)) {
     const finishing = (k: number) => {
-      const { budget } = analysed(requestOf(main(`${make(k)}\nexit`)), false, 1);
+      // (the labels its warnings name are charged where they are shown, apart after the stop: k paths up to k steps,
+      // the warnings' own text, which the finishing this measures does not make, #1484)
+      const { result, records } = withLabelRecords(() =>
+        analysed(requestOf(main(`${make(k)}\nexit`)), false, 1),
+      );
+      const { budget } = result;
       assert.equal(budget.exhausted, "work");
-      return { units: budget.finishing, nodes: budget.counts.get("syntaxNodes")! };
+      let shown = 0;
+      for (const record of records)
+        if (record.kind === "text") for (const units of Object.values(record.apart)) shown += units;
+      return { units: budget.finishing - shown, nodes: budget.counts.get("syntaxNodes")! };
     };
     const [small, large] = [finishing(64), finishing(128)];
     const doubling = (2 * (large.units / small.units)) / (large.nodes / small.nodes);

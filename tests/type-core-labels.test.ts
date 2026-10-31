@@ -189,8 +189,9 @@ const CASES: readonly (readonly [string, string, readonly string[]])[] = [
   ],
 ];
 
-test("a decision's label makes no text: in every mode the labels shown are those the store's warnings and checks publish, each text made at most once in the pass, spelled by the contract or the written type", () => {
-  for (const [name, source, shown] of CASES)
+/** In every mode the labels `cases` show are those they publish, each text made at most once in a pass. */
+function showsPublished(cases: typeof CASES): void {
+  for (const [name, source, shown] of cases)
     for (const mode of MODES) {
       const at = `${name}, ${JSON.stringify(mode)}`;
       const made = request(source);
@@ -216,6 +217,119 @@ test("a decision's label makes no text: in every mode the labels shown are those
         );
       }
     }
+}
+
+test("a decision's label makes no text: in every mode the labels shown are those the store's warnings and checks publish, each text made at most once in the pass, spelled by the contract or the written type", () => {
+  showsPublished(CASES);
+});
+
+/**
+ * #1484: a consumer's label is its target's recipe (`keyLabel`), its text made where its warning or check shows it. Each
+ * consumer that names a label, by the label's kind: a variable's path, an element, a dict's entry, a call's result, an
+ * anonymous value's own text, a fallback's steps below it; and consumers that show nothing.
+ */
+const CONSUMER_CASES: typeof CASES = [
+  ["a member read's receivers", "let raw = hostValue\nsay raw.a.b\nexit\n", ["raw", "raw.a"]],
+  ["a method's receiver", "let raw = hostValue\nraw.items.clear()\nexit\n", ["raw", "raw.items"]],
+  ["a store's receiver", "let raw = hostValue\nraw.inner.v = 1\nexit\n", ["raw", "raw.inner"]],
+  [
+    "an add's receiver, a place's path",
+    "let box = {items: [1]}\nbox.items = hostValue\nbox.items.add(2)\nexit\n",
+    ["box.items"],
+  ],
+  ["a selection", "let raw = hostValue\nsay raw.items.first\nexit\n", ["raw", "raw.items"]],
+  ["a count", "let raw = hostValue\nrepeat raw.n {}\nexit\n", ["raw", "raw.n"]],
+  ["an argument", 'let raw = hostValue\nsay "abc".contains(raw.part)\nexit\n', ["raw", "raw.part"]],
+  [
+    "an operand that may be null",
+    'let maybe = "ok"\nif askBoolean("Clear?") { maybe = null }\nlet box = {v: maybe}\nlet n = box.v + "x"\nexit\n',
+    ["box.v"],
+  ],
+  ["an element", "let xs = [hostValue]\nsay xs[0].v.w\nexit\n", ["xs.element", "xs.element.v"]],
+  [
+    "a dict's entry",
+    'let d = dict{ a: hostValue }\nsay d["a"].v.w\nexit\n',
+    ["d.entry", "d.entry.v"],
+  ],
+  [
+    "a call's result",
+    "function f {\n  return hostValue\n}\nsay f().v.w\nexit\n",
+    ["f.result", "f.result.v"],
+  ],
+  ["an anonymous value's own text", "say [hostValue][0].v\nexit\n", ["[hostValue][0]"]],
+  [
+    "a dict's values, a new list each read",
+    "let d = dict{ a: hostValue }\nsay d.values[0].v\nexit\n",
+    ["d.values[0]"],
+  ],
+  [
+    "a fallback",
+    "let raw = hostValue\nlet n = 1\nlet k = n otherwise raw.m\nexit\n",
+    ["raw", "raw.m"],
+  ],
+  [
+    "a fallback's elements by depth",
+    "let raw = hostValue\nlet xs = [[1, 2]]\nlet ys = xs otherwise [[1], raw.b]\nexit\n",
+    [
+      "raw",
+      "ys.element",
+      "ys.element.element",
+      "[[1], raw.b].element",
+      "[[1], raw.b].element.element",
+    ],
+  ],
+  // (a written union whose other type lacks the member, the value here the one that has it: nothing shown)
+  ["a method's receiver, nothing shown", "let v: integer[] | string = [1]\nv.clear()\nexit\n", []],
+  [
+    "a member read's receiver, nothing shown",
+    "let v: object | string = {a: 1}\nsay v.a\nexit\n",
+    [],
+  ],
+  ["a store's receiver, nothing shown", "let v: object | string = {a: 1}\nv.a = 2\nexit\n", []],
+  [
+    "a method's receiver below properties, nothing shown",
+    "let xs: integer[] | string = [1]\nlet v = {inner: {xs: xs}}\nv.inner.xs.clear()\nexit\n",
+    [],
+  ],
+];
+
+test("a consumer's label makes its text only where its warning or check shows it: in every mode the labels shown are those published, each text made at most once in the pass", () => {
+  showsPublished(CONSUMER_CASES);
+});
+
+test("a consumer's labels grow with what they show: a read chain twice as deep asks each value's recipe once and makes each label it shows once, a quiet one none", () => {
+  const counts = [16, 32].map((n) => {
+    const shown = withLabelRecords(() =>
+      analyseCore(request(`let raw = hostValue\nsay raw${".a".repeat(n)}\nexit\n`)),
+    ).records;
+    const quiet = withLabelRecords(() =>
+      analyseCore(
+        request(
+          `let xs: integer${"[]".repeat(n)} = ${"[".repeat(n)}1${"]".repeat(n)}\nxs${"[0]".repeat(n - 1)}.add(2)\nlet k: integer = xs${"[0]".repeat(n)}\nexit\n`,
+        ),
+      ),
+    ).records;
+    const made = (records: readonly LabelRecord[]): string[] =>
+      records.flatMap((record) =>
+        record.kind === "text" && record.pass !== null && record.made ? [record.text ?? ""] : [],
+      );
+    return {
+      n,
+      asked: shown.filter((record) => record.kind === "recipe").length,
+      made: made(shown),
+      quiet: made(quiet),
+    };
+  });
+  for (const { n, made, quiet } of counts) {
+    assert.deepEqual(
+      made.sort(),
+      Array.from({ length: n - 1 }, (_, depth) => `raw${".a".repeat(depth + 1)}`).sort(),
+      `${n}: each label shown made once`,
+    );
+    assert.deepEqual(quiet, [], `${n}: a quiet chain makes no text`);
+  }
+  const [small, large] = counts;
+  assert.ok(large!.asked <= 2.2 * small!.asked, `${small!.asked} -> ${large!.asked} recipes asked`);
 });
 
 test("the recipes a decision makes grow with its path, not with its prefixes' texts: a chain twice as deep makes about twice the recipes and no text more than it shows", () => {
