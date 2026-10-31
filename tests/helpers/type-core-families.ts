@@ -2349,6 +2349,43 @@ function wideJoin(k: number, copied: boolean): readonly SourceFile[] {
   );
 }
 
+/**
+ * Codex r2's sibling: k copies of one record, each storing its own property below `depth` steps, joined in pairs `levels`
+ * times (pairs, then pairs of pairs), then all into one place, read at each property directly or through `copies`
+ * copies of the place; a read asks only the layer that lists its property's first step, never a joining one.
+ */
+function nestedJoin(k: number, { levels = 2, depth = 1, copies = 0 } = {}): readonly SourceFile[] {
+  const path = `${"g.".repeat(depth)}p`;
+  const out = [
+    `let seed = ${"{g: ".repeat(depth)}{z: 1}${"}".repeat(depth)}`,
+    rows(k, (i) => `let arm${i} = seed\narm${i}.${path}${i} = hostValue`),
+  ];
+  let tops = Array.from({ length: k }, (_, i) => `arm${i}`);
+  for (let level = 1; level <= levels; level++) {
+    const pairs = Array.from({ length: tops.length / 2 }, (_, i) => `join${level}_${i}`);
+    out.push(
+      rows(
+        pairs.length,
+        (i) => `let ${pairs[i]} = ${tops[2 * i]}\n${pairs[i]} = ${tops[2 * i + 1]}`,
+      ),
+    );
+    tops = pairs;
+  }
+  out.push(`let place = ${tops[0]}`, ...tops.slice(1).map((top) => `place = ${top}`));
+  let read = "place";
+  for (let i = 1; i <= copies; i++) {
+    out.push(`let copy${i} = ${read}`);
+    read = `copy${i}`;
+  }
+  return main(
+    lines(
+      ...out,
+      rows(k, (i) => `repeat ${read}.${path}${i} {}`),
+      "exit",
+    ),
+  );
+}
+
 export const LAYER_FAMILIES: readonly WorkFamily[] = [
   {
     name: "diamonds",
@@ -2390,6 +2427,34 @@ export const LAYER_FAMILIES: readonly WorkFamily[] = [
     name: "wide-join-copied",
     measures: "Codex r1's B1, one layer down: the same join read through a copy of the place",
     program: (k) => wideJoin(k, true),
+  },
+  {
+    name: "nested-join",
+    measures:
+      "Codex r2's sibling: the copies joined in pairs of pairs, then into one place, read at each",
+    program: (k) => nestedJoin(k),
+  },
+  {
+    name: "nested-join-copied",
+    measures: "Codex r2's sibling: the pairs of pairs read through a copy of the place",
+    program: (k) => nestedJoin(k, { copies: 1 }),
+  },
+  {
+    name: "nested-join-deep",
+    measures: "Codex r2's sibling: the pairs of pairs, each property below three steps",
+    program: (k) => nestedJoin(k, { depth: 3 }),
+  },
+  {
+    name: "nested-join-deep-copied",
+    measures:
+      "Codex r2's sibling: the pairs of pairs, each property below three steps, read through two copies",
+    program: (k) => nestedJoin(k, { depth: 3, copies: 2 }),
+  },
+  {
+    name: "nested-join-witness",
+    measures:
+      "Codex r2's witness: the copies joined in pairs, then into one place, read through a copy",
+    program: (k) => nestedJoin(k, { levels: 1, copies: 1 }),
   },
   {
     name: "diamonds-unequal-depth",

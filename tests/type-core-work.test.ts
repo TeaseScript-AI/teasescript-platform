@@ -197,6 +197,22 @@ test("a stack of diamonds of copies and its siblings grow with the program in ei
 });
 
 /**
+ * #1466, Codex r2's sibling: a read below nested joins asks only the layer listing its property's first step, never a
+ * joining layer it passes through, so the summaries' demands are one per property: k, at each size and in either order
+ * (r4.227's bound for these families, a regression oracle of the selection).
+ */
+test("a read below nested joins asks only the layers listing its path (#1466)", () => {
+  for (const family of LAYER_FAMILIES.filter((each) => each.name.startsWith("nested-join")))
+    for (const k of [8, 16, 32, 64])
+      for (const reversed of [false, true])
+        assert.equal(
+          analysed(sized(family, k), reversed).budget.facts.layerDemands,
+          k,
+          `${family.name} at ${k}${reversed ? " reversed" : ""}`,
+        );
+});
+
+/**
  * Stage 3b's families (TABLE §13.3, W27–W34 and the tested-copy variant): the narrowing index built and every read's
  * narrowing (N2 with N5) and route (N3) asked, as S10's second part's consumers will ask them, in source order and
  * reversed with the solver's worklist; its total and each counter under the standard gate. The series to k = 1,024 is
