@@ -11,8 +11,9 @@
 // - `creation`: a folder made beside the baselines in that function, renamed into a folder of baselines (onto no
 //   folder or an empty one);
 // - `unproven`: none of these.
-// Any other use of an fs binding (passed on, stored, indexed by a computed name) is an escape. Also lists each child
-// process started and each module loaded by a computed name. Prints it all as one JSON object.
+// Any other use of an fs binding (passed on, stored, indexed by a computed name) is an escape. A child process the
+// tools start is an unproven site unless its form is one of `PROCESSES`, each proven to create and change no path.
+// Also lists each module loaded by a computed name. Prints it all as one JSON object.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,6 +50,59 @@ const WRITERS = new Map(
     open: [0],
   }),
 );
+/**
+ * The child processes the tools may start, each proven to create and change no path; any other is an unproven site:
+ * - the gate's lock holder: `bash -c` of exactly this script, given one argument, which it opens for reading only
+ *   (`9<` fails on an absent path and creates none), locks by its descriptor, and writes nothing but to /dev/null;
+ * - the runner's child: the runner's own module (`fork(fileURLToPath(import.meta.url), ["--child", …])`), with no
+ *   option but `execArgv` (a heap limit only), `serialization` and `stdio`: what it writes is this module's, so listed.
+ */
+const LOCK_HOLDER = 'exec 9< "$0" && flock 9 && echo held && exec cat > /dev/null';
+function allowedProcess(call, name, importedFrom) {
+  const [command, args, options] = call.arguments;
+  const elements = args !== undefined && ts.isArrayLiteralExpression(args) ? args.elements : [];
+  const only = (allowed) =>
+    options !== undefined &&
+    ts.isObjectLiteralExpression(options) &&
+    options.properties.every(
+      (property) =>
+        ts.isPropertyAssignment(property) && allowed(property.name.getText(), property.initializer),
+    );
+  if (
+    name === "spawn" &&
+    literal(command) === "bash" &&
+    elements.length === 3 &&
+    literal(elements[0]) === "-c" &&
+    literal(elements[1]) === LOCK_HOLDER &&
+    !ts.isSpreadElement(elements[2]) &&
+    only((key) => key === "stdio")
+  )
+    return "the gate's lock holder";
+  const self = command === undefined ? undefined : strip(command);
+  if (
+    name === "fork" &&
+    self !== undefined &&
+    ts.isCallExpression(self) &&
+    ts.isIdentifier(self.expression) &&
+    self.expression.text === "fileURLToPath" &&
+    ["url", "node:url"].includes(importedFrom(self.expression)) &&
+    self.arguments.length === 1 &&
+    self.arguments[0].getText() === "import.meta.url" &&
+    literal(elements[0]) === "--child" &&
+    only(
+      (key, value) =>
+        ["serialization", "stdio"].includes(key) ||
+        (key === "execArgv" &&
+          ts.isArrayLiteralExpression(value) &&
+          value.elements.every((element) =>
+            /^`--max-old-space-size=\$\{\w+\}`$/.test(element.getText()),
+          )),
+    )
+  )
+    return "the runner's own child";
+  return undefined;
+}
+
 /** The modules through which code runs that this list does not see. */
 const LOADERS = ["module", "node:module", "vm", "node:vm", "worker_threads", "node:worker_threads"];
 const opOf = (name) => (name.endsWith("Sync") ? name.slice(0, -4) : name);
@@ -570,6 +624,15 @@ export function inventory(checkout = process.cwd()) {
     return "unproven";
   };
 
+  /** The module an imported name comes from, else undefined. */
+  const importedFrom = (identifier) => {
+    const declaration = local(identifier)?.declarations?.[0];
+    const statement =
+      declaration !== undefined && ts.isImportSpecifier(declaration)
+        ? declaration.parent.parent.parent
+        : undefined;
+    return statement === undefined ? undefined : literal(statement.moduleSpecifier);
+  };
   const sites = [];
   const processes = [];
   for (const { call, of, name } of calls) {
@@ -578,8 +641,11 @@ export function inventory(checkout = process.cwd()) {
       ts.isIdentifier(callee) ? callee : (callee.name ?? callee.argumentExpression ?? callee),
     );
     const entry = { site: at, function: named(call), call: text(call) };
-    if (of === "processes") processes.push({ ...entry, process: name });
-    else if (writes(name, call))
+    if (of === "processes") {
+      const allowed = allowedProcess(call, name, importedFrom);
+      if (allowed !== undefined) processes.push({ ...entry, process: name, allowed });
+      else sites.push({ ...entry, write: name, kind: "unproven" });
+    } else if (writes(name, call))
       sites.push({ ...entry, write: name, kind: kindOf(call, opOf(name)) });
   }
   const loads = [];

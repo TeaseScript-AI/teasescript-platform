@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -424,35 +425,56 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     assert.equal(readFileSync(join(held, "other-agent", "data"), "utf8"), "x\n");
 
     // `prune` decides under the baseline's lock (#1542 r2: prune-versus-joining-writer): paused right after it read the
-    // MANIFEST whose only tree is gone, it retires the baseline; an alias writer that started meanwhile waits for the
-    // lock, finds the baseline retired and stores into a new one, which names its commit alone
-    const racing = join(directory, "racing");
-    const retired = tree("retired", "7", "", "racing\n");
-    const joining = tree("joining", "8", "", "racing\n");
-    assert.equal(store(retired, area, racing, "--shard", "0/2").status, 1);
-    rmSync(retired, { recursive: true });
-    const raced = join(racing, readdirSync(racing)[0]!);
-    const barrier = join(directory, "barrier.mjs");
-    writeFileSync(
-      barrier,
+    // MANIFEST whose only tree is gone, it retires the baseline, and an alias writer finds it retired and stores into a
+    // new one, which names its commit alone. In two orders, neither left to timing: the writer's lock holder has opened
+    // the folder, to wait for the lock, when prune goes on (the writer says so once the holder's descriptor is open); or
+    // the writer starts its lock holder only once prune has ended (held right before it), when a holder that locked the
+    // folder by its path made a file there
+    const pause = (at: string) =>
       `import fs from "node:fs";
+import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-const read = fs.readFileSync;
-let paused = false;
-fs.readFileSync = function (file, ...rest) {
-  const result = read.call(this, file, ...rest);
-  if (!paused && String(file) === process.env.PAUSE_MANIFEST) {
-    paused = true;
-    fs.writeFileSync(process.env.PAUSE_READY, "");
-    while (!fs.existsSync(process.env.PAUSE_RELEASE)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-  }
-  return result;
+const wait = () => {
+  fs.writeFileSync(process.env.PAUSE_READY, "");
+  while (!fs.existsSync(process.env.PAUSE_RELEASE)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
 };
+const [read, spawned] = [fs.readFileSync, childProcess.spawn];
+let paused = false;
+${
+  at === "read"
+    ? `fs.readFileSync = function (file, ...rest) {
+  const result = read.call(this, file, ...rest);
+  if (!paused && String(file) === process.env.PAUSE_MANIFEST) (paused = true), wait();
+  return result;
+};`
+    : at === "opened"
+      ? `childProcess.spawn = function (...args) {
+  const child = spawned.apply(this, args);
+  // (the holder has the folder open, or has ended)
+  const open = () => {
+    try {
+      if (fs.readFileSync("/proc/" + child.pid + "/stat", "utf8").split(") ")[1].startsWith("Z")) return true;
+      return fs
+        .readdirSync("/proc/" + child.pid + "/fd")
+        .some((fd) => fs.readlinkSync("/proc/" + child.pid + "/fd/" + fd) === process.env.PAUSE_FOLDER);
+    } catch {
+      return true;
+    }
+  };
+  if (!paused) {
+    paused = true;
+    while (!open()) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+    fs.writeFileSync(process.env.PAUSE_READY, "");
+  }
+  return child;
+};`
+      : `childProcess.spawn = function (...args) {
+  if (!paused) (paused = true), wait();
+  return spawned.apply(this, args);
+};`
+}
 syncBuiltinESMExports();
-`,
-    );
-    const ready = join(directory, "ready");
-    const release = join(directory, "release");
+`;
     const background = (args: string[], env: NodeJS.ProcessEnv = process.env) => {
       const child = spawn(process.execPath, args, { env, stdio: ["ignore", "pipe", "ignore"] });
       let stdout = "";
@@ -461,29 +483,57 @@ syncBuiltinESMExports();
         child.on("close", (status) => done({ status, stdout })),
       );
     };
-    const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
-    const pruning = background(["--import", barrier, baselines, "prune", racing], {
-      ...process.env,
-      PAUSE_MANIFEST: join(raced, "MANIFEST"),
-      PAUSE_READY: ready,
-      PAUSE_RELEASE: release,
-    });
-    while (!existsSync(ready)) await sleep(10);
-    const writing = background([runner, area, joining, "--store", racing, "--shard", "1/2"]);
-    await sleep(50);
-    writeFileSync(release, "");
-    const [prunedRace, wrote] = await Promise.all([pruning, writing]);
-    assert.match(prunedRace.stdout, /"pruned"/);
-    assert.equal(wrote.status, 1);
-    assert.match(wrote.stdout, /"verified":true/);
-    assert.deepEqual(readdirSync(racing), [raced.split("/").at(-1)]);
-    assert.deepEqual(
-      readFileSync(join(raced, "MANIFEST"), "utf8")
-        .split("\n")
-        .filter((line) => line.startsWith("commit ")),
-      [`commit ${"8".repeat(40)} ${joining}`],
-    );
-    assert.deepEqual(states(state(joining, racing)), ["area partial 1"]);
+    const until = async (done: () => boolean) => {
+      while (!done()) await new Promise((next) => setTimeout(next, 10));
+    };
+    for (const order of ["waiting", "late"]) {
+      const racing = join(directory, `racing-${order}`);
+      const retired = tree(`retired-${order}`, "7", "", "racing\n");
+      const joining = tree(`joining-${order}`, "8", "", "racing\n");
+      assert.equal(store(retired, area, racing, "--shard", "0/2").status, 1);
+      rmSync(retired, { recursive: true });
+      const raced = join(racing, readdirSync(racing)[0]!);
+      const preloads = ["read", order === "waiting" ? "opened" : "spawn"].map((at) => {
+        const file = join(directory, `pause-${order}-${at}.mjs`);
+        writeFileSync(file, pause(at));
+        return file;
+      });
+      const named = (name: string) => join(directory, `${order}-${name}`);
+      const [ready, release, held, go] = [
+        named("ready"),
+        named("release"),
+        named("held"),
+        named("go"),
+      ];
+      const pruning = background(["--import", preloads[0]!, baselines, "prune", racing], {
+        ...process.env,
+        PAUSE_MANIFEST: join(raced, "MANIFEST"),
+        PAUSE_READY: ready,
+        PAUSE_RELEASE: release,
+      });
+      await until(() => existsSync(ready));
+      const writing = background(
+        ["--import", preloads[1]!, runner, area, joining, "--store", racing, "--shard", "1/2"],
+        { ...process.env, PAUSE_READY: held, PAUSE_RELEASE: go, PAUSE_FOLDER: raced },
+      );
+      await until(() => existsSync(held));
+      writeFileSync(release, "");
+      const prunedRace = await pruning;
+      writeFileSync(go, "");
+      const wrote = await writing;
+      assert.match(prunedRace.stdout, /"pruned"/);
+      assert.equal(wrote.status, 1);
+      assert.match(wrote.stdout, /"verified":true/);
+      assert.deepEqual(readdirSync(racing), [raced.split("/").at(-1)]);
+      assert.equal(statSync(raced).isDirectory(), true);
+      assert.deepEqual(
+        readFileSync(join(raced, "MANIFEST"), "utf8")
+          .split("\n")
+          .filter((line) => line.startsWith("commit ")),
+        [`commit ${"8".repeat(40)} ${joining}`],
+      );
+      assert.deepEqual(states(state(joining, racing)), ["area partial 1"]);
+    }
 
     // a shard cut short (#1542 r1) no longer verifies, and any writer replaces it
     const second = join(baseline, "1of2.runs.jsonl");
@@ -557,6 +607,7 @@ type Site = {
   code?: string;
   write?: string;
   kind?: string;
+  allowed?: string;
 };
 type Inventory = {
   modules: string[];
@@ -589,13 +640,13 @@ test("the stored baselines' tools write into a baseline only through its gate, e
     sites.filter(({ kind }) => kind === "creation").map((site) => site.function),
     ["owned"],
   );
-  // the child processes: the gate's lock holder, which writes to /dev/null only, and the runner's own child; the
-  // modules loaded by a computed name are a tree's oracle library and an area's generators, which are no tool's
-  for (const { call } of processes)
-    assert.match(
-      call ?? "",
-      /^(spawn\("flock", \[\w+, "-c", "[^">]*> \/dev\/null"\]|fork\( ?fileURLToPath\(import\.meta\.url\),)/,
-    );
+  // the child processes, each of a form the inventory proves creates and changes no path (any other is an unproven
+  // site); the modules loaded by a computed name are a tree's oracle library and an area's generators, which are no
+  // tool's
+  assert.deepEqual(
+    processes.map((process) => process.allowed),
+    ["the gate's lock holder", "the runner's own child"],
+  );
   assert.deepEqual(
     loads.map((load) => load.function),
     ["oracles", "generatorsOf"],
@@ -629,8 +680,9 @@ test("the stored baselines' tools write into a baseline only through its gate, e
   );
 
   // over a copy of the tools: a write added to an imported helper (#1542 r4: imported-helper-write) and writes
-  // through each kind of binding are found, unproven, as is one that climbs out of a folder beside the baselines; an
-  // fs binding passed on, exported or destructured otherwise, a module loader and code from text are escapes
+  // through each kind of binding are found, unproven, as are one that climbs out of a folder beside the baselines and
+  // child processes of no allowed form (`flock` on a path, which creates it where it is absent); an fs binding passed
+  // on, exported or destructured otherwise, a module loader and code from text are escapes
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     for (const file of [
@@ -651,6 +703,7 @@ import fs, { writeFileSync as written, promises } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
+import { execSync, spawn } from "node:child_process";
 import { beside, outside } from "./baselines.mjs";
 const { appendFileSync } = everything;
 const renamed = promisify(fs.rename);
@@ -679,6 +732,9 @@ export function climb(root) {
   process.getBuiltinModule("node:fs").rmdirSync(root);
   const { promises: { rm } } = fs;
   eval("0");
+  spawn("flock", [root, "-c", "true"]);
+  spawn("bash", ["-c", 'touch "$0"', root], { stdio: "ignore" });
+  execSync("touch notes");
   return [rm, Worker];
 }
 `,
@@ -721,6 +777,9 @@ if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
           "rmSync",
           "rmSync",
           "rmdirSync",
+          "spawn",
+          "spawn",
+          "execSync",
         ].map((write) => `tests/families/sources.mjs ${write}`),
       ],
     );
