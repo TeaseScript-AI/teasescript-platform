@@ -293,9 +293,8 @@ test("the corpus runner compares a head with a stored baseline as with the base 
     );
 
     // one stored hash altered and one source removed: a difference, and the removed source's runs uncompared
-    const entries = readFileSync(stored, "utf8")
-      .trim()
-      .split("\n")
+    const lines = readFileSync(stored, "utf8").trim().split("\n");
+    const entries = lines
       .map((line) => JSON.parse(line))
       .filter(({ source }) => source !== "changed");
     entries.find(({ source }) => source === "same").runs["src-on publication"].value.hash =
@@ -316,6 +315,15 @@ test("the corpus runner compares a head with a stored baseline as with the base 
         ],
       ],
     );
+
+    // the unaltered result in a second file: a source stored twice with other results is no baseline
+    const same = lines.find((line) => JSON.parse(line).source === "same");
+    writeFileSync(join(baseline, "z.runs.jsonl"), `${same}\n`);
+    const twice = spawnSync(process.execPath, [runner, area, head!, "--baseline", baseline], {
+      encoding: "utf8",
+    });
+    assert.equal(twice.status, 2);
+    assert.match(twice.stderr, /"same".* is stored twice, with other results/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

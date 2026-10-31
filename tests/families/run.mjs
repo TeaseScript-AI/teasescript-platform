@@ -295,7 +295,7 @@ if (process.argv[2] === "--child") {
   }
   /** A source's place in a baseline: its generator, its name and its key, so that an edited source is a new one. */
   const placeOf = (name, source) => JSON.stringify([name, source.name, sourceKey(source)]);
-  /** The stored runs of this shard's sources, by their place, from the baseline's `*.runs.jsonl` files. */
+  /** The stored runs of this shard's sources (each its line), by their place, from the baseline's `*.runs.jsonl`. */
   const stored = new Map();
   if (baseline !== undefined) {
     const files = existsSync(baseline)
@@ -312,9 +312,15 @@ if (process.argv[2] === "--child") {
       for await (const line of createInterface({
         input: createReadStream(path.join(baseline, file)),
       })) {
-        const entry = JSON.parse(line);
-        const place = JSON.stringify([entry.generator, entry.source, entry.key]);
-        if (places.has(place)) stored.set(place, entry);
+        const { generator, source, key } = JSON.parse(line);
+        const place = JSON.stringify([generator, source, key]);
+        if (!places.has(place)) continue;
+        // a source stored twice with other results has no one baseline
+        if (stored.has(place) && stored.get(place) !== line) {
+          console.error(`${place} is stored twice, with other results, in ${baseline}`);
+          process.exit(2);
+        }
+        stored.set(place, line);
       }
   }
   if (store !== undefined) writeFileSync(store, "");
@@ -339,7 +345,8 @@ if (process.argv[2] === "--child") {
       row.sources += 1;
       const reply = await analysed({ files: source.files, checks, globals: source.globals });
       const inputs = { files: source.files, globals: source.globals };
-      const kept = stored.get(placeOf(name, source));
+      const line = stored.get(placeOf(name, source));
+      const kept = line === undefined ? undefined : JSON.parse(line);
       const results = {};
       const uncompared = [];
       // the runs that ended count, those of a source that stalls or throws after them included
@@ -374,13 +381,15 @@ if (process.argv[2] === "--child") {
         const entry = { generator: name, source: source.name, key, stalled, thrown: failed };
         appendFileSync(store, `${JSON.stringify({ ...entry, runs: results })}\n`);
       }
+      // (with a baseline, one tree may stall where the other threw)
       if (stalled !== undefined) {
         row.stalled += 1;
         record({ generator: name, source: source.name, stalled, ...inputs });
-      } else if (failed !== undefined) {
+      }
+      if (failed !== undefined) {
         row.exceptions += 1;
         thrown({ generator: name, source: source.name, thrown: failed }, source);
-      } else if (!reply.parsed) row.unparsed += 1;
+      } else if (stalled === undefined && !reply.parsed) row.unparsed += 1;
     }
     console.log(JSON.stringify(row));
     total.generators += 1;
