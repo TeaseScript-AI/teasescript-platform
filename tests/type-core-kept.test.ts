@@ -46,7 +46,7 @@ const FORMS: readonly (readonly [string, RegExp])[] = [
 
 /** The constructions outside the helpers, by file, member and form: how many, and why they need no charge. */
 const LISTED: Readonly<Record<string, readonly [number, string]>> = {
-  "admission/structure.ts collect spread": [
+  "admission/structure.ts listOf spread": [
     1,
     "the list of the paths collected, each made by a kept helper",
   ],

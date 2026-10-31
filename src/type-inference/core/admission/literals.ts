@@ -41,7 +41,14 @@ import type { Join, JoinDecided, OwnStructure } from "./model.js";
 import { ownOf } from "./own.js";
 import { joinedDomain, permittedAt, unrestricted } from "./permitted.js";
 import { earliestDecider } from "./scan.js";
-import { literalLanding, pathsBelow, sharedPaths, sourceOf, valueStructure } from "./structure.js";
+import {
+  expectStructures,
+  holdsSource,
+  literalLanding,
+  pathsBelow,
+  sharedPaths,
+  sourceOf,
+} from "./structure.js";
 import { touchCopy, touchesOf, touchOf, touchRead } from "./touches.js";
 import { writtenSource } from "./walk.js";
 
@@ -248,17 +255,27 @@ export function literalElements(
   const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
   // a named element: one whose structure holds a source (a copy, a call, what a carrier takes of either)
   const named = (d: Definition): boolean =>
-    d.value !== undefined && valueStructure(admission, d.value).sources.length > 0;
+    d.value !== undefined && holdsSource(admission, d.value);
   // per landing and the distinct groups of a literal's elements' contracts (flow-insensitive: by source identity,
   // class or a typed ingress's type and default, `conflictGroups`), the paths below them where their contracts hold
   // more than one kind: only there can one element offend another (F2)
   const conflicts = new Map<string, readonly (readonly string[])[]>();
   // (per key, the paths where what the elements definitely hold meets, A2's)
   const atCopies = new Map<string, ReadonlySet<string>>();
+  // (a literal of two elements or more that lands in no written type: its elements are compared)
+  const compared = (cell: PlaceId, list: readonly Definition[]): boolean => {
+    const owner = program.cellOwner.get(cell);
+    return owner?.kind === "cell" && list.length >= 2 && contract.landsIn(owner.owner, []) === null;
+  };
+  // (the compared elements' own structures, announced before any is asked, so a nest of them is listed inside first
+  // whichever cell the order takes first: #1444)
+  const elements = [...definitions.cellDefs].flatMap(([cell, list]) =>
+    compared(cell, list) ? list.flatMap((d) => (d.value === undefined ? [] : [d.value])) : [],
+  );
+  expectStructures(admission, elements);
   cells: for (const [cell, list] of order([...definitions.cellDefs])) {
     const owner = program.cellOwner.get(cell);
-    if (owner?.kind !== "cell" || list.length < 2 || contract.landsIn(owner.owner, []) !== null)
-      continue;
+    if (!compared(cell, list) || owner?.kind !== "cell") continue;
     if (undecided !== undefined && list.some(named)) {
       undecided(cell);
       continue;
@@ -752,7 +769,7 @@ export function joinElements(
         ({ operand }) =>
           contract.copiedKey(operand) !== null ||
           contract.resultKey(operand) !== null ||
-          valueStructure(admission, operand).sources.length > 0,
+          holdsSource(admission, operand),
       )
     ) {
       reports.push(() => undecided(root.result));

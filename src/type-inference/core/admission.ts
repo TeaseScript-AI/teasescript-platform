@@ -300,6 +300,8 @@ export class Admission {
   readonly structures = new Map<string, Structure>();
   /** Each value's own structure read below a strip, per side (`composed`), from its parts'. */
   readonly structureParts = new Map<string, Composed>();
+  /** The stored values' own structures a consumer announced it will ask (`expectStructures`), listed inside first. */
+  readonly expected = new Set<Composed>();
   readonly depths = new Map<CanonicalKey, number>();
   keyBound: number | null = null;
   below: Map<CanonicalKey, Steps[]> | null = null;

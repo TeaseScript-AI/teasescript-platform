@@ -69,6 +69,27 @@ export function valueStructure(admission: Admission, value: PlaceId): Structure 
 }
 
 /**
+ * Whether a stored value's own structure holds a source (a copy, a call, what a carrier takes of either), from its
+ * composed structure, never listed for the question.
+ */
+export function holdsSource(admission: Admission, value: PlaceId): boolean {
+  return composed(admission, value, [], false).sourced;
+}
+
+/**
+ * The stored values whose own structures a consumer will ask (`valueStructure`), whichever it asks first: a walk that
+ * meets one inside the value it lists lists that one first, relative to its own path, and keeps it, so a nest of them
+ * is walked once in any order of the questions (#1444). A value no consumer announced is walked where it stands, never
+ * listed for a value around it: where each value of a nest adds a path, its own list would repeat the nest inside it.
+ */
+export function expectStructures(admission: Admission, values: Iterable<PlaceId>): void {
+  for (const value of values) {
+    const own = composed(admission, value, [], false);
+    if (!own.empty) admission.expected.add(own);
+  }
+}
+
+/**
  * A source key's own structure (F2): the elements, at every depth, of the values stored at it or at a prefix of it (an
  * add's below its element), cut to the key's path, and of the keys below it with stores. A copied record's fields are
  * none of it: they are admitted at their first read (A2, TABLE q12).
@@ -147,10 +168,7 @@ function collect(
   elements = false,
 ): Structure {
   const paths = new Map<string, readonly string[]>();
-  const sources = new Map<
-    string,
-    { readonly below: readonly string[]; readonly key: CanonicalKey }
-  >();
+  const sources = new Map<string, Source>();
   // (each path's text charged by its size before it is made, TABLE r4.58)
   for (const at of levels)
     for (let length = 1; length <= at.length; length += 1) {
@@ -160,61 +178,97 @@ function collect(
     }
   for (const { value, at, strip } of roots)
     joinInto(admission, paths, sources, composed(admission, value, strip, elements), at);
+  return listOf(paths, sources);
+}
+
+type Source = Structure["sources"][number];
+
+/** The paths and sources put in `paths` and `sources`, in their order. */
+function listOf(paths: Map<string, readonly string[]>, sources: Map<string, Source>): Structure {
   return { paths: [...paths.values()], sources: [...sources.values()] };
 }
 
 /**
  * A value's own structure at its path, read below a strip (`composed`): its own paths and sources below that path, and
- * its parts' structures where each stands, by reference, in the walk's order; listed at the root that asks it
- * (`joinInto`), never copied into each value around it, and kept listed where a value's own structure asked it
- * (`valueStructure`), so a value around it takes that list instead of walking its parts again.
+ * its parts' structures where each stands, by reference, in the walk's order; whether a source stands among them or
+ * below a part (`holdsSource`); listed at the root that asks it (`joinInto`), never copied into each value around it,
+ * and kept listed where a value's own structure asked it (`valueStructure`) or a consumer announced it will
+ * (`expectStructures`), so a value around it takes that list instead of walking its parts again.
  */
 export interface Composed {
   readonly entries: readonly (
     | { readonly path: readonly string[] }
-    | { readonly source: { readonly below: readonly string[]; readonly key: CanonicalKey } }
+    | { readonly source: Source }
     | { readonly part: Composed; readonly at: readonly string[] }
   )[];
   readonly empty: boolean;
+  readonly sourced: boolean;
   listed: Structure | null;
 }
 
-const NO_STRUCTURE: Composed = { entries: [], empty: true, listed: null };
+const NO_STRUCTURE: Composed = { entries: [], empty: true, sourced: false, listed: null };
 
 /**
  * A composed structure's paths and sources below `at`, put in `paths` and `sources` where they are not yet, in the
- * walk's order (on an explicit stack; a part met again at the same place lists nothing new).
+ * walk's order (on an explicit stack; a part met again at the same place lists nothing new). A part a consumer
+ * announced (`expectStructures`) and not yet listed is listed first, on its own walk relative to its own path, and
+ * kept, then taken from its list as one already listed is.
  */
 function joinInto(
   admission: Admission,
   paths: Map<string, readonly string[]>,
-  sources: Map<string, { readonly below: readonly string[]; readonly key: CanonicalKey }>,
+  sources: Map<string, Source>,
   from: Composed,
   at: readonly string[],
 ): void {
   const work = admission.pass.program.work;
-  const visited = new Map<Composed, Set<readonly string[]>>();
-  const stack: { readonly node: Composed; readonly at: readonly string[]; next: number }[] = [
-    { node: from, at, next: 0 },
+  interface Walk {
+    /** The announced part this walk lists, `null` for the root's. */
+    readonly owner: Composed | null;
+    readonly paths: Map<string, readonly string[]>;
+    readonly sources: Map<string, Source>;
+    readonly visited: Map<Composed, Set<readonly string[]>>;
+    readonly stack: { readonly node: Composed; readonly at: readonly string[]; next: number }[];
+  }
+  const walks: Walk[] = [
+    { owner: null, paths, sources, visited: new Map(), stack: [{ node: from, at, next: 0 }] },
   ];
-  while (stack.length > 0) {
-    const frame = stack.at(-1)!;
-    if (frame.next >= frame.node.entries.length) {
-      stack.pop();
+  while (walks.length > 0) {
+    const current = walks.at(-1)!;
+    const frame = current.stack.at(-1);
+    if (frame === undefined) {
+      walks.pop();
+      if (current.owner !== null) current.owner.listed = listOf(current.paths, current.sources);
       continue;
     }
-    const entry = frame.node.entries[frame.next++]!;
+    if (frame.next >= frame.node.entries.length) {
+      current.stack.pop();
+      continue;
+    }
+    const entry = frame.node.entries[frame.next]!;
+    // (an announced part not yet listed: its own list first, this entry met again after it)
+    if ("part" in entry && entry.part.listed === null && admission.expected.has(entry.part)) {
+      walks.push({
+        owner: entry.part,
+        paths: new Map(),
+        sources: new Map(),
+        visited: new Map(),
+        stack: [{ node: entry.part, at: [], next: 0 }],
+      });
+      continue;
+    }
+    frame.next += 1;
     work.charge("checks");
     if ("path" in entry) {
       const below =
         frame.at.length === 0 ? entry.path : keptSteps(admission.work, frame.at, entry.path);
       const name = keptText(admission.work, below);
-      if (!paths.has(name)) paths.set(name, below);
+      if (!current.paths.has(name)) current.paths.set(name, below);
     } else if ("source" in entry) {
       const { below: within, key } = entry.source;
       const below = frame.at.length === 0 ? within : keptSteps(admission.work, frame.at, within);
       const name = keptParts(admission.work, below, key);
-      if (!sources.has(name)) sources.set(name, { below, key });
+      if (!current.sources.has(name)) current.sources.set(name, { below, key });
     } else if (!entry.part.empty) {
       const below =
         entry.at.length === 0
@@ -222,26 +276,26 @@ function joinInto(
           : frame.at.length === 0
             ? entry.at
             : keptSteps(admission.work, frame.at, entry.at);
-      let seen = visited.get(entry.part);
-      if (seen === undefined) visited.set(entry.part, (seen = new Set()));
+      let seen = current.visited.get(entry.part);
+      if (seen === undefined) current.visited.set(entry.part, (seen = new Set()));
       if (seen.has(below)) continue;
       seen.add(below);
       const listed = entry.part.listed;
       if (listed === null) {
-        stack.push({ node: entry.part, at: below, next: 0 });
+        current.stack.push({ node: entry.part, at: below, next: 0 });
         continue;
       }
       for (const path of listed.paths) {
         work.charge("checks");
         const at = below.length === 0 ? path : keptSteps(admission.work, below, path);
         const name = keptText(admission.work, at);
-        if (!paths.has(name)) paths.set(name, at);
+        if (!current.paths.has(name)) current.paths.set(name, at);
       }
       for (const { below: within, key } of listed.sources) {
         work.charge("checks");
         const at = below.length === 0 ? within : keptSteps(admission.work, below, within);
         const name = keptParts(admission.work, at, key);
-        if (!sources.has(name)) sources.set(name, { below: at, key });
+        if (!current.sources.has(name)) current.sources.set(name, { below: at, key });
       }
     }
   }
@@ -357,11 +411,15 @@ function composed(
     stack.pop();
     // (one part's structure at the value's own path, the value adding nothing: taken whole)
     const entries: Composed["entries"][number][] = [];
+    let sourced = false;
     for (const entry of frame.entries)
-      if (!("part" in entry)) entries.push(entry);
-      else {
+      if (!("part" in entry)) {
+        entries.push(entry);
+        sourced ||= "source" in entry;
+      } else {
         const part = admission.structureParts.get(frame.parts[entry.part]!.name)!;
         if (!part.empty) entries.push({ part, at: entry.at });
+        sourced ||= part.sourced;
       }
     let made: Composed;
     const [lone] = entries;
@@ -369,7 +427,7 @@ function composed(
     else if (entries.length === 1 && "part" in lone! && lone.at.length === 0) made = lone.part;
     else {
       keep(admission.work, 1 + entries.length);
-      made = { entries, empty: false, listed: null };
+      made = { entries, empty: false, sourced, listed: null };
     }
     admission.structureParts.set(frame.name, made);
   }
