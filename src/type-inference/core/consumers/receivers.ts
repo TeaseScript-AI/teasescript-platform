@@ -2,7 +2,7 @@ import type { PlaceId, SourceSite } from "../../graph.js";
 import { concrete, isExternal, isOpaque } from "../admission.js";
 import { joinParts, joinSteps, keepText } from "../budget.js";
 import type { Consumers } from "../consumers.js";
-import { MEMBER_KINDS, REFERENCE } from "../contract.js";
+import { MEMBER_KINDS, presenceSteps, REFERENCE, type PresenceStep } from "../contract.js";
 import { labelBelow, labelRoot } from "../contract/labels.js";
 import { keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
@@ -206,29 +206,29 @@ function propertyPresence(
   let has = false;
   let unknown = false;
   let literal: Writer | null = null;
-  // a source without the property gives `missing`; an unknown value of a present property says nothing of it
-  const see = (all: readonly Item[]): void => {
-    // an empty source supplies no object
-    const items = withoutEmpty(all);
-    if (items.length === 0) return;
-    for (const item of items)
-      if (item.tag === "unknown" && (item.reasons & REASON.missing) !== 0) {
-        lacks = true;
-        literal = firstWriter(literal, item.writer);
-      }
-    if (items.some((item) => !(item.tag === "unknown" && item.reasons === REASON.missing)))
-      has = true;
-    if (items.some((item) => item.tag === "unknown" && item.reasons !== REASON.missing))
-      unknown = true;
+  // the state after a source, or after a run of them read in order (`presenceSteps`)
+  const take = (step: PresenceStep): void => {
+    lacks = (step.mask & 1) !== 0;
+    has = (step.mask & 2) !== 0;
+    unknown ||= step.unknown;
+    literal = firstWriter(literal, step.literal);
   };
+  const see = (items: readonly Item[]): void =>
+    take(presenceSteps(items)[(lacks ? 1 : 0) | (has ? 2 : 0)]!);
   for (let length = path.length; length >= 0 && !(lacks && has); length -= 1) {
     program.work.charge("checks");
     const stored = contract.prefixStores(keyOf(keyPlace(receiver), path.slice(0, length)));
     const below = joinSteps(path.slice(length), [property]);
     for (const entry of stored.list)
       if (!(lacks && has)) see(walk.run(contract.entryAt(entry, below)));
-    for (const sub of contract.relevantSubs(stored, below))
-      if (!(lacks && has)) see(walk.run(contract.subAt(sub.key, below)));
+    if (lacks && has) break;
+    // (the prefix's layers' sources in order, as their summary's steps, #1466; each by itself where it declines)
+    const state = (lacks ? 1 : 0) | (has ? 2 : 0);
+    const after = contract.summaryPresence(stored, below, state, (work) => walk.run(work));
+    if (after !== null) take(after);
+    else
+      for (const sub of contract.relevantSubs(stored, below))
+        if (!(lacks && has)) see(walk.run(contract.subAt(sub.key, below)));
   }
   const presence = { state: lacks ? (has ? "some" : "none") : "all", literal, unknown } as const;
   keepText(program.work, memoKey.length);
