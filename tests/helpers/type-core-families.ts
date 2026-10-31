@@ -2297,6 +2297,99 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
+ * #1466's stack of k diamonds of copies (`topologySources`' `diamond`; TABLE r4.224, r4.227): each copies one object
+ * into two places, stores into one of them and replaces the next place by the other, every next place read; and its
+ * siblings: both places stored, the replacing order reversed, every second right place a shared ancestor, the next place
+ * written `object` with a misfitting store, the reads guarded, and the branches of unequal depth (Astra's design review).
+ * A read below the shared layers is answered once per layer and path from the layers below it (`prefix-index.ts`), so
+ * each grows as k log k where `main` grew as k³.
+ */
+function diamonds(
+  k: number,
+  { both = false, reverse = false, shared = false, typed = false, guarded = false } = {},
+): readonly SourceFile[] {
+  return main(
+    lines(
+      "let d0 = {f: hostValue, g: 1}",
+      ...(shared ? ["let shared = d0"] : []),
+      rows(k, (i) => {
+        const [first, second] = reverse ? [`r${i}`, `l${i}`] : [`l${i}`, `r${i}`];
+        return lines(
+          `let l${i} = d${i}`,
+          `let r${i} = ${shared && i % 2 === 1 ? "shared" : `d${i}`}`,
+          `l${i}.g = ${typed ? '"bad"' : "hostValue"}`,
+          ...(both ? [`r${i}.g = hostValue`] : []),
+          `let d${i + 1}${typed ? ": object" : ""} = ${first}`,
+          `d${i + 1} = ${second}`,
+        );
+      }),
+      rows(k, (i) =>
+        guarded ? `if d${i + 1}.g != null { repeat d${i + 1}.g {} }` : `repeat d${i + 1}.g {}`,
+      ),
+      "exit",
+    ),
+  );
+}
+
+export const LAYER_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "diamonds",
+    measures: "#1466: a stack of k diamonds of copies",
+    program: (k) => diamonds(k),
+  },
+  {
+    name: "diamonds-both",
+    measures: "#1466: each diamond storing into both places",
+    program: (k) => diamonds(k, { both: true }),
+  },
+  {
+    name: "diamonds-reversed",
+    measures: "#1466: each next place replaced by the stored one",
+    program: (k) => diamonds(k, { reverse: true }),
+  },
+  {
+    name: "diamonds-shared",
+    measures: "#1466: every second right place a copy of one shared ancestor",
+    program: (k) => diamonds(k, { shared: true }),
+  },
+  {
+    name: "diamonds-typed",
+    measures: "#1466: every next place written `object`, each stored place's property misfitting",
+    program: (k) => diamonds(k, { typed: true }),
+  },
+  {
+    name: "diamonds-guarded",
+    measures: "#1466: every read guarded",
+    program: (k) => diamonds(k, { guarded: true }),
+  },
+  {
+    name: "diamonds-unequal-depth",
+    measures:
+      "#1466, Astra's design review: branches of one to two and two to four copies, both stored",
+    program: (k) =>
+      main(
+        lines(
+          "let d0 = {f: hostValue, g: 1}",
+          rows(k, (i) => {
+            const left = Array.from({ length: 1 + (i % 2) }, (_, j) => `l${i}x${j}`);
+            const right = Array.from({ length: 2 + (i % 3) }, (_, j) => `r${i}x${j}`);
+            return lines(
+              ...left.map((name, j) => `let ${name} = ${j === 0 ? `d${i}` : left[j - 1]}`),
+              ...right.map((name, j) => `let ${name} = ${j === 0 ? `d${i}` : right[j - 1]}`),
+              `${left.at(-1)}.g = hostValue`,
+              `${right.at(-1)}.g = hostValue`,
+              `let d${i + 1} = ${left.at(-1)}`,
+              `d${i + 1} = ${right.at(-1)}`,
+            );
+          }),
+          rows(k, (i) => `repeat d${i + 1}.g {}`),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
  * Admission's hot-candidate discovery by touch tries (#1188, its design note's §1.3 and §4.1): one family per context
  * that listed a contribution again before the tries, each beside a wide typed root. A place merging two copies, each
  * then copied beside a second wide record; a literal of a plain wide record beside k such merges (Sol r2); k
