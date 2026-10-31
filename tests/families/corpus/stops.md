@@ -16,6 +16,10 @@ outside the repository").
   keeps an analysis's exception as its own row and exits 1 on it, and `labels-compare.py` counts such rows apart and
   rejects them (#1494). Its `canary-1494.sh` checks that; its changed files stay beside it as `<file>.pre-1494`
   (`PORTED-1494.md`).
+- `desktop:~/work/evidence/corpus/stops/astra-1487/`: Astra's r1 of #1487; its `README.md` gives the commands. Its
+  stalled replay (`builder-scripts/stalled-rerun.mjs`) and single-source readers (`scripts/one-source-strict.mjs`,
+  `{scripts,builder-scripts}/one-family-source.mjs`) keep an exception apart, unhashed, and exit 1 on it (#1510). Its
+  `canary-1510.sh` checks that; its changed files stay beside them as `<file>.pre-1510` (`PORTED-1510.md`).
 
 ## Known problems
 
