@@ -264,7 +264,7 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
     }
     // (the prefix's layers' summaries: an offending item in one is an offending source of it, whose layer's stores
     // are the candidates, #1466; each source by itself where a summary declines)
-    const offended = admission.run(contract.offendingStores(stored, rest, offends));
+    const offended = contract.offendingStores(stored, rest, offends, (work) => admission.run(work));
     if (offended !== null) takeAll(offended);
     else
       for (const sub of contract.relevantSubs(stored, rest)) {
