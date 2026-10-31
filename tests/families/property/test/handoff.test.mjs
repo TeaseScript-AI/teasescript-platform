@@ -43,6 +43,19 @@ test("corpus export contains every selected source, no imports, and the record t
   assert.equal(exported.recorded.sources, keys.size);
   assert.equal(exported.recorded.sha256, setKey(keys));
 });
+test("an export records the plan's rules in its command, and a plan without any as before", () => {
+  const command = (rules) =>
+    JSON.parse(
+      vm.runInNewContext(
+        corpusModule(makePlan("quick", 1442, rules), "where recorded").replaceAll(
+          "export const ",
+          "const ",
+        ) + "\nJSON.stringify(recorded)",
+      ),
+    ).commands[0][0];
+  assert.match(command(["1440"]), / --seed 1442 --rules 1440 --out <plan>;/);
+  assert.match(command([]), / --seed 1442 --out <plan>;/);
+});
 test("the committed corpus module holds the focused plan's sources, as its record says", async () => {
   const focused = makePlan("focused", 1442);
   const committed = await import("../s8-stores.mjs");
