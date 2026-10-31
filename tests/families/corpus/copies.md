@@ -16,6 +16,11 @@ outside the repository").
 - `desktop:~/work/evidence/corpus/copies/sol-1437-r2/` and `copies/sol-1437-r3/`: Sol's r2 and r3 of #1437 (each
   `README.md` gives the commands). `delta.mjs` and `dispatch.mjs` keep a prediction that throws apart, in
   `exceptions`, never in `agree` or the mismatches, and exit 1 on it; every catch of theirs and of `boundaries.mjs`
-  and `witnesses.mjs` records any thrown value, as `unprintable <type>` where its conversion to text throws, through
-  the folder's `describeCaught.mjs` (#1523). Each folder's `canary-1523.sh` checks that; its changed files stay beside
-  it as `<file>.pre-1523` (`PORTED-1523.md`).
+  and `witnesses.mjs` records any thrown value it keeps, as `unprintable <type>` where its conversion to text throws,
+  through the folder's `describeCaught.mjs` (#1523). Each folder's `canary-1523.sh` checks that; its changed files
+  stay beside it as `<file>.pre-1523` (`PORTED-1523.md`).
+- `desktop:~/work/evidence/corpus/copies/astra-1443/` and `copies/sol-1443-r1/`: Astra's and Sol's r1 of #1443 (each
+  `README.md` gives the commands). Their stop readers (`own-stops.mjs` and `stops-v2.mjs`; `stops.mjs`) keep a value
+  named `CandidateOutsideSlice` as an `outside` row, as `unprintable <type>` where its conversion to text throws,
+  through the folder's `describeCaught.mjs`, and rethrow every other value as before (#1523). Each folder's
+  `canary-1523.sh` checks that; its changed files stay beside it as `<file>.pre-1523` (`PORTED-1523.md`).

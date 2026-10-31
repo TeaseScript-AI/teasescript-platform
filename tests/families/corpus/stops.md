@@ -41,6 +41,11 @@ outside the repository").
   gives the commands. Their readers record any thrown value, as `unprintable <type>` where its conversion to text
   throws, through the folder's `describeCaught.mjs` (#1523). Each folder's `canary-1523.sh` checks that; its changed
   files stay beside it as `<file>.pre-1523` (`PORTED-1523.md`).
+- `desktop:~/work/evidence/corpus/stops/1476-r1-labels/` and `stops/astra-1476/`: Codex's and Astra's r1 of #1476
+  (each `README.md` gives the commands). Their stop readers (`stop-soundness.mjs`; `stops.mjs`) keep a
+  `CandidateOutsideSlice` as an `outside` row, as `unprintable <type>` where its conversion to text throws, through the
+  folder's `describeCaught.mjs`, and rethrow every other value as before (#1523). Each folder's `canary-1523.sh` checks
+  that; its changed files stay beside it as `<file>.pre-1523` (`PORTED-1523.md`).
 
 ## Known problems
 
