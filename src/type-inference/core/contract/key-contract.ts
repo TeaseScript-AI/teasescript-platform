@@ -171,14 +171,19 @@ export function* keyContract(contract: Contract, asked: Key): Work<readonly Item
   if (receiver.reference) return [unknownItem(REASON.opaque)];
   const written = writtenOf(found.kind);
   // F2, F22: the written type is the contract; the stores keep M. §3.2 (r4.9): it fixes the kinds, never removes the
-  // mark of what is stored
+  // mark of what is stored. An unrestricted written domain (`list`'s element) says what may be held, not what is: its
+  // unknown is opaque, so every consumer owes its check (#1501, r4.215)
   if (written !== null) {
     const at = termAt(written, path);
     if (at !== null) {
       const stored = yield* contractAlong(contract, place, path, 0, receiver.floor, walk.prefix);
       const marks = marksOf(stored);
       const tags = typeKinds(at).map((tag) =>
-        makeItem(tag, null, { ...marks, ...(marks.guarded === true ? { cert: "pos" } : {}) }),
+        makeItem(tag, null, {
+          ...marks,
+          ...(tag === "unknown" ? { reasons: REASON.opaque } : {}),
+          ...(marks.guarded === true ? { cert: "pos" } : {}),
+        }),
       );
       return path.at(-1) === "element" && stored.some((item) => item.tag === "empty")
         ? [...tags, EMPTY]
