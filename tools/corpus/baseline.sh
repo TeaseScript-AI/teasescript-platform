@@ -10,9 +10,11 @@
 # defaults (180 s, 2,048 MB) in ~/work/baselines/<sha>/<area>/<i>of<N>.runs.jsonl, beside its `--out` (.out.jsonl),
 # its JSON lines (.stdout), .stderr and state (.exit: `complete` or `failed`, and the runner's exit status). A shard is
 # complete when the runner ended with its total line (exit 0, or 1 for a stall, an exception or nodes left unanswered,
-# which are stored like any outcome) and stored one line per source; a failed shard fails its job. The area's last
-# shard to end writes SHA256SUMS when every shard is complete, else INCOMPLETE naming the failed ones; an area with
-# neither is still running or lost a job.
+# which are stored like any outcome) and stored one line per source; a failed shard fails its job. Each state is
+# written whole or not at all. Once every shard of an area says `complete`, the area gets SHA256SUMS, written by its
+# last shard's job or by any later job or call; once every shard ended and one failed, INCOMPLETE naming the failed
+# ones; an area with neither is still running or lost a job. After a job died (the queue moves it to failed/), remove
+# QUEUED and call again: the call queues every shard not complete and writes the SHA256SUMS of each complete area.
 #
 # A shard's job may be queued more than once: it runs while no other job runs that shard and the shard is not yet
 # complete, else it ends at once, so a later job also reruns a failed shard. ~/work/baselines/<sha>/MANIFEST is the
@@ -30,6 +32,30 @@
 # direct runs, else the CPU count) override the defaults.
 set -uo pipefail
 
+# an area's SHA256SUMS once every shard says complete, its INCOMPLETE once every shard ended and one failed (the caller
+# holds the area's lock); fails when it could not write them
+publish() {
+  local dir=$1 n=$2 i ended=0 failed=() files=()
+  for ((i = 0; i < n; i++)); do
+    if grep -q '^complete ' "$dir/${i}of$n.exit" 2> /dev/null; then
+      ended=$((ended + 1))
+      files+=("${i}of$n.runs.jsonl" "${i}of$n.out.jsonl" "${i}of$n.stdout" "${i}of$n.stderr" "${i}of$n.exit")
+    elif [ -e "$dir/${i}of$n.exit" ]; then
+      ended=$((ended + 1))
+      failed+=("${i}of$n")
+    fi
+  done
+  [ "$ended" -eq "$n" ] || return 0
+  if [ "${#failed[@]}" -gt 0 ]; then
+    printf '%s\n' "${failed[@]}" > "$dir/INCOMPLETE.tmp" && mv "$dir/INCOMPLETE.tmp" "$dir/INCOMPLETE"
+    return
+  fi
+  [ -e "$dir/SHA256SUMS" ] && return 0
+  # (INCOMPLETE goes first: a call ended in between leaves neither, which the next job or call repairs)
+  rm -f "$dir/INCOMPLETE" && (cd "$dir" && sha256sum -- "${files[@]}" > SHA256SUMS.tmp) &&
+    mv "$dir/SHA256SUMS.tmp" "$dir/SHA256SUMS"
+}
+
 if [ "${1:-}" = --job ]; then
   # one shard, run by its queued job: --job <baseline folder> <tree> <runner> <area> <area folder> <i> <N>
   out=$2 tree=$3 runner=$4 area=$5 folder=$6 i=$7 n=$8
@@ -38,28 +64,23 @@ if [ "${1:-}" = --job ]; then
   mkdir -p "$dir"
   exec {shard}>> "$dir/.${i}of$n.lock"
   flock -n "$shard" || exit 0
-  grep -q '^complete ' "$name.exit" 2> /dev/null && exit 0
-  node "$runner/tests/families/run.mjs" "$folder" "$tree" --store "$name.runs.jsonl" --shard "$i/$n" \
-    --out "$name.out.jsonl" > "$name.stdout" 2> "$name.stderr"
-  status=$?
-  sources=$(tail -n 1 "$name.stdout" | sed -En 's/^\{"area":.*,"generators":[0-9]+,"sources":([0-9]+),.*"node":"[^"]*"\}$/\1/p')
-  state=failed
-  if [ "$status" -le 1 ] && [ -n "$sources" ] && [ "$(wc -l < "$name.runs.jsonl" 2> /dev/null)" = "$sources" ]; then
-    state=complete
-  fi
-  # the state is written and the area's shards counted under one lock, so the last shard sees every other's state
   exec {lock}>> "$dir/.lock"
-  flock "$lock"
-  echo "$state $status" > "$name.exit"
-  if [ "$(find "$dir" -maxdepth 1 -name "*of$n.exit" | wc -l)" -eq "$n" ]; then
-    if grep -l '^failed ' "$dir"/*of"$n".exit > "$dir/INCOMPLETE.tmp" && [ -s "$dir/INCOMPLETE.tmp" ]; then
-      mv "$dir/INCOMPLETE.tmp" "$dir/INCOMPLETE"
-    else
-      rm -f "$dir/INCOMPLETE.tmp" "$dir/INCOMPLETE"
-      (cd "$dir" && sha256sum -- *of"$n".* > SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS)
+  # a complete shard is not run again, but its job still writes the area's SHA256SUMS where they are missing
+  if ! grep -q '^complete ' "$name.exit" 2> /dev/null; then
+    node "$runner/tests/families/run.mjs" "$folder" "$tree" --store "$name.runs.jsonl" --shard "$i/$n" \
+      --out "$name.out.jsonl" > "$name.stdout" 2> "$name.stderr"
+    status=$?
+    sources=$(tail -n 1 "$name.stdout" | sed -En 's/^\{"area":.*,"generators":[0-9]+,"sources":([0-9]+),.*"node":"[^"]*"\}$/\1/p')
+    state=failed
+    if [ "$status" -le 1 ] && [ -n "$sources" ] && [ "$(wc -l < "$name.runs.jsonl" 2> /dev/null)" = "$sources" ]; then
+      state=complete
     fi
+    flock "$lock"
+    { echo "$state $status" > "$name.exit.tmp" && mv "$name.exit.tmp" "$name.exit"; } || exit 1
   fi
-  [ "$state" = complete ]
+  flock "$lock"
+  publish "$dir" "$n" || exit 1
+  grep -q '^complete ' "$name.exit"
   exit
 fi
 
@@ -196,5 +217,13 @@ for line in "${shards[@]}"; do
   fi
 done
 [ "$missing" -eq 0 ] || fail "$missing jobs not queued ($queued queued now); call again to queue them"
+# the SHA256SUMS of each area whose shards are all complete, where a job ended before it wrote them
+for line in "${plan[@]}"; do
+  [[ $line == "area "* ]] || continue
+  read -r _ _ area n _ <<< "$line"
+  [ -d "$out/$area" ] || continue
+  (exec {lock}>> "$out/$area/.lock" && flock "$lock" && publish "$out/$area" "$n") ||
+    fail "the SHA256SUMS of $area could not be written; call again"
+done
 date -u +%Y-%m-%dT%H:%M:%SZ > "$out/QUEUED" || fail "QUEUED could not be written; call again"
 echo "baseline $sha: queued $queued jobs in $out"
