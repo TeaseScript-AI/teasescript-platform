@@ -567,6 +567,35 @@ test("a default named by its key path is checked where it is selected, also with
         2,
         2.5,
       ],
+      // through composition (Codex r5 on #1539): parentheses, and `otherwise` chains whose other operands bring no
+      // collection, a written one, or an unwritten one
+      ...(
+        [
+          ["(ints.get(8, default: null))", true],
+          ["((ints.get(8, default: null)))", true],
+          ["(ints.get(8, default: null) otherwise null)", true],
+          ["(ints.get(8, default: null) otherwise copy.get(8, default: null))", true],
+          ["(ints.get(8, default: null) otherwise rows.get(8, default: null))", true],
+          ["((ints.get(8, default: null) otherwise null) otherwise null)", true],
+          [
+            "((ints.get(8, default: null) otherwise null) otherwise copy.get(8, default: null))",
+            true,
+          ],
+          [
+            "((ints.get(8, default: null) otherwise null) otherwise rows.get(8, default: null))",
+            true,
+          ],
+        ] as const
+      ).map(
+        ([left, written]) =>
+          [
+            "let ints: integer[][] = [[1]]\nlet copy = ints\nlet rows = [[1]]\n",
+            `${left} otherwise xs[0]`,
+            written ? "list<integer>" : "list<integer|number>",
+            written ? 2 : 2.5,
+            written ? 2.5 : "bad",
+          ] as const,
+      ),
     ] as const
   ).map(([setup, call, type, fits, bad]) => ({ setup, call, type, fits, bad }));
   const rows: {

@@ -858,17 +858,23 @@ function fallbackType(
   const written = path.length === 0 ? undefined : writtenLanding(owner, path, statements);
   const nullable =
     path.length > 0 && (written === undefined || written === null || holdsNull(written));
-  const at = (shape: DerivedType | null, remaining: readonly string[]): DerivedType => {
-    if (remaining.length === 0)
-      return {
-        kind: "kinds",
-        kinds: nullable && !against.includes("null") ? [...against, "null"] : against,
-      };
+  const at = (
+    shape: DerivedType | null,
+    remaining: readonly string[],
+    literal: Expression | null,
+  ): DerivedType => {
+    if (remaining.length === 0) {
+      const kinds = nullable && !against.includes("null") ? [...against, "null"] : against;
+      // (C10 publishes a collection's own kind alone where no literal holds the value: #1538 checks it whole)
+      return literal === null && kinds.some(isCollectionKind)
+        ? completedType(owner, path, kinds, statements)
+        : { kind: "kinds", kinds };
+    }
     const [step, ...rest] = remaining;
     if (step !== "element")
       return {
         kind: "object",
-        properties: [{ name: step!, type: at(partOf(shape, step!), rest) }],
+        properties: [{ name: step!, type: at(partOf(shape, step!), rest, null) }],
       };
     const collection =
       shape?.kind === "union"
@@ -878,9 +884,161 @@ function fallbackType(
         : shape;
     if (collection?.kind !== "list" && collection?.kind !== "set" && collection?.kind !== "dict")
       throw new Underivable("a fallback element check without a source-carried collection");
-    return { kind: collection.kind, element: at(collection.element, rest) };
+    const first =
+      (literal?.kind === "listLiteral" || literal?.kind === "setLiteral") &&
+      literal.elements.length > 0
+        ? collectionLiteral(literal.elements[0]!)
+        : null;
+    return { kind: collection.kind, element: at(collection.element, rest, first) };
   };
-  return at(root, path);
+  return at(root, path, collectionLiteral(value));
+}
+
+function isCollectionKind(kind: string): boolean {
+  return kind === "list" || kind === "set" || kind === "dict";
+}
+
+/** The collection literal a value is, through parentheses and constant indexes of list literals, or `null`. */
+function collectionLiteral(expression: Expression): Expression | null {
+  const at = selected(expression);
+  return at?.kind === "listLiteral" || at?.kind === "setLiteral" || at?.kind === "dictLiteral"
+    ? at
+    : null;
+}
+
+/**
+ * #1538 (ADR 0021 7.2): a fallback level no literal holds, at which C10 publishes a collection's own kind alone, is
+ * checked against the whole structure of the value the default stands in for (a `get`'s receiver's element, an
+ * `otherwise`'s left without `null`), C10's scalars and `null` beside it; whole numbers there are numbers too
+ * except at a level a written type reaches (`writtenAt`).
+ */
+function completedType(
+  owner: DefaultOwner,
+  path: readonly string[],
+  kinds: readonly string[],
+  statements: readonly Statement[],
+): DerivedType {
+  if (path.some((step) => step !== "element"))
+    throw new Underivable("a completed fallback below a property");
+  const callee = owner.kind === "callExpression" ? unwrap(owner.callee) : null;
+  const [value, steps] =
+    owner.kind === "binaryExpression"
+      ? [owner.left, path]
+      : callee?.kind === "propertyAccessExpression" && callee.property.name === "get"
+        ? [callee.object, ["element", ...path]]
+        : [null, path];
+  if (value === null) throw new Underivable("a completed fallback of another owner");
+  let shape = sourceShape(value, statements);
+  for (const step of steps) shape = partOf(shape, step);
+  if (shape !== null && owner.kind === "binaryExpression" && path.length === 0)
+    shape = withoutNull(shape);
+  const held = (shape?.kind === "union" ? shape.members : shape === null ? [] : [shape]).filter(
+    (member) => isCollectionKind(member.kind),
+  );
+  if (held.length === 0) throw new Underivable("a completed fallback without a collection");
+  const family = (type: DerivedType, below: readonly string[]): DerivedType => {
+    if (type.kind === "kinds")
+      return type.kinds.includes("integer") &&
+        !type.kinds.includes("number") &&
+        !writtenAt(value, [...steps, ...below], statements)
+        ? { kind: "kinds", kinds: [...type.kinds, "number"] }
+        : type;
+    if (type.kind === "union")
+      return unionTypes(type.members.map((member) => family(member, below)));
+    if (type.kind === "object")
+      return {
+        ...type,
+        properties: type.properties.map((property) => ({
+          name: property.name,
+          type: family(property.type, [...below, property.name]),
+        })),
+      };
+    return {
+      kind: type.kind,
+      element: type.element === null ? null : family(type.element, [...below, "element"]),
+    };
+  };
+  const scalars = kinds.filter((kind) => !isCollectionKind(kind));
+  return unionTypes([
+    ...held.map((member) => family(member, [])),
+    ...(scalars.length > 0 ? [{ kind: "kinds", kinds: scalars } as const] : []),
+  ]);
+}
+
+/**
+ * Whether a value's level (by its steps) is a written type's (A4, ADR 0021 1.3): a written declaration's, through
+ * parentheses, element reads, `get`s, a literal's elements and copies; an `otherwise` chain's where every operand that
+ * brings a collection is written with one structure.
+ */
+function writtenAt(
+  expression: Expression,
+  steps: readonly string[],
+  statements: readonly Statement[],
+  seen: ReadonlySet<string> = new Set(),
+): boolean {
+  const at = unwrap(expression);
+  switch (at.kind) {
+    case "identifier": {
+      if (seen.has(at.name)) return false;
+      const declared = statements.some(
+        (statement) =>
+          statement.kind === "letStatement" &&
+          statement.name.name === at.name &&
+          statement.typeAnnotation !== null,
+      );
+      if (declared) return true;
+      const values = statements.flatMap((statement) => {
+        const store = storeOf(statement);
+        return store?.name === at.name ? [store.value] : [];
+      });
+      const next = new Set([...seen, at.name]);
+      return (
+        values.length > 0 && values.every((value) => writtenAt(value, steps, statements, next))
+      );
+    }
+    case "indexExpression":
+      return writtenAt(at.object, ["element", ...steps], statements, seen);
+    case "callExpression": {
+      const callee = unwrap(at.callee);
+      return (
+        callee.kind === "propertyAccessExpression" &&
+        callee.property.name === "get" &&
+        writtenAt(callee.object, ["element", ...steps], statements, seen)
+      );
+    }
+    case "listLiteral":
+    case "setLiteral":
+      return (
+        steps[0] === "element" &&
+        at.elements.length > 0 &&
+        at.elements.every((element) => writtenAt(element, steps.slice(1), statements, seen))
+      );
+    case "binaryExpression": {
+      if (at.operator !== "otherwise") return false;
+      const operands = [at.left, at.right].filter((operand) => {
+        const shape = sourceShape(operand, statements);
+        return (
+          shape === null ||
+          (shape.kind === "union" ? shape.members : [shape]).some((member) =>
+            isCollectionKind(member.kind),
+          )
+        );
+      });
+      const texts = new Set(
+        operands.map((operand) => {
+          const shape = sourceShape(operand, statements);
+          return shape === null ? "" : derivedText(withoutNull(shape) ?? shape);
+        }),
+      );
+      return (
+        operands.length > 0 &&
+        texts.size === 1 &&
+        operands.every((operand) => writtenAt(operand, steps, statements, seen))
+      );
+    }
+    default:
+      return false;
+  }
 }
 
 /** Every obligation is mapped by S3 §4; S7 content is owed by that map and F18, never by the emitted plan. */

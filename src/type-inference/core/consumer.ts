@@ -1237,52 +1237,70 @@ class Contracts {
   };
 
   /**
-   * The complete contract of the value a fallback stands in for at `steps` below it (C10, ADR 0021 7.2): a `get`'s
-   * receiver's at its element, an `otherwise`'s left one without `null`: its place's contract, else, where no place holds
-   * it (a literal, an operation), the core's answer for it (`#answeredTask`); `null` for another owner.
+   * The complete contract of the value a fallback stands in for at `steps` below it (C10, ADR 0021 7.2): a `get`'s value,
+   * an `otherwise`'s left one without `null`, as `#provenanceOf` finds it; `null` for another owner.
    */
   public direct(
     owner: BinaryExpression | CallExpression,
     steps: readonly string[],
   ): TypePlan | null {
-    let read = owner.kind === "binaryExpression" ? owner.left : getReceiver(owner);
-    let elements = owner.kind === "binaryExpression" ? 0 : 1;
-    // a get's value is its receiver's element: read through it until the read is a value the core answers for
-    while (read !== null && getReceiver(read) !== null) {
-      read = getReceiver(read);
-      elements += 1;
-    }
-    if (read === null) return null;
-    const node = nodeOf(this.answers, this.index, read);
-    const place = this.answers.at(node)?.place ?? null;
+    const value =
+      owner.kind === "binaryExpression" ? owner.left : getReceiver(owner) === null ? null : owner;
+    if (value === null) return null;
     // (a contract's path names a dict's value its element, as every key does)
-    const below = joinSteps(
-      Array.from({ length: elements }, () => "element"),
+    const { contract, written } = this.#provenanceOf(
+      value,
       steps.map(() => "element"),
     );
-    const path = place === null ? null : joinSteps(place.path, below);
-    const found = runCompileTask(
-      place === null || path === null
-        ? this.#answeredTask(node, below, read)
-        : this.#contractTask(place.id, path, read, []),
-    );
-    // each level as the core answers its place's domain: a written one, or one a copy inherits from a written type (A4,
-    // ADR 0021 1.3), keeps its type; an unwritten one, and any a value no place holds (a literal, an operation, a call
-    // other than a get), is checked in C10's family, whole numbers with numbers (ADR 0021 1.2, 7.2): never stricter than
-    // C10 for the same default written out (Codex r3, r4 on #1539)
-    const contract =
-      found === null
-        ? null
-        : place === null || path === null
-          ? numberFamily(found, () => true)
-          : numberFamily(
-              found,
-              (levels) =>
-                !writtenDomain(this.answers.place(place.id, joinSteps(path, levels)).admitted),
-            );
-    return contract === null || owner.kind === "callExpression" || steps.length > 0
-      ? contract
-      : withoutNull(contract);
+    // a written level, or one a copy inherits from a written type (A4, ADR 0021 1.3), keeps its type; any other is checked
+    // in C10's family, whole numbers with numbers (ADR 0021 1.2, 7.2): never stricter than C10 for the same default
+    // written out (Codex r3, r4 on #1539)
+    const checked = contract === null ? null : numberFamily(contract, (levels) => !written(levels));
+    return checked === null || owner.kind === "callExpression" || steps.length > 0
+      ? checked
+      : withoutNull(checked);
+  }
+
+  /**
+   * The value an expression gives at `path` below it as the core answers for it, with the provenance of each level below
+   * that: the fallback completion's one lookup. Parentheses give their content's value, as `nodeOf` reads them. A
+   * place's value has its place's contract, each level written where the core answers its domain as written or as
+   * inherited from a written type. A `get`'s value is its receiver's element. An `otherwise` chain's value joins its
+   * operands' as the core admits a join (A4): a level is written where any operand that brings a collection (a `null` or
+   * a scalar brings none) is written there; the contract is theirs where they agree, else the core's answer for the join,
+   * whose own receiving check then stays. Any other value is the core's answer for it by its own text (a literal, an
+   * operation, another call), unwritten.
+   */
+  #provenanceOf(value: Expression, path: readonly string[]): Provenance {
+    const read = unwrap(value);
+    const node = nodeOf(this.answers, this.index, read);
+    const place = this.answers.at(node)?.place ?? null;
+    if (place !== null) {
+      const at = joinSteps(place.path, path);
+      return {
+        contract: runCompileTask(this.#contractTask(place.id, at, read, [])),
+        written: (levels) =>
+          writtenDomain(this.answers.place(place.id, joinSteps(at, levels)).admitted),
+      };
+    }
+    const receiver = getReceiver(read);
+    if (receiver !== null) return this.#provenanceOf(receiver, joinSteps(["element"], path));
+    if (read.kind === "binaryExpression" && read.operator === "otherwise") {
+      const joined = [read.left, read.right]
+        .filter((operand) => bringsCollection(this.#provenanceOf(operand, []).contract))
+        .map((operand) => this.#provenanceOf(operand, path));
+      const contract = joined[0]?.contract ?? null;
+      if (joined.length > 0)
+        return {
+          contract:
+            contract !== null &&
+            joined.every((part) => part.contract !== null && samePlan(part.contract, contract))
+              ? contract
+              : runCompileTask(this.#answeredTask(node, path, read)),
+          written: (levels) => joined.some((part) => part.written(levels)),
+        };
+    }
+    return { contract: runCompileTask(this.#answeredTask(node, path, read)), written: () => false };
   }
 
   /**
@@ -1726,6 +1744,30 @@ function levelsOf(plan: TypePlan): string[][] {
         pending.push([property.type, [...path, propertyStep(property.name)]]);
   }
   return [...levels.values()];
+}
+
+/** A value's contract at a path, and whether each level below it (by its steps) is a written domain. */
+interface Provenance {
+  readonly contract: TypePlan | null;
+  readonly written: (levels: readonly string[]) => boolean;
+}
+
+/** Whether a value of a contract may be a collection: one of its members is, or it is open (`null`). */
+function bringsCollection(contract: TypePlan | null): boolean {
+  return contract === null || membersOf(contract).some((member) => isCollection(member.kind));
+}
+
+/** Whether two plans are one type: the same members, in any order, at every level. */
+function samePlan(a: TypePlan, b: TypePlan): boolean {
+  const key = (plan: TypePlan): string =>
+    plan.kind === "union"
+      ? plan.members.map(key).sort().join("|")
+      : plan.kind === "list" || plan.kind === "set" || plan.kind === "dict"
+        ? `${plan.kind}<${plan.element === null ? "" : key(plan.element)}>`
+        : plan.kind === "object"
+          ? `{${plan.properties.map((property) => `${property.name}: ${key(property.type)}`).join(", ")}}`
+          : plan.kind;
+  return key(a) === key(b);
 }
 
 /** Whether the core answers a domain as written: its own written type, or one a copy inherits (A4, ADR 0021 1.3). */
