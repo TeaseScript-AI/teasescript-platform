@@ -245,15 +245,27 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(b"".join(parts), patch)
 
     def test_part_count_holds_when_a_longer_part_costs_fewer_tokens(self) -> None:
-        # Token merges at a part's edges: ending in "ab" (or "b") costs two tokens less and
-        # starting with "b" two more, so a longer part can be cheaper. The preferred
-        # boundaries must neither change the greedy count nor abort the split, whether the
-        # merge changes the parts after a boundary or the part before it.
-        cases = [(b"b\naba\nax\nabx", 3, b"ab", 6), (b"xxx\nb\nbaaab", 9, b"b", 3)]
-        for patch, maximum_bytes, cheap_end, part_count in cases:
+        # Token merges at a part's edges: a part costs `weight` tokens more when it starts
+        # with `dear_start` and less when it ends with `cheap_end`, so a longer part can be
+        # cheaper. The preferred boundaries must neither change the greedy count nor abort
+        # the split, whether the merge changes the parts after a boundary, the part before
+        # it, or leaves the greedy search no part where the plan has one.
+        cases = [
+            (b"b\naba\nax\nabx", 3, b"b", b"ab", 2, 6),
+            (b"xxx\nb\nbaaab", 9, b"b", b"b", 2, 3),
+            (b"a\nxxab\naa\n", 4, b"x", b"xa", 3, 4),
+        ]
+        for patch, maximum_bytes, dear_start, cheap_end, weight, part_count in cases:
 
-            def count_tokens(value: bytes, cheap_end: bytes = cheap_end) -> int:
-                cost = len(value) - 2 * value.endswith(cheap_end) + 2 * value.startswith(b"b")
+            def count_tokens(
+                value: bytes,
+                dear_start: bytes = dear_start,
+                cheap_end: bytes = cheap_end,
+                weight: int = weight,
+            ) -> int:
+                cost = len(value) + weight * (
+                    value.startswith(dear_start) - value.endswith(cheap_end)
+                )
                 return max(1, cost)
 
             with self.subTest(patch=patch):

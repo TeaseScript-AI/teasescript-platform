@@ -438,20 +438,24 @@ def split_utf8_patch(
     token_counts: list[int | None] = []
     offset = 0
     while offset < len(patch):
-        greedy_end = largest_bounded_end(
-            patch,
-            start=offset,
-            maximum_bytes=maximum_bytes,
-            target_tokens=target_tokens,
-            count_tokens=count_tokens,
-        )
-        boundaries = (
-            preferred_boundaries(patch, start=offset, end=greedy_end)
-            if greedy_end < len(patch)
-            else []
-        )
-        if greedy_end not in boundaries:
-            boundaries.append(greedy_end)
+        boundaries: list[int] = []
+        try:
+            greedy_end = largest_bounded_end(
+                patch,
+                start=offset,
+                maximum_bytes=maximum_bytes,
+                target_tokens=target_tokens,
+                count_tokens=count_tokens,
+            )
+        except PreparationError:
+            # The greedy search can miss every part that the plan's next part
+            # shows to exist when a longer part costs fewer tokens.
+            greedy_end = None
+        else:
+            if greedy_end < len(patch):
+                boundaries = preferred_boundaries(patch, start=offset, end=greedy_end)
+            if greedy_end not in boundaries:
+                boundaries.append(greedy_end)
         end = next(
             (
                 boundary
