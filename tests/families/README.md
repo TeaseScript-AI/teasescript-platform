@@ -12,7 +12,8 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
   [--allowances natural,16,256] [--shard i/N] [--timeout 180] [--memory 2048] [--out differences.jsonl]
-node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base SHA>/<area> [the same options]
+node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base src tree>/<area> [the same options]
+node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/16]
 ```
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
@@ -42,11 +43,21 @@ result of the same source (its generator, name and key, so an edited source is n
 baseline does not hold is `uncompared`, never agreement (`--out` names its source and runs); a source stalls or throws
 outside its runs where either the stored run or the head did. The limits then apply to each tree alone, where a run of
 both trees shares them in one process, so a source that stalls there may end here, and the head's runs after a stored
-stall are uncompared. `--store <file>` runs one tree and stores each source's results as one line; `--baseline` reads a
-folder's `*.runs.jsonl` files, and stops (exit 2) at a source stored twice with other results.
-`tools/corpus/baseline.sh`, installed as the desktop's `~/work/trees/hooks/baseline`, stores every runner area and the
-type-core fixture (`tools/corpus/fixture/`) of each new `main` in `~/work/baselines/<sha>/<area>/`; an area without its
-`SHA256SUMS` is not complete.
+stall are uncompared. `--baseline` reads a folder's `*.runs.jsonl` files, and stops (exit 2) at a source stored twice
+with other results.
+
+`--store` runs one tree of a commit (an `sx-tree` tree: `src/`, `dist/`, `.sha`) at the runner's defaults and stores
+each source's results as one line in the baseline of its `src/` tree, `<folder>/<src tree>/<area>/<i>of<N>.runs.jsonl`,
+where `<src tree>` is `git rev-parse <commit>:src`: every commit with that tree shares it, and its `MANIFEST` names
+them. A shard is written whole or not at all, by one running writer at a time, and a stored shard is not run again; the
+area's `PLAN` fixes its sources and count of shards for every writer, and its `SHA256SUMS` follow its last shard.
+`bash tools/corpus/baseline.sh status <commit>` says in one line which areas the commit's tree holds, and exits 0 only
+when every one is complete (`SHA256SUMS` present and verified). Before a base run, ask it: compare the head with a
+complete area through `--baseline`, and store an area that is not from the base tree's own runner and areas
+(`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/16`, one job per shard,
+the fixture area as `<base tree>/tools/corpus/fixture`), so that it serves every later run on that tree. The script,
+installed as the desktop's `~/work/trees/hooks/baseline`, fills each new `main`'s tree at low priority where nobody
+stores it.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
