@@ -369,16 +369,21 @@ if (process.argv[2] === "--child") {
     const commit = readFileSync(path.join(tree, ".sha"), "utf8").trim();
     const top = await owned(store, identity, `commit ${commit} ${tree}`);
     if (top.refused !== undefined) refused(top.refused);
-    const dir = path.join(top.dir, path.basename(folder));
-    const plan = await planned(top.dir, dir, planOf(path.basename(folder), every, shards));
+    const name = path.basename(folder);
+    const plan = await planned(top.dir, name, planOf(name, every, shards));
     if (plan.refused !== undefined) refused(plan.refused);
-    storing = beginShard(top.dir, dir, shard, shards, plan.plan, plan.places[shard]);
+    storing = await beginShard(top.dir, name, shard, shards, plan.plan, plan.places[shard]);
+    if (storing.refused !== undefined) refused(storing.refused);
     if (storing.skipped !== undefined) {
       const { file, skipped } = storing;
       console.log(JSON.stringify({ area, shard: `${shard}/${shards}`, stored: file, skipped }));
       process.exit(0);
     }
-    storing.made = { shard: `${shard}/${shards}`, commit, tree, ...identity };
+    // (the shard's lines, held until it is published whole: nothing is written into the baseline before)
+    Object.assign(storing, {
+      made: { shard: `${shard}/${shards}`, commit, tree, ...identity },
+      lines: [],
+    });
   }
   /** What the stored tree and the head did (a stall's or an exception's text), where either did. */
   const either = (base, head) =>
@@ -435,7 +440,7 @@ if (process.argv[2] === "--child") {
       if (storing !== undefined) {
         const key = sourceKey(source);
         const entry = { generator: name, source: source.name, key, stalled, thrown: failed };
-        appendFileSync(storing.tmp, `${JSON.stringify({ ...entry, runs: results })}\n`);
+        storing.lines.push(`${JSON.stringify({ ...entry, runs: results })}\n`);
       }
       // (with a baseline, one tree may stall where the other threw)
       if (stalled !== undefined) {
@@ -457,7 +462,7 @@ if (process.argv[2] === "--child") {
     // the shard whole, its total last, with what made it
     const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));
     const made = { ...ended, ...storing.made, runner: runner.digest("hex") };
-    const published = await endShard(storing, made);
+    const published = await endShard(storing, storing.lines, made);
     // (foreign contents or a retired baseline, found at publication: nothing is published)
     if (published.refused !== undefined) refused(published.refused);
     Object.assign(ended, { stored: storing.file, verified: published.verified });

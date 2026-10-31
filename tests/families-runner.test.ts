@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import ts from "typescript";
 
 const runner = resolve(process.cwd(), "tests/families/run.mjs");
 const baselines = resolve(process.cwd(), "tests/families/baselines.mjs");
@@ -333,10 +334,10 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     assert.deepEqual(states(state(alias)), ["area partial 1"]);
     const stat = readFileSync("/proc/self/stat", "utf8");
     const started = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
-    writeFileSync(join(baseline, ".1of2.claim"), `${process.pid} ${started}\n`);
+    writeFileSync(join(baseline, ".1of2.claim"), `${process.pid}-${started}\n`);
     assert.match(into(alias, "1/2").stdout, /"skipped":"being stored by another writer"/);
-    writeFileSync(join(baseline, ".1of2.claim"), `${process.pid} 1\n`);
-    writeFileSync(join(baseline, `.1of2.runs.jsonl.${process.pid}-1.tmp`), "partial\n");
+    writeFileSync(join(baseline, ".1of2.claim"), `${process.pid}-1\n`);
+    writeFileSync(join(baseline, `1of2.runs.jsonl.${process.pid}-1.tmp`), "partial\n");
     assert.equal(into(alias, "1/2").status, 1);
     const files = ["0of2.runs.jsonl", "1of2.runs.jsonl", "PLAN"];
     assert.deepEqual(readdirSync(baseline).sort(), files);
@@ -543,4 +544,145 @@ syncBuiltinESMExports();
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+/**
+ * Every place the stored baselines' tools write to the filesystem (#1542), each with its kind: `gate`, inside a callback
+ * passed to `gate`, the only way anything is written into a baseline; `helper`, in a function called only from such a
+ * callback or another helper; `creation`, a new baseline made outside it (its `.creating-` folder, or the baselines
+ * folder itself) and renamed into place onto no folder or an empty one; `recovery`, a `.pruning-` or `.creating-` folder
+ * of the tool's outside any baseline; `outside`, the runner's `--out`, the caller's own file. A write this list does not
+ * hold fails until it is classified; the hook (`tools/corpus/baseline.sh`) writes nothing.
+ */
+const WRITES = [
+  ["baselines.mjs", "created", "writeFileSync(tmp, text)", "helper"],
+  ["baselines.mjs", "created", "linkSync(tmp, file)", "helper"],
+  ["baselines.mjs", "created", "rmSync(tmp, { force: true })", "helper"],
+  ["baselines.mjs", "replaced", "writeFileSync(`${file}.${WRITER}.tmp`, text)", "helper"],
+  ["baselines.mjs", "replaced", "renameSync(`${file}.${WRITER}.tmp`, file)", "helper"],
+  ["baselines.mjs", "owned", "mkdirSync(root, { recursive: true })", "creation"],
+  ["baselines.mjs", "owned", "mkdirSync(creating)", "creation"],
+  ["baselines.mjs", "owned", 'writeFileSync(path.join(creating, "MANIFEST"), header)', "creation"],
+  ["baselines.mjs", "owned", "renameSync(creating, dir)", "creation"],
+  ["baselines.mjs", "owned", "rmSync(creating, { recursive: true, force: true })", "creation"],
+  ["baselines.mjs", "owned", 'appendFileSync(path.join(dir, "MANIFEST"), `${line}\\n`)', "gate"],
+  [
+    "baselines.mjs",
+    "planned",
+    'appendFileSync(path.join(top, "MANIFEST"), `area ${area} ${shards} ${id}\\n`)',
+    "gate",
+  ],
+  ["baselines.mjs", "planned", "mkdirSync(path.join(top, area), { recursive: true })", "gate"],
+  ["baselines.mjs", "beginShard", "rmSync(path.join(dir, entry), { force: true })", "gate"],
+  ["baselines.mjs", "endShard", "writeFileSync(tmp, body + ended)", "gate"],
+  ["baselines.mjs", "endShard", "linkSync(tmp, file)", "gate"],
+  ["baselines.mjs", "endShard", "renameSync(tmp, file)", "gate"],
+  ["baselines.mjs", "endShard", "rmSync(tmp, { force: true })", "gate"],
+  ["baselines.mjs", "endShard", "rmSync(claim, { force: true })", "gate"],
+  ["baselines.mjs", "start", 'rmSync(marker("SUPERSEDED"), { force: true })', "gate"],
+  [
+    "baselines.mjs",
+    "queue",
+    "copyFileSync(script, path.join(dir, `baseline.sh.${WRITER}.tmp`))",
+    "gate",
+  ],
+  [
+    "baselines.mjs",
+    "queue",
+    'renameSync(path.join(dir, `baseline.sh.${WRITER}.tmp`), path.join(dir, "baseline.sh"))',
+    "gate",
+  ],
+  ["baselines.mjs", "queue", 'rmSync(path.join(dir, "SUPERSEDED"), { force: true })', "gate"],
+  ["baselines.mjs", "recover", "rmSync(dir, { recursive: true, force: true })", "recovery"],
+  ["baselines.mjs", "prune", "renameSync(dir, retired)", "gate"],
+  ["run.mjs", "(top level)", 'writeFileSync(out, "")', "outside"],
+  ["run.mjs", "(top level)", "appendFileSync(out, `${JSON.stringify(line)}\\n`)", "outside"],
+];
+
+test("the stored baselines' tools write into a baseline only through its gate, every write listed by kind (#1542)", () => {
+  const writers =
+    /^(writeFileSync|appendFileSync|mkdirSync|mkdtempSync|renameSync|linkSync|symlinkSync|rmSync|unlinkSync|rmdirSync|copyFileSync|cpSync|truncateSync|createWriteStream|writeSync|openSync)$/;
+  const helpers = new Set(
+    WRITES.filter(([, , , kind]) => kind === "helper").map(([, name]) => name),
+  );
+  helpers.add("claimed");
+  const found: string[] = [];
+  const gated = new Map<string, boolean>();
+  const helperCalls: [string, string, boolean][] = [];
+  for (const file of ["baselines.mjs", "run.mjs"]) {
+    const text = readFileSync(join("tests", "families", file), "utf8");
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    // each call with the top-level function it is in and whether it is inside a callback passed to `gate`
+    const visit = (node: ts.Node, top: string, inGate: boolean): void => {
+      if (node.parent === source)
+        top =
+          ts.isFunctionDeclaration(node) && node.name !== undefined
+            ? node.name.text
+            : ts.isVariableStatement(node)
+              ? node.declarationList.declarations[0]!.name.getText(source)
+              : "(top level)";
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression.getText(source);
+        // (a file opened only to read is no write)
+        const read = callee === "openSync" && node.arguments[1]?.getText(source) === '"r"';
+        if (writers.test(callee) && !read) {
+          const call = `${file} ${top} ${node.getText(source).replace(/\s+/g, " ")}`;
+          found.push(call);
+          gated.set(call, inGate);
+        }
+        if (helpers.has(callee)) helperCalls.push([callee, top, inGate]);
+      }
+      const isGate = ts.isCallExpression(node) && node.expression.getText(source) === "gate";
+      ts.forEachChild(node, (child) =>
+        visit(
+          child,
+          top,
+          inGate || (isGate && (ts.isArrowFunction(child) || ts.isFunctionExpression(child))),
+        ),
+      );
+    };
+    visit(source, "(top level)", false);
+  }
+  // every write is listed, and every listed write is there
+  const listed = WRITES.map(([file, top, call]) => `${file} ${top} ${call}`);
+  assert.deepEqual([...found].sort(), [...listed].sort());
+  for (const [file, top, call, kind] of WRITES) {
+    const site = `${file} ${top} ${call}`;
+    if (kind === "gate") assert.equal(gated.get(site), true, `${site} is outside a gate`);
+    else assert.equal(gated.get(site), false, `${site} is in a gate but listed as ${kind}`);
+    if (kind === "creation") assert.equal(top, "owned", site);
+    if (kind === "recovery") assert.equal(top, "recover", site);
+    if (kind === "outside") assert.equal(file, "run.mjs", site);
+    if (kind === "helper") assert.ok(helpers.has(top), site);
+  }
+  // a helper is called only inside a gate or from another helper
+  for (const [callee, top, inGate] of helperCalls)
+    assert.ok(inGate || helpers.has(top), `${callee} called in ${top}, outside a gate`);
+  // the hook writes nothing: no file command, no redirection (after a space, as the script writes them) but to /dev/null
+  // or stderr, once its comments and then its single-quoted programs are set aside
+  const hook = readFileSync(join("tools", "corpus", "baseline.sh"), "utf8")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n")
+    .replace(/'[^']*'/g, "''");
+  assert.deepEqual(
+    [
+      ...hook.matchAll(
+        /(?:^|[;&|({]\s*|\b(?:then|do|else)\s+)(mkdir|mv|cp|rm|rmdir|ln|touch|truncate|install)\s/gm,
+      ),
+    ].map(([command]) => command),
+    [],
+  );
+  assert.deepEqual(
+    [...hook.matchAll(/(?:^|\s)\d*>>?\s*([^\s;&|)]+)/gm)]
+      .map(([, target]) => target)
+      .filter((target) => !["/dev/null", "/dev/stderr", "&1", "&2"].includes(target!)),
+    [],
+  );
+  assert.deepEqual(
+    [...hook.matchAll(/\btee\s+(\S+)/g)]
+      .map(([, target]) => target)
+      .filter((target) => target !== "/dev/stderr"),
+    [],
+  );
 });
