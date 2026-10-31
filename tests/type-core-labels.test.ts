@@ -225,8 +225,9 @@ test("a decision's label makes no text: in every mode the labels shown are those
 
 /**
  * #1484: a consumer's label is its target's recipe (`keyLabel`), its text made where its warning or check shows it. Each
- * consumer that names a label, by the label's kind: a variable's path, an element, a dict's entry, a call's result, an
- * anonymous value's own text, a fallback's steps below it; and consumers that show nothing.
+ * consumer that names a label, by the label's kind: a variable's path, an element, a dict's entry, a call's result, a
+ * `get`'s result, a parameter, a loop variable, an anonymous value's own text, a fallback's steps below it; and consumers
+ * that show nothing.
  */
 const CONSUMER_CASES: typeof CASES = [
   ["a member read's receivers", "let raw = hostValue\nsay raw.a.b\nexit\n", ["raw", "raw.a"]],
@@ -257,6 +258,14 @@ const CONSUMER_CASES: typeof CASES = [
     ["f.result", "f.result.v"],
   ],
   ["an anonymous value's own text", "say [hostValue][0].v\nexit\n", ["[hostValue][0]"]],
+  [
+    "a `get`'s result",
+    "let xs = [hostValue]\nsay xs.get(0, default: hostOther).v.w\nexit\n",
+    ["xs.element", "xs.element.v"],
+  ],
+  ["a parameter", "function g(p) {\n  say p.v.w\n}\ng(hostValue)\nexit\n", ["g.p", "g.p.v"]],
+  ["a loop variable", "let xs = [hostValue]\nfor x in xs {\n  say x.v.w\n}\nexit\n", ["x", "x.v"]],
+  ["a list's elements at `join`", "let xs = [hostValue]\nsay xs.join()\nexit\n", ["xs.element"]],
   [
     "a dict's values, a new list each read",
     "let d = dict{ a: hostValue }\nsay d.values[0].v\nexit\n",
