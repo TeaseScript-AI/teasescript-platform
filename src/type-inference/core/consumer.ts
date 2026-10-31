@@ -51,7 +51,7 @@ import type {
 } from "../backend.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { closedType, coreResult, type Answers } from "./answers.js";
-import { BudgetExhausted, joinSteps, pathText } from "./budget.js";
+import { BudgetExhausted, joinSteps } from "./budget.js";
 import { typedDefault as defaultKinds } from "./contract.js";
 import { leftOutCheck, leftOutWarning } from "./consumers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
@@ -853,16 +853,17 @@ function runtimeChecks(
     const expression = index.expressionAt(diagnostic.site);
     switch (diagnostic.kind) {
       case "written-target": {
-        // C10's obligation names the fallback by its key path (§10.5 r4.10: `xs.element` for `xs[0]`), or by its own
-        // text where no place holds its value, with the element steps of a nested literal's depth; C1's a place (S6's
-        // departure 6)
-        const { target } = diagnostic.obligation;
+        // C10's obligation names the fallback as every obligation names its value (§10.5 r4.10: `xs.element` for
+        // `xs[0]`, `d.entry` for a dict's, its text where no place holds it), with the element steps of a nested
+        // literal's depth; C1's a place (S6's departure 6)
         const held = index.fallbackOf(expression);
         const steps =
           held === undefined
             ? null
-            : (fallbackSteps(target, textOf(expression)) ??
-              fallbackSteps(target, fallbackKey(answers, index, expression)));
+            : fallbackSteps(
+                diagnostic.obligation.target,
+                answers.targetName(nodeOf(answers, index, expression)),
+              );
         const owner = steps === null ? undefined : held;
         if (owner === undefined)
           owed.push({
@@ -967,35 +968,13 @@ interface FallbackDepth {
   readonly against: readonly RequiredKind[];
 }
 
-/**
- * The element steps of a C10 target below the fallback named `name` (its text or its key path), or `null` for another
- * target (a C1's).
- */
+/** The element steps of a C10 target below the fallback named `name` (`targetName`), or `null` for another (a C1's). */
 function fallbackSteps(target: string, name: string | null): string[] | null {
   if (name === null) return null;
   if (target === name) return [];
   if (!target.startsWith(`${name}.`)) return null;
   const steps = target.slice(name.length + 1).split(".");
   return steps.every((step) => step === "element" || step === "entry") ? steps : null;
-}
-
-/**
- * A fallback's key path as C10's obligation names it (§10.5 r4.10, `keyLabel`): the variable its value is read through
- * and the steps its occurrence reads below it (`xs.element`); `null` where no place holds the value.
- */
-function fallbackKey(answers: Answers, index: SliceIndex, fallback: Expression): string | null {
-  const place = answers.at(nodeOf(answers, index, fallback))?.place ?? null;
-  let root = fallback;
-  while (
-    root.kind === "propertyAccessExpression" ||
-    root.kind === "indexExpression" ||
-    root.kind === "parenthesizedExpression"
-  )
-    root = root.kind === "parenthesizedExpression" ? root.expression : root.object;
-  // (a text to compare once, not kept: its plain twins)
-  return place === null || root.kind !== "identifier"
-    ? null
-    : pathText(joinSteps([root.name], place.path));
 }
 
 /**

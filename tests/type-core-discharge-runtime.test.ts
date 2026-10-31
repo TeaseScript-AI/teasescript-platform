@@ -512,10 +512,22 @@ test("a get's and a conversion's selected default is checked against the result'
   }
 });
 
-test("a default read through an element is checked where it is selected, also with no store around it, in three layers, in both orders (C10, #1538)", () => {
-  // (C10 names such a default by its key path, `xs.element`, §10.5 r4.10, never by its text `xs[0]`)
+test("a default named by its key path is checked where it is selected, also with no store around it, in three layers, in both orders (C10, #1538)", () => {
+  // C10 names a default as every obligation names its value (§10.5 r4.10): an element read `xs.element`, a written dict's
+  // entry `d.entry`, a `get`'s result by its receiver's element, never by its text; a nested default owes its own check
+  const dict = (a: SerializableRuntimeValue): SerializableRuntimeValue => ({
+    kind: "dict",
+    entries: [{ key: "a", value: a }],
+  });
+  const list = (item: SerializableRuntimeValue): SerializableRuntimeValue => ({
+    kind: "list",
+    items: [item],
+  });
   const rows: readonly (readonly [
     source: string,
+    /** The default whose check fails, the name C10 gives it, and the call that selects the outer default. */
+    fallback: string,
+    target: string,
     call: string,
     fits: SerializableRuntimeValue,
     said: readonly string[],
@@ -523,6 +535,8 @@ test("a default read through an element is checked where it is selected, also wi
   ])[] = [
     [
       'let xs: list = [hostValue, 4]\nlet fixed: number[] = [1.5]\nsay "BEFORE"\nsay fixed.get(9, default: xs[0])\nsay "AFTER"\nexit\n',
+      "xs[0]",
+      "xs.element",
       "fixed.get(9, default: xs[0])",
       2.5,
       ["BEFORE", "2.5", "AFTER"],
@@ -530,17 +544,46 @@ test("a default read through an element is checked where it is selected, also wi
     ],
     [
       'let xs = hostValue\nlet counts: integer[] = [1]\nsay "BEFORE"\nrepeat counts.get(9, default: xs[0]) {\n  say "ok"\n}\nsay "AFTER"\nexit\n',
+      "xs[0]",
+      "xs.element",
       "counts.get(9, default: xs[0])",
-      { kind: "list", items: [2] },
+      list(2),
       ["BEFORE", "ok", "ok", "AFTER"],
-      { kind: "list", items: ["text"] },
+      list("text"),
+    ],
+    [
+      'let fixed: number[] = [1.5]\nlet d: dict = hostValue\nsay "BEFORE"\nsay fixed.get(9, default: d["a"])\nsay "AFTER"\nexit\n',
+      'd["a"]',
+      "d.entry",
+      'fixed.get(9, default: d["a"])',
+      dict(2),
+      ["BEFORE", "2", "AFTER"],
+      dict("text"),
+    ],
+    [
+      'let fixed: number[] = [1.5]\nlet xs: list = [hostValue]\nsay "BEFORE"\nsay fixed.get(9, default: xs.get(0, default: null))\nsay "AFTER"\nexit\n',
+      "xs.get(0, default: null)",
+      "xs.element",
+      "fixed.get(9, default: xs.get(0, default: null))",
+      2,
+      ["BEFORE", "2", "AFTER"],
+      "text",
+    ],
+    [
+      'let xs = hostValue\nlet fixed: number[] = [1.5]\nsay "BEFORE"\nsay fixed.get(9, default: fixed.get(8, default: xs[0]))\nsay "AFTER"\nexit\n',
+      "xs[0]",
+      "xs.element",
+      "fixed.get(9, default: fixed.get(8, default: xs[0]))",
+      list(2),
+      ["BEFORE", "2", "AFTER"],
+      list("text"),
     ],
   ];
-  for (const [source, call, fits, said, bad] of rows) {
-    const site = at(source, "xs[0]");
+  for (const [source, fallback, target, call, fits, said, bad] of rows) {
+    const site = at(source, fallback);
     const known = decision(source);
     assert.ok(known.diagnostics.includes(`warning-runtime-check written-target @${site}`), source);
-    assert.ok(known.checks.includes(`copy-type xs.element [integer, number] @${site}`), source);
+    assert.ok(known.checks.includes(`copy-type ${target} [integer, number] @${site}`), source);
     const plan = candidatePlan(source);
     assert.ok(
       contentOf(plan).includes(`fallbackCheck call@${at(source, call)} integer|number`),

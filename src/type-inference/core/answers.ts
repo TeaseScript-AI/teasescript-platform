@@ -15,6 +15,7 @@ import {
   type WorkCounter,
 } from "./budget.js";
 import { Consumers, STOP_RULE, typedCall } from "./consumers.js";
+import { keyLabel } from "./consumers/names.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import { compareDemandNames, exportNames, importNames } from "./contract/key-ids.js";
 import { selectLanes } from "./contract/lanes.js";
@@ -395,6 +396,11 @@ export interface Answers {
    * value is known to have there (`properties` at that path).
    */
   valueAt(node: FlowNode, path: readonly string[]): ValueAnswer;
+  /**
+   * The name an obligation gives the value at a node (§10.5 r4.10, `keyLabel`): its key path, else its text; `null`
+   * where the node holds no value. The plan side reads an obligation's target by it, never by a name of its own.
+   */
+  targetName(node: FlowNode): string | null;
   view(node: FlowNode): CoreView;
   /**
    * Gives `view` its known values: the one constant service the consumer owns (S3 §1, TABLE r4.81 (3)), so the known
@@ -1430,6 +1436,12 @@ class CoreAnswers implements Answers {
   public placeProperties(id: PlaceId, path: readonly string[] = []): ReadonlySet<string> {
     // (the key in its identity, as the property search names its tasks: G3 stage 1)
     return this.#propertyNames({ key: this.#pass.contract.keyAt(id, path) });
+  }
+
+  public targetName(node: FlowNode): string | null {
+    // (the label the consumer that published the obligation made for the value, its walk's memos answering again)
+    const value = this.#valueOf(node);
+    return value === null ? null : keyLabel(this.#consumers, value);
   }
 
   public valueAt(node: FlowNode, path: readonly string[]): ValueAnswer {
