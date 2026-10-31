@@ -9,7 +9,7 @@ import { writerKey } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import {
   inMode,
@@ -292,6 +292,30 @@ test("a tested path's mark reaches every entry of its source, and only that path
     "let seed = {n: 1.5, m: 2.5}\nlet w = {q: seed}\nlet a = w.q\nif w.q.n is integer { a = w.q }\nlet b = w.q\nif flagHost { b = w.q }\nlet x: integer = b.n\nexit",
   );
   assert.deepEqual(result(wrapped), { outcome: "warning-runtime-check", checked: true });
+});
+
+/**
+ * #1466: A5's candidates through a prefix's layers are the stores that brought each layer whose summary holds an
+ * offending item, a joined layer's too: `t` decided a whole number by its start value, then copied `a2`, whose own
+ * store below its root brings host data, owes its check at that copy, in either order.
+ */
+test("a copy that joins a layer of host data owes its check where the layer's summary offends (#1466)", () => {
+  const source =
+    "let a = {g: 1}\nlet b = {g: 1}\nlet a2 = a\na2.g = hostValue\nlet b2 = b\nb2.g = 2\nlet t = b2\nt = a2\nrepeat t.g {}\nexit";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  for (const reversed of [false, true]) {
+    const { checks } = inOrder(reversed, () => compactAnalysis(request));
+    assert.ok(
+      checks.some(
+        (check) =>
+          check.kind === "copy-type" &&
+          check.target === "t.g" &&
+          source.slice(check.site.offset, check.site.end) === "a2",
+      ),
+      `reversed: ${reversed}`,
+    );
+  }
 });
 
 test("a chain of whole copies read at k fields resolves each copy once (W34)", () => {
