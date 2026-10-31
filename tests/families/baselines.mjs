@@ -15,7 +15,8 @@
 // Nothing is written into a baseline but through `gate`: the folder must be this tool's (its MANIFEST's first line,
 // read before anything else), the gate holds the baseline's lock (`flock` on its folder) and checks that no foreign
 // path is there, then writes; a writer whose baseline was retired while it waited starts a new one. A folder holding
-// a foreign path is neither written into (the writer is refused, exit 2, naming the path) nor removed. An area's PLAN,
+// a foreign path is neither written into (the writer is refused, exit 2, naming the path) nor removed. The gate removes
+// the temporary files a writer that ended (killed) left. An area's PLAN,
 // made by its first writer, binds its run: each shard's sources in their order, each generator's checks, the
 // allowances and limits; a writer that would run another is refused ("another plan"). A recorded area not made yet,
 // or made without its PLAN, is the next writer's to finish. A shard counts only once verified: its last line, its
@@ -246,6 +247,14 @@ async function gate(dir, action) {
         refused: `${dir} holds foreign contents, which this tool did not write: ${foreign.join(", ")}`,
         foreign,
       };
+    // the temporary files a writer left when it ended (killed) before renaming or linking them
+    const folders = [dir, ...[...recorded(text).keys()].map((area) => path.join(dir, area))];
+    for (const folder of folders.filter((folder) => existsSync(folder)))
+      for (const name of readdirSync(folder)) {
+        const writer = /\.(\d+-\d+)\.tmp$/.exec(name)?.[1];
+        if (writer !== undefined && !running(writer))
+          rmSync(path.join(folder, name), { force: true });
+      }
     return await action(text);
   } finally {
     holder.stdin.end();
@@ -417,7 +426,7 @@ export async function planned(top, area, plan) {
 
 /**
  * A shard to store (through the gate): `skipped` where it verifies or a running writer stores it, else this process's
- * claim, a dead writer's temporary files of the shard removed; `refused` where the baseline refuses the writer.
+ * claim; `refused` where the baseline refuses the writer.
  */
 export async function beginShard(top, area, shard, shards, plan, places) {
   const dir = path.join(top, area);
@@ -426,14 +435,6 @@ export async function beginShard(top, area, shard, shards, plan, places) {
     if (verified(file, plan, places)) return { skipped: "stored" };
     if (!claimed(path.join(dir, `.${shard}of${shards}.claim`)))
       return { skipped: "being stored by another writer" };
-    const prefix = `${path.basename(file)}.`;
-    for (const entry of readdirSync(dir))
-      if (
-        entry.startsWith(prefix) &&
-        entry.endsWith(".tmp") &&
-        !running(entry.slice(prefix.length, -4))
-      )
-        rmSync(path.join(dir, entry), { force: true });
     return {};
   });
   if (outcome === RETIRED) return { refused: `${top} was retired while this writer began a shard` };
@@ -599,9 +600,13 @@ async function queue(dir, script) {
 /**
  * A folder this tool made outside a baseline (`.pruning-…` or `.creating-…`, named by its writer) removed once that
  * writer ended (`writer`, or this process where it is null), where it holds this tool's MANIFEST and no foreign path;
- * else kept, and named.
+ * else kept, and named (as is one so named but not by a writer of this tool, `writer` undefined).
  */
 function recover(dir, writer) {
+  if (writer === undefined) {
+    console.log(JSON.stringify({ kept: dir, foreign: ["(not named by a writer of this tool)"] }));
+    return;
+  }
   if (writer !== null && running(writer)) return;
   const text = isOwned(dir) ? readFileSync(path.join(dir, "MANIFEST"), "utf8") : null;
   const foreign = text === null ? ["(no MANIFEST of this tool)"] : foreignIn(dir, text);
@@ -620,9 +625,9 @@ async function prune(root) {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const dir = path.join(root, entry.name);
     if (!entry.isDirectory()) continue;
-    const made = /^\.(?:pruning-.+|[0-9a-f]+\.creating)-(\d+-\d+)$/.exec(entry.name);
-    if (made !== null) {
-      recover(dir, made[1]);
+    // (a folder named as this tool names one outside a baseline, which may be another's: `recover` decides)
+    if (/^\.(?:pruning-|[0-9a-f]+\.creating-)/.test(entry.name)) {
+      recover(dir, /-(\d+-\d+)$/.exec(entry.name)?.[1]);
       continue;
     }
     if (entry.name.startsWith(".") || !isOwned(dir)) continue;
