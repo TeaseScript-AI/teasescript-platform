@@ -50,7 +50,13 @@ import type {
   TypeCheckResult,
 } from "../backend.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
-import { closedType, coreResult, type AdmittedType, type Answers } from "./answers.js";
+import {
+  closedType,
+  coreResult,
+  type AdmittedType,
+  type Answers,
+  type ValueAnswer,
+} from "./answers.js";
 import { BudgetExhausted, joinSteps } from "./budget.js";
 import { typedDefault as defaultKinds } from "./contract.js";
 import { leftOutCheck, leftOutWarning } from "./consumers.js";
@@ -1248,9 +1254,12 @@ class Contracts {
       owner.kind === "binaryExpression" ? owner.left : getReceiver(owner) === null ? null : owner;
     if (value === null) return null;
     // (a contract's path names a dict's value its element, as every key does)
+    const below = steps.map(() => "element");
+    const landing = this.#landing(owner);
     const { contract, written } = this.#provenanceOf(
       value,
-      steps.map(() => "element"),
+      below,
+      landing === null ? null : { id: landing.id, path: joinSteps(landing.path, below) },
     );
     // a written level, or one a copy inherits from a written type (A4, ADR 0021 1.3), keeps its type; any other is checked
     // in C10's family, whole numbers with numbers (ADR 0021 1.2, 7.2): never stricter than C10 for the same default
@@ -1267,11 +1276,12 @@ class Contracts {
    * place's value has its place's contract, each level written where the core answers its domain as written or as
    * inherited from a written type. A `get`'s value is its receiver's element. An `otherwise` chain's value joins its
    * operands' as the core admits a join (A4): a level is written where any operand that brings a collection (a `null` or
-   * a scalar brings none) is written there; the contract is theirs where they agree, else the core's answer for the join,
-   * whose own receiving check then stays. Any other value is the core's answer for it by its own text (a literal, an
+   * a scalar brings none) is written there; the contract is theirs where they agree, else the core's admitted contract
+   * of the place the value at `path` lands in (`landing`, the one its receiving check is against), and none where it
+   * lands in none or an operand's is open. Any other value is the core's answer for it by its own text (a literal, an
    * operation, another call), unwritten.
    */
-  #provenanceOf(value: Expression, path: readonly string[]): Provenance {
+  #provenanceOf(value: Expression, path: readonly string[], landing: Landing | null): Provenance {
     const read = unwrap(value);
     const node = nodeOf(this.answers, this.index, read);
     const place = this.answers.at(node)?.place ?? null;
@@ -1284,21 +1294,29 @@ class Contracts {
       };
     }
     const receiver = getReceiver(read);
-    if (receiver !== null) return this.#provenanceOf(receiver, joinSteps(["element"], path));
+    if (receiver !== null)
+      return this.#provenanceOf(receiver, joinSteps(["element"], path), landing);
     if (read.kind === "binaryExpression" && read.operator === "otherwise") {
       const joined = [read.left, read.right]
-        .filter((operand) => bringsCollection(this.#provenanceOf(operand, []).contract))
-        .map((operand) => this.#provenanceOf(operand, path));
+        .filter((operand) =>
+          bringsCollection(this.answers.valueAt(nodeOf(this.answers, this.index, operand), [])),
+        )
+        .map((operand) => this.#provenanceOf(operand, path, landing));
       const contract = joined[0]?.contract ?? null;
-      if (joined.length > 0)
+      if (joined.some((part) => part.contract === null))
+        return { contract: null, written: () => false };
+      if (contract !== null && joined.every((part) => samePlan(part.contract!, contract)))
+        return { contract, written: (levels) => joined.some((part) => part.written(levels)) };
+      if (contract !== null) {
+        // (operands of written types that differ: the core admits the join where it lands, by its copies, Codex r6)
+        if (landing === null)
+          throw new OutsideContract(read, "a join of different written types that no place admits");
         return {
-          contract:
-            contract !== null &&
-            joined.every((part) => part.contract !== null && samePlan(part.contract, contract))
-              ? contract
-              : runCompileTask(this.#answeredTask(node, path, read)),
-          written: (levels) => joined.some((part) => part.written(levels)),
+          contract: runCompileTask(this.#contractTask(landing.id, landing.path, read, [])),
+          written: (levels) =>
+            writtenDomain(this.answers.place(landing.id, joinSteps(landing.path, levels)).admitted),
         };
+      }
     }
     return { contract: runCompileTask(this.#answeredTask(node, path, read)), written: () => false };
   }
@@ -1752,9 +1770,9 @@ interface Provenance {
   readonly written: (levels: readonly string[]) => boolean;
 }
 
-/** Whether a value of a contract may be a collection: one of its members is, or it is open (`null`). */
-function bringsCollection(contract: TypePlan | null): boolean {
-  return contract === null || membersOf(contract).some((member) => isCollection(member.kind));
+/** Whether a value the core answers may be a collection: one of its kinds is, or it may hold an unknown. */
+function bringsCollection(value: ValueAnswer): boolean {
+  return value.items.some((item) => item.tag === "unknown" || isCollection(item.tag));
 }
 
 /** Whether two plans are one type: the same members, in any order, at every level. */

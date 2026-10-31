@@ -967,8 +967,8 @@ function completedType(
 
 /**
  * Whether a value's level (by its steps) is a written type's (A4, ADR 0021 1.3): a written declaration's, through
- * parentheses, element reads, `get`s, a literal's elements and copies; an `otherwise` chain's where every operand that
- * brings a collection is written with one structure.
+ * parentheses, element reads, `get`s, a literal's elements and copies; an `otherwise` chain's where any operand that
+ * brings a collection is, all of one structure.
  */
 function writtenAt(
   expression: Expression,
@@ -1015,26 +1015,24 @@ function writtenAt(
       );
     case "binaryExpression": {
       if (at.operator !== "otherwise") return false;
-      const operands = [at.left, at.right].filter((operand) => {
-        const shape = sourceShape(operand, statements);
-        return (
-          shape === null ||
-          (shape.kind === "union" ? shape.members : [shape]).some((member) =>
-            isCollectionKind(member.kind),
-          )
+      // (a level of a join is written where any operand that brings a collection is; the core admits a join of different
+      // structures by its copies, which these rules do not derive)
+      const operands = [at.left, at.right]
+        .map((operand) => [operand, sourceShape(operand, statements)] as const)
+        .filter(
+          ([, shape]) =>
+            shape === null ||
+            (shape.kind === "union" ? shape.members : [shape]).some((member) =>
+              isCollectionKind(member.kind),
+            ),
         );
-      });
       const texts = new Set(
-        operands.map((operand) => {
-          const shape = sourceShape(operand, statements);
-          return shape === null ? "" : derivedText(withoutNull(shape) ?? shape);
-        }),
+        operands.map(([, shape]) =>
+          shape === null ? "" : derivedText(withoutNull(shape) ?? shape),
+        ),
       );
-      return (
-        operands.length > 0 &&
-        texts.size === 1 &&
-        operands.every((operand) => writtenAt(operand, steps, statements, seen))
-      );
+      if (texts.size > 1) throw new Underivable("a join of different structures");
+      return operands.some(([operand]) => writtenAt(operand, steps, statements, seen));
     }
     default:
       return false;

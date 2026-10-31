@@ -596,6 +596,15 @@ test("a default named by its key path is checked where it is selected, also with
             written ? 2.5 : "bad",
           ] as const,
       ),
+      // (operands of written types that differ, a chain as a `get`'s receiver: checked as the core admits the join where
+      // it lands, `number` here, as the receiving check is, Codex r6)
+      [
+        "let ints: integer[][][] = [[[1]]]\nlet nums: number[][][] = [[[1]]]\n",
+        "((nums.get(0, default: [[0]])) otherwise (ints.get(0, default: [[0]]))).get(8, default: xs[0])",
+        "list<number>",
+        2.5,
+        "bad",
+      ],
     ] as const
   ).map(([setup, call, type, fits, bad]) => ({ setup, call, type, fits, bad }));
   const rows: {
@@ -741,7 +750,7 @@ test("a default named by its key path is checked where it is selected, also with
     const plan = candidatePlan(source);
     assert.ok(
       contentOf(plan).includes(
-        `fallbackCheck ${call.includes(" otherwise ") ? "binary" : "call"}@${at(source, call)} ${type}`,
+        `fallbackCheck ${call.endsWith(" otherwise xs[0]") ? "binary" : "call"}@${at(source, call)} ${type}`,
       ),
       `${source}: ${JSON.stringify(contentOf(plan))}`,
     );
