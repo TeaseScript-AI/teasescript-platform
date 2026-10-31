@@ -24,7 +24,9 @@ outside the repository").
   changed files stay beside them as `<file>.pre-1510` and `<file>.pre-1514` (`PORTED-1510.md`, `PORTED-1514.md`).
 - `desktop:~/work/evidence/corpus/stops/2b-1511-r1/`: Codex's r1 of #1511 (its `README.md` gives the commands), whose
   fixture hashes (`builder-scripts/fixture-pub.mjs`) keep an exception apart, unhashed, and exit 1 on it (#1516);
-  `canary-1516.sh` checks that, and the original stays beside it as `fixture-pub.mjs.pre-1516` (`PORTED-1516.md`).
+  `canary-1516.sh` checks that, and the original stays beside it as `fixture-pub.mjs.pre-1516` (`PORTED-1516.md`);
+  its publication parity (`parity.mjs`) keeps an exception on either tree apart the same way (#1518; `canary-1518.sh`,
+  `parity.mjs.pre-1518`, `PORTED-1518.md`).
 
 ## Known problems
 
