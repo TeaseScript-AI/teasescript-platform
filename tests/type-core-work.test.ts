@@ -1068,10 +1068,11 @@ test("a cycle of whole copies read at every member grows with the program in eit
 /**
  * #1426: in a selection nested k deep whose options are objects, read at a property, each level's literal is read at the
  * path once, its answer composed from the level inside's: the contract's merges and steps grow with the program in
- * either order (a level merged again from every literal inside measured 3.75 to 3.93 here). Admission's own structure
- * of each literal still walks the nest inside it where the order asks the outer literal first (`valueStructure`), so
- * the total is gated in the source order of the issue's shape alone. The series to k = 256, the four modes and the
- * siblings are the step's evidence, outside CI.
+ * either order (a level merged again from every literal inside measured 3.75 to 3.93 here). #1444: admission lists
+ * the own structure of each literal's elements once, after the elements inside it, whichever literal the order asks
+ * first (`expectStructures`), so its checks and the total grow with the program in either order too (asked outer
+ * first, each element's walk of the nest inside it measured 2.64 to 2.76 for `checks` here). The series to k = 256, the
+ * four modes and the siblings are the steps' evidence, outside CI.
  */
 test("nested selections of objects merge each level's items once, in either order (#1426)", () => {
   const steep: string[] = [];
@@ -1084,13 +1085,12 @@ test("nested selections of objects merge each level's items once, in either orde
       const doubling = (before: number, after: number): number =>
         (2 * (after / Math.max(1, before))) / scale;
       const name = `${family.name}${reversed ? " reversed" : ""}`;
-      for (const counter of ["mergeItems", "invSteps"] as const) {
+      for (const counter of ["mergeItems", "invSteps", "checks"] as const) {
         const factor = doubling(small!.counts.get(counter) ?? 0, large!.counts.get(counter) ?? 0);
         if (factor > COUNTER_DOUBLING) steep.push(`${name} ${counter}: ${factor.toFixed(3)}`);
       }
-      if (family === NESTED_OBJECT_SELECTIONS[0] && !reversed)
-        if (doubling(small!.total, large!.total) > DOUBLING)
-          steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
+      if (doubling(small!.total, large!.total) > DOUBLING)
+        steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
     }
   }
   assert.deepEqual(steep, []);
