@@ -312,9 +312,11 @@ test("a receiver that may be a reference answers by F19a before its exact value 
     [
       `contract: ${opaque}`,
       `contract: ${opaque}`,
-      // the late store's own check against the list the place is decided by (C1)
-      "contract: unknown; integer-use warning-runtime-check, member-read warning-runtime-check, written-target warning-runtime-check; copy-type, integer-check, null-check",
-      `value: ${opaque}`,
+      // the late store's own checks against the list the place is decided by (C1): one for the speaker, one for the
+      // unrestricted dict's value, which may be any value (#1501)
+      "contract: unknown; integer-use warning-runtime-check, member-read warning-runtime-check, written-target warning-runtime-check, written-target warning-runtime-check; copy-type, copy-type, integer-check, null-check",
+      // (the member's check for the speaker, and for the dict's value, #1501)
+      "value: unknown; integer-use warning-runtime-check, member-read warning-runtime-check, member-read warning-runtime-check; integer-check, null-check, null-check",
       `contract: ${opaque}`,
       "value: unknown; member-read warning-runtime-check; null-check",
     ],
@@ -345,10 +347,11 @@ test("a `get` on a receiver that may be a reference is the runtime's, no default
     });
   const opaque =
     "value: unknown; integer-use warning-runtime-check, member-read warning-runtime-check; integer-check, null-check";
-  // a late store that may be the speaker owes its own check against the list the place is decided by (C1); a definite
-  // speaker there would be admission's error and be ignored (A6)
+  // a late store that may be the speaker owes its own check against the list the place is decided by (C1), and one for
+  // the unrestricted dict's value, which may be any value (#1501); a definite speaker there would be admission's error
+  // and be ignored (A6)
   const late =
-    "value: unknown; integer-use warning-runtime-check, member-read warning-runtime-check, written-target warning-runtime-check; copy-type, integer-check, null-check";
+    "value: unknown; integer-use warning-runtime-check, member-read warning-runtime-check, written-target warning-runtime-check, written-target warning-runtime-check; copy-type, copy-type, integer-check, null-check";
   const got: string[] = [];
   const want: string[] = [];
   // (a list or the speaker: a value of an unrestricted dict, as in the test before)

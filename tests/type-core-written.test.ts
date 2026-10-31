@@ -19,8 +19,8 @@ import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { writtenTypeErrors } from "../src/type-inference/core/written.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { plannedStores, runGlobals } from "./helpers/type-core-route.js";
-import { inMode, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
+import { plannedContent, plannedStores, runGlobals } from "./helpers/type-core-route.js";
+import { inMode, MODES, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
 import {
   DEFAULT_CHAIN_MATRIX,
   INFERRED_COPY_MATRIX,
@@ -617,6 +617,130 @@ test("a copied written object stays unrestricted below it in the analysis and th
         [ran.status, ran.failure, ran.said.map(({ text }) => text)],
         stop === null ? ["halted", null, ["DONE"]] : ["failed", `TSR058@${spans(stop)[1]}`, []],
         `${lines} with ${JSON.stringify(globals)}`,
+      );
+    }
+  }
+});
+
+test("a value read from an unrestricted written list owes each receiving consumer's check, the list still unrestricted (#1501)", () => {
+  const object = (
+    ...fields: (readonly [string, SerializableRuntimeValue])[]
+  ): SerializableRuntimeValue => ({
+    kind: "object",
+    properties: fields.map(([name, value]) => ({ name, value })),
+  });
+  const list = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+    kind: "list",
+    items,
+  });
+  // (the list held in another list: a read through that carrier answers the written domain, which says what the list may
+  // hold, not what it holds; the source list keeps any element, so a value fails only where it is received)
+  const setup = 'let xs: list = [hostValue, 4]\nlet carrier = [xs]\nsay "BEFORE"\n';
+  const rows: readonly {
+    readonly lines: string;
+    /** The receiving statement, and the warning's code and text at the receiving value. */
+    readonly receiving: string;
+    readonly warned: readonly (readonly [string, string])[];
+    /** The plan's check there, its texts by their spans: checked stores, or other content (`plannedContent`). */
+    readonly stores: readonly (readonly string[])[];
+    readonly content: readonly (readonly string[])[];
+    /** Host values the consumer takes, and ones it does not. */
+    readonly fitting: readonly SerializableRuntimeValue[];
+    readonly forbidden: readonly SerializableRuntimeValue[];
+  }[] = [
+    {
+      lines: "let result: integer = carrier[0][0]\nsay result",
+      receiving: "let result: integer = carrier[0][0]",
+      warned: [["TSV041", "carrier[0][0]"]],
+      stores: [["result", "let result: integer = carrier[0][0]", "carrier[0][0]", "integer"]],
+      content: [],
+      fitting: [2],
+      forbidden: [2.5, "bad", true, null],
+    },
+    {
+      // the complete written type, its element included
+      lines: "let result: integer[] = carrier[0][0]\nsay result.length",
+      receiving: "let result: integer[] = carrier[0][0]",
+      warned: [
+        ["TSV041", "carrier[0][0]"],
+        ["TSV041", "carrier[0][0]"],
+      ],
+      stores: [
+        ["result", "let result: integer[] = carrier[0][0]", "carrier[0][0]", "list<integer>"],
+      ],
+      content: [],
+      fitting: [list(2, 4), list()],
+      forbidden: [list("bad", 4), list(2.5), 2],
+    },
+    {
+      // a property store cannot create the property
+      lines: "let target = carrier[0][0]\ntarget.n = 1",
+      receiving: "target.n = 1",
+      warned: [["TSV043", "target.n"]],
+      stores: [],
+      content: [["requireExisting", "target.n = 1", "target.n"]],
+      fitting: [object(["n", 2]), object(["n", "bad"])],
+      forbidden: [object(), 2],
+    },
+    {
+      // a default that stands in for a number, a copy of the value
+      lines: "let v = carrier[0][0]\nlet fixed: number[] = [1.5]\nsay fixed.get(9, default: v)",
+      receiving: "say fixed.get(9, default: v)",
+      warned: [["TSV041", "v"]],
+      stores: [],
+      content: [["fallbackCheck", "fixed.get(9, default: v)", "integer|number"]],
+      fitting: [2, 2.5],
+      forbidden: ["bad", true],
+    },
+  ];
+  for (const { lines, receiving, warned, stores, content, fitting, forbidden } of rows) {
+    const source = `${setup}${lines}\nsay "AFTER"\nexit\n`;
+    // (a text's span, searched from the receiving statement on)
+    const from = source.indexOf(receiving);
+    const span = (text: string): string => {
+      const start = source.indexOf(text, from);
+      return `${start}:${start + text.length}`;
+    };
+    const planned = (entries: readonly (readonly string[])[]): string[] =>
+      entries.map(([first, ...texts]) =>
+        [first, ...texts.slice(0, -1).map(span), texts.at(-1)].join(" "),
+      );
+    const compiled = MODES.map((mode) =>
+      inMode(mode, () => compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND)),
+    );
+    for (const [index, { diagnostics, plan }] of compiled.entries()) {
+      const where = `${lines} in mode ${index}`;
+      // the decision: the runtime-check warning at the receiving value, nothing else
+      assert.deepEqual(
+        diagnostics.map(
+          (d) => `${d.severity} ${d.code}@${d.span.start.offset}:${d.span.end.offset}`,
+        ),
+        warned.map(([code, text]) => `warning ${code}@${span(text)}`),
+        where,
+      );
+      // the plan: the check at the receiving statement, against the whole written type
+      assert.ok(plan !== null, where);
+      assert.deepEqual(plannedStores(plan), planned(stores), where);
+      assert.deepEqual(plannedContent(plan, source), planned(content), where);
+      assert.ok(isDeepStrictEqual(plan, compiled[0]!.plan), `${where}: the plan of mode 0`);
+    }
+    // the runs: a fitting value reaches AFTER; another fails at the receiving statement, having said only BEFORE
+    const [start, end] = [from, from + receiving.length];
+    for (const value of fitting) {
+      const ran = runGlobals(compiled[0]!.plan!, { hostValue: value });
+      assert.deepEqual(
+        [ran.status, ran.said.at(-1)?.text],
+        ["halted", "AFTER"],
+        `${lines} with ${JSON.stringify(value)}`,
+      );
+    }
+    for (const value of forbidden) {
+      const ran = runGlobals(compiled[0]!.plan!, { hostValue: value });
+      const [, at, to] = /@(\d+):(\d+)$/.exec(ran.failure ?? "") ?? [];
+      assert.deepEqual(
+        [ran.status, ran.said.map(({ text }) => text), Number(at) >= start && Number(to) <= end],
+        ["failed", ["BEFORE"], true],
+        `${lines} with ${JSON.stringify(value)}: ${ran.failure}`,
       );
     }
   }
