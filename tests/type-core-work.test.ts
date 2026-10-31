@@ -870,16 +870,10 @@ test("each product a repair removed grows with the program in either order (#119
  * #1310 (the lead's rule): an operand that reaches an earlier join, through a literal's property, a nested list element,
  * an `otherwise`'s side, a kept variable or a copy, takes that join's composed type, so the join check composes each
  * tree once (beside #1357's prefixes each in an object above): each family's total and its counters grow with the
- * program in either order, the sharing on and off. The kept variables and copies of a written union without a conflicting
- * leaf are reported, not gated: admission's landings walk the chain once per link on `main` too (#1428), the copies'
- * charged work (`landedBelow`'s `copiesAlong`, `landsThrough` and `emit` from `hotSets`) and both forms' ids, made
- * there below the charged length (`keptParts` in `landedBelow`, 14,470 → 57,510 code units kept, 28,974 → 115,217
- * copied, as on `main`); at k = 64 → 128 total and `indexSteps`:
- *
- * | copies of a written union | `main` | this head |
- * | joined at each link | 2.18, 2.47 | 2.16, 2.45 |
- * | only copied | 2.02, 2.04 | 2.02, 2.04 |
- * | joined, from an unwritten list | 2.01, 2.03 | 2.01, 2.02 |
+ * program in either order, the sharing on and off. The kept variables and copies of a written union are gated since
+ * admission lists each place's landings at a prefix once per pass (`landedBelow`, #1547): each link's landing walked
+ * the chain below it before (#1428), 2.15 total and 2.45 `indexSteps` at k = 64 → 128 for the copies (2.09 and 2.27
+ * for the kept variables), now 2.02 and 2.03 (2.03 and 2.04).
  *
  * Each link an object of its own property, the composed type grows with the chain (Codex r15's and r16's B1): the
  * projections' members are gated at 64 → 128 and 128 → 256, the growing join an operand's first part (an `otherwise`'s
@@ -891,10 +885,10 @@ test("each product a repair removed grows with the program in either order (#119
 test("a join's operand reaching an earlier join takes its composed type, its work linear either way (#1310)", () => {
   const gated = JOIN_REACH_FAMILIES.filter(
     (family) =>
-      !/^join-reach-(kept|copy)-(left|right)(-width)?$/.test(family.name) &&
+      !/^join-reach-(kept|copy)-(left|right)-width$/.test(family.name) &&
       !family.name.startsWith("join-reach-choice-later-"),
   );
-  assert.equal(gated.length, 22);
+  assert.equal(gated.length, 26);
   // (a composed type growing with the chain: its second doubling too, where a walk of a growing part first crosses the
   // total's gate, Codex r16's B1)
   const growing = gated.filter((family) => family.name.endsWith("-width"));
