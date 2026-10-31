@@ -245,6 +245,8 @@ export class Contract {
   readonly stepLayers = new WeakMap<PrefixStores | SupportNode, Map<string, StepLayers>>();
   /** Per set of listing layers and path id, the layers in it or below it holding a source at the path (`holdersIn`). */
   readonly holdersBelow = new WeakMap<SupportNode, Map<number, SupportNode | null>>();
+  /** Per prefix of several layers, the union of their maps (`topsFront`). */
+  readonly topsFronts = new WeakMap<PrefixStores, SupportNode | null>();
   readonly aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly projectedLayers = new Map<string, SubLayer | null>();
   /**
@@ -258,6 +260,8 @@ export class Contract {
   readonly summaryLeaves = new Map<Key, Map<string, SupportNode>>();
   readonly supportBranches = new Map<number, Map<number, Map<number, SupportNode>>>();
   readonly supportUnions = new Map<number, Map<number, SupportNode>>();
+  /** A step map overlaid by another, by the two nodes' ids in order (`overlay`). */
+  readonly supportOverlays = new Map<number, Map<number, SupportNode>>();
   readonly keys = new Map<CanonicalKey, Identity>();
   readonly identities = new Map<PlaceId, Identity>();
   readonly aliases = new Map<PlaceId, { readonly key: Key; readonly guarded: boolean }>();
