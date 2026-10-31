@@ -137,7 +137,10 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   ],
   "messages/errors.ts mixedSentence join": [1, "an object's property names in a sentence, joined"],
   "messages/errors.ts memberFix step": [2, "a receiver and its member as the fix's code"],
-  "messages.ts memberWarningFix step": [1, "a receiver and its property as the fix's code"],
+  "messages/warnings.ts memberWarningFix step": [
+    1,
+    "a receiver and its property as the fix's code",
+  ],
   "messages/errors.ts shownFix step": [
     1,
     "an object's code and its first property as the fix's code",
