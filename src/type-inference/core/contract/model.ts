@@ -122,14 +122,18 @@ export interface SubLayer {
   readonly jumps: readonly SubLayer[];
   /** Its leaf in a set of layers (`front`). */
   readonly self: SupportNode;
-  /** The layers whose maps its own unites: its parent, unless one it joins has the parent on its chain, and its joins. */
-  readonly through: readonly SubLayer[];
+  /**
+   * Per step, the nearest layers listing it below it: the union of the maps (`front`) of its parent, unless one it joins
+   * has the parent on its chain, and of its joins; made with it, so a listing layer's read finds those below it by one
+   * lookup, never by its parent and joins in turn.
+   */
+  readonly under: SupportNode | null;
   /**
    * Per step, the nearest layers listing it at or below it, as a map of steps to sets of layers (`SupportNode.value`):
-   * itself for its own steps, else the sets of the layers it reads through, so a read under a step asks the layers
-   * that list it, never one it passes through; made with it from theirs.
+   * itself for its own steps, else those below it (`under`), so a read under a step asks the layers that list it,
+   * never one it passes through; made with it from theirs.
    */
-  front: SupportNode | null;
+  readonly front: SupportNode | null;
 }
 
 /**

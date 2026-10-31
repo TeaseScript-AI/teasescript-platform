@@ -522,7 +522,7 @@ function projectedLayer(contract: Contract, place: PlaceId, projection: Steps): 
 /**
  * A prefix's layer: its own sources over the layer it inherits and the layers its source joins; none if it adds
  * neither, its parent then standing for it with its origin. A join already on the parent's chain adds nothing the
- * parent does not and is left out, and a parent on a join's chain adds nothing to its map (`through`), so copies joined
+ * parent does not and is left out, and a parent on a join's chain adds nothing to its maps (`under`), so copies joined
  * again over one ancestor, in either order, stay a chain of the layers that list their steps.
  */
 function layerOf(
@@ -560,6 +560,16 @@ function layerOf(
     }
   }
   const id = contract.layersById.length;
+  const self = setLeaf(contract, id);
+  // (below it, each step maps to the listing layers the maps of its parent and joins name for it; its own steps map to
+  // itself)
+  let under: SupportNode | null = null;
+  for (const child of covered || parent === null ? kept : [parent, ...kept])
+    under = union(contract, under, child.front);
+  // (the map below its own steps kept with it, so a listing layer's read finds those below it by one lookup)
+  if (under !== null) contract.keep(1);
+  let front = under;
+  for (const step of own.keys()) front = mapWith(contract, front, step, self);
   const layer: SubLayer = {
     own,
     parent,
@@ -570,16 +580,11 @@ function layerOf(
     id,
     depth: parent === null ? 0 : parent.depth + 1,
     jumps,
-    self: setLeaf(contract, id),
-    through: covered || parent === null ? kept : [parent, ...kept],
-    front: null,
+    self,
+    under,
+    front,
   };
   contract.layersById.push(layer);
-  // (its steps map to itself; every other step to the listing layers the maps it reads through name for it)
-  let front: SupportNode | null = null;
-  for (const child of layer.through) front = union(contract, front, child.front);
-  for (const step of own.keys()) front = mapWith(contract, front, step, layer.self);
-  layer.front = front;
   return layer;
 }
 
@@ -718,12 +723,9 @@ function layersIn(contract: Contract, set: SupportNode | null): SubLayer[] {
   return out;
 }
 
-/** The nearest layers below `layer`, through the layers it reads through (`through`), that list `step`, as one set. */
+/** The nearest layers below `layer` that list `step`, as one set: one lookup in its map below its own steps (`under`). */
 function listingBelow(contract: Contract, layer: SubLayer, step: string): SupportNode | null {
-  let set: SupportNode | null = null;
-  for (const child of layer.through)
-    set = union(contract, set, mapGet(contract, child.front, step));
-  return set;
+  return mapGet(contract, layer.under, step);
 }
 
 /** Whether a source has a store of its own at a prefix of `ref` below its root (`ownPaths`). */
