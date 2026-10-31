@@ -35,7 +35,7 @@ import { keptKey, keyOf, type Definition, type Key } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, STOPPED, type Item, type Writer } from "./items.js";
 import { Laminar } from "./narrowing.js";
-import type { CoreDiagnostic, SiteExpectation } from "./result.js";
+import type { CoreDiagnostic, Obligation, SiteExpectation } from "./result.js";
 import type { Work } from "./solver.js";
 export { typedCall } from "./consumers/finishing.js";
 export { leftOutCheck, leftOutWarning, withoutRecords } from "./consumers/left-out.js";
@@ -255,6 +255,58 @@ export class Consumers {
   }
 
   readonly typedReads = new Map<string, readonly Item[] | null>();
+
+  /**
+   * The external items a finishing read's domain brought (`heldIngress`, the finished contract's, `markDomain`): what its
+   * key's stores hold, which the read's mark stands for (#1448).
+   */
+  readonly domainOwned = new WeakSet<Item>();
+
+  /**
+   * C9 at a consumer (`Admission.boundariesAt`): each item's boundary requests at `here`, in order. A domain's item is
+   * the content of the warning that owns it there (S8's mark-ownership rule, TABLE r4.110 (a), #1448): where `leftOut`
+   * says that warning was left out (`withoutRecords`), its requests are left out with it. An item no warning was asked
+   * for keeps its requests.
+   */
+  public boundariesAt(
+    items: readonly Item[],
+    here: Obligation | null,
+    leftOut: (item: Item) => boolean = () => false,
+  ): void {
+    // (only a finishing read brings a domain item: an ordinary walk's requests are C9's alone)
+    if (!this.finishing) {
+      this.admission.boundariesAt(items, here);
+      return;
+    }
+    // (each item looked up, charged: the finishing walk's charges never move a stop)
+    this.pass.program.work.charge("checks", items.length);
+    for (const item of items)
+      if (!this.domainOwned.has(item) || !leftOut(item)) this.admission.boundaryFor(item, here);
+  }
+
+  /**
+   * `boundariesAt` where the warnings owning a domain's items follow the requests: every other item's requests now, a
+   * domain item's once those warnings were asked for (`send`), which the consumer always calls.
+   */
+  public boundariesBefore(
+    items: readonly Item[],
+    here: Obligation | null,
+  ): (leftOut?: (item: Item) => boolean) => void {
+    if (!this.finishing) {
+      this.admission.boundariesAt(items, here);
+      return () => {};
+    }
+    this.pass.program.work.charge("checks", items.length);
+    const domain: Item[] = [];
+    for (const item of items)
+      if (this.domainOwned.has(item)) domain.push(item);
+      else this.admission.boundaryFor(item, here);
+    return (leftOut = () => false) => {
+      // (each gone over again, charged)
+      this.pass.program.work.charge("checks", domain.length);
+      for (const item of domain) if (!leftOut(item)) this.admission.boundaryFor(item, here);
+    };
+  }
 
   hostStores: Map<PlaceId, Definition[]> | null = null;
 

@@ -379,6 +379,13 @@ const CONSUMERS: Readonly<Record<string, Consumer>> = {
     needs: (value) => typeof value === "number",
     says: (value) => [String(Number(value) + 1)],
   },
+  // (an operation a later statement reads, which a stop leaves to the finishing walk, #1448)
+  laterOperation: {
+    lines: (read) => ['repeat 2 {say "x"}', `say "\${${read} * 2}"`],
+    slice: false,
+    needs: (value) => typeof value === "number",
+    says: (value) => ["x", "x", String(Number(value) * 2)],
+  },
   fallback: {
     // (a fallback's left is read in requirement mode: its kinds give the requirement its right meets, C10)
     lines: (read) => [`let w = ${read} otherwise 1`, "say w"],
@@ -431,11 +438,9 @@ export function heldFamily(few = false): HeldCase[] {
     for (const depth of few || FIXED_HOLDERS.has(holderName) ? [1] : [1, 2, 4])
       for (const [consumerName, consumer] of Object.entries(CONSUMERS)) {
         if (few && consumerName !== "repeat" && consumerName !== "interpolation") continue;
-        // (two classes the oracle reports, outside this family's rule, judged in the whole family outside CI: a property
-        // store's warning gives its fix in words in a stop's unchecked region, #1449; a ring's domain holds every
-        // member's host store, the unstopped read the reaching one's, #1448)
-        if (few && consumerName === "repeat" && (holderName === "field" || holderName === "ring"))
-          continue;
+        // (a class the oracle reports, outside this family's rule, judged in the whole family outside CI: a property
+        // store's warning gives its fix in words in a stop's unchecked region, #1449)
+        if (few && consumerName === "repeat" && holderName === "field") continue;
         // (of the fixed texts, the anchors take the reviewer's witness alone)
         if (few && FIXED_HOLDERS.has(holderName) && holderName !== "addAllField") continue;
         const held = holder(depth);

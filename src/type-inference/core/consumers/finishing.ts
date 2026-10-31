@@ -231,9 +231,10 @@ function laterSources(
   // restricted one holds its kinds, its stores' boundaries checking them): a contract by its plain `unknown`
   if (held !== null) {
     if (requirement) return required(withoutEmpty(held).map((item) => item.tag));
+    const domain = markDomain(walk, value, held);
     return held.some((item) => item.tag === "unknown" && item.reasons === 0)
-      ? [...held, ...heldIngress(walk, value, rest)]
-      : held;
+      ? [...domain, ...heldIngress(walk, value, rest)]
+      : domain;
   }
   // the admitted type as admission retained it (revision 14): a written type by its syntax in any finishing pass; a
   // decision or a copy's only where admission settled
@@ -264,6 +265,24 @@ function laterSources(
   // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)
   const step = rest.at(-1) ?? walk.pass.program.projOf.get(value)?.step;
   return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
+}
+
+/**
+ * A domain's external items as a read's (#1448): what its key's stores hold, so a consumer's boundary requests for them
+ * are the content of the warning that owns them (`Consumers.boundariesAt`). Each is a copy kept in `domainOwned`; a solver
+ * item, which other reads share, stays as it is. A host read's stay unmarked: its own host ingress is in them, and that
+ * boundary forms whatever its stores hold (TABLE r4.113).
+ */
+function markDomain(walk: Consumers, value: PlaceId, items: readonly Item[]): readonly Item[] {
+  // (each item looked at once, charged)
+  walk.pass.program.work.charge("checks", items.length);
+  if (!items.some(isExternal) || hostIngress(walk, value) !== null) return items;
+  return items.map((item) => {
+    if (!isExternal(item)) return item;
+    const own = { ...item };
+    walk.domainOwned.add(own);
+    return own;
+  });
 }
 
 /** A place's stored paths, as a trie of their steps: each node with the stores whose values stand at its path. */
@@ -948,10 +967,9 @@ function heldIngress(walk: Consumers, value: PlaceId, rest: readonly string[]): 
   const place = found.cut ? readPlace(walk, value) : null;
   // (cut, its place's component's host data holds all its walk met: that one union, shared by every read of the
   // component, so a consumer resolves it once)
-  const node = program.scope.ingress.union(
-    hostIngress(walk, value)?.[0]?.ingress,
-    place === null ? found.host : placeIngress(walk, place),
-  );
+  const structural = hostIngress(walk, value)?.[0] ?? null;
+  const domain = place === null ? found.host : placeIngress(walk, place);
+  const node = program.scope.ingress.union(structural?.ingress, domain);
   frontierReads?.set(read(), {
     guarded: false,
     cut: found.cut,
@@ -961,7 +979,15 @@ function heldIngress(walk: Consumers, value: PlaceId, rest: readonly string[]): 
     copies: found.copies,
     depth: found.depth,
   });
-  return node === undefined ? [] : [{ ...unknownItem(REASON.external), ingress: node }];
+  if (node === undefined) return [];
+  const item: Item = { ...unknownItem(REASON.external), ingress: node };
+  // (what the stores bring is its mark's content, `Consumers.boundariesAt`, #1448; a host read's own ingress, in it too,
+  // forms whatever they hold, TABLE r4.113)
+  if (domain !== undefined && structural === null) {
+    program.work.charge("checks");
+    walk.domainOwned.add(item);
+  }
+  return [item];
 }
 
 /**

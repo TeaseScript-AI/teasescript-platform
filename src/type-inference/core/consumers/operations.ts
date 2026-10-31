@@ -23,7 +23,7 @@ import { keyLabel, kindsOf, ownSpan, quietKinds } from "./names.js";
 import { consume, indexUse, integerOnly } from "./operands.js";
 import { projection, selection } from "./projections.js";
 import { methodReceiver } from "./receivers.js";
-import { obligation, shownProperty, warning } from "./warnings.js";
+import { leftOutBy, obligation, shownProperty, warning, type Owner } from "./warnings.js";
 
 /**
  * C1 with C9 r4.29 and r4.43: where external data a store brings enters, for its warning and check: the external
@@ -338,9 +338,10 @@ function operatorUse(
     return operands[index]!.filter((item) => kinds.some((kind) => kind === item.tag));
   };
   const operandText = (index: number): string => program.textAt(operandSite(index));
-  // C9: external data at an operand is validated where it came in (host data at the operand)
-  operands.forEach((items, index) =>
-    walk.admission.boundariesAt(
+  // C9: external data at an operand is validated where it came in (host data at the operand); a domain's, what the
+  // operand's own warning owns, once it was asked for
+  const sends = operands.map((items, index) =>
+    walk.boundariesBefore(
       items,
       obligation("copy-type", operandSite(index), operandText(index), ["unknown"], ""),
     ),
@@ -393,6 +394,7 @@ function operatorUse(
           rule(index, [], elements),
           operands[index]!.map((item) => item.tag),
         );
+    for (const send of sends) send();
     return;
   }
   const owe = (
@@ -475,8 +477,15 @@ function operatorUse(
     const unknown = items.find((item) => isOpaque(item) || isExternal(item));
     if (unknown !== undefined) offend(index, unknown);
   });
-  for (const [index, item, pair] of offending.values())
-    owe(item, operandSite(index), operandText(index), domain(index), index, pair);
+  // (an operand's unknown warning stands for its every unknown item, `leftOutBy`: the operand's items, whose domain items
+  // alone ask)
+  const owners = operands.map((): Owner[] => []);
+  for (const [index, item, pair] of offending.values()) {
+    const made = owe(item, operandSite(index), operandText(index), domain(index), index, pair);
+    if (walk.finishing && (isOpaque(item) || isExternal(item)))
+      owners[index]!.push([made, () => operands[index]!]);
+  }
+  sends.forEach((send, index) => send(leftOutBy(walk, owners[index]!)));
   if (operation !== null) {
     const [item, against, pair] = operation;
     owe(item, c.site, program.textAt(c.site), against, null, pair);

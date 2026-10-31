@@ -240,15 +240,14 @@ export function stopProblems(c: StopCase): string[] {
   );
   // (an extra the stopped analysis without its marks lacks is their content; a check both have stays compared)
   const extra = beyond(kept, owed);
+  let formed: string[] = [];
   if (extra.length > 0 && marks.length > 0) {
     const without = stopped.without(...omission(excused)).answers.checks;
-    kept = beyond(
-      kept,
-      beyond(
-        extra,
-        without.map((check) => JSON.stringify(check)),
-      ),
+    formed = beyond(
+      extra,
+      without.map((check) => JSON.stringify(check)),
     );
+    kept = beyond(kept, formed);
   }
   if (JSON.stringify(owed) !== JSON.stringify(kept)) {
     const [lost, extra] = [beyond(owed, kept), beyond(kept, owed)];
@@ -282,6 +281,27 @@ export function stopProblems(c: StopCase): string[] {
       );
     content.push(...own(unstopped), ...own(stopped));
   }
+  // (a boundary check that forms only with the marks, whose own obligations are unchanged, #1448: its own plan content,
+  // what leaving that exact check out of the stopped compile's discharge removes, every warning and other check kept)
+  const boundaries = new Set(
+    stopped.answers.checks
+      .filter((check) => check.boundary)
+      .map((check) => JSON.stringify(check))
+      .filter((text) => formed.includes(text)),
+  );
+  if (differences.length > 0 && boundaries.size > 0)
+    content.push(
+      ...planDifferences(
+        stopped.without(...omission(new Set())).result.plan,
+        stopped.without(
+          {
+            diagnostic: () => false,
+            check: (check: Obligation) => boundaries.has(JSON.stringify(check)),
+          },
+          `checks#${[...boundaries].sort().join("|")}`,
+        ).result.plan,
+      ),
+    );
   const inContent = (path: string): boolean =>
     content.some((part) => path === part.path || path.startsWith(`${part.path}/`));
   const excusedNodes: Span[] = [];
@@ -301,34 +321,3 @@ export function stopProblems(c: StopCase): string[] {
   });
   return problems;
 }
-
-/**
- * A difference the oracle knows and does not excuse (TABLE r4.110): the source it is found in, its exact problems, its
- * mechanism, the issue that owns it, and the stop points of the every-unit sweep it is found at over its four modes. The
- * sweep fails where the count moves; the exception goes when its issue lands.
- */
-export interface NamedException {
-  readonly source: string;
-  /** The exact problems it shows, one at each of its stop points. */
-  readonly problems: readonly string[];
-  readonly mechanism: string;
-  readonly issue: string;
-  readonly count: number;
-  /** Where CI counts it (`type-core-stop.test.ts`): its stop points in the settled phases, the analysis's own order. */
-  readonly settled?: number;
-}
-
-export const NAMED_EXCEPTIONS: readonly NamedException[] = [
-  {
-    source:
-      'let seed = {ticks: 2, title: "ok"}\nlet state = seed\nstate = hostValue\nrepeat state.ticks {}\nsay state.title\nexit\n',
-    problems: [
-      'extra check {"kind":"copy-type","target":"state.ticks","against":["unknown"],"on":"validate external data state.ticks","site":{"file":0,"start":77,"end":88},"boundary":true}',
-    ],
-    mechanism:
-      "a settled walk stop reads `state.ticks` by its key's finished contract, whose external item lost the ingress the value read keeps, so the count's consumer checks it as host data no ingress store brought: a redundant runtime check",
-    issue: "#1216",
-    count: 294,
-    settled: 98,
-  },
-];

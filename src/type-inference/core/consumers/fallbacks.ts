@@ -13,7 +13,7 @@ import { error } from "./diagnostics.js";
 import { heldHostData } from "./finishing.js";
 import { unsettledItem } from "./kinds.js";
 import { keyLabel, ownSpan, quietKinds } from "./names.js";
-import { obligation, storeRoot, storeWarning } from "./warnings.js";
+import { obligation, storeRoot, storeWarning, warnGroups } from "./warnings.js";
 import { type CanonicalKey } from "../contract/key-ids.js";
 
 // C10: a fallback's or a default's kinds against the direct value's, and an unwritten parameter's default (ADR 1.5).
@@ -165,11 +165,14 @@ function fallbackFitsAt(
   // destination admits `unknown`; its host data meets its boundary
   const unknowns = fallback.filter((item) => isOpaque(item) || isExternal(item));
   if (unknowns.length > 0 && !(union !== null && union.has("unknown"))) {
-    for (const { item } of offendingKinds(unknowns))
-      storeWarning(walk, site, label(), item, against, rule, fitting);
-    walk.admission.boundariesAt(
+    const leftOut = warnGroups(walk, unknowns, (item) =>
+      storeWarning(walk, site, label(), item, against, rule, fitting),
+    );
+    // (a domain's items, what their group's warning owns, #1448)
+    walk.boundariesAt(
       fallback,
       obligation("copy-type", site, label(), against.map(requiredKind), `check ${what} ${label()}`),
+      leftOut,
     );
   }
   if (off.length === 0) {

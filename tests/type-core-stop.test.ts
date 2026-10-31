@@ -39,12 +39,7 @@ import {
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { inMode, keptErrors, MODES, stopIdentity } from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
-import {
-  NAMED_EXCEPTIONS,
-  stopProblems,
-  type Globals,
-  type StopRun,
-} from "./helpers/type-core-stop-oracle.js";
+import { stopProblems, type Globals, type StopRun } from "./helpers/type-core-stop-oracle.js";
 
 /*
  * The program stop through the candidate route, in its three layers (the owner's D4, option a′, TABLE r4.54; the
@@ -2019,21 +2014,21 @@ test("every settled walk stop keeps a projected fallback's own-read boundary", (
 });
 
 /**
- * The oracle's named exception for #1216 (TABLE r4.110 (b)): a settled walk stop adds a redundant read check of
- * `state.ticks`, read by its key's contract that lost the ingress origin; counted at every stop of the settled phases in
- * the analysis's own order, the test fails where the count moves (the exception goes when #1216 lands).
+ * #1216 (TABLE r4.110 (b)): a settled walk stop adds a redundant read check of `state.ticks`, read by its key's contract
+ * whose external item lost the ingress the value read keeps, so the count's consumer checks it as host data no ingress
+ * store brought. The stop oracle takes it as the count's mark content (r4.213, #1448); the check is pinned by its
+ * publication, counted at every stop of the settled phases in the analysis's own order: the test fails where the count
+ * moves (it goes when #1216 lands).
  */
-test("the named exception for #1216 stands at its counted stops", () => {
-  const exception = NAMED_EXCEPTIONS.find((each) => each.issue === "#1216");
-  assert.ok(exception?.settled !== undefined);
-  const request = coreRequest(
-    [{ path: "main.tease", source: exception.source }],
-    ["hostValue", "hostOther"],
-  );
+test("#1216's redundant check stands at its counted stops", () => {
+  const source =
+    'let seed = {ticks: 2, title: "ok"}\nlet state = seed\nstate = hostValue\nrepeat state.ticks {}\nsay state.title\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
   assert.ok(request !== null);
   const analyse = (allowance: number): Answers =>
     withTestAllowance(allowance, () => analyseCore(request));
-  const check = exception.problems[0]!.slice("extra check ".length);
+  const check =
+    '{"kind":"copy-type","target":"state.ticks","against":["unknown"],"on":"validate external data state.ticks","site":{"file":0,"start":77,"end":88},"boundary":true}';
   const has = (answers: Answers): boolean =>
     answers.checks.some((each) => JSON.stringify(each) === check);
   const unstopped = analyseCore(request);
@@ -2045,7 +2040,7 @@ test("the named exception for #1216 stands at its counted stops", () => {
   }).values())
     for (let allowance = low; allowance <= high; allowance += 1)
       if (has(analyse(allowance))) count += 1;
-  assert.equal(count, exception.settled);
+  assert.equal(count, 98);
 });
 
 /**
@@ -2073,6 +2068,114 @@ test("a settled stop keeps the checks of the host data a place's stores hold (#1
           `${c.name}, ${mode.name}, ${phase} @${allowance}`,
         );
     }
+});
+
+/**
+ * #1448 (S8's mark-ownership rule, TABLE r4.110 (a), r4.113): after a settled walk stop, the boundaries a domain read
+ * brings for its key's stores are the content of the warning that owns that read there: leaving its owner out
+ * (`withoutRecords`) removes them, an unrelated mark does not, a second owner keeps them, an operation a later statement
+ * reads, a method call's receiver, a `get`'s default and the soft owner of an unknown receiver's `get` key are owners too,
+ * and a read's own host ingress keeps its boundary without any mark. At the first settled walk stop, forward with the sharing and reversed without it.
+ */
+test("a domain read's store boundaries are its owning mark's content (#1448)", () => {
+  const record = (d: { code: string; site: { start: number; end: number } }): string =>
+    `${d.code} ${d.site.start}:${d.site.end}`;
+  const boundaries = (
+    source: string,
+    mode: (typeof HELD_MODES)[number],
+    left: string[] | "all",
+    allowance?: number,
+  ) => {
+    const c = { name: "owned", source, slice: false, values: [] };
+    const stop =
+      allowance ?? heldStops(c, mode, 1).find((each) => each.phase === "walk")?.allowance;
+    assert.ok(stop !== undefined, source);
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!;
+    const run = (omit: ((code: string) => boolean) | null): Answers =>
+      mode.run(() =>
+        withTestAllowance(stop, () =>
+          omit === null
+            ? analyseCore(request)
+            : withoutRecords({ diagnostic: (d) => omit(record(d)), check: () => false }, () =>
+                analyseCore(request),
+              ),
+        ),
+      );
+    const marks = run(null).budget.deferred.map(record);
+    const answers = run(
+      left === "all" ? (each) => marks.includes(each) : (each) => left.includes(each),
+    );
+    return answers.checks
+      .filter((check) => check.boundary)
+      .map((check) => `${check.target}@${check.site.start}`);
+  };
+  const replaced =
+    'let root = {f0: hostValue}\nroot = {f0: hostOther}\nsay "BEFORE"\nrepeat root.f0 {say "ok"}\n';
+  for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!]) {
+    const where = mode.name;
+    // the count's mark owns both stores' boundaries its domain read brings; the receiver's mark is unrelated
+    const witness = `${replaced}say "AFTER"\nexit\n`;
+    assert.deepEqual(boundaries(witness, mode, []), ["root@16", "root@39"], where);
+    assert.deepEqual(boundaries(witness, mode, ["TSV043 70:77"]), ["root@16", "root@39"], where);
+    assert.deepEqual(boundaries(witness, mode, ["TSV011 70:77"]), [], where);
+    // two consumers read the domain, each its own owner
+    const two = `${replaced}say "\${root.f0}"\nsay "AFTER"\nexit\n`;
+    assert.deepEqual(boundaries(two, mode, ["TSV011 70:77"]), ["root@16", "root@39"], where);
+    assert.deepEqual(boundaries(two, mode, ["TSV042 96:103"]), ["root@16", "root@39"], where);
+    assert.deepEqual(boundaries(two, mode, ["TSV011 70:77", "TSV042 96:103"]), [], where);
+    // an operation a later statement reads: its operand's mark owns them, the interpolation's is unrelated
+    const later =
+      'let root = {f0: hostValue}\nroot = {f0: hostOther}\nsay "BEFORE"\nrepeat 2 {say "x"}\nsay "${root.f0 * 2}"\nsay "AFTER"\nexit\n';
+    assert.deepEqual(boundaries(later, mode, []), ["root@16", "root@39"], where);
+    assert.deepEqual(boundaries(later, mode, ["TSV042 89:100"]), ["root@16", "root@39"], where);
+    assert.deepEqual(boundaries(later, mode, ["TSV043 89:96"]), [], where);
+    // a method call's receiver and a `get`'s default: the member check's mark and the default's own warning own them
+    const head = 'let root = {f0: hostValue}\nroot = {f0: hostOther}\nsay "BEFORE"\n';
+    const method = `${head}say "\${root.f0.first()}"\nsay "AFTER"\nexit\n`;
+    assert.deepEqual(boundaries(method, mode, ["TSV042 70:85"]), ["root@16", "root@39"], where);
+    assert.deepEqual(boundaries(method, mode, ["TSV043 70:85"]), [], where);
+    const fallback = `${head}say "\${[1].get(4, default: root.f0)}"\nsay "AFTER"\nexit\n`;
+    assert.deepEqual(boundaries(fallback, mode, ["TSV042 70:98"]), ["root@16", "root@39"], where);
+    assert.deepEqual(boundaries(fallback, mode, ["TSV041 90:97"]), [], where);
+    // a soft owner, a `get` on an unknown receiver (its key's one warning); and beside a count, two owners (Codex r1's B1)
+    const get =
+      "let root = {f0: hostValue}\nroot = {f0: hostOther}\nhostValue.get(root.f0, default: 0)\nexit\n";
+    assert.deepEqual(boundaries(get, mode, []), ["root@16", "root@39", "hostValue@50"], where);
+    assert.deepEqual(
+      boundaries(get, mode, ["TSV043 50:84"]),
+      ["root@16", "root@39", "hostValue@50"],
+      where,
+    );
+    assert.deepEqual(boundaries(get, mode, ["TSV043 64:71"]), ["hostValue@50"], where);
+    const counted = `${head}repeat root.f0 {say "ok"}\nhostValue.get(root.f0, default: 0)\nsay "AFTER"\nexit\n`;
+    const both = ["root@16", "root@39", "hostValue@89"];
+    assert.deepEqual(boundaries(counted, mode, ["TSV043 103:110"]), both, where);
+    assert.deepEqual(boundaries(counted, mode, ["TSV011 70:77"]), both, where);
+    assert.deepEqual(
+      boundaries(counted, mode, ["TSV011 70:77", "TSV043 103:110"]),
+      ["hostValue@89"],
+      where,
+    );
+    // a member read whose receiver's object lacks the property: its `extra` warning owns the receiver's domain items, and
+    // the property's presence, read from every source, asks that store's boundary itself
+    const extra = `let root = {f0: hostValue}\nroot = {f0: {h: 1}}\nsay "BEFORE"\nsay "\${root.f0.g}"\nsay "AFTER"\nexit\n`;
+    assert.deepEqual(boundaries(extra, mode, "all"), ["root@16"], where);
+    // on an unrestricted written object nothing else asks it: at each settled stop the receiver's unknown warning or the
+    // `extra` one owns it, and every mark left out leaves no boundary (Codex r2's witness on #1511)
+    const written =
+      'let root: object = {f0: hostValue}\nroot = {f0: {h: 1}}\nsay "${root.f0.g}"\nexit\n';
+    const c = { name: "written", source: written, slice: false, values: [] };
+    for (const { allowance } of heldStops(c, mode, 1))
+      assert.deepEqual(boundaries(written, mode, "all", allowance), [], `${where} ${allowance}`);
+    // a host read's own ingress beside its stores' (r4.113)
+    const host =
+      'hostValue.f0 = 2\nsay "BEFORE"\nrepeat hostValue.f0 {say "ok"}\nsay "AFTER"\nexit\n';
+    assert.deepEqual(
+      boundaries(host, mode, "all"),
+      ["hostValue@0", "hostValue@37", "hostValue.f0@37"],
+      where,
+    );
+  }
 });
 
 /**

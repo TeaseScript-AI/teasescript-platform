@@ -93,8 +93,9 @@ export function projection(
     )
   )
     selection(walk, c.owner, node, c.site, `.${property}`);
-  // C9: the receiver's external data brings its boundary checks, whichever member check follows
-  walk.admission.boundariesAt(
+  // C9: the receiver's external data brings its boundary checks, whichever member check follows; a domain's those the
+  // member check's warning owns
+  const send = walk.boundariesBefore(
     owners,
     obligation(
       "null-check",
@@ -139,6 +140,7 @@ export function projection(
         },
         [],
       );
+      send();
       return;
     }
     // (a member read a stop left unsettled is no proof of the property either: its check stands, as C6's; nor is an
@@ -161,19 +163,21 @@ export function projection(
           (item) => item.tag,
         )
       : undefined;
-  memberChecks(
-    walk,
-    c.site,
-    label,
-    owners,
-    takes,
-    `.${property}`,
-    "read",
-    receiverText,
-    member,
-    extra,
-    c.owner,
-    elements,
+  send(
+    memberChecks(
+      walk,
+      c.site,
+      label,
+      owners,
+      takes,
+      `.${property}`,
+      "read",
+      receiverText,
+      member,
+      extra,
+      c.owner,
+      elements,
+    ),
   );
 }
 
