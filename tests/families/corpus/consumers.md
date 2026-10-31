@@ -15,10 +15,10 @@ outside the repository").
   `unprintable <type>` where its conversion to text throws, through the folder's `describeCaught.mjs` (#1523). Its
   `canary-1523.sh` checks that; its changed files stay beside them as `<file>.pre-1523` (`PORTED-1523.md`).
 - `desktop:~/work/evidence/corpus/consumers/astra-1437/`: Astra's r1 of #1437 (its `README.md` gives the commands),
-  whose `budget-repro.mjs`, `explore.mjs`, `runtime-model.mjs`, `seam-stops.mjs` and `stop-core.mjs` record any
-  thrown value, as `unprintable <type>` where its conversion to text throws, through the folder's `describeCaught.mjs`
-  (#1523). Its `canary-1523.sh` checks that; its changed files stay beside them as `<file>.pre-1523`
-  (`PORTED-1523.md`).
+  whose `budget-repro.mjs`, `explore.mjs`, `runtime-model.mjs`, `seam-stops.mjs`, `stop-core.mjs` and spot publications
+  (`spot-{head,base}/publication.mjs`) record any thrown value, as `unprintable <type>` where its conversion to text
+  throws, through the folder's `describeCaught.mjs` (#1523). Its `canary-1523.sh` checks that; its changed files stay
+  beside them as `<file>.pre-1523` (`PORTED-1523.md`).
 
 ## Known problems
 
