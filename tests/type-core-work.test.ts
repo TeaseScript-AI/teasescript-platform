@@ -157,13 +157,19 @@ function steepCounters(
       const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}${sizes[0] === 64 ? "" : ` ${sizes[0]} → ${sizes[1]}`}`;
       const doubling = (before: number, after: number): number =>
         (2 * (after / Math.max(1, before))) / scale;
-      if (doubling(small.total, large.total) > DOUBLING)
+      // (where `main` grows faster on the family's shape, at or under `main`'s growth, TABLE r4.233)
+      const bound = Math.max(DOUBLING, family.main?.total ?? 0);
+      const counterBound = (counter: string): number =>
+        counter === "invSteps"
+          ? Math.max(COUNTER_DOUBLING, family.main?.invSteps ?? 0)
+          : COUNTER_DOUBLING;
+      if (doubling(small.total, large.total) > bound)
         steep.push(`${name}: ${doubling(small.total, large.total).toFixed(3)}`);
       for (const [counter, after] of large.counts)
         if (
           counter !== "syntaxNodes" &&
           after >= 200 &&
-          doubling(small.counts.get(counter) ?? 0, after) > COUNTER_DOUBLING
+          doubling(small.counts.get(counter) ?? 0, after) > counterBound(counter)
         )
           steep.push(
             `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,
@@ -178,12 +184,13 @@ test("every W34, W44 and W45 variant's work and each of its counters grow with t
 });
 
 /**
- * #1466: a stack of k diamonds of copies, its siblings and a wide join read at sparse paths (`LAYER_FAMILIES`), each
- * read answered once per layer and path from the layers below it that may hold its property, at one small doubling, in
- * either order and with the sharing off too: the total and
- * the contract's own counter (`invSteps`), which `main` grew as k³ there (7.85 per doubling from 16 to 32). The support's
- * other counters carry its log factor, which reads above the counters' bound at these sizes. The series to k = 64 in
- * four modes is the PR's evidence, outside CI.
+ * #1466: a stack of k diamonds of copies, its siblings, wide and nested joins and chains of listing layers read at
+ * sparse paths (`LAYER_FAMILIES`), each read answered once per layer and path from the layers below it that hold its
+ * property, at one small doubling, in either order and with the sharing off too: the total and the contract's own
+ * counter (`invSteps`), which `main` grew as k³ on the diamonds (7.85 per doubling from 16 to 32); where `main` grows
+ * faster than the bound on a family's shape, at or under `main`'s growth (`WorkFamily.main`, TABLE r4.233). The
+ * support's other counters carry its log factor, which reads above the counters' bound at these sizes. The series to
+ * k = 64 in four modes is the PR's evidence, outside CI.
  */
 test("a stack of diamonds of copies and its siblings grow with the program in either order (#1466)", () => {
   for (const unshared of [false, true]) {
@@ -197,12 +204,16 @@ test("a stack of diamonds of copies and its siblings grow with the program in ei
 });
 
 /**
- * #1466, Codex r2's sibling: a read below nested joins asks only the layer listing its property's first step, never a
- * joining layer it passes through, so the summaries' demands are one per property: k, at each size and in either order
- * (r4.227's bound for these families, a regression oracle of the selection).
+ * #1466, Codex r2's sibling and its shared shape: a read below nested joins, or below joined copies over a record listing
+ * the same step, asks only the layer holding its property, never a joining layer or a copy it passes through, so the
+ * summaries' demands are one per property: k, at each size and in either order (r4.227's bound for these families, a
+ * regression oracle of the selection).
  */
-test("a read below nested joins asks only the layers listing its path (#1466)", () => {
-  for (const family of LAYER_FAMILIES.filter((each) => each.name.startsWith("nested-join")))
+test("a read below nested or shared joins asks only the layers holding its path (#1466)", () => {
+  const families = LAYER_FAMILIES.filter(
+    (each) => each.name.startsWith("nested-join") || each.name === "shared-join",
+  );
+  for (const family of families)
     for (const k of [8, 16, 32, 64])
       for (const reversed of [false, true])
         assert.equal(

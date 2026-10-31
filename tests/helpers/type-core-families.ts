@@ -11,6 +11,12 @@ export interface WorkFamily {
   readonly name: string;
   readonly measures: string;
   readonly program: (k: number) => readonly SourceFile[];
+  /**
+   * Where `main` grows faster than the gate's bound: `main`'s growth per doubling at the gate's sizes, the least of the
+   * four orders and sharings, for the total and `invSteps` (TABLE r4.233: at or under `main`'s), a regression oracle of
+   * this family's shape, measured once.
+   */
+  readonly main?: { readonly total: number; readonly invSteps: number };
 }
 
 const rows = (k: number, row: (index: number) => string): string =>
@@ -2350,6 +2356,52 @@ function wideJoin(k: number, copied: boolean): readonly SourceFile[] {
 }
 
 /**
+ * Codex r2's `shared` shape: k copies of one record that stores below `g` itself, each storing its own property below
+ * `g`, joined into one place and read at each property through a copy; a copy holding nothing at the property read is
+ * passed through, so a read asks the copy holding its property and the record below, never every copy.
+ */
+function sharedJoin(k: number): readonly SourceFile[] {
+  return main(
+    lines(
+      "let seed = {g: {z: 1}}",
+      "seed.g.q = hostValue",
+      rows(k, (i) => `let arm${i} = seed\narm${i}.g.p${i} = hostValue`),
+      "let joined = arm0",
+      rows(k - 1, (i) => `joined = arm${i + 1}`),
+      "let copy = joined",
+      rows(k, (i) => `repeat copy.g.p${i} {}`),
+      "exit",
+    ),
+  );
+}
+
+/**
+ * A chain of k copies, each storing its own property below `g`, read at each at the chain's end, or (`joined`) through
+ * one place joining every copy of the chain; and (`stored`) each copy joined from the one before it and a copy of that
+ * storing a property, storing its own too, read through a copy. Every copy lists `g`, and only one holds a read's
+ * property; `main` grows superlinearly on each.
+ */
+function listingChain(k: number, { joined = false, stored = false } = {}): readonly SourceFile[] {
+  const link = (i: number): string =>
+    stored
+      ? `let a${i} = d${i}\na${i}.g.p${i} = hostValue\nlet d${i + 1} = d${i}\nd${i + 1} = a${i}\nd${i + 1}.g.q${i} = hostValue`
+      : `let d${i + 1} = d${i}\nd${i + 1}.g.p${i} = hostValue`;
+  const read = stored ? "copy" : joined ? "x" : `d${k}`;
+  return main(
+    lines(
+      "let d0 = {g: {z: 1}}",
+      rows(k, link),
+      ...(joined ? ["let x = d1", rows(k - 1, (i) => `x = d${i + 2}`)] : []),
+      ...(stored ? [`let copy = d${k}`] : []),
+      rows(k, (i) =>
+        stored ? `repeat copy.g.p${i} {}\nrepeat copy.g.q${i} {}` : `repeat ${read}.g.p${i} {}`,
+      ),
+      "exit",
+    ),
+  );
+}
+
+/**
  * Codex r2's sibling: k copies of one record, each storing its own property below `depth` steps, joined in pairs `levels`
  * times (pairs, then pairs of pairs), then all into one place, read at each property directly or through `copies`
  * copies of the place; a read asks only the layer that lists its property's first step, never a joining one.
@@ -2455,6 +2507,31 @@ export const LAYER_FAMILIES: readonly WorkFamily[] = [
     measures:
       "Codex r2's witness: the copies joined in pairs, then into one place, read through a copy",
     program: (k) => nestedJoin(k, { levels: 1, copies: 1 }),
+  },
+  {
+    name: "shared-join",
+    measures:
+      "Codex r2's shared shape: the joined copies over a record that stores below the same step",
+    program: (k) => sharedJoin(k),
+  },
+  {
+    name: "listing-chain",
+    measures: "a chain of copies each storing its own property below one step, read at its end",
+    program: (k) => listingChain(k),
+    main: { total: 2.735, invSteps: 3.868 },
+  },
+  {
+    name: "listing-chain-joined",
+    measures: "the chain's copies all joined into one place, read through it",
+    program: (k) => listingChain(k, { joined: true }),
+    main: { total: 4.808, invSteps: 7.341 },
+  },
+  {
+    name: "listing-chain-stored",
+    measures:
+      "each copy joined from the one before and a stored copy of it, storing its own too, read through a copy",
+    program: (k) => listingChain(k, { stored: true }),
+    main: { total: 5.809, invSteps: 7.378 },
   },
   {
     name: "diamonds-unequal-depth",
