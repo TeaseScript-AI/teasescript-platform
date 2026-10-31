@@ -247,9 +247,9 @@ test("the access stops an object without the property before the next effect and
 /**
  * The lead's rulings on Codex r2's B1 (#1436) and r3's N2 (#1458): a load's or parse's default, written or not, proves a
  * property only where its reader takes a missing key from the default. JSON's reader does at every level; a stored
- * value's in its root object, never in an element of a collection, which it keeps as it is when it fits. Each source is
- * read and stored, with the script's storage or the JSON holding an element or an object without the property, in the
- * four modes, each mode's plan run.
+ * value's in its root object, never in an element of a collection, which it keeps as it is when it fits. A `null` the
+ * default names is filled the same way (#1470). Each source is read and stored, with the script's storage or the JSON
+ * holding an element or an object without the property, in the four modes, each mode's plan run.
  */
 const READERS: readonly (readonly [
   name: string,
@@ -257,6 +257,7 @@ const READERS: readonly (readonly [
   receiver: string,
   absent: "possible" | "never",
   read: { readonly stored: SerializableRuntimeValue } | { readonly json: string },
+  says?: string,
 ])[] = [
   [
     "a stored list's element",
@@ -336,12 +337,48 @@ const READERS: readonly (readonly [
     "never",
     { json: '{"items": [{}]}' },
   ],
+  [
+    "a stored root object, its default's property null",
+    'let seed: object = load("seed", default: {n: null})',
+    "seed",
+    "never",
+    { stored: { kind: "object", properties: [] } },
+    "null",
+  ],
+  [
+    "an object nested in a stored object, its default's property null",
+    'let seed: object = load("seed", default: {inner: {n: null}})',
+    "seed.inner",
+    "never",
+    {
+      stored: {
+        kind: "object",
+        properties: [{ name: "inner", value: { kind: "object", properties: [] } }],
+      },
+    },
+    "null",
+  ],
+  [
+    "a stored list's element, its default's property null",
+    'let seed: object[] = load("seed", default: [{n: null}])',
+    "seed[0]",
+    "possible",
+    { stored: { kind: "list", items: [{ kind: "object", properties: [] }] } },
+  ],
+  [
+    "an element of a JSON object's list, its default's property null",
+    "let seed: object = fromJson(hostText, default: {items: [{n: null}]})",
+    "seed.items[0]",
+    "never",
+    { json: '{"items": [{}]}' },
+    "null",
+  ],
 ];
 
-test("a load's or parse's default proves a property only where its reader fills it from the default (#1436, #1458)", () => {
+test("a load's or parse's default proves a property only where its reader fills it from the default (#1436, #1458, #1470)", () => {
   const wrong: string[] = [];
   const globals = ["hostValue", "hostText"];
-  for (const [name, declare, receiver, absent, read] of READERS)
+  for (const [name, declare, receiver, absent, read, says = "1"] of READERS)
     for (const use of ["read", "store"] as const) {
       const access = `${receiver}.n`;
       const source =
@@ -368,7 +405,7 @@ test("a load's or parse's default proves a property only where its reader fills 
       const expected =
         absent === "possible"
           ? { failure: `TSR017@${c.start}:${c.end}`, said: ["BEFORE"] }
-          : { failure: null, said: ["BEFORE", use === "read" ? "1" : "STORED", "AFTER"] };
+          : { failure: null, said: ["BEFORE", use === "read" ? says : "STORED", "AFTER"] };
       // (each mode's own plan, as each mode's own decision)
       for (const mode of MODES) {
         const { plan } = inMode(mode, () =>
