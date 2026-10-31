@@ -22,6 +22,7 @@ import {
   HOT_CANDIDATE_FAMILIES,
   INHERITED_FIELD_FAMILIES,
   JOIN_REACH_FAMILIES,
+  LAYER_FAMILIES,
   MIXED_ADD_PRODUCTS,
   NARROWING_FAMILIES,
   NESTED_OBJECT_SELECTIONS,
@@ -171,6 +172,24 @@ function steepCounters(
 
 test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters([...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS]), []);
+});
+
+/**
+ * #1466: a stack of k diamonds of copies and its siblings (`LAYER_FAMILIES`), each read answered once per layer and
+ * path from the layers below it, at one small doubling, in either order and with the sharing off too: the total and
+ * the contract's own counter (`invSteps`), which `main` grew as k³ there (7.85 per doubling from 16 to 32). The support's
+ * other counters carry its log factor, which reads above the counters' bound at these sizes. The series to k = 64 in
+ * four modes is the PR's evidence, outside CI.
+ */
+test("a stack of diamonds of copies and its siblings grow with the program in either order (#1466)", () => {
+  for (const unshared of [false, true]) {
+    const measure = (at: Sized, reversed: boolean): Measured => {
+      const { total, counts } = analysed(at, reversed, unshared).budget;
+      const kept = ["syntaxNodes", "invSteps"] as const;
+      return { total, counts: new Map(kept.map((counter) => [counter, counts.get(counter) ?? 0])) };
+    };
+    assert.deepEqual(steepCounters(LAYER_FAMILIES, unshared, measure, [16, 32]), []);
+  }
 });
 
 /**
