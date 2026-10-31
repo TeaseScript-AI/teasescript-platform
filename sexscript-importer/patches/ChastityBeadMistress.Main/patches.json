@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "permission-yellow-beads",
+      "layer": "source",
+      "category": "e",
+      "reason": "Two author errors. Permission writes else (choice == 1) without its if, so the \"I don't require anything\" choice stopped the legacy script with an error instead of going back to Main: write else if (choice == 1). The easy and medium settings save the yellow-bead count as currentBlackBeads, right after startingYellowBeads, so changing the setting mid-chastity overwrote the black count and left yellow unchanged: save currentYellowBeads, as the hard setting does.",
+      "diff": "permission-yellow-beads.diff"
+    }
+  ]
+}

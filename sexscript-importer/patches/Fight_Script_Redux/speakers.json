@@ -1,0 +1,429 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:269",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:274",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:279",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:284",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:295",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:309",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:323",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:337",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:351",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:365",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:379",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:393",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:407",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:421",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:435",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:449",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:469",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:487",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:492",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:497",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:502",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:507",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:512",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:539",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:541",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:547",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:549",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:555",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:557",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:569",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:573",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:578",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:581",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:588",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:595",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:598",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:605",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:612",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:615",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:622",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:629",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:632",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:640",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:647",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:649",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:655",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:658",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:666",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:673",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:675",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:681",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:684",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:692",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:699",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:701",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:714",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:721",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:730",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:736",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:746",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:752",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:768",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:777",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:783",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:799",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:815",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:869",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:875",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:881",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:892",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:896",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:901",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:907",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:913",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:919",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:922",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:930",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:937",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:943",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:946",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:954",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:961",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:967",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:970",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:978",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:985",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1000",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1007",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1016",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1022",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1032",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1038",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1055",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1062",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1068",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1075",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1082",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1089",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1096",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1103",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1110",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1117",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1124",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Fight_Script_Redux.groovy:1151",
+      "speaker": "narrator"
+    }
+  ],
+  "names": []
+}

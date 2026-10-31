@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Prof. Nessa (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "title": "Prof.",
+      "firstName": "Nessa"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

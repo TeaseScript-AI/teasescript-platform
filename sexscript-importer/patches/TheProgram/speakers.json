@@ -1,0 +1,33 @@
+{
+  "reason": "Every character message starts with its speaker's name and a colon: \"Gabriella Paltrova:\" (the intro video host, 001Video), \"Riley Reid:\" (the therapist, 002TherapistA–E and 003Toilet) and \"Ember:\" (Mistress Ember, seven messages in 002TherapistA). The only unprefixed texts are the unreachable \"Unfinished ?\" fallbacks and empty clears, which are system text.",
+  "speakers": {
+    "gabriella": {
+      "firstName": "Gabriella",
+      "lastName": "Paltrova"
+    },
+    "riley": {
+      "firstName": "Riley",
+      "lastName": "Reid"
+    },
+    "ember": {
+      "firstName": "Ember"
+    }
+  },
+  "default": "system",
+  "prefixes": [
+    {
+      "text": "Gabriella Paltrova",
+      "speaker": "gabriella"
+    },
+    {
+      "text": "Riley Reid",
+      "speaker": "riley"
+    },
+    {
+      "text": "Ember",
+      "speaker": "ember"
+    }
+  ],
+  "switches": [],
+  "names": []
+}

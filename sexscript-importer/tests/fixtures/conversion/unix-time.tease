@@ -1,0 +1,73 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyCompare(left, right) {
+  if left == null {
+    if right == null {
+      return 0
+    }
+    return -1
+  }
+  if right == null {
+    return 1
+  }
+  if left < right {
+    return -1
+  }
+  if left > right {
+    return 1
+  }
+  return 0
+}
+// Legacy Unix seconds become moments and durations: a start and the time since it, compared with seconds.
+let timestampValue = getAbsoluteDateTime()
+showButton "Stop"
+let timepassed = getAbsoluteDateTime() - timestampValue
+if timepassed > 45 s {
+  say prose "Good", instant
+} else if timepassed < 45 s {
+  say prose "Weak", instant
+}
+// A number added to a moment counts seconds. A variable that adds the time since a moment to a number keeps its
+// seconds, each time since in whole seconds as legacy counted them, and so does a duration multiplied or divided.
+let timewrite = 120
+let starttime = getAbsoluteDateTime()
+let start = getAbsoluteDateTime()
+let rounds = 0
+while starttime + timewrite s > getAbsoluteDateTime() and rounds < 3 {
+  start = getAbsoluteDateTime()
+  wait 1 s
+  rounds += 1
+  if rounds == 1 {
+    timewrite += round((getAbsoluteDateTime() - start) / 1 s)
+  }
+  say prose "Writing for ${round(timewrite / 60)} minutes", instant
+}
+let endTime = getAbsoluteDateTime() + 2 min
+let remaining = endTime - getAbsoluteDateTime()
+wait remaining
+// A key keeps its name and holds the moment or the duration; a duration shown as a number gives its whole seconds.
+// NOTE SX_LOAD_OPEN_NULL line 23: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+if load("tease.locked", default: sexscriptLegacyValue(null)) != null and sexscriptLegacyCompare(getAbsoluteDateTime(), load("tease.locked", default: sexscriptLegacyValue(null))) < 0 {
+  say prose "Still locked", instant
+}
+save getAbsoluteDateTime() + 3 day as "tease.locked"
+// NOTE SX_LOAD_OPEN_NULL line 25: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+let last = load "tease.last", default: sexscriptLegacyValue(null)
+if last == null or getAbsoluteDateTime() - last > 2 h {
+  save getAbsoluteDateTime() as "tease.last"
+}
+save timepassed as "tease.best"
+// NOTE SX_LOAD_OPEN_NULL line 28: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+let best = load "tease.best", default: sexscriptLegacyValue(null)
+say prose "Your best is ${round((best otherwise 0 s) / 1 s)} seconds", instant
+// Milliseconds are moments too.
+let ms = getAbsoluteDateTime()
+showButton "Go"
+if getAbsoluteDateTime() - ms < 2 s {
+  say prose "Fast", instant
+}
+// A moment that meets a plain number otherwise keeps the Unix seconds.
+let stamp = getAbsoluteDateTime().toSeconds()
+say prose "Stamp ${stamp}", instant
+exit

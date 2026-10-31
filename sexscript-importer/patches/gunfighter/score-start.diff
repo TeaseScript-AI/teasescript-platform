@@ -1,0 +1,11 @@
+--- a/scripts/Banjo/gunfighter.groovy
++++ b/scripts/Banjo/gunfighter.groovy
+@@ -85,7 +85,7 @@
+ def remaining
+ def gameover
+ def won
+-def score
++def score = 0
+ def wins
+ //def opponent1
+ //def opponent2

@@ -1,0 +1,161 @@
+--- a/scripts/Banjo/spankparty.groovy
++++ b/scripts/Banjo/spankparty.groovy
+@@ -795,18 +795,25 @@
+ 			quit = true
+ 		}
+ 	}
+-	implement1 = toyboxArray[getRandom(toybox.size())]
+-	toyboxArray = toyboxArray - implement1
+-	implement2 = toyboxArray[getRandom(toybox.size()-1)]
+-	toyboxArray = toyboxArray - implement2
+-	implement3 = toyboxArray[getRandom(toybox.size()-2)]
+-	toyboxArray = toyboxArray - implement3
+-	implement4 = toyboxArray[getRandom(toybox.size()-3)]
+-	toyboxArray = toyboxArray - implement4
+-	implement5 = toyboxArray[getRandom(toybox.size()-4)]
+-	toyboxArray = toyboxArray - implement5
+-	implement6 = toyboxArray[getRandom(toybox.size()-5)]
+-	toyboxArray = toyboxArray - implement6
++	// Six implements must be available for the draws: the owned ones repeat as needed, or the default list
++	toyboxArray = [] + toyboxArray
++	def ownedImplements = toyboxArray.collect()
++	if (ownedImplements.isEmpty())
++		ownedImplements = toyboxDefault
++	while (toyboxArray.size() < 6)
++		toyboxArray = toyboxArray + [ownedImplements[toyboxArray.size() % ownedImplements.size()]]
++	implement1 = toyboxArray[getRandom(toyboxArray.size())]
++	toyboxArray.remove(toyboxArray.indexOf(implement1))
++	implement2 = toyboxArray[getRandom(toyboxArray.size())]
++	toyboxArray.remove(toyboxArray.indexOf(implement2))
++	implement3 = toyboxArray[getRandom(toyboxArray.size())]
++	toyboxArray.remove(toyboxArray.indexOf(implement3))
++	implement4 = toyboxArray[getRandom(toyboxArray.size())]
++	toyboxArray.remove(toyboxArray.indexOf(implement4))
++	implement5 = toyboxArray[getRandom(toyboxArray.size())]
++	toyboxArray.remove(toyboxArray.indexOf(implement5))
++	implement6 = toyboxArray[getRandom(toyboxArray.size())]
++	toyboxArray.remove(toyboxArray.indexOf(implement6))
+ 	implementArray = [implement1,implement2,implement3,implement4,implement5,implement6]
+ 	implementArrayGoodbye = implementArray.collect()
+ }
+@@ -932,7 +939,7 @@
+ 		show(""+player1+" "+reachreaches+" into the "+redone+" "+bagbowl+" to draw an implement...")
+ 		showButton("Draw")
+ 		p1implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - p1implement
++		implementArray.remove(implementArray.indexOf(p1implement))
+ 		setImplement(p1implement)
+ 		setImage("implements/"+p1implement+".jpg")
+ 		show(""+player1+" drew:\n\nThe "+p1implement+"!")
+@@ -970,7 +977,7 @@
+ 		else
+ 			showButton("Draw")
+ 		p2implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - p2implement
++		implementArray.remove(implementArray.indexOf(p2implement))
+ 		setImplement(p2implement)
+ 		setImage("implements/"+p2implement+".jpg")
+ 		show(""+player2+" drew:\n\nThe "+p2implement+"!")
+@@ -1023,7 +1030,7 @@
+ 		else
+ 			showButton("Draw")
+ 		p3implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - p3implement
++		implementArray.remove(implementArray.indexOf(p3implement))
+ 		setImplement(p3implement)
+ 		setImage("implements/"+p3implement+".jpg")
+ 		show(""+player3+" drew:\n\nThe "+p3implement+"!")
+@@ -1076,7 +1083,7 @@
+ 		else
+ 			showButton("Draw")
+ 		p4implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - p4implement
++		implementArray.remove(implementArray.indexOf(p4implement))
+ 		setImplement(p4implement)
+ 		setImage("implements/"+p4implement+".jpg")
+ 		show(""+player4+" drew:\n\nThe "+p4implement+"!")
+@@ -1129,7 +1136,7 @@
+ 		else
+ 			showButton("Draw")
+ 		p5implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - p5implement
++		implementArray.remove(implementArray.indexOf(p5implement))
+ 		setImplement(p5implement)
+ 		setImage("implements/"+p5implement+".jpg")
+ 		show(""+player5+" drew:\n\nThe "+p5implement+"!")
+@@ -1182,7 +1189,7 @@
+ 		else
+ 			showButton("Draw")
+ 		p6implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - p6implement
++		implementArray.remove(implementArray.indexOf(p6implement))
+ 		setImplement(p6implement)
+ 		setImage("implements/"+p6implement+".jpg")
+ 		show(""+player6+" drew:\n\nThe "+p6implement+"!")
+@@ -2272,7 +2279,7 @@
+ 	implementArray = implementArrayGoodbye
+ 	spankersTemp = spankers
+ 	g1implement = implementArray[getRandom(spankersTemp)]
+-	implementArray = implementArray - g1implement
++	implementArray.remove(implementArray.indexOf(g1implement))
+ 	setImplement(g1implement)
+ 	spankersTemp = spankersTemp - 1
+ 	setImage("spankparty/guests/"+guestdir+"/guest_"+spanker1+".jpg")
+@@ -2280,7 +2287,7 @@
+ 	showButton("Continue")
+ 	if(spankers>1) {
+ 		g2implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - g2implement
++		implementArray.remove(implementArray.indexOf(g2implement))
+ 		setImplement(g2implement)
+ 		spankersTemp = spankersTemp - 1
+ 		setImage("spankparty/guests/"+guestdir+"/guest_"+spanker2+".jpg")
+@@ -2289,7 +2296,7 @@
+ 	}
+ 	if(spankers>2) {
+ 		g3implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - g3implement
++		implementArray.remove(implementArray.indexOf(g3implement))
+ 		setImplement(g3implement)
+ 		spankersTemp = spankersTemp - 1
+ 		setImage("spankparty/guests/"+guestdir+"/guest_"+spanker3+".jpg")
+@@ -2298,7 +2305,7 @@
+ 	}
+ 	if(spankers>3) {
+ 		g4implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - g4implement
++		implementArray.remove(implementArray.indexOf(g4implement))
+ 		setImplement(g4implement)
+ 		spankersTemp = spankersTemp - 1
+ 		setImage("spankparty/guests/"+guestdir+"/guest_"+spanker4+".jpg")
+@@ -2307,7 +2314,7 @@
+ 	}
+ 	if(spankers>4) {
+ 		g5implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - g5implement
++		implementArray.remove(implementArray.indexOf(g5implement))
+ 		setImplement(g5implement)
+ 		spankersTemp = spankersTemp - 1
+ 		setImage("spankparty/guests/"+guestdir+"/guest_"+spanker5+".jpg")
+@@ -2316,13 +2323,20 @@
+ 	}
+ 	if(spankers>5) {
+ 		g6implement = implementArray[getRandom(spankersTemp)]
+-		implementArray = implementArray - g6implement
++		implementArray.remove(implementArray.indexOf(g6implement))
+ 		setImplement(g6implement)
+ 		spankersTemp = spankersTemp - 1
+ 		setImage("spankparty/guests/"+guestdir+"/guest_"+spanker6+".jpg")
+ 		show(""+spanker6+" picks up the "+g6implement+"...")
+ 		showButton("Continue")
+ 	}
++	// Every spankee in the goodbye line needs an implement, also beyond the number of guests
++	def goodbyeImplements = implementArrayGoodbye.findAll { it != null }
++	if (g2implement == null) g2implement = goodbyeImplements[1 % goodbyeImplements.size()]
++	if (g3implement == null) g3implement = goodbyeImplements[2 % goodbyeImplements.size()]
++	if (g4implement == null) g4implement = goodbyeImplements[3 % goodbyeImplements.size()]
++	if (g5implement == null) g5implement = goodbyeImplements[4 % goodbyeImplements.size()]
++	if (g6implement == null) g6implement = goodbyeImplements[5 % goodbyeImplements.size()]
+ }
+ 
+ def goodbyeIntro = {

@@ -1,0 +1,9 @@
+let mood = randomInteger(0..3)
+if mood == 0 {
+  say prose "Happy", instant
+} else if mood == 1 {
+  say prose "Strict", instant
+} else {
+  say prose "Bored", instant
+}
+exit

@@ -1,0 +1,11 @@
+--- a/scripts/Domme3/assignments.groovy
++++ b/scripts/Domme3/assignments.groovy
+@@ -585,6 +585,8 @@
+ 			endReached = true
+ 			break
+ 	}	
++	// A reminded assignment that no longer applies, such as one a setting turned off, picks another.
++	if (reminder && !endReached) reminder = false
+ }
+ dassignment++
+ save("domme3.dassignment",dassignment)	

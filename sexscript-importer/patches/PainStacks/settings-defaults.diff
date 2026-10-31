@@ -1,0 +1,20 @@
+--- a/scripts/PainStacks.groovy
++++ b/scripts/PainStacks.groovy
+@@ -386,6 +386,8 @@
+ def loadConfig = {
+     numStacks = loadInteger(SCRIPTNAME + ".numStacks")
+     chanceDelayMaxShock = loadInteger(SCRIPTNAME + ".chanceDelayMaxShock")
++    if (numStacks == null) numStacks = NUMSTACKS
++    if (chanceDelayMaxShock == null) chanceDelayMaxShock = CHANCEDELAYMAXSHOCK
+     painLevelRandom = loadBoolean(SCRIPTNAME + ".painLevelRandom")
+     shockTimeRandom = loadBoolean(SCRIPTNAME + ".shockTimeRandom")
+     waitTimeRandom = loadBoolean(SCRIPTNAME + ".waitTimeRandom")
+@@ -421,8 +423,6 @@
+ 
+     shockType = loadString(SCRIPTNAME + ".shockType")
+ 
+-    if (numStacks == null) numStacks = NUMSTACKS
+-    if (chanceDelayMaxShock == null) chanceDelayMaxShock = CHANCEDELAYMAXSHOCK
+     if (painLevelRandom == null) painLevelRandom = PAINLEVELRANDOM
+     if (shockTimeRandom == null) shockTimeRandom = SHOCKTIMERANDOM
+     if (waitTimeRandom == null) waitTimeRandom = WAITTIMERANDOM

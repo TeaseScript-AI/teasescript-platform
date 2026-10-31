@@ -1,0 +1,26 @@
+--- a/scripts/ShockJack.groovy
++++ b/scripts/ShockJack.groovy
+@@ -686,9 +686,12 @@
+ 
+ def loadConfig = {
+     shockTimeStartAmount = loadInteger("ShockJack.shockTimeStartAmount")
++    if (shockTimeStartAmount == null) shockTimeStartAmount = SHOCKTIMESTARTAMOUNT
+     queenTrippleBets = loadBoolean("ShockJack.queenTrippleBets")
+     playerClothStart = loadInteger("ShockJack.playerClothStart")
++    if (playerClothStart == null) playerClothStart = PLAYERCLOTHSTART
+     dealerClothStart = loadInteger("ShockJack.dealerClothStart")
++    if (dealerClothStart == null) dealerClothStart = DEALERCLOTHSTART
+     playerWon = loadInteger("ShockJack.playerWon")
+     gameModeStrip = loadBoolean("ShockJack.gameModeStrip")
+     gameModeUnStrip = loadBoolean("ShockJack.gameModeUnStrip")
+@@ -732,10 +735,7 @@
+         if (estimName in estimNames) estimFileNames.add(estimName)
+     }
+ 
+-    if (shockTimeStartAmount == null) shockTimeStartAmount = SHOCKTIMESTARTAMOUNT
+     if (queenTrippleBets == null) queenTrippleBets = QUEENTRIPPLEBETS
+-    if (playerClothStart == null) playerClothStart = PLAYERCLOTHSTART
+-    if (dealerClothStart == null) dealerClothStart = DEALERCLOTHSTART
+     if (playerWon == null) playerWon = 0
+     if (gameModeStrip == null) gameModeStrip = GAMEMODESTRIP
+     if (gameModeUnStrip == null) gameModeUnStrip = GAMEMODEUNSTRIP

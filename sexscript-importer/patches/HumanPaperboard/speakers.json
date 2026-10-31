@@ -1,0 +1,29 @@
+{
+  "reason": "A multiplayer service board: menus, status checks, the rules screen, other players' profile cards and the ordering questions are system text. The only voice with a persona is the unnamed photographer under camgirl.jpg, who runs the photo session in TakeAdPic and TakeRequestedPic (\"We are here to take the first pic…\", \"I hope he will like this shit.\").",
+  "speakers": {
+    "photographer": {
+      "displayName": "Photographer"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/HumanPaperboard.groovy:TakeAdPic",
+      "speaker": "photographer"
+    },
+    {
+      "after": "scripts/HumanPaperboard.groovy:463",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/HumanPaperboard.groovy:TakeRequestedPic",
+      "speaker": "photographer"
+    },
+    {
+      "after": "scripts/HumanPaperboard.groovy:430",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

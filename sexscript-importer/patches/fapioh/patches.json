@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "no-card-left",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): getImgTest() gives \"reset\" when it finds no card in 100 draws, and the main loop then empties the list of completed cards and draws again; with no category activated (all fapioh.catX false or never set) the second draw gives \"reset\" too, the image \"fapiohreset\" does not exist, and \">>>\" took the card name with substring(indexOf('-') - 1), which failed at -2 (V2 explorer: TSR025 at fapioh/fapioh.tease:351). Evident intent: draw a card of the activated categories; with none, there is nothing to play, so the game says so and ends as its Exit does.",
+      "diff": "no-card-left.diff"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+--- a/scripts/toy/bondage.groovy
++++ b/scripts/toy/bondage.groovy
+@@ -236,8 +236,7 @@
+ 				["Don't do anything that seems dangerous to you, I will not punish you for deviating my instructions. Stay safe!"]]);
+ 		pause(10);
+ 		showButtonG("Yes, ${dommeTitle()}", "ok");
+-		def playCount = !getRandom(likes(BONDAGE) ? 2 : 3);
+-		if (playCount) playCount = randRange(1,2);
++		def playCount = !getRandom(likes(BONDAGE) ? 2 : 3) ? randRange(1,2) : 0;
+ 		switch (playCount) {
+ 			case 1:
+ 				present([DRESSED, nTEASE], [

@@ -1,0 +1,23 @@
+--- a/scripts/DW_intro.groovy
++++ b/scripts/DW_intro.groovy
+@@ -39,6 +39,8 @@
+ 	return  "DareWiliam/zip";
+ }
+ def lasttime = loadInteger("DareWiliam.zip.launch.lasttime");
++// Patched legacy bug: no launch time is stored before the first report, which read null; a missing time means the report never ran.
++if (lasttime == null) lasttime = 0
+ if ((getTime() - lasttime) > 30) return "DareWiliam/zip";
+ def bm=loadInteger('DareWiliam.bm')
+ if (bm==1) {
+--- a/scripts/DareWiliam/zip.groovy
++++ b/scripts/DareWiliam/zip.groovy
+@@ -12,6 +12,9 @@
+ // - Language (2 letters, see ISO 639-1), samples : en, de, ar, es, zh... 
+ // - Tags (any number of tags, see samples on website)
+ setInfos(3, "Loading", "summary?", "Anonymous", "started", 0x00FF00, "en", ["", "", ""]);
++// Patched legacy bug: DW_intro sends the player here when this report last ran more than 30 seconds ago, and this
++// script returns to DW_intro, but nothing stored when it ran, so the two went round forever.
++save("DareWiliam.zip.launch.lasttime", getTime())
+ setImage(null);
+ show('Please wait');
+ String zipFileName = "DWreport"  

@@ -1,0 +1,2 @@
+say prose "Willkommen.", instant
+goto "chapters/first.tease"

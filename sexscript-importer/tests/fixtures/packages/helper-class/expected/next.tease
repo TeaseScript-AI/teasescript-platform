@@ -1,0 +1,8 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+showWait("Again", 2)
+// Groovy filled the required message first and gave count its default, which TeaseScript cannot express.
+// TODO SX_PARAMETER_DEFAULT_ORDER line 5: This call leaves out a parameter that has a default before a parameter without one; Groovy then filled the required parameters first, which TeaseScript parameters cannot express. Pass every argument up to the last required parameter.
+// | ss.rounds(this, "Stroke")
+exit

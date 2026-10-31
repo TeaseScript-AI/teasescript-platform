@@ -1,0 +1,22 @@
+--- a/scripts/Banjo/teachertrouble.groovy
++++ b/scripts/Banjo/teachertrouble.groovy
+@@ -44,6 +44,9 @@
+ def relation = (loadString("Banjo.teachertrouble.relation"))
+ def naughtiness = (loadInteger("Banjo.teachertrouble.naughtiness"))
+ def detentions = (loadInteger("Banjo.teachertrouble.detentions"))
++// Patched legacy bug: a missing count of detentions is none (see recordLoad).
++if (detentions == null)
++	detentions = 0
+ def smoker = true
+ def manlady = "man"
+ def boygirl = "boy"
+@@ -1318,6 +1321,9 @@
+ 	relation = loadString("Banjo.teachertrouble.relation")
+ 	naughtiness = loadInteger("Banjo.teachertrouble.naughtiness")
+ 	detentions = loadInteger("Banjo.teachertrouble.detentions")
++	// Patched legacy bug: a record saved without its detentions (left during its creation) read null, which +1 failed on.
++	if (detentions == null)
++		detentions = 0
+ 	setGender()
+ 	setGuardianGender()
+ }

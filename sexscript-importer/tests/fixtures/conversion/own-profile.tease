@@ -1,0 +1,5 @@
+// A script that asks the name itself and saves it needs no profile prompt.
+say prose "What is your name?", instant
+save askText(prefill: "pet").replace("\n", " ") as "intro.name"
+say prose "Hello, ${load("intro.name", default: "")}", instant
+exit

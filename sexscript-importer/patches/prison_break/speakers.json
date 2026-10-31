@@ -1,0 +1,1711 @@
+{
+  "reason": "A second-person prison story (converted from a CyberMistress routine) told by a narrator; the characters speak in quotation marks inside the narration: the cellmate, unnamed guards (including the disciplinary-room guard), fellow inmates, the player's wife, a taxi driver, Dianne and the female guard Miranda. Each story block is attributed by who speaks in it; *PUNISHMENT*/*REWARD* instructions, the intro, save/load screens and the end card are system text.",
+  "speakers": {
+    "cellmate": {
+      "displayName": "Cellmate"
+    },
+    "guard": {
+      "displayName": "Guard"
+    },
+    "inmate": {
+      "displayName": "Inmate"
+    },
+    "wife": {
+      "displayName": "Wife"
+    },
+    "taxi": {
+      "displayName": "Taxi Driver"
+    },
+    "dianne": {
+      "firstName": "Dianne"
+    },
+    "miranda": {
+      "firstName": "Miranda",
+      "displayName": "Female Guard"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/prison_break.groovy:37",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:43",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:59",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:66",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:76",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:82",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:96",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:102",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:108",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:114",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:120",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:126",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:132",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:138",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:148",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:154",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:161",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:168",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:182",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:189",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:195",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:229",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:238",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:244",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:250",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:256",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:264",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:271",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:277",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:283",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:289",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:295",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:301",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:309",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:316",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:322",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:328",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:334",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:341",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:378",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:385",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:399",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:406",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:420",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:439",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:449",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:457",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:463",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:470",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:482",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:490",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:496",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:502",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:509",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:515",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:521",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:529",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:535",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:543",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:561",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:571",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:577",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:584",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:592",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:598",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:606",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:641",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:650",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:656",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:663",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:669",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:675",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:681",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:696",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:702",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:717",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:731",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:738",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:754",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:761",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:771",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:783",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:791",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:804",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:811",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:819",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:827",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:835",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:842",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:855",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:861",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:870",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:877",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:885",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:892",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:898",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:905",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:911",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:917",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:924",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:930",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:936",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:942",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:948",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:954",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:960",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:966",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:972",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:978",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:984",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:992",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:999",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1005",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1011",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1036",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1051",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1060",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1066",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1075",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1083",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1089",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1096",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1102",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1121",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1141",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1148",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1156",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1166",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1172",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1178",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1184",
+      "speaker": "taxi"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1191",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1197",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1203",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1209",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1215",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1221",
+      "speaker": "dianne"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1229",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1240",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1247",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1257",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1271",
+      "speaker": "wife"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1279",
+      "speaker": "wife"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1285",
+      "speaker": "wife"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1292",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1298",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1313",
+      "speaker": "wife"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1321",
+      "speaker": "wife"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1341",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1354",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1364",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1371",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1379",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1399",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1407",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1413",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1427",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1434",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1440",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1442",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1450",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1456",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1462",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1468",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1474",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1480",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1486",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1492",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1498",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1506",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1519",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1526",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1532",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1538",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1544",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1568",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1575",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1621",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1643",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1650",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1656",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1662",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1668",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1674",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1681",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1687",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1693",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1699",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1710",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1719",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1725",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1738",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1747",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1753",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1761",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1768",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1774",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1785",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1791",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1797",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1843",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1850",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1856",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1867",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1873",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1879",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1886",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1892",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1898",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1916",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1930",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1939",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1946",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1952",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1959",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1965",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1972",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1978",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1984",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1990",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:1997",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2003",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2009",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2015",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2021",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2043",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2049",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2055",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2061",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2067",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2073",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2079",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2085",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2091",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2098",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2105",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2112",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2126",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2145",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2158",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2165",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2171",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2179",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2185",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2191",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2197",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2203",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2209",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2215",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2221",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2228",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2241",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2247",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2254",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2265",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2271",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2304",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2311",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2318",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2324",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2334",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2341",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2351",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2357",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2363",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2369",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2375",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2382",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2388",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2419",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2426",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2438",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2447",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2456",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2465",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2478",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2491",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2497",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2503",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2509",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2515",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2522",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2528",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2554",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2573",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2586",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2592",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2598",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2604",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2610",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2617",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2624",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2630",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2637",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2643",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2662",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2677",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2683",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2689",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2697",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2703",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2709",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2717",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2723",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2729",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2735",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2741",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2747",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2754",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2760",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2767",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2773",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2779",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2786",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2792",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2799",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2805",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2811",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2818",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2824",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2831",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2837",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2843",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2849",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2855",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2861",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2868",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2882",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2889",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2895",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2901",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2907",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2913",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2919",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2925",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2931",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2937",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2943",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2952",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2958",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2964",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2970",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2976",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2982",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2988",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:2994",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3000",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3007",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3021",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3035",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3041",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3054",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3060",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3073",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3079",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3085",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3091",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3104",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3110",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3116",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3122",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3128",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3134",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3140",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3146",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3153",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3166",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3174",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3180",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3187",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3194",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3200",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3207",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3221",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3228",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3236",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3242",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3248",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3256",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3262",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3268",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3275",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3281",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3287",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3293",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3316",
+      "speaker": "cellmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3323",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3329",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3335",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3341",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3347",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3353",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3359",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3378",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3391",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3398",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3411",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3417",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3423",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3429",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3437",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3447",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3453",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3459",
+      "speaker": "inmate"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3466",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3472",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3485",
+      "speaker": "miranda"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3493",
+      "speaker": "miranda"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3499",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3511",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3517",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3527",
+      "speaker": "miranda"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3533",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3546",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3552",
+      "speaker": "miranda"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3558",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/prison_break.groovy:3564",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/prison_break.groovy:3546"
+      ],
+      "files": [
+        "scripts/prison_break.groovy"
+      ],
+      "speaker": "miranda",
+      "template": "Miranda"
+    }
+  ]
+}

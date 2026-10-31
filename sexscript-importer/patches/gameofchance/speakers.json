@@ -1,0 +1,29 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/gameofchance.groovy:209",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/gameofchance.groovy:220",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/gameofchance.groovy:258",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/gameofchance.groovy:259",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

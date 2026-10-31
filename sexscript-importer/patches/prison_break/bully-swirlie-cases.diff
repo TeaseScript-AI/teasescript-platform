@@ -1,0 +1,28 @@
+--- a/scripts/prison_break.groovy
++++ b/scripts/prison_break.groovy
+@@ -1607,12 +1607,13 @@
+ 		break
+ 	}
+ 	wait(1)
+-	switch(getRandom(4)) {
++	// Legacy bug: BullySwirlie shared case 3 with DiaperMarshmallow, which came first, so it never came; it is case 4.
++	switch(getRandom(5)) {
+ 	case 0: block = "SpankPaddle"; break
+ 	case 1: block = "Chastity"; break
+ 	case 2: block = "BedFuck"; break
+ 	case 3: block = "DiaperMarshmallow"; break
+-	case 3: block = "BullySwirlie"; break
++	case 4: block = "BullySwirlie"; break
+ 	//case 4: block = "Solitary"; break
+ 	}
+ 	break
+@@ -2529,7 +2530,8 @@
+ 	setImage("pb/random.gif")
+ 	show("\"Ha ha yeah!  What shall we do to him today?\"")
+ 	wait(2)
+-	switch(getRandom(6)) {
++	// Legacy bug: getRandom(6) gives 0 to 5, so case 6, BullySwirlie, never came; pick from all seven.
++	switch(getRandom(7)) {
+ 	case 0: block = "BullyWedgie"; break
+ 	case 1: block = "BullySpank"; break
+ 	case 2: block = "BullyBang"; break

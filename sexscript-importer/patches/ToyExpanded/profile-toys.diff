@@ -1,0 +1,34 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -156,7 +156,30 @@
+ 	final loadI = "loadInteger";
+ 	final loadS = "loadString";
+ 	void setProp(String i, Object v) { save("toy.$i".toString(), v) }
+-	boolean has(String i) { (loadBoolean("toys.$i") == true) || (loadBoolean("toy.toys.$i") == true) || DEFAULTTOYS.contains(i) }
++	boolean has(String i) { (ownsToy(i) == true) || (loadBoolean("toy.toys.$i") == true) || DEFAULTTOYS.contains(i) }
++	// The player's toy chest, read by the toys' own keys.
++	Boolean ownsToy(String i) {
++		switch (i) {
++			case ANKLECUFFS: return loadBoolean("toys.ankle_cuffs")
++			case BALLGAG: return loadBoolean("toys.ballgag")
++			case BLINDFOLD: return loadBoolean("toys.blindfold")
++			case BUTTPLUG: return loadBoolean("toys.buttplug")
++			case COLLAR: return loadBoolean("toys.dog_collar")
++			case CLAMPS: return loadBoolean("toys.nipple_clamps")
++			case CHASTITY: return loadBoolean("toys.chastity_belt")
++			case CLOTHESPINS: return loadBoolean("toys.clothespins")
++			case HANDCUFFS: return loadBoolean("toys.handcuffs")
++			case HEATRUB: return loadBoolean("toys.heat_rub")
++			case DILDO: return loadBoolean("toys.dildo")
++			case PADDLE: return loadBoolean("toys.paddle")
++			case RINGGAG: return loadBoolean("toys.ring_gag")
++			case ROPE: return loadBoolean("toys.rope")
++			case VIBRATING_BUTTPLUG: return loadBoolean("toys.vibrating_buttplug")
++			case WHIP: return loadBoolean("toys.whip")
++			case RUBBERBANDS: return loadBoolean("toys.rubber_bands")
++		}
++		return loadBoolean("toys.$i")
++	}
+ 	boolean likes(String i) { loadBoolean("fetish.$i") == true }
+ 	boolean can(String i) { loadBoolean("toy.permission.$i") == true }
+ 	boolean perm(String i) { can(i) }

@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "implement-texts",
+      "layer": "source",
+      "category": "b",
+      "reason": "The nine implements start as null and setImplements gives each a toy name from the toy box before it builds the implement list, which the envelope pick reads. The converter keeps a null start that a list takes, so the list held text or null, which the picked implement's text variable cannot take. The implements start as empty text instead; every one is a name by the time the list is built.",
+      "diff": "implement-texts.diff"
+    },
+    {
+      "id": "last-envelope",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report), uncertain patch: the game has nine envelopes (implements), each round pays $100, and roundBet offers another round until the money reaches the $1000 limit, which takes ten rounds; so a player who kept going reached a tenth chooseImplement with no envelope left, whose empty choice failed (V2 explorer: TSR052 at Banjo/smackedforcash.tease:799). Whether the author meant ten envelopes, a lower limit, or an end after the ninth is not clear; the most plausible reading that keeps the nine implements is that the game ends when the envelopes run out. roundBet then says \"That was the last envelope.\" and ends the rounds, as a declined round does, instead of offering another.",
+      "diff": "last-envelope.diff"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+--- a/scripts/Banjo/smackedforcash.groovy
++++ b/scripts/Banjo/smackedforcash.groovy
+@@ -565,7 +565,14 @@
+ //	moneyRound = moneyBase*round
+ 	spankMinutes = spankDuration/60
+ 	setImage("smackedforcash/producer-"+producer+".jpg")
+-	if(!getBoolean("Do you want to open another enveolope and take another spanking?\n\nIf you do, you'll earn an extra \$"+moneyRound+".","Yes","No"))
++	// Legacy bug (uncertain patch): nine envelopes, but $100 a round reaches the $1000 limit only after ten, so a tenth
++	// round offered an empty choice and failed; the game ends when no envelope is left (patch last-envelope).
++	if(envelopeArray.size()==0) {
++		show("That was the last envelope.")
++		wait(5)
++		round = 0
++	}
++	else if(!getBoolean("Do you want to open another enveolope and take another spanking?\n\nIf you do, you'll earn an extra \$"+moneyRound+".","Yes","No"))
+ 		round = 0
+ }
+ 

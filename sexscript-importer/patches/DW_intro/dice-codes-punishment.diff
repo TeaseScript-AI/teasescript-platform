@@ -1,0 +1,48 @@
+--- a/scripts/DareWiliam/tasks.groovy
++++ b/scripts/DareWiliam/tasks.groovy
+@@ -324,15 +324,15 @@
+ text = new Date().format( "dd-MM-yyyy HH:mm")
+ log.append(text+": Started spanking (78562146)\r\n")
+ def extracode=getInteger("Enter the second code if you got one, otherwise enter 1",1);
+-if(extracode==0) {
+-save("DareWiliam.punishment",1);
++if(extracode<=0) {
++save("DareWiliam.Punshishment", "1");
+ show("You can't read, can you?? Beg me to be punished.");
+ return null;
+ }
+ show("Today we will do some spanking.\n I will tell you a couple of options, and then roll a dice to see what you will do.");
+ showButton("Yes, Master");
+ show("First, I will decide what you will be useing.\n\nOptions: \n1 - Ruler\n2 - Hand\n3 - Spoon\n4 - Slipper\n5 - Hairbrush\n6 - Belt\n\n\n I will now roll my dice.");
+-def dice = getRandom(5) + 1;
++def dice = getRandom(6) + 1;
+ showButton("Yes, Master");
+ def implement = "";
+ if (dice == 1) implement = "a ruler";
+@@ -345,7 +345,7 @@
+ show("I rolled "+dice+", so you will use "+implement+".");
+ wait(3);
+ show("Now I decide where you will spank yourself. \n\nOptions:\n1 - Lying flat on a bed\n2 - Over a chair\n3 - Bend over a table\n4 - Kneeling in front of bed\n5 - On a bed on all fours\n6 - Standing\n\n\nI will roll my dice again.");
+-dice = getRandom(5) + 1;
++dice = getRandom(6) + 1;
+ showButton("Yes, Master");
+ def place = "";
+ if (dice == 1) place = "lying flat on a bed";
+@@ -358,7 +358,7 @@
+ wait(3);
+ 
+ show("Ok, now let's see what you will wear. \n\nOptions:\n1 - First third of strokes on tros, second third on underwear, last third on bare bottom\n2 - First half on underwear, second half on bare bottom\n3 or 4 - Trousers and underwear lowered, otherwise fully dressed for the entire spanking\n5 or 6 - Naked");
+-dice = getRandom(5) + 1;
++dice = getRandom(6) + 1;
+ showButton("Yes, Master");
+ def clothing = "";
+ if (dice == 1) clothing = "first third of strokes on trousers, second third on underwear, last third on bare bottom";
+@@ -728,7 +728,7 @@
+ 	}
+ }
+ }
+-def NumberofWedgies=Math.sqrt(extra2);
++def NumberofWedgies=Math.sqrt(Math.max(extra2,0));
+ if (NumberofWedgies!=Math.floor(NumberofWedgies)||NumberofWedgies<=0){
+ 	show("False code, bitch!!");
+ 	wait(3);

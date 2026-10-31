@@ -1,0 +1,32 @@
+{
+  "reason": "One opponent per session, picked in the opening menu and held in the variable opponent: the unnamed beach woman (Default), Memphis, Miss Kylee or Aunty Kiara (the names they introduce themselves with). She speaks every line of the game; the opponent menu, main menu, configuration and debug level menu are system text.",
+  "speakers": {
+    "opponent": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/Banjo/eyesuphere.groovy:1539",
+      "speaker": "opponent"
+    }
+  ],
+  "names": [
+    {
+      "variable": "opponent",
+      "files": [
+        "scripts/Banjo/eyesuphere.groovy"
+      ],
+      "speaker": "opponent",
+      "values": {
+        "Default": "Mistress",
+        "Memphis": "Memphis",
+        "Kylee": "Miss Kylee",
+        "Kiara": "Aunty Kiara"
+      },
+      "otherwise": "Mistress"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -371,8 +371,8 @@
+ 	}
+ 
+ 	final requestables = [:];
+-	final addRequestable = { String name, String label, func, cond = null ->
+-		requestables[name] = [lbl: label, act: func, cond: cond, arg: null];
++	final addRequestable = { String name, String label, func, cond = null, arg = null ->
++		requestables[name] = [lbl: label, act: func, cond: cond, arg: arg];
+ 	};
+ 	final removeRequestable = { String name ->
+ 		requestables.remove(name);
+@@ -429,7 +429,7 @@
+ 					def opts = [];
+ 					for (r in requestables.values()) {
+ 						def cond = r.cond;
+-						if (!cond || cond()) opts.add(r);
++						if (!cond || cond(r.arg)) opts.add(r);
+ 					}
+ 					opts.push([ lbl: "Back", act: null ]);
+ 					opts.add([ lbl: "End session", act: null ]);
+--- a/scripts/toy/toys.groovy
++++ b/scripts/toy/toys.groovy
+@@ -10,8 +10,8 @@
+ 			remFunc: removeFunc
+ 		];
+ 		toy.addRequestable("un$toyState".toString(), removeReq,
+-				removeReqFunc ?: { toy.requestRelease(toyState) },
+-				{ toy.stateIs(toyState) })
++				removeReqFunc ?: { state -> toy.requestRelease(state) },
++				{ state -> toy.stateIs(state) }, toyState)
+ 	};
+ 
+ 	toy.metaClass.removeToy { state, imageSpec ->

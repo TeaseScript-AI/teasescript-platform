@@ -1,0 +1,11 @@
+--- a/scripts/Mandys_blackmail2.groovy
++++ b/scripts/Mandys_blackmail2.groovy
+@@ -608,7 +608,7 @@
+ 	break
+ 
+ case "main20":
+-	setImage("mandys_blackmail/co2.jpg")
++	setImage("mandys_blackmail/co02.jpg")
+ 	show("I am starting to build a nice database of humiliating pictures against you.. \n\nI'm sure we are going to have some fun with this!")
+ 	block = "money"
+ 	break
