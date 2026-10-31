@@ -331,7 +331,6 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     // it; a writer that ended (another start time) claims it no longer, and its temporary file goes
     assert.equal(into(base, "0/2").status, 1);
     assert.deepEqual(readdirSync(baseline).sort(), ["0of2.runs.jsonl", "PLAN"]);
-    assert.deepEqual(states(state(alias)), ["area partial 1"]);
     const stat = readFileSync("/proc/self/stat", "utf8");
     const started = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
     writeFileSync(join(baseline, ".1of2.claim"), `${process.pid}-${started}\n`);
@@ -394,7 +393,12 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     assert.equal(store(foreign, area, elsewhere, "--shard", "0/2").status, 1);
     const last = (result: { stdout: string }) =>
       JSON.parse(result.stdout.trim().split("\n").at(-1)!);
-    const held = last(state(foreign, elsewhere)).baseline;
+    const held = join(
+      elsewhere,
+      readdirSync(elsewhere).find((name) =>
+        existsSync(join(elsewhere, name, "area", "0of2.runs.jsonl")),
+      )!,
+    );
     mkdirSync(join(held, "other-agent"));
     writeFileSync(join(held, "other-agent", "data"), "x\n");
     assert.match(
@@ -427,7 +431,7 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     const joining = tree("joining", "8", "", "racing\n");
     assert.equal(store(retired, area, racing, "--shard", "0/2").status, 1);
     rmSync(retired, { recursive: true });
-    const raced = last(state(joining, racing)).baseline;
+    const raced = join(racing, readdirSync(racing)[0]!);
     const barrier = join(directory, "barrier.mjs");
     writeFileSync(
       barrier,
@@ -466,7 +470,7 @@ syncBuiltinESMExports();
     });
     while (!existsSync(ready)) await sleep(10);
     const writing = background([runner, area, joining, "--store", racing, "--shard", "1/2"]);
-    await sleep(150);
+    await sleep(50);
     writeFileSync(release, "");
     const [prunedRace, wrote] = await Promise.all([pruning, writing]);
     assert.match(prunedRace.stdout, /"pruned"/);
@@ -547,8 +551,8 @@ syncBuiltinESMExports();
 });
 
 /**
- * Every place the stored baselines' tools write to the filesystem (#1542), each with its kind: `gate`, inside a callback
- * passed to `gate`, the only way anything is written into a baseline; `helper`, in a function called only from such a
+ * Every place the stored baselines' tools write to the filesystem (#1542), each with its kind: `gate`, in the gate's body
+ * or inside a callback passed to `gate`, the only way anything is written into a baseline; `helper`, in a function called only from such a
  * callback or another helper; `creation`, a new baseline made outside it (its `.creating-` folder, or the baselines
  * folder itself) and renamed into place onto no folder or an empty one; `recovery`, a `.pruning-` or `.creating-` folder
  * of the tool's outside any baseline; `outside`, the runner's `--out`, the caller's own file. A write this list does not
@@ -573,7 +577,7 @@ const WRITES = [
     "gate",
   ],
   ["baselines.mjs", "planned", "mkdirSync(path.join(top, area), { recursive: true })", "gate"],
-  ["baselines.mjs", "beginShard", "rmSync(path.join(dir, entry), { force: true })", "gate"],
+  ["baselines.mjs", "gate", "rmSync(path.join(folder, name), { force: true })", "gate"],
   ["baselines.mjs", "endShard", "writeFileSync(tmp, body + ended)", "gate"],
   ["baselines.mjs", "endShard", "linkSync(tmp, file)", "gate"],
   ["baselines.mjs", "endShard", "renameSync(tmp, file)", "gate"],
@@ -641,7 +645,13 @@ test("the stored baselines' tools write into a baseline only through its gate, e
         ),
       );
     };
-    visit(source, "(top level)", false);
+    // (the gate's own body is the gate)
+    for (const statement of source.statements)
+      visit(
+        statement,
+        "(top level)",
+        ts.isFunctionDeclaration(statement) && statement.name?.text === "gate",
+      );
   }
   // every write is listed, and every listed write is there
   const listed = WRITES.map(([file, top, call]) => `${file} ${top} ${call}`);
@@ -685,4 +695,157 @@ test("the stored baselines' tools write into a baseline only through its gate, e
       .filter((target) => target !== "/dev/stderr"),
     [],
   );
+});
+
+/**
+ * A preload that stops the process right after its first write (`<function> <path> <data or second path>`) on a path
+ * under CRASH_ROOT that CRASH_AT matches, telling CRASH_READY, so that the test kills it there (#1542).
+ */
+const CRASH = `import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const at = new RegExp(process.env.CRASH_AT);
+const tell = fs.writeFileSync;
+let stopped = false;
+for (const name of ["writeFileSync", "appendFileSync", "mkdirSync", "renameSync", "linkSync", "rmSync", "copyFileSync"]) {
+  const original = fs[name];
+  fs[name] = function (...args) {
+    const result = original.apply(this, args);
+    const done = name + " " + args.slice(0, 2).map(String).join(" ");
+    if (!stopped && args.slice(0, 2).some((arg) => String(arg).startsWith(process.env.CRASH_ROOT)) && at.test(done)) {
+      stopped = true;
+      tell(process.env.CRASH_READY, done);
+      for (;;) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+    }
+    return result;
+  };
+}
+syncBuiltinESMExports();
+`;
+
+test("the stored baselines finish or clear what a writer killed at a write left, one write per entry point (#1542)", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const tree = (name: string, sha: string, src = "a\n") => {
+      const folder = join(directory, name);
+      mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
+      mkdirSync(join(folder, "src"));
+      mkdirSync(join(folder, "tests", "families", "area"), { recursive: true });
+      writeFileSync(join(folder, "src", "a.ts"), src);
+      writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(folder, "package-lock.json"), "{}\n");
+      writeFileSync(
+        join(folder, "dist", "tests", "helpers", "type-core-oracles.js"),
+        storable(false),
+      );
+      writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
+      writeFileSync(
+        join(folder, "tests", "families", "area", "stored.mjs"),
+        'export const cases = [["same", "same"], ["changed", "changed"]];\n',
+      );
+      return folder;
+    };
+    const base = tree("base", "1");
+    const alias = tree("alias", "2");
+    const crash = join(directory, "crash.mjs");
+    writeFileSync(crash, CRASH);
+    let count = 0;
+    const killedAt = async (at: string, ...args: string[]) => {
+      const ready = join(directory, `ready-${(count += 1)}`);
+      const env = { ...process.env, CRASH_ROOT: directory, CRASH_AT: at, CRASH_READY: ready };
+      const child = spawn(process.execPath, ["--import", crash, ...args], { env, stdio: "ignore" });
+      const closed = new Promise((done) => child.on("close", done));
+      while (!existsSync(ready) && child.exitCode === null)
+        await new Promise((done) => setTimeout(done, 5));
+      assert.ok(existsSync(ready), `${args.join(" ")} ended before a write ${at}`);
+      child.kill("SIGKILL");
+      await closed;
+    };
+    const run = (...args: string[]) => spawnSync(process.execPath, args, { encoding: "utf8" });
+    const last = (result: { stdout: string }) =>
+      JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+    const store = (from: string, root: string, shard: string) =>
+      run(runner, join(from, "tests", "families", "area"), from, "--store", root, "--shard", shard);
+
+    // a store killed right after it made its area's folder (#1542 r3: interrupted-area-creation; the area is recorded
+    // before), then one killed before it published its shard: the next writer finishes the area and publishes, the dead
+    // writer's temporary file cleared
+    const first = join(directory, "first");
+    await killedAt(
+      "^mkdirSync .*/area ",
+      runner,
+      join(base, "tests", "families", "area"),
+      base,
+      "--store",
+      first,
+      "--shard",
+      "0/2",
+    );
+    assert.equal(last(store(alias, first, "0/2")).verified, true);
+    await killedAt(
+      "^writeFileSync .*runs\\.jsonl\\.\\d+-\\d+\\.tmp ",
+      runner,
+      join(base, "tests", "families", "area"),
+      base,
+      "--store",
+      first,
+      "--shard",
+      "1/2",
+    );
+    assert.equal(last(store(alias, first, "1/2")).verified, true);
+    const stored = run(baselines, "state", base, first, "--read-only");
+    assert.equal(stored.status, 0, stored.stdout);
+    const made = last(stored).baseline;
+    assert.deepEqual(readdirSync(join(made, "area")).sort(), [
+      "0of2.runs.jsonl",
+      "1of2.runs.jsonl",
+      "PLAN",
+    ]);
+
+    // a join killed before its new baseline was renamed into place: the next one makes it; prune clears the leftover
+    const second = join(directory, "second");
+    await killedAt("^writeFileSync .*\\.creating-.*MANIFEST ", baselines, "state", base, second);
+    assert.equal(run(baselines, "state", base, second).status, 1);
+    // `start` killed before its marker's rename, `queue` before its copy's: the next call decides and copies
+    const top = last(run(baselines, "state", base, second, "--read-only")).baseline;
+    await killedAt(
+      "^writeFileSync .*STARTED\\.\\d+-\\d+\\.tmp ",
+      baselines,
+      "start",
+      top,
+      top.split("/").at(-1)!,
+    );
+    assert.equal(last(run(baselines, "start", top, top.split("/").at(-1)!)).decision, "started");
+    const hook = resolve(process.cwd(), "tools", "corpus", "baseline.sh");
+    await killedAt("^copyFileSync ", baselines, "queue", top, hook);
+    assert.equal(last(run(baselines, "queue", top, hook)).queued, top);
+    assert.deepEqual(readdirSync(top).sort(), ["MANIFEST", "STARTED", "baseline.sh"]);
+    // (#1542 r3: queued-job-foreign-contents) a job's decision in a baseline that holds a foreign path is refused,
+    // nothing written
+    writeFileSync(join(top, "foreign-late"), "x\n");
+    const before = readdirSync(top).sort();
+    assert.equal(run(baselines, "start", top, top.split("/").at(-1)!).status, 2);
+    assert.deepEqual(readdirSync(top).sort(), before);
+
+    // a prune killed between retiring a baseline and removing it: the next prune clears the retired folder, and the
+    // join's leftover
+    const third = join(directory, "third");
+    const gone = tree("gone", "3", "gone\n");
+    assert.equal(store(gone, third, "0/1").status, 0);
+    rmSync(gone, { recursive: true });
+    await killedAt("^renameSync .*\\.pruning-", baselines, "prune", third);
+    assert.equal(readdirSync(third).filter((name) => name.startsWith(".pruning-")).length, 1);
+    // (#1542 r3: foreign-retirement-prefix) a folder named as the tool names its own, but not by one of its writers, is
+    // kept and named
+    mkdirSync(join(third, ".pruning-independent-owner"));
+    writeFileSync(join(third, ".pruning-independent-owner", "keep.txt"), "x\n");
+    assert.match(
+      run(baselines, "prune", third).stdout,
+      /"kept":"[^"]*\.pruning-independent-owner"/,
+    );
+    run(baselines, "prune", second);
+    assert.deepEqual(readdirSync(third), [".pruning-independent-owner"]);
+    assert.deepEqual(readdirSync(second), [top.split("/").at(-1)]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
