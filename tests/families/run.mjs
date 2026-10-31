@@ -15,29 +15,33 @@
 // compared either, and is counted apart (`unanswered`) and kept in `--out`. With `--baseline`, the head alone runs, and
 // each run is judged against the stored base result of the same source, mode and check (a source with each run it
 // does not hold is kept in `--out` as `uncompared`, never agreement); `--store` runs one tree of a commit (sx-tree's,
-// with `src/` and `.sha`) at the runner's defaults and stores each source's results as a JSON line, in the baseline of
-// its `src/` tree (see `storing`), whose area folder's `*.runs.jsonl` files `--baseline` then reads. Prints one JSON line
-// per generator and a total: sources, unparsed, stalled, exceptions, unanswered, uncompared, modes, runs, differences.
+// with `src/` and `.sha`) at the runner's defaults and stores one shard of each source's results, one JSON line each, in
+// the baseline of its `src/` tree (`baselines.mjs`), whose area folder's `*.runs.jsonl` files `--baseline` then reads.
+// Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, uncompared, modes,
+// runs, differences.
 import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
   createReadStream,
   existsSync,
-  linkSync,
-  mkdirSync,
   readdirSync,
   readFileSync,
-  readlinkSync,
-  renameSync,
-  rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { setKey, sourceKey, sourcesOf } from "./sources.mjs";
+import {
+  beginShard,
+  DEFAULTS,
+  endShard,
+  identityOf,
+  owned,
+  planned,
+  planOf,
+} from "./baselines.mjs";
+import { generatorsOf, placeOf, sourceKey } from "./sources.mjs";
 
 /** A tree's oracle library, from its `dist/`. */
 async function oracles(root) {
@@ -129,100 +133,6 @@ function judged(was, is) {
   };
 }
 
-/** A git object's id, as `git hash-object` gives a blob's. */
-const gitId = (type, body) =>
-  createHash("sha1").update(`${type} ${body.length}\0`).update(body).digest();
-
-/**
- * A folder's git tree id, as a commit holds it (`git rev-parse <commit>:src` for a tree's `src/`): its files, executables
- * and links by their content, in git's order (a folder's name sorts as if it ended in `/`), empty folders left out;
- * `null` for a folder with no file.
- */
-function treeId(folder) {
-  const entries = [];
-  for (const entry of readdirSync(folder, { withFileTypes: true })) {
-    const file = path.join(folder, entry.name);
-    if (entry.isDirectory()) {
-      const id = treeId(file);
-      if (id !== null)
-        entries.push({ order: `${entry.name}/`, mode: "40000", name: entry.name, id });
-    } else {
-      const link = entry.isSymbolicLink();
-      const mode = link ? "120000" : statSync(file).mode & 0o100 ? "100755" : "100644";
-      const body = link ? Buffer.from(readlinkSync(file)) : readFileSync(file);
-      entries.push({ order: entry.name, mode, name: entry.name, id: gitId("blob", body) });
-    }
-  }
-  if (entries.length === 0) return null;
-  entries.sort((a, b) => Buffer.compare(Buffer.from(a.order), Buffer.from(b.order)));
-  const body = entries.flatMap(({ mode, name, id }) => [Buffer.from(`${mode} ${name}\0`), id]);
-  return gitId("tree", Buffer.concat(body));
-}
-
-/** `file` made whole with `text` where it does not exist yet, else left as another writer made it: what it holds. */
-function created(file, text) {
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, text);
-  try {
-    linkSync(tmp, file);
-  } catch (error) {
-    if (error.code !== "EEXIST") throw error;
-  } finally {
-    rmSync(tmp, { force: true });
-  }
-  return readFileSync(file, "utf8");
-}
-
-/** A process's start time (Linux's `/proc`), which with its pid names one process for good; none once it ended. */
-function startOf(pid) {
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
-  } catch {
-    return undefined;
-  }
-}
-
-/** Whether a writer (`<pid> <start time>`, as a claim or a temporary file names it) still runs. */
-const running = (writer) => {
-  const [pid, start] = writer.trim().split(/[ -]/);
-  return start !== undefined && startOf(Number(pid)) === start;
-};
-
-/**
- * This process's claim on a shard (`file`), taken while no running writer holds it: a writer that ended without
- * releasing its claim (killed) holds it no longer. Two writers may still both take it after such an end; they then
- * store the same shard, and the first to publish it keeps it.
- */
-function claimed(file, writer) {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    let holder;
-    try {
-      holder = created(file, `${writer}\n`).trim();
-    } catch (error) {
-      if (error.code === "ENOENT") continue;
-      throw error;
-    }
-    if (holder === writer) return true;
-    if (running(holder)) return false;
-    rmSync(file, { force: true });
-  }
-  return false;
-}
-
-/**
- * The area's SHA256SUMS (its PLAN's and each shard's), once each of its `shards` is stored: written whole by whichever
- * writer finds them complete first, the same by any other.
- */
-function published(folder, shards) {
-  const sums = path.join(folder, "SHA256SUMS");
-  const files = ["PLAN", ...Array.from({ length: shards }, (_, i) => `${i}of${shards}.runs.jsonl`)];
-  if (existsSync(sums) || !files.every((file) => existsSync(path.join(folder, file)))) return;
-  const lines = files.map((file) => `${hash(readFileSync(path.join(folder, file)))}  ${file}\n`);
-  writeFileSync(`${sums}.${process.pid}.tmp`, lines.join(""));
-  renameSync(`${sums}.${process.pid}.tmp`, sums);
-}
-
 if (process.argv[2] === "--child") {
   // the child: each source's runs in the four modes on each tree (the base and the head, or one)
   const { roots, allowances } = JSON.parse(process.argv[3]);
@@ -302,7 +212,7 @@ if (process.argv[2] === "--child") {
         "       node tests/families/run.mjs <area> <tree> --store <folder> [--shard i/N]",
     );
   const sizesOption = option("sizes")?.split(",").map(Number);
-  const allowances = (option("allowances") ?? "natural,16,256")
+  const allowances = (option("allowances") ?? DEFAULTS.allowances)
     .split(",")
     .map((text) => (text === "natural" ? null : Number(text)));
   const [shard, shards] = (option("shard") ?? "0/1").split("/").map(Number);
@@ -326,9 +236,9 @@ if (process.argv[2] === "--child") {
       refused(`${tree} is no built tree of a commit (sx-tree's, with src/ and .sha) to store`);
   }
   // 180 s by default, 60 s in CI (GitHub Actions sets `CI`), whose runs are the runner's own tests (owner, 2026-10-30)
-  const seconds = Number(option("timeout") ?? (process.env.CI === "true" ? 60 : 180));
+  const seconds = Number(option("timeout") ?? DEFAULTS.timeout);
   const timeout = seconds * 1000;
-  const memory = Number(option("memory") ?? 2048);
+  const memory = Number(option("memory") ?? DEFAULTS.memory);
   const out = option("out");
   if (out !== undefined) writeFileSync(out, "");
   const record = (line) => {
@@ -412,21 +322,13 @@ if (process.argv[2] === "--child") {
       current.send(message);
     });
 
-  /** A source's place in a baseline: its generator, its name and its key, so that an edited source is a new one. */
-  const placeOf = (name, source) => JSON.stringify([name, source.name, sourceKey(source)]);
   const folder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), area);
-  const generators = [];
-  // with `--store`, the place of every source of the area, each shard's: the set its stored baseline holds
-  const members = [];
-  for (const name of readdirSync(folder)
-    .filter((file) => file.endsWith(".mjs"))
-    .sort()) {
-    const generator = await import(pathToFileURL(path.join(folder, name)).href);
-    const all = sourcesOf(generator, sizesOption);
-    if (store !== undefined) for (const source of all) members.push(placeOf(name, source));
-    const sources = all.filter((_, index) => index % shards === shard);
-    generators.push({ name, checks: generator.checks ?? ["publication"], sources });
-  }
+  // each generator's sources in this shard, and with `--store` all of them (the area's PLAN)
+  const every = await generatorsOf(folder, sizesOption);
+  const generators = every.map(({ sources, ...generator }) => ({
+    ...generator,
+    sources: sources.filter((_, index) => index % shards === shard),
+  }));
   /** The stored runs of this shard's sources (each its line), by their place, from the baseline's `*.runs.jsonl`. */
   const stored = new Map();
   if (baseline !== undefined) {
@@ -456,70 +358,27 @@ if (process.argv[2] === "--child") {
         stored.set(place, line);
       }
   }
-  /**
-   * `--store`: this shard's file in the baseline of the tree's `src/` tree, `<folder>/<src tree id>/<area>/<i>of<N>.runs.jsonl`,
-   * written as a temporary file until its last source ended. The baseline's MANIFEST names each commit stored in it
-   * (its line appended once, never rewritten); the area's PLAN the set of its sources and its count of shards, as its
-   * first writer made it, which every other writer shares or is refused. One running writer at a time stores a shard
-   * (its claim), and publishes it whole by a hard link, which no other writer replaces; a stored shard is not run again.
-   */
+  // `--store`: this shard of the area in the baseline of the tree's `src/` tree (`baselines.mjs`), which the tree must
+  // share (its oracle library, lockfile and Node) and whose PLAN the area's sources must have; a shard that verifies, or
+  // that a running writer stores, ends here
   let storing;
   if (store !== undefined) {
     const tree = path.resolve(roots[0]);
-    const src =
-      treeId(path.join(tree, "src"))?.toString("hex") ?? refused(`${tree}/src holds no file`);
+    const identity = identityOf(tree);
+    if (identity.src === null) refused(`${tree}/src holds no file`);
     const commit = readFileSync(path.join(tree, ".sha"), "utf8").trim();
-    const top = path.join(store, src);
-    const dir = path.join(top, path.basename(folder));
-    mkdirSync(dir, { recursive: true });
-    const header = `baseline 3\nsrc ${src}\n`;
-    const listed = created(path.join(top, "MANIFEST"), header);
-    if (!listed.startsWith(header)) refused(`${top}/MANIFEST is no MANIFEST of this baseline`);
-    const named = `commit ${commit} ${tree}`;
-    if (!listed.split("\n").includes(named))
-      appendFileSync(path.join(top, "MANIFEST"), `${named}\n`);
-    const plan = `set ${setKey(members)}\nsources ${members.length}\nshards ${shards}\n`;
-    const planned = created(path.join(dir, "PLAN"), plan);
-    if (planned !== plan)
-      refused(`${dir} stores another set of sources or count of shards than this run:\n${planned}`);
-    const name = `${shard}of${shards}.runs.jsonl`;
-    const file = path.join(dir, name);
-    const claim = path.join(dir, `.${shard}of${shards}.claim`);
-    const writer = `${process.pid} ${startOf(process.pid)}`;
-    /** A shard stored, or being stored, by another writer: the area's SHA256SUMS where they are missing, and the end. */
-    const skipped = (reason) => {
-      published(dir, shards);
-      console.log(
-        JSON.stringify({ area, shard: `${shard}/${shards}`, stored: file, skipped: reason }),
-      );
+    const top = owned(store, identity, `commit ${commit} ${tree}`);
+    if (top.refused !== undefined) refused(top.refused);
+    const dir = path.join(top.dir, path.basename(folder));
+    const plan = planned(top.dir, dir, planOf(path.basename(folder), every, shards));
+    if (plan.refused !== undefined) refused(plan.refused);
+    storing = beginShard(dir, shard, shards, plan.plan, plan.places[shard]);
+    if (storing.skipped !== undefined) {
+      const { file, skipped } = storing;
+      console.log(JSON.stringify({ area, shard: `${shard}/${shards}`, stored: file, skipped }));
       process.exit(0);
-    };
-    if (existsSync(file)) skipped("stored");
-    if (!claimed(claim, writer)) skipped("being stored by another writer");
-    // (stored between the look and the claim)
-    if (existsSync(file)) {
-      rmSync(claim, { force: true });
-      skipped("stored");
     }
-    // a temporary file of this shard whose writer ended
-    for (const entry of readdirSync(dir)) {
-      const writes =
-        entry.startsWith(`.${name}.`) && entry.endsWith(".tmp")
-          ? entry.slice(name.length + 2, -4)
-          : null;
-      if (writes !== null && !running(writes)) rmSync(path.join(dir, entry), { force: true });
-    }
-    storing = {
-      dir,
-      file,
-      claim,
-      writer,
-      tmp: path.join(dir, `.${name}.${writer.replace(" ", "-")}.tmp`),
-      src,
-      commit,
-      tree,
-    };
-    writeFileSync(storing.tmp, "");
+    storing.made = { shard: `${shard}/${shards}`, commit, tree, ...identity };
   }
   /** What the stored tree and the head did (a stall's or an exception's text), where either did. */
   const either = (base, head) =>
@@ -595,28 +454,10 @@ if (process.argv[2] === "--child") {
   child?.kill();
   const ended = { ...total, timeout: seconds, node: process.version };
   if (storing !== undefined) {
-    // the shard whole, its total last, with what made it; a shard another writer published first stays
-    const { dir, file, claim, writer, tmp, src, commit, tree } = storing;
-    const oracle = path.join(tree, "dist", "tests", "helpers", "type-core-oracles.js");
-    const made = {
-      shard: `${shard}/${shards}`,
-      src,
-      commit,
-      tree,
-      runner: hash(readFileSync(fileURLToPath(import.meta.url))),
-      oracles: hash(readFileSync(oracle)),
-    };
-    appendFileSync(tmp, `${JSON.stringify({ total: { ...ended, ...made } })}\n`);
-    try {
-      linkSync(tmp, file);
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-    }
-    rmSync(tmp, { force: true });
-    if (existsSync(claim) && readFileSync(claim, "utf8").trim() === writer)
-      rmSync(claim, { force: true });
-    published(dir, shards);
-    ended.stored = file;
+    // the shard whole, its total last, with what made it
+    const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));
+    const whole = endShard(storing, { ...ended, ...storing.made, runner: runner.digest("hex") });
+    Object.assign(ended, { stored: storing.file, verified: whole });
   }
   console.log(JSON.stringify(ended));
   process.exitCode =
