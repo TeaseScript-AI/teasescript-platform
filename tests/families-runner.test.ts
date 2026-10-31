@@ -264,17 +264,15 @@ function writeSrc(tree: string, extra = ""): void {
 test("the corpus runner stores a tree in the baseline of its src/ tree, verified shard by shard, which judges a head as the base tree beside it does", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
-    // the base as two commits with one `src/` tree and oracle library, one with another library, and the head
-    const tree = (name: string, sha: string, library = "oracles\n", extra = "") => {
+    // the base as two commits with one `src/` tree and built oracle library, one with another library, and the head
+    const tree = (name: string, sha: string, library = "", extra = "") => {
       const folder = join(directory, name);
       mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
-      mkdirSync(join(folder, "tests", "helpers"), { recursive: true });
       writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
       writeFileSync(join(folder, "package-lock.json"), "{}\n");
-      writeFileSync(join(folder, "tests", "helpers", "type-core-oracles.ts"), library);
       writeFileSync(
         join(folder, "dist", "tests", "helpers", "type-core-oracles.js"),
-        storable(name === "head"),
+        storable(name === "head") + library,
       );
       writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
       writeSrc(folder, extra);
@@ -287,7 +285,7 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
       `export const cases = ${JSON.stringify(order.map((name) => [name, name]))};\n`;
     const base = tree("base", "1");
     const alias = tree("alias", "2");
-    const other = tree("other", "3", "another oracle library\n");
+    const other = tree("other", "3", "// another oracle library\n");
     const head = tree("head", "4");
     const area = join(base, "tests", "families", "area");
     const root = join(directory, "baselines");
@@ -365,13 +363,20 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     assert.deepEqual(states(complete), ["area complete 2"]);
 
     // refused, nothing written: another count of shards; the same sources in another order (#1542 r1: the second
-    // writer's shard would hold the first's sources again); another oracle library; other than the defaults; a folder
-    // this tool did not make, whose contents `prune` leaves
+    // writer's shard would hold the first's sources again) or with other checks; another oracle library; other than
+    // the defaults; a folder this tool did not make, whose contents `prune` leaves
     assert.match(into(base, "0/3").stderr, /is planned otherwise/);
     const reordered = join(directory, "reordered", "area");
     mkdirSync(reordered, { recursive: true });
     writeFileSync(join(reordered, "stored.mjs"), generator([...names].reverse()));
     assert.equal(store(alias, reordered, root, "--shard", "1/2").status, 2);
+    const checked = join(directory, "checked", "area");
+    mkdirSync(checked, { recursive: true });
+    writeFileSync(
+      join(checked, "stored.mjs"),
+      `${generator(names)}export const checks = ["stops"];\n`,
+    );
+    assert.match(store(alias, checked, root, "--shard", "1/2").stderr, /is planned otherwise/);
     assert.match(into(other, "0/2").stderr, /holds runs of another oracles than this tree's/);
     assert.equal(into(base, "0/2", "--timeout", "5").status, 2);
     assert.deepEqual(readdirSync(baseline).sort(), files);
@@ -379,7 +384,7 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     mkdirSync(join(elsewhere, SRC, "data"), { recursive: true });
     writeFileSync(join(elsewhere, SRC, "data", "kept"), "x\n");
     assert.match(store(base, area, elsewhere).stderr, /is not this tool's/);
-    const gone = tree("gone", "5", "oracles\n", "gone\n");
+    const gone = tree("gone", "5", "", "gone\n");
     assert.equal(store(gone, area, elsewhere).status, 1);
     rmSync(gone, { recursive: true });
     spawnSync(process.execPath, [baselines, "prune", elsewhere], { encoding: "utf8" });

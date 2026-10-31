@@ -2,7 +2,7 @@
 // node tests/families/baselines.mjs prune <folder>
 // The corpus runner's stored baselines (#1541): every read and write of <folder>/<src tree>/ is here. A baseline holds
 // the runs of the trees of one `src/` tree (`git rev-parse <commit>:src`) whose runs depend on the same inputs beside it:
-// the oracle library (`tests/helpers/type-core-oracles.ts` and the helpers it imports), the lockfile and Node. Its folder
+// the oracle library as built (`dist/tests/helpers/type-core-oracles.js` and the helpers it imports), the lockfile and Node. Its folder
 // is this tool's only when this tool made it with its MANIFEST already inside (written whole, then the folder renamed
 // into place); a folder that holds anything else is never written into or removed. The MANIFEST names the src tree and
 // those inputs, which every writer must share, then, appended and never rewritten, each commit stored there and each
@@ -82,20 +82,19 @@ const blobId = (file) =>
   existsSync(file) ? gitId("blob", readFileSync(file)).toString("hex") : "none";
 
 /**
- * The oracle library's id: each helper it loads (`type-core-oracles.ts` and, through `./*.js` imports, the helpers of
- * its folder those name) by its blob id; `none` where the tree has no library source.
+ * The oracle library's id: each file of it the runs load (`type-core-oracles.js` and, through `./*.js` imports, the
+ * files of its folder those name) by its blob id; `none` where the tree has none.
  */
 function oraclesId(helpers) {
   const seen = new Map();
-  const pending = ["type-core-oracles.ts"];
+  const pending = ["type-core-oracles.js"];
   while (pending.length > 0) {
     const name = pending.pop();
     const file = path.join(helpers, name);
     if (seen.has(name) || !existsSync(file)) continue;
-    const text = readFileSync(file, "utf8");
     seen.set(name, blobId(file));
-    for (const [, imported] of text.matchAll(/from\s+"\.\/([^"/]+)\.js"/g))
-      pending.push(`${imported}.ts`);
+    for (const [, imported] of readFileSync(file, "utf8").matchAll(/from\s+"\.\/([^"/]+\.js)"/g))
+      pending.push(imported);
   }
   if (seen.size === 0) return "none";
   return hash(
@@ -110,7 +109,7 @@ function oraclesId(helpers) {
 export function identityOf(tree) {
   return {
     src: treeId(path.join(tree, "src"))?.toString("hex") ?? null,
-    oracles: oraclesId(path.join(tree, "tests", "helpers")),
+    oracles: oraclesId(path.join(tree, "dist", "tests", "helpers")),
     lock: blobId(path.join(tree, "package-lock.json")),
     node: process.version,
   };
