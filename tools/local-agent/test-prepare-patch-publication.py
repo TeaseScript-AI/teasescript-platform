@@ -17,6 +17,7 @@ import unittest
 
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import Callable
 
 from compact_unittest import run_compact_unittest
 
@@ -309,23 +310,36 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertLess(doubled_calls, 2.5 * calls)
 
     def test_token_search_ends_before_a_multi_byte_character(self) -> None:
-        # A fit just before a multi-byte character once made every later probe snap back to it.
-        calls = 0
+        # A fit just before a multi-byte character once made every later probe snap back to
+        # it. Only that stalled search may change: one that ended keeps its result.
+        def guarded(count_bytes: Callable[[bytes], int]) -> Callable[[bytes], int]:
+            calls = 0
 
-        def count_tokens(value: bytes) -> int:
-            nonlocal calls
-            calls += 1
-            if calls > 100:
-                raise AssertionError("the token search did not end")
-            return len(value)
+            def count_tokens(value: bytes) -> int:
+                nonlocal calls
+                calls += 1
+                if calls > 100:
+                    raise AssertionError("the token search did not end")
+                return count_bytes(value)
 
-        patch = "\u20ac\u20ac\u20ac".encode()
+            return count_tokens
+
+        euro = "\u20ac".encode()
         parts, counts = SUPPORT.split_utf8_patch(
-            patch, maximum_bytes=100, target_tokens=4, count_tokens=count_tokens
+            euro * 3, maximum_bytes=100, target_tokens=4, count_tokens=guarded(len)
         )
-
-        self.assertEqual(parts, ["\u20ac".encode()] * 3)
+        self.assertEqual(parts, [euro] * 3)
         self.assertEqual(counts, [3, 3, 3])
+
+        # Token counts that fall as a part grows: only 1, 5 and 7 bytes cost one token.
+        patch = "a\U0001f600bcd".encode()
+        parts, _ = SUPPORT.split_utf8_patch(
+            patch,
+            maximum_bytes=100,
+            target_tokens=1,
+            count_tokens=guarded(lambda value: 1 if len(value) in (1, 5, 7) else 2),
+        )
+        self.assertEqual(parts, [patch[:7], patch[7:]])
 
     def test_transfer_branch_matches_workflow_contract(self) -> None:
         repository = self.root / "branch-repository"

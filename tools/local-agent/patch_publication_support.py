@@ -259,7 +259,7 @@ def largest_token_bounded_end(
         count = count_tokens(patch[start:middle])
         if count <= target_tokens:
             best = middle
-            low = (low + high) // 2 + 1
+            low = max(low + 1, middle + 1)
         else:
             high = middle - 1
     if best == start:
