@@ -512,6 +512,266 @@ test("a get's and a conversion's selected default is checked against the result'
   }
 });
 
+test("a default named by its key path is checked where it is selected, also with no store around it, in three layers, in both orders (C10, #1538)", () => {
+  // C10 names a default as every obligation names its value (§10.5 r4.10): an element read `xs.element`, a written dict's
+  // entry `d.entry`, a `get`'s result by its receiver's element, never by its text; a nested default owes its own check,
+  // and a default no literal holds that stands in for a collection is checked against that value's whole contract (ADR
+  // 0021 7.2), whether the call's value is stored, stored into a written place (whose own check stays), or read at once
+  const dict = (a: SerializableRuntimeValue): SerializableRuntimeValue => ({
+    kind: "dict",
+    entries: [{ key: "a", value: a }],
+  });
+  const list = (item: SerializableRuntimeValue): SerializableRuntimeValue => ({
+    kind: "list",
+    items: [item],
+  });
+  // whole numbers by the domain's provenance as the core answers it at a place (Codex r3, r4 on #1539): a written list,
+  // its copy, a copy of a copy, a written element below an inferred carrier and a `get`'s value keep their written type;
+  // a list no written type reaches, a literal's or an unwritten place's, is checked in C10's family, numbers too
+  const wholeNumbers = (
+    [
+      ["", "[[1]].get(8, default: xs[0])", "list<integer|number>", 2.5, "bad"],
+      [
+        "let ints: integer[] = [1]\n",
+        "[ints].get(8, default: xs[0])",
+        "list<integer|number>",
+        2.5,
+        "bad",
+      ],
+      ["let rows = [[1]]\n", "rows.get(8, default: xs[0])", "list<integer|number>", 2.5, "bad"],
+      [
+        "let ints: integer[][] = [[1]]\nlet copy = ints\n",
+        "copy.get(8, default: xs[0])",
+        "list<integer>",
+        2,
+        2.5,
+      ],
+      [
+        "let ints: integer[][] = [[1]]\nlet a = ints\nlet copy = a\n",
+        "copy.get(8, default: xs[0])",
+        "list<integer>",
+        2,
+        2.5,
+      ],
+      [
+        "let ints: integer[] = [1]\nlet rows = [ints]\n",
+        "rows.get(8, default: xs[0])",
+        "list<integer>",
+        2,
+        2.5,
+      ],
+      [
+        "let ints: integer[][] = [[1]]\n",
+        "ints.get(8, default: null) otherwise xs[0]",
+        "list<integer>",
+        2,
+        2.5,
+      ],
+      // through composition (Codex r5 on #1539): parentheses, and `otherwise` chains whose other operands bring no
+      // collection, a written one, or an unwritten one
+      ...(
+        [
+          ["(ints.get(8, default: null))", true],
+          ["((ints.get(8, default: null)))", true],
+          ["(ints.get(8, default: null) otherwise null)", true],
+          ["(ints.get(8, default: null) otherwise copy.get(8, default: null))", true],
+          ["(ints.get(8, default: null) otherwise rows.get(8, default: null))", true],
+          ["((ints.get(8, default: null) otherwise null) otherwise null)", true],
+          [
+            "((ints.get(8, default: null) otherwise null) otherwise copy.get(8, default: null))",
+            true,
+          ],
+          [
+            "((ints.get(8, default: null) otherwise null) otherwise rows.get(8, default: null))",
+            true,
+          ],
+        ] as const
+      ).map(
+        ([left, written]) =>
+          [
+            "let ints: integer[][] = [[1]]\nlet copy = ints\nlet rows = [[1]]\n",
+            `${left} otherwise xs[0]`,
+            written ? "list<integer>" : "list<integer|number>",
+            written ? 2 : 2.5,
+            written ? 2.5 : "bad",
+          ] as const,
+      ),
+      // (operands of written types that differ, a chain as a `get`'s receiver: checked as the core admits the join where
+      // it lands, `number` here, as the receiving check is, Codex r6)
+      [
+        "let ints: integer[][][] = [[[1]]]\nlet nums: number[][][] = [[[1]]]\n",
+        "((nums.get(0, default: [[0]])) otherwise (ints.get(0, default: [[0]]))).get(8, default: xs[0])",
+        "list<number>",
+        2.5,
+        "bad",
+      ],
+    ] as const
+  ).map(([setup, call, type, fits, bad]) => ({ setup, call, type, fits, bad }));
+  const rows: {
+    readonly source: string;
+    /** The default whose check fails, the name C10 gives it and the kinds it publishes there. */
+    readonly fallback: string;
+    readonly target: string;
+    readonly against: string;
+    /** The call that selects the outer default, and the check planned there. */
+    readonly call: string;
+    readonly type: string;
+    readonly fits: SerializableRuntimeValue;
+    readonly said: readonly string[];
+    readonly bad: SerializableRuntimeValue;
+  }[] = [
+    {
+      source:
+        'let xs: list = [hostValue, 4]\nlet fixed: number[] = [1.5]\nsay "BEFORE"\nsay fixed.get(9, default: xs[0])\nsay "AFTER"\nexit\n',
+      fallback: "xs[0]",
+      target: "xs.element",
+      against: "integer, number",
+      call: "fixed.get(9, default: xs[0])",
+      type: "integer|number",
+      fits: 2.5,
+      said: ["BEFORE", "2.5", "AFTER"],
+      bad: "text",
+    },
+    {
+      source:
+        'let xs = hostValue\nlet counts: integer[] = [1]\nsay "BEFORE"\nrepeat counts.get(9, default: xs[0]) {\n  say "ok"\n}\nsay "AFTER"\nexit\n',
+      fallback: "xs[0]",
+      target: "xs.element",
+      against: "integer, number",
+      call: "counts.get(9, default: xs[0])",
+      type: "integer|number",
+      fits: list(2),
+      said: ["BEFORE", "ok", "ok", "AFTER"],
+      bad: list("text"),
+    },
+    {
+      source:
+        'let fixed: number[] = [1.5]\nlet d: dict = hostValue\nsay "BEFORE"\nsay fixed.get(9, default: d["a"])\nsay "AFTER"\nexit\n',
+      fallback: 'd["a"]',
+      target: "d.entry",
+      against: "integer, number",
+      call: 'fixed.get(9, default: d["a"])',
+      type: "integer|number",
+      fits: dict(2),
+      said: ["BEFORE", "2", "AFTER"],
+      bad: dict("text"),
+    },
+    {
+      source:
+        'let fixed: number[] = [1.5]\nlet xs: list = [hostValue]\nsay "BEFORE"\nsay fixed.get(9, default: xs.get(0, default: null))\nsay "AFTER"\nexit\n',
+      fallback: "xs.get(0, default: null)",
+      target: "xs.element",
+      against: "integer, number",
+      call: "fixed.get(9, default: xs.get(0, default: null))",
+      type: "integer|number",
+      fits: 2,
+      said: ["BEFORE", "2", "AFTER"],
+      bad: "text",
+    },
+    {
+      source:
+        'let xs = hostValue\nlet fixed: number[] = [1.5]\nsay "BEFORE"\nsay fixed.get(9, default: fixed.get(8, default: xs[0]))\nsay "AFTER"\nexit\n',
+      fallback: "xs[0]",
+      target: "xs.element",
+      against: "integer, number",
+      call: "fixed.get(9, default: fixed.get(8, default: xs[0]))",
+      type: "integer|number",
+      fits: list(2),
+      said: ["BEFORE", "2", "AFTER"],
+      bad: list("text"),
+    },
+    // a collection-valued default inside a literal one (named by the literal's text), and one whose receiver no place
+    // holds (the core's answer for it)
+    {
+      source:
+        'let xs: list = [hostValue]\nlet deep: number[][][] = [[[1.25]]]\nsay "BEFORE"\nlet r = deep.get(8, default: [xs[0]])\nsay r[0][0]\nsay "AFTER"\nexit\n',
+      fallback: "[xs[0]]",
+      target: "[xs[0]].element",
+      against: "list",
+      call: "deep.get(8, default: [xs[0]])",
+      type: "list<list<number>|null>",
+      fits: list(2.5),
+      said: ["BEFORE", "2.5", "AFTER"],
+      bad: list("bad"),
+    },
+    {
+      source:
+        'let xs: list = [hostValue]\nsay "BEFORE"\nlet r = [[1.25]].get(8, default: xs[0])\nsay r[0]\nsay "AFTER"\nexit\n',
+      fallback: "xs[0]",
+      target: "xs.element",
+      against: "list",
+      call: "[[1.25]].get(8, default: xs[0])",
+      type: "list<number>",
+      fits: list(2.5),
+      said: ["BEFORE", "2.5", "AFTER"],
+      bad: list("bad"),
+    },
+    ...wholeNumbers.map(({ setup, call, type, fits, bad }) => ({
+      source: `let xs: list = [hostValue]\n${setup}say "BEFORE"\nlet r = ${call}\nsay r[0]\nsay "AFTER"\nexit\n`,
+      fallback: "xs[0]",
+      target: "xs.element",
+      against: "list",
+      call,
+      type,
+      fits: list(fits),
+      said: ["BEFORE", String(fits), "AFTER"],
+      bad: list(bad),
+    })),
+    // a collection-valued default, stored, stored into a written place, and read at once (Astra r1's B1 on #1539)
+    ...(["list", "dict"] as const).flatMap((form) =>
+      (
+        [
+          ["let r = ", "\nsay r[0]"],
+          ["let r: number[] = ", "\nsay r[0]"],
+          ["say ", "[0]"],
+        ] as const
+      ).map(([before, after]) => {
+        const fallback = form === "list" ? "xs[0]" : 'd["a"]';
+        const call = `fixed.get(8, default: ${fallback})`;
+        return {
+          source: `${form === "list" ? "let xs: list = [hostValue]" : "let d: dict = hostValue"}\nlet fixed: number[][] = [[1.25]]\nsay "BEFORE"\n${before}${call}${after}\nsay "AFTER"\nexit\n`,
+          fallback,
+          target: form === "list" ? "xs.element" : "d.entry",
+          against: "list",
+          call,
+          type: "list<number>",
+          fits: form === "list" ? list(2.5) : dict(list(2.5)),
+          said: ["BEFORE", "2.5", "AFTER"],
+          bad: form === "list" ? list("bad") : dict(list("bad")),
+        };
+      }),
+    ),
+  ];
+  for (const { source, fallback, target, against, call, type, fits, said, bad } of rows) {
+    const site = at(source, fallback);
+    const known = decision(source);
+    assert.ok(known.diagnostics.includes(`warning-runtime-check written-target @${site}`), source);
+    assert.ok(known.checks.includes(`copy-type ${target} [${against}] @${site}`), source);
+    const plan = candidatePlan(source);
+    assert.ok(
+      contentOf(plan).includes(
+        `fallbackCheck ${call.endsWith(" otherwise xs[0]") ? "binary" : "call"}@${at(source, call)} ${type}`,
+      ),
+      `${source}: ${JSON.stringify(contentOf(plan))}`,
+    );
+    assert.deepEqual(ran(runWith(plan, fits)), halted(said), source);
+    assert.deepEqual(ran(runWith(plan, bad)), failed(`TSR058@${site}`, ["BEFORE"]), source);
+  }
+  // the same default written out runs exactly where the host value the check takes does: C10's own where no written type
+  // reaches the list, the receiving place's check where one does
+  for (const { setup, call, fits } of wholeNumbers) {
+    const out = call.replace("xs[0]", "[2.5]");
+    const written = `${setup}say "BEFORE"\nlet r = ${out}\nsay r[0]\nsay "AFTER"\nexit\n`;
+    assert.deepEqual(
+      ran(runWith(candidatePlan(written), null)),
+      fits === 2.5
+        ? halted(["BEFORE", "2.5", "AFTER"])
+        : failed(`TSR058@${at(written, out)}`, ["BEFORE"]),
+      written,
+    );
+  }
+});
+
 test("fromJson reads its JSON as its expected type on both lowerings, a wrong kind giving the default and an object repaired per field (F18, ADR 0021 rule 2.6)", () => {
   for (const files of ["", ", files: false"]) {
     const scalar = `let n = fromJson(hostValue, default: 0${files})\nsay n\nexit\n`;

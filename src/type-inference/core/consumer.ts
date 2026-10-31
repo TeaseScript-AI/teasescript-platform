@@ -50,7 +50,13 @@ import type {
   TypeCheckResult,
 } from "../backend.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
-import { closedType, coreResult, type Answers } from "./answers.js";
+import {
+  closedType,
+  coreResult,
+  type AdmittedType,
+  type Answers,
+  type ValueAnswer,
+} from "./answers.js";
 import { BudgetExhausted, joinSteps } from "./budget.js";
 import { typedDefault as defaultKinds } from "./contract.js";
 import { leftOutCheck, leftOutWarning } from "./consumers.js";
@@ -853,10 +859,18 @@ function runtimeChecks(
     const expression = index.expressionAt(diagnostic.site);
     switch (diagnostic.kind) {
       case "written-target": {
-        // C10's obligation names the fallback's own text as its target, with the element steps of a nested literal's
-        // depth, C1's a place (S6's departure 6)
-        const steps = fallbackSteps(diagnostic.obligation.target, textOf(expression));
-        const owner = steps === null ? undefined : index.fallbackOf(expression);
+        // C10's obligation names the fallback as every obligation names its value (§10.5 r4.10: `xs.element` for
+        // `xs[0]`, `d.entry` for a dict's, its text where no place holds it), with the element steps of a nested
+        // literal's depth; C1's a place (S6's departure 6)
+        const held = index.fallbackOf(expression);
+        const steps =
+          held === undefined
+            ? null
+            : fallbackSteps(
+                diagnostic.obligation.target,
+                answers.targetName(nodeOf(answers, index, expression)),
+              );
+        const owner = steps === null ? undefined : held;
         if (owner === undefined)
           owed.push({
             obligation: diagnostic.obligation,
@@ -887,7 +901,12 @@ function runtimeChecks(
     }
   }
   for (const [owner, { fallback, depths }] of fallbacks) {
-    const type = fallbackPlan(fallback, depths, (steps) => contracts.takesNull(owner, steps));
+    const type = fallbackPlan(
+      fallback,
+      depths,
+      (steps) => contracts.takesNull(owner, steps),
+      (steps) => contracts.direct(owner, steps),
+    );
     if (type !== null)
       core.fallbackChecks.set(owner, { type, place: `the value of '${textOf(owner)}'` });
   }
@@ -960,11 +979,12 @@ interface FallbackDepth {
   readonly against: readonly RequiredKind[];
 }
 
-/** The element steps of a C10 target below the fallback whose text is `text`, or `null` for another target (a C1's). */
-function fallbackSteps(target: string, text: string): string[] | null {
-  if (target === text) return [];
-  if (!target.startsWith(`${text}.`)) return null;
-  const steps = target.slice(text.length + 1).split(".");
+/** The element steps of a C10 target below the fallback named `name` (`targetName`), or `null` for another (a C1's). */
+function fallbackSteps(target: string, name: string | null): string[] | null {
+  if (name === null) return null;
+  if (target === name) return [];
+  if (!target.startsWith(`${name}.`)) return null;
+  const steps = target.slice(name.length + 1).split(".");
   return steps.every((step) => step === "element" || step === "entry") ? steps : null;
 }
 
@@ -972,12 +992,15 @@ function fallbackSteps(target: string, text: string): string[] | null {
  * The check of a selected fallback from C10's obligations at its depths (ADR 0021 7.2, nested literals by their
  * elements): at each depth the kinds required there, `null` below the fallback itself where `takesNull` allows it, the
  * collection below it as the fallback's literal is one, else a list or a set for an element and a dict for an entry;
- * `null` where no depth requires a kind.
+ * `null` where no depth requires a kind. Where C10 publishes nothing below a collection no literal holds, that collection
+ * is checked whole, as the value the fallback stands in for is at that depth (`whole`), not its first level alone (Astra
+ * r1's B1 on #1539); where that value gives no collection there the program leaves the slice.
  */
 function fallbackPlan(
   fallback: Expression,
   depths: readonly FallbackDepth[],
   takesNull: (steps: readonly string[]) => boolean,
+  whole: (steps: readonly string[]) => TypePlan | null,
 ): TypePlan | null {
   const deepest = depths.reduce((most, depth) => Math.max(most, depth.steps.length), 0);
   // the literal the fallback's value is at each depth, as far as a literal holds it
@@ -1016,6 +1039,23 @@ function fallbackPlan(
                 ];
     // below the fallback itself an element may be `null` too, unless a written place it lands in excludes it (C10)
     const steps = depths.find((entry) => entry.steps.length >= depth)?.steps.slice(0, depth) ?? [];
+    if (literal === null && collections.length === 0 && kinds.some(isCollection)) {
+      const complete = whole(steps);
+      const held =
+        complete === null ? [] : membersOf(complete).filter((member) => isCollection(member.kind));
+      if (held.length === 0)
+        throw new OutsideContract(
+          fallback,
+          "a default whose collection the value it stands in for does not type",
+        );
+      const scalars = kindsPlan(kinds.filter((kind) => !isCollection(kind)));
+      below = unionOf([
+        ...held,
+        ...(scalars === null ? [] : [scalars]),
+        ...(depth > 0 && takesNull(steps) ? [{ kind: "null" } as const] : []),
+      ]);
+      continue;
+    }
     const others = kindsPlan([
       ...(collections.length === 0
         ? kinds
@@ -1201,6 +1241,114 @@ class Contracts {
     for (const call of chain) this.#literals.set(call, found);
     return found;
   };
+
+  /**
+   * The complete contract of the value a fallback stands in for at `steps` below it (C10, ADR 0021 7.2): a `get`'s value,
+   * an `otherwise`'s left one without `null`, as `#provenanceOf` finds it; `null` for another owner.
+   */
+  public direct(
+    owner: BinaryExpression | CallExpression,
+    steps: readonly string[],
+  ): TypePlan | null {
+    const value =
+      owner.kind === "binaryExpression" ? owner.left : getReceiver(owner) === null ? null : owner;
+    if (value === null) return null;
+    // (a contract's path names a dict's value its element, as every key does)
+    const below = steps.map(() => "element");
+    const landing = this.#landing(owner);
+    const { contract, written } = this.#provenanceOf(
+      value,
+      below,
+      landing === null ? null : { id: landing.id, path: joinSteps(landing.path, below) },
+    );
+    // a written level, or one a copy inherits from a written type (A4, ADR 0021 1.3), keeps its type; any other is checked
+    // in C10's family, whole numbers with numbers (ADR 0021 1.2, 7.2): never stricter than C10 for the same default
+    // written out (Codex r3, r4 on #1539)
+    const checked = contract === null ? null : numberFamily(contract, (levels) => !written(levels));
+    return checked === null || owner.kind === "callExpression" || steps.length > 0
+      ? checked
+      : withoutNull(checked);
+  }
+
+  /**
+   * The value an expression gives at `path` below it as the core answers for it, with the provenance of each level below
+   * that: the fallback completion's one lookup. Parentheses give their content's value, as `nodeOf` reads them. A
+   * place's value has its place's contract, each level written where the core answers its domain as written or as
+   * inherited from a written type. A `get`'s value is its receiver's element. An `otherwise` chain's value joins its
+   * operands' as the core admits a join (A4): a level is written where any operand that brings a collection (a `null` or
+   * a scalar brings none) is written there; the contract is theirs where they agree, else the core's admitted contract
+   * of the place the value at `path` lands in (`landing`, the one its receiving check is against), and none where it
+   * lands in none or an operand's is open. Any other value is the core's answer for it by its own text (a literal, an
+   * operation, another call), unwritten.
+   */
+  #provenanceOf(value: Expression, path: readonly string[], landing: Landing | null): Provenance {
+    const read = unwrap(value);
+    const node = nodeOf(this.answers, this.index, read);
+    const place = this.answers.at(node)?.place ?? null;
+    if (place !== null) {
+      const at = joinSteps(place.path, path);
+      return {
+        contract: runCompileTask(this.#contractTask(place.id, at, read, [])),
+        written: (levels) =>
+          writtenDomain(this.answers.place(place.id, joinSteps(at, levels)).admitted),
+      };
+    }
+    const receiver = getReceiver(read);
+    if (receiver !== null)
+      return this.#provenanceOf(receiver, joinSteps(["element"], path), landing);
+    if (read.kind === "binaryExpression" && read.operator === "otherwise") {
+      const joined = [read.left, read.right]
+        .filter((operand) =>
+          bringsCollection(this.answers.valueAt(nodeOf(this.answers, this.index, operand), [])),
+        )
+        .map((operand) => this.#provenanceOf(operand, path, landing));
+      const contract = joined[0]?.contract ?? null;
+      if (joined.some((part) => part.contract === null))
+        return { contract: null, written: () => false };
+      if (contract !== null && joined.every((part) => samePlan(part.contract!, contract)))
+        return { contract, written: (levels) => joined.some((part) => part.written(levels)) };
+      if (contract !== null) {
+        // (operands of written types that differ: the core admits the join where it lands, by its copies, Codex r6)
+        if (landing === null)
+          throw new OutsideContract(read, "a join of different written types that no place admits");
+        return {
+          contract: runCompileTask(this.#contractTask(landing.id, landing.path, read, [])),
+          written: (levels) =>
+            writtenDomain(this.answers.place(landing.id, joinSteps(landing.path, levels)).admitted),
+        };
+      }
+    }
+    return { contract: runCompileTask(this.#answeredTask(node, path, read)), written: () => false };
+  }
+
+  /**
+   * The core's answer at `path` below a value no place holds, as a plan: its kinds, whole numbers among numbers as
+   * numbers, a collection's elements by the same rule, an object open; open (`null`) where it may hold an unknown or holds
+   * nothing.
+   */
+  *#answeredTask(
+    node: FlowNode,
+    path: readonly string[],
+    at: Expression,
+  ): CompileTask<TypePlan | null> {
+    const held = new Set<ItemTag>();
+    for (const item of this.answers.valueAt(node, path).items)
+      if (item.tag !== "empty") held.add(item.tag);
+    if (held.has("unknown") || held.size === 0) return null;
+    if (path.length + 1 >= SLICE_DEPTH)
+      throw new OutsideContract(at, "a value whose structure the slice does not follow");
+    if (held.has("number")) held.delete("integer");
+    const collection = held.has("list") || held.has("set") || held.has("dict");
+    const element = collection
+      ? yield* compileChild(this.#answeredTask(node, joinSteps(path, ["element"]), at))
+      : null;
+    const members = [...held]
+      .filter((kind): kind is ValueKind => kind !== "unknown" && kind !== "empty")
+      .map((kind) =>
+        kind === "list" || kind === "set" || kind === "dict" ? { kind, element } : kindPlan(kind),
+      );
+    return members.length === 1 ? members[0]! : { kind: "union", members };
+  }
 
   /**
    * Whether an element of a fallback at `steps` below it may be `null` (C10): unless the fallback lands directly in a
@@ -1614,6 +1762,111 @@ function levelsOf(plan: TypePlan): string[][] {
         pending.push([property.type, [...path, propertyStep(property.name)]]);
   }
   return [...levels.values()];
+}
+
+/** A value's contract at a path, and whether each level below it (by its steps) is a written domain. */
+interface Provenance {
+  readonly contract: TypePlan | null;
+  readonly written: (levels: readonly string[]) => boolean;
+}
+
+/** Whether a value the core answers may be a collection: one of its kinds is, or it may hold an unknown. */
+function bringsCollection(value: ValueAnswer): boolean {
+  return value.items.some((item) => item.tag === "unknown" || isCollection(item.tag));
+}
+
+/** Whether two plans are one type: the same members, in any order, at every level. */
+function samePlan(a: TypePlan, b: TypePlan): boolean {
+  const key = (plan: TypePlan): string =>
+    plan.kind === "union"
+      ? plan.members.map(key).sort().join("|")
+      : plan.kind === "list" || plan.kind === "set" || plan.kind === "dict"
+        ? `${plan.kind}<${plan.element === null ? "" : key(plan.element)}>`
+        : plan.kind === "object"
+          ? `{${plan.properties.map((property) => `${property.name}: ${key(property.type)}`).join(", ")}}`
+          : plan.kind;
+  return key(a) === key(b);
+}
+
+/** Whether the core answers a domain as written: its own written type, or one a copy inherits (A4, ADR 0021 1.3). */
+function writtenDomain(admitted: AdmittedType): boolean {
+  return admitted.by === "written" || (admitted.by === "decided" && admitted.inherited);
+}
+
+/**
+ * A plan with each whole number a number too (C10's family, ADR 0021 1.2) at each level `widens` says (by its steps below
+ * the plan: `element`, a property's step), the levels it does not as they are.
+ */
+function numberFamily(
+  plan: TypePlan,
+  widens: (steps: readonly string[]) => boolean,
+  steps: readonly string[] = [],
+): TypePlan {
+  switch (plan.kind) {
+    case "integer":
+      return widens(steps) ? { kind: "union", members: [plan, { kind: "number" }] } : plan;
+    case "union": {
+      const members = plan.members.flatMap((member) =>
+        membersOf(numberFamily(member, widens, steps)),
+      );
+      // (one member per kind but the collections and objects, which differ by what is below them)
+      const kept = members.filter(
+        (member, at) =>
+          isCollection(member.kind) ||
+          member.kind === "object" ||
+          members.findIndex((other) => other.kind === member.kind) === at,
+      );
+      return unionOf(kept);
+    }
+    case "list":
+    case "set":
+    case "dict":
+      return plan.element === null
+        ? plan
+        : {
+            kind: plan.kind,
+            element: numberFamily(plan.element, widens, joinSteps(steps, ["element"])),
+          };
+    case "object":
+      return {
+        ...plan,
+        properties: plan.properties.map((property) => ({
+          ...property,
+          type: numberFamily(
+            property.type,
+            widens,
+            joinSteps(steps, [propertyStep(property.name)]),
+          ),
+        })),
+      };
+    default:
+      return plan;
+  }
+}
+
+/** A `get` call's receiver, else `null`. */
+function getReceiver(expression: Expression): Expression | null {
+  return expression.kind === "callExpression" &&
+    expression.callee.kind === "propertyAccessExpression" &&
+    expression.callee.property.name === "get"
+    ? expression.callee.object
+    : null;
+}
+
+/** A plan's members: a union's, else the plan itself. */
+function membersOf(plan: TypePlan): readonly TypePlan[] {
+  return plan.kind === "union" ? plan.members : [plan];
+}
+
+/** A plan without its `null`, `null` where nothing else is left. */
+function withoutNull(plan: TypePlan): TypePlan | null {
+  const members = membersOf(plan).filter((member) => member.kind !== "null");
+  return members.length === 0 ? null : unionOf(members);
+}
+
+/** Whether a kind is a collection's. */
+function isCollection(kind: string): boolean {
+  return kind === "list" || kind === "set" || kind === "dict";
 }
 
 /** One plan of several: the plan itself, or the union of their members. */
