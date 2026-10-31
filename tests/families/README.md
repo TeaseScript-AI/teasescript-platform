@@ -51,12 +51,15 @@ shard of an area, each source's results as one line, in the baseline of its `src
 `<folder>/<src tree>/<area>/<i>of<N>.runs.jsonl`, where `<src tree>` is `git rev-parse <commit>:src`. Every commit with
 that tree and the same oracle library, lockfile and Node shares the baseline; one that differs in any of them stores
 none there (base and head run instead). `baselines.mjs` reads and writes the baseline: a folder it made with its
-`MANIFEST` first (what its runs depend on, the commits stored there, each area's `PLAN`), holding only paths it writes;
-a folder holding another path is neither written into nor removed, and the refusal names the path. Each area's `PLAN`
+`MANIFEST` first (what its runs depend on, the commits stored there, each area's `PLAN`), holding only paths it writes,
+each named exactly as it names them; a folder holding another path is neither written into nor removed, and the refusal
+names the path. Each area's `PLAN`
 binds its shards' sources in their order and its checks, and a writer that would run another is refused (exit 2). A
 shard counts only once its total line verifies its contents and its sources. One running writer at a time stores it, and
 any writer replaces one that does not verify. Every write into the baseline goes through one gate in `baselines.mjs`,
-which holds the baseline's lock; `prune` retires a baseline once none of its trees remains.
+which holds the baseline's lock; `node tests/families/writes.mjs` lists the tools' writes, computed from their modules,
+and the runner's test fails for one neither in the gate nor proven outside every baseline. `--out` is refused in a
+baseline or a folder of baselines. `prune` retires a baseline once none of its trees remains.
 `bash tools/corpus/baseline.sh status <commit>` says in one line what each area of the commit's tree holds, and exits 0
 only when each one is complete. Before a base run, ask it: compare the head with a complete area through `--baseline`,
 and store an area that is not from the base tree's own runner and areas

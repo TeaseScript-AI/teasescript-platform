@@ -37,6 +37,8 @@ import {
   DEFAULTS,
   endShard,
   identityOf,
+  isOwned,
+  outside,
   owned,
   planned,
   planOf,
@@ -196,15 +198,16 @@ if (process.argv[2] === "--child") {
     return !arg.startsWith("--") && !args[index - 1]?.startsWith("--");
   });
   const option = (name) => options.get(name);
-  // the base against the head, the head against a stored baseline (`--baseline`), or one tree's runs stored (`--store`)
-  const baseline = option("baseline");
-  const store = option("store");
-  const single = baseline !== undefined || store !== undefined;
   /** A usage the runner refuses (exit 2), before any source runs. */
   const refused = (problem) => {
     console.error(problem);
     process.exit(2);
   };
+  // the base against the head, the head against a stored baseline (`--baseline`), or one tree's runs stored (`--store`,
+  // into a folder of baselines that lies in no baseline)
+  const baseline = option("baseline");
+  const store = option("store") === undefined ? undefined : outside(option("store"), [], refused);
+  const single = baseline !== undefined || store !== undefined;
   if (area === undefined || roots.length !== (single ? 1 : 2) || (baseline && store))
     refused(
       "usage: node tests/families/run.mjs <area> <base> <head> [options]\n" +
@@ -239,7 +242,21 @@ if (process.argv[2] === "--child") {
   const seconds = Number(option("timeout") ?? DEFAULTS.timeout);
   const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? DEFAULTS.memory);
-  const out = option("out");
+  // the runner's own file lies outside every baseline: not in the folder it stores into or reads, nor in the folder of
+  // baselines of the baseline it reads, nor in any baseline (#1542 r4)
+  const reads =
+    baseline === undefined
+      ? []
+      : [
+          baseline,
+          ...(isOwned(path.dirname(path.resolve(baseline)))
+            ? [path.resolve(baseline, "../..")]
+            : []),
+        ];
+  const out =
+    option("out") === undefined
+      ? undefined
+      : outside(option("out"), [...(store === undefined ? [] : [store]), ...reads], refused);
   if (out !== undefined) writeFileSync(out, "");
   const record = (line) => {
     if (out !== undefined) appendFileSync(out, `${JSON.stringify(line)}\n`);
