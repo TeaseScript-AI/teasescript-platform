@@ -597,7 +597,14 @@ const WRITES = [
     "gate",
   ],
   ["baselines.mjs", "queue", 'rmSync(path.join(dir, "SUPERSEDED"), { force: true })', "gate"],
-  ["baselines.mjs", "recover", "rmSync(dir, { recursive: true, force: true })", "recovery"],
+  [
+    "baselines.mjs",
+    "recover",
+    "rmSync(path.join(dir, entry), { recursive: true, force: true })",
+    "recovery",
+  ],
+  ["baselines.mjs", "recover", 'rmSync(path.join(dir, "MANIFEST"), { force: true })', "recovery"],
+  ["baselines.mjs", "recover", "rmdirSync(dir)", "recovery"],
   ["baselines.mjs", "prune", "renameSync(dir, retired)", "gate"],
   ["run.mjs", "(top level)", 'writeFileSync(out, "")', "outside"],
   ["run.mjs", "(top level)", "appendFileSync(out, `${JSON.stringify(line)}\\n`)", "outside"],
@@ -706,7 +713,7 @@ import { syncBuiltinESMExports } from "node:module";
 const at = new RegExp(process.env.CRASH_AT);
 const tell = fs.writeFileSync;
 let stopped = false;
-for (const name of ["writeFileSync", "appendFileSync", "mkdirSync", "renameSync", "linkSync", "rmSync", "copyFileSync"]) {
+for (const name of ["writeFileSync", "appendFileSync", "mkdirSync", "renameSync", "linkSync", "rmSync", "rmdirSync", "copyFileSync"]) {
   const original = fs[name];
   fs[name] = function (...args) {
     const result = original.apply(this, args);

@@ -51,6 +51,7 @@ import {
   readlinkSync,
   readSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -599,8 +600,8 @@ async function queue(dir, script) {
 
 /**
  * A folder this tool made outside a baseline (`.pruning-…` or `.creating-…`, named by its writer) removed once that
- * writer ended (`writer`, or this process where it is null), where it holds this tool's MANIFEST and no foreign path;
- * else kept, and named (as is one so named but not by a writer of this tool, `writer` undefined).
+ * writer ended (`writer`, or this process where it is null), where it is empty or holds this tool's MANIFEST and no
+ * foreign path; else kept, and named (as is one so named but not by a writer of this tool, `writer` undefined).
  */
 function recover(dir, writer) {
   if (writer === undefined) {
@@ -608,10 +609,20 @@ function recover(dir, writer) {
     return;
   }
   if (writer !== null && running(writer)) return;
-  const text = isOwned(dir) ? readFileSync(path.join(dir, "MANIFEST"), "utf8") : null;
-  const foreign = text === null ? ["(no MANIFEST of this tool)"] : foreignIn(dir, text);
-  if (foreign.length > 0) console.log(JSON.stringify({ kept: dir, foreign }));
-  else rmSync(dir, { recursive: true, force: true });
+  const entries = readdirSync(dir);
+  if (entries.length > 0) {
+    const text = isOwned(dir) ? readFileSync(path.join(dir, "MANIFEST"), "utf8") : null;
+    const foreign = text === null ? ["(no MANIFEST of this tool)"] : foreignIn(dir, text);
+    if (foreign.length > 0) {
+      console.log(JSON.stringify({ kept: dir, foreign }));
+      return;
+    }
+    // the MANIFEST last, so that a removal cut short leaves a folder still this tool's, for the next call to finish
+    for (const entry of entries.filter((name) => name !== "MANIFEST"))
+      rmSync(path.join(dir, entry), { recursive: true, force: true });
+    rmSync(path.join(dir, "MANIFEST"), { force: true });
+  }
+  rmdirSync(dir);
 }
 
 /**
