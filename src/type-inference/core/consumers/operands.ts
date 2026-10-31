@@ -12,7 +12,7 @@ import {
 } from "../result.js";
 import { error } from "./diagnostics.js";
 import { TEXT } from "./kinds.js";
-import { keyLabel, kindsOf, ownSpan, quietKinds } from "./names.js";
+import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel } from "./names.js";
 import { obligation, warnGroups, warning } from "./warnings.js";
 
 // C2, C3, C11, C12, C13: an operand's items against the kinds that fit, a whole number, an index by its receiver.
@@ -70,16 +70,17 @@ export function consume(
     );
     return;
   }
-  const label = keyLabel(walk, value);
-  const on = (obliged: ObligationKind): string =>
+  const label = shownLabel(walk, keyLabel(walk, value));
+  const on = (obliged: ObligationKind, text: string): string =>
     obliged === "null-check"
-      ? `check that ${label} is not null at ${what}`
+      ? `check that ${text} is not null at ${what}`
       : obliged === "integer-check"
-        ? `check that ${label} is a whole number at ${what}`
-        : `check the operand ${label} at ${what} when it runs`;
+        ? `check that ${text} is a whole number at ${what}`
+        : `check the operand ${text} at ${what} when it runs`;
   const required = against.map((tag) => requiredKind(tag));
-  const owe = (item: Item, obliged: ObligationKind): boolean =>
-    warning(
+  const owe = (item: Item, obliged: ObligationKind): boolean => {
+    const text = label();
+    return warning(
       walk,
       kind,
       at,
@@ -87,13 +88,14 @@ export function consume(
       obligation(
         obliged,
         at,
-        obliged === "operand" ? program.textAt(at) : label,
+        obliged === "operand" ? program.textAt(at) : text,
         required,
-        on(obliged),
+        on(obliged, text),
       ),
       rule,
       items.filter((item) => need.has(item.tag)),
     );
+  };
   const nullItem = bad.find((item) => item.tag === "null");
   if (nullItem !== undefined) owe(nullItem, "null-check");
   // (C13's arguments, keys and iterables: beside a known misfit, an unknown owes no second warning at the site, its
@@ -109,7 +111,10 @@ export function consume(
   // one warning, every offending item's)
   walk.boundariesAt(
     items,
-    obligation(obligationKind, at, label, required, on(obligationKind)),
+    () => {
+      const text = label();
+      return obligation(obligationKind, at, text, required, on(obligationKind, text));
+    },
     warnGroups(
       walk,
       owedBy === null ? warned : offending,
@@ -149,7 +154,7 @@ export function integerOnly(
   if (offending.length === 0 && owedBy === null) return;
   // the count or index expression's node, inside its parentheses (§3.4 r4.10)
   const at = ownSpan(walk, value, site);
-  const target = keyLabel(walk, value);
+  const target = shownLabel(walk, keyLabel(walk, value));
   if (
     soft === false &&
     offending.length === items.length &&
@@ -171,7 +176,13 @@ export function integerOnly(
       "integer-use",
       at,
       item,
-      obligation(obliged, at, target, ["integer"], `check that the ${what} is ${on} when it runs`),
+      obligation(
+        obliged,
+        at,
+        target(),
+        ["integer"],
+        `check that the ${what} is ${on} when it runs`,
+      ),
       rule,
       items.filter((item) => item.tag === "integer"),
     );
@@ -181,13 +192,14 @@ export function integerOnly(
   // owner's one warning, every offending item's)
   walk.boundariesAt(
     items,
-    obligation(
-      "integer-check",
-      at,
-      target,
-      ["integer"],
-      `check that the ${what} is a whole number when it runs`,
-    ),
+    () =>
+      obligation(
+        "integer-check",
+        at,
+        target(),
+        ["integer"],
+        `check that the ${what} is a whole number when it runs`,
+      ),
     warnGroups(
       walk,
       offending.filter((found) => found.tag !== "null"),

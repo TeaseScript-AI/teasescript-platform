@@ -19,7 +19,7 @@ import { error } from "./diagnostics.js";
 import { jsonArgument, methodArguments, methodElements } from "./signatures.js";
 import { fallbackFits } from "./fallbacks.js";
 import { BOOLEAN, hasMethod, operandDomain, SHOWN, TEXT } from "./kinds.js";
-import { keyLabel, kindsOf, ownSpan, quietKinds } from "./names.js";
+import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel } from "./names.js";
 import { consume, indexUse, integerOnly } from "./operands.js";
 import { projection, selection } from "./projections.js";
 import { methodReceiver } from "./receivers.js";
@@ -493,7 +493,7 @@ function operatorUse(
   operands.forEach((items, index) => {
     const nullItem = items.find((item) => item.tag === "null");
     if (nullItem === undefined) return;
-    const label = keyLabel(walk, c.arguments[index]!);
+    const label = shownLabel(walk, keyLabel(walk, c.arguments[index]!))();
     warning(
       walk,
       "operator",

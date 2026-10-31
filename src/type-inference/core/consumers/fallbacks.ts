@@ -1,8 +1,9 @@
 import type { PlaceId, SourceSite } from "../../graph.js";
 import { concrete, fits, isExternal, isOpaque, requiredKind } from "../admission.js";
-import { joinParts, joinSteps, keepText, keptText } from "../budget.js";
+import { joinParts, joinSteps, keepText } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { typeTags } from "../contract.js";
+import { labelBelow } from "../contract/labels.js";
 import { keyPlace } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
@@ -12,7 +13,7 @@ import { elementStep, offendingKinds, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
 import { heldHostData } from "./finishing.js";
 import { unsettledItem } from "./kinds.js";
-import { keyLabel, ownSpan, quietKinds } from "./names.js";
+import { keyLabel, ownSpan, quietKinds, shownLabel } from "./names.js";
 import { obligation, storeRoot, storeWarning, warnGroups } from "./warnings.js";
 import { type CanonicalKey } from "../contract/key-ids.js";
 
@@ -38,29 +39,22 @@ export function fallbackFits(
   // nested list, set and dict literals by their elements, one depth after another; the target: the fallback's own
   // key path at the depth, a dict's value its `entry` (§10.5)
   const { contract, program } = walk.pass;
-  // the label by its steps: the fallback's own, then one per depth below it
-  const label = [keyLabel(walk, value)];
+  // the label's recipe: the fallback's own, then one step below it per depth, its text made where a check or a
+  // warning there shows it (a label stepped at every depth made k nested `otherwise` k² code units, uncharged, #1433)
+  let label = keyLabel(walk, value);
   for (
     let rest: readonly string[] = [];
-    fallbackFitsAt(walk, c, node, directAt, value, rest, written, labelAt(walk, label));
+    fallbackFitsAt(walk, c, node, directAt, value, rest, written, shownLabel(walk, label));
     rest = joinSteps(rest, ["element"])
   ) {
     program.work.charge("checks");
-    label.push(
+    label = labelBelow(
+      label,
       elementStep(
         withoutEmpty(walk.run(contract.contractOfValueAt(value, rest))).map((item) => item.tag),
       ),
     );
   }
-}
-
-/**
- * The fallback's label at the depth its steps reach, made and charged once where a check or warning there first names
- * it: a label stepped at every depth made the labels of k nested `otherwise` k² code units, uncharged (#1433).
- */
-function labelAt(walk: Consumers, label: readonly string[]): () => string {
-  let made: string | undefined;
-  return () => (made ??= label.length === 1 ? label[0]! : keptText(walk.pass.program.work, label));
 }
 
 /** C10 at one path of the fallback, its label there made by `label`: whether its elements are checked too. */
@@ -110,16 +104,18 @@ function fallbackFitsAt(
       ) &&
       (into === null || !typeTags(into).includes("unknown"))
     )
-      walk.admission.boundariesAt(
-        [...own, ...heldHostData(walk, value)].filter((item) => isOpaque(item) || isExternal(item)),
-        obligation(
-          "copy-type",
-          site,
-          label(),
-          ["unknown"],
-          `check ${c.kind === "fallback" ? "the fallback" : "the default"} ${label()}`,
-        ),
-      );
+      for (const item of [...own, ...heldHostData(walk, value)])
+        if (isOpaque(item) || isExternal(item))
+          walk.admission.boundaryFor(item, () => {
+            const text = label();
+            return obligation(
+              "copy-type",
+              site,
+              text,
+              ["unknown"],
+              `check ${c.kind === "fallback" ? "the fallback" : "the default"} ${text}`,
+            );
+          });
     return false;
   }
   const directFamilies = new Set(directTags.map(family));
@@ -171,7 +167,16 @@ function fallbackFitsAt(
     // (a domain's items, what their group's warning owns, #1448)
     walk.boundariesAt(
       fallback,
-      obligation("copy-type", site, label(), against.map(requiredKind), `check ${what} ${label()}`),
+      () => {
+        const text = label();
+        return obligation(
+          "copy-type",
+          site,
+          text,
+          against.map(requiredKind),
+          `check ${what} ${text}`,
+        );
+      },
       leftOut,
     );
   }

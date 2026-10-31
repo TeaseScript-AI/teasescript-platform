@@ -1,21 +1,29 @@
 import type { PlaceId, SourceSite } from "../../graph.js";
 import { concrete, isExternal, isOpaque } from "../admission.js";
-import { joinParts, joinSteps, keepText, pathText } from "../budget.js";
+import { joinParts, joinSteps, keepText } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { MEMBER_KINDS, REFERENCE } from "../contract.js";
+import { labelBelow, labelRoot } from "../contract/labels.js";
 import { keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "../items.js";
 import { described } from "../messages.js";
 import { propertyName } from "../program.js";
-import { offendingKinds, type DiagnosticRule } from "../result.js";
+import { offendingKinds, type ContextDetail, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
 import { defaultNull } from "./fallbacks.js";
 import { finishingKeyRead } from "./finishing.js";
 import { hasMethod } from "./kinds.js";
 import type { Offending } from "./model.js";
-import { keyLabel, ownSpan, quietKinds, receiverKinds, unlistedObject } from "./names.js";
+import {
+  keyLabel,
+  ownSpan,
+  quietKinds,
+  receiverKinds,
+  shownLabel,
+  unlistedObject,
+} from "./names.js";
 import { leftOutBy, nullWarning, obligation, propertiesOf, type Owner } from "./warnings.js";
 
 // C5a–c, F19a: a method's or a member's receiver, and the receiver of every store through a member and every add.
@@ -38,19 +46,19 @@ export function methodReceiver(
     return;
   }
   const kinds = receiverKinds(walk, receiver, node);
-  const label = keyLabel(walk, receiver);
+  const label = shownLabel(walk, keyLabel(walk, receiver));
   // C9: the receiver's external data brings its boundary checks, whichever member check follows; a domain's those the
   // member check's warning owns
-  const send = walk.boundariesBefore(
-    kinds,
-    obligation(
+  const send = walk.boundariesBefore(kinds, () => {
+    const text = label();
+    return obligation(
       "null-check",
       ownSpan(walk, receiver, site),
-      label,
+      text,
       ["non-null"],
-      `check that ${label} is a value with .${name} before the call`,
-    ),
-  );
+      `check that ${text} is a value with .${name} before the call`,
+    );
+  });
   defaultNull(walk, receiver, node, site, `.${name}()`, "call");
   const leftOut = memberChecks(
     walk,
@@ -60,7 +68,7 @@ export function methodReceiver(
     (tag) => hasMethod(tag, name),
     `.${name}()`,
     "call",
-    walk.pass.program.textAt(ownSpan(walk, receiver, site)),
+    () => walk.pass.program.textAt(ownSpan(walk, receiver, site)),
     `.${name}()`,
     [],
     receiver,
@@ -81,28 +89,37 @@ export function methodReceiver(
 export function memberChecks(
   walk: Consumers,
   site: SourceSite,
-  label: string,
+  label: () => string,
   kinds: readonly Item[],
   takes: (tag: ItemTag) => boolean,
   what: string,
   use: "read" | "call" | "store",
-  receiver: string,
+  receiver: () => string,
   member: string,
   extra: readonly Offending[] = [],
   receiverPlace?: PlaceId,
   elements?: readonly ItemTag[],
 ): (item: Item) => boolean {
-  const rule: DiagnosticRule = {
-    rule: "member",
-    receiver,
-    member,
-    use,
-    ...(elements === undefined ? {} : { elements }),
-  };
-  const detail = {
-    text: receiver,
-    kinds: kinds.map((item) => item.tag),
-    member: member.replace(/^\.|\(\)$/g, ""),
+  // (the rule names the receiver's text, a label's where it is one: made where the error or a warning first names it)
+  let named:
+    { readonly rule: DiagnosticRule; readonly detail: ContextDetail["receiver"] } | undefined;
+  const ruled = (): NonNullable<typeof named> => {
+    if (named !== undefined) return named;
+    const text = receiver();
+    return (named = {
+      rule: {
+        rule: "member",
+        receiver: text,
+        member,
+        use,
+        ...(elements === undefined ? {} : { elements }),
+      },
+      detail: {
+        text,
+        kinds: kinds.map((item) => item.tag),
+        member: member.replace(/^\.|\(\)$/g, ""),
+      },
+    });
   };
   const nulls = kinds.filter((item) => item.tag === "null");
   const others = kinds.filter((item) => item.tag !== "null");
@@ -116,7 +133,7 @@ export function memberChecks(
       walk,
       "member-read",
       site,
-      rule,
+      ruled().rule,
       (definite(nulls) ? nulls : lacking).map((item) => item.tag),
     );
     return () => false;
@@ -145,17 +162,18 @@ export function memberChecks(
   const owners: Owner[] = [];
   for (const [index, entry] of [...offending, ...extra].entries()) {
     const [item, on] = entry;
+    const text = label();
     const made = nullWarning(
       walk,
       "member-read",
       site,
       item,
-      `check that ${label} ${on}`,
-      label,
-      rule,
+      `check that ${text} ${on}`,
+      text,
+      ruled().rule,
       having,
       ["non-null"],
-      detail,
+      ruled().detail,
       receiverPlace,
     );
     if (walk.finishing && (entry === unknownEntry[0] || index >= offending.length))
@@ -240,16 +258,27 @@ export function receivers(walk: Consumers): void {
     // §3.4: the whole member or element access, including a mutator's call.
     const at = d.into !== undefined ? ownSpan(walk, d.into, d.site) : d.site;
     const recvPath = keyPath(d.recv!);
-    const label =
+    const label = shownLabel(
+      walk,
       owner !== undefined
         ? keyLabel(walk, owner)
-        : program.place(d.place).label +
-          (recvPath.length > 0 ? `.${pathText(recvPath.map(propertyName))}` : "");
-    // C9: the receiver's external data brings its boundary checks, whichever member check follows
-    walk.admission.boundariesAt(
-      receiver,
-      obligation("null-check", at, label, ["non-null"], `check that ${label} accepts the store`),
+        : recvPath.reduce(
+            (above, step) => labelBelow(above, propertyName(step)),
+            labelRoot(walk.pass.contract, d.place),
+          ),
     );
+    // C9: the receiver's external data brings its boundary checks, whichever member check follows
+    for (const item of receiver)
+      walk.admission.boundaryFor(item, () => {
+        const text = label();
+        return obligation(
+          "null-check",
+          at,
+          text,
+          ["non-null"],
+          `check that ${text} accepts the store`,
+        );
+      });
     // what the store needs of its receiver: a property store an object, an element store a list or a dict, an add
     // its method (C5b: `x.missing = 2` with x a whole number fails at runtime)
     const property = d.kind === "whole" ? (d.path.at(-1) ?? null) : null;
@@ -274,7 +303,8 @@ export function receivers(walk: Consumers): void {
           ? "an element store"
           : `a store of .${property === null ? property : propertyName(property)}`;
     // D1: the receiver in its own text, and the member as the access writes it
-    const receiverText = owner !== undefined ? program.textAt(ownSpan(walk, owner, d.site)) : label;
+    const receiverText =
+      owner !== undefined ? () => program.textAt(ownSpan(walk, owner, d.site)) : label;
     const member =
       d.kind === "add"
         ? `.${method ?? "add"}()`
@@ -299,7 +329,7 @@ export function receivers(walk: Consumers): void {
           presence.literal ?? d.site,
           {
             rule: "absent",
-            receiver: receiverText,
+            receiver: receiverText(),
             property: propertyName(property),
             store: presence.literal === null ? null : at,
             properties: [...propertiesOf(walk, { key: d.recv! })],

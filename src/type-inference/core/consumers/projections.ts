@@ -13,7 +13,15 @@ import { defaultNull } from "./fallbacks.js";
 import { literalSyntax } from "./finishing.js";
 import { hasProperty, unsettledItem } from "./kinds.js";
 import type { Offending } from "./model.js";
-import { keyLabel, kindsOf, ownSpan, quietKinds, receiverKinds, unlistedObject } from "./names.js";
+import {
+  keyLabel,
+  kindsOf,
+  ownSpan,
+  quietKinds,
+  receiverKinds,
+  shownLabel,
+  unlistedObject,
+} from "./names.js";
 import { consume } from "./operands.js";
 import { memberChecks } from "./receivers.js";
 import { obligation, propertiesOf, warning } from "./warnings.js";
@@ -84,7 +92,7 @@ export function projection(
     }
   }
   const owners = receiverKinds(walk, c.owner, node);
-  const label = keyLabel(walk, c.owner);
+  const label = shownLabel(walk, keyLabel(walk, c.owner));
   // C6: a selection on a collection, or on an unknown receiver that may be one
   if (
     selectsElement(property) &&
@@ -95,16 +103,16 @@ export function projection(
     selection(walk, c.owner, node, c.site, `.${property}`);
   // C9: the receiver's external data brings its boundary checks, whichever member check follows; a domain's those the
   // member check's warning owns
-  const send = walk.boundariesBefore(
-    owners,
-    obligation(
+  const send = walk.boundariesBefore(owners, () => {
+    const text = label();
+    return obligation(
       "null-check",
       ownSpan(walk, c.owner, c.site),
-      label,
+      text,
       ["non-null"],
-      `check that ${label} is not null and has .${property}`,
-    ),
-  );
+      `check that ${text} is not null and has .${property}`,
+    );
+  });
   // C5a, C5b, F19a, F15; C5c: a property some source lacks, its own obligation (an error where no known source has it)
   const objects = owners.some((item) => item.tag === "object");
   const extra: Offending[] = [];
@@ -172,7 +180,7 @@ export function projection(
       takes,
       `.${property}`,
       "read",
-      receiverText,
+      () => receiverText,
       member,
       extra,
       c.owner,
@@ -222,7 +230,7 @@ export function selection(
     explainingItem(
       kinds.filter((candidate) => collections.includes(candidate) || candidate.tag === "unknown"),
     ) ?? makeItem("list");
-  const target = keyLabel(walk, value);
+  const target = shownLabel(walk, keyLabel(walk, value))();
   const against = [...new Set(collections.map((found) => found.tag))];
   const rule: DiagnosticRule = {
     rule: "selection",
