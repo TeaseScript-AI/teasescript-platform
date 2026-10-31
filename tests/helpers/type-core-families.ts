@@ -2402,6 +2402,28 @@ function listingChain(k: number, { joined = false, stored = false } = {}): reado
 }
 
 /**
+ * Codex r4's positive-hit dimension: k records each storing two properties of their own, each copied and storing its own
+ * property below a step of its own, joined into one place and read at each property: every read's step is listed by one
+ * of the k layers joined, so a read finds that layer by the place's map, never by each layer joined.
+ */
+function distinctSteps(k: number): readonly SourceFile[] {
+  return main(
+    lines(
+      "let seed = {z: 1}",
+      rows(
+        k,
+        (i) =>
+          `let root${i} = seed\nroot${i}.h = hostValue\nroot${i}.j = hostValue\nlet arm${i} = root${i}\narm${i}.g${i} = hostValue`,
+      ),
+      "let joined = arm0",
+      rows(k - 1, (i) => `joined = arm${i + 1}`),
+      rows(k, (i) => `repeat joined.g${i} {}`),
+      "exit",
+    ),
+  );
+}
+
+/**
  * Codex r2's sibling: k copies of one record, each storing its own property below `depth` steps, joined in pairs `levels`
  * times (pairs, then pairs of pairs), then all into one place, read at each property directly or through `copies`
  * copies of the place; a read asks only the layer that lists its property's first step, never a joining one.
@@ -2507,6 +2529,12 @@ export const LAYER_FAMILIES: readonly WorkFamily[] = [
     measures:
       "Codex r2's witness: the copies joined in pairs, then into one place, read through a copy",
     program: (k) => nestedJoin(k, { levels: 1, copies: 1 }),
+  },
+  {
+    name: "distinct-steps",
+    measures:
+      "Codex r4's positive hits: k joined layers, each listing a step of its own, read at each",
+    program: (k) => distinctSteps(k),
   },
   {
     name: "shared-join",
