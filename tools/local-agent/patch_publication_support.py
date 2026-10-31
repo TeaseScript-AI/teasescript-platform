@@ -409,9 +409,10 @@ def split_utf8_patch(
     remaining_parts = len(greedy_ends)
     # plan_starts[k] begins a plan of k fitting parts that ends the patch. With k
     # parts after the current one, the current part ends at a preferred boundary
-    # or the greedy end only when the part from there to plan_starts[k - 1] still
-    # fits, and at plan_starts[k] otherwise, so the minimum count always holds.
-    # The greedy split is the plan when the backward one needs another count.
+    # or the greedy end only when the current part fits up to there and the part
+    # from there to plan_starts[k - 1] fits too, and at plan_starts[k] otherwise,
+    # so the minimum count always holds. The greedy split is the plan when the
+    # backward one needs another count.
     plan_starts = suffix_part_starts(
         patch,
         part_count=remaining_parts,
@@ -420,23 +421,24 @@ def split_utf8_patch(
         count_tokens=count_tokens,
     ) or [*reversed(greedy_ends), 0]
 
+    def fits(start: int, end: int) -> bool:
+        return end - start <= maximum_bytes and (
+            target_tokens is None
+            or count_tokens is None
+            or count_tokens(patch[start:end]) <= target_tokens
+        )
+
     def continues_plan(boundary: int, parts_after: int) -> bool:
         if parts_after == 0:
             return boundary == len(patch)
         next_start = plan_starts[parts_after - 1]
-        if boundary >= next_start or next_start - boundary > maximum_bytes:
-            return False
-        return (
-            target_tokens is None
-            or count_tokens is None
-            or count_tokens(patch[boundary:next_start]) <= target_tokens
-        )
+        return boundary < next_start and fits(boundary, next_start)
 
     parts: list[bytes] = []
     token_counts: list[int | None] = []
     offset = 0
     while offset < len(patch):
-        end = largest_bounded_end(
+        greedy_end = largest_bounded_end(
             patch,
             start=offset,
             maximum_bytes=maximum_bytes,
@@ -444,17 +446,18 @@ def split_utf8_patch(
             count_tokens=count_tokens,
         )
         boundaries = (
-            preferred_boundaries(patch, start=offset, end=end)
-            if end < len(patch)
+            preferred_boundaries(patch, start=offset, end=greedy_end)
+            if greedy_end < len(patch)
             else []
         )
-        if end not in boundaries:
-            boundaries.append(end)
+        if greedy_end not in boundaries:
+            boundaries.append(greedy_end)
         end = next(
             (
                 boundary
                 for boundary in boundaries
                 if continues_plan(boundary, remaining_parts - 1)
+                and (boundary == greedy_end or fits(offset, boundary))
             ),
             plan_starts[remaining_parts - 1],
         )

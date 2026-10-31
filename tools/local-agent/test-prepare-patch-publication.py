@@ -245,23 +245,29 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(b"".join(parts), patch)
 
     def test_part_count_holds_when_a_longer_part_costs_fewer_tokens(self) -> None:
-        # Token merges at a part's edges: a part ending in "ab" costs two tokens less and
-        # one starting with "b" two more. The greedy split needs six parts; the preferred
-        # boundaries must neither change that nor abort the split.
-        patch = b"b\naba\nax\nabx"
+        # Token merges at a part's edges: ending in "ab" (or "b") costs two tokens less and
+        # starting with "b" two more, so a longer part can be cheaper. The preferred
+        # boundaries must neither change the greedy count nor abort the split, whether the
+        # merge changes the parts after a boundary or the part before it.
+        cases = [(b"b\naba\nax\nabx", 3, b"ab", 6), (b"xxx\nb\nbaaab", 9, b"b", 3)]
+        for patch, maximum_bytes, cheap_end, part_count in cases:
 
-        def count_tokens(value: bytes) -> int:
-            return len(value) - 2 * value.endswith(b"ab") + 2 * value.startswith(b"b")
+            def count_tokens(value: bytes, cheap_end: bytes = cheap_end) -> int:
+                cost = len(value) - 2 * value.endswith(cheap_end) + 2 * value.startswith(b"b")
+                return max(1, cost)
 
-        parts, counts = SUPPORT.split_utf8_patch(
-            patch, maximum_bytes=3, target_tokens=3, count_tokens=count_tokens
-        )
-
-        self.assertEqual(b"".join(parts), patch)
-        self.assertEqual(len(parts), 6)
-        self.assertTrue(all(len(part) <= 3 for part in parts))
-        self.assertEqual(counts, [count_tokens(part) for part in parts])
-        self.assertTrue(all(count <= 3 for count in counts))
+            with self.subTest(patch=patch):
+                parts, counts = SUPPORT.split_utf8_patch(
+                    patch,
+                    maximum_bytes=maximum_bytes,
+                    target_tokens=3,
+                    count_tokens=count_tokens,
+                )
+                self.assertEqual(b"".join(parts), patch)
+                self.assertEqual(len(parts), part_count)
+                self.assertTrue(all(len(part) <= maximum_bytes for part in parts))
+                self.assertEqual(counts, [count_tokens(part) for part in parts])
+                self.assertTrue(all(count <= 3 for count in counts))
 
     def test_preferred_boundaries_keep_tokenizer_calls_linear(self) -> None:
         # Issue #185: re-splitting the whole remaining suffix for every preferred boundary
