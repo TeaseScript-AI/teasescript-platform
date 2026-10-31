@@ -11,21 +11,23 @@
 # when every area is complete, 2 where the baseline is not this tool's or holds runs of other inputs.
 #
 # The hook, installed on a worker as ~/work/trees/hooks/baseline, which `sx-tree` runs with each new `main`'s tree and
-# SHA, fills what builders did not store. It retires what `prune` finds (and names a baseline it keeps for foreign
-# contents), makes or joins the tree's baseline (`state`, which appends the commit) and returns at once where the
-# baseline is not this tool's, holds foreign contents or the runs of other inputs, every area is complete or a writer is
-# storing one. Else it removes the tree's SUPERSEDED (the tree is the current one again) and queues one job per shard to
-# store that has no job pending or running (`sx-queue status`): 16 per area or its PLAN's count (`sx-queue add --owner
-# baseline`, priority 7, of which the queue runs at most two at once, lead 2026-10-31, so a fill takes idle cores). Jobs
-# run the copy of this script the call left in the baseline (baseline.sh) and the tree's runner (`--store`), which ends
-# at once where its shard verifies or another running writer stores it; a job ends 0 where its shard then verifies or
-# is being stored.
+# SHA, fills what builders did not store; it writes nothing itself, every write being the state module's. It retires
+# what `prune` finds (and names a baseline it keeps for foreign contents), makes or joins the tree's baseline (`state`,
+# which appends the commit) and returns at once where the baseline is not this tool's, holds foreign contents or the
+# runs of other inputs, every area is complete or a writer is storing one. Else `queue` leaves a copy of this script in
+# the baseline for its jobs, so that a later install does not change a fill already queued, and undoes the tree's
+# SUPERSEDED (the tree is the current one again); then the hook queues one job per shard to store that has no job
+# pending or running (`sx-queue status`): 16 per area or its PLAN's count (`sx-queue add --owner baseline`, priority 7,
+# of which the queue runs at most two at once, lead 2026-10-31, so a fill takes idle cores). `sx-tree` runs its hooks
+# one at a time. A job runs the copy, decides with `start` (below) and runs the tree's runner (`--store`), which ends at
+# once where its shard verifies or another running writer stores it; a job ends 0 where its shard then verifies or is
+# being stored.
 #
-# Supersession (#1513, by tree): the first job to start decides under the baseline's .start.lock. Where its tree is
-# the current one (the `src/` tree of the clone's origin/main), it removes SUPERSEDED and writes STARTED; where it is not
-# and the fill has not STARTED, it writes SUPERSEDED (the current tree) and every such job ends at once; a STARTED fill
-# runs to its end. SUPERSEDED is undone where the tree is current again, by the hook or by a job. A builder's store is
-# never superseded. A marker that could not be written fails the job.
+# Supersession (#1513, by tree): `start` decides for a fill's first job. Where the tree is the current one (the `src/`
+# tree of the clone's origin/main), it undoes SUPERSEDED and writes STARTED; where it is not and the fill has not
+# STARTED, it writes SUPERSEDED (the current tree) and every such job ends at once; a STARTED fill runs to its end.
+# SUPERSEDED is undone where the tree is current again, by the hook (`queue`) or by a job. A builder's store is never
+# superseded. A decision that could not be written fails the job.
 #
 # A tree whose runner has no baselines.mjs (from before #1541) is skipped, unless BASELINE_RUNNER names a built
 # checkout that has one. BASELINE_PRIORITY (7), BASELINE_MEM (3G, each job's memory cap) and BASELINE_REPO (the clone
@@ -42,20 +44,15 @@ if [ "${1:-}" = --job ]; then
     echo "baseline ${out##*/}: $repo has no origin/main to name the current tree" >&2
     exit 1
   fi
-  # whether the fill runs, decided by its first job (see above)
-  exec {start}>> "$out/.start.lock"
-  flock "$start"
-  if [ "$current" = "${out##*/}" ]; then
-    rm -f "$out/SUPERSEDED"
-    if [ ! -e "$out/STARTED" ]; then
-      { date -u +%Y-%m-%dT%H:%M:%SZ > "$out/STARTED.tmp" && mv "$out/STARTED.tmp" "$out/STARTED"; } || exit 1
-    fi
-  elif [ ! -e "$out/STARTED" ]; then
-    { echo "$current" > "$out/SUPERSEDED.tmp" && mv "$out/SUPERSEDED.tmp" "$out/SUPERSEDED"; } || exit 1
+  # whether the fill runs, decided by its first job through the state module (see above)
+  if ! decided=$(node "$runner/tests/families/baselines.mjs" start "$out" "$current"); then
+    echo "baseline ${out##*/}: $(jq -r .refused <<< "$decided" 2> /dev/null)" >&2
+    exit 1
+  fi
+  if [ "$(jq -r .decision <<< "$decided")" = superseded ]; then
     echo "baseline ${out##*/}: ${folder##*/} $i/$n superseded by the current tree $current"
     exit 0
   fi
-  exec {start}>&-
   ended=$(node "$runner/tests/families/run.mjs" "$folder" "$tree" --store "${out%/*}" --shard "$i/$n" | tee /dev/stderr |
     tail -n 1)
   grep -q '"verified":true\|"skipped":' <<< "$ended"
@@ -129,15 +126,12 @@ if [ "$(jq -r .storing <<< "$baseline")" = true ]; then
   echo "baseline $sha: a writer is storing into $out"
   exit 0
 fi
-exec {lock}>> "$out/.queue.lock"
-if ! flock -n "$lock"; then
-  echo "baseline $sha: another call is queueing $out"
+# the jobs run a copy of this script in the baseline, so that a later install does not change a fill already queued,
+# and the tree is the current one again, so its SUPERSEDED is undone: both through the state module (see above)
+if ! copied=$(node "$modules/baselines.mjs" queue "$out" "$0"); then
+  echo "baseline $sha: no fill, $(jq -r .refused <<< "$copied" 2> /dev/null)"
   exit 0
 fi
-# the tree is the current one again: its fill runs (see above)
-rm -f "$out/SUPERSEDED"
-# the jobs run this copy, so that a later install does not change a fill already queued
-{ cp "$0" "$out/baseline.sh.tmp" && mv "$out/baseline.sh.tmp" "$out/baseline.sh"; } || fail "this script could not be copied"
 # the jobs of the tree pending or running, by name (their files are <priority>-<time>-<name>.job): a shard with one is
 # not queued again
 waiting=$({ sx-queue status --pending && sx-queue status --running; } 2> /dev/null |
