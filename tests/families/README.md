@@ -11,7 +11,8 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
-  [--allowances natural,16,256] [--shard i/N] [--timeout 60] [--memory 2048] [--out differences.jsonl]
+  [--allowances natural,16,256] [--shard i/N] [--timeout 180] [--memory 2048] [--out differences.jsonl]
+node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base SHA>/<area> [the same options]
 ```
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
@@ -19,21 +20,33 @@ publishes (`publication`) part by part (`publicationHashes`: the answers, the re
 route, in that order, each hashed as it is made), so a publication of any size is compared without one string of it, and
 a difference names its first differing part by that index and each tree's count of parts (#1503); and, for a generator
 whose `checks` include `"stops"`, which decisions stop and when at each demand allowance (`stopSet`). A source that
-takes more than `--timeout` seconds or `--memory` MB of heap, or that ends its analysing process (a fatal V8 error), is
-counted as stalled with the reason (`--out`), and the runner goes on with the next. The runs its process had written
-before the runner ended it still count; one whose outcome it was still writing is lost with the process, and a final
-reply cannot finish the source once its timeout callback has run (#1498). After the kill the runner waits for the
-process and its pipes to close, so a descendant holding its stderr delays the next source (no compiler or oracle code
-spawns one). A run that throws on either tree is an exception, never compared, because identical exceptions on both
-trees are not agreement (#1439): the runner prints it on stderr with its source, mode and check, writes it with each
-stack to `--out` and counts it apart from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in
-CI). A publication is had only up to the oracle's own stop: where its questions after a finished analysis pass the
-allowance, the nodes from that one on stay unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on
-either tree is neither compared nor an exception: the runner writes it to `--out` and counts it apart. It prints one
-JSON line per generator and a total (sources, unparsed, stalled, exceptions, unanswered, modes, runs, differences), and
-exits 1 when any run differs, throws or leaves nodes unanswered, or any source stalls. Run large sizes as one capped job
-per area or shard on a worker. Some recorded large inputs exceed the default timeout on unchanged trees. Report stalls
-and publication exceptions separately; neither establishes agreement.
+takes more than `--timeout` seconds (180 by default; 60 in CI, which sets `CI=true` and runs only the runner's own
+tests) or `--memory` MB of heap, or that ends its analysing process (a fatal V8 error), is counted as stalled with the
+reason (`--out`), and the runner goes on with the next. The runs its process had written before the runner ended it
+still count; one whose outcome it was still writing is lost with the process, and a final reply cannot finish the source
+once its timeout callback has run (#1498). After the kill the runner waits for the process and its pipes to close, so a
+descendant holding its stderr delays the next source (no compiler or oracle code spawns one). A run that throws on
+either tree is an exception, never compared, because identical exceptions on both trees are not agreement (#1439): the
+runner prints it on stderr with its source, mode and check, writes it with each stack to `--out` and counts it apart
+from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in CI). A publication is had only up to
+the oracle's own stop: where its questions after a finished analysis pass the allowance, the nodes from that one on stay
+unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on either tree is neither compared nor an
+exception: the runner writes it to `--out` and counts it apart. It prints one JSON line per generator and a total
+(sources, unparsed, stalled, exceptions, unanswered, uncompared, modes, runs, differences, the limit in seconds), and
+exits 1 when any run differs, throws, leaves nodes unanswered or is uncompared, or any source stalls. Run large sizes as
+one capped job per area or shard on a worker. Some recorded large inputs exceed the default timeout on unchanged trees.
+Report stalls and publication exceptions separately; neither establishes agreement.
+
+With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the stored
+result of the same source (its generator, name and key, so an edited source is new), mode and check, and a run the
+baseline does not hold is `uncompared`, never agreement (`--out` names its source and runs); a source stalls or throws
+outside its runs where either the stored run or the head did. The limits then apply to each tree alone, where a run of
+both trees shares them in one process, so a source that stalls there may end here, and the head's runs after a stored
+stall are uncompared. `--store <file>` runs one tree and stores each source's results as one line; `--baseline` reads a
+folder's `*.runs.jsonl` files, and stops (exit 2) at a source stored twice with other results.
+`tools/corpus/baseline.sh`, installed as the desktop's `~/work/trees/hooks/baseline`, stores every runner area and the
+type-core fixture (`tools/corpus/fixture/`) of each new `main` in `~/work/baselines/<sha>/<area>/`; an area without its
+`SHA256SUMS` is not complete.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
