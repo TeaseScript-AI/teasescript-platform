@@ -19,8 +19,8 @@
 # at most two at once, lead 2026-10-31, so the fill takes idle cores), writes QUEUED and returns. The areas are the
 # folders of tests/families/ with generators and the type-core fixture (tools/corpus/fixture/), in 16 shards each (an
 # area already begun, in its PLAN's count). A job runs the tree's runner, which skips a shard stored or being stored, so
-# a duplicate job ends at once, and ends 0 once its shard is stored; a job whose area has every shard stored writes its
-# missing SHA256SUMS. After a job died, remove QUEUED and call again. Jobs run the copy of this script the call left in
+# a duplicate job ends at once; it ends 0 once its shard is stored or while a running writer stores it, and a job whose
+# area has every shard stored writes its missing SHA256SUMS. After a job died, remove QUEUED and call again. Jobs run the copy of this script the call left in
 # the baseline. A baseline goes with its trees: once none of the trees its MANIFEST names remains (`sx-tree --prune`)
 # and no writer is storing, the next call removes it; a folder of the per-commit hook (#1512) goes with its tree.
 #
@@ -109,7 +109,8 @@ if [ "${1:-}" = --job ]; then
     exit 0
   fi
   node "$runner/tests/families/run.mjs" "$folder" "$tree" --store "${out%/*}" --shard "$i/$n"
-  [ -e "$out/${folder##*/}/${i}of$n.runs.jsonl" ]
+  # (a shard another running writer stores is that writer's)
+  [ -e "$out/${folder##*/}/${i}of$n.runs.jsonl" ] || running "$out/${folder##*/}/.${i}of$n.claim"
   exit
 fi
 
