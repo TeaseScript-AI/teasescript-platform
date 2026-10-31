@@ -682,6 +682,9 @@ export function climb(root) {
   execSync("touch notes");
   return [rm, Worker];
 }
+export function owned(root) {
+  everything.rmSync(path.join(pathOf(root, "baseline"), ".."));
+}
 const { "writeFileSync": quoted } = everything;
 const options = { flag: "w" };
 const load = process.getBuiltinModule;
@@ -736,6 +739,8 @@ if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
           "spawn",
           "spawn",
           "execSync",
+          // (a creation that climbs out of its baseline)
+          "rmSync",
           // (#1542 r5: an aliased loader, options in a variable, a default parameter)
           "process.getBuiltinModule",
           "readFileSync",
