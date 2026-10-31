@@ -14,8 +14,8 @@ import { Project, ts } from "ts-morph";
  * and `Consumers`' recording arrays among them, `boundaryCheck`, a parameter named `error` in admission's files, and a
  * derivation moved to a function. A reference is every name whose symbol is one, or an alias of one: an import, a
  * namespace's member, a destructuring's key in a declaration or an assignment, a shorthand property; in a value
- * position, a class's `extends` expression included, not a type's (an annotation, a type argument, an interface's or an
- * `implements` heritage). The check
+ * position, a class's `extends` expression and an instantiation expression's (`f<T>`) included, not a type's (an
+ * annotation, a type argument, an `implements` heritage, an interface, its computed keys included). The check
  * recognises a closed list of its forms: a direct call of a derivation, `R.m(…)` or `f(…)` as written, and an exact
  * forwarder's call; inside a derivation of admission's, a push `R.readChecks.push(…)`, a call `boundaryCheck(…)` or a
  * call of a parameter named `error` (each creating an obligation); inside a consumer derivation, a push onto a
@@ -39,8 +39,7 @@ import { Project, ts } from "ts-morph";
  * A listed host read or read is trusted by its reason (TABLE r4.152 (3)). A reference the syntax does not name (an
  * inherited member reached through an inferred wrapper, a generic receiver, a computed name, a value passed through an
  * aggregate or a copy) is outside this check, a review matter against r4.182, as r4.165 states it for the question
- * sources. Known miss (#1401): instantiation expressions can hide named value references; interface computed keys can
- * be reported as values.
+ * sources.
  */
 const ADMISSION = "src/type-inference/core/admission.ts";
 const CONSUMERS = "src/type-inference/core/consumers.ts";
@@ -832,20 +831,21 @@ export function obligationInventoryDiagnostics(program, root, files) {
     if (inAdmissionCode(node) && kind === "admission" && name !== "readChecks") return;
     unproved(node, entry, "a reference");
   };
+  /**
+   * Whether a node is a type's, no value (#1401): a type node (an annotation, a type argument), except an expression
+   * with type arguments outside an `implements` heritage or an interface's, which is an instantiation expression `f<T>`
+   * or a class's `extends` expression (Codex r7 B1), a value whose type arguments are types; and an interface, which
+   * emits nothing, its computed keys included. Anything else is a value's.
+   */
+  const typeOnly = (node) =>
+    ts.isInterfaceDeclaration(node) ||
+    (ts.isExpressionWithTypeArguments(node)
+      ? ts.isHeritageClause(node.parent) &&
+        !(node.parent.token === ts.SyntaxKind.ExtendsKeyword && ts.isClassLike(node.parent.parent))
+      : ts.isTypeNode(node));
   for (const sourceFile of scopeFiles) {
     const visit = (node) => {
-      // (a class's `extends` expression is a value, its type arguments types, Codex r7 B1; every other type node is a type
-      // position: an annotation, a type argument, an interface's or an `implements` heritage)
-      if (
-        ts.isExpressionWithTypeArguments(node) &&
-        ts.isHeritageClause(node.parent) &&
-        node.parent.token === ts.SyntaxKind.ExtendsKeyword &&
-        ts.isClassLike(node.parent.parent)
-      ) {
-        visit(node.expression);
-        return;
-      }
-      if (ts.isTypeNode(node)) return;
+      if (typeOnly(node)) return;
       for (const [at, entry, symbol] of namedBy(node)) classify(at, entry, symbol, sourceFile);
       node.forEachChild(visit);
     };
