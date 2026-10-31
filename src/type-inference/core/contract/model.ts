@@ -137,16 +137,30 @@ export interface SubLayer {
 }
 
 /**
- * The listing layers a read under a step may ask below a prefix or a listing layer (`selectAt`): those its layers' maps
- * name for the step (`SubLayer.front`), the sources each lists there by the layers listing them, and those with listing
- * layers below them.
+ * The listing layers a read under a step may ask below a prefix or in a set of listing layers below others
+ * (`selectAt`): those its layers' maps name for the step (`SubLayer.front`), the sources each lists there by the layers
+ * listing them, and the sets of listing layers below them (`SubLayer.under`), each once.
  */
 export interface StepLayers {
-  /** The listing layers found under the step, each with the position of the prefix's layer it was found under. */
-  readonly found: readonly { readonly layer: SubLayer; readonly at: number }[];
+  /** The listing layers found under the step, each with the stores that brought it below a prefix (none in a set). */
+  readonly found: readonly LayerFound[];
   readonly own: ReadonlyMap<Key, readonly number[]>;
-  /** The found layers with listing layers below them, whose summaries hold those layers' too. */
-  readonly nested: readonly number[];
+  /**
+   * Each set of listing layers below found layers, once, with how many found layers it is below and the stores that
+   * brought them; per found layer, its set's index, or -1.
+   */
+  readonly below: readonly {
+    readonly set: SupportNode;
+    readonly over: number;
+    readonly defs: ReadonlySet<Definition | null> | null;
+  }[];
+  readonly belowOf: readonly number[];
+}
+
+/** A listing layer a read may ask, with the stores that brought it below a prefix (`PrefixStores.also`), or none. */
+export interface LayerFound {
+  readonly layer: SubLayer;
+  readonly defs: ReadonlySet<Definition | null> | null;
 }
 
 /**

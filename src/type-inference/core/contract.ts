@@ -238,11 +238,13 @@ export class Contract {
   readonly discovering = new Map<CanonicalKey, PrefixFrame>();
   readonly subPaths = new Map<Key, ReadonlySet<string>>();
   /**
-   * Per relative path of a source's own live keys, the sources holding it (`ownPaths`); per prefix or layer and step,
-   * the layers below it there (`stepLayers`).
+   * Per relative path of a source's own live keys, the sources holding it (`ownPaths`); per prefix or set of listing
+   * layers and step, the listing layers found there (`stepLayers`).
    */
   readonly subsByPath = new Map<string, Set<Key>>();
-  readonly stepLayers = new WeakMap<PrefixStores | SubLayer, Map<string, StepLayers>>();
+  readonly stepLayers = new WeakMap<PrefixStores | SupportNode, Map<string, StepLayers>>();
+  /** Per set of listing layers and path id, the layers in it or below it holding a source at the path (`holdersIn`). */
+  readonly holdersBelow = new WeakMap<SupportNode, Map<number, SupportNode | null>>();
   readonly aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly projectedLayers = new Map<string, SubLayer | null>();
   /**

@@ -48,12 +48,14 @@ import type {
   CopyRing,
   EntryDraft,
   IdentityWork,
+  LayerFound,
   LayerOrigin,
   LayerPath,
   LayerProof,
   PrefixFrame,
   PrefixStores,
   PresenceStep,
+  StepLayers,
   SubLayer,
   SubSource,
   SupportNode,
@@ -1028,7 +1030,7 @@ function layerSupport(
     if (done(layer)) continue;
     if (!ready) {
       stack.push([layer, true]);
-      for (const child of childrenAt(contract, layer, ref))
+      for (const child of childrenAt(contract, layer, ref, path))
         if (!done(child)) stack.push([child, false]);
       continue;
     }
@@ -1037,7 +1039,7 @@ function layerSupport(
       contract.pass.program.work.charge("invSteps");
       if (ownHas(contract, sub, ref)) root = union(contract, root, supportLeaf(contract, sub));
     }
-    for (const child of childrenAt(contract, layer, ref))
+    for (const child of childrenAt(contract, layer, ref, path))
       root = union(contract, root, child.paths.get(path)!.support ?? null);
     atPath(contract, layer, path).support = root;
   }
@@ -1058,101 +1060,213 @@ function topAt(stores: PrefixStores, at: number): PrefixStores["also"][number] {
   return at === 0 ? { layer: stores.subs, defs: stores.inheritedBy } : stores.also[at - 1]!;
 }
 
-/** A listing layer a read may ask, with the position of the prefix's layer it was found under (`topAt`). */
-interface Found {
-  readonly layer: SubLayer;
-  readonly at: number;
-}
-
 /**
- * Of the listing layers a read under `ref`'s first step may ask below `owner` (`find`: those the maps of its layers
- * name for the step, `SubLayer.front`), those that may hold a source at `ref`, in order: per owner, the first read under
- * a step finds them, the sources each lists there and those with listing layers below them, whose summaries hold
- * theirs (`stepLayers`); every read takes those, and of the rest those listing a source with a store at a prefix of its
- * path, found per prefix from the smaller of those sources and the sources with a store there (`subsByPath`). A layer
- * that lists no source under the step is never asked; so k copies joined into one place, each storing its own property
- * below one step, are not each asked per read of one of those properties (#1078), however their joins nest.
+ * The listing layers a read under a step finds below `owner` (`find`: those the maps of its layers name for the step,
+ * `SubLayer.front`), once per owner and step (`stepLayers`): the sources each lists there, by the found layers listing
+ * them, and the sets of listing layers below them (`SubLayer.under`), each once, with the stores that brought the found
+ * layers above it.
  */
-function selectAt(
+function stepLayersOf(
   contract: Contract,
-  owner: PrefixStores | SubLayer,
-  find: () => readonly Found[],
-  ref: PathRef,
-): Found[] {
+  owner: PrefixStores | SupportNode,
+  find: () => readonly LayerFound[],
+  step: string,
+): StepLayers {
   const work = contract.pass.program.work;
-  const step = ref.at(0);
   let bySteps = contract.stepLayers.get(owner);
   if (bySteps === undefined) contract.stepLayers.set(owner, (bySteps = new Map()));
-  let known = bySteps.get(step);
-  if (known === undefined) {
-    const found = find();
-    const own = new Map<Key, number[]>();
-    const nested: number[] = [];
-    for (let at = 0; at < found.length; at += 1) {
-      const { layer } = found[at]!;
-      for (const sub of layer.own.get(step) ?? []) {
-        work.charge("invSteps");
-        ownPaths(contract, sub);
-        contract.keep(1);
-        const listed = own.get(sub);
-        if (listed === undefined) own.set(sub, [at]);
-        else listed.push(at);
-      }
-      if (listingBelow(contract, layer, step) !== null) nested.push(at);
+  const known = bySteps.get(step);
+  if (known !== undefined) return known;
+  const found = find();
+  const own = new Map<Key, number[]>();
+  const sets: { set: SupportNode; over: number; defs: Set<LayerFound["defs"]> }[] = [];
+  const setAt = new Map<number, number>();
+  const belowOf: number[] = [];
+  for (let at = 0; at < found.length; at += 1) {
+    const { layer, defs } = found[at]!;
+    for (const sub of layer.own.get(step) ?? []) {
+      work.charge("invSteps");
+      ownPaths(contract, sub);
+      contract.keep(1);
+      const listed = own.get(sub);
+      if (listed === undefined) own.set(sub, [at]);
+      else listed.push(at);
     }
-    contract.keep(1 + found.length + nested.length);
-    bySteps.set(step, (known = { found, own, nested }));
+    const set = listingBelow(contract, layer, step);
+    if (set === null) {
+      belowOf.push(-1);
+      continue;
+    }
+    let index = setAt.get(set.id);
+    if (index === undefined) {
+      setAt.set(set.id, (index = sets.length));
+      sets.push({ set, over: 0, defs: new Set() });
+    }
+    sets[index]!.over += 1;
+    sets[index]!.defs.add(defs);
+    belowOf.push(index);
   }
-  const { found, own, nested } = known;
-  const walked = new Set(nested);
+  // (a set below found layers brought by several prefixes' stores is brought by all of them, as one set made once)
+  const below = sets.map(({ set, over, defs }) => {
+    if (defs.size === 1) return { set, over, defs: [...defs][0]! };
+    const all = new Set<Definition | null>();
+    for (const each of defs)
+      for (const d of each ?? []) {
+        work.charge("invSteps");
+        all.add(d);
+      }
+    return { set, over, defs: all };
+  });
+  contract.keep(1 + found.length + below.length);
+  const made = { found, own, below, belowOf };
+  bySteps.set(step, made);
+  return made;
+}
+
+/** The found layers listing a source with a store at a prefix of `ref` (`subsByPath`), by their indices. */
+function holdingAt(
+  contract: Contract,
+  own: ReadonlyMap<Key, readonly number[]>,
+  ref: PathRef,
+): Set<number> {
+  const work = contract.pass.program.work;
+  const holding = new Set<number>();
   let text = "";
   for (let length = 1; length <= ref.length && own.size > 0; length += 1) {
     work.charge("invSteps");
-    text = length === 1 ? step : stepText(text, ref.at(length - 1));
+    text = length === 1 ? ref.at(0) : stepText(text, ref.at(length - 1));
     const having = contract.subsByPath.get(text);
     if (having === undefined) continue;
+    // (from the smaller of the sources found and the sources with a store there)
     if (having.size <= own.size)
       for (const sub of having) {
         work.charge("invSteps");
-        for (const at of own.get(sub) ?? []) walked.add(at);
+        for (const at of own.get(sub) ?? []) holding.add(at);
       }
     else
       for (const [sub, at] of own) {
         work.charge("invSteps");
-        if (having.has(sub)) for (const each of at) walked.add(each);
+        if (having.has(sub)) for (const each of at) holding.add(each);
       }
   }
-  work.charge("invSteps", walked.size);
-  return [...walked].sort((a, b) => a - b).map((at) => found[at]!);
+  return holding;
+}
+
+/** The sets below found layers a read passes through: below a found layer holding nothing at its path (`holdingAt`). */
+function passedBelow(
+  contract: Contract,
+  { below, belowOf }: StepLayers,
+  holding: ReadonlySet<number>,
+): number[] {
+  const held = new Map<number, number>();
+  for (const index of holding) {
+    const set = belowOf[index]!;
+    if (set >= 0) held.set(set, (held.get(set) ?? 0) + 1);
+  }
+  const passed: number[] = [];
+  for (let index = 0; index < below.length; index += 1) {
+    contract.pass.program.work.charge("invSteps");
+    // (below layers that all hold a source at the path, the set is in their summaries)
+    if ((held.get(index) ?? 0) < below[index]!.over) passed.push(index);
+  }
+  return passed;
+}
+
+/** A set of listing layers' own layers, found under a step with no stores of a prefix bringing them. */
+function setFound(contract: Contract, set: SupportNode): () => LayerFound[] {
+  return () => layersIn(contract, set).map((layer) => ({ layer, defs: null }));
 }
 
 /**
- * The listing layers a prefix's read at `ref` asks (`selectAt`), each with the stores that brought the prefix's layer it
- * was found under, in order.
+ * The layers holding a source at `ref` in a set of listing layers or below them, as one set, once per set and path
+ * (`Contract.holdersBelow`): of the set's layers found under the path's first step (`stepLayersOf`), those listing a
+ * source with a store at a prefix of the path; and below any that holds nothing there, which a read passes through, the
+ * holders in the set below it (`SubLayer.under`), in turn. On an explicit stack, each set below answered first and once.
  */
-function topsAt(contract: Contract, stores: PrefixStores, ref: PathRef): PrefixStores["also"] {
+function holdersIn(
+  contract: Contract,
+  set: SupportNode,
+  ref: PathRef,
+  path: number,
+): SupportNode | null {
   const step = ref.at(0);
-  const find = (): Found[] => {
-    const out: Found[] = [];
-    for (let at = 0, count = topCount(stores); at < count; at += 1)
-      for (const layer of layersIn(contract, mapGet(contract, topAt(stores, at).layer.front, step)))
-        out.push({ layer, at });
-    return out;
-  };
-  return selectAt(contract, stores, find, ref).map(({ layer, at }) => ({
-    layer,
-    defs: topAt(stores, at).defs,
-  }));
+  const answered = (each: SupportNode): SupportNode | null | undefined =>
+    contract.holdersBelow.get(each)?.get(path);
+  const stack: (readonly [SupportNode, ReadonlySet<number> | null])[] = [[set, null]];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    const [at, ready] = next;
+    if (answered(at) !== undefined) continue;
+    const layers = stepLayersOf(contract, at, setFound(contract, at), step);
+    const holding = ready ?? holdingAt(contract, layers.own, ref);
+    const passed = passedBelow(contract, layers, holding);
+    const waiting = passed.filter((index) => answered(layers.below[index]!.set) === undefined);
+    if (waiting.length > 0) {
+      stack.push([at, holding]);
+      for (const index of waiting) stack.push([layers.below[index]!.set, null]);
+      continue;
+    }
+    let root: SupportNode | null = null;
+    for (const index of holding) root = union(contract, root, layers.found[index]!.layer.self);
+    for (const index of passed)
+      root = union(contract, root, answered(layers.below[index]!.set) ?? null);
+    let byPath = contract.holdersBelow.get(at);
+    if (byPath === undefined) contract.holdersBelow.set(at, (byPath = new Map()));
+    byPath.set(path, root);
+    contract.keep(1);
+  }
+  return answered(set) ?? null;
 }
 
-/** The listing layers below a listing layer that its read at `ref` asks (`selectAt`), in order. */
-function childrenAt(contract: Contract, layer: SubLayer, ref: PathRef): SubLayer[] {
-  const find = (): Found[] =>
-    layersIn(contract, listingBelow(contract, layer, ref.at(0))).map((each) => ({
-      layer: each,
-      at: 0,
-    }));
-  return selectAt(contract, layer, find, ref).map((found) => found.layer);
+/**
+ * The listing layers a prefix's read at `ref` asks: of those found under its first step (`stepLayersOf`), those listing
+ * a source with a store at a prefix of its path, whose summaries hold the layers below them; and for a found layer that
+ * holds nothing at the path, which the read passes through, the holders below it (`holdersIn`), with the stores that
+ * brought the found layers above them; so the layers asked, and their demands, are the layers holding a source at the
+ * path. So k copies joined into one place, each storing its own property below one step, are not each asked per read
+ * of one of those properties (#1078), however their joins nest or share a listing layer below them.
+ */
+function topsAt(
+  contract: Contract,
+  stores: PrefixStores,
+  ref: PathRef,
+  path: () => number,
+): PrefixStores["also"] {
+  const work = contract.pass.program.work;
+  const find = (): LayerFound[] => {
+    const out: LayerFound[] = [];
+    for (let at = 0, count = topCount(stores); at < count; at += 1) {
+      const { layer: top, defs } = topAt(stores, at);
+      for (const layer of layersIn(contract, mapGet(contract, top.front, ref.at(0))))
+        out.push({ layer, defs });
+    }
+    return out;
+  };
+  const layers = stepLayersOf(contract, stores, find, ref.at(0));
+  const holding = holdingAt(contract, layers.own, ref);
+  const out: PrefixStores["also"][number][] = [];
+  for (const index of [...holding].sort((a, b) => a - b)) {
+    work.charge("invSteps");
+    const { layer, defs } = layers.found[index]!;
+    out.push({ layer, defs: defs! });
+  }
+  for (const index of passedBelow(contract, layers, holding)) {
+    const { set, defs } = layers.below[index]!;
+    for (const layer of layersIn(contract, holdersIn(contract, set, ref, path())))
+      out.push({ layer, defs: defs! });
+  }
+  return out;
+}
+
+/** The layers holding a source at `ref` below a listing layer (`holdersIn` of the set below it), which its summary reads. */
+function childrenAt(contract: Contract, layer: SubLayer, ref: PathRef, path: number): SubLayer[] {
+  const set = listingBelow(contract, layer, ref.at(0));
+  return set === null ? [] : layersIn(contract, holdersIn(contract, set, ref, path));
+}
+
+/** A path's id, made and charged once on its first asking (`pathOf`). */
+function pathOnce(contract: Contract, ref: PathRef): () => number {
+  let id: number | undefined;
+  return () => (id ??= pathOf(contract, ref));
 }
 
 /**
@@ -1168,9 +1282,10 @@ export function relevantSubs(
 ): readonly SubSource[] {
   const ref = restRef(contract, asked);
   if (ref.length === 0) return [];
-  const tops = topsAt(contract, stores, ref);
+  const pathId = pathOnce(contract, ref);
+  const tops = topsAt(contract, stores, ref, pathId);
   if (tops.length === 0) return [];
-  const path = pathOf(contract, ref);
+  const path = pathId();
   // (a source's stores: the set of the one layer listing it, shared; a set of its own, made and charged as the second
   // layer listing it is met, where several do)
   const found = new Map<Key, ReadonlySet<Definition | null>>();
@@ -1285,7 +1400,7 @@ function* layerMade(
       return { items: [], proof: DECLINED };
     root = union(contract, root, summaryLeaf(contract, sub, items));
   }
-  for (const child of childrenAt(contract, layer, rest)) {
+  for (const child of childrenAt(contract, layer, rest, path)) {
     if (child.origin === null) return { items: [], proof: DECLINED };
     const { proof } = yield* contract.pass.solver.proven(layerDemand(contract, child, path));
     if (proof === null || proof.declined) return { items: [], proof: DECLINED };
@@ -1311,7 +1426,8 @@ interface LayersAt {
 function layersAt(contract: Contract, stores: PrefixStores, rest: Rest): LayersAt | undefined {
   const ref = restRef(contract, rest);
   if (ref.length === 0) return { layers: [], path: 0 };
-  const tops = topsAt(contract, stores, ref);
+  const path = pathOnce(contract, ref);
+  const tops = topsAt(contract, stores, ref, path);
   if (tops.length === 0) return { layers: [], path: 0 };
   if (stores.cut) return undefined;
   const layers: LayersAt["layers"][number][] = [];
@@ -1319,7 +1435,7 @@ function layersAt(contract: Contract, stores: PrefixStores, rest: Rest): LayersA
     if (layer.origin === null) return undefined;
     layers.push({ layer, defs });
   }
-  return { layers, path: pathOf(contract, ref) };
+  return { layers, path: path() };
 }
 
 /** The summary of a prefix's layers at `rest`: the union of each layer's (`layerDemand`); `undefined` where one declines. */
