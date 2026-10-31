@@ -11,14 +11,15 @@
 # when every area is complete, 2 where the baseline is not this tool's or holds runs of other inputs.
 #
 # The hook, installed on a worker as ~/work/trees/hooks/baseline, which `sx-tree` runs with each new `main`'s tree and
-# SHA, fills what builders did not store. It removes what `prune` finds, makes or joins the tree's baseline (`state`,
-# which appends the commit) and returns at once where the baseline is not this tool's or not the tree's, every area is
-# complete or a writer is storing one. Else it removes the tree's SUPERSEDED (the tree is the current one again) and
-# queues one job per shard to store that has no job pending or running (`sx-queue status`): 16 per area or its PLAN's
-# count (`sx-queue add --owner baseline`, priority 7, of which the queue runs at most two at once, lead 2026-10-31, so a
-# fill takes idle cores). Jobs run the copy of this script the call left in the baseline (baseline.sh) and the tree's
-# runner (`--store`), which ends at once where its shard verifies or another running writer stores it; a job ends 0
-# where its shard then verifies or is being stored.
+# SHA, fills what builders did not store. It retires what `prune` finds (and names a baseline it keeps for foreign
+# contents), makes or joins the tree's baseline (`state`, which appends the commit) and returns at once where the
+# baseline is not this tool's, holds foreign contents or the runs of other inputs, every area is complete or a writer is
+# storing one. Else it removes the tree's SUPERSEDED (the tree is the current one again) and queues one job per shard to
+# store that has no job pending or running (`sx-queue status`): 16 per area or its PLAN's count (`sx-queue add --owner
+# baseline`, priority 7, of which the queue runs at most two at once, lead 2026-10-31, so a fill takes idle cores). Jobs
+# run the copy of this script the call left in the baseline (baseline.sh) and the tree's runner (`--store`), which ends
+# at once where its shard verifies or another running writer stores it; a job ends 0 where its shard then verifies or
+# is being stored.
 #
 # Supersession (#1513, by tree): the first job to start decides under the baseline's .start.lock. Where its tree is
 # the current one (the `src/` tree of the clone's origin/main), it removes SUPERSEDED and writes STARTED; where it is not
@@ -108,8 +109,8 @@ fail() {
   echo "baseline $sha: $*" >&2
   exit 1
 }
-node "$modules/baselines.mjs" prune "$root" | jq -r '"baseline \(.pruned): removed with its trees"' ||
-  fail "pruning $root failed"
+node "$modules/baselines.mjs" prune "$root" | jq -r 'if .pruned then "baseline \(.pruned): removed with its trees"
+  else "baseline \(.kept): kept for its foreign contents: \(.foreign | join(", "))" end' || fail "pruning $root failed"
 lines=$(node "$modules/baselines.mjs" state "$tree" "$root")
 status=$?
 baseline=$(tail -n 1 <<< "$lines")
