@@ -13,5 +13,6 @@ outside the repository").
 - `desktop:~/work/evidence/corpus/tooling/`: one master copy of each kit that briefs hand out, the split kit (`split/`,
   with `cycles.cjs`) and the #1423 probe kit (`g3-probe/`, with `queue-final.sh`). Its `README.md` says what each
   master fixes. `g3-probe/disagree-kind.py` counts a row's exceptions apart and rejects them, never classifying them
-  (#1514); `g3-probe/canary-1514.sh` checks that, and its original stays beside it as `disagree-kind.py.pre-1514`
-  (`PORTED-1514.md`).
+  (#1514), and counts a disagreeing row whose text `publication.mjs` omitted as `unclassifiable: text omitted` and
+  exits 1 (#1515); `g3-probe/canary-1515.sh`, which runs `canary-1514.sh`, checks that, and its originals stay beside it
+  as `disagree-kind.py.pre-1514` and `.pre-1515` (`PORTED-1514.md`, `PORTED-1515.md`).
