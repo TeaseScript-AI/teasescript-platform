@@ -492,7 +492,10 @@ const VALUES = [
     `class ProbeMovedBase extends probe.probeBaseMoved(${SELF}.admission) {}\n    void ProbeMovedBase;`,
   ],
 ];
-/** The type/value boundary (#1401): [the label, the statement, how many unproved references it holds]. */
+/**
+ * The type/value boundary (#1401, #1527): [the label, the statement, how many unproved references it holds, the
+ * top-level declarations it names, if any].
+ */
 const TYPE_VALUE = [
   // (an instantiation expression is a value, its type arguments types: a member's, a namespace's moved derivation's,
   // called in an `extends` expression)
@@ -534,6 +537,41 @@ const TYPE_VALUE = [
   [
     "Admission.probeKey",
     `class ProbeKeyedClass {\n      [${SELF}.admission.probeKey] = 1;\n    }\n    void ProbeKeyedClass;`,
+    1,
+  ],
+  // (code that emits nothing, #1527: a `declare` and an `abstract` member's computed key, an overload signature's
+  // beside its implementation's, which is evaluated, an overload signature's and an ambient function's destructured
+  // parameter; an abstract class's method implementation, whose key is evaluated)
+  [
+    "Admission.probeKey",
+    `class ProbeDeclared {\n      declare [${SELF}.admission.probeKey]: number;\n    }\n    void ProbeDeclared;`,
+    0,
+  ],
+  [
+    "Admission.probeKey",
+    `abstract class ProbeAbstract {\n      abstract [${SELF}.admission.probeKey]: number;\n    }\n    void ProbeAbstract;`,
+    0,
+  ],
+  [
+    "Admission.probeKey",
+    `class ProbeOverloadedKey {\n      [${SELF}.admission.probeKey](): void;\n      [${SELF}.admission.probeKey](): void {}\n    }\n    void ProbeOverloadedKey;`,
+    1,
+  ],
+  [
+    "Admission.probeKey",
+    "void probeSignature;",
+    0,
+    "function probeSignature({ probeKey }: Admission): void;\nfunction probeSignature(admission: Admission): void {\n  void admission;\n}\n",
+  ],
+  [
+    "Admission.probeKey",
+    "void probeAmbient;",
+    0,
+    "declare function probeAmbient({ probeKey }: Admission): void;\n",
+  ],
+  [
+    "Admission.probeKey",
+    `abstract class ProbeKeyedMethod {\n      [${SELF}.admission.probeKey](): void {}\n    }\n    void ProbeKeyedMethod;`,
     1,
   ],
 ];
@@ -651,6 +689,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
           // (an unrecognised decoy; a recognised one of a derivation's name)
           "\nfunction freshDecoy(): void {}\nfunction freshShared(walk: Consumers): void {\n  void walk;\n}\n" +
           RECORDING.map(consumerFunction).join("") +
+          TYPE_VALUE.map(([, , , declarations = ""]) => declarations).join("") +
           // (a parameter's destructuring; references outside every consumer derivation)
           `export function probeParameter({ diagnostics }: Consumers): void {\n  diagnostics.push(${PUSHED});\n}\n` +
           "interface ProbeView {\n  admission: Admission;\n}\n" +
