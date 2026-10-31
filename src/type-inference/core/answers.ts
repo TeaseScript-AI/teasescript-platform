@@ -17,6 +17,7 @@ import {
 import { Consumers, STOP_RULE, typedCall } from "./consumers.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import { compareDemandNames, exportNames, importNames } from "./contract/key-ids.js";
+import { replayLayer } from "./contract/prefix-index.js";
 import { selectLanes } from "./contract/lanes.js";
 import {
   Contract,
@@ -596,13 +597,16 @@ export function solveDemands(
 }
 
 /**
- * The computation that demands `key` (`c|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`, `lit|`, `op|`, `dk|`, `dn|`,
- * `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them).
+ * The computation that demands `key` (`protoLayer|`, `c|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`, `lit|`, `op|`,
+ * `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them).
  */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
   const { program, contract, values, exact } = pass;
   switch (kind) {
+    // (a layer's summary by its origin and path, its layer found again through this pass's stores: #1466)
+    case "protoLayer":
+      return replayLayer(contract, parts);
     case "c":
       return contract.contractOf(parts.join("|"));
     case "s": {

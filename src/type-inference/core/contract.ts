@@ -105,6 +105,7 @@ import type {
   PrefixFrame,
   PrefixLevels,
   PrefixStores,
+  PresenceStep,
   ReadClass,
   ReadClassGroup,
   ReadEntry,
@@ -116,12 +117,20 @@ import type {
   StoredClass,
   SubLayer,
   SubSource,
+  SupportNode,
   ValueEntry,
   WrapperHop,
 } from "./contract/model.js";
 import { choiceOptions, plusRepeatOf } from "./contract/others.js";
 import { chainOf, literalHop, remember } from "./contract/positions.js";
-import { prefixStores, prefixWork, relevantSubs, subSources } from "./contract/prefix-index.js";
+import {
+  offendingStores,
+  prefixStores,
+  prefixWork,
+  relevantSubs,
+  subSources,
+  summaryPresence,
+} from "./contract/prefix-index.js";
 import {
   contractOfValue,
   contractOfValueAt,
@@ -171,6 +180,7 @@ export type {
   LiteralIndex,
   LoneRead,
   PrefixStores,
+  PresenceStep,
   StoppedKey,
   StoredChoiceKeys,
   SubSource,
@@ -187,6 +197,7 @@ export {
   writtenOf,
   writtenTypeSteps,
 } from "./contract/terms.js";
+export { presenceSteps } from "./contract/prefix-index.js";
 export { withOwnSelection } from "./contract/value-kinds.js";
 
 /*
@@ -214,6 +225,10 @@ export class Contract {
     ringComponents: 0,
     ringPorts: 0,
     ringStops: 0,
+    supportNodes: 0,
+    supportEdges: 0,
+    layerDemands: 0,
+    listedSources: 0,
   };
   readonly prefix = new Map<CanonicalKey, PrefixStores>();
   /** Per copy-only place its copies reach, the cycle of whole copies it is a port of, `null` for none (`ringOf`). */
@@ -229,6 +244,15 @@ export class Contract {
   readonly stepLayers = new WeakMap<PrefixStores, Map<string, StepLayers>>();
   readonly aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly projectedLayers = new Map<string, SubLayer | null>();
+  /**
+   * #1466: the layers' answers' support nodes, each made once per pass (`prefix-index.ts`): a source's leaf, a step's,
+   * a summary's leaf by its source and content, a branch by its bit and children, and the union of each two nodes asked.
+   */
+  readonly supportLeaves = new Map<Key, SupportNode>();
+  readonly stepLeaves = new Map<string, SupportNode>();
+  readonly summaryLeaves = new Map<Key, Map<string, SupportNode>>();
+  readonly supportBranches = new Map<number, Map<number, Map<number, SupportNode>>>();
+  readonly supportUnions = new Map<number, Map<number, SupportNode>>();
   readonly keys = new Map<CanonicalKey, Identity>();
   readonly identities = new Map<PlaceId, Identity>();
   readonly aliases = new Map<PlaceId, { readonly key: Key; readonly guarded: boolean }>();
@@ -924,6 +948,23 @@ export class Contract {
 
   public subSources(stores: PrefixStores): Key[] {
     return subSources(stores);
+  }
+
+  public offendingStores(
+    stores: PrefixStores,
+    rest: Rest,
+    offends: (items: readonly Item[]) => boolean,
+  ): Work<ReadonlySet<Definition | null> | null> {
+    return offendingStores(this, stores, rest, offends);
+  }
+
+  public summaryPresence(
+    stores: PrefixStores,
+    rest: Rest,
+    mask: number,
+    run: (work: Work<readonly Item[]>) => readonly Item[],
+  ): PresenceStep | null {
+    return summaryPresence(this, stores, rest, mask, run);
   }
 
   public entered(value: PlaceId, items: readonly Item[]): readonly Item[] {

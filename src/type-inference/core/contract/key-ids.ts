@@ -1151,7 +1151,8 @@ export function exportNames(
 
 /**
  * Names a packet came with (`exportNames`) in this pass: its paths made here, parent first (`importKeyIds`), each
- * cursor's token its key's text and each span's its path's, so this pass asks each demand in its own identity.
+ * cursor's token its key's text and each span's its path's, so this pass asks each demand in its own identity; a layer
+ * summary's (`protoLayer|`, #1466) keeps them as this pass's cursor and span, the tokens its demand is named by.
  */
 export function importNames(
   contract: Contract,
@@ -1159,18 +1160,21 @@ export function importNames(
   packet: unknown,
 ): string[] {
   const ids = importKeyIds(contract, packet);
-  return names.map((name) =>
-    name
+  return names.map((name) => {
+    const native = name.startsWith("protoLayer|");
+    return name
       .split("|")
-      .map((part) =>
-        isCursorToken(part)
-          ? keyOfId(contract, ids[keyIdPath(part)]!)
-          : SPAN.test(part)
-            ? textOf(contract, keyIdPath(ids[Number(part.slice(1))]!))
-            : part,
-      )
-      .join("|"),
-  );
+      .map((part) => {
+        if (isCursorToken(part)) {
+          const id = ids[keyIdPath(part)]!;
+          return native ? id : keyOfId(contract, id);
+        }
+        if (!SPAN.test(part)) return part;
+        const path = keyIdPath(ids[Number(part.slice(1))]!);
+        return native ? spanRef(contract, path).name() : textOf(contract, path);
+      })
+      .join("|");
+  });
 }
 
 /**
