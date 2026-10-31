@@ -1061,7 +1061,7 @@ export function relevantSubs(
   asked: Rest,
 ): readonly SubSource[] {
   const ref = restRef(contract, asked);
-  if (ref.length === 0 || topsOf(stores).length === 0) return [];
+  if (ref.length === 0) return [];
   const tops = topsAt(contract, stores, ref);
   if (tops.length === 0) return [];
   const path = pathOf(contract, ref);
@@ -1190,27 +1190,50 @@ function* layerMade(
   return { items: root?.items ?? [], proof: summaryProof(contract, root) };
 }
 
+/** The layers a summary of a prefix's layers reads at a path, each with the stores that brought its top, and the path. */
+interface LayersAt {
+  readonly layers: readonly {
+    readonly layer: SubLayer;
+    readonly defs: ReadonlySet<Definition | null>;
+  }[];
+  readonly path: number;
+}
+
 /**
- * The summary of a prefix's layers at `rest`: the union of each layer's (`layerDemand`); `undefined` where one
- * declines, the prefix's stores are cut at an open copy cycle, or a layer has no origin, so the consumer reads each
- * source by itself (`relevantSubs`).
+ * The layers a summary of a prefix's layers at `rest` reads (`topsAt`), each its top's entry (`entryAt`), found without
+ * a demand: none where no layer may hold a source there; `undefined` where the prefix's stores are cut at an open copy
+ * cycle or a layer has no origin, so the consumer reads each source by itself (`relevantSubs`).
  */
+function layersAt(contract: Contract, stores: PrefixStores, rest: Rest): LayersAt | undefined {
+  const ref = restRef(contract, rest);
+  if (ref.length === 0) return { layers: [], path: 0 };
+  const tops = topsAt(contract, stores, ref);
+  if (tops.length === 0) return { layers: [], path: 0 };
+  if (stores.cut) return undefined;
+  const layers: LayersAt["layers"][number][] = [];
+  for (const { layer: top, defs } of tops) {
+    const layer = entryAt(contract, top, ref.at(0))!;
+    if (layer.origin === null) return undefined;
+    layers.push({ layer, defs });
+  }
+  return { layers, path: pathOf(contract, ref) };
+}
+
+/** The summary of a prefix's layers at `rest`: the union of each layer's (`layerDemand`); `undefined` where one declines. */
 function* summaryOf(
   contract: Contract,
   stores: PrefixStores,
   rest: Rest,
 ): Work<SupportNode | null | undefined> {
-  const ref = restRef(contract, rest);
-  if (ref.length === 0 || topsOf(stores).length === 0) return null;
-  if (stores.cut) return undefined;
-  const tops = topsAt(contract, stores, ref);
-  if (tops.length === 0) return null;
-  const path = pathOf(contract, ref);
+  const at = layersAt(contract, stores, rest);
+  return at === undefined ? undefined : yield* unionOf(contract, at);
+}
+
+/** The union of the summaries of the layers `layersAt` found; `undefined` where one declines. */
+function* unionOf(contract: Contract, at: LayersAt): Work<SupportNode | null | undefined> {
   let root: SupportNode | null = null;
-  for (const top of tops) {
-    const layer = entryAt(contract, top.layer, ref.at(0))!;
-    if (layer.origin === null) return undefined;
-    const { proof } = yield* contract.pass.solver.proven(layerDemand(contract, layer, path));
+  for (const { layer } of at.layers) {
+    const { proof } = yield* contract.pass.solver.proven(layerDemand(contract, layer, at.path));
     if (proof === null || proof.declined) return undefined;
     root = union(contract, root, proof.root);
   }
@@ -1239,8 +1262,9 @@ export function* summaryCount(
 
 /**
  * C5c's presence after a prefix's layers at `rest`, read in their sources' order from the incoming state `mask`, its
- * demands run as the consumer runs its reads (`run`, with its read's allowance); `null` where a summary declines or the
- * run stops, so the consumer reads each source by itself, each with its own allowance, as before.
+ * demands run as the consumer runs its reads (`run`, with its read's allowance), and nothing run where no layer may
+ * hold a source there; `null` where a summary declines or the run stops, so the consumer reads each source by itself,
+ * each with its own allowance, as before.
  */
 export function summaryPresence(
   contract: Contract,
@@ -1249,10 +1273,14 @@ export function summaryPresence(
   mask: number,
   run: (work: Work<readonly Item[]>) => readonly Item[],
 ): PresenceStep | null {
-  let after: PresenceStep | null = null;
+  const at = layersAt(contract, stores, rest);
+  if (at === undefined) return null;
+  let after: PresenceStep | null = { mask, unknown: false, literal: null };
+  if (at.layers.length === 0) return after;
+  after = null;
   run(
     (function* (): Work<readonly Item[]> {
-      const root = yield* summaryOf(contract, stores, rest);
+      const root = yield* unionOf(contract, at);
       if (root !== undefined)
         after = root === null ? { mask, unknown: false, literal: null } : root.presence![mask]!;
       return [];
@@ -1263,33 +1291,35 @@ export function summaryPresence(
 
 /**
  * A5's candidates of a prefix's layers at `rest`: the stores that brought each layer whose summary holds an offending
- * item (`offends` holds of a merge exactly where it holds of one of the merged sources' answers); `null` where a
- * summary declines.
+ * item (`offends` holds of a merge exactly where it holds of one of the merged sources' answers), its demands run as
+ * admission runs its questions (`run`), nothing run where no layer may hold a source there; `null` where a summary
+ * declines.
  */
-export function* offendingStores(
+export function offendingStores(
   contract: Contract,
   stores: PrefixStores,
   rest: Rest,
   offends: (items: readonly Item[]) => boolean,
-): Work<ReadonlySet<Definition | null> | null> {
-  const ref = restRef(contract, rest);
+  run: (work: Work<ReadonlySet<Definition | null> | null>) => ReadonlySet<Definition | null> | null,
+): ReadonlySet<Definition | null> | null {
+  const at = layersAt(contract, stores, rest);
+  if (at === undefined) return null;
   const out = new Set<Definition | null>();
-  if (ref.length === 0 || topsOf(stores).length === 0) return out;
-  if (stores.cut) return null;
-  const tops = topsAt(contract, stores, ref);
-  if (tops.length === 0) return out;
-  const path = pathOf(contract, ref);
-  for (const top of tops) {
-    const { defs } = top;
-    const layer = entryAt(contract, top.layer, ref.at(0))!;
-    if (layer.origin === null) return null;
-    const { items, proof } = yield* contract.pass.solver.proven(layerDemand(contract, layer, path));
-    if (proof === null || proof.declined) return null;
-    if (!offends(items)) continue;
-    contract.pass.program.work.charge("invSteps", defs.size);
-    for (const d of defs) out.add(d);
-  }
-  return out;
+  if (at.layers.length === 0) return out;
+  return run(
+    (function* (): Work<ReadonlySet<Definition | null> | null> {
+      for (const { layer, defs } of at.layers) {
+        const { items, proof } = yield* contract.pass.solver.proven(
+          layerDemand(contract, layer, at.path),
+        );
+        if (proof === null || proof.declined) return null;
+        if (!offends(items)) continue;
+        contract.pass.program.work.charge("invSteps", defs.size);
+        for (const d of defs) out.add(d);
+      }
+      return out;
+    })(),
+  );
 }
 
 /**

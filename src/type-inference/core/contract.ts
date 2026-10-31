@@ -957,8 +957,11 @@ export class Contract {
     stores: PrefixStores,
     rest: Rest,
     offends: (items: readonly Item[]) => boolean,
-  ): Work<ReadonlySet<Definition | null> | null> {
-    return offendingStores(this, stores, rest, offends);
+    run: (
+      work: Work<ReadonlySet<Definition | null> | null>,
+    ) => ReadonlySet<Definition | null> | null,
+  ): ReadonlySet<Definition | null> | null {
+    return offendingStores(this, stores, rest, offends, run);
   }
 
   public summaryPresence(
