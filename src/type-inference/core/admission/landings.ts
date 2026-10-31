@@ -1,4 +1,16 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
+import {
+  isKeyId,
+  isPathSteps,
+  keptStepsJoin,
+  keyIdPath,
+  stepsFrom,
+  stepsOfId,
+  stepsPrefixText,
+  stepsText,
+  type KeyId,
+  type Steps,
+} from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
 import {
   joinParts,
@@ -46,8 +58,11 @@ function lastAtLeast(tree: readonly number[], size: number, last: number, least:
 }
 
 /** Whether `path` starts with `prefix` (or is it). */
-function isPrefix(prefix: readonly string[], path: readonly string[]): boolean {
-  return prefix.length <= path.length && prefix.every((step, index) => path[index] === step);
+function isPrefix(prefix: Steps, path: Steps): boolean {
+  if (prefix.length > path.length) return false;
+  for (let index = 0; index < prefix.length; index += 1)
+    if (path.at(index) !== prefix.at(index)) return false;
+  return true;
 }
 
 /**
@@ -128,18 +143,23 @@ function cyclesOf(
  * answers as its nearest member with a store on the path, or its top. Each copy storing its own field asks that member
  * directly, never every copy above it (the reviewer's control of a copy's own contribution, TABLE r4.80).
  */
-export function passThrough(
-  admission: Admission,
-  place: PlaceId,
-  path: readonly string[],
-): PlaceId {
+/** `passThrough` of a cursor: a place no copy forest holds answers itself; else its steps made (`stepsOfId`). */
+export function passThroughKey(admission: Admission, place: PlaceId, key: KeyId): PlaceId {
+  if (!copyForest(admission).parent.has(place)) return place;
+  return passThrough(admission, place, stepsOfId(admission.pass.contract, key));
+}
+
+export function passThrough(admission: Admission, place: PlaceId, path: Steps): PlaceId {
   const forest = copyForest(admission);
   if (!forest.parent.has(place)) return place;
   const own = forest.stores.get(place);
   const lists: (Storing | undefined)[] = [];
   for (let length = 1; length <= path.length; length += 1) {
     admission.pass.program.work.charge("indexSteps");
-    const text = keptText(admission.work, path.slice(0, length));
+    // (a record's prefix text through its record, `prefixText`; an array's made and charged as before)
+    const text = isPathSteps(path)
+      ? path.prefixText(length)
+      : keptText(admission.work, path.slice(0, length));
     if (own?.has(text) === true) return place;
     lists.push(forest.storing.get(text));
   }
@@ -549,10 +569,25 @@ export function copiesOf(admission: Admission, place: PlaceId): readonly Inherit
  * Whether copies land a path in a place (`Inheritance`): its own landings, else its copies' sources' landings below
  * their strips, on an explicit stack, each place and path asked once.
  */
+/**
+ * `landed` of a key in its identity: a cursor's past wrappers from its path's id (`landedFrontier`), its steps made only
+ * where no wrapper is passed (G3 stage 1).
+ */
+export function landedKey(admission: Admission, place: PlaceId, key: Key): boolean {
+  const { contract } = admission.pass;
+  if (!isKeyId(key)) return landed(admission, place, keyPath(key));
+  if (contract.pathDepths[keyIdPath(key)]! > 1 && positions()) {
+    const frontier = landedFrontier(admission, place, keyIdPath(key));
+    if (frontier.place !== place)
+      return landedOwn(admission, frontier.place, contract.pathSteps(frontier.rest));
+  }
+  return landedOwn(admission, place, stepsOfId(contract, key));
+}
+
 export function landed(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
   // (G3 3a: a path past wrappers lands as its frontier's rest lands in the frontier's read's binding, `landedFrontier`)
   if (path.length > 1 && positions()) {
-    const frontier = landedFrontier(admission, place, path);
+    const frontier = landedFrontier(admission, place, admission.pass.contract.pathIdOf(path));
     if (frontier.place !== place)
       return landedOwn(admission, frontier.place, admission.pass.contract.pathSteps(frontier.rest));
   }
@@ -567,10 +602,10 @@ export function landed(admission: Admission, place: PlaceId, path: readonly stri
 function landedFrontier(
   admission: Admission,
   place: PlaceId,
-  path: readonly string[],
+  path: number,
 ): { readonly place: PlaceId; readonly rest: number } {
   const { contract } = admission.pass;
-  const ids: number[] = [contract.pathIdOf(path)];
+  const ids: number[] = [path];
   for (let id = ids[0]!; !admission.landedFrontiers.has(joinParts(place, id)) && id > 0;) {
     id = contract.pathParent(id);
     ids.push(id);
@@ -585,7 +620,7 @@ function landedFrontier(
       continue;
     }
     const above = admission.landedFrontiers.get(joinParts(place, contract.pathParent(id)))!;
-    const step = path[contract.pathDepth(id) - 1]!;
+    const step = contract.pathLast(id);
     // (a rest of one step goes on below it: its wrapper hands the path on, keeping the new step)
     const hop =
       contract.pathDepth(above.rest) === 1
@@ -683,25 +718,26 @@ function landingSteps(
 }
 
 /** `landed` itself, for a place and path. */
-function landedOwn(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
+function landedOwn(admission: Admission, place: PlaceId, path: Steps): boolean {
   const { seeds, owned, cycleOf, cycles, fed, wholes } = inheritance(admission);
   const work = admission.pass.program.work;
   const memo = admission.landedPaths;
   const frames: {
     readonly key: string;
-    readonly path: readonly string[];
+    readonly path: Steps;
     readonly copies: readonly InheritedCopy[];
     next: number;
   }[] = [];
   // a place and path's answer where its own landings give it, else its frame, its copies' sources asked one by one;
-  // a place that answers through its parent answers as the copy it answers through (`passThrough`)
-  const open = (place: PlaceId, steps: readonly string[]): boolean | null => {
+  // a place that answers through its parent answers as the copy it answers through (`passThrough`); a record's steps
+  // spelled by their record
+  const open = (place: PlaceId, steps: Steps): boolean | null => {
     const at = steps.length === 0 ? place : passThrough(admission, place, steps);
-    const key = keptParts(admission.work, at, steps);
+    const text = stepsText(steps);
+    const key = keptParts(admission.work, at, text);
     const known = memo.get(key);
     if (known !== undefined) return known;
     work.charge("indexSteps");
-    const text = pathText(steps);
     const whole = wholes.get(at);
     const found =
       cycleOf.has(at) && !fed.has(at) && whole === undefined
@@ -736,7 +772,7 @@ function landedOwn(admission: Admission, place: PlaceId, path: readonly string[]
     const copy = frame.copies[frame.next++]!;
     answer = open(
       copy.from,
-      keptSteps(admission.work, copy.strip, frame.path.slice(copy.path.length)),
+      keptStepsJoin(admission.work, copy.strip, stepsFrom(frame.path, copy.path.length)),
     );
   }
   return memo.get(key)!;
@@ -888,7 +924,7 @@ function copyIndex(
 function copiesAlong(
   admission: Admission,
   place: PlaceId,
-  path: readonly string[],
+  path: Steps,
   under: boolean,
 ): readonly InheritedCopy[] {
   const work = admission.pass.program.work;
@@ -910,7 +946,9 @@ function copiesAlong(
   const positions: number[] = [];
   for (let length = 0; length <= path.length; length += 1) {
     work.charge("indexSteps");
-    const text = keptText(admission.work, path.slice(0, length));
+    // (a record's prefixes spelled by their record, charged as `keptText` charges an array's)
+    const text = stepsPrefixText(path, length);
+    keepText(admission.work, text.length);
     const found =
       length < path.length ? index.at.get(text) : under ? index.under.get(text) : undefined;
     for (const position of found ?? []) {

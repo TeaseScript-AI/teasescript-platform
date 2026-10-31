@@ -2,14 +2,16 @@ import type { Expression } from "../../ast.js";
 import { expressionChildren, unwrap } from "../../expression-children.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
-import { joinSteps, keepText, keptText } from "./budget.js";
+import { keepText, keptText, pathText } from "./budget.js";
 import {
-  KeyTrie,
+  isCursor,
   keptKey,
   keptPrefixes,
+  keyBelowText,
   keyOf,
   keyPath,
   keyPlace,
+  KeyTrie,
   recordKey,
   sortCost,
   type Key,
@@ -531,6 +533,12 @@ export class GuardIndex {
   public narrowed(key: Key, node: FlowNode): boolean {
     const program = this.program;
     if (!program.reached(node)) return false;
+    // (G3 stage 1: a wrapper's key is its cursor, and no test names a key of a wrapper's binding: `wrapperShape`)
+    if (isCursor(key)) {
+      const place = keyPlace(key);
+      if (this.untested(program.occurrenceOf.get(place) ?? place)) return false;
+      throw new Error(`The key cursor '${key}' was asked of a tested binding's guards.`);
+    }
     const asked = recordKey(key);
     // (G3 3b: the tested keys at or above it, by one walk of its steps; an untested one guards nothing)
     for (const tested of this.#tested.above(asked, true)) {
@@ -641,6 +649,11 @@ export class GuardIndex {
    * `rest` read further (§3.2).
    */
   public guardedRead(value: PlaceId, rest: readonly string[] = []): boolean {
+    return this.guardedReadAt(value, pathText(rest));
+  }
+
+  /** `guardedRead` at a path given by its text (a cursor's span's, spelled by its record: `PathRef.text`). */
+  public guardedReadAt(value: PlaceId, restText: string): boolean {
     const program = this.program;
     const steps: string[] = [];
     let current = value;
@@ -652,7 +665,9 @@ export class GuardIndex {
     const binding = program.occurrenceOf.get(current);
     const node = program.occNode.get(current);
     if (binding === undefined || node === undefined || node === null) return false;
-    return this.narrowed(keyOf(binding, joinSteps(steps.reverse(), rest)), node);
+    // (a binding no test names guards no read of it, at whatever path: no key made, G3 stage 1)
+    if (this.untested(binding)) return false;
+    return this.narrowed(keyBelowText(keyOf(binding, steps.reverse()), restText), node);
   }
 
   /** The tested keys `q` below each key, per relative path `q` (every split of every tested key's path). */

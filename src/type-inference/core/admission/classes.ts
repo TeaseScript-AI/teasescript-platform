@@ -1,17 +1,18 @@
 import { unwrap } from "../../../expression-children.js";
 import type { PlaceId } from "../../graph.js";
+import type { Contract } from "../contract.js";
+import {
+  isKeyId,
+  isSteps,
+  keptKeyBelowIn,
+  keyBelowRef,
+  restRef,
+  type Rest,
+} from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
 import type { CorePass } from "../answers.js";
 import { joinSteps, keepText, keptParts, keptSplit, keptText, pathText } from "../budget.js";
-import {
-  keptKey,
-  keptKeyBelow,
-  keyBelow,
-  prefixesOf,
-  recordKey,
-  type Definition,
-  type Key,
-} from "../definitions.js";
+import { keptKey, prefixesOf, recordKey, type Definition, type Key } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
 import { dictList, measuresLength } from "../method-categories.js";
 import { stepName } from "../program.js";
@@ -39,15 +40,20 @@ export function withoutChains<T>(callback: () => T): T {
 }
 
 /** The path below an add's added value for a path below its list (an `addAll`'s value stands for the list's elements). */
-export function addRest(d: Definition, rest: readonly string[]): readonly string[] {
-  return d.how === "elements" ? rest : rest.slice(1);
+export function addRest(d: Definition, rest: readonly string[]): readonly string[];
+export function addRest(d: Definition, rest: Rest): Rest;
+export function addRest(d: Definition, rest: Rest): Rest {
+  if (d.how === "elements") return rest;
+  return isSteps(rest) ? rest.slice(1) : rest.from(1);
 }
 
 /** The key an alias's read stands for at `rest` below its store; `null` beside or above its cell, where no read is. */
-export function aliasKeyAt(alias: Alias, rest: readonly string[]): Key | null {
-  if (rest.length < alias.at.length || alias.at.some((step, index) => rest[index] !== step))
+export function aliasKeyAt(contract: Contract, alias: Alias, asked: Rest): Key | null {
+  // (a cursor's span read one step at a time below the alias's cell, its key a cursor's: G3 stage 1)
+  const rest = restRef(contract, asked);
+  if (rest.length < alias.at.length || alias.at.some((step, index) => rest.at(index) !== step))
     return null;
-  return keyBelow(alias.source, rest.slice(alias.at.length));
+  return keyBelowRef(contract, alias.source, rest.from(alias.at.length));
 }
 
 /**
@@ -130,7 +136,7 @@ function aliasKey(admission: Admission, d: Definition): string | null {
     end === null || untested(admission, alias.source) ? "" : alias.source,
     read.source,
     read.written,
-    lists.aliasSignature(read.source, read.read),
+    lists.aliasSignature(admission.pass.contract.keyText(read.source), read.read),
     handlers.afterSomeCreation(read.read) ? "h" : "",
     // (the member's own copied binding's written type at its read, A4's decider, whatever its chain resolves to:
     // `let b: integer[] = raw` is no `let a = raw`, TABLE r4.72)
@@ -187,13 +193,16 @@ function chainEnd(admission: Admission, source: Key, read: FlowNode): ChainEnd |
   let current = { source, read };
   for (;;) {
     program.work.charge("aliasSteps");
-    const answer = exact.exactPath(current.source, current.read);
+    const answer = exact.exactPath(admission.pass.contract.keyText(current.source), current.read);
     if ("fail" in answer || answer.def.kind !== "whole" || answer.def.value === undefined) break;
     const value = answer.def.value;
     const next = stablePath(admission, value, answer.def.node);
     if (next === null || guards.guardedRead(value) || guards.guardedBelowRead(value).length > 0)
       break;
-    current = { source: keptKeyBelow(admission.work, next.source, answer.rest), read: next.read };
+    current = {
+      source: keptKeyBelowIn(admission.pass.contract, next.source, answer.rest),
+      read: next.read,
+    };
     end = {
       ...current,
       written: keptText(
@@ -217,6 +226,8 @@ function chainEnd(admission: Admission, source: Key, read: FlowNode): ChainEnd |
 
 /** Whether no test touches a source key: none of it, of a prefix of it, or of a key below it (§3.2). */
 function untested(admission: Admission, source: Key): boolean {
+  // (a cursor's binding no test names: its family's shape requires it, G3 stage 1)
+  if (isKeyId(source)) return true;
   const { guards, program } = admission.pass;
   const key = recordKey(source);
   if (guards.belowTested.has(key)) return false;
@@ -231,13 +242,10 @@ function untested(admission: Admission, source: Key): boolean {
  * Whether a class answers as one at `rest` below its stores (§4.1): a copy's everywhere, a literal's below its alias
  * cell only (beside or above it each literal's own terms stand, with their own writers).
  */
-export function covers(
-  admission: Admission,
-  representative: Definition,
-  rest: readonly string[],
-): boolean {
+export function covers(admission: Admission, representative: Definition, asked: Rest): boolean {
   const at = admission.aliases.get(representative)?.at ?? [];
-  return rest.length >= at.length && at.every((step, index) => rest[index] === step);
+  const rest = restRef(admission.pass.contract, asked);
+  return rest.length >= at.length && at.every((step, index) => rest.at(index) === step);
 }
 
 /**

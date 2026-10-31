@@ -23,10 +23,26 @@ import {
 } from "./contract.js";
 import { joinParts, joinSteps, keepText } from "./budget.js";
 import {
+  type CanonicalKey,
+  isPathSteps,
+  isSteps,
+  keyStepsIn,
+  type Rest,
+  someStep,
+  spanRef,
+  stepsAfter,
+  stepsArray,
+  stepsFrom,
+  stepsJoin,
+  stepsRest,
+  stepsText,
+  stepsTo,
+  type Steps,
+} from "./contract/key-ids.js";
+import {
   keptKey,
-  keptKeyBelow,
   keyOf,
-  keyPath,
+  keyOfText,
   keyPlace,
   type Definition,
   type ForLoopFacts,
@@ -111,6 +127,11 @@ export function narrowingKey(g: Narrowing): string {
   return joinParts("gv", g.node.id, g.input.id, g.form.kind, g.elements);
 }
 
+/** The key of `place` at `rest`: a record's steps spelled by their record (`PathSteps.text`), an array's as before. */
+function keyOfSteps(place: PlaceId, rest: Steps): Key {
+  return isPathSteps(rest) ? keyOfText(place, rest.text()) : keyOf(place, rest);
+}
+
 export class Values {
   /** The route each read took, by key, node and `before`, recorded as the read is answered. */
   readonly #routes = new Map<string, ReadRoute>();
@@ -120,7 +141,9 @@ export class Values {
   public constructor(readonly pass: CorePass) {}
 
   /** A read of `key` at `node` (§3); `before`: a definition at `node` itself does not count. */
-  public *keyItems(key: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
+  public *keyItems(asked: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
+    // (a key in its identity: a wrapper family's text read as its cursor, whose stop it then meets, G3 stage 1)
+    const key = this.pass.contract.canonicalKey(asked);
     const read = yield* this.#keyRead(key, node, before);
     // §3.2: under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
     return read.guardable && this.pass.guards.narrowed(key, node!)
@@ -133,7 +156,7 @@ export class Values {
    * or the contract; `guardable` where the mark applies.
    */
   *#keyRead(
-    key: Key,
+    key: CanonicalKey,
     node: FlowNode | null,
     before: boolean,
   ): Work<{
@@ -156,7 +179,7 @@ export class Values {
     }
     if (program.isHost(keyPlace(key))) {
       route("contract");
-      return { items: hostAt(keyPath(key)), def: null, guardable: false };
+      return { items: hostAt(keyStepsIn(this.pass.contract, key)), def: null, guardable: false };
     }
     if (yield* contract.refReceiver(key)) {
       route("contract");
@@ -166,7 +189,7 @@ export class Values {
       route("contract");
       return { items: yield* contract.contractOf(key), def: null, guardable: false };
     }
-    const answer = exact.exactPath(key, node, before);
+    const answer = exact.exactPath(contract.keyText(key), node, before);
     // F5a: the loop ran only over a held iterable, and nothing between the add and the body's end may change the
     // collection: X6's events, a call into a callable that stores it included
     let loop = false;
@@ -174,7 +197,9 @@ export class Values {
       const facts = answer.def.loop;
       loop =
         !(yield* this.#iterableHeld(facts)) ||
-        facts.backs.some((back) => lists.eventBetween(key, answer.def.orig!.node, back) !== null);
+        facts.backs.some(
+          (back) => lists.eventBetween(contract.keyText(key), answer.def.orig!.node, back) !== null,
+        );
     }
     const items =
       "def" in answer && !loop
@@ -291,7 +316,7 @@ export class Values {
     const { program, contract, guards, solver } = this.pass;
     const { g, root, key } = narrowed;
     const at = narrowed.node ?? node;
-    const read = yield* this.#keyRead(key, at, false);
+    const read = yield* this.#keyRead(contract.canonicalKey(key), at, false);
     const items = yield* this.narrowingValue(g);
     const kinds =
       solver.answer(narrowingKey(g)) === undefined
@@ -343,7 +368,7 @@ export class Values {
       "def" in exact.exactPath(g.key, g.input);
     const input = loopDefinition
       ? yield* contract.contractOf(g.key)
-      : (yield* this.#keyRead(g.key, g.input, false)).items;
+      : (yield* this.#keyRead(contract.canonicalKey(g.key), g.input, false)).items;
     return narrowedItems(g.form, input, program.scope);
   }
 
@@ -366,8 +391,9 @@ export class Values {
    */
   public valueRoute(value: PlaceId, node: FlowNode | null, rest: readonly string[]): ReadRoute {
     const { program, contract } = this.pass;
+    // (a key in its identity, as `#keyRead` records it: a wrapper family's text read as its cursor, G3 stage 1)
     const recorded = (key: Key, at: FlowNode | null): ReadRoute =>
-      this.#routes.get(joinParts(key, at?.id ?? "-", 0)) ?? "exact";
+      this.#routes.get(joinParts(contract.canonicalKey(key), at?.id ?? "-", 0)) ?? "exact";
     let path = rest;
     let at = node;
     for (let projection = program.projOf.get(value); projection !== undefined;) {
@@ -439,13 +465,17 @@ export class Values {
   }
 
   /** The value of a place at a node, read at the path `rest` below it. */
-  public valueItems(
-    value: PlaceId,
-    node: FlowNode | null,
-    rest: readonly string[],
-  ): Work<readonly Item[]> {
+  public valueItems(value: PlaceId, node: FlowNode | null, asked: Rest): Work<readonly Item[]> {
+    // (G3 stage 1: a cursor's span read by its path's id)
+    if (!isSteps(asked) && asked.kind === "span") return this.valueItemsAt(value, node, asked.id());
+    const rest = isSteps(asked) ? asked : asked.steps();
     // G3 3a: a read at a path of property steps stands one step below its parent's position
-    if (rest.length > 0 && positions() && rest.every(propertyOnly) && this.#rooted(value, rest[0]!))
+    if (
+      rest.length > 0 &&
+      positions() &&
+      !someStep(rest, (step) => !propertyOnly(step)) &&
+      this.#rooted(value, rest.at(0)!)
+    )
       return this.#positioned(value, node, rest);
     return this.#through(value, node, rest, 0);
   }
@@ -479,31 +509,71 @@ export class Values {
       this.#rooted(value, rest[0]!)
     ) {
       const { items, proof } = yield* this.pass.solver.proven(
-        this.#position(value, node, this.pass.contract.pathIdOf(rest), rest),
+        this.#position(value, node, this.pass.contract.pathIdOf(rest)),
       );
       return { items, proof: proof instanceof Position ? proof : null };
     }
     return { items: yield* this.#through(value, node, rest, 0), proof: null };
   }
 
-  *#positioned(
+  /** `valuePosition` at the path of a path id (G3 stage 1: a decided cursor's), from the arena's metadata. */
+  public *valuePositionAt(
     value: PlaceId,
     node: FlowNode | null,
-    rest: readonly string[],
-  ): Work<readonly Item[]> {
-    return yield this.#position(value, node, this.pass.contract.pathIdOf(rest), rest);
+    path: number,
+  ): Work<{ readonly items: readonly Item[]; readonly proof: Position | null }> {
+    const { contract } = this.pass;
+    if (
+      path > 0 &&
+      positions() &&
+      contract.pathProperties[path]! &&
+      this.#rooted(value, contract.pathFirstSteps[path]!)
+    ) {
+      const { items, proof } = yield* this.pass.solver.proven(this.#position(value, node, path));
+      return { items, proof: proof instanceof Position ? proof : null };
+    }
+    return {
+      items: yield* this.#through(value, node, spanRef(contract, path).steps(), 0),
+      proof: null,
+    };
+  }
+
+  *#positioned(value: PlaceId, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
+    // (a record's steps their path's own id)
+    return yield this.#position(
+      value,
+      node,
+      isPathSteps(rest) ? rest.path : this.pass.contract.pathIdOf(rest),
+    );
+  }
+
+  /**
+   * `valueItems` at the path of a path id (G3 stage 1: a decided cursor's path, or a span of it): positioned where its
+   * steps are property steps and its first passes a wrapper, from the arena's metadata; else its steps made (uncharged,
+   * as a caller's array was) for the read's own computation.
+   */
+  public valueItemsAt(value: PlaceId, node: FlowNode | null, path: number): Work<readonly Item[]> {
+    const { contract } = this.pass;
+    if (
+      path > 0 &&
+      positions() &&
+      contract.pathProperties[path]! &&
+      this.#rooted(value, contract.pathFirstSteps[path]!)
+    )
+      return this.#positionedAt(value, node, path);
+    // (no position: its steps made through the charged boundary)
+    return this.#through(value, node, spanRef(contract, path).steps(), 0);
+  }
+
+  *#positionedAt(value: PlaceId, node: FlowNode | null, path: number): Work<readonly Item[]> {
+    return yield this.#position(value, node, path);
   }
 
   /**
    * G3 3a: a value at a node and a path of property steps as a demand that proves its position (`positions.ts`): its
    * parent's (one step up, at its root its own) advanced one step (`#advance`).
    */
-  #position(
-    value: PlaceId,
-    node: FlowNode | null,
-    path: number,
-    rest: readonly string[],
-  ): ProofDemand<Proof> {
+  #position(value: PlaceId, node: FlowNode | null, path: number): ProofDemand<Proof> {
     const { contract, program } = this.pass;
     const site = program.places[value]?.site ?? null;
     const key = joinParts("vq", value, node?.id ?? "-", path);
@@ -515,7 +585,7 @@ export class Values {
       proves: true,
       make: () => {
         contract.remember(key);
-        return this.#advance(value, node, path, rest);
+        return this.#advance(value, node, path);
       },
     };
   }
@@ -528,16 +598,13 @@ export class Values {
    * the exact path answers its key at the step from its declaration. A read through no wrapper, and wherever a receiver
    * fails, is the read's own computation from its root, which every read answers outside positions.
    */
-  *#advance(
-    value: PlaceId,
-    node: FlowNode | null,
-    path: number,
-    rest: readonly string[],
-  ): Work<Proven<Proof>> {
+  *#advance(value: PlaceId, node: FlowNode | null, path: number): Work<Proven<Proof>> {
     const { contract, program } = this.pass;
-    const step = rest.at(-1)!;
-    const own = (): Work<readonly Item[]> => this.#through(value, node, rest, 0);
-    const from = yield* this.#positionOf(value, node, contract.pathParent(path), rest.slice(0, -1));
+    const step = contract.pathLast(path);
+    // (the read's own computation takes its path's steps, made where it runs: a position carries its path's id alone)
+    const own = (): Work<readonly Item[]> =>
+      this.#through(value, node, contract.pathSteps(path), 0);
+    const from = yield* this.#positionOf(value, node, contract.pathParent(path));
     const hop =
       from !== null && from.rest === 0 ? yield* this.#hop(from.read, from.node, step) : null;
     if (from === null || (!from.hopped && hop === null))
@@ -563,7 +630,8 @@ export class Values {
           program.scope,
         )
       : yield* own();
-    const outer = from.outer === null ? null : keptKeyBelow(program.work, from.outer, [step]);
+    // (the receiver's key one step down in its identity: a wrapper's family's its cursor's child)
+    const outer = from.outer === null ? null : contract.keptKeyBelowIn(from.outer, [step]);
     return {
       items,
       proof:
@@ -595,12 +663,7 @@ export class Values {
    * A value's position at a path (`#advance`): a read's or a literal's own at no path, a property read's its owner's one
    * step down; else its demand's proof; `null` for any other value, and outside positions.
    */
-  *#positionOf(
-    value: PlaceId,
-    node: FlowNode | null,
-    path: number,
-    rest: readonly string[],
-  ): Work<Position | null> {
+  *#positionOf(value: PlaceId, node: FlowNode | null, path: number): Work<Position | null> {
     const { program, solver, contract } = this.pass;
     if (!positions()) return null;
     if (path === 0) {
@@ -629,10 +692,9 @@ export class Values {
         projection.owner,
         projection.node ?? node,
         contract.pathStep(0, step),
-        [step],
       );
     }
-    const { proof } = yield* solver.proven(this.#position(value, node, path, rest));
+    const { proof } = yield* solver.proven(this.#position(value, node, path));
     return proof instanceof Position ? proof : null;
   }
 
@@ -675,7 +737,7 @@ export class Values {
   #through(
     value: PlaceId,
     node: FlowNode | null,
-    rest: readonly string[],
+    rest: Steps,
     from: number,
   ): Work<readonly Item[]> {
     const { program } = this.pass;
@@ -696,25 +758,26 @@ export class Values {
   *#members(
     value: PlaceId,
     node: FlowNode | null,
-    rest: readonly string[],
+    rest: Steps,
     at: number,
     from: number,
   ): Work<readonly Item[]> {
     const { program } = this.pass;
-    const before = rest.slice(0, at);
-    const after = rest.slice(at + 1);
+    // (a record's steps before and after the member their views)
+    const before = stepsTo(rest, at);
+    const after = stepsFrom(rest, at + 1);
     // F19a, r4.44: a receiver that may be a reference, by its completed contract, has the runtime's members
     const contract = this.pass.contract;
     const decided =
       before.length === 0
         ? yield* contract.valueReceiver(value)
-        : yield* contract.contractOfValueAt(value, before);
+        : yield* contract.contractOfValueAt(value, stepsRest(before));
     if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
       return yield* this.#through(value, node, rest, at + 1);
     const receiver = withoutEmpty(yield* this.#through(value, node, before, from));
     const out: Item[] = [];
     let own = false;
-    const step = rest[at]!;
+    const step = rest.at(at)!;
     for (const item of receiver) {
       const of = (tag: ItemTag): Item =>
         carried({ ...makeItem(tag, item.writer, { context: item.context }), cert: item.cert }, [
@@ -723,14 +786,14 @@ export class Values {
       const declared = declaredProperty(item.tag, step);
       if (item.tag === "dict" && dictList(step) !== undefined) {
         if (after.length === 0) out.push(of("list"));
-        else if (after[0] === "element") {
+        else if (after.at(0) === "element") {
           // a key is text from the list's contract, possible: no literal holds a derived list's element (r4.47, P3)
           const below =
             dictList(step) === "keys"
               ? after.length === 1
                 ? weaken([of("string")])
                 : []
-              : yield* this.#through(value, node, joinSteps(before, after), at);
+              : yield* this.#through(value, node, stepsJoin(before, after), at);
           // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
           const elements = after.length === 1 ? withoutEmpty(below) : below;
           out.push(...(item.cert === "def" ? elements : weaken(elements)));
@@ -758,7 +821,7 @@ export class Values {
   }
 
   /** The value of a place at a node at a path, by the place's kind. */
-  *#valueAt(value: PlaceId, node: FlowNode | null, rest: readonly string[]): Work<readonly Item[]> {
+  *#valueAt(value: PlaceId, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
     if (!this.pass.solver.enterRead()) return STOPPED;
     try {
       const { program, contract } = this.pass;
@@ -785,7 +848,7 @@ export class Values {
       if (binding !== undefined)
         return contract.entered(
           value,
-          yield* this.keyItems(keyOf(binding, rest), program.occNode.get(value) ?? node),
+          yield* this.keyItems(keyOfSteps(binding, rest), program.occNode.get(value) ?? node),
         );
       const projection = program.projOf.get(value);
       if (projection !== undefined) {
@@ -798,7 +861,7 @@ export class Values {
           return yield* this.valueItems(
             projection.owner,
             at,
-            joinSteps([stepName(projection.step)], rest),
+            stepsAfter([stepName(projection.step)], rest),
           );
         // S6c: a selection reads its owner twice, at its step and whole, so its whole value once per value and node,
         // whatever asks: a chain of k `.first` reads each link once whole, never each link 2^k times
@@ -817,7 +880,7 @@ export class Values {
         const call = program.opOf.get(value);
         if (call?.kind === "call")
           return yield* this.keyItems(
-            keyOf(program.functionOf(call.fn).result, rest),
+            keyOfSteps(program.functionOf(call.fn).result, rest),
             program.callOutOf.get(value) ?? node,
           );
       }
@@ -827,7 +890,7 @@ export class Values {
       if (program.hasOf.has(value) || program.cellOwner.has(value))
         return yield* this.#literalItems(value, rest, node);
       if (program.isHost(value)) return hostAt(rest);
-      return yield* this.keyItems(keyOf(value, rest), node);
+      return yield* this.keyItems(keyOfSteps(value, rest), node);
     } finally {
       this.pass.solver.leaveRead();
     }
@@ -841,28 +904,24 @@ export class Values {
     owner: PlaceId,
     step: string,
     node: FlowNode | null,
-    rest: readonly string[],
+    rest: Steps,
     narrowed: NarrowedRead | null = null,
   ): Work<readonly Item[]> {
     const elements =
       narrowed === null
-        ? yield* this.valueItems(owner, node, joinSteps([stepName(step)], rest))
+        ? yield* this.valueItems(owner, node, stepsAfter([stepName(step)], rest))
         : yield* this.#narrowedRead(narrowed, node);
     const owners = withoutEmpty(yield* this.valueItems(owner, node, []));
     return withOwnSelection(elements, owners, this.pass);
   }
 
   /** F27: the loop variable is the element of the iterable's value at loop entry; a dict's key is text, a range's a whole number. */
-  *#iteration(
-    owner: PlaceId,
-    node: FlowNode | null,
-    rest: readonly string[],
-  ): Work<readonly Item[]> {
+  *#iteration(owner: PlaceId, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
       if (item.tag === "list" || item.tag === "set") {
         const elements = belowSelected(
-          yield* this.valueItems(owner, node, joinSteps(["element"], rest)),
+          yield* this.valueItems(owner, node, stepsAfter(["element"], rest)),
           rest,
         );
         out.push(...(item.cert === "def" ? elements : weaken(elements)));
@@ -892,12 +951,12 @@ export class Values {
     owner: PlaceId,
     node: FlowNode | null,
     step: string,
-    rest: readonly string[],
+    rest: Steps,
   ): Work<readonly Item[]> {
     // F19a before F14 and the exact value: a receiver that may be a reference has the runtime's members, its `length`
     // among them, read as a member so its route is the member's
     if (heldReference(yield* this.pass.contract.valueReceiver(owner)))
-      return yield* this.valueItems(owner, node, joinSteps([step], rest));
+      return yield* this.valueItems(owner, node, stepsAfter([step], rest));
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
       if (
@@ -915,7 +974,7 @@ export class Values {
           );
       } else if (item.tag === "object" || REFERENCE.has(item.tag)) {
         // an object's own `length` (F11), a reference's member (F19a)
-        const own = yield* this.valueItems(owner, node, joinSteps([step], rest));
+        const own = yield* this.valueItems(owner, node, stepsAfter([step], rest));
         out.push(...(item.cert === "def" ? own : weaken(own)));
       } else if (item.tag === "unknown") out.push(item);
     }
@@ -923,27 +982,19 @@ export class Values {
   }
 
   /** A literal's value at a path (F12): a demand per literal, path and node. */
-  *#literalItems(
-    literal: PlaceId,
-    rest: readonly string[],
-    node: FlowNode | null,
-  ): Work<readonly Item[]> {
+  *#literalItems(literal: PlaceId, rest: Steps, node: FlowNode | null): Work<readonly Item[]> {
     const site = this.pass.program.places[literal]?.site ?? null;
     return yield {
-      key: joinParts("lit", literal, rest, node?.id ?? "-"),
+      key: joinParts("lit", literal, stepsText(rest), node?.id ?? "-"),
       kind: "value",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
-      make: () => this.literalValue(literal, rest, node),
+      make: () => this.literalValue(literal, stepsRest(rest), node),
     };
   }
 
   /** The demand of `#literalItems`. */
-  public *literalValue(
-    literal: PlaceId,
-    rest: readonly string[],
-    node: FlowNode | null,
-  ): Work<readonly Item[]> {
+  public *literalValue(literal: PlaceId, rest: Rest, node: FlowNode | null): Work<readonly Item[]> {
     const { program, definitions, contract } = this.pass;
     // the element cell of an empty literal holds no element
     if (!program.hasOf.has(literal) && (definitions.cellDefs.get(literal) ?? []).length === 0)
@@ -955,19 +1006,16 @@ export class Values {
    * An operation's value at a path: a demand per result and path, and one for every path below a computed-key load's
    * root, where F19 gives host data whatever the path (`operationValue`; #1203: `loadsBelow`).
    */
-  *#operationItems(
-    c: ValueConstraint,
-    node: FlowNode | null,
-    rest: readonly string[],
-  ): Work<readonly Item[]> {
+  *#operationItems(c: ValueConstraint, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
     const site = this.pass.program.places[c.result]?.site ?? c.site;
     const below = rest.length > 0 && c.kind === "load" && c.key === null;
     const items = yield {
-      key: below ? joinParts("op-below", c.result) : joinParts("op", c.result, rest),
+      key: below ? joinParts("op-below", c.result) : joinParts("op", c.result, stepsText(rest)),
       kind: "value",
       file: site.file,
       offset: site.start,
-      make: () => this.operationValue(c, node, rest),
+      // (an operation's own walk keeps its paths: a record's steps copied out)
+      make: () => this.operationValue(c, node, stepsArray(rest)),
     };
     // (the one answer below the root is the path's but for the mark of an element step there, `hostAt`)
     return below ? [...items, ...emptyAt(rest)] : items;

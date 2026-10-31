@@ -2,11 +2,27 @@ import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { joinParts, keep, keepText } from "../budget.js";
 import { typeTags, writtenOf } from "../contract.js";
-import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
-import { landed, passThrough } from "./landings.js";
+import { keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
+import {
+  canonicalKey,
+  type CanonicalKey,
+  isKeyId,
+  keptKeyAt,
+  keptKeyAtRef,
+  type KeyId,
+  keyIdAt,
+  keyIdFirst,
+  keyIdOf,
+  keyIdPath,
+  keyIdPlace,
+  prefixId,
+  spanRef,
+} from "../contract/key-ids.js";
+import { keyLane } from "../contract/lanes.js";
+import { landed, landedKey, passThrough, passThroughKey } from "./landings.js";
 import type { Frontier, Inheriting, Stop, Stops, Waiting } from "./model.js";
 import { permittedAt, unrestricted } from "./permitted.js";
-import { inputsOf, scanAt } from "./scan.js";
+import { inputsAt, inputsOf, scanAt } from "./scan.js";
 import { cycleOf, inheritedInto, join } from "./waiting.js";
 import { copySources, stopsOf } from "./walk.js";
 import { wholeOf } from "./eligibility.js";
@@ -81,11 +97,41 @@ export function inheritedAt(
   place: PlaceId,
   path: readonly string[],
 ): TypeTerm | null {
+  // (a wrapper's family's path is its cursor, G3 stage 1: `inheritedAtKey`)
+  const { contract } = admission.pass;
+  if (path.length > 0 && keyLane(contract, place, path[0]!) === "cursor")
+    return inheritedAtKey(admission, keyIdOf(contract, place, path));
   if (path.length > admission.reach) {
     const above = inheritedAt(admission, place, path.slice(0, admission.reach));
     return above === null ? null : permittedAt(above, path.slice(admission.reach));
   }
-  const key = keyOf(place, path);
+  return resolveInherited(admission, keyOf(place, path));
+}
+
+/**
+ * `inheritedAt` of a key in its identity: a text's as before; a cursor's past the deepest path a written type reaches
+ * as its prefix there leaves it (`prefixId`, its rest a span), else resolved by its cursor.
+ */
+function inheritedAtKey(admission: Admission, key: Key): TypeTerm | null {
+  if (!isKeyId(key)) return inheritedAt(admission, keyPlace(key), keyPath(key));
+  const { contract } = admission.pass;
+  const path = keyIdPath(key);
+  if (contract.pathDepths[path]! > admission.reach) {
+    const prefix = prefixId(contract, path, admission.reach);
+    const above = inheritedAtKey(
+      admission,
+      prefix === 0 ? keyOf(keyIdPlace(key), []) : keyIdAt(keyIdPlace(key), prefix),
+    );
+    return above === null ? null : permittedAt(above, spanRef(contract, path, admission.reach));
+  }
+  return resolveInherited(admission, key);
+}
+
+/** `inheritedAt`'s resolution of a key within the deepest path a written type reaches. */
+function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
+  const { contract } = admission.pass;
+  // (a key in its identity, as the inherited types hold it: G3 stage 1)
+  const key = canonicalKey(contract, asked);
   const known = admission.inherited.get(key);
   if (known !== undefined) return known;
   // (a resolution resolves every key its scans wait on itself, so none starts inside another)
@@ -93,26 +139,54 @@ export function inheritedAt(
     throw new Error(`The inherited type of '${key}' was asked while resolving.`);
   admission.resolving = true;
   try {
-    const scan = (next: Key): Waiting => {
-      const [place, path] = [keyPlace(next), keyPath(next)];
+    // (a cursor's path never made: its id, its first step from the arena, G3 stage 1)
+    const scan = (next: CanonicalKey): Waiting => {
+      const place = keyPlace(next);
+      const cursor = isKeyId(next) ? next : null;
+      const path = isKeyId(next) ? null : keyPath(next);
+      // (a text path's id made only past its first step's wrapper check, as before G3 stage 1)
+      const id = (): number => (cursor !== null ? keyIdPath(cursor) : contract.pathIdOf(path!));
+      const first = cursor !== null ? keyIdFirst(contract, cursor) : (path![0] ?? null);
       // (G3 3a: a key past a wrapper inherits what the wrapper's read does below it, from its frontier, `wrapped`)
-      const frontier = positions() ? wrappedFrontier(admission, place, path) : null;
+      const frontier = positions() ? wrappedFrontier(admission, place, id, first) : null;
       if (frontier !== null)
         return {
           key: next,
-          steps: wrapped(admission, next, place, path, frontier, () => ownScan(next)),
+          steps: wrapped(admission, next, place, path ?? id(), first!, frontier, () =>
+            ownScan(next),
+          ),
           cycle: "",
         };
       return ownScan(next);
     };
-    const ownScan = (next: Key): Waiting => {
-      const [place, path] = [keyPlace(next), keyPath(next)];
+    const ownScan = (next: CanonicalKey): Waiting => {
+      const place = keyPlace(next);
+      if (isKeyId(next)) {
+        // (a cursor's place answers through no copy above it unless its forest says so: then its steps made)
+        const through = passThroughKey(admission, place, next);
+        if (through !== place)
+          return {
+            key: next,
+            steps: answerOf(
+              admission,
+              keptKeyAtRef(contract, through, spanRef(contract, keyIdPath(next))),
+            ),
+            cycle: "",
+          };
+        const inputs = inputsAt(admission, { root: place, key: next });
+        return {
+          key: next,
+          steps: inputs === null ? null : scanAt(admission, inputs.direct, inputs.prefixes, next),
+          cycle: "",
+        };
+      }
+      const path = keyPath(next);
       // (a place that answers through a copy above it asks that copy's place, nothing scanned)
       const through = passThrough(admission, place, path);
       if (through !== place)
         return {
           key: next,
-          steps: answerOf(admission, keptKey(admission.work, through, path)),
+          steps: answerOf(admission, keptKeyAt(contract, through, path)),
           cycle: "",
         };
       const inputs = inputsOf(admission, place, path);
@@ -124,7 +198,7 @@ export function inheritedAt(
     };
     const pending: Waiting[] = [scan(key)];
     // (the positions of the waiting scans, and the last cycle closed)
-    const waiting = new Map<Key, number>([[key, 0]]);
+    const waiting = new Map<CanonicalKey, number>([[key, 0]]);
     let closed = "";
     // (the type the top scan waited on, given to it as it goes on)
     let given: TypeTerm | null = null;
@@ -183,11 +257,12 @@ export function inheritedAt(
 function wrappedFrontier(
   admission: Admission,
   place: PlaceId,
-  path: readonly string[],
+  path: () => number,
+  first: string | null,
 ): Frontier | null {
-  if (path.length === 0 || scanHop(admission, place, path[0]!) === null) return null;
+  if (first === null || scanHop(admission, place, first) === null) return null;
   const { contract } = admission.pass;
-  const ids: number[] = [contract.pathIdOf(path)];
+  const ids: number[] = [path()];
   // (up to the nearest path known, then each one step below its parent's)
   for (let id = ids[0]!; !admission.frontiers.has(joinParts(place, id)) && id > 0;) {
     id = contract.pathParent(id);
@@ -203,7 +278,7 @@ function wrappedFrontier(
       continue;
     }
     const above = admission.frontiers.get(joinParts(place, contract.pathParent(id)))!;
-    const step = path[contract.pathDepth(id) - 1]!;
+    const step = contract.pathLast(id);
     const hop = above.rest === 0 ? scanHop(admission, above.place, step) : null;
     admission.frontiers.set(
       memoKey,
@@ -305,13 +380,19 @@ function* wrapped(
   admission: Admission,
   key: Key,
   place: PlaceId,
-  path: readonly string[],
+  path: readonly string[] | number,
+  first: string,
   frontier: Frontier,
   own: () => Waiting,
 ): Inheriting<{ readonly copied: TypeTerm | null; readonly nullable: boolean } | null> {
   const { program, values, contract } = admission.pass;
-  const decl = scanHop(admission, place, path[0]!)!.decl;
-  const value = admission.run(values.valuePosition(decl.value!, decl.node, path));
+  const decl = scanHop(admission, place, first)!.decl;
+  // (a cursor's path read by its id: G3 stage 1)
+  const value = admission.run(
+    typeof path === "number"
+      ? values.valuePositionAt(decl.value!, decl.node, path)
+      : values.valuePosition(decl.value!, decl.node, path),
+  );
   const at = value.proof;
   if (
     at === null ||
@@ -344,14 +425,14 @@ export function drive<T>(admission: Admission, steps: Inheriting<T>): T {
   for (;;) {
     const step = steps.next(given);
     if (step.done === true) return step.value;
-    given = inheritedAt(admission, keyPlace(step.value), keyPath(step.value));
+    given = inheritedAtKey(admission, step.value);
   }
 }
 
 /** Another key's inherited type as a scan's answer (`inheritedAt`'s `passThrough`): known, or waited on. */
 function* answerOf(
   admission: Admission,
-  key: Key,
+  key: CanonicalKey,
 ): Inheriting<{ readonly copied: TypeTerm | null; readonly nullable: boolean } | null> {
   const known = admission.inherited.get(key);
   const term = known !== undefined ? known : yield key;
@@ -365,6 +446,53 @@ function* answerOf(
  * own written type is below it, whatever a store on the path decided before the copy. Only in a place copies land in,
  * walked down from its root one step at a time (`OpenStep`), so each of its paths is asked of the landings once.
  */
+/**
+ * `openAbove` of a cursor (G3 stage 1): its path's step of the walk (`OpenStep`) one step below its parent's, each
+ * path's kept, so a family's k nested paths take k steps, never k²; each prefix's landing and inherited type asked by
+ * its key, as `openAbove` asks them.
+ */
+export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): boolean {
+  if (!admission.a4Places.has(place)) return false;
+  let root = admission.a4Places.get(place) ?? null;
+  if (root === null) admission.a4Places.set(place, (root = { carried: [], below: new Map() }));
+  const { contract } = admission.pass;
+  let byPath = admission.openSteps.get(place);
+  if (byPath === undefined) admission.openSteps.set(place, (byPath = new Map([[0, root]])));
+  const way: number[] = [];
+  let at = keyIdPath(key);
+  for (; !byPath.has(at); at = contract.pathParents[at]!) way.push(at);
+  let node = byPath.get(at)!;
+  for (let index = way.length - 1; index >= 0; index -= 1) {
+    const id = way[index]!;
+    if (node.carried !== true) {
+      const step = contract.pathLastSteps[id]!;
+      let next = node.below.get(step);
+      if (next === undefined) {
+        const terms = [...node.carried];
+        const above = contract.pathParents[id]!;
+        const prefix = above === 0 ? keyOf(place, []) : keyIdAt(place, above);
+        const own = landedKey(admission, place, prefix) ? inheritedAtKey(admission, prefix) : null;
+        if (own !== null && !terms.includes(own)) terms.push(own);
+        let carried: TypeTerm[] | true = [];
+        for (const term of terms) {
+          const below = permittedAt(term, [step]);
+          if (below === null) continue;
+          if (unrestricted(below)) {
+            carried = true;
+            break;
+          }
+          if (!carried.includes(below)) carried.push(below);
+        }
+        node.below.set(step, (next = { carried, below: new Map() }));
+      }
+      node = next;
+    }
+    keep(admission.work, 1);
+    byPath.set(id, node);
+  }
+  return node.carried === true;
+}
+
 export function openAbove(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
   if (!admission.a4Places.has(place)) return false;
   let at = admission.a4Places.get(place) ?? null;

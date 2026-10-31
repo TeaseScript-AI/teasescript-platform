@@ -1,7 +1,8 @@
 import type { PlaceId } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { keptArray, keptParts, keptSteps } from "../budget.js";
-import { keptKeyBelow, keyOf, type Definition, type Key } from "../definitions.js";
+import { keptKeyBelowIn } from "../contract/key-ids.js";
+import { keyOf, type Definition, type Key } from "../definitions.js";
 import { SCALAR } from "./kinds.js";
 import { inheritance } from "./landings.js";
 import type { HeldExtra, HeldOwn, OwnStructure } from "./model.js";
@@ -121,7 +122,7 @@ export function contributionOf(
   deep: boolean,
 ): { readonly read: Key } | "point" | "below" {
   const source = deep ? null : sourceOf(admission, value);
-  if (source !== null) return { read: keptKeyBelow(admission.work, source, strip) };
+  if (source !== null) return { read: keptKeyBelowIn(admission.pass.contract, source, strip) };
   const kinds = admission.quietKinds(value);
   return kinds !== null &&
     kinds.every((tag) => SCALAR.has(tag) || tag === "null") &&

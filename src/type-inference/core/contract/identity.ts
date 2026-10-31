@@ -1,15 +1,15 @@
 import type { PlaceId } from "../../graph.js";
 import { keepText, keptSteps, pathText } from "../budget.js";
 import type { Contract } from "../contract.js";
+import { keptKey, keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
 import {
-  keptKey,
-  keptKeyBelow,
-  keyBelow,
-  keyOf,
-  keyPath,
-  keyPlace,
-  type Key,
-} from "../definitions.js";
+  type CanonicalKey,
+  isKeyId,
+  keptKeyBelowIn,
+  keyBelowIn,
+  keyStepsIn,
+  stepsArray,
+} from "./key-ids.js";
 import { methodCategory } from "../method-categories.js";
 import { stepName } from "../program.js";
 import { holderAt, holderOfKey, newHolder } from "./marks.js";
@@ -20,16 +20,16 @@ import { resultOf } from "./value-kinds.js";
 // The one identity function (§8 r4.15): the key a value copies, a key's and a value's source identity, structures.
 
 /** The key a value copies, through its projections: `seed.f0` reads `seed|f0`; `null` for no read. */
-export function copiedKey(contract: Contract, value: PlaceId): Key | null {
+export function copiedKey(contract: Contract, value: PlaceId): CanonicalKey | null {
   const { program } = contract.pass;
   const binding = program.occurrenceOf.get(value);
-  if (binding !== undefined) return keyOf(binding, []);
+  if (binding !== undefined) return contract.keyAt(binding, []);
   // (G3 3b: a projection's key is its owner's and its step, once per projection, never its whole chain again)
   const known = contract.copiedKeys.get(value);
   if (known !== undefined) return known;
   const pending: PlaceId[] = [];
   let current = value;
-  let below: Key | null = null;
+  let below: CanonicalKey | null = null;
   for (;;) {
     const projection = program.projOf.get(current);
     if (projection === undefined || projection.step === "iteration") {
@@ -41,15 +41,16 @@ export function copiedKey(contract: Contract, value: PlaceId): Key | null {
     const owner = program.occurrenceOf.get(projection.owner);
     const memo = owner === undefined ? contract.copiedKeys.get(projection.owner) : undefined;
     if (owner !== undefined || memo !== undefined) {
-      below = owner !== undefined ? keyOf(owner, []) : memo!;
+      below = owner !== undefined ? contract.keyAt(owner, []) : memo!;
       break;
     }
     current = projection.owner;
   }
   for (let index = pending.length - 1; index >= 0; index -= 1) {
     const at = pending[index]!;
+    // (a wrapper's family's key its owner's cursor's child: `keyBelowIn`)
     if (below !== null)
-      below = keptKeyBelow(contract.work, below, [stepName(program.projOf.get(at)!.step)]);
+      below = keptKeyBelowIn(contract, below, [stepName(program.projOf.get(at)!.step)]);
     contract.keep(1);
     contract.copiedKeys.set(at, below);
   }
@@ -183,7 +184,7 @@ function rootOfPlace(
   for (let index = chain.length - 1; index >= 0; index -= 1) {
     const link = chain[index]!;
     top = {
-      key: keptKeyBelow(contract.work, top.key, keyPath(link.up)),
+      key: keptKeyBelowIn(contract, top.key, keyStepsIn(contract, link.up)),
       guarded: top.guarded || link.guarded,
     };
     contract.aliases.set(link.place, top);
@@ -195,15 +196,18 @@ function rootOfPlace(
  * A key's source identity: the key itself through its aliases, and a place of whole copies of one source followed
  * to that source; with its holder (§8 r4.15, r4.23). A loop along those places, then each answered from the last.
  */
-export function keyIdentity(contract: Contract, key: Key): Identity {
+export function keyIdentity(contract: Contract, asked: Key): Identity {
+  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  const key = contract.canonicalKey(asked);
   if (!contract.keys.has(key)) contract.settle(keyIdentityWork(contract, key));
   return contract.keys.get(key)!;
 }
 
-export function* keyIdentityWork(contract: Contract, key: Key): IdentityWork {
+export function* keyIdentityWork(contract: Contract, key: CanonicalKey): IdentityWork {
   if (contract.keys.has(key)) return;
   const { program } = contract.pass;
-  const chain: { readonly key: Key; readonly rooted: Key; readonly guarded: boolean }[] = [];
+  const chain: { readonly key: CanonicalKey; readonly rooted: Key; readonly guarded: boolean }[] =
+    [];
   let at = key;
   let last: Identity;
   for (;;) {
@@ -218,7 +222,11 @@ export function* keyIdentityWork(contract: Contract, key: Key): IdentityWork {
     });
     program.work.charge("invSteps");
     const top = rootOfPlace(contract, keyPlace(at));
-    const rooted = keptKeyBelow(contract.work, top.key, keyPath(at));
+    // (a cursor of a place that is no alias is its own rooted key; any other key's steps below its place's root)
+    const rooted =
+      isKeyId(at) && top.key === keyOf(keyPlace(at), [])
+        ? at
+        : keptKeyBelowIn(contract, top.key, keyStepsIn(contract, at));
     keepText(contract.work, rooted.length + 1);
     let identity: Identity = {
       id: `k${rooted}`,
@@ -227,7 +235,7 @@ export function* keyIdentityWork(contract: Contract, key: Key): IdentityWork {
       holder: holderOfKey(contract, rooted),
     };
     const place = keyPlace(rooted);
-    let inner: Key | null = null;
+    let inner: CanonicalKey | null = null;
     if (
       top.key === keyOf(place, []) &&
       copyOnly(contract, place) &&
@@ -236,7 +244,7 @@ export function* keyIdentityWork(contract: Contract, key: Key): IdentityWork {
       // (a prefix under discovery whose own stores already hold more than copies has no single entry, whatever the rest
       // bring: so answered, never discovered again from its start, so a chain of k calls of one helper discovers its
       // parameter once, not once per link, #1257)
-      const prefix = keyOf(place, []);
+      const prefix = contract.keyAt(place, []);
       const stores =
         contract.discovering.get(prefix)?.other === true
           ? null
@@ -249,13 +257,13 @@ export function* keyIdentityWork(contract: Contract, key: Key): IdentityWork {
         stores.also.length === 0
           ? stores.list[0]!
           : null;
-      const path = keyPath(rooted);
+      const path = keyStepsIn(contract, rooted);
       if (entry !== null && entry.key !== undefined) {
-        inner = keyBelow(entry.key, path);
+        inner = keyBelowIn(contract, entry.key, path);
         chain.push({ key: at, rooted, guarded: identity.guarded || entry.guarded });
       } else if (entry !== null && entry.value !== undefined) {
         // (the lifted holder's reference keeps it as its shift, charged as kept)
-        const within = keptSteps(contract.work, entry.at ?? [], path);
+        const within = keptSteps(contract.work, entry.at ?? [], stepsArray(path));
         const source = yield* contract.needValue(entry.value);
         identity = {
           id: contract.kept(`${source.id}@${pathText(within)}`),

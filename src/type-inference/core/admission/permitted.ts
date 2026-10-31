@@ -15,11 +15,14 @@ const OPEN: TypeTerm = { kind: "dynamic", why: "unwritten parts" };
  * union's member's too) a part whose every kind fits; `null` where the written type does not reach the path (the lead's
  * ruling on the merged S6's B2). One step at a time, so a path costs its length.
  */
-export function permittedAt(term: TypeTerm, path: readonly string[]): TypeTerm | null {
+export function permittedAt(
+  term: TypeTerm,
+  path: { readonly length: number; at(index: number): string | undefined },
+): TypeTerm | null {
   let at: TypeTerm | null = term;
-  for (const step of path) {
+  for (let index = 0; index < path.length; index += 1) {
     if (at === null || unrestricted(at)) return at;
-    at = permittedStep(at, step);
+    at = permittedStep(at, path.at(index)!);
   }
   return at;
 }

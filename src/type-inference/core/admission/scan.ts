@@ -1,8 +1,22 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { joinParts, joinSteps, keepText, pathText } from "../budget.js";
+import { joinParts, joinSteps, keepText } from "../budget.js";
 import { typeTags, writtenOf } from "../contract.js";
 import { keyOf, keyPath, keyPlace, sortCost, type Definition, type Key } from "../definitions.js";
+import {
+  arrayRef,
+  keyIdPath,
+  restPart,
+  restRef,
+  restSteps,
+  spanRef,
+  stepsAfter,
+  stepsFrom,
+  stepsJoin,
+  stepsRest,
+  type PathRef,
+  type Rest,
+} from "../contract/key-ids.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
@@ -13,6 +27,7 @@ import { deciding } from "./kinds.js";
 import { chooses, live, snapshotOf } from "./links.js";
 import type {
   Candidate,
+  DecidedAt,
   EvaluationKey,
   Inheriting,
   Inputs,
@@ -38,24 +53,44 @@ export function inputsOf(
   root: PlaceId,
   path: readonly string[],
 ): Inputs | null {
-  const { program, definitions } = admission.pass;
-  const place = program.place(root);
-  if (
-    place.kind.kind === "cell" ||
-    place.kind.kind === "property" ||
-    program.cellOwner.has(root) ||
-    program.hasOf.has(root)
-  )
-    return null;
+  const { program, definitions, contract } = admission.pass;
+  if (!decidesPaths(admission, root)) return null;
   const direct = (definitions.candidates.get(keyOf(root, path)) ?? []).filter(
     (candidate) => !admission.besideDefault(candidate.d),
   );
   // (G3 3b: the keys whole stores, adds or dead arguments reach along the path, shortest first, by one walk of its
   // steps down their trie: never a key made per prefix of the path)
-  const prefixes: { readonly key: Key; readonly rest: readonly string[] }[] = [];
+  const prefixes: { readonly key: Key; readonly rest: PathRef }[] = [];
   for (const { key, depth } of admission.stored.along(root, path, false))
-    prefixes.push({ key, rest: path.slice(depth) });
+    prefixes.push({ key, rest: arrayRef(contract, path.slice(depth)) });
+  void program;
   return direct.length === 0 && prefixes.length === 0 ? null : { direct, prefixes };
+}
+
+/**
+ * `inputsOf` for a decided path in its identity (G3 stage 1): a cursor's family holds no definition or candidate below
+ * its place's own key (its shape requires it), so it has no direct store, and its one prefix with stores is that own
+ * key, its rest the cursor's whole path as a span, asked of the trie as the path's walk asks it there.
+ */
+export function inputsAt(admission: Admission, at: DecidedAt): Inputs | null {
+  if (at.key === undefined) return inputsOf(admission, at.root, at.path);
+  if (!decidesPaths(admission, at.root)) return null;
+  const prefixes: { readonly key: Key; readonly rest: PathRef }[] = [];
+  for (const { key } of admission.stored.along(at.root, [], true))
+    prefixes.push({ key, rest: spanRef(admission.pass.contract, keyIdPath(at.key)) });
+  return prefixes.length === 0 ? null : { direct: [], prefixes };
+}
+
+/** Whether admission decides a place's paths: no literal's own cell or property. */
+function decidesPaths(admission: Admission, root: PlaceId): boolean {
+  const { program } = admission.pass;
+  const place = program.place(root);
+  return !(
+    place.kind.kind === "cell" ||
+    place.kind.kind === "property" ||
+    program.cellOwner.has(root) ||
+    program.hasOf.has(root)
+  );
 }
 
 /**
@@ -66,7 +101,7 @@ export function inputsOf(
 export function* scanAt(
   admission: Admission,
   direct: readonly Candidate[],
-  prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[],
+  prefixes: readonly { readonly key: Key; readonly rest: PathRef }[],
   into: Key,
 ): Inheriting<{
   readonly tags: ItemTag[];
@@ -82,8 +117,9 @@ export function* scanAt(
   const { program, lists } = admission.pass;
   const work = program.work;
   const seen = new Map<string, Item[]>();
-  const evaluate = (d: Definition, at: readonly string[]): Item[] => {
-    const memoKey = joinParts(d.uid, at);
+  // (a span's memo by its path's id, `(uid, span)`, never its text: G3 stage 1)
+  const evaluate = (d: Definition, at: Rest): Item[] => {
+    const memoKey = joinParts(d.uid, restPart(at));
     let items = seen.get(memoKey);
     if (items === undefined) {
       keepText(admission.work, memoKey.length);
@@ -102,16 +138,17 @@ export function* scanAt(
   );
   own.sort((a, b) => admission.sourceOrder(a.d) - admission.sourceOrder(b.d));
   work.charge("checks", direct.length + sortCost(own.length));
-  const scans: {
-    readonly ds: readonly Definition[];
-    readonly at: (index: number) => readonly string[];
-  }[] = [{ ds: own.map((candidate) => candidate.d), at: (index) => own[index]!.at }];
+  const scans: { readonly ds: readonly Definition[]; readonly at: (index: number) => Rest }[] = [
+    { ds: own.map((candidate) => candidate.d), at: (index) => stepsRest(own[index]!.at) },
+  ];
+  // (a prefix's rest as its prefix reads it: an array where the path was one, a record's steps, a cursor's span else)
+  const restOf = (rest: PathRef): Rest => (rest.kind === "span" ? rest : stepsRest(rest.steps()));
   for (const { key: prefix, rest } of prefixes)
-    scans.push({ ds: eligibleOf(admission, prefix, rest), at: () => rest });
+    scans.push({ ds: eligibleOf(admission, prefix, restOf(rest)), at: () => restOf(rest) });
   for (const { key: prefix, rest } of prefixes)
-    if (rest[0] === "element") {
-      const adds = eligibleOf(admission, prefix, rest, true);
-      scans.push({ ds: adds, at: (index) => addRest(adds[index]!, rest) });
+    if (rest.length > 0 && rest.at(0) === "element") {
+      const adds = eligibleOf(admission, prefix, restOf(rest), true);
+      scans.push({ ds: adds, at: (index) => addRest(adds[index]!, restOf(rest)) });
     }
   const positions = scans.map(() => 0);
   let sawNull = false;
@@ -193,7 +230,7 @@ export function* earliestDecider(
   admission: Admission,
   value: PlaceId,
   node: FlowNode,
-  at: readonly string[],
+  asked: Rest,
   into: Key | null,
 ): Inheriting<{
   readonly term: TypeTerm | null;
@@ -205,7 +242,9 @@ export function* earliestDecider(
   readonly joinedNull?: boolean;
 } | null> {
   const { program, values, contract } = admission.pass;
-  const transferred = transferredDecider(admission, expand(admission, value, node, []), at);
+  // (a cursor's span read one step at a time and by its path's id, never made: G3 stage 1)
+  const at = restRef(contract, asked);
+  const transferred = transferredDecider(admission, expand(admission, value, node, []), asked);
   if (transferred !== undefined)
     return transferred === null
       ? null
@@ -228,7 +267,10 @@ export function* earliestDecider(
     // read out of has it alone, and each operation surely gives it)
     if (stop.deep && length === at.length && !(stop.single && selects(self, stop, true)))
       return null;
-    const rest = joinSteps(stop.strip, at.slice(length));
+    const rest: Rest =
+      at.kind === "span"
+        ? at.from(length).after(stop.strip)
+        : stepsAfter(stop.strip, stepsFrom(restSteps(asked), length));
     const term =
       stop.from === null
         ? permittedAt(stop.term!, rest)
@@ -243,7 +285,8 @@ export function* earliestDecider(
   const deepest = Math.min(at.length, Math.max(depths.written, depths.values));
   for (let length = 0; length <= deepest; length += 1) {
     program.work.charge("checks");
-    const prefix = pathText(at.slice(0, length));
+    // (a span's prefix text its record's, `textOf`; an array's made plain, as before)
+    const prefix = at.text(length);
     const written = snapshots(admission, stops.written.get(prefix), false);
     // (and a call a join carries by its written result, as `joinElements` reads it: F20)
     const calls = joinedOf(admission, snapshots(admission, stops.values.get(prefix), false));
@@ -257,7 +300,13 @@ export function* earliestDecider(
         term =
           result === null || !selects(admission, stop)
             ? null
-            : permittedAt(result, joinSteps(keyPath(key!), stop.strip, at.slice(length)));
+            : permittedAt(
+                result,
+                stepsJoin(
+                  joinSteps(keyPath(key!), stop.strip),
+                  stepsFrom(restSteps(asked), length),
+                ),
+              );
       }
       if (term === null) continue;
       const domain = joinedDomain(typeTags(term));
@@ -287,7 +336,7 @@ export function* earliestDecider(
   for (let length = 0; length <= Math.min(at.length, depths.values); length += 1) {
     const list = snapshots(
       admission,
-      stops.values.get(pathText(at.slice(0, length))),
+      stops.values.get(at.text(length)),
       length === at.length,
       true,
     );
@@ -296,7 +345,7 @@ export function* earliestDecider(
   const literals =
     at.length > depths.literals
       ? undefined
-      : snapshots(admission, stops.literals.get(pathText(at)), true);
+      : snapshots(admission, stops.literals.get(at.text(at.length)), true);
   if (literals !== undefined) lists.push({ list: literals, length: at.length });
   const positions = lists.map(() => 0);
   const throughs = new Map<string, WeakMap<ViaChain, boolean>>();
@@ -321,9 +370,16 @@ export function* earliestDecider(
     // (a typed default's literal is the call's input, not the stored value's own element: where the default holds host
     // data it leaves the path open, and the call decides nothing there beside it, F18, TABLE r4.66 (3))
     if (next.via?.typed === true) continue;
-    const rest = at.slice(lists[best]!.length);
     const items = withoutEmpty(
-      admission.run(values.valueItems(next.value, next.node, joinSteps(next.strip, rest))),
+      admission.run(
+        values.valueItems(
+          next.value,
+          next.node,
+          at.kind === "span"
+            ? at.from(lists[best]!.length).after(next.strip)
+            : stepsAfter(next.strip, stepsFrom(restSteps(asked), lists[best]!.length)),
+        ),
+      ),
     );
     const definite = items.some((item) => item.tag === "unknown") ? [] : deciding(items);
     // (an operand its operation does not give decides nothing, F17a, F17b)
@@ -333,7 +389,7 @@ export function* earliestDecider(
     const kinds = [...tags].sort().join(",");
     let holds = throughs.get(kinds);
     if (holds === undefined) throughs.set(kinds, (holds = new WeakMap()));
-    if (through(admission, next.via, at, tags, holds))
+    if (through(admission, next.via, asked, tags, holds))
       return { term: null, site: siteOf(next), tags };
   }
 }
@@ -515,17 +571,20 @@ function viaClasses(admission: Admission, via: ViaChain | null): string {
 function through(
   admission: Admission,
   via: ViaChain | null,
-  at: readonly string[],
+  at: Rest,
   definite: readonly ItemTag[],
   holds: WeakMap<ViaChain, boolean>,
 ): boolean {
+  const ref = restRef(admission.pass.contract, at);
   return perLink(admission, holds, via, true, (level) => {
     const carried = withoutEmpty(
       admission.run(
         admission.pass.values.valueItems(
           level.value,
           level.node,
-          joinSteps(level.strip, at.slice(level.path.length)),
+          ref.kind === "span"
+            ? ref.from(level.path.length).after(level.strip)
+            : stepsAfter(level.strip, stepsFrom(restSteps(at), level.path.length)),
         ),
       ),
     );

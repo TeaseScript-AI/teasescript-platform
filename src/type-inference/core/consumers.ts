@@ -11,6 +11,7 @@ import {
   keptSlice,
   type BudgetLimit,
 } from "./budget.js";
+import { restSteps, stepsArray, type CanonicalKey, type Rest } from "./contract/key-ids.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
@@ -171,7 +172,10 @@ export class Consumers {
       readonly unknown: boolean;
     }
   >();
-  readonly defaults = new Map<string, { readonly key: Key; readonly at: FlowNode } | null>();
+  readonly defaults = new Map<
+    string,
+    { readonly key: CanonicalKey; readonly at: FlowNode } | null
+  >();
   /** The cheap deciders' shapes, one per key, and their decisions, one per key and path (`cheapDecided`). */
   readonly cheapShapes = new Map<Key, CheapShape>();
   readonly cheapFrontiers = new Map<Key, CheapFrontier>();
@@ -203,7 +207,8 @@ export class Consumers {
       {
         run: (work) => this.solve(work),
         // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
-        read: (value, node, at) => (this.finishing ? finishingRead(this, value, node, at) : null),
+        read: (value, node, at) =>
+          this.finishing ? finishingRead(this, value, node, stepsArray(restSteps(at))) : null,
       },
       rejected,
       cycling,
@@ -259,7 +264,7 @@ export class Consumers {
   }
 
   /** A value's items at a node and a path, as a consumer's demand: past its allowance, its own key's contract. */
-  public valueRun(value: PlaceId, node: FlowNode | null, rest: readonly string[]): readonly Item[] {
+  public valueRun(value: PlaceId, node: FlowNode | null, rest: Rest): readonly Item[] {
     return this.run(this.pass.values.valueItems(value, node, rest), () =>
       this.pass.contract.contractOfValueAt(value, rest),
     );
@@ -405,7 +410,7 @@ export class Consumers {
       // (a pass whose admission gives the stores below a selection other targets starts the passes again, #1275; one in
       // which a decision stopped is not settled either: the next starts with its key stopped, TABLE r4.180)
       const own = this.#ownTargets(this.admission, (root, path) => {
-        decide(this, root, path, true);
+        decide(this, { root, path }, true);
       });
       this.settled =
         own &&
@@ -535,9 +540,9 @@ export class Consumers {
   /** `readsTakeTask`'s answer per place. */
   readonly placeExpectations = new Map<PlaceId, SiteExpectation>();
 
-  readonly names = new Map<Key | PlaceId, readonly string[]>();
+  readonly names = new Map<CanonicalKey | PlaceId, readonly string[]>();
 
-  readonly shown = new Map<Key | PlaceId, string | null>();
+  readonly shown = new Map<CanonicalKey | PlaceId, string | null>();
 
   directSites: Map<string, SourceSite> | null = null;
 

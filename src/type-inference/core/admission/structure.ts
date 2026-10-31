@@ -1,16 +1,23 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { joinSteps, keep, keepText, keptParts, keptSlice, keptSteps, keptText } from "../budget.js";
+import { keptPath, keyOf, keyPath, type Definition, type Key } from "../definitions.js";
 import {
-  keptKey,
-  keptKeyBelow,
-  keptPath,
-  keyOf,
-  keyPath,
-  keyPlace,
-  type Definition,
-  type Key,
-} from "../definitions.js";
+  canonicalKey,
+  isKeyId,
+  isPathSteps,
+  keptKeyAt,
+  keptKeyBelowIn,
+  keptKeyWalk,
+  keptStepsFrom,
+  keyDepthIn,
+  keyIdPath,
+  keyWalk,
+  stepsArray,
+  stepsTo,
+  type CanonicalKey,
+  type Steps,
+} from "../contract/key-ids.js";
 import { withoutEmpty } from "../exact-path.js";
 import { dictList } from "../method-categories.js";
 import { propertyStep } from "../program.js";
@@ -22,18 +29,22 @@ import type { Structure } from "./model.js";
  * A value's source key: the key a copy reads, a call's callee's result key (F20), a dict's `values` read as its
  * elements (r4.46 (2)); `null` for any other value and for a dict's `keys`, which hold text.
  */
-export function sourceOf(admission: Admission, value: PlaceId): Key | null {
+export function sourceOf(admission: Admission, value: PlaceId): CanonicalKey | null {
   const { contract, program } = admission.pass;
-  const key = contract.copiedKey(value) ?? contract.resultKey(value);
-  if (key === null) return null;
+  const found = contract.copiedKey(value) ?? contract.resultKey(value);
+  if (found === null) return null;
+  // (the source in its identity, as the structures and depths hold it: G3 stage 1)
+  const key = canonicalKey(contract, found);
+  // (G3 stage 1: a cursor with no built-in member on its path holds no dict's list step: itself, never walked)
+  if (isKeyId(key) && contract.pathMembers[keyIdPath(key)] === 0) return key;
+  const walk = keyWalk(contract, key);
   const path: string[] = [];
-  for (const [index, step] of keyPath(key).entries()) {
+  for (let index = 0; index < walk.path.length; index += 1) {
+    const step = walk.path.at(index)!;
     const list = dictList(step);
     if (list !== undefined) {
       program.work.charge("indexSteps");
-      const owner = withoutEmpty(
-        admission.run(contract.contractOf(keyOf(keyPlace(key), keyPath(key).slice(0, index)))),
-      );
+      const owner = withoutEmpty(admission.run(contract.contractOf(walk.prefix(index))));
       if (owner.some((item) => item.tag === "dict")) {
         if (list === "keys") return null;
         continue;
@@ -41,7 +52,7 @@ export function sourceOf(admission: Admission, value: PlaceId): Key | null {
     }
     path.push(step);
   }
-  return keyOf(keyPlace(key), path);
+  return contract.keyAt(walk.place, path);
 }
 
 /** A stored value's own structure: its literals' fields and elements at every depth, and their sources (F2). */
@@ -66,10 +77,10 @@ function keyStructure(admission: Admission, key: Key): Structure {
   const id = `k${key}`;
   const known = admission.structures.get(id);
   if (known !== undefined) return known;
-  const { definitions, lists, program } = admission.pass;
-  const place = keyPlace(key);
-  // (its steps, which the roots' rests below keep, charged by the key's text)
-  const path = keptPath(admission.work, key);
+  const { definitions, lists, program, contract } = admission.pass;
+  // (its steps, which the roots' rests below keep, charged by the key's text; a cursor's through the charged boundary)
+  const walk = keptKeyWalk(contract, key);
+  const path = walk.path;
   const roots: { value: PlaceId; at: readonly string[]; strip: readonly string[] }[] = [];
   const levels: (readonly string[])[] = [];
   // a store's value standing at `below` (an add's below its element), read at `strip`: below the key, at its path or
@@ -100,12 +111,19 @@ function keyStructure(admission: Admission, key: Key): Structure {
     );
   };
   for (let length = 0; length <= path.length; length += 1) {
-    const stores = definitions.byKey.get(keyOf(place, path.slice(0, length))) ?? [];
+    // (a cursor's prefixes below its root are in no definition index: its family's shape requires it)
+    const stores = definitions.byKey.get(walk.prefix(length)) ?? [];
     // (a prefix's stores share one rest of the key's path)
-    const rest = stores.length === 0 ? [] : keptSlice(admission.work, path, length);
+    // (the roots keep their rests as arrays: a record's suffix copied out, `stepsArray`)
+    const rest =
+      stores.length === 0
+        ? []
+        : isPathSteps(path)
+          ? stepsArray(path.from(length))
+          : keptSlice(admission.work, path, length);
     for (const d of stores) root(d, [], rest);
   }
-  for (const below of definitions.keysBelow(key)) {
+  for (const below of isKeyId(key) ? [] : definitions.keysBelow(key)) {
     const at = keptSlice(admission.work, keptPath(admission.work, below), path.length);
     if (at.some((step) => step !== "element")) continue;
     levels.push(at);
@@ -129,7 +147,10 @@ function collect(
   elements = false,
 ): Structure {
   const paths = new Map<string, readonly string[]>();
-  const sources = new Map<string, { readonly below: readonly string[]; readonly key: Key }>();
+  const sources = new Map<
+    string,
+    { readonly below: readonly string[]; readonly key: CanonicalKey }
+  >();
   // (each path's text charged by its size before it is made, TABLE r4.58)
   for (const at of levels)
     for (let length = 1; length <= at.length; length += 1) {
@@ -151,7 +172,7 @@ function collect(
 export interface Composed {
   readonly entries: readonly (
     | { readonly path: readonly string[] }
-    | { readonly source: { readonly below: readonly string[]; readonly key: Key } }
+    | { readonly source: { readonly below: readonly string[]; readonly key: CanonicalKey } }
     | { readonly part: Composed; readonly at: readonly string[] }
   )[];
   readonly empty: boolean;
@@ -167,7 +188,7 @@ const NO_STRUCTURE: Composed = { entries: [], empty: true, listed: null };
 function joinInto(
   admission: Admission,
   paths: Map<string, readonly string[]>,
-  sources: Map<string, { readonly below: readonly string[]; readonly key: Key }>,
+  sources: Map<string, { readonly below: readonly string[]; readonly key: CanonicalKey }>,
   from: Composed,
   at: readonly string[],
 ): void {
@@ -250,7 +271,7 @@ function composed(
   if (known !== undefined) return known;
   type Entry =
     | { readonly path: readonly string[] }
-    | { readonly source: { readonly below: readonly string[]; readonly key: Key } }
+    | { readonly source: { readonly below: readonly string[]; readonly key: CanonicalKey } }
     | { readonly part: number; readonly at: readonly string[] };
   interface Frame {
     readonly name: string;
@@ -276,8 +297,11 @@ function composed(
       if (source !== null) {
         // (read past the longest key, it is cut there, never dropped: whether a literal holds a source, and so which
         // obligations its paths owe, never depends on the keys elsewhere in the program, TABLE r4.67 (1))
-        const room = Math.max(0, longestKey(admission) - keyPath(source).length);
-        const read = keptKeyBelow(admission.work, source, below.slice(0, room));
+        const room = Math.max(
+          0,
+          longestKey(admission) - keyDepthIn(admission.pass.contract, source),
+        );
+        const read = keptKeyBelowIn(admission.pass.contract, source, below.slice(0, room));
         entries.push({ source: { below: [], key: read } });
       } else for (const [carried, rest] of admission.carriersOf(of, below)) part([], carried, rest);
       return { name: key, entries, parts, next: 0 };
@@ -382,13 +406,15 @@ function longestKey(admission: Admission): number {
  * (Tarjan's components) one turn of it for each of its keys, so the copies of one source share it and every order
  * gives one answer.
  */
-export function depthOf(admission: Admission, key: Key): number {
+export function depthOf(admission: Admission, asked: Key): number {
+  const { program, contract } = admission.pass;
+  // (a key in its identity, as the depths hold it: G3 stage 1)
+  const key = canonicalKey(contract, asked);
   const known = admission.depths.get(key);
   if (known !== undefined) return known;
-  const { program, contract } = admission.pass;
   const work = program.work;
   // (a key whose contract holds no collection has no elements to follow)
-  const flat = (at: Key): boolean => {
+  const flat = (at: CanonicalKey): boolean => {
     const none = !withoutEmpty(admission.run(contract.contractOf(at))).some(
       (item) => item.tag === "list" || item.tag === "set" || item.tag === "dict",
     );
@@ -396,12 +422,12 @@ export function depthOf(admission: Admission, key: Key): number {
     return none;
   };
   if (flat(key)) return 0;
-  const order = new Map<Key, number>();
-  const low = new Map<Key, number>();
-  const stack: Key[] = [];
-  const open = new Set<Key>();
-  const frames: { readonly key: Key; next: number }[] = [];
-  const enter = (at: Key): void => {
+  const order = new Map<CanonicalKey, number>();
+  const low = new Map<CanonicalKey, number>();
+  const stack: CanonicalKey[] = [];
+  const open = new Set<CanonicalKey>();
+  const frames: { readonly key: CanonicalKey; next: number }[] = [];
+  const enter = (at: CanonicalKey): void => {
     order.set(at, order.size);
     low.set(at, order.get(at)!);
     stack.push(at);
@@ -426,7 +452,7 @@ export function depthOf(admission: Admission, key: Key): number {
     if (parent !== undefined)
       low.set(parent.key, Math.min(low.get(parent.key)!, low.get(frame.key)!));
     if (low.get(frame.key) !== order.get(frame.key)) continue;
-    const members = new Set<Key>();
+    const members = new Set<CanonicalKey>();
     for (let member = stack.pop()!; ; member = stack.pop()!) {
       open.delete(member);
       members.add(member);
@@ -488,11 +514,13 @@ export function sharedPaths(
 ): (readonly string[])[] {
   const { program } = admission.pass;
   const out = new Map<string, readonly string[]>();
-  const put = (path: readonly string[]): void => {
+  const put = (path: Steps): void => {
     program.work.charge("indexSteps");
     {
-      const text = path.length > 0 ? keptText(admission.work, path) : "";
-      if (path.length > 0 && !out.has(text)) out.set(text, path);
+      // (a record's path named by its record's text; the list returned keeps arrays: a new one copied out)
+      const text =
+        path.length === 0 ? "" : isPathSteps(path) ? path.text() : keptText(admission.work, path);
+      if (path.length > 0 && !out.has(text)) out.set(text, stepsArray(path));
     }
   };
   for (const d of list)
@@ -534,20 +562,28 @@ export function literalLanding(admission: Admission, literal: PlaceId): Key | nu
 }
 
 /** The paths admission decides (`groups`) below a key, indexed once by every prefix of each. */
-function decidedBelow(admission: Admission, key: Key): readonly (readonly string[])[] {
+function decidedBelow(admission: Admission, asked: Key): readonly Steps[] {
   if (admission.below === null) {
     admission.below = new Map();
-    for (const { root, path } of admission.groups())
+    for (const group of admission.groups()) {
+      // (a cursor's steps made through the charged boundary, its prefixes its ancestors: G3 stage 1)
+      const path = admission.stepsAt(group);
+      const walk = group.key === undefined ? null : keyWalk(admission.pass.contract, group.key);
       for (let length = 0; length < path.length; length += 1) {
         admission.pass.program.work.charge("indexSteps");
-        const prefix = keptKey(admission.work, root, path.slice(0, length));
-        const rest = keptSlice(admission.work, path, length);
+        const prefix =
+          walk === null
+            ? keptKeyAt(admission.pass.contract, group.root, stepsTo(path, length))
+            : walk.prefix(length);
+        const rest = keptStepsFrom(admission.work, path, length);
         const paths = admission.below.get(prefix);
         if (paths === undefined) admission.below.set(prefix, [rest]);
         else paths.push(rest);
       }
+    }
   }
-  return admission.below.get(key) ?? [];
+  // (a key in its identity, as the groups' prefixes hold it: G3 stage 1)
+  return admission.below.get(canonicalKey(admission.pass.contract, asked)) ?? [];
 }
 
 /** A path below a store's destination: an `addAll`'s literal's elements are the destination's own elements. */

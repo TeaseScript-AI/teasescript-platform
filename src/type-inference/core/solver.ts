@@ -200,8 +200,14 @@ export interface SolvedMember {
 export interface SolverSeam {
   /** Solve every component's members in the reverse of the canonical order. */
   readonly reverseWorklist?: boolean;
-  /** Hears of every component solved: its members' keys in the order they were solved in, with their answers. */
-  readonly onComponent?: (members: readonly SolvedMember[]) => void;
+  /**
+   * Hears of every component solved: its members' keys in the order they were solved in, with their answers; and,
+   * where a key holds a cursor, the names another pass replays them by and their packet (`exportNames`, #1422 B1).
+   */
+  readonly onComponent?: (
+    members: readonly SolvedMember[],
+    replay: { readonly names: readonly string[]; readonly packet: unknown } | null,
+  ) => void;
 }
 
 let activeSeam: SolverSeam | null = null;
@@ -225,14 +231,19 @@ export interface DemandWork {
 
 /**
  * The canonical order of two demands: their file, their offset, their kind, then their key, so that distinct demands
- * at one site still have one order.
+ * at one site still have one order. G3 stage 1: a key holding a cursor compares as the logical text it stands for
+ * (`names`, the pass's: `compareDemandNames`), never by its ids (#1398).
  */
-function canonical(a: Demand | ProofDemand<Proof>, b: Demand | ProofDemand<Proof>): number {
+function canonical(
+  a: Demand | ProofDemand<Proof>,
+  b: Demand | ProofDemand<Proof>,
+  names: ((a: string, b: string) => number) | null,
+): number {
   return (
     a.file - b.file ||
     a.offset - b.offset ||
     KIND_RANK[a.kind] - KIND_RANK[b.kind] ||
-    (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+    (names !== null ? names(a.key, b.key) : a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
   );
 }
 
@@ -308,6 +319,14 @@ export class Solver {
   readonly #work: WorkLedger;
   readonly #scope: ItemScope;
   readonly #seam: SolverSeam | null = activeSeam;
+  /** The order of demands' keys at one site and kind (`canonical`): the pass's, a cursor's by its logical text. */
+  names: ((a: string, b: string) => number) | null = null;
+  /** Test-only seam: a component's names as another pass replays them (`exportNames`). */
+  replayOf:
+    | ((
+        names: readonly string[],
+      ) => { readonly names: readonly string[]; readonly packet: unknown } | null)
+    | null = null;
   readonly #units: DemandWork[] = [];
   #counter = 0;
   #running = false;
@@ -619,7 +638,9 @@ export class Solver {
     const { component } = solving;
     const reverse = this.#seam?.reverseWorklist === true;
     solving.members = [...component.members].sort((a, b) =>
-      reverse ? canonical(b.demand, a.demand) : canonical(a.demand, b.demand),
+      reverse
+        ? canonical(b.demand, a.demand, this.names)
+        : canonical(a.demand, b.demand, this.names),
     );
     solving.position = new Map(solving.members.map((member, at) => [member, at]));
     component.dependents.clear();
@@ -767,7 +788,8 @@ export class Solver {
       if (member.proof !== null) this.#proofs.set(member.demand.key, member.proof);
       this.#active.delete(member.demand.key);
     }
-    this.#seam?.onComponent?.(solved);
+    if (this.#seam?.onComponent !== undefined)
+      this.#seam.onComponent(solved, this.replayOf?.(solved.map((member) => member.key)) ?? null);
     const closing = solving.closing.node!;
     this.#units.push({
       key: closing.demand.key,

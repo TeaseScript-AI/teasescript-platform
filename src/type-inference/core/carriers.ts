@@ -213,6 +213,39 @@ function isChoice(program: CoreProgram, value: PlaceId): boolean {
 }
 
 /**
+ * A path below a value still to read (`carried`'s strip), read at its front and extended there: an array of steps, or
+ * a walk's own form (`copySources`' for a wrapper's family, G3 stage 1: a path of the arena kept in reverse, so a step
+ * goes on in front in constant work and a chain of k projections never makes k strips of up to k steps).
+ */
+export interface Strip<S> {
+  readonly length: number;
+  /** Its step at `index` (0 or 1), `undefined` past its end. */
+  at(index: 0 | 1): string | undefined;
+  /** It without its first step. */
+  rest(): S;
+  /** The steps of `below`, then its own (`keptSteps(below, strip)`). */
+  under(below: readonly string[]): S;
+}
+
+/** An array as a `Strip`, read and extended as before (`keptSteps`). */
+export interface StepsStrip extends Strip<StepsStrip> {
+  readonly kind: "steps";
+  readonly steps: readonly string[];
+}
+
+/** An array of steps as a `Strip`. */
+export function arrayStrip(program: CoreProgram, steps: readonly string[]): StepsStrip {
+  return {
+    kind: "steps",
+    steps,
+    length: steps.length,
+    at: (index) => steps[index],
+    rest: () => arrayStrip(program, steps.slice(1)),
+    under: (below) => arrayStrip(program, keptSteps(program.work, below, steps)),
+  };
+}
+
+/**
  * The values a value carries, each with the path into it its own value is read at (`strip`: the path below it still to
  * read), its role and its evaluation position, after the value side's decisions: nothing where the operation keeps its
  * own value (F19a, F19), and each operand only where its decision allows it.
@@ -223,17 +256,30 @@ export function carried(
   strip: readonly string[],
   dispatch: Dispatch,
 ): readonly (readonly [PlaceId, readonly string[], CarrierRole, number])[] {
+  return carriedBy(program, value, arrayStrip(program, strip), dispatch).map(
+    ([operand, below, role, position]) => [operand, below.steps, role, position],
+  );
+}
+
+/** `carried` of a `Strip`, each operand's strip in its form. */
+export function carriedBy<S extends Strip<S>>(
+  program: CoreProgram,
+  value: PlaceId,
+  strip: S,
+  dispatch: Dispatch,
+): readonly (readonly [PlaceId, S, CarrierRole, number])[] {
   if (keepsOwn(program, value, dispatch)) return [];
   if (isChoice(program, value)) {
     // r4.93: a choice's answer is a scalar button (V30 §19, TSV029), so an outer choice's rows reach it once: its
     // `#value` row as the button itself, its `#text` row the same button again, its element rows nothing
     const selection = (step: string | undefined): boolean =>
       step === SELECTED_VALUE || step === SELECTED_TEXT;
-    if (strip[0] === SELECTED_TEXT || (strip[0] === "element" && selection(strip[1]))) return [];
-    if (strip[0] === SELECTED_VALUE) return carried(program, value, strip.slice(1), dispatch);
+    if (strip.at(0) === SELECTED_TEXT || (strip.at(0) === "element" && selection(strip.at(1))))
+      return [];
+    if (strip.at(0) === SELECTED_VALUE) return carriedBy(program, value, strip.rest(), dispatch);
   }
-  const elements = strip.length === 0 || strip[0] === "element";
-  const out: (readonly [PlaceId, readonly string[], CarrierRole, number])[] = [];
+  const elements = strip.length === 0 || strip.at(0) === "element";
+  const out: (readonly [PlaceId, S, CarrierRole, number])[] = [];
   let kinds: ReadonlySet<ItemTag> | null = null;
   for (const { operand, below, when, role, position } of operandsOf(program, value)) {
     if (when === "elements" && !elements) continue;
@@ -248,7 +294,7 @@ export function carried(
       // (a dict's `values` are its elements: read at an element path only)
       if (when === "dict" && below.length === 0 && !elements) continue;
     }
-    out.push([operand, keptSteps(program.work, below, strip), role, position]);
+    out.push([operand, strip.under(below), role, position]);
   }
   return out;
 }

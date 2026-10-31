@@ -1,14 +1,8 @@
 import type { PlaceId } from "../../graph.js";
+import { isKeyId, keptKeyAt, keptStepsIn, stepsArray } from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
 import { keptArray, keptSlice, keptSteps, keptText } from "../budget.js";
-import {
-  keptKey,
-  keptPath,
-  keyPlace,
-  sortCost,
-  type Definition,
-  type Key,
-} from "../definitions.js";
+import { keptPath, keyPlace, sortCost, type Definition, type Key } from "../definitions.js";
 import { refText, type Found, type Touch, type TouchRef } from "../touch.js";
 import type { HeldOwn } from "./model.js";
 import { liveOwn } from "./own.js";
@@ -79,7 +73,7 @@ function keyComponents<T>(
  */
 export function atCopy(admission: Admission, root: PlaceId, path: readonly string[]): boolean {
   admission.groups();
-  return admission.atCopies.has(keptKey(admission.work, root, path));
+  return admission.atCopies.has(keptKeyAt(admission.pass.contract, root, path));
 }
 
 /**
@@ -118,7 +112,12 @@ function heldReads(
 /** A read's contribution to a held trie where it stands: its source's held trie at its path. */
 function heldRead(admission: Admission, source: Key, at: readonly string[]): Touch | null {
   const touches = touchesOf(admission);
-  const held = touches.sub(heldOf(admission, keyPlace(source)), keptPath(admission.work, source));
+  // (a cursor's steps through the charged boundary, G3 stage 1)
+  // (the touches' tries take arrays, kept in their payloads: a cursor's steps copied out, `stepsArray`)
+  const held = touches.sub(
+    heldOf(admission, keyPlace(source)),
+    stepsArray(keptStepsIn(admission.pass.contract, source)),
+  );
   return held === null ? null : touches.graft(held, at);
 }
 
@@ -175,7 +174,11 @@ function finishHeld(admission: Admission, members: readonly PlaceId[]): void {
       if (from === undefined) {
         const held = heldRead(admission, source, where);
         if (held !== null) own[at]!.push(held);
-      } else if (where.length === 0 && keptPath(admission.work, source).length === 0)
+      } else if (
+        where.length === 0 &&
+        !isKeyId(source) &&
+        keptPath(admission.work, source).length === 0
+      )
         copies[at]!.push(from);
     }
   }
@@ -253,7 +256,9 @@ function groupHeld(
       for (const { at: where, source } of heldReads(admission, store)) {
         work.charge("indexSteps");
         const from = index.get(keyPlace(source));
-        const whole = where.length === 0 && keptPath(admission.work, source).length === 0;
+        // (a cursor is never a place's own key: its source is below its root, G3 stage 1)
+        const whole =
+          where.length === 0 && !isKeyId(source) && keptPath(admission.work, source).length === 0;
         if (from === undefined) {
           const held = heldRead(admission, source, where);
           if (held !== null) parts.push(held);
@@ -298,7 +303,8 @@ function groupHeld(
       touches.paths(touches.standsAt(copyOf === null ? own : owns.get(copyOf)!, met), [], owed);
     }
     for (const path of owed)
-      if (path.length > 0) admission.groupMeetings.push(keptKey(admission.work, member, path));
+      if (path.length > 0)
+        admission.groupMeetings.push(keptKeyAt(admission.pass.contract, member, path));
   }
   return held;
 }

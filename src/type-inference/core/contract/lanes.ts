@@ -2,9 +2,11 @@ import type { PlaceId } from "../../graph.js";
 import { joinParts, type WorkCounter, type WorkLedger } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keyOf } from "../definitions.js";
+import { stepName, type CoreProgram } from "../program.js";
 import { marksNothing } from "./marks.js";
 import type { WrapperHop } from "./model.js";
 import { writtenOf } from "./terms.js";
+import { wrapperFacts } from "./wrapper-facts.js";
 
 // G3 stage 1 (TABLE r4.196): a binding's wrapper shape, the frozen structural part of `wrapperHop`, and the lane the keys
 // of each `(binding, first step)` family take from it.
@@ -36,6 +38,8 @@ export type KeyRecord =
       readonly own: number;
       readonly shared: number;
       readonly apart: number;
+      /** Where `withKeyRecords` asks it: the producer that asked (`sites`), its first frame past this module. */
+      readonly site?: string;
     }
   | {
       readonly kind: "lane";
@@ -45,27 +49,65 @@ export type KeyRecord =
       readonly lane: KeyLane;
       readonly hit: boolean;
       readonly building: boolean;
+      /** Text from the program's facts alone (`wrapperFacts`): no shape asked, nothing charged or frozen. */
+      readonly facts: boolean;
       readonly owner: string | null;
+      /** Where `withKeyRecords` asks it: the producer that asked (`sites`), its first frame past the key modules. */
+      readonly site?: string;
     };
 
 let recording: {
   readonly records: KeyRecord[];
   readonly passes: WeakMap<Contract, number>;
+  readonly sites: boolean;
   next: number;
 } | null = null;
 
-/** Test and evidence only: `run`, with every wrapper shape and key lane asked inside it recorded (`KeyRecord`). */
-export function withKeyRecords<T>(run: () => T): {
-  readonly result: T;
-  readonly records: readonly KeyRecord[];
-} {
+/**
+ * Test and evidence only: `run`, with every wrapper shape and key lane asked inside it recorded (`KeyRecord`); with
+ * `sites`, each with the producer that asked it (its first frame past the key modules: the selector's budget by producer).
+ */
+export function withKeyRecords<T>(
+  run: () => T,
+  sites = false,
+): { readonly result: T; readonly records: readonly KeyRecord[] } {
   if (recording !== null) throw new Error("Key records are already being recorded.");
   const records: KeyRecord[] = [];
-  recording = { records, passes: new WeakMap(), next: 0 };
+  recording = { records, passes: new WeakMap(), sites, next: 0 };
   try {
     return { result: run(), records };
   } finally {
     recording = null;
+  }
+}
+
+/** Where a recorded question came from (`withKeyRecords`' `sites`): the first frame past the key modules. */
+function producer(): { readonly site?: string } {
+  if (recording === null || !recording.sites) return {};
+  const frames = (new Error().stack ?? "").split("\n").slice(2);
+  const frame =
+    frames.find((line) => !/[\\/](lanes|key-ids|wrapper-facts)\.(js|ts)\b/.test(line)) ?? "";
+  return {
+    site: frame
+      .replace(/^\s*at\s+/, "")
+      .replace(/\(?file:.*[\\/]core[\\/]/, "")
+      .replace(/\)$/, ""),
+  };
+}
+
+let textKeys = false;
+
+/**
+ * Test and evidence only: `run` with every family's keys their text, its lane's question still asked and its shape
+ * still found (`keyLane`): the early selector's work alone, beside the representation's (Astra's criterion 3).
+ */
+export function withTextKeys<T>(run: () => T): T {
+  if (textKeys) throw new Error("Text keys are already in force.");
+  textKeys = true;
+  try {
+    return run();
+  } finally {
+    textKeys = false;
   }
 }
 
@@ -152,6 +194,7 @@ export function wrapperShape(
         own: 0,
         shared: 0,
         apart: 0,
+        ...producer(),
       });
     return known;
   }
@@ -176,6 +219,7 @@ export function wrapperShape(
         hit: false,
         owner: contract.pass.solver.reading,
         ...chargedSince(contract.work, before),
+        ...producer(),
       });
   }
 }
@@ -253,11 +297,17 @@ function shapeOf(contract: Contract, binding: PlaceId, step: string): WrapperHop
  * (`wrapperShape`), text where it does not; text for the pass, too, where the question comes while the shape is being
  * found or the identity layer or the marks are being built (`building`), whose unfinished state a shape found then
  * would read, never promoted later. A key with no first step keeps its text, and the live conditions of `wrapperHop`
- * (an ingress, a stop) decide answers, never a lane. A fresh pass (A6, a stopped set, the finishing) asks afresh.
+ * (an ingress, a stop) decide answers, never a lane. A fresh pass (A6, a stopped set, the finishing) asks afresh. A
+ * family the program's facts alone leave without a wrapper (`wrapperFacts`) is text at once, asking no shape: a typed
+ * key's identity and charges stay what they were.
  */
 export function keyLane(contract: Contract, place: PlaceId, firstStep: string | null): KeyLane {
   if (firstStep === null) return "text";
   const binding = contract.pass.program.occurrenceOf.get(place) ?? place;
+  if (!wrapperFacts(contract, binding, firstStep)) {
+    if (recording !== null) noteLane(contract, binding, firstStep, "text", false, false, true);
+    return "text";
+  }
   let byStep = contract.lanes.get(binding);
   const frozen = byStep?.get(firstStep);
   if (frozen !== undefined) {
@@ -274,13 +324,51 @@ export function keyLane(contract: Contract, place: PlaceId, firstStep: string | 
     if (recording !== null) noteLane(contract, binding, firstStep, meanwhile, true, false);
     return meanwhile;
   }
-  const lane: KeyLane = shape === null ? "text" : "cursor";
+  const lane: KeyLane = shape === null || textKeys ? "text" : "cursor";
   contract.keep(1);
   byStep ??= contract.lanes.get(binding);
   if (byStep === undefined) contract.lanes.set(binding, (byStep = new Map()));
   byStep.set(firstStep, lane);
   if (recording !== null) noteLane(contract, binding, firstStep, lane, false, building);
   return lane;
+}
+
+/**
+ * The lanes of the families reads start (a read's projection: its binding and its first step), frozen at the pass's
+ * start (`createPass`), before any identity layer or marks are built: a key born while they are (a copy's key, a
+ * source's identity, `copiedKey`) is then born in its family's lane, which a question asked then could not find
+ * (`building`). Each family once, charged (`readFamilies`: so the pass's selection is bounded by its read families),
+ * its shape as `keyLane` finds it.
+ */
+export function selectLanes(contract: Contract): void {
+  const { program } = contract.pass;
+  for (const [binding, step] of readFamilies(program)) {
+    program.work.charge("indexSteps");
+    keyLane(contract, binding, step);
+  }
+}
+
+const READ_FAMILIES = new WeakMap<CoreProgram, readonly (readonly [PlaceId, string])[]>();
+
+/** A program's read families, each once in its first read's order: an index of its syntax, made once per program. */
+function readFamilies(program: CoreProgram): readonly (readonly [PlaceId, string])[] {
+  const known = READ_FAMILIES.get(program);
+  if (known !== undefined) return known;
+  const seen = new Map<PlaceId, Set<string>>();
+  const families: (readonly [PlaceId, string])[] = [];
+  for (const projection of program.projOf.values()) {
+    if (projection.step === "iteration") continue;
+    const binding = program.occurrenceOf.get(projection.owner);
+    if (binding === undefined) continue;
+    const step = stepName(projection.step);
+    let steps = seen.get(binding);
+    if (steps === undefined) seen.set(binding, (steps = new Set()));
+    if (steps.has(step)) continue;
+    steps.add(step);
+    families.push([binding, step]);
+  }
+  READ_FAMILIES.set(program, families);
+  return families;
 }
 
 function noteLane(
@@ -290,6 +378,7 @@ function noteLane(
   lane: KeyLane,
   hit: boolean,
   building: boolean,
+  facts = false,
 ): void {
   recording!.records.push({
     kind: "lane",
@@ -299,6 +388,8 @@ function noteLane(
     lane,
     hit,
     building,
+    facts,
     owner: contract.pass.solver.reading,
+    ...producer(),
   });
 }

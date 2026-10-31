@@ -10,9 +10,14 @@ import {
 } from "../src/type-inference/core/budget.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import {
+  canonicalRest,
+  compareDemandNames,
   compareKeyIds,
   exportKeyIds,
+  exportNames,
   importKeyIds,
+  importNames,
+  isSteps,
   keyIdAt,
   keyIdBelow,
   keyIdDepth,
@@ -24,8 +29,12 @@ import {
   keyIdPlace,
   keyIdStep,
   keyOfId,
+  keyPrefixIn,
   memberStepIn,
+  PathSteps,
+  restSteps,
   rootId,
+  spanRef,
   stepsOfId,
   type KeyId,
   type KeyPacket,
@@ -33,29 +42,38 @@ import {
 import {
   keyLane,
   withKeyRecords,
+  withTextKeys,
   wrapperShape,
   type KeyRecord,
 } from "../src/type-inference/core/contract/lanes.js";
 import type { WrapperHop } from "../src/type-inference/core/contract/model.js";
-import { keyOf } from "../src/type-inference/core/definitions.js";
+import { keyOf, type Key } from "../src/type-inference/core/definitions.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import { REASON, type Item } from "../src/type-inference/core/items.js";
 import { memberStep } from "../src/type-inference/core/method-categories.js";
 import type { Demand, Work } from "../src/type-inference/core/solver.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { probeMade } from "./helpers/type-core-made.js";
-import { narrowingPass } from "./helpers/type-core-narrowing.js";
-import { inMode, MODES } from "./helpers/type-core-oracles.js";
+import { narrowingPass, nodeAt } from "./helpers/type-core-narrowing.js";
+import { inMode, MODES, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
+import { Admission } from "../src/type-inference/core/admission.js";
+import { sharedPaths } from "../src/type-inference/core/admission/structure.js";
 
 /*
- * G3 stage 1, PR 1 (TABLE r4.196): the key cursors (`contract/key-ids.ts`) and the frozen wrapper lane
- * (`contract/lanes.ts`), exercised directly; no answer reads them yet. A cursor names one key of its pass whichever
- * way it is made, orders as its key's text, survives the pass's stops and forgets, and crosses passes only as a packet;
- * a family's lane is frozen at its first question, by the binding's wrapper shape alone; what the conversions walk and
- * make grows with what they charge (`helpers/type-core-made.ts`).
+ * G3 stage 1 (TABLE r4.196): the key cursors (`contract/key-ids.ts`) and the frozen wrapper lane
+ * (`contract/lanes.ts`), exercised directly and through the decided paths that carry them (PR 3). A cursor names one
+ * key of its pass whichever way it is made, orders as its key's text, survives the pass's stops and forgets, and
+ * crosses passes only as a packet; a family's lane is frozen at its first question, by the binding's wrapper shape
+ * alone; what the conversions walk and make grows with what they charge (`helpers/type-core-made.ts`).
  */
 
 const GLOBALS = ["hostValue", "hostOther", "hostInit"];
+
+/** Steps read by position, as a site reads a record's (`PathSteps`). */
+function read(steps: { readonly length: number; at(index: number): string | undefined }): string[] {
+  return Array.from({ length: steps.length }, (_, index) => steps.at(index)!);
+}
 
 function request(source: string) {
   const made = coreRequest([{ path: "main.tease", source }], GLOBALS);
@@ -141,7 +159,7 @@ test("a key's cursor names one key of its pass whichever way it is made; its tex
       assert.equal(keyIdPath(elsewhere), keyIdPath(id));
     }
     // (so far no key's text or steps were made)
-    assert.equal(contract.keyTexts.size + contract.pathStepLists.size, 0);
+    assert.equal(contract.keyTexts.size + contract.pathFacts.size, 0);
     for (const [index, id] of inOrder.entries()) {
       const [place, path] = keys[index]!;
       const where = keyOf(place, path);
@@ -156,7 +174,11 @@ test("a key's cursor names one key of its pass whichever way it is made; its tex
         path.length === 0 ? null : keyIdOf(contract, place, path.slice(0, -1)),
       );
       for (let from = 0; from <= path.length; from += 1) {
-        assert.deepEqual(stepsOfId(contract, id, from), path.slice(from), `${where} @${from}`);
+        assert.deepEqual(
+          read(stepsOfId(contract, id, from)),
+          path.slice(from),
+          `${where} @${from}`,
+        );
         assert.equal(memberStepIn(contract, id, from), memberStep(path, from), `${where} @${from}`);
       }
     }
@@ -169,6 +191,12 @@ test("a key's cursor names one key of its pass whichever way it is made; its tex
           compareKeyIds(contract, inOrder[a]!, inOrder[b]!),
           expected,
           `${texts[a]} ? ${texts[b]}`,
+        );
+        // (and in demands' names, as the solver orders a component's members: #1398)
+        assert.equal(
+          compareDemandNames(contract, joinParts("c", inOrder[a]!), joinParts("c", inOrder[b]!)),
+          expected,
+          `c|${texts[a]} ? c|${texts[b]}`,
         );
       }
     ids.push(inOrder);
@@ -217,6 +245,18 @@ test("#1422 B1: a replayed demand's key comes through a packet from the pass tha
     assert.notEqual(raw, key);
     assert.notDeepEqual(tags(solveDemands(source, [joinParts("c", raw)])[0]!), intended);
   }
+  // the same through a replayed component's names, their cursors by the names' packet (the solver's replay seam)
+  const exported = exportNames(old.contract, [joinParts("c", ids[0]!), joinParts("c", ids[1]!)])!;
+  const sent: unknown = JSON.parse(JSON.stringify(exported.packet));
+  assert.deepEqual(
+    importNames(fresh.contract, exported.names, sent),
+    ids.map((id) => joinParts("c", keyOfId(old.contract, id))),
+  );
+  for (const [index, name] of exported.names.entries())
+    assert.deepEqual(
+      tags(solveDemands(source, [name], sent)[0]!),
+      tags(old.solver.run(old.contract.contractOf(keyOfId(old.contract, ids[index]!)))),
+    );
 });
 
 test("a cursor outlives its pass's stops and forgets, its family's lane too, while a stop vetoes the wrapper live and forgets a reader that read the cursor's demand finished (#1405)", () => {
@@ -401,6 +441,189 @@ function laneProblems(records: readonly KeyRecord[]): string[] {
   return problems;
 }
 
+test("a key's text and its cursor read one stop: after a stop both forms are stopped and read the stop, a completed read of either is forgotten, and a key below the stopped prefix is stopped (Codex r1 F1)", () => {
+  const text =
+    "let seed: integer=1\nlet leaf={n:seed}\nlet box={shell:leaf}\nlet out=box.shell.n\nexit\n";
+  const pass = narrowingPass(request(text));
+  const { contract, solver, values } = pass;
+  const box = bindingOf(pass, "box");
+  assert.equal(keyLane(contract, box, "shell"), "cursor");
+  const node = nodeAt(pass, text.indexOf("box.shell.n"));
+  const forms = (path: readonly string[]): Key[] => [
+    keyOf(box, path),
+    keyIdOf(contract, box, path),
+  ];
+  const read = (key: Key): string =>
+    JSON.stringify(solver.run(values.keyItems(key, node)).map((item) => [item.tag, item.reasons]));
+  const contractRead = (key: Key): string =>
+    JSON.stringify(solver.run(contract.contractOf(key)).map((item) => [item.tag, item.reasons]));
+  const [leaf, below] = [forms(["shell"]), forms(["shell", "n"])];
+  // (before the stop: both forms read alike, each read completed)
+  for (const key of below) assert.equal(read(key), JSON.stringify([["integer", 0]]));
+  for (const key of [...leaf, ...below]) contractRead(key);
+  contract.stop(box, ["shell"]);
+  const stopped = JSON.stringify([["unknown", REASON.budget]]);
+  for (const key of [...leaf, ...below]) {
+    assert.equal(contract.keyStopped(key), true, String(key));
+    assert.equal(contractRead(key), stopped, String(key));
+  }
+  for (const key of below) assert.equal(read(key), stopped, String(key));
+  // (every entry reads one identity: one identity and one prefix's stores for both forms, a text's stop the cursor's)
+  const [byText, byCursor] = below;
+  assert.equal(contract.keyIdentity(byText!), contract.keyIdentity(byCursor!));
+  assert.equal(contract.prefixStores(byText!), contract.prefixStores(byCursor!));
+  const other = narrowingPass(request(text));
+  const otherBox = bindingOf(other, "box");
+  assert.equal(keyLane(other.contract, otherBox, "shell"), "cursor");
+  other.contract.stopKey(keyOf(otherBox, ["shell"]));
+  assert.equal(other.contract.keyStopped(keyIdOf(other.contract, otherBox, ["shell", "n"])), true);
+});
+
+test("a key's text and its cursor are one key to admission's indexes: the paths decided below a wrapper's prefix are the same asked by either (Codex r3 R3-F1)", () => {
+  const text =
+    "let seed: integer=1\nlet leaf={n:seed}\nlet box={shell:leaf}\nlet out=box.shell.n\nexit\n";
+  const pass = narrowingPass(request(text));
+  const box = bindingOf(pass, "box");
+  assert.equal(keyLane(pass.contract, box, "shell"), "cursor");
+  const admission = new Admission(
+    pass,
+    { run: (work) => pass.solver.run(work) },
+    new Map(),
+    new Set(),
+  );
+  const byCursor = sharedPaths(admission, keyIdOf(pass.contract, box, ["shell"]), []);
+  assert.deepEqual(byCursor, [["n"]]);
+  assert.deepEqual(sharedPaths(admission, keyOf(box, ["shell"]), []), byCursor);
+});
+
+test("a wrapper's own literal asked by an array converts it to its span once: asked again by an equal array, it charges nothing and names the same span (a member chain asks one literal and rest at every level)", () => {
+  const text =
+    "let seed: integer=1\nlet leaf={n:seed}\nlet box={shell:leaf}\nlet out=box.shell.n\nexit\n";
+  const pass = narrowingPass(request(text));
+  const box = bindingOf(pass, "box");
+  const own = [...pass.definitions.byValue].find(([, definitions]) =>
+    definitions.some(
+      (d) =>
+        d.place === box && d.how === "initializer" && d.kind === "whole" && d.path.length === 0,
+    ),
+  );
+  assert.ok(own !== undefined);
+  const first = probeMade(pass.contract, () =>
+    canonicalRest(pass.contract, own[0], ["shell", "n"]),
+  );
+  const again = probeMade(pass.contract, () =>
+    canonicalRest(pass.contract, own[0], ["shell", "n"]),
+  );
+  assert.ok(!isSteps(first.result) && !isSteps(again.result));
+  assert.deepEqual(read(restSteps(first.result)), ["shell", "n"]);
+  assert.ok(first.work.charged > 0);
+  assert.equal(again.work.charged, 0);
+  assert.equal(again.result.id(), first.result.id());
+});
+
+test("a span's prefix text is made once, on the prefix's own path, and found again: asked again through another view of the same span, it charges only its visits to the span, the prefix and the text (a stop lookup asks one prefix again and again)", () => {
+  const { contract } = narrowingPass(request("let x = 1\nexit\n"));
+  const steps = ["propertyzero", "propertyone1", "propertytwo2", "propertythre", "propertyfour"];
+  const id = keyIdOf(contract, 5, steps);
+  const view = () => spanRef(contract, keyIdPath(id), 1);
+  const first = probeMade(contract, () => view().text(3));
+  const again = probeMade(contract, () => view().text(3));
+  assert.equal(first.result, "propertyone1.propertytwo2.propertythre");
+  assert.equal(again.result, first.result);
+  assert.equal(again.work.charged, 3, `${first.work.charged} then ${again.work.charged}`);
+  assert.ok(first.work.charged > again.work.charged);
+});
+
+test("a member chain's key asked at each of its offsets in turn, cold, climbs its path once: its member scan and its prefixes cost a unit a question after, linear in the path, and a repeated question its one unit (a member chain's demand asks each offset once)", () => {
+  const asks = [
+    [
+      "memberStepIn",
+      (contract: Contract, id: KeyId, at: number) => memberStepIn(contract, id, at),
+      (_: Contract, at: number) => at,
+    ],
+    [
+      "keyPrefixIn",
+      (contract: Contract, id: KeyId, at: number) => keyPrefixIn(contract, id, at + 1),
+      (contract: Contract, at: number) =>
+        keyIdOf(
+          contract,
+          5,
+          Array.from({ length: at + 1 }, () => "year"),
+        ),
+    ],
+  ] as const;
+  for (const [name, ask, answer] of asks) {
+    const cost = (depth: number): number => {
+      const { contract } = narrowingPass(request("let x = 1\nexit\n"));
+      const id = keyIdOf(
+        contract,
+        5,
+        Array.from({ length: depth }, () => "year"),
+      );
+      let charged = 0;
+      for (let at = 0; at < depth; at += 1) {
+        const { result, work } = probeMade(contract, () => ask(contract, id, at));
+        assert.equal(result, answer(contract, at), `${name} @${at}`);
+        charged += work.charged;
+      }
+      assert.equal(probeMade(contract, () => ask(contract, id, 3)).work.charged, 1, name);
+      return charged;
+    };
+    const [at16, at32] = [cost(16), cost(32)];
+    assert.ok(at32 <= 2.2 * at16, `${name}: ${at16} at 16, ${at32} at 32`);
+  }
+});
+
+/** A member chain of `n` layers, each wrapping the one before: a temporal field's, or (`dicts`) every third a dict below a property, read through its `values`, among objects. */
+function memberChain(n: number, dicts: boolean): string {
+  const lines = ["let seed: integer = 1", "let root = {f: seed}"];
+  const path: string[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const before = i === 0 ? "root" : `a${i - 1}`;
+    if (dicts && i % 3 === 0) {
+      lines.push(`let d${i} = dict {k: ${before}}`, `let a${i} = {q: d${i}}`);
+      path.unshift("q.values.first");
+    } else {
+      const step = dicts ? ["year", "values", "keys"][i % 3]! : "year";
+      lines.push(`let a${i} = {${step}: ${before}}`);
+      path.unshift(step);
+    }
+  }
+  return [...lines, `let out = a${n - 1}.${path.join(".")}.f`, "exit", ""].join("\n");
+}
+
+test("a member chain's work keeps its ratio to its text lane's within ×1.005 from 8 to 16 levels in every mode, a temporal field's chain and one of dicts and objects mixed: the two-size gate of the key side's member walk on a cursor", () => {
+  for (const dicts of [false, true])
+    for (const mode of MODES) {
+      const [at8, at16] = [8, 16].map((n) => {
+        const source = request(memberChain(n, dicts));
+        const cursor = inMode(mode, () => analyseCore(source)).budget.total;
+        const text = withTextKeys(() => inMode(mode, () => analyseCore(source))).budget.total;
+        return cursor / text;
+      });
+      // (a band of ×1.005: the ratio of a flat series still moves a little between sizes with its constant terms; each
+      // mutant of the walk rises by more on the mixed chain in some mode, M04 by 2.2%, M21 4.2%, M19 8.0%, M20 19%,
+      // while on the year chain alone M04 rises by 0.7% in one mode, so the year chain alone would not hold the class)
+      assert.ok(
+        at16! <= at8! * 1.005,
+        `${dicts ? "dicts" : "year"} ${JSON.stringify(mode)}: ×${at8!.toFixed(4)} at 8, ×${at16!.toFixed(4)} at 16`,
+      );
+    }
+});
+
+test("a wrapper's read inside a callable takes the route its text lane takes: the routes a read records are read back in its key's identity", () => {
+  const source = request(
+    "let seed: integer = 1\nlet root = {f: seed}\nlet a0 = {q: root}\nfunction small {\n  return a0.q.f\n}\nlet out = small()\nexit\n",
+  );
+  const routes = (): string => {
+    const answers = analyseCore(source);
+    return JSON.stringify(answers.graph.nodes.map((node) => answers.at(node)?.route ?? null));
+  };
+  const { result, records } = withKeyRecords(routes);
+  assert.ok(records.some((record) => record.kind === "lane" && record.lane === "cursor"));
+  assert.equal(result, withTextKeys(routes));
+});
+
 test("a binding's wrapper shape is found once per pass whoever asks first, and each family's lane is frozen by it alone, whatever the analysis stops, rejects or finishes afresh, in every mode (TABLE r4.196)", () => {
   const problems: string[] = [];
   const seen = { cursor: 0, text: 0, vetoed: 0, passes: 0, building: 0 };
@@ -465,9 +688,18 @@ test("a family's lane is the binding's whichever read asks; a question while its
       assert.equal(keyLane(pass.contract, box, "shell"), "cursor");
       assert.equal(keyLane(pass.contract, box, null), "text");
     });
+    // (the family's own records: G3 stage 1's keys born while its shape is found ask their own families' lanes, a
+    // host global's here, text by the program's facts alone)
     assert.deepEqual(
-      records.map((record) => `${record.kind} ${record.hit}`),
+      records
+        .filter((record) => record.binding === box)
+        .map((record) => `${record.kind} ${record.hit}`),
       ["shape false", "lane false", "lane true"],
+    );
+    assert.ok(
+      records
+        .filter((record) => record.binding !== box)
+        .every((record) => record.kind === "lane" && record.facts && record.lane === "text"),
     );
     // a read of a host global: its ingress vetoes the wrapper live, and its binding has no shape
     const host = pass.program.places.find((place) =>
@@ -514,6 +746,38 @@ test("a family's lane is the binding's whichever read asks; a question while its
     const pass = narrowingPass(request(wrapped(3, "store-before")));
     assert.equal(keyLane(pass.contract, bindingOf(pass, "a1"), "q"), "text");
     assert.equal(keyLane(pass.contract, bindingOf(pass, "a0"), "q"), "cursor");
+  }
+});
+
+test("a pass freezes its read families' lanes first (`selectLanes`); a family first asked while the marks are built (a wrapper's read inside a literal) keeps the fallback: text for the pass, never promoted, its answers the text lane's", () => {
+  // (`a0.q` read alone, `b0.r` inside a literal; selected in either order, the marks built in the first shape)
+  const reads = ["let x = a0.q.f", "let xs = [b0.r.f]"];
+  for (const order of [reads, [...reads].reverse()]) {
+    const source = request(
+      `let seed: integer = 1\nlet root = {f: seed}\nlet a0 = {q: root}\nlet b0 = {r: root}\n${order.join("\n")}\nexit\n`,
+    );
+    const places = new CoreProgram(source).places.filter(({ kind }) => kind.kind === "binding");
+    const bindings = places.map(({ id }) => id);
+    const [a0, b0] = ["a0", "b0"].map((label) => places.find((place) => place.label === label)!.id);
+    for (const mode of MODES) {
+      const { result, records } = withKeyRecords(() => inMode(mode, () => analyseCore(source)));
+      const lanes = records.filter((record) => record.kind === "lane");
+      const inLiteral = lanes.filter((record) => record.binding === b0 && record.step === "r");
+      const alone = lanes.filter((record) => record.binding === a0 && record.step === "q");
+      const where = `${order[0]} first, ${mode.reversed ? "reversed" : "source"}, ${mode.unshared ? "unshared" : "shared"}`;
+      assert.ok(inLiteral[0]?.building === true, where);
+      assert.ok(
+        inLiteral.slice(1).every((record) => record.hit && record.lane === "text"),
+        where,
+      );
+      assert.ok(alone.length > 0 && alone.every((record) => record.lane === "cursor"), where);
+      const text = withTextKeys(() => inMode(mode, () => analyseCore(source)));
+      assert.equal(
+        publishedAnswers(result, bindings, source).text,
+        publishedAnswers(text, bindings, source).text,
+        where,
+      );
+    }
   }
 });
 
@@ -583,7 +847,9 @@ function sites(n: number): Map<string, { readonly walked: number; readonly charg
   const sliced = keyIdOf(contract, 12, steps);
   site("stepsOfId span, kept", () => stepsOfId(contract, sliced, n >> 1));
   site("stepsOfId span, walked", () => stepsOfId(contract, walked, n >> 1));
-  site("memberStepIn", () => memberStepIn(contract, deepest, n >> 1));
+  // (a path whose steps are not yet kept: the scan's cold question makes them, its steps walked and charged)
+  const scanned = keyIdOf(contract, 14, [...steps, "y"]);
+  site("memberStepIn", () => memberStepIn(contract, scanned, n >> 1));
   const apart = keyIdBelow(contract, rootId(7), "t");
   site("compareKeyIds", () => compareKeyIds(contract, deepest, apart));
   // (width and branching, #1454 r1: `n` children below a step `n` code units wide, each compared with a short sibling;
@@ -650,7 +916,7 @@ test("every cursor conversion charges at least what it must inspect, alone, at e
             [
               `stepsOfId @${from}`,
               (contract: Contract, _: Contract, id: KeyId) => stepsOfId(contract, id, from),
-              state === "cached" || (state === "repeated" && from === 0) ? 1 : depth - from + 1,
+              state === "cold" ? depth - from + 1 : 1,
             ] as const,
         ),
         ...[0, depth].map(
@@ -695,15 +961,26 @@ const MADE_FORMS: readonly (readonly [string, RegExp])[] = [
 
 /** The ones there are, by file and form, and why each is bounded or charged. */
 const MADE_LISTED: Readonly<Record<string, readonly [number, string]>> = {
-  "key-ids.ts template": [4, "the cursor's type and text (two numbers); two error messages"],
+  "key-ids.ts template": [
+    7,
+    "the cursor's type and text (two numbers); two error messages; a span's name (a path's id after a dot); a replayed name's cursor and span tokens (numbers, `exportNames`)",
+  ],
   "key-ids.ts slice": [
-    5,
-    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`)",
+    19,
+    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`); a text key's parent and prefixes as the legacy sites made them (`keyParentIn`, `keyWalk`, `keyPrefixIn`); a text key's first step and place, to ask its lane (`canonicalKey`, one step); an array's views as the legacy sites made them (`stepsFrom`, `stepsTo`, `stepsPrefixText`, `restFrom`, `restTo`); a record's steps' view, plain as an array's slice (`PathSteps.from`, `to`); a demand name's span and cursor tokens read back as numbers (`compareDemandNames`, `exportNames`, `importNames`)",
+  ],
+  "key-ids.ts concatenation": [
+    3,
+    "a demand name with its cursors' texts, charged and kept once per name (`compareDemandNames`); a component's names for a replay and back (`exportNames`, `importNames`, the solver's test seam)",
   ],
   "key-ids.ts joinParts": [2, "two places' decimal texts with their bar (`compareKeyIds`)"],
   "lanes.ts joinParts": [
     2,
     "a family's memo key: charged where kept (`wrapperShape`), looked up (`keyLane`)",
+  ],
+  "lanes.ts slice": [
+    1,
+    "a recorded question's stack frames, under `withKeyRecords`' sites alone (evidence, `producer`)",
   ],
 };
 
@@ -725,4 +1002,118 @@ test("the cursor modules make no text but the listed ones, each bounded or charg
     found,
     Object.fromEntries(Object.entries(MADE_LISTED).map(([key, [count]]) => [key, count])),
   );
+});
+
+test("a demand name's span token is spelled by its path's record, its text made once and found again by every name holding it (Codex r11 N11-F1)", () => {
+  const { contract } = narrowingPass(request("let x = 1\nexit\n"));
+  const steps = Array.from({ length: 40 }, (_, k) => `s${k}`);
+  const path = keyIdPath(keyIdOf(contract, 5, steps));
+  assert.equal(contract.pathFacts.get(path)?.text, undefined);
+  assert.equal(compareDemandNames(contract, `cl|1|.${path}`, `cl|2|.${path}`), -1);
+  assert.equal(contract.pathFacts.get(path)?.text, steps.join("."));
+  // (another name holding the token: its path's text found, never made again from its steps)
+  const { result, work } = probeMade(contract, () =>
+    compareDemandNames(contract, `cl|3|.${path}`, `cl|2|.${path}`),
+  );
+  assert.equal(result, 1);
+  assert.equal(work.visits, 0);
+});
+
+/** The record's steps copied out (`PathSteps.toArray`) by site over `copiesOf`'s analyses: how many, and why each site needs an array. */
+const COPIES_LISTED: Readonly<Record<string, readonly [number, string]>> = {
+  writtenSource: [
+    310,
+    "a kept copy's strip: the copied key's steps joined into the store walk's strip (`Expansion.strip`), an array its expansions keep and name",
+  ],
+  heldRead: [16, "a held read's touch path, an array its trie keeps (`Touches`)"],
+  stoppedKeys: [
+    12,
+    "a stopped key leaves its pass as steps (`Contract.stoppedKeys`), as no path id does",
+  ],
+  keyIdentityWork: [
+    12,
+    "a lifted holder's reference: the key's steps joined to its entry's, the holder's shift and its identity's name",
+  ],
+  touchRead: [8, "a touch's path, an array its trie keeps (`Touches`)"],
+  keyStructure: [8, "a root's rest below a prefix's store, kept in the structure's roots"],
+  decide: [
+    6,
+    "a stopped decision's path, its stores asked once by it (`stoppedStores`), kept as an array",
+  ],
+  prefixWork: [
+    4,
+    "a projected copy's entry: the copied key's steps joined into the entry's `at`, kept in the prefix's entries",
+  ],
+};
+
+/** The record's steps copied out during `run`, by the function asking (the first named frame outside `key-ids.ts`). */
+function copiesOf(run: () => void): Record<string, number> {
+  const original = PathSteps.prototype.toArray;
+  const sites: Record<string, number> = {};
+  PathSteps.prototype.toArray = function (this: PathSteps) {
+    const frames = new Error().stack!.split("\n").slice(2);
+    const named = frames.find(
+      (frame) => !frame.includes("key-ids.") && /^\s*at (?!Array\.)[\w$#.]+ \(/.test(frame),
+    );
+    const site = /^\s*at (?:[\w$]+\.)?([\w$#]+) \(/.exec(named ?? "")?.[1] ?? "?";
+    sites[site] = (sites[site] ?? 0) + 1;
+    return original.call(this);
+  };
+  try {
+    run();
+  } finally {
+    PathSteps.prototype.toArray = original;
+  }
+  return sites;
+}
+
+/** A wrapper's reads that copy a record's steps where the wrappers' and chains' do not: a prefix's copy, a default, a loop, an add. */
+const COPYING_READS = [
+  ["", "let mid = a0.q\nlet out = mid.f"],
+  ["", "function g(x = a0.q) {\n  return x.f\n}\nlet out = g()"],
+  ["", "let acc = a0.q\nrepeat 3 {\n  acc = a0.q\n}"],
+  [", s: tag, l: items", "let xs = [0]\nxs.add(a0.q.f)\nxs.addAll(a0.q.l)"],
+].map(
+  ([fields, reads]) =>
+    `let seed: integer = 1\nlet tag = "t"\nlet items: integer[] = [1]\nlet root = {f: seed${fields}}\nlet a0 = {q: root}\n${reads}\nexit\n`,
+);
+
+test("a record's steps leave it as an array only at the listed sites, each a charged copy (\`toArray\`), over the wrappers, the member chains to 16 levels and the family's copying reads in every mode", () => {
+  const sources = [
+    ...[2, 4, 8, 16].flatMap((depth) => VARIANTS.map((variant) => wrapped(depth, variant))),
+    ...[8, 16].flatMap((n) => [memberChain(n, false), memberChain(n, true)]),
+    ...COPYING_READS,
+  ].map(request);
+  const found = copiesOf(() => {
+    for (const source of sources) for (const mode of MODES) inMode(mode, () => analyseCore(source));
+  });
+  assert.deepEqual(
+    found,
+    Object.fromEntries(Object.entries(COPIES_LISTED).map(([site, [count]]) => [site, count])),
+  );
+});
+
+test("the early selector alone (\`withTextKeys\`, criterion 3's seam): every family's keys their text, its shapes still found, its answers the cursors'", () => {
+  const source = request(wrapped(4, "every-depth"));
+  const bindings = new CoreProgram(source).places
+    .filter(({ kind }) => kind.kind === "binding")
+    .map(({ id }) => id);
+  const cursors = publishedAnswers(analyseCore(source), bindings, source).text;
+  const { result, records } = withKeyRecords(() => withTextKeys(() => analyseCore(source)));
+  assert.equal(publishedAnswers(result, bindings, source).text, cursors);
+  assert.ok(records.some((record) => record.kind === "shape" && record.outcome === "wrapper"));
+  assert.ok(records.every((record) => record.kind !== "lane" || record.lane === "text"));
+});
+
+test("a wrapper's own cell copying a written binding lands below its place's own key (A4): its cursor's path is decided, and the plan checks it, as the text lane does (the corpus's `null/direct` cases)", () => {
+  const files = [
+    {
+      path: "main.tease",
+      source:
+        "let typed:null=null\nlet root={f:typed,g:typed}\nlet foreign={f:hostValue,g:typed}\nlet a=foreign\na=a\nlet mid=a\nlet c=root\nc=mid\nc.f=null\nexit\n",
+    },
+  ];
+  const { result, records } = withKeyRecords(() => publishedRoute(files, GLOBALS));
+  assert.ok(records.some((record) => record.kind === "lane" && record.lane === "cursor"));
+  assert.equal(result.text, withTextKeys(() => publishedRoute(files, GLOBALS)).text);
 });

@@ -3,13 +3,14 @@ import type { Admission } from "../admission.js";
 import type { CorePass } from "../answers.js";
 import { joinSteps, keepText, keptParts } from "../budget.js";
 import { termAt, writtenOf } from "../contract.js";
-import { keptKey, type Definition } from "../definitions.js";
+import { type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { IngressNode, Item, ItemTag } from "../items.js";
 import type { Obligation, RequiredKind } from "../result.js";
 import { concrete, isExternal } from "./kinds.js";
 import { f18Kinds, landingIndex, leafIngress, typedIngress } from "./landing-index.js";
 import { elementsBelow } from "./structure.js";
+import { keptKeyAt } from "../contract/key-ids.js";
 
 // The boundary checks of external data (C9, F18), and the inventory of the derivations that create an obligation.
 
@@ -327,7 +328,7 @@ export function publish(admission: Admission, written = false): void {
       written ? writtenOf(program.place(d.place).kind) : null,
     );
     const against: RequiredKind[] = tags.length > 0 ? tags.map(requiredKind) : ["unknown"];
-    const key = keptKey(admission.work, d.place, path);
+    const key = keptKeyAt(admission.pass.contract, d.place, path);
     const message = `validate external data entering ${label} against ${against.join("|")}`;
     // (the check keeps its label and its message, each about the path's text)
     keepText(admission.work, label.length);

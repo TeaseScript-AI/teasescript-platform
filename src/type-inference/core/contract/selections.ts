@@ -6,6 +6,7 @@ import type { FlowNode } from "../flow-graph.js";
 import { makeItem, REASON, type Item, type Writer } from "../items.js";
 import type { Work } from "../solver.js";
 import { ingressLeafOf } from "./ingress.js";
+import type { Rest } from "./key-ids.js";
 import { OPAQUE_MEMBER, propertyOnly, REFERENCE, unknownItem } from "./kinds.js";
 import { nodeAt } from "./literal-index.js";
 import type {
@@ -93,9 +94,9 @@ export function selectionOf(
 export function selectionPieces(
   contract: Contract,
   selection: Selection,
-  after: readonly string[],
+  after: Rest,
 ): readonly SelectionPiece[] {
-  const step = after[0];
+  const step = after.length > 0 ? after.at(0) : undefined;
   if (
     step === undefined ||
     selection.closed.length === 0 ||
@@ -429,7 +430,7 @@ export function* selectedObject(
   contract: Contract,
   object: LiteralObject,
   byValue: boolean,
-  after: readonly string[],
+  after: Rest,
   node: FlowNode | null,
   exact: boolean,
   below: boolean,

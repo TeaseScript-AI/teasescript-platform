@@ -179,9 +179,12 @@ export function declaredMethod(kind: string, name: string): readonly ValueKind[]
  * The first step of a path from `from` on that a built-in value answers by itself, wherever the path ends: a dict's
  * `values` or `keys`, or a declared property; -1 for none.
  */
-export function memberStep(path: readonly string[], from: number): number {
+export function memberStep(
+  path: { readonly length: number; at(index: number): string | undefined },
+  from: number,
+): number {
   for (let index = from; index < path.length; index += 1) {
-    const step = path[index]!;
+    const step = path.at(index)!;
     if (
       dictList(step) !== undefined ||
       Object.hasOwn(TEMPORAL_FIELDS, step) ||

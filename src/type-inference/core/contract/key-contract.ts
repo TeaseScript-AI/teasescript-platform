@@ -2,7 +2,6 @@ import type { PlaceId } from "../../graph.js";
 import { joinParts, joinSteps } from "../budget.js";
 import type { Contract } from "../contract.js";
 import {
-  keyBelow,
   keyOf,
   keyPath,
   keyPlace,
@@ -10,6 +9,33 @@ import {
   SELECTED_VALUE,
   type Key,
 } from "../definitions.js";
+import {
+  canonicalKey,
+  isKeyId,
+  isPathSteps,
+  isSteps,
+  keyAt,
+  keyBelowIn,
+  keyBelowRef,
+  keyDepthIn,
+  keyParentIn,
+  keyPrefixIn,
+  keyStepsIn,
+  keyWalk,
+  restFrom,
+  restPart,
+  restSteps,
+  restTo,
+  someStepOf,
+  stepIndex,
+  stepsArray,
+  stepsFrom,
+  stepsJoin,
+  stepsRest,
+  type KeyWalk,
+  type Rest,
+  type Steps,
+} from "./key-ids.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import { marked } from "../guards.js";
@@ -81,7 +107,9 @@ export function literalRoute(
 }
 
 /** The contract of a key (§3.2): a demand, once per key and pass. */
-export function* contractOf(contract: Contract, key: Key): Work<readonly Item[]> {
+export function* contractOf(contract: Contract, asked: Key): Work<readonly Item[]> {
+  // (a key in its family's identity, a wrapper's its cursor: one demand per key, whoever made it)
+  const key = canonicalKey(contract, asked);
   if (contract.keyStopped(key)) return STOPPED;
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   return yield {
@@ -98,10 +126,11 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
   const place = keyPlace(key);
   const found = program.places[place];
   if (found === undefined) return [unknownItem(REASON.external)];
-  if (program.isHost(place)) return hostAt(keyPath(key));
+  // (a host's keys are text: its steps an array, no copy)
+  if (program.isHost(place)) return hostAt(stepsArray(keyStepsIn(contract, key)));
   if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
-  // G3 3a: a key past a wrapper, one step below its parent's position
-  const path = keyPath(key);
+  // G3 3a: a key past a wrapper, one step below its parent's position (a cursor's from the arena, no text)
+  const path = isKeyId(key) ? null : keyPath(key);
   if (positionable(contract, key, path)) return yield positioned(contract, key, path);
   // a key through a member a built-in value answers by itself (a copy of `d.values`, of `date.year`)
   const items = yield* contract.keyThrough(key, 0);
@@ -113,25 +142,32 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
 
 /** `keyThrough` at the step `at`, the first of the key's path from its `from` on that a built-in value answers. */
 export function* keyListsAt(contract: Contract, key: Key, at: number): Work<readonly Item[]> {
-  const place = keyPlace(key);
-  const path = keyPath(key);
-  const receiver = yield* contract.receiverKinds(keyOf(place, path.slice(0, at)));
+  // (one prefix, found once per length, and the key read again as it is: a member chain reads each key at each of its
+  // steps, so neither its prefixes are climbed nor the key rebuilt per step)
+  const prefix = keyPrefixIn(contract, key, at);
+  const receiver = yield* contract.receiverKinds(prefix);
   if (heldReference(receiver)) return yield* keyContract(contract, key);
+  const path = keyStepsIn(contract, key);
   return yield* members(contract, path, at, receiver, (along, start) =>
-    contract.keyThrough(keyOf(place, along), start),
+    contract.keyThrough(
+      along === path ? key : keyBelowIn(contract, prefix, stepsFrom(along, at)),
+      start,
+    ),
   );
 }
 
 /** The contract of a key from its stores and its prefixes' (§3.2). */
-export function* keyContract(contract: Contract, key: Key): Work<readonly Item[]> {
+export function* keyContract(contract: Contract, asked: Key): Work<readonly Item[]> {
   const { program } = contract.pass;
-  const place = keyPlace(key);
-  const path = keyPath(key);
+  // (a key in its identity: the levels and the prefixes its walk reads are held by it, G3 stage 1)
+  const key = canonicalKey(contract, asked);
+  const walk = keyWalk(contract, key);
+  const { place, path } = walk;
   const found = program.place(place);
   if (program.cellOwner.has(place) || program.hasOf.has(place))
-    return yield* contract.contractOfLiteral(place, path);
+    return yield* contract.contractOfLiteral(place, stepsRest(path));
   // F19a: a reference's member is opaque, whatever is stored through it
-  const receiver = yield* receiverWalk(contract, key);
+  const receiver = yield* receiverWalk(contract, walk);
   if (receiver.reference) return [unknownItem(REASON.opaque)];
   const written = writtenOf(found.kind);
   // F2, F22: the written type is the contract; the stores keep M. §3.2 (r4.9): it fixes the kinds, never removes the
@@ -139,7 +175,7 @@ export function* keyContract(contract: Contract, key: Key): Work<readonly Item[]
   if (written !== null) {
     const at = termAt(written, path);
     if (at !== null) {
-      const stored = yield* contractAlong(contract, place, path, 0, receiver.floor);
+      const stored = yield* contractAlong(contract, place, path, 0, receiver.floor, walk.prefix);
       const marks = marksOf(stored);
       const tags = typeKinds(at).map((tag) =>
         makeItem(tag, null, { ...marks, ...(marks.guarded === true ? { cert: "pos" } : {}) }),
@@ -149,7 +185,7 @@ export function* keyContract(contract: Contract, key: Key): Work<readonly Item[]
         : tags;
     }
   }
-  const along = yield* contractAlong(contract, place, path, 0, receiver.floor);
+  const along = yield* contractAlong(contract, place, path, 0, receiver.floor, walk.prefix);
   // below a prefix without a structure, what its unknowns and references hold there
   return mergeItems([...along, ...receiver.below], program.scope);
 }
@@ -161,12 +197,14 @@ export function* keyContract(contract: Contract, key: Key): Work<readonly Item[]
  * a single exact contribution is no such meeting. Over the collection's own stores and every prefix's, as its
  * contract reads them; a copy's own elements by the same question; once per element step.
  */
-export function* severalElements(contract: Contract, key: Key): Work<boolean> {
-  const place = keyPlace(key);
-  const path = keyPath(key);
-  const step = path.indexOf("element");
+export function* severalElements(contract: Contract, asked: Key): Work<boolean> {
+  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  const key = canonicalKey(contract, asked);
+  const walk = keyWalk(contract, key);
+  const { place, path } = walk;
+  const step = stepIndex(path, "element");
   if (step < 0) return false;
-  const at = keyOf(place, path.slice(0, step + 1));
+  const at = walk.prefix(step + 1);
   const site = contract.pass.program.places[place]?.site ?? null;
   // a demand per element step, so a chain of collections read from collections (a function's result returning
   // another's) is followed on the solver's explicit stack, and a copy cycle is solved as its component
@@ -181,13 +219,14 @@ export function* severalElements(contract: Contract, key: Key): Work<boolean> {
 }
 
 function* severalWork(contract: Contract, at: Key): Work<readonly Item[]> {
-  const place = keyPlace(at);
-  const collection = keyPath(at).slice(0, -1);
+  const walk = keyWalk(contract, at);
+  // (the path ends with its element step: a record's below each prefix its view; an array's sliced)
+  const whole = stepsRest(walk.path);
   let count = 0;
-  for (let length = collection.length; length >= 0 && count < 2; length -= 1) {
+  for (let length = walk.path.length - 1; length >= 0 && count < 2; length -= 1) {
     contract.pass.program.work.charge("invSteps");
-    const stored = contract.prefixStores(keyOf(place, collection.slice(0, length)));
-    const below = joinSteps(collection.slice(length), ["element"]);
+    const stored = contract.prefixStores(walk.prefix(length));
+    const below = restFrom(whole, length);
     for (const entry of stored.list) {
       if (count >= 2) break;
       count += yield* elementsOf(contract, entry, below);
@@ -202,23 +241,22 @@ function* severalWork(contract: Contract, at: Key): Work<readonly Item[]> {
 }
 
 /** The elements one source entry gives at `below` (which ends with an element step), counted to two. */
-function* elementsOf(
-  contract: Contract,
-  entry: PrefixEntry,
-  below: readonly string[],
-): Work<number> {
+function* elementsOf(contract: Contract, entry: PrefixEntry, below: Rest): Work<number> {
   const { program, definitions } = contract.pass;
   program.work.charge("invSteps");
   if (withoutEmpty(yield* contract.entryAt(entry, below)).length === 0) return 0;
   if (entry.key !== undefined)
-    return (yield* contract.severalElements(keyBelow(entry.key, below))) ? 2 : 1;
+    return (yield* contract.severalElements(keyBelowRef(contract, entry.key, below))) ? 2 : 1;
   if (entry.value === undefined || entry.elem !== undefined || !program.hasOf.has(entry.value))
     return 1;
   // a literal: its elements at the step, through its own fields and elements; a value it holds counts once
-  const path = joinSteps(entry.at ?? [], below);
+  // (the entry's own steps, then `below`'s, read by position: no copy of a record's steps)
+  const own = entry.at ?? [];
+  const length = own.length + below.length;
   let values: readonly PlaceId[] = [entry.value];
   let count = 0;
-  for (const [index, step] of path.entries()) {
+  for (let index = 0; index < length; index += 1) {
+    const step = index < own.length ? own[index]! : below.at(index - own.length)!;
     const next: PlaceId[] = [];
     for (const value of values) {
       program.work.charge("invSteps");
@@ -231,7 +269,7 @@ function* elementsOf(
         const at = typeAtPath(has.type, [step]);
         if (at === null || !("place" in at)) continue;
         const cells = definitions.cellDefs.get(at.place) ?? [];
-        if (index === path.length - 1) count += cells.length;
+        if (index === length - 1) count += cells.length;
         else for (const d of cells) next.push(d.value!);
       }
     }
@@ -261,16 +299,18 @@ export function declaredBefore(contract: Contract, place: PlaceId, node: FlowNod
 
 export function* contractRead(
   contract: Contract,
-  key: Key,
+  asked: Key,
   node: FlowNode,
   context: ContextWord,
   later = false,
 ): Work<readonly Item[]> {
+  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  const key = canonicalKey(contract, asked);
   const { program } = contract.pass;
   const items = yield* contract.contractOf(key);
   const kinds = withoutEmpty(items);
-  const place = keyPlace(key);
-  const path = keyPath(key);
+  const walk = keyWalk(contract, key);
+  const { place, path } = walk;
   // P3: one kind, not unknown, no guarded source, the root's declaration dominates the read. The dominance is a flow
   // fact, which dead code drops (X1): there a declared place's one known kind stays known, so an intrinsic violation
   // is the error it is in live code (AD-3), unless the kind came through a call (a parameter's, a result's, a copy of
@@ -283,8 +323,8 @@ export function* contractRead(
     (program.live(node) || kinds[0]!.called !== true);
   // every selection on the way holds an element
   for (let length = 1; length <= path.length && definite; length += 1)
-    if (path[length - 1] === "element") {
-      const elements = yield* contract.contractOf(keyOf(place, path.slice(0, length)));
+    if (path.at(length - 1) === "element") {
+      const elements = yield* contract.contractOf(walk.prefix(length));
       if (
         elements.length === 0 ||
         elements.some((item) => item.tag === "empty" || item.tag === "unknown")
@@ -299,7 +339,7 @@ export function* contractRead(
   // arrival (`later`), an element read the contract answers fails X3 before it (r4.48 (5))
   const word: ContextWord = deferred
     ? "deferred-parameter"
-    : later && path.includes("element") && (yield* contract.severalElements(key))
+    : later && stepIndex(path, "element") >= 0 && (yield* contract.severalElements(key))
       ? "member"
       : context;
   return items.map((item) =>
@@ -314,15 +354,18 @@ export function* contractRead(
 }
 
 /** §3 step 1, F19a: a receiver on the key's path whose contract holds a reference kind (one object behind every alias). */
-export function* refReceiver(contract: Contract, key: Key): Work<boolean> {
-  // G3 3b: a positioned key's parent's walk, one receiver more (`advance`)
-  const path = keyPath(key);
-  if (path.length > 1 && positionable(contract, key, path)) {
-    const parent = keyOf(keyPlace(key), path.slice(0, -1));
-    const from = yield* positionOf(contract, { key: parent, length: path.length - 1 });
+export function* refReceiver(contract: Contract, asked: Key): Work<boolean> {
+  const key = canonicalKey(contract, asked);
+  // G3 3b: a positioned key's parent's walk, one receiver more (`advance`); a cursor's parent the arena's
+  const path = isKeyId(key) ? null : keyPath(key);
+  const depth = path === null ? keyDepthIn(contract, key) : path.length;
+  if (depth > 1 && positionable(contract, key, path)) {
+    const parent =
+      path === null ? keyParentIn(contract, key)! : keyOf(keyPlace(key), path.slice(0, -1));
+    const from = yield* positionOf(contract, { key: parent, length: depth - 1 });
     if (from !== null) return !from.noRef || heldReference(yield* contract.receiverKinds(parent));
   }
-  return (yield* receiverWalk(contract, key)).reference;
+  return (yield* receiverWalk(contract, keyWalk(contract, key))).reference;
 }
 
 /**
@@ -338,15 +381,14 @@ export function* refReceiver(contract: Contract, key: Key): Work<boolean> {
  */
 function* receiverWalk(
   contract: Contract,
-  key: Key,
+  walk: KeyWalk,
 ): Work<{ readonly reference: boolean; readonly floor: number; readonly below: readonly Item[] }> {
-  const place = keyPlace(key);
-  const path = keyPath(key);
+  const { path } = walk;
   let floor = -1;
   let below: readonly Item[] = [];
   for (let length = 0; length < path.length; length += 1) {
     contract.pass.program.work.charge("invSteps");
-    const items = yield* contract.receiverKinds(keyOf(place, path.slice(0, length)));
+    const items = yield* contract.receiverKinds(walk.prefix(length));
     if (heldReference(items)) return { reference: true, floor, below };
     if (!items.some(holdsBelow)) {
       floor = length;
@@ -360,7 +402,8 @@ function* receiverWalk(
 }
 
 /** A receiver's contract as a demand of its own, with F19a's decision whether it is a reference's (r4.44). */
-export function* receiverKinds(contract: Contract, key: Key): Work<readonly Item[]> {
+export function* receiverKinds(contract: Contract, asked: Key): Work<readonly Item[]> {
+  const key = canonicalKey(contract, asked);
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   return yield {
     key: joinParts("rc", key),
@@ -396,20 +439,26 @@ export function* valueReceiver(contract: Contract, receiver: PlaceId): Work<read
 function* contractAlong(
   contract: Contract,
   place: PlaceId,
-  path: readonly string[],
+  path: Steps,
   from: number,
   floor = -1,
+  prefixOf: (length: number) => Key = (length) =>
+    isPathSteps(path)
+      ? keyAt(contract, place, path.to(length))
+      : keyOf(place, path.slice(0, length)),
 ): Work<Item[]> {
   const { program, definitions, lists } = contract.pass;
   const out: Item[] = [];
+  // (a record's path read below each prefix as its view; an array sliced as before)
+  const whole: Rest = stepsRest(path);
   for (let length = path.length; length >= from && length > floor; length -= 1) {
-    const prefix = keyOf(place, path.slice(0, length));
-    const rest = path.slice(length);
+    const prefix = prefixOf(length);
+    const rest = restFrom(whole, length);
     if (rest.length > 0) {
       // a prefix's whole stores, shared by every property below it; its literals by level (§4.6), each group of the
       // same structure below the path once (with a selection step, every entry by itself)
       const stores = contract.prefixStores(prefix);
-      if (rest.some((step) => step === SELECTED_VALUE || step === SELECTED_TEXT))
+      if (someStepOf(rest, (step) => step === SELECTED_VALUE || step === SELECTED_TEXT))
         for (const entry of stores.list)
           for (const item of yield* contract.entryAt(entry, rest)) out.push(item);
       else {
@@ -436,7 +485,10 @@ function* contractAlong(
                 group,
                 rest,
                 withWriter(
-                  yield* contract.contractOfValueAt(group.literal, joinSteps(group.at, rest)),
+                  yield* contract.contractOfValueAt(
+                    group.literal,
+                    isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
+                  ),
                   group.w,
                 ),
               ),
@@ -484,14 +536,12 @@ function* contractAlong(
  * A projected source's stores below its path start after the path: a demand, once per source and path, whatever
  * number of its copies read there (r4.46 (3)).
  */
-export function* subAt(
-  contract: Contract,
-  sub: Key,
-  rest: readonly string[],
-): Work<readonly Item[]> {
+export function* subAt(contract: Contract, asked: Key, rest: Rest): Work<readonly Item[]> {
+  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  const sub = canonicalKey(contract, asked);
   const site = contract.pass.program.places[keyPlace(sub)]?.site ?? null;
   return yield {
-    key: joinParts("s", sub, rest),
+    key: joinParts("s", sub, restPart(rest)),
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
@@ -499,12 +549,34 @@ export function* subAt(
   };
 }
 
-function* subAtMade(contract: Contract, sub: Key, rest: readonly string[]): Work<readonly Item[]> {
+function* subAtMade(contract: Contract, sub: Key, rest: Rest): Work<readonly Item[]> {
   const { program } = contract.pass;
   program.work.charge("invSteps");
-  const base = keyPath(sub);
+  if (!isKeyId(sub)) {
+    const base = keyPath(sub);
+    return mergeItems(
+      yield* contractAlong(
+        contract,
+        keyPlace(sub),
+        stepsJoin(base, restSteps(rest)),
+        base.length + 1,
+      ),
+      program.scope,
+    );
+  }
+  // (a cursor's keys below it its children, never a text: `keyBelowRef`; its path and the rest's joined, a record's
+  // steps, `stepsJoin`)
+  const walk = keyWalk(contract, sub);
+  const base = walk.path;
   return mergeItems(
-    yield* contractAlong(contract, keyPlace(sub), joinSteps(base, rest), base.length + 1),
+    yield* contractAlong(
+      contract,
+      walk.place,
+      stepsJoin(base, restSteps(rest)),
+      base.length + 1,
+      -1,
+      (length) => keyBelowRef(contract, sub, restTo(contract, rest, length - base.length)),
+    ),
     program.scope,
   );
 }

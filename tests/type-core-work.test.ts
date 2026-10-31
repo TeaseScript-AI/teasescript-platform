@@ -1466,3 +1466,40 @@ test("what a stop forgets by is counted apart: linear on nested selections, belo
   }
   assert.deepEqual(over, []);
 });
+
+/**
+ * G3 stage 1 (TABLE r4.196): the retained wrapper pairs, one read through k wrappers by a short step and by a long one,
+ * their decided paths' keys cursors from birth (`keyLane`), never texts or arrays per prefix: their work and each
+ * counter grow with the program in either order, with the sharing on and off (on `main` 2.17 and 2.96 at 16 → 32). The
+ * pairs at 64 → 128 and 40 → 80, the uncharged-work probe and the reversed schedule are the PR's evidence, outside CI.
+ */
+const WRAPPER_PAIRS: readonly WorkFamily[] = ["q", "anUnusuallyLongPropertyName"].map((step) => ({
+  name: `wrapper by '${step}'`,
+  measures: "a read through k wrappers",
+  program: (k: number) => [
+    {
+      path: "main.tease",
+      source:
+        [
+          "let seed: integer = 1",
+          "let root = {f: seed}",
+          ...Array.from(
+            { length: k },
+            (_, i) => `let box${i} = {${step}: ${i ? `box${i - 1}` : "root"}}`,
+          ),
+          `let out = box${k - 1}.${Array.from({ length: k }, () => step).join(".")}.f`,
+          "exit",
+        ].join("\n") + "\n",
+    },
+  ],
+}));
+
+test("a read through wrappers decides its paths as cursors: its work and each counter grow with the program (G3 stage 1)", () => {
+  assert.deepEqual(
+    [
+      ...steepCounters(WRAPPER_PAIRS, false, undefined, [16, 32]),
+      ...steepCounters(WRAPPER_PAIRS, true, undefined, [16, 32]),
+    ],
+    [],
+  );
+});

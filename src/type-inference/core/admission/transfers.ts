@@ -1,6 +1,14 @@
 import type { PlaceId } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { joinSteps, keep, keepText, keptParts, keptSteps, keptText } from "../budget.js";
+import {
+  restRef,
+  stepsAfter,
+  stepsFrom,
+  type PathRef,
+  type Rest,
+  type Steps,
+} from "../contract/key-ids.js";
+import { keep, keepText, keptParts, keptSteps, keptText } from "../budget.js";
 import { writtenOf } from "../contract.js";
 import { keyPlace, sortCost, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
@@ -603,7 +611,7 @@ function decides(
   admission: Admission,
   member: Member,
   entry: Entry,
-  at: readonly string[],
+  at: PathRef,
   rest: number,
   mask: ReadonlySet<ItemTag> | null,
 ): readonly ItemTag[] | null {
@@ -615,7 +623,7 @@ function decides(
       admission.pass.values.valueItems(
         task.value,
         task.node,
-        joinSteps(task.stop!.strip, at.slice(rest)),
+        restAfter(task.stop!.strip, at, rest),
       ),
     ),
   );
@@ -637,7 +645,7 @@ function narrowed(
   mask: ReadonlySet<ItemTag> | null,
   member: Member,
   through: Expansion | null,
-  at: readonly string[],
+  at: PathRef,
   rest: number,
   id: number,
 ): ReadonlySet<ItemTag> | null {
@@ -652,7 +660,7 @@ function narrowed(
         admission.pass.values.valueItems(
           through.value,
           through.node,
-          joinSteps(through.strip, at.slice(rest)),
+          restAfter(through.strip, at, rest),
         ),
       ),
     ))
@@ -668,12 +676,22 @@ function maskName(mask: ReadonlySet<ItemTag> | null): string {
   return mask === null ? "*" : [...mask].sort().join(" ");
 }
 
+/**
+ * A decided path's rest from step `rest`, after a strip: an array's joined as before; a span's a view, its path's id
+ * one step from its parent's (`joinedId`), never made (G3 stage 1).
+ */
+function restAfter(strip: readonly string[], at: PathRef, rest: number): Rest {
+  return at.kind === "span"
+    ? at.from(rest).after(strip)
+    : stepsAfter(strip, stepsFrom(at.steps(), rest));
+}
+
 /** The ids of a decided path's rests (`ids[k]` the rest from step `k`), one per distinct rest in the pass. */
-function restIds(admission: Admission, at: readonly string[]): number[] {
+function restIds(admission: Admission, at: Steps): number[] {
   const ids: number[] = [];
   ids[at.length] = 0;
   for (let index = at.length - 1; index >= 0; index -= 1) {
-    const name = keptParts(admission.work, ids[index + 1]!, at[index]!);
+    const name = keptParts(admission.work, ids[index + 1]!, at.at(index)!);
     let id = admission.restIds.get(name);
     if (id === undefined) admission.restIds.set(name, (id = admission.restIds.size + 1));
     ids[index] = id;
@@ -687,13 +705,15 @@ function restIds(admission: Admission, at: readonly string[]): number[] {
  */
 function forEachPath(
   region: Region,
-  at: readonly string[],
+  at: PathRef,
   rest: number,
   visit: (path: RegionPath | null, length: number) => void,
 ): void {
   let path: RegionPath | null = region.root;
   for (let length = 0; rest + length <= at.length; length += 1) {
-    if (length > 0) path = path?.below.get(at[rest + length - 1]!) ?? null;
+    if (length > 0) path = path?.below.get(at.at(rest + length - 1)) ?? null;
+    // (a span's walk ends past the region's paths, where nothing stands: no visit per step beyond, G3 stage 1)
+    if (path === null && at.kind === "span") break;
     visit(path, length);
   }
 }
@@ -705,8 +725,8 @@ function forEachPath(
 function writtenOn(
   admission: Admission,
   root: DeciderGroup,
-  at: readonly string[],
-  ids: readonly number[],
+  at: PathRef,
+  ids: (rest: number) => number,
 ): boolean {
   interface Frame {
     readonly group: DeciderGroup;
@@ -718,7 +738,7 @@ function writtenOn(
   let answer: boolean | null = null;
   const finish = (value: boolean): void => {
     const frame = stack.pop()!;
-    frame.group.written.set(ids[frame.rest]!, value);
+    frame.group.written.set(ids(frame.rest), value);
     answer = value;
   };
   while (stack.length > 0) {
@@ -731,7 +751,7 @@ function writtenOn(
       }
       answer = null;
     } else if (frame.below === null) {
-      const known = group.written.get(ids[rest]!);
+      const known = group.written.get(ids(rest));
       if (known !== undefined || !holdsWritten(admission, group)) {
         stack.pop();
         answer = known ?? false;
@@ -770,8 +790,8 @@ function writtenOn(
 function firstValue(
   admission: Admission,
   root: DeciderGroup,
-  at: readonly string[],
-  ids: readonly number[],
+  at: PathRef,
+  ids: (rest: number) => number,
 ): DecidingValue | null {
   interface Frame {
     readonly group: DeciderGroup;
@@ -786,7 +806,7 @@ function firstValue(
     rest: number,
     masks: readonly (ReadonlySet<ItemTag> | null)[],
   ): Frame => {
-    const name = keptParts(admission.work, ids[rest]!, ...masks.map(maskName));
+    const name = keptParts(admission.work, ids(rest), ...masks.map(maskName));
     return { group, rest, masks, name, lists: null, positions: [] };
   };
   const stack: Frame[] = [
@@ -862,7 +882,7 @@ function firstValue(
               through[index]!,
               at,
               below,
-              ids[below]!,
+              ids(below),
             ),
           ),
         ),
@@ -894,11 +914,19 @@ function firstValue(
 export function transferredDecider(
   admission: Admission,
   task: Expansion,
-  at: readonly string[],
+  asked: Rest,
 ): DecidingValue | null | undefined {
   const root = groupOf(admission, [
     { task, deep: false, single: true, typed: false, chosen: true, surely: true, joined: false },
   ]);
-  const ids = restIds(admission, at);
+  // (an array's rests named as before, all at once; a span's by its rests' path ids as asked, below zero so the two
+  // never meet in a group's answers, G3 stage 1)
+  const at = restRef(admission.pass.contract, asked);
+  let ids: (rest: number) => number;
+  if (at.kind === "span") ids = (rest) => -1 - at.from(rest).id();
+  else {
+    const list = restIds(admission, at.steps());
+    ids = (rest) => list[rest]!;
+  }
   return writtenOn(admission, root, at, ids) ? undefined : firstValue(admission, root, at, ids);
 }

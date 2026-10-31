@@ -1,7 +1,18 @@
 import type { PlaceId, SourceSite } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { joinParts, joinSteps, keepText, pathText, stepText } from "../budget.js";
-import { keyBelow, sortCost, type Definition } from "../definitions.js";
+import { joinParts, keepText, stepText } from "../budget.js";
+import {
+  isPathSteps,
+  keyBelowIn,
+  stepsAfter,
+  stepsFrom,
+  stepsJoin,
+  stepsPrefixText,
+  stepsRest,
+  stepsText,
+  type Steps,
+} from "../contract/key-ids.js";
+import { sortCost, type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { IngressNode, Item } from "../items.js";
 import { concrete, isExternal } from "./kinds.js";
@@ -22,14 +33,15 @@ import { compareKeys, contributionSite, RECEIVER_ROLES, stopsOf } from "./walk.j
 function contributions(
   admission: Admission,
   d: Definition,
-  at: readonly string[],
-): readonly { readonly stop: Stop; readonly rest: readonly string[] }[] {
+  at: Steps,
+): readonly { readonly stop: Stop; readonly rest: Steps }[] {
   if (d.value === undefined) return [];
-  const out: { stop: Stop; rest: readonly string[] }[] = [];
+  const out: { stop: Stop; rest: Steps }[] = [];
+  // (a record's prefixes named by their record's texts and its rests its views; an array's as before)
   for (let length = 0; length <= at.length; length += 1)
-    for (const stop of keyStops(admission, d, pathText(at.slice(0, length))).distinct()) {
+    for (const stop of keyStops(admission, d, stepsPrefixText(at, length)).distinct()) {
       admission.pass.program.work.charge("checks");
-      out.push({ stop, rest: at.slice(length) });
+      out.push({ stop, rest: stepsFrom(at, length) });
     }
   return out.sort((a, b) => compareKeys(a.stop.key, b.stop.key));
 }
@@ -44,7 +56,7 @@ function contributions(
 export function ingressSiteOf(
   admission: Admission,
   d: Definition,
-  at: readonly string[],
+  at: Steps,
   item?: Item,
 ): SourceSite {
   if (d.kind !== "whole" || d.value === undefined) return d.site;
@@ -67,7 +79,7 @@ export function ingressSiteOf(
   // data only its own sitings, the inline ones it skips never read, Codex r24 F2's neighbours)
   const lists: (readonly Siting[])[] = [];
   for (let length = 0; length <= at.length; length += 1) {
-    const stops = keyStops(admission, d, pathText(at.slice(0, length)));
+    const stops = keyStops(admission, d, stepsPrefixText(at, length));
     lists.push(named ? stops.namedSitings() : stops.sitings());
   }
   const positions = lists.map(() => 0);
@@ -247,7 +259,7 @@ function namedBelowCombining(admission: Admission, stop: Stop): boolean {
 export function namedExternalSite(
   admission: Admission,
   d: Definition,
-  at: readonly string[],
+  at: Steps,
 ): SourceSite | null {
   const { contract, values } = admission.pass;
   const { inline } = storeIngresses(admission, d);
@@ -255,10 +267,10 @@ export function namedExternalSite(
   for (const { stop, rest } of contributions(admission, d, at)) {
     const source = sourceOf(admission, stop.value);
     if (source === null || inline.has(stop.value)) continue;
-    const path = joinSteps(stop.strip, rest);
-    const key = keyBelow(source, path);
+    const path = stepsJoin(stop.strip, rest);
+    const key = keyBelowIn(contract, source, path);
     if (withoutEmpty(admission.run(contract.contractOf(key))).some(concrete)) continue;
-    if (admission.run(values.valueItems(stop.value, stop.node, path)).some(isExternal))
+    if (admission.run(values.valueItems(stop.value, stop.node, stepsRest(path))).some(isExternal))
       // (an operation's own read: the destination's check at the store's value, TABLE r4.63 (3))
       return stop.via?.own === true ? d.site : contributionSite(admission, stop, d);
   }
@@ -324,23 +336,22 @@ function ownLeaves(admission: Admission, d: Definition, typed = true): ReadonlyS
  * The whole value a stored value's path lies below (a copy, external data, an operation), not a field or element of
  * one of its literals, or `null`.
  */
-export function wholeBelow(
-  admission: Admission,
-  value: PlaceId,
-  at: readonly string[],
-): PlaceId | null {
+export function wholeBelow(admission: Admission, value: PlaceId, at: Steps): PlaceId | null {
   const { program } = admission.pass;
   // the values at each depth of the path, and the first whole one there, once per value and path prefix: the paths
   // of a stored value share their prefixes (each field of a list's elements its element step)
   let level: Level = { values: [value], whole: program.hasOf.has(value) ? null : value };
   let key = `${value}`;
   for (let index = 0; index + 1 < at.length && level.whole === null; index += 1) {
-    key = stepText(key, at[index]!);
+    // (a record's prefix named by its record's text, `prefixText`; an array's step by step as before)
+    key = isPathSteps(at)
+      ? stepText(String(value), at.prefixText(index + 1))
+      : stepText(key, at[index]!);
     let next = admission.levels.get(key);
     if (next === undefined) {
       const values: PlaceId[] = [];
       for (const current of level.values)
-        for (const d of admission.storesAt(current, at[index]!)) values.push(d.value!);
+        for (const d of admission.storesAt(current, at.at(index)!)) values.push(d.value!);
       program.work.charge("checks", values.length + 1);
       next = { values, whole: values.find((current) => !program.hasOf.has(current)) ?? null };
       keepText(admission.work, key.length);
@@ -357,12 +368,7 @@ export function wholeBelow(
  * brings of host data (r4.60), or named data the store brings beside the inline data at `at`, owes its own check
  * (Codex r21 B3).
  */
-export function ownIngress(
-  admission: Admission,
-  item: Item,
-  d: Definition,
-  at: readonly string[],
-): boolean {
+export function ownIngress(admission: Admission, item: Item, d: Definition, at: Steps): boolean {
   if (item.ingress === undefined) return false;
   const stops = landingIndex(admission).byStore.get(d);
   if (stops === undefined) return false;
@@ -387,22 +393,18 @@ export function ownIngress(
  * every operation's own read (C10's): what an item merging them with inline data owes beside its boundary. Once per
  * store and path, reading only its prefixes' named data (`keyStops`).
  */
-function namedBeside(
-  admission: Admission,
-  d: Definition,
-  at: readonly string[],
-): ReadonlySet<PlaceId> {
-  const memoKey = joinParts(d.uid, at);
+function namedBeside(admission: Admission, d: Definition, at: Steps): ReadonlySet<PlaceId> {
+  // (a record's path named by its record's text, `stepsText`)
+  const memoKey = joinParts(d.uid, stepsText(at));
   const known = admission.beside.get(memoKey);
   if (known !== undefined) return known;
   const { program, values } = admission.pass;
   const out = new Set<PlaceId>();
   for (let length = 0; length <= at.length; length += 1)
-    for (const stop of keyStops(admission, d, pathText(at.slice(0, length))).named()) {
+    for (const stop of keyStops(admission, d, stepsPrefixText(at, length)).named()) {
       program.work.charge("checks");
-      for (const item of admission.run(
-        values.valueItems(stop.value, stop.node, joinSteps(stop.strip, at.slice(length))),
-      ))
+      const rest = stepsAfter(stop.strip, stepsFrom(at, length));
+      for (const item of admission.run(values.valueItems(stop.value, stop.node, rest)))
         if (isExternal(item) && item.ingress !== undefined)
           for (const ingress of leafIngresses(admission, item.ingress)) out.add(ingress);
     }

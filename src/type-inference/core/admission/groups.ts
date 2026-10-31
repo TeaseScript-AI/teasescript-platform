@@ -1,12 +1,34 @@
 import type { PlaceId } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { joinSteps, keptParts, keptSplit, keptSteps, keptText, pathText } from "../budget.js";
+import {
+  joinSteps,
+  keepText,
+  keptParts,
+  keptSplit,
+  keptSteps,
+  keptText,
+  pathText,
+  splitPath,
+} from "../budget.js";
 import { writtenOf } from "../contract.js";
+import {
+  canonicalKey,
+  type CanonicalKey,
+  isKeyId,
+  keptKeyAt,
+  keptParentIn,
+  type KeyId,
+  keyIdAt,
+  keyIdBelow,
+  keyIdOf,
+  keyIdPath,
+  rootId,
+} from "../contract/key-ids.js";
+import { keyLane } from "../contract/lanes.js";
 import {
   keptKey,
   keptPath,
   keptPathText,
-  keptParent,
   keptPrefixes,
   keyPlace,
   type Definition,
@@ -19,7 +41,8 @@ import { heldMeetings } from "./held.js";
 import { offending, SCALAR } from "./kinds.js";
 import { landingIndex } from "./landing-index.js";
 import { byPath, inheritance, landed, landedBelow, wholeCycle } from "./landings.js";
-import type { ByPath, InheritedCopy } from "./model.js";
+import type { ByPath, DecidedAt, InheritedCopy } from "./model.js";
+import { stepName } from "../program.js";
 import { ownStructure } from "./own.js";
 import { levelsOf } from "./permitted.js";
 import { depthOf, elementsBelow, valueStructure } from "./structure.js";
@@ -52,21 +75,32 @@ export function stores(admission: Admission): readonly Definition[] {
   return admission.storeList;
 }
 
-/** Every place and path admission decides: the keys with definitions, below them a literal's structure, written elements. */
-export function groups(
-  admission: Admission,
-): readonly { readonly root: PlaceId; readonly path: readonly string[] }[] {
+/**
+ * Every place and path admission decides: the keys with definitions, below them a literal's structure, written elements.
+ * G3 stage 1: each in its identity (`keyAt`): a wrapper's family's path its key's cursor, a projection's one step below
+ * its owner's (`projectionCursor`), a parent by the arena (`keyParentIn`), never its path's text or steps.
+ */
+export function groups(admission: Admission): readonly DecidedAt[] {
   if (admission.groupList !== null) return admission.groupList;
-  const { program, definitions } = admission.pass;
+  const { program, definitions, contract } = admission.pass;
   const work = program.work;
-  const tracked = new Set<Key>([...definitions.byKey.keys(), ...definitions.candidates.keys()]);
+  // (each key in its identity: a definition's key is its family's text, G3 stage 1)
+  const tracked = new Set<CanonicalKey>();
+  for (const key of [...definitions.byKey.keys(), ...definitions.candidates.keys()])
+    tracked.add(canonicalKey(contract, key));
+  const chains = new Map<PlaceId, ChainLink>();
   for (const c of program.constraints)
     if (c.kind === "project") {
+      const cursor = projectionCursor(admission, chains, c.into);
+      if (cursor !== null) {
+        tracked.add(cursor);
+        continue;
+      }
       const target = program.targetRoot(c.into);
       if (!program.cellOwner.has(target.root) && !program.hasOf.has(target.root))
-        tracked.add(keptKey(admission.work, target.root, target.path));
+        tracked.add(keptKeyAt(contract, target.root, target.path));
     }
-  for (const [, binding] of program.occurrenceOf) tracked.add(keptKey(admission.work, binding, []));
+  for (const [, binding] of program.occurrenceOf) tracked.add(keptKeyAt(contract, binding, []));
   const reaching = admission.stores();
   const stores = new Map<Key, number>();
   for (const d of reaching)
@@ -82,7 +116,7 @@ export function groups(
       const base = joinSteps(d.path, d.kind === "add" && d.how !== "elements" ? ["element"] : []);
       const structure = valueStructure(admission, d.value!);
       for (const path of structure.paths)
-        tracked.add(keptKey(admission.work, d.place, joinSteps(base, path)));
+        tracked.add(keptKeyAt(contract, d.place, joinSteps(base, path)));
       for (const { below, key } of structure.sources) {
         work.charge("indexSteps");
         const landing = keptKey(admission.work, d.place, joinSteps(base, below));
@@ -90,8 +124,8 @@ export function groups(
         if (depth <= (deepest.get(landing) ?? 0)) continue;
         deepest.set(landing, depth);
         tracked.add(
-          keptKey(
-            admission.work,
+          keptKeyAt(
+            contract,
             d.place,
             joinSteps(base, below, Array<string>(depth).fill("element")),
           ),
@@ -108,7 +142,7 @@ export function groups(
       const base = joinSteps(d.path, d.kind === "add" && d.how !== "elements" ? ["element"] : []);
       for (const path of structure.paths) {
         work.charge("indexSteps");
-        tracked.add(keptKey(admission.work, d.place, joinSteps(base, path)));
+        tracked.add(keptKeyAt(contract, d.place, joinSteps(base, path)));
       }
     }
   // A2 (TABLE r4.131): a place receiving copies is checked where they meet it, read or not: the paths where what two
@@ -140,7 +174,7 @@ export function groups(
       )
     )
       for (const path of heldMeetings(admission, list, [])) {
-        const key = keptKey(admission.work, place, path);
+        const key = keptKeyAt(contract, place, path);
         tracked.add(key);
         admission.atCopies.add(key);
       }
@@ -158,15 +192,15 @@ export function groups(
       work.charge("indexSteps");
       const below = elementsBelow(d, stop.path);
       if (below.length > 0)
-        tracked.add(keptKey(admission.work, d.place, joinSteps(admission.destPath(d), below)));
+        tracked.add(keptKeyAt(contract, d.place, joinSteps(admission.destPath(d), below)));
     }
   // (each key's prefixes, walked up a step at a time to one whose own are in already: each prefix made once, so a
   // literal nested k deep makes its k keys' prefixes in k steps, not k² made again per key, TABLE r4.100 (2))
-  const closed = new Set<Key>();
+  const closed = new Set<CanonicalKey>();
   for (const key of [...tracked])
-    for (let at: Key | null = key; at !== null && !closed.has(at);) {
+    for (let at: CanonicalKey | null = key; at !== null && !closed.has(at);) {
       closed.add(at);
-      at = keptParent(admission.work, at);
+      at = keptParentIn(contract, at);
       if (at === null) break;
       work.charge("indexSteps");
       tracked.add(at);
@@ -178,12 +212,27 @@ export function groups(
       program.constraints.length +
       definitions.storeDefs.length,
   );
+  // (per place its paths' texts, a cursor's its path's id after a NUL, which no path's text holds)
   const roots = new Map<PlaceId, Set<string>>();
   for (const key of tracked) {
     let paths = roots.get(keyPlace(key));
     if (paths === undefined) roots.set(keyPlace(key), (paths = new Set()));
-    paths.add(keptPathText(admission.work, key));
+    paths.add(
+      isKeyId(key) ? cursorEntry(admission, keyIdPath(key)) : keptPathText(admission.work, key),
+    );
   }
+  // (a path added by its steps or its text, in its family's identity: a wrapper's family's its cursor's entry)
+  const entry = (place: PlaceId, path: readonly string[] | string): string => {
+    if (typeof path === "string") {
+      const first = path === "" ? null : path.split(".", 1)[0]!;
+      return first !== null && keyLane(contract, place, first) === "cursor"
+        ? cursorEntry(admission, keyIdPath(keyIdOf(contract, place, splitPath(path))))
+        : path;
+    }
+    return path.length > 0 && keyLane(contract, place, path[0]!) === "cursor"
+      ? cursorEntry(admission, keyIdPath(keyIdOf(contract, place, path)))
+      : keptText(admission.work, path);
+  };
   // A1, A8: a written collection's elements at every depth
   for (const place of program.places) {
     const written = writtenOf(place.kind);
@@ -202,7 +251,7 @@ export function groups(
   const { seeds, into, order } = inheritance(admission);
   for (const [place, paths] of seeds) {
     const own = at(place);
-    for (const text of paths.keys()) own.add(text);
+    for (const text of paths.keys()) own.add(entry(place, text));
   }
   // A4 through copies (r4.75 (1)): a copy of a place that may inherit a written type lands at its own path; below it,
   // where copies of written types land in that place, it is decided with the copy only where the place's contents may
@@ -217,18 +266,75 @@ export function groups(
       const own = at(place);
       for (const { path } of copies) {
         work.charge("indexSteps");
-        own.add(keptText(admission.work, path));
+        own.add(entry(place, path));
       }
       for (const path of hots.get(place) ?? []) {
         work.charge("indexSteps");
-        own.add(keptText(admission.work, path));
+        own.add(entry(place, path));
       }
     }
-  const groups: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
+  const groups: DecidedAt[] = [];
   for (const [root, paths] of roots)
-    for (const path of paths) groups.push({ root, path: keptSplit(admission.work, path) });
+    for (const entry of paths)
+      groups.push(
+        entry.startsWith("\u0000")
+          ? { root, key: keyIdAt(root, Number(entry.slice(1))) }
+          : { root, path: keptSplit(admission.work, entry) },
+      );
   admission.groupList = groups;
   return groups;
+}
+
+/** A cursor's entry among a place's paths (`groups`): its path's id after a NUL, its slot charged as a kept text. */
+function cursorEntry(admission: Admission, path: number): string {
+  const text = `\u0000${path}`;
+  keepText(admission.work, text.length);
+  return text;
+}
+
+/** A projection's chain (`projectionCursor`): its root, its first step, its key's cursor in a wrapper's family. */
+interface ChainLink {
+  readonly root: PlaceId;
+  readonly first: string;
+  readonly key: KeyId | null;
+}
+
+/**
+ * The cursor of a projection's key (`targetRoot`'s, a read's steps by their names) where its family is a wrapper's
+ * (`keyLane`), else `null`: down from the nearest projection of its chain known in `chains`, each one step below its
+ * owner's (`keyIdBelow`), so a chain of k projections makes k cursors and walks k links, never k² (G3 stage 1).
+ */
+function projectionCursor(
+  admission: Admission,
+  chains: Map<PlaceId, ChainLink>,
+  value: PlaceId,
+): KeyId | null {
+  const { program, contract } = admission.pass;
+  const way: PlaceId[] = [];
+  let at = value;
+  for (;;) {
+    if (chains.has(at)) break;
+    const projection = program.projOf.get(at);
+    if (projection === undefined) break;
+    way.push(at);
+    at = program.occurrenceOf.get(projection.owner) ?? projection.owner;
+  }
+  let link = chains.get(at) ?? null;
+  for (let index = way.length - 1; index >= 0; index -= 1) {
+    const step = stepName(program.projOf.get(way[index]!)!.step);
+    if (link === null) {
+      const key =
+        keyLane(contract, at, step) === "cursor" ? keyIdBelow(contract, rootId(at), step) : null;
+      link = { root: at, first: step, key };
+    } else
+      link = {
+        root: link.root,
+        first: link.first,
+        key: link.key === null ? null : keyIdBelow(contract, link.key, step),
+      };
+    chains.set(way[index]!, link);
+  }
+  return chains.get(value)?.key ?? null;
 }
 
 /**

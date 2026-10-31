@@ -286,6 +286,12 @@ test("a tested path's mark reaches every entry of its source, and only that path
     outcome: "compile-error",
     checked: false,
   });
+  // (behind a wrapper the guarded copy is of its projection, a copy the marks still collect: a test names the wrapper,
+  // so its keys are text, G3 stage 1)
+  const wrapped = flagged(
+    "let seed = {n: 1.5, m: 2.5}\nlet w = {q: seed}\nlet a = w.q\nif w.q.n is integer { a = w.q }\nlet b = w.q\nif flagHost { b = w.q }\nlet x: integer = b.n\nexit",
+  );
+  assert.deepEqual(result(wrapped), { outcome: "warning-runtime-check", checked: true });
 });
 
 test("a chain of whole copies read at k fields resolves each copy once (W34)", () => {

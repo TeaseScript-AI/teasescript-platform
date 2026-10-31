@@ -1,10 +1,25 @@
 import type { PlaceId } from "../../graph.js";
-import { keepText, keptParts, keptSteps, keptText, pathText, stepText } from "../budget.js";
+import {
+  type CanonicalKey,
+  isKeyId,
+  keptKeyBelowIn,
+  keyDepthIn,
+  keyStepsIn,
+  type Rest,
+  restRef,
+  restSteps,
+  stepsArray,
+  stepsPrefixText,
+  stepsText,
+  type Steps,
+} from "./key-ids.js";
+import { keepText, keptParts, keptSteps, keptText, stepText } from "../budget.js";
 import type { Contract } from "../contract.js";
 import {
   keptKey,
-  keptKeyBelow,
+  keptKeyOfText,
   keyOf,
+  keyOfText,
   keyPath,
   keyPlace,
   type Definition,
@@ -40,7 +55,8 @@ function copiedRoot(contract: Contract, d: Definition): PlaceId | null {
       return null;
   }
   const copied = contract.copiedKey(d.value!);
-  if (copied === null || keyPath(copied).length > 0 || guards.guardedRead(d.value!)) return null;
+  if (copied === null || keyDepthIn(contract, copied) > 0 || guards.guardedRead(d.value!))
+    return null;
   return copyOnly(contract, keyPlace(copied)) ? keyPlace(copied) : null;
 }
 
@@ -144,16 +160,18 @@ function ringOf(contract: Contract, place: PlaceId): CopyRing | null {
  * entry of its key, which the solver's fixpoint then closes, so each member's stores are one answer, whichever place
  * entered the cycle; any other key still open (a copy cycle through a projection) stays an entry, cut there.
  */
-export function prefixStores(contract: Contract, prefix: Key): PrefixStores {
+export function prefixStores(contract: Contract, asked: Key): PrefixStores {
+  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  const prefix = contract.canonicalKey(asked);
   if (!contract.prefix.has(prefix)) contract.settle(prefixWork(contract, prefix));
   return contract.prefix.get(prefix)!;
 }
 
-export function* prefixWork(contract: Contract, prefix: Key): IdentityWork {
+export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityWork {
   if (contract.prefix.has(prefix)) return;
   const { program, definitions, lists, guards } = contract.pass;
   const work = program.work;
-  const frame = (pk: Key): PrefixFrame => ({
+  const frame = (pk: CanonicalKey): PrefixFrame => ({
     pk,
     defs: definitions.byKey.get(pk) ?? [],
     i: 0,
@@ -247,7 +265,7 @@ export function* prefixWork(contract: Contract, prefix: Key): IdentityWork {
     }
     defs.add(f.d);
   };
-  const open = new Set<Key>([prefix]);
+  const open = new Set<CanonicalKey>([prefix]);
   const stack: PrefixFrame[] = [];
   const push = (f: PrefixFrame): void => {
     stack.push(f);
@@ -274,8 +292,11 @@ export function* prefixWork(contract: Contract, prefix: Key): IdentityWork {
       else {
         yield* adding(contract, f, {
           ...(e.key !== undefined
-            ? { key: keptKeyBelow(contract.work, e.key, projection) }
-            : { value: e.value!, at: keptSteps(contract.work, e.at ?? [], projection) }),
+            ? { key: keptKeyBelowIn(contract, e.key, projection) }
+            : {
+                value: e.value!,
+                at: keptSteps(contract.work, e.at ?? [], stepsArray(projection)),
+              }),
           ...(e.guarded ? { guarded: true } : {}),
           ingress: e.ingress,
         });
@@ -359,14 +380,18 @@ export function* prefixWork(contract: Contract, prefix: Key): IdentityWork {
       }
       // §3.2 (r4.15, r4.23): a copy of a record with a tested key below it is a mark of its source's holder
       // (collected once), looked up at the read of each path; the entry stays its source's
-      const path = keyPath(copied);
+      const path = keyStepsIn(contract, copied);
       if (path.length > 0) {
-        const root = keyOf(keyPlace(copied), []);
+        const root = contract.keyAt(keyPlace(copied), []);
         let direct = false;
-        for (let length = 1; length <= path.length && !direct; length += 1) {
+        // (a cursor's keys below its place's own key hold no definition: its family's shape requires it, G3 stage 1)
+        for (let length = 1; length <= path.length && !direct && !isKeyId(copied); length += 1) {
           work.charge("invSteps");
           if (
-            (definitions.byKey.get(keyOf(keyPlace(copied), path.slice(0, length))) ?? []).length > 0
+            (
+              definitions.byKey.get(keyOfText(keyPlace(copied), stepsPrefixText(path, length))) ??
+              []
+            ).length > 0
           )
             direct = true;
         }
@@ -442,15 +467,13 @@ function aliasLayer(contract: Contract, inner: PrefixStores, place: PlaceId): Su
  * The layer a projected copy of `place` at `projection` takes: the place's own live stores below the path, once, from
  * the keys below the path alone (r4.46 (3): never the place's whole key set per copy).
  */
-function projectedLayer(
-  contract: Contract,
-  place: PlaceId,
-  projection: readonly string[],
-): SubLayer | null {
-  const id = keptParts(contract.work, place, projection);
+function projectedLayer(contract: Contract, place: PlaceId, projection: Steps): SubLayer | null {
+  // (a record's steps spelled by their record)
+  const text = stepsText(projection);
+  const id = keptParts(contract.work, place, text);
   if (contract.projectedLayers.has(id)) return contract.projectedLayers.get(id)!;
   const { program, definitions, lists } = contract.pass;
-  const sub = keptKey(contract.work, place, projection);
+  const sub = keptKeyOfText(contract.work, place, text);
   const own = new Map<string, Set<Key>>();
   for (const below of definitions.keysBelow(sub)) {
     program.work.charge("invSteps");
@@ -557,11 +580,13 @@ function ownPaths(contract: Contract, sub: Key): ReadonlySet<string> {
 export function relevantSubs(
   contract: Contract,
   stores: PrefixStores,
-  rest: readonly string[],
+  asked: Rest,
 ): readonly SubSource[] {
-  if (rest.length === 0) return [];
+  // (a cursor's span read one step at a time; its steps made only for a layer that walks them)
+  const ref = restRef(contract, asked);
+  if (ref.length === 0) return [];
   const work = contract.pass.program.work;
-  const step = rest[0]!;
+  const step = ref.at(0);
   let bySteps = contract.stepLayers.get(stores);
   if (bySteps === undefined) contract.stepLayers.set(stores, (bySteps = new Map()));
   // (the layers it inherits or joins, by position: the one it inherits first, then those it joins)
@@ -586,7 +611,7 @@ export function relevantSubs(
         if (listed === undefined) own.set(sub, [at]);
         else listed.push(at);
       }
-      if (walkLayer(contract, top, defs, step, rest, found)) deep.push(at);
+      if (walkLayer(contract, top, defs, step, restSteps(asked), found)) deep.push(at);
     }
     contract.keep(1 + deep.length);
     bySteps.set(step, { own, deep });
@@ -594,9 +619,9 @@ export function relevantSubs(
     const { own, deep } = known;
     const walked = new Set(deep);
     let text = "";
-    for (let length = 1; length <= rest.length && own.size > 0; length += 1) {
+    for (let length = 1; length <= ref.length && own.size > 0; length += 1) {
       work.charge("invSteps");
-      text = length === 1 ? step : stepText(text, rest[length - 1]!);
+      text = length === 1 ? step : stepText(text, ref.at(length - 1));
       const having = contract.subsByPath.get(text);
       if (having === undefined) continue;
       if (having.size <= own.size)
@@ -613,7 +638,7 @@ export function relevantSubs(
     work.charge("invSteps", walked.size);
     for (const at of [...walked].sort((a, b) => a - b)) {
       const { layer, defs } = topAt(at);
-      walkLayer(contract, layer, defs, step, rest, found);
+      walkLayer(contract, layer, defs, step, restSteps(asked), found);
     }
   }
   return [...found]
@@ -631,7 +656,7 @@ function walkLayer(
   top: SubLayer,
   brought: ReadonlySet<Definition | null>,
   step: string,
-  rest: readonly string[],
+  rest: Steps,
   found: Map<Key, Set<Definition | null>>,
 ): boolean {
   const work = contract.pass.program.work;
@@ -648,7 +673,7 @@ function walkLayer(
       let held = false;
       for (let length = 1; length <= rest.length && !held; length += 1) {
         work.charge("invSteps");
-        held = paths.has(pathText(rest.slice(0, length)));
+        held = paths.has(stepsPrefixText(rest, length));
       }
       if (!held) continue;
       let defs = found.get(sub);

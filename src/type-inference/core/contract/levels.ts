@@ -1,7 +1,8 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, joinSteps, keptParts } from "../budget.js";
+import { joinParts, keptParts } from "../budget.js";
+import { keyBelowRef, restPart, restRef, restTo, type Rest } from "./key-ids.js";
 import type { Contract } from "../contract.js";
-import { keyBelow, type Key } from "../definitions.js";
+import { type Key } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
 import { EMPTY, firstWriter, type Item } from "../items.js";
 import { stepName } from "../program.js";
@@ -25,40 +26,39 @@ import type {
 export function* entryAt(
   contract: Contract,
   entry: PrefixEntry,
-  rest: readonly string[],
+  rest: Rest,
 ): Work<readonly Item[]> {
   contract.pass.program.work.charge("invSteps");
+  // (a cursor's span read one step at a time, its path's id where a key or a value takes it whole, G3 stage 1)
+  const ref = restRef(contract, rest);
   if (entry.unk !== undefined) return [unknownItem(entry.unk, entry.w)];
   // F6, F7: the contract's M is open
-  if (entry.empty === true) return rest.length === 1 && rest[0] === "element" ? [EMPTY] : [];
+  if (entry.empty === true) return ref.length === 1 && ref.at(0) === "element" ? [EMPTY] : [];
   // F5: an add's element; an `addAll` contributes kinds, never emptiness (M unchanged)
   if (entry.elem !== undefined) {
-    if (rest[0] !== "element") return [];
-    const at = joinSteps(entry.at ?? [], rest.slice(1));
+    if (ref.length === 0 || ref.at(0) !== "element") return [];
+    const at = ref.from(1).after(entry.at ?? []);
     const items = annotated(
       contract,
       entry,
       at,
       withWriter(yield* contract.contractOfValueAt(entry.elem, at), entry.w),
     );
-    return rest.length === 1 ? withoutEmpty(items) : items;
+    return ref.length === 1 ? withoutEmpty(items) : items;
   }
   // §3.2: a copy read under a guard; a tested child's mark by the entry's holder at the path (r4.15)
   if (entry.key !== undefined)
     return annotated(
       contract,
       entry,
-      rest,
-      withWriter(yield* contract.contractOf(keyBelow(entry.key, rest)), entry.w),
+      ref,
+      withWriter(yield* contract.contractOf(keyBelowRef(contract, entry.key, ref)), entry.w),
     );
   return annotated(
     contract,
     entry,
-    rest,
-    withWriter(
-      yield* contract.contractOfValueAt(entry.value!, joinSteps(entry.at ?? [], rest)),
-      entry.w,
-    ),
+    ref,
+    withWriter(yield* contract.contractOfValueAt(entry.value!, ref.after(entry.at ?? [])), entry.w),
   );
 }
 
@@ -66,7 +66,9 @@ export function* entryAt(
  * A prefix's entries as its levels read them (§4.6), once per prefix: each entry a level's member (`levelMember`)
  * starts the levels, every other entry answers each path by itself.
  */
-export function prefixLevels(contract: Contract, prefix: Key, stores: PrefixStores): PrefixLevels {
+export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStores): PrefixLevels {
+  // (a prefix in its identity, as the levels hold it: G3 stage 1)
+  const prefix = contract.canonicalKey(asked);
   const known = contract.levelBases.get(prefix);
   if (known !== undefined) return known;
   const others: PrefixEntry[] = [];
@@ -179,11 +181,13 @@ function levelMember(contract: Contract, entry: PrefixEntry): LevelGroup | null 
  */
 export function groupsAt(
   contract: Contract,
-  prefix: Key,
+  asked: Key,
   base: readonly LevelGroup[],
-  path: readonly string[],
+  path: Rest,
 ): readonly LevelGroup[] {
-  const memoKey = joinParts(prefix, path);
+  // (a prefix in its identity, as the levels' groups are named by it: G3 stage 1; a span by its name, never its text)
+  const prefix = contract.canonicalKey(asked);
+  const memoKey = joinParts(prefix, restPart(path));
   const known = contract.levelGroups.get(memoKey);
   if (known !== undefined) return known;
   contract.keepText(memoKey.length);
@@ -195,7 +199,7 @@ export function groupsAt(
   const groups: LevelGroup[] = [];
   for (const group of path.length === 0
     ? base
-    : groupsAt(contract, prefix, base, path.slice(0, -1))) {
+    : groupsAt(contract, prefix, base, restTo(contract, path, path.length - 1))) {
     program.work.charge("structureSteps");
     const levels = levelsOf(contract, group.literal);
     // (what stands at each step above the path: entries read below it, objects lacking the next step, a
@@ -203,8 +207,9 @@ export function groupsAt(
     const above: string[] = [];
     let id = 0;
     contract.keep(group.at.length + path.length);
-    for (const step of joinSteps(group.at, path)) {
+    for (let index = 0; index < group.at.length + path.length; index += 1) {
       above.push(levels.at.get(id) ?? "");
+      const step = index < group.at.length ? group.at[index]! : path.at(index - group.at.length)!;
       id = pathBelow(contract, id, step);
     }
     const cell = program.cellOwner.get(group.literal)?.kind === "cell" ? "cell" : "";

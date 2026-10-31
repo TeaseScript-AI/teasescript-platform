@@ -1,9 +1,19 @@
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
+import {
+  isKeyId,
+  keyBelowIn,
+  keyIdPath,
+  keyWalk,
+  someStep,
+  stepsArray,
+  stepsOfId,
+  type CanonicalKey,
+} from "./contract/key-ids.js";
 import { joinParts, joinSteps } from "./budget.js";
 import { carried, type Dispatch } from "./carriers.js";
 import { heldReference, type IndexNode } from "./contract.js";
-import { keyBelow, keyOf, keyPath, keyPlace, recordPath, type Key } from "./definitions.js";
+import { keyPath, recordPath } from "./definitions.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
 import type { Work } from "./solver.js";
@@ -11,7 +21,7 @@ import type { Work } from "./solver.js";
 /** A task of a property name search (`propertyNames`): a value at a path, a key, or a literal at a path. */
 export type PropertyNamesTask =
   | { readonly value: PlaceId; readonly path: readonly string[] }
-  | { readonly key: Key }
+  | { readonly key: CanonicalKey }
   | { readonly literal: PlaceId; readonly path: readonly string[] };
 
 /**
@@ -53,8 +63,15 @@ export function propertyNames(
       const source = contract.copiedKey(at) ?? contract.resultKey(at);
       // r4.46 (2): through a dict's `values` the projections are followed (a dict's values are its elements)
       // (a choice's selected value is read as its record's `value` or `text`, as the literal's records say: V30 §19)
-      if (source !== null && !keyPath(source).some((step) => dictList(step) !== undefined)) {
-        pending.push({ key: keyBelow(source, recordPath(path)) });
+      // (a cursor's path holds no dict's list where it holds no built-in member: the arena's, G3 stage 1)
+      if (
+        source !== null &&
+        !(isKeyId(source)
+          ? contract.pathMembers[keyIdPath(source)] !== 0 &&
+            someStep(stepsOfId(contract, source), (step) => dictList(step) !== undefined)
+          : keyPath(source).some((step) => dictList(step) !== undefined))
+      ) {
+        pending.push({ key: keyBelowIn(contract, source, recordPath(path)) });
         continue;
       }
       if (program.hasOf.has(at)) {
@@ -89,20 +106,25 @@ export function propertyNames(
       continue;
     }
     const key = task.key;
-    const place = keyPlace(key);
-    const path = keyPath(key);
-    for (const below of definitions.keysBelow(key)) {
+    // (a cursor's steps through the charged boundary, its prefixes its ancestors, no key below it a definition's: its
+    // family's shape requires it, G3 stage 1)
+    const walk = keyWalk(contract, key);
+    const { path } = walk;
+    for (const below of isKeyId(key) ? [] : definitions.keysBelow(key)) {
       const step = keyPath(below)[path.length];
       if (step !== undefined && step !== "element") names.add(propertyName(step));
     }
+    // (the tasks keep their paths: a cursor's steps copied out once)
+    const steps = stepsArray(path);
     for (let length = 0; length <= path.length; length += 1) {
-      const rest = path.slice(length);
-      const stores = contract.prefixStores(keyOf(place, path.slice(0, length)));
+      const rest = steps.slice(length);
+      const stores = contract.prefixStores(walk.prefix(length));
       // the sources' own stores below their roots
-      for (const sub of contract.subSources(stores)) pending.push({ key: keyBelow(sub, rest) });
+      for (const sub of contract.subSources(stores))
+        pending.push({ key: keyBelowIn(contract, sub, rest) });
       for (const entry of stores.list) {
         const at = joinSteps(entry.at ?? [], rest);
-        if (entry.key !== undefined) pending.push({ key: keyBelow(entry.key, at) });
+        if (entry.key !== undefined) pending.push({ key: keyBelowIn(contract, entry.key, at) });
         else if (entry.value !== undefined) pending.push({ value: entry.value, path: at });
         // an added value stands at the collection's element, an `addAll`'s at its own (as `entryAt` reads it), never
         // at the collection itself

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
 import { compileProjectWithBackend } from "../../src/compiler.js";
+import { keyIdPath } from "../../src/type-inference/core/contract/key-ids.js";
+import { stepsOf } from "../../src/type-inference/core/contract/literal-index.js";
 import type { Diagnostic } from "../../src/diagnostics.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { Admission } from "../../src/type-inference/core/admission.js";
@@ -683,15 +685,17 @@ export function stopSet(
     traceOf(this.pass).decided += 1;
     return decide.apply(this, args);
   };
-  Admission.prototype.stopDecision = function (this: Admission, root, path) {
+  Admission.prototype.stopDecision = function (this: Admission, at) {
     const trace = traceOf(this.pass);
+    // (a cursor's steps read from the arena uncharged: the observer changes nothing it observes)
+    const path = at.key === undefined ? at.path : stepsOf(this.pass.contract, keyIdPath(at.key));
     trace.stops.push([
       trace.pass,
-      this.pass.program.places[root]!.label,
+      this.pass.program.places[at.root]!.label,
       path.join("."),
       trace.decided,
     ]);
-    stopDecision.call(this, root, path);
+    stopDecision.call(this, at);
   };
   try {
     const once = (): Answers => analyseCore(request);

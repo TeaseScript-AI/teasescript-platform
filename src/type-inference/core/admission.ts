@@ -13,7 +13,7 @@ import {
   copiedAt,
   decide,
   kindsAt,
-  decisionStopped,
+  decisionStoppedAt,
   stopDecision,
 } from "./admission/decision.js";
 import { groups, stores } from "./admission/groups.js";
@@ -43,6 +43,7 @@ import type {
   ChainEnd,
   CopyForest,
   Decided,
+  DecidedAt,
   Decision,
   Expansion,
   Frontier,
@@ -71,8 +72,34 @@ import type { DeciderGroup, HeldInput } from "./admission/transfers.js";
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
 import { joinSteps, keptSteps, type WorkLedger } from "./budget.js";
-import { carried, keepsOwn, type CarrierRole, type Dispatch } from "./carriers.js";
+import {
+  arrayStrip,
+  carried,
+  carriedBy,
+  keepsOwn,
+  type CarrierRole,
+  type Dispatch,
+  type StepsStrip,
+  type Strip,
+} from "./carriers.js";
 import { heldReference, termAt, typeTags, writtenOf } from "./contract.js";
+import type { DecisionWork } from "./answers.js";
+import {
+  appendKeyId,
+  keyIdParent,
+  keyIdPath,
+  keyIdPlace,
+  keyIdStep,
+  keyPacket,
+  keyParentIn,
+  restRef,
+  stepsOfId,
+  type CanonicalKey,
+  type KeyId,
+  type KeyPacketMaking,
+  type Rest,
+  type Steps,
+} from "./contract/key-ids.js";
 import { labelBelow, labelPlainText, labelRoot, type Label } from "./contract/labels.js";
 import {
   KeyTrie,
@@ -94,7 +121,7 @@ export { requiredKind } from "./admission/boundaries.js";
 export { withoutChains } from "./admission/classes.js";
 export { withMemberOracle } from "./admission/decision.js";
 export { concrete, contributes, deciding, fits, isExternal, isOpaque } from "./admission/kinds.js";
-export type { Candidate, Decision } from "./admission/model.js";
+export type { Candidate, DecidedAt, Decision } from "./admission/model.js";
 
 /*
  * Admission (checkpoint 9, TABLE §5) and the boundary checks of external data (C9). A place's type is decided once,
@@ -115,9 +142,18 @@ export interface AdmissionHost {
   /**
    * After a stop, a value's items at a node and a path as the finishing read answers them (the leaf's own kind, the
    * finished answer and contract, the retained type: TABLE r4.102, r4.106, r4.109), else `null`: admission's C1 and its
-   * boundaries read as every consumer does (one derivation, TABLE r4.126).
+   * boundaries read as every consumer does (one derivation, TABLE r4.126). The path as asked: a cursor's span is made
+   * steps only where the finishing read answers (G3 stage 1).
    */
-  read?(value: PlaceId, node: FlowNode, at: readonly string[]): readonly Item[] | null;
+  read?(value: PlaceId, node: FlowNode, at: Rest): readonly Item[] | null;
+}
+
+/** A cursor decision's path read from its pass's packet (`decisionWork`), nothing charged: the analysis's output. */
+function packetPath(packet: KeyPacketMaking, index: number): readonly string[] {
+  const { nodes, keys } = packet;
+  const steps: string[] = [];
+  for (let at = keys[index]![1]; at >= 0; at = nodes[at]![0]) steps.push(nodes[at]![1]);
+  return steps.reverse();
 }
 
 /**
@@ -126,7 +162,7 @@ export interface AdmissionHost {
  */
 export class Admission {
   /** The decider's kinds per key (§5). */
-  readonly decided = new Map<Key, readonly ItemTag[]>();
+  readonly decided = new Map<CanonicalKey, readonly ItemTag[]>();
   /** The stores rejected in this pass, by their definitions' order, with the places and paths they are rejected at (A6). */
   readonly newlyRejected = new Map<number, Set<Key>>();
   /**
@@ -135,7 +171,7 @@ export class Admission {
    */
   readonly refused = new Set<number>();
   /** The boundary checks of the ingress stores, by the key each enters (C9), published after the consumers ran. */
-  readonly boundaries = new Map<Key, Obligation[]>();
+  readonly boundaries = new Map<CanonicalKey, Obligation[]>();
   /** The boundary checks no store into a place owes: host data read where it is consumed, an ingress read (C9, F18). */
   readonly readChecks: Obligation[] = [];
   readonly rejectedKeys = new Set<Key>();
@@ -144,6 +180,8 @@ export class Admission {
   readonly a4Keys = new Set<Key>();
   /** The places `a4Keys` lands copies in, each with `openAbove`'s walk down its paths from its root. */
   readonly a4Places = new Map<PlaceId, OpenStep | null>();
+  /** Per place, each cursor's path's step of `openAbove`'s walk (`openAboveKey`, G3 stage 1). */
+  readonly openSteps = new Map<PlaceId, Map<number, OpenStep>>();
   /** The parameters with a default (ADR 0021 1.5). */
   readonly #defaulted = new Set<PlaceId>();
   readonly a4Copies: {
@@ -152,18 +190,18 @@ export class Admission {
     readonly term: TypeTerm;
   }[] = [];
   /** Whether each decision admits `null` (a copy of a written type without one does not, A4). */
-  readonly nullable = new Map<Key, boolean>();
+  readonly nullable = new Map<CanonicalKey, boolean>();
   /**
    * The decisions a copy of a written type with `null` made: they admit it whatever the stored kinds hold (A4, F17b; ADR
    * 0021 1.3: the kinds present never narrow a written domain, the lead's ruling on external round 7 B1).
    */
-  readonly permitsNull = new Set<Key>();
+  readonly permitsNull = new Set<CanonicalKey>();
   /** The paths a copy of a written type decides, not the place's own (A4 through copies, r4.75 (1)). */
-  readonly inheritsWrittenKeys = new Set<Key>();
+  readonly inheritsWrittenKeys = new Set<CanonicalKey>();
   /** The paths a written type, or a copy of one, leaves unrestricted (`permittedAt`): no decision, every kind fits. */
-  readonly unrestricted = new Set<Key>();
+  readonly unrestricted = new Set<CanonicalKey>();
   /** The site of the contribution each decision took (S3 §1's admitted answer), `null` for a written type. */
-  readonly deciderSites = new Map<Key, SourceSite | null>();
+  readonly deciderSites = new Map<CanonicalKey, SourceSite | null>();
   readonly copies = new Map<
     PlaceId,
     readonly {
@@ -178,11 +216,11 @@ export class Admission {
   /** A4 through copies (`copyGraph`): the unwritten places a copy of a written binding reaches, copy by copy. */
   readonly inheriting = new Set<PlaceId>();
   /** Per unwritten place and path, the written type its own decision copies there (`inheritedAt`), or none. */
-  readonly inherited = new Map<Key, TypeTerm | null>();
+  readonly inherited = new Map<CanonicalKey, TypeTerm | null>();
   /** The places and paths whose decisions wait on each other through copies, by cycle (`cut`): a union-find. */
-  readonly cycles = new Map<Key, Key>();
+  readonly cycles = new Map<CanonicalKey, CanonicalKey>();
   /** Each cycle's size, by its root (`cycleOf`). */
-  readonly cycleSizes = new Map<Key, number>();
+  readonly cycleSizes = new Map<CanonicalKey, number>();
   /**
    * The deepest path a written type can reach through copies (`inheritedAt`): the written copies' landing paths with
    * their types' element levels, and every copy of an inheriting place's own landing path beside them.
@@ -253,7 +291,7 @@ export class Admission {
   /** Per class (its representative), its eligible member at each tested key of its demanded paths (§4.3). */
   readonly eligible = new Map<Definition, Map<string, Definition | null>>();
   /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once. */
-  demands: Map<Key, (readonly string[])[]> | null = null;
+  demands: Map<CanonicalKey, Steps[]> | null = null;
   readonly representative = new Map<Definition, Definition>();
   /** The expected types of typed ingresses by identity, and the contract-side classes, for `conflictClass`. */
   readonly termIds = new Map<TypeTerm, string>();
@@ -262,9 +300,9 @@ export class Admission {
   readonly structures = new Map<string, Structure>();
   /** Each value's own structure read below a strip, per side (`composed`), from its parts'. */
   readonly structureParts = new Map<string, Composed>();
-  readonly depths = new Map<Key, number>();
+  readonly depths = new Map<CanonicalKey, number>();
   keyBound: number | null = null;
-  below: Map<Key, (readonly string[])[]> | null = null;
+  below: Map<CanonicalKey, Steps[]> | null = null;
   readonly takeables = new WeakMap<
     ReadonlySet<Definition | null>,
     { readonly wholes: readonly Definition[]; readonly adds: readonly Definition[] }[]
@@ -316,7 +354,14 @@ export class Admission {
     PlaceId,
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
   >();
-  groupList: { readonly root: PlaceId; readonly path: readonly string[] }[] | null = null;
+  groupList: DecidedAt[] | null = null;
+  /**
+   * The cursors decision records name, as one packet of their paths made as each record is (`decisionWork`): Sol §4's
+   * compact records, each path's node once, never a path per record, and no arena id past the pass.
+   */
+  readonly decisionPacket: KeyPacketMaking = keyPacket();
+  /** Per decided cursor, its label's recipe (`labelOfKey`). */
+  readonly keyLabels = new Map<KeyId, Label>();
   /** A4 through copies' landings (`inheritance`), and per place and path whether its copies land it (`landed`). */
   inherits: Inheritance | null = null;
   readonly landedPaths = new Map<string, boolean>();
@@ -336,8 +381,8 @@ export class Admission {
   /** Per place, its seeds' paths at or below each prefix (`seedsUnder`), and its stores taken again (`#retakenOf`). */
   readonly seedIndex = new Map<PlaceId, Map<string, string[]>>();
   /** Per key, its decision before it is recorded (`decided`); the keys `decide` took (`lazily`). */
-  readonly decisions = new Map<Key, Decided | null>();
-  readonly attempted = new Set<Key>();
+  readonly decisions = new Map<CanonicalKey, Decided | null>();
+  readonly attempted = new Set<CanonicalKey>();
   landings: LandingIndex | null = null;
   /** The touch tries of the pass (`Touches`, #1188), per place its trie and the paths its contributions meet at. */
   touches: Touches | null = null;
@@ -350,9 +395,9 @@ export class Admission {
   /** Per place, what its live stores definitely hold (`heldOf`, A2). */
   readonly helds = new Map<PlaceId, Touch | null>();
   /** The keys where what a place's stores definitely hold meets (`groups`, A2): checked where the copy meets it. */
-  readonly atCopies = new Set<Key>();
+  readonly atCopies = new Set<CanonicalKey>();
   /** The keys a member of a live group owes where the group's contributions meet (`finishHeld`, read by `groups`). */
-  readonly groupMeetings: Key[] = [];
+  readonly groupMeetings: CanonicalKey[] = [];
   /** Each place's live stores, each with its own points and reads (`liveOwn`), for a live group's members. */
   readonly liveStores = new Map<PlaceId, readonly HeldOwn[]>();
   /** The places with definitions, every one of them dead in this pass (`liveOwn`). */
@@ -512,14 +557,15 @@ export class Admission {
   }
 
   /** A store's value at the path below its destination, by §3 at its node. */
-  public valueAt(d: Definition, at: readonly string[]): Item[] {
+  public valueAt(d: Definition, at: Rest): Item[] {
     this.pass.program.work.charge("checks");
-    if (d.kind === "const") return at.length === 0 ? [...(d.items ?? [])] : [];
+    if (d.kind === "const")
+      return restRef(this.pass.contract, at).length === 0 ? [...(d.items ?? [])] : [];
     return this.items(d.value!, d.node, at);
   }
 
   /** A value's items at a node and a path: the finishing read's after a stop (`AdmissionHost.read`), else the solver's. */
-  public items(value: PlaceId, node: FlowNode, at: readonly string[]): Item[] {
+  public items(value: PlaceId, node: FlowNode, at: Rest): Item[] {
     const finished = this.host.read?.(value, node, at) ?? null;
     return withoutEmpty(finished ?? this.run(this.pass.values.valueItems(value, node, at)));
   }
@@ -552,6 +598,39 @@ export class Admission {
     return label;
   }
 
+  /**
+   * `labelOf` for a decided cursor (G3 stage 1): its parent's recipe one step on, each cursor's once (`keyLabels`),
+   * an element step's kinds asked of its parent's key as `labelOf` asks them, shallowest first; its place is unwritten
+   * (its family's shape requires it).
+   */
+  public labelOfKey(key: KeyId): Label {
+    const { contract } = this.pass;
+    const way: KeyId[] = [];
+    let at: KeyId | null = key;
+    for (
+      ;
+      at !== null && keyIdPath(at) !== 0 && !this.keyLabels.has(at);
+      at = keyIdParent(contract, at)
+    )
+      way.push(at);
+    let label =
+      at === null || keyIdPath(at) === 0
+        ? labelRoot(contract, keyIdPlace(key))
+        : this.keyLabels.get(at)!;
+    for (let index = way.length - 1; index >= 0; index -= 1) {
+      const id = way[index]!;
+      const step = keyIdStep(contract, id);
+      if (step !== "element") label = labelBelow(label, step);
+      else {
+        const parent = keyParentIn(contract, id)!;
+        const tags = withoutEmpty(this.run(contract.contractOf(parent))).map((item) => item.tag);
+        label = labelBelow(label, elementStep(tags));
+      }
+      this.keyLabels.set(id, label);
+    }
+    return label;
+  }
+
   /** `labelOf`'s text made plain, for a check that charges the text it keeps itself (`labelPlainText`). */
   public pathLabel(
     place: PlaceId,
@@ -567,7 +646,7 @@ export class Admission {
 
   storeList: readonly Definition[] | null = null;
 
-  public groups(): readonly { readonly root: PlaceId; readonly path: readonly string[] }[] {
+  public groups(): readonly DecidedAt[] {
     return groups(this);
   }
 
@@ -575,16 +654,54 @@ export class Admission {
     compareLanded(this);
   }
 
-  public stopDecision(root: PlaceId, path: readonly string[]): void {
-    stopDecision(this, root, path);
+  /** `stopDecision` of a decided path in its identity (`DecidedAt`: a cursor's key alone, G3 stage 1). */
+  public stopDecision(at: DecidedAt): void {
+    stopDecision(this, at);
+  }
+
+  /** `decisionStopped` of a decided path in its identity. */
+  public decisionStoppedAt(at: DecidedAt): boolean {
+    return decisionStoppedAt(this, at);
   }
 
   public decisionStopped(place: PlaceId, path: readonly string[]): boolean {
-    return decisionStopped(this, place, path);
+    return this.decisionStoppedAt({ root: place, path });
   }
 
-  public decide(root: PlaceId, path: readonly string[], lazily?: boolean): Decision | null {
-    return decide(this, root, path, lazily);
+  /** The decision of a decided path in its identity (`DecidedAt`: a cursor's key alone, its steps never made). */
+  public decide(at: DecidedAt, lazily?: boolean): Decision | null {
+    return decide(this, at, lazily);
+  }
+
+  /**
+   * A decision's work record (`consumers/stores.ts`): a cursor's path not made but named by its key, its steps exported
+   * with every other cursor decision's of the pass through one packet (`exportDecisionPaths`), read only from it.
+   */
+  public decisionWork(
+    at: DecidedAt,
+    units: number,
+    allowance: number,
+    stopped: boolean,
+  ): DecisionWork {
+    if (at.key === undefined) return { place: at.root, path: at.path, units, allowance, stopped };
+    // (its path's nodes the packet lacks added, charged, as its record is made: one packet a pass, each node once)
+    const index = appendKeyId(this.pass.contract, this.decisionPacket, at.key);
+    // (the record holds the packet alone, never the admission: the analysis's output)
+    const packet = this.decisionPacket;
+    return {
+      place: at.root,
+      get path(): readonly string[] {
+        return packetPath(packet, index);
+      },
+      units,
+      allowance,
+      stopped,
+    };
+  }
+
+  /** A decided path's steps, made: a cursor's through the charged boundary (`stepsOfId`), for a stop's stores. */
+  public stepsAt(at: DecidedAt): Steps {
+    return at.key === undefined ? at.path : stepsOfId(this.pass.contract, at.key);
   }
 
   public storeRequirement(
@@ -645,6 +762,19 @@ export class Admission {
     return carried(this.pass.program, value, strip, this.#dispatch);
   }
 
+  /** `carriersOf` of a `Strip`, each operand's strip in its form (`copySources`). */
+  public carriersBy<S extends Strip<S>>(
+    value: PlaceId,
+    strip: S,
+  ): readonly (readonly [PlaceId, S, CarrierRole, number])[] {
+    return carriedBy(this.pass.program, value, strip, this.#dispatch);
+  }
+
+  /** An array of steps as a `Strip` (`carried`'s). */
+  public arrayStrip(steps: readonly string[]): StepsStrip {
+    return arrayStrip(this.pass.program, steps);
+  }
+
   /** Whether the receiver's or the key's decision leaves a value's operation its own value (F19a, F19: `keepsOwn`). */
   public keepsOwn(value: PlaceId): boolean {
     return keepsOwn(this.pass.program, value, this.#dispatch);
@@ -679,17 +809,13 @@ export class Admission {
 
   public offendingAt(
     d: Definition,
-    at: readonly string[],
+    at: Steps,
     leaf: (items: readonly Item[]) => boolean,
   ): Definition | null {
     return offendingAt(this, d, at, leaf);
   }
 
-  public siteAt(
-    d: Definition,
-    at: readonly string[],
-    leaf: (items: readonly Item[]) => boolean,
-  ): SourceSite {
+  public siteAt(d: Definition, at: Steps, leaf: (items: readonly Item[]) => boolean): SourceSite {
     return siteAt(this, d, at, leaf);
   }
 
@@ -697,11 +823,11 @@ export class Admission {
     return storesAt(this, value, step);
   }
 
-  public ingressSiteOf(d: Definition, at: readonly string[], item?: Item): SourceSite {
+  public ingressSiteOf(d: Definition, at: Steps, item?: Item): SourceSite {
     return ingressSiteOf(this, d, at, item);
   }
 
-  public namedExternalSite(d: Definition, at: readonly string[]): SourceSite | null {
+  public namedExternalSite(d: Definition, at: Steps): SourceSite | null {
     return namedExternalSite(this, d, at);
   }
 
@@ -709,7 +835,7 @@ export class Admission {
     return ownReadItem(this, item, d);
   }
 
-  public wholeBelow(value: PlaceId, at: readonly string[]): PlaceId | null {
+  public wholeBelow(value: PlaceId, at: Steps): PlaceId | null {
     return wholeBelow(this, value, at);
   }
 
@@ -756,7 +882,7 @@ export class Admission {
     return d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
   }
 
-  public ownIngress(item: Item, d: Definition, at: readonly string[]): boolean {
+  public ownIngress(item: Item, d: Definition, at: Steps): boolean {
     return ownIngress(this, item, d, at);
   }
 

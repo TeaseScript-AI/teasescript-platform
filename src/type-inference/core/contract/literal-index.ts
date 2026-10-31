@@ -9,7 +9,8 @@ import { propertyStep } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
 import { ingressLeafOf } from "./ingress.js";
-import { emptyAt, REFERENCE } from "./kinds.js";
+import type { Rest } from "./key-ids.js";
+import { emptyAt, propertyOnly, REFERENCE } from "./kinds.js";
 import type {
   IdentityWork,
   IndexNode,
@@ -120,6 +121,7 @@ export function pathAt(contract: Contract, parent: number, step: string): number
   // (G3 stage 1's metadata, each from its parent's and the step alone: `key-ids.ts`)
   contract.pathFirstSteps.push(parent === 0 ? step : contract.pathFirstSteps[parent]!);
   contract.pathMembers.push(memberStep([step], 0) === 0 ? id : contract.pathMembers[parent]!);
+  contract.pathProperties.push(contract.pathProperties[parent]! && propertyOnly(step));
   steps.set(step, id);
   return id;
 }
@@ -605,7 +607,7 @@ export function* signatureWork(contract: Contract, literal: PlaceId): IdentityWo
 export function* loadsBelow(
   contract: Contract,
   groups: readonly OtherGroup[],
-  after: readonly string[],
+  after: Rest,
   exact: boolean,
   node: FlowNode | null = null,
 ): Work<readonly Item[]> {

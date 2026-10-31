@@ -10,12 +10,16 @@ import {
   keptText,
   type WorkLedger,
 } from "../budget.js";
-import type { CarrierRole } from "../carriers.js";
+import type { CarrierRole, StepsStrip, Strip } from "../carriers.js";
+import { convert, someStep, stepsArray } from "../contract/key-ids.js";
+import { keyLane } from "../contract/lanes.js";
+import { pathAt } from "../contract/literal-index.js";
 import { writtenOf } from "../contract.js";
-import { keyPath, keyPlace, sortCost, type Definition } from "../definitions.js";
+import { keyPlace, sortCost, type Definition } from "../definitions.js";
+import { keyStepsIn } from "../contract/key-ids.js";
 import type { FlowNode } from "../flow-graph.js";
 import { dictList } from "../method-categories.js";
-import type { CoreProgram } from "../program.js";
+import { stepName, type CoreProgram } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { EvaluationKey, Expansion, Part, Stop, Stops, Via, ViaChain } from "./model.js";
 import { permittedAt } from "./permitted.js";
@@ -150,41 +154,123 @@ export function copySources(
     strip: readonly string[];
     cellsLive: boolean;
   }[] = [];
-  const pending: [PlaceId, Steps | null, readonly string[], boolean][] = [[value, null, [], true]];
+  // (a read of a wrapper's family carries its strip as a path of the arena kept in reverse, one step on in front per
+  // projection, made once for each copy it reaches: G3 stage 1; any other walk its arrays as before)
+  const reversed = readsCursorFamily(admission, value);
+  const start: CopyStrip = reversed ? reverseStrip(admission, 0) : admission.arrayStrip([]);
+  const pending: [PlaceId, Steps | null, CopyStrip, boolean][] = [[value, null, start, true]];
   while (pending.length > 0) {
     const [current, path, strip, cellsLive] = pending.pop()!;
     program.work.charge("indexSteps");
     const binding = program.occurrenceOf.get(current);
     if (binding !== undefined) {
-      out.push({ path: made(path), binding, strip, cellsLive });
+      out.push({ path: made(path), binding, strip: stripSteps(admission, strip), cellsLive });
       continue;
     }
-    const next: [PlaceId, Steps | null, readonly string[], boolean][] = [];
+    const next: [PlaceId, Steps | null, CopyStrip, boolean][] = [];
     // (its cells' tasks share one rest of the strip, charged as kept)
-    let rest: readonly string[] | null = null;
+    let rest: CopyStrip | null = null;
     if (program.hasOf.has(current))
       for (const has of program.hasOf.get(current)!) {
-        const on = strip.length > 0 ? admission.termAt(has.type, strip[0]!) : undefined;
+        const on = strip.length > 0 ? admission.termAt(has.type, strip.at(0)!) : undefined;
         const fields: readonly (readonly [string, TypeTerm])[] =
-          strip.length === 0 ? fieldsOf(has.type) : on === undefined ? [] : [[strip[0]!, on]];
+          strip.length === 0 ? fieldsOf(has.type) : on === undefined ? [] : [[strip.at(0)!, on]];
         for (const [name, term] of fields)
           if (term.kind === "ref") {
             // (one step per field, which its cells share)
             const child: Steps | null =
               strip.length === 0 ? { parent: path, step: name, made: null } : path;
             for (const d of definitions.cellDefs.get(term.place) ?? []) {
-              rest ??= strip.length === 0 ? strip : keptSlice(admission.work, strip, 1);
+              rest ??=
+                strip.length === 0
+                  ? strip
+                  : strip.kind === "steps"
+                    ? admission.arrayStrip(keptSlice(admission.work, strip.steps, 1))
+                    : strip.rest();
               next.push([d.value!, child, rest, cellsLive && admission.pass.lists.live(d)]);
             }
           }
       }
     else
-      for (const [carried, rest] of admission.carriersOf(current, strip))
+      for (const [carried, rest] of strip.kind === "steps"
+        ? admission.carriersBy(current, strip)
+        : admission.carriersBy(current, strip))
         next.push([carried, path, rest, cellsLive]);
     for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
   }
   admission.copies.set(value, out);
   return out;
+}
+
+/**
+ * Whether a value reads a wrapper's family (`keyLane`): its projections down to a read of a binding, the lowest's step
+ * the family's first. Its walk's strips are then kept in reverse (`reverseStrip`).
+ */
+function readsCursorFamily(admission: Admission, value: PlaceId): boolean {
+  const { program, contract } = admission.pass;
+  let at = value;
+  let first: string | null = null;
+  for (
+    let projection = program.projOf.get(at);
+    projection !== undefined;
+    projection = program.projOf.get(at)
+  ) {
+    if (projection.step === "iteration") return false;
+    first = stepName(projection.step);
+    at = projection.owner;
+  }
+  const binding = program.occurrenceOf.get(at);
+  return first !== null && binding !== undefined && keyLane(contract, binding, first) === "cursor";
+}
+
+/**
+ * A strip as a path of the arena kept in reverse (`rev`: its last step the strip's first): a step goes on in front as a
+ * child, its first step and its rest are the path's last step and parent, each new node charged as `pathAt` keeps it.
+ */
+interface ReverseStrip extends Strip<ReverseStrip> {
+  readonly kind: "reverse";
+  readonly rev: number;
+}
+
+/** A copy walk's strip: an array's, or a wrapper's family's kept in reverse (`reverseStrip`). */
+type CopyStrip = StepsStrip | ReverseStrip;
+
+function reverseStrip(admission: Admission, rev: number): ReverseStrip {
+  const { contract } = admission.pass;
+  const { pathDepths: depths, pathParents: parents, pathLastSteps: last } = contract;
+  return {
+    kind: "reverse",
+    rev,
+    length: depths[rev]!,
+    at: (index) =>
+      index === 0
+        ? rev === 0
+          ? undefined
+          : last[rev]
+        : depths[rev]! >= 2
+          ? last[parents[rev]!]
+          : undefined,
+    rest: () => reverseStrip(admission, rev === 0 ? 0 : parents[rev]!),
+    under: (below) => {
+      let at = rev;
+      convert(contract, below.length, 0, 0);
+      for (let index = below.length - 1; index >= 0; index -= 1)
+        at = pathAt(contract, at, below[index]!);
+      return reverseStrip(admission, at);
+    },
+  };
+}
+
+/** A strip's steps: an array's itself; a reversed path's made once, in order, charged as kept. */
+function stripSteps(admission: Admission, strip: CopyStrip): readonly string[] {
+  if (strip.kind === "steps") return strip.steps;
+  const { contract } = admission.pass;
+  const { rev } = strip;
+  const steps: string[] = [];
+  convert(contract, contract.pathDepths[rev]!, 0, 0);
+  for (let at = rev; at !== 0; at = contract.pathParents[at]!)
+    steps.push(contract.pathLastSteps[at]!);
+  return keptArray(admission.work, steps);
 }
 
 /**
@@ -218,9 +304,10 @@ export function writtenSource(
   // (a projection of a receiver that may be a reference is the runtime's member, no copy: F19a)
   for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
     if (admission.keepsOwn(at)) return null;
-  const steps = keyPath(key);
-  const path = keptSteps(admission.work, steps, strip);
-  if (steps.some((step) => dictList(step) !== undefined)) return null;
+  const steps = keyStepsIn(contract, key);
+  if (someStep(steps, (step) => dictList(step) !== undefined)) return null;
+  // (a copy's strip keeps an array: a cursor's steps copied out, `stepsArray`, for a source it keeps)
+  const path = keptSteps(admission.work, stepsArray(steps), strip);
   if (term === null) return { term: null, from: place, strip: path };
   return permittedAt(term, path) === null ? null : { term, from: null, strip: path };
 }

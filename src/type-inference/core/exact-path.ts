@@ -1282,7 +1282,10 @@ export function withoutEmpty(items: readonly Item[]): Item[] {
  * The answer at `rest` below a collection's selected element (`get`, a loop's visit, a removal): a selection consumes
  * only its own emptiness mark, the element's; a demanded descendant's mark passes through (#1027's B1, F12).
  */
-export function belowSelected(items: readonly Item[], rest: readonly string[]): readonly Item[] {
+export function belowSelected(
+  items: readonly Item[],
+  rest: { readonly length: number },
+): readonly Item[] {
   return rest.length === 0 ? withoutEmpty(items) : items;
 }
 
