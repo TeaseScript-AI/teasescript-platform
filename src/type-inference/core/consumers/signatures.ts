@@ -11,6 +11,7 @@ import type { PlaceId } from "../../graph.js";
 import { isExternal, isOpaque, requiredKind } from "../admission.js";
 import type { Consumers } from "../consumers.js";
 import { REFERENCE } from "../contract.js";
+import { labelBelow } from "../contract/labels.js";
 import { keptParts, keptSteps, READ_DEPTH_LIMIT } from "../budget.js";
 import type { FlowNode } from "../flow-graph.js";
 import { REASON, STOPPED, type Item, type ItemTag } from "../items.js";
@@ -19,7 +20,7 @@ import { propertyNames } from "../property-names.js";
 import { offendingKinds, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
 import { hasMethod } from "./kinds.js";
-import { domainItems, keyLabel, ownSpan, quietKinds, receiverKinds } from "./names.js";
+import { domainItems, keyLabel, ownSpan, quietKinds, receiverKinds, shownLabel } from "./names.js";
 import { consume } from "./operands.js";
 import { obligation, warning } from "./warnings.js";
 
@@ -214,7 +215,7 @@ export function methodElements(
     );
     return;
   }
-  const label = `${keyLabel(walk, receiver)}.element`;
+  const label = shownLabel(walk, labelBelow(keyLabel(walk, receiver), "element"));
   const against = VALUE_KIND_NAMES.filter(fits).map(requiredKind);
   // (two ordered types: the elements of a type other than the earliest element's, each the type a sort cannot compare
   // with it)
@@ -232,7 +233,7 @@ export function methodElements(
       obligation(
         "operand",
         c.site,
-        label,
+        label(),
         against,
         `check the elements of ${text} at .${name}() when it runs`,
       ),

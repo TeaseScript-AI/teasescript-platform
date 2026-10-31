@@ -2041,7 +2041,7 @@ test("#1216's redundant check stands at its counted stops", () => {
   }).values())
     for (let allowance = low; allowance <= high; allowance += 1)
       if (has(analyse(allowance))) count += 1;
-  assert.equal(count, 98);
+  assert.equal(count, 100);
 });
 
 /**

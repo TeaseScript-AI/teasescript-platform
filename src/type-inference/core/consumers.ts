@@ -12,6 +12,7 @@ import {
   type BudgetLimit,
 } from "./budget.js";
 import { restSteps, stepsArray, type CanonicalKey, type Rest } from "./contract/key-ids.js";
+import type { Label } from "./contract/labels.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
@@ -152,10 +153,11 @@ export class Consumers {
   readonly order: <T>(list: readonly T[]) => T[];
   readonly getOf = new Map<PlaceId, PlaceId>();
   readonly resultOfCall = new Map<PlaceId, PlaceId>();
+  /** Each value's label's recipe (`keyLabel`), made once from its owner's. */
+  readonly labels = new Map<PlaceId, Label>();
   /**
-   * What a label's walk up a projection chain asks, once per value (`keyLabel` asks it at every level of every label,
-   * each a walk of up to 256 steps or a contract): the element step below each owner, and whether each chain passes a
-   * derived list or starts at no place.
+   * What a label's walk up a projection chain asks, once per value: the element step below each owner, and whether
+   * each chain passes a derived list or starts at no place.
    */
   readonly elementSteps = new Map<PlaceId, string>();
   readonly derivedChains = new Map<PlaceId, boolean>();
@@ -266,16 +268,16 @@ export class Consumers {
    * C9 at a consumer (`Admission.boundariesAt`): each item's boundary requests at `here`, in order. A domain's item is
    * the content of the warning that owns it there (S8's mark-ownership rule, TABLE r4.110 (a), #1448): where `leftOut`
    * says that warning was left out (`withoutRecords`), its requests are left out with it. An item no warning was asked
-   * for keeps its requests.
+   * for keeps its requests. `here` may be its recipe, made only where a check is owed (`Admission.boundaryFor`).
    */
   public boundariesAt(
     items: readonly Item[],
-    here: Obligation | null,
+    here: Obligation | (() => Obligation) | null,
     leftOut: (item: Item) => boolean = () => false,
   ): void {
     // (only a finishing read brings a domain item: an ordinary walk's requests are C9's alone)
     if (!this.finishing) {
-      this.admission.boundariesAt(items, here);
+      for (const item of items) this.admission.boundaryFor(item, here);
       return;
     }
     // (each item looked up, charged: the finishing walk's charges never move a stop)
@@ -290,10 +292,10 @@ export class Consumers {
    */
   public boundariesBefore(
     items: readonly Item[],
-    here: Obligation | null,
+    here: Obligation | (() => Obligation) | null,
   ): (leftOut?: (item: Item) => boolean) => void {
     if (!this.finishing) {
-      this.admission.boundariesAt(items, here);
+      for (const item of items) this.admission.boundaryFor(item, here);
       return () => {};
     }
     this.pass.program.work.charge("checks", items.length);

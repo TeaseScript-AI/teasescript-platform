@@ -1,9 +1,10 @@
 import type { Expression } from "../../../ast.js";
 import type { PlaceId, SourceSite } from "../../graph.js";
 import { isExternal, isOpaque } from "../admission.js";
-import { joinSteps, stepText } from "../budget.js";
+import { joinSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { heldReference, REFERENCE } from "../contract.js";
+import { labelBelow, labelRoot, labelText, type Label } from "../contract/labels.js";
 import { keptKey, keptKeyBelow, keyPath, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
@@ -56,34 +57,66 @@ export function ownSpan(walk: Consumers, value: PlaceId, fallback: SourceSite): 
 }
 
 /**
- * An obligation's target (§10.5 r4.10): the key path a value reads in the contract's vocabulary (`box.n`, every
- * selection or index `xs.element`, a dict's `d.entry`, a parameter `use.data`, a result `f.result`), else its text.
+ * An obligation's target (§10.5 r4.10) as a label's recipe (`contract/labels.ts`): the key path a value reads in the
+ * contract's vocabulary (`box.n`, every selection or index `xs.element`, a dict's `d.entry`, a parameter `use.data`, a
+ * result `f.result`), else its text. One recipe per value, kept, each one step below its owner's with the step spelled
+ * here, as `Admission.labelOf` spells it; its text is made only where a check or a diagnostic shows it (`shownLabel`).
  */
-export function keyLabel(walk: Consumers, value: PlaceId, depth = 0): string {
-  const { program } = walk.pass;
-  const binding = program.occurrenceOf.get(value);
-  if (binding !== undefined) return program.place(binding).label;
-  const projection =
-    program.projOf.get(value) ??
-    (walk.getOf.has(value) ? { owner: walk.getOf.get(value)!, step: "index" } : undefined);
-  // §10.5: an anonymous target, a read below a value no place holds (a literal's, an operation's) or through a dict's
-  // `values` or `keys` (a new list each read, r4.46 (2)), is named by its own text
-  if (projection !== undefined && (derived(walk, value) || anonymous(walk, value))) {
-    const site = program.places[value]?.site ?? null;
-    if (site !== null) return program.textAt(site);
+export function keyLabel(walk: Consumers, value: PlaceId): Label {
+  const { program, contract } = walk.pass;
+  // (up the chain to a value whose recipe is kept or that starts one, each step spelled on the way, in the order the
+  // label once asked its questions; then each recipe one step below its owner's)
+  const below: [PlaceId, string][] = [];
+  let at = value;
+  let label = walk.labels.get(at);
+  while (label === undefined) {
+    const binding = program.occurrenceOf.get(at);
+    const projection =
+      binding === undefined
+        ? (program.projOf.get(at) ??
+          (walk.getOf.has(at) ? { owner: walk.getOf.get(at)!, step: "index" } : undefined))
+        : undefined;
+    const site = program.places[at]?.site ?? null;
+    if (binding !== undefined) label = labelRoot(contract, binding);
+    else if (projection === undefined) {
+      const result = walk.resultOfCall.get(at);
+      label = result !== undefined ? labelRoot(contract, result) : ownLabel(walk, site);
+    }
+    // §10.5: an anonymous target, a read below a value no place holds (a literal's, an operation's) or through a dict's
+    // `values` or `keys` (a new list each read, r4.46 (2)), is named by its own text
+    else if ((derived(walk, at) || anonymous(walk, at)) && site !== null)
+      label = ownLabel(walk, site);
+    else {
+      // a selection, index or `get` is `element` (an object's own `first` too, F11), a dict's value `entry`
+      below.push([
+        at,
+        stepName(projection.step) === "element" && projection.step !== "element"
+          ? elementStepOf(walk, projection.owner)
+          : propertyName(projection.step),
+      ]);
+      at = projection.owner;
+      label = walk.labels.get(at);
+      continue;
+    }
+    walk.labels.set(at, label);
   }
-  if (projection !== undefined && depth < 256) {
-    // a selection, index or `get` is `element` (an object's own `first` too, F11), a dict's value `entry`
-    const step =
-      stepName(projection.step) === "element" && projection.step !== "element"
-        ? elementStepOf(walk, projection.owner)
-        : propertyName(projection.step);
-    return stepText(keyLabel(walk, projection.owner, depth + 1), step);
+  for (let index = below.length - 1; index >= 0; index -= 1) {
+    const [next, step] = below[index]!;
+    label = labelBelow(label, step);
+    walk.labels.set(next, label);
   }
-  const result = walk.resultOfCall.get(value);
-  if (result !== undefined) return program.place(result).label;
-  const site = program.places[value]?.site ?? null;
-  return site === null ? "the value" : program.textAt(site);
+  return label;
+}
+
+/** A recipe named by a value's own text, or `the value` where it has none (`keyLabel`). */
+function ownLabel(walk: Consumers, site: SourceSite | null): Label {
+  const text = site === null ? "the value" : walk.pass.program.textAt(site);
+  return { parent: null, step: "", text, below: null };
+}
+
+/** A label's text where a check or a diagnostic shows it: made there once per recipe and charged (`labelText`). */
+export function shownLabel(walk: Consumers, label: Label): () => string {
+  return () => labelText(walk.pass.contract, label);
 }
 
 /** A label's step below an owner an index or a selection reads: an element, or a dict's value; once per owner. */

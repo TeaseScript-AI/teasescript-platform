@@ -70,7 +70,6 @@ export const consumersFiles = (root) => splitFiles(root, CONSUMERS);
 export const READS = new Map([
   ["admitted", "the admitted type at a path: a decision's answer, recorded by `decide`"],
   ["atCopy", "whether A2 found copies meeting at a path: where the error goes, a test"],
-  ["boundariesAt", "`boundaryFor` for each item: the obligation is that entry's"],
   ["boundaryAt", "records a store whose boundary `publish` forms: the obligation is that entry's"],
   ["cellSited", "C9's site for an item a store brings: a site, read"],
   ["compareLanded", "the member-answer oracle's comparison, a test seam inert outside it"],
