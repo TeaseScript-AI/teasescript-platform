@@ -217,11 +217,11 @@ test("a demand stop with a question stop after it ends the search, its names wit
   assert.ok(retried > 0, "a question stops and is asked again");
 });
 
-test("the search charges each task it takes up, each prefix it visits, each index entry it copies and each step its pump check walks or compares (#1493)", () => {
+test("the search charges each task it takes up, each prefix it visits, each entry of its path's index and each step its pump check walks or compares (#1493)", () => {
   // (the uncharged-work probe's gate, kept here: the ledger's `checks` during a search are its tasks, a seen one too,
-  // its prefixes, its index entries, its pump checks' earlier tasks of their own place and their head steps; the entries
-  // stay within the kinds and places on a chain per task, the earlier tasks within the longest walk per task, and the
-  // head steps within the longest path per earlier task walked)
+  // its prefixes, its path's index entries, its pump checks' earlier tasks of their own place and their head steps; the
+  // entries stay within 2 + ⌈log₂ D⌉ per task on a chain of D, the earlier tasks within the longest walk per task, and
+  // the head steps within the longest path per earlier task walked)
   const nested = (depth: number): string => {
     const path = ".p".repeat(depth);
     return [
@@ -269,7 +269,10 @@ test("the search charges each task it takes up, each prefix it visits, each inde
         records.tasks + records.prefixes + records.entries + records.ancestors + records.heads,
         label,
       );
-      assert.ok(records.entries <= records.tasks * records.places, label);
+      assert.ok(
+        records.entries <= records.tasks * (2 + Math.ceil(Math.log2(records.chain))),
+        label,
+      );
       assert.ok(records.ancestors <= records.tasks * records.depth, label);
       assert.ok(records.heads <= records.ancestors * records.longest, label);
       if (name === "r" && source.startsWith("let t=hostValue")) {
@@ -307,6 +310,42 @@ test("the search charges each task it takes up, each prefix it visits, each inde
     });
     assert.deepEqual(result.sort(), ["f", "g", "q"], JSON.stringify(mode));
     assert.equal(records.ancestors, 0, `${JSON.stringify(mode)} ${JSON.stringify(records)}`);
+  }
+  // (a chain whose every task is a new place, `let c(i+1)={p:c(i)}` read `depth` properties down: an index of each
+  // chain's kinds and places copied per task made 527,878 entries at 256, quadratic; the depth-first path's stays within
+  // 2 + ⌈log₂ D⌉ per task, 9,272 at 256)
+  const places = (depth: number): string =>
+    [
+      "let c0={kept:1}",
+      ...Array.from({ length: depth }, (_, index) => `let c${index + 1}={p:c${index}}`),
+      `let read=c${depth}${".p".repeat(depth)}`,
+      "say read",
+      "exit",
+    ].join("\n");
+  for (const depth of [16, 64, 256]) {
+    const request = coreRequest([{ path: "main.tease", source: places(depth) }], ["hostValue"]);
+    assert.ok(request !== null);
+    for (const mode of MODES) {
+      const { result, records } = inMode(mode, () => {
+        const answers = analyseCore(request);
+        const node = answers.graph.nodes.find(
+          (each) => each.expression?.kind === "identifier" && each.expression.name === "read",
+        );
+        assert.ok(node !== undefined);
+        return withNameRecords(() => [...answers.properties(node).keys()]);
+      });
+      const label = `${depth} ${JSON.stringify(mode)} ${JSON.stringify(records)}`;
+      assert.deepEqual(result, ["kept"], label);
+      assert.equal(
+        records.checks,
+        records.tasks + records.prefixes + records.entries + records.ancestors + records.heads,
+        label,
+      );
+      assert.ok(
+        records.entries <= records.tasks * (2 + Math.ceil(Math.log2(records.chain))),
+        label,
+      );
+    }
   }
   // (at depths 4, 16 and 64 the tasks, the earlier tasks walked and the longest chain stay the same, and the head steps
   // grow by the path's own growth: the head term grows no faster than the path)
@@ -432,10 +471,13 @@ test("the search makes no uncharged temporary per step beyond a constant, its pr
         assert.deepEqual(names, ["left", "q"], label);
         assert.ok(records.prefixes <= records.tasks, label);
         assert.ok(uncharged <= 2 * records.tasks, label);
-        // (the pump check's walk, through the index, stays within the tasks; walking every earlier task made it quadratic,
-        // 474, 1,714 and 6,498 earlier tasks by the read; the index, a constant set of kinds and places, grows with them)
+        // (the pump check walks its own place's earlier tasks only, within the tasks; walking every earlier task made it
+        // quadratic, 474, 1,714 and 6,498 by the read; the path's index stays within 2 + ⌈log₂ D⌉ entries per task)
         assert.ok(records.ancestors <= records.tasks, label);
-        assert.equal(records.places, rows[0]!.records.places, label);
+        assert.ok(
+          records.entries <= records.tasks * (2 + Math.ceil(Math.log2(records.chain))),
+          label,
+        );
       }
       for (const [low, high] of [
         [rows[0]!, rows[1]!],

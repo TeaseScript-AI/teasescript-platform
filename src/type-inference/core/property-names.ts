@@ -25,15 +25,20 @@ export type PropertyNamesTask =
   | { readonly literal: PlaceId; readonly path: readonly string[] };
 
 /**
- * A task the search has taken up (`propertyNames`): how many of its scheduling task's last steps its own path keeps
- * untouched (neither cut, changed nor read by the step between them) and its chain's index (#1493's pump bound).
+ * A task the search has taken up (`propertyNames`): its position on the search's chain and how many of its scheduling
+ * task's last steps its own path keeps untouched, neither cut, changed nor read by the step between them (#1493's pump
+ * bound).
  */
 interface Visit {
   readonly at: PlaceId;
+  /** Its kind and place as one number. */
+  readonly slot: number;
   readonly path: readonly string[];
   readonly kept: number;
-  /** Its chain's index: each kind and place on the chain, its own included, to that place's nearest visit (`Mark`). */
-  readonly index: ReadonlyMap<number, Mark>;
+  /** Its position on the chain, the search's first task's 0. */
+  readonly depth: number;
+  /** The least `kept` of the last 2, 4, 8, ... visits on the chain down to it, its own included (a sparse table). */
+  readonly least: readonly number[];
   /**
    * Its own kind and place's nearest visit above it and the least `kept` on the way down since; the shortest path among
    * it and its place's visits above it.
@@ -41,12 +46,6 @@ interface Visit {
   readonly same: Visit | null;
   readonly keptSince: number;
   readonly shortestSame: number;
-}
-
-/** A place's nearest visit on a chain and the least `kept` on the way down from it (`Visit.index`). */
-interface Mark {
-  readonly visit: Visit;
-  readonly kept: number;
 }
 
 /**
@@ -62,7 +61,7 @@ export interface NameRecords {
   heads: number;
   longest: number;
   entries: number;
-  places: number;
+  chain: number;
   checks: number;
 }
 
@@ -82,7 +81,7 @@ export function withNameRecords<T>(run: () => T): {
     heads: 0,
     longest: 0,
     entries: 0,
-    places: 0,
+    chain: 0,
     checks: 0,
   };
   recording = records;
@@ -117,11 +116,14 @@ interface Scheduled {
  * bounded front of its path and pushes a bounded head, a chain of tasks that never ends holds such a pair, and from it
  * the same steps repeat forever, each turn longer (a feedback copy `w = r.z`: `w|`, `w|z`, `w|z.z`, ...); a search that
  * ends without the bound meets none, so its names are as before, whatever the answer at a key is, stopped or not. The
- * check walks only the new task's own place's visits above it, one charge per visit, through each task's index of its
- * chain (each kind and place on it to that place's nearest visit and the least `kept` since, copied from the scheduling
- * task with one charge per entry), until none with a shorter path is left; and it compares heads only with those, one
- * charge per step of the head: at most the new tasks times the longest walk in visits, plus head steps each no longer
- * than the earlier task's path, plus the index entries, at most the new tasks times the kinds and places on a chain.
+ * check walks only the new task's own kind and place's visits above it, one charge per visit, until none with a shorter
+ * path is left, and compares heads only with those, one charge per step of the head. The worklist is a stack, so a
+ * task's chain is the current depth-first path, its scheduling visit last (checked at each task taken up): the search
+ * keeps that path, each kind and place's positions on it, and on each visit the least `kept` of the last 2, 4, 8, ...
+ * visits down to it, so a visit finds its place's nearest visit above it and the least `kept` since in two reads. Each
+ * visit is added once, removed at most once and makes at most ⌈log₂ D⌉ such entries on a chain of D visits, each
+ * charged. The check's total: at most the new tasks times (2 + ⌈log₂ D⌉), plus their place's earlier tasks walked, plus
+ * head steps each no longer than the earlier task's path.
  */
 export function propertyNames(
   pass: CorePass,
@@ -135,6 +137,16 @@ export function propertyNames(
   const names = new Set<string>();
   const pending: Scheduled[] = [{ task: start, from: null, kept: 0 }];
   const seen = new Set<string>();
+  // (the current depth-first path, the search's first visit first, and each kind and place's positions on it)
+  const chain: Visit[] = [];
+  const positions = new Map<number, number[]>();
+  /** The least `kept` of the visits at positions `low` to `high` on the chain, from two of their sparse entries. */
+  const leastKept = (low: number, high: number): number => {
+    const level = 31 - Math.clz32(high - low + 1);
+    const at = (position: number): number =>
+      level === 0 ? chain[position]!.kept : chain[position]!.least[level - 1]!;
+    return Math.min(at(high), at(low + 2 ** level - 1));
+  };
   const checksBefore = recording === null ? 0 : (work.counts().get("checks") ?? 0);
   const dispatch: Dispatch = {
     kinds: (of) => new Set(run(contract.contractOfValue(of)).map((item) => item.tag)),
@@ -200,28 +212,55 @@ export function propertyNames(
     const walk = "key" in task ? keptKeyWalk(contract, task.key) : null;
     const taken: readonly string[] = "key" in task ? stepsArray(walk!.path) : task.path;
     const at = "key" in task ? walk!.place : "literal" in task ? task.literal : task.value;
-    // (its kind and place's entry in the chain's index; the index copied, one charged entry per kind and place on the
-    // chain, each its least `kept` down to this visit)
     const slot = at * 3 + ("key" in task ? 0 : "literal" in task ? 2 : 1);
-    const index = new Map<number, Mark>();
-    if (from !== null) {
-      work.charge("checks", from.index.size);
-      if (recording !== null) recording.entries += from.index.size;
-      for (const [each, mark] of from.index)
-        index.set(each, mark.kept <= kept ? mark : { visit: mark.visit, kept });
+    // (the chain back to the scheduling visit, each visit below it removed once, charged)
+    // EVIDENCE: invariant: the worklist is a stack, so the visit that scheduled a task is on the current path.
+    if (from === null ? chain.length > 0 : chain[from.depth] !== from)
+      throw new Error(
+        "A property-name task's scheduling visit is not on the search's current path.",
+      );
+    const position = from === null ? 0 : from.depth + 1;
+    while (chain.length > position) {
+      positions.get(chain.pop()!.slot)!.pop();
+      work.charge("checks");
+      if (recording !== null) recording.entries += 1;
     }
-    const above = index.get(slot);
+    let own = positions.get(slot);
+    if (own === undefined) positions.set(slot, (own = []));
+    const nearest = own.length === 0 ? null : own[own.length - 1]!;
+    // (the visit added, charged, with its sparse entries: the least `kept` of the last 2, 4, 8, ... visits, each charged)
+    const least: number[] = [];
+    for (let level = 1; 2 ** level <= position + 1; level += 1) {
+      const below = chain[position - 2 ** (level - 1)]!;
+      least.push(
+        Math.min(
+          level === 1 ? kept : least[level - 2]!,
+          level === 1 ? below.kept : below.least[level - 2]!,
+        ),
+      );
+    }
+    work.charge("checks", 1 + least.length);
+    if (recording !== null) recording.entries += 1 + least.length;
+    const same = nearest === null ? null : chain[nearest]!;
     const visit: Visit = {
       at,
+      slot,
       path: taken,
       kept,
-      index,
-      same: above?.visit ?? null,
-      keptSince: above?.kept ?? Number.POSITIVE_INFINITY,
-      shortestSame: Math.min(taken.length, above?.visit.shortestSame ?? taken.length),
+      depth: position,
+      least,
+      same,
+      keptSince:
+        nearest === null
+          ? Number.POSITIVE_INFINITY
+          : nearest + 1 === position
+            ? kept
+            : Math.min(kept, leastKept(nearest + 1, position - 1)),
+      shortestSame: Math.min(taken.length, same?.shortestSame ?? taken.length),
     };
-    index.set(slot, { visit, kept: Number.POSITIVE_INFINITY });
-    if (recording !== null) recording.places = Math.max(recording.places, index.size);
+    chain.push(visit);
+    own.push(position);
+    if (recording !== null) recording.chain = Math.max(recording.chain, chain.length);
     if (recording !== null) recording.longest = Math.max(recording.longest, visit.path.length);
     // (a pumped task's own names are taken, its sources not followed)
     const follows = !pumps(visit);
