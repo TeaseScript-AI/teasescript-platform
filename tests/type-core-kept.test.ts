@@ -313,6 +313,10 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
   ],
   "consumers/stores.ts admittedStores side": [1, "a definition's id and two positions"],
   "consumers/operations.ts operatorUse key": [1, "an operand's index and a kind"],
+  "consumers/finishing.ts recordRead read": [
+    1,
+    "a read's value and path in a test's record (`withFrontierBound`), never kept by an analysis",
+  ],
   "contract/prefix-index.ts prefixWork root": [1, "a place's root key, `place|`"],
   "contract/marks.ts readGroups groupKey": [
     1,
