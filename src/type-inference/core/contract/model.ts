@@ -114,40 +114,35 @@ export interface SubLayer {
   readonly origin: LayerOrigin | null;
   /** Per path id read below it, its support and its summary's demand, each made once (`layerSupport`, `layerDemand`). */
   readonly paths: Map<number, LayerPath>;
+  /** Its number in the pass, its key in a set of layers (`SubLayer.self`). */
+  readonly id: number;
   /** Its parent's depth and one; 0 for none. */
   readonly depth: number;
-  /** Per step, the nearest of it and the layers below it by parents that lists the step (`listerOf`); made with it. */
-  listers: StepNode | null;
-  /** The nearest of it and the layers below it by parents that joins further layers, or `null`; made with it. */
-  joined: SubLayer | null;
-  /** The steps it and every layer below it list, as a support of their texts (`holds`); made with it. */
-  steps: SupportNode | null;
+  /** Its layers 2^i parents down, for finding a layer on its parent chain (`ancestorAt`). */
+  readonly jumps: readonly SubLayer[];
+  /** Its leaf in a set of layers (`front`). */
+  readonly self: SupportNode;
+  /** The layers whose maps its own unites: its parent, unless one it joins has the parent on its chain, and its joins. */
+  readonly through: readonly SubLayer[];
+  /**
+   * Per step, the nearest layers listing it at or below it, as a map of steps to sets of layers (`SupportNode.value`):
+   * itself for its own steps, else the sets of the layers it reads through, so a read under a step asks the layers
+   * that list it, never one it passes through; made with it from theirs.
+   */
+  front: SupportNode | null;
 }
 
 /**
- * A node of a layer's map of steps to the nearest layer listing each (`SubLayer.listers`): a persistent binary radix
- * tree over the steps' code units, as `SupportNode`'s over keys, a layer's its parent's with its own steps added along
- * their paths, so finding the nearest layer that lists a step walks the step's bits, never the layers between.
- */
-export interface StepNode {
-  /** The bit its children part at; a leaf's `Infinity`. */
-  readonly bit: number;
-  /** A leaf's step; a branch's first leaf's. */
-  readonly step: string;
-  readonly left: StepNode | null;
-  readonly right: StepNode | null;
-  /** A leaf's layer. */
-  readonly layer: SubLayer | null;
-}
-
-/**
- * The layers below a prefix or a layer under a step (`selectAt`), by their positions (a prefix's tops, a layer's parent
- * and joins): the sources each one's entry lists there, by the positions listing them, and the positions whose entry
- * has a layer below it that lists the step.
+ * The listing layers a read under a step may ask below a prefix or a listing layer (`selectAt`): those its layers' maps
+ * name for the step (`SubLayer.front`), the sources each lists there by the layers listing them, and those with listing
+ * layers below them.
  */
 export interface StepLayers {
+  /** The listing layers found under the step, each with the position of the prefix's layer it was found under. */
+  readonly found: readonly { readonly layer: SubLayer; readonly at: number }[];
   readonly own: ReadonlyMap<Key, readonly number[]>;
-  readonly deep: readonly number[];
+  /** The found layers with listing layers below them, whose summaries hold those layers' too. */
+  readonly nested: readonly number[];
 }
 
 /**
@@ -189,6 +184,10 @@ export interface SupportNode {
   readonly count: number;
   /** A summary's presence: per incoming state (lacks 1, has 2), what reading its sources in order makes of it. */
   readonly presence: readonly PresenceStep[] | null;
+  /** A step map's leaf: the set of layers its step maps to (`SubLayer.front`). */
+  readonly value?: SupportNode | null;
+  /** A set of layers' leaf: its layer's number (`SubLayer.id`). */
+  readonly layer?: number;
 }
 
 /**
