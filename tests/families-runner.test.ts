@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -261,7 +262,7 @@ function writeSrc(tree: string, extra = ""): void {
   symlinkSync("a.ts", join(tree, "src", "link.ts"));
 }
 
-test("the corpus runner stores a tree in the baseline of its src/ tree, verified shard by shard, which judges a head as the base tree beside it does", () => {
+test("the corpus runner stores a tree in the baseline of its src/ tree, verified shard by shard, which judges a head as the base tree beside it does", async () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     // the base as two commits with one `src/` tree and built oracle library, one with another library, and the head
@@ -384,12 +385,96 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     mkdirSync(join(elsewhere, SRC, "data"), { recursive: true });
     writeFileSync(join(elsewhere, SRC, "data", "kept"), "x\n");
     assert.match(store(base, area, elsewhere).stderr, /is not this tool's/);
+    // a baseline of this tool that holds a foreign path (#1542 r2: foreign-child): writers and `state` refuse it, naming
+    // the path, and `prune` keeps it, naming it, where it removes one whose trees are gone
     const gone = tree("gone", "5", "", "gone\n");
+    const foreign = tree("foreign", "6", "", "foreign\n");
     assert.equal(store(gone, area, elsewhere).status, 1);
+    assert.equal(store(foreign, area, elsewhere, "--shard", "0/2").status, 1);
+    const last = (result: { stdout: string }) =>
+      JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+    const held = last(state(foreign, elsewhere)).baseline;
+    mkdirSync(join(held, "other-agent"));
+    writeFileSync(join(held, "other-agent", "data"), "x\n");
+    assert.match(
+      store(foreign, area, elsewhere, "--shard", "1/2").stderr,
+      /foreign contents, which this tool did not write: other-agent\//,
+    );
+    const seen = state(foreign, elsewhere);
+    assert.equal(seen.status, 2);
+    assert.match(last(seen).refused, /foreign contents/);
     rmSync(gone, { recursive: true });
-    spawnSync(process.execPath, [baselines, "prune", elsewhere], { encoding: "utf8" });
-    assert.deepEqual(readdirSync(elsewhere), [SRC]);
+    rmSync(foreign, { recursive: true });
+    const pruned = spawnSync(process.execPath, [baselines, "prune", elsewhere], {
+      encoding: "utf8",
+    });
+    assert.match(pruned.stdout, /"pruned"/);
+    assert.match(pruned.stdout, /"kept":.*"foreign":\["other-agent\/"\]/);
+    assert.deepEqual(readdirSync(elsewhere).sort(), [SRC, held.split("/").at(-1)].sort());
     assert.deepEqual(readdirSync(join(elsewhere, SRC)), ["data"]);
+    assert.equal(readFileSync(join(held, "other-agent", "data"), "utf8"), "x\n");
+
+    // `prune` decides under the baseline's lock (#1542 r2: prune-versus-joining-writer): paused right after it read the
+    // MANIFEST whose only tree is gone, it retires the baseline; an alias writer that started meanwhile waits for the
+    // lock, finds the baseline retired and stores into a new one, which names its commit alone
+    const racing = join(directory, "racing");
+    const retired = tree("retired", "7", "", "racing\n");
+    const joining = tree("joining", "8", "", "racing\n");
+    assert.equal(store(retired, area, racing, "--shard", "0/2").status, 1);
+    rmSync(retired, { recursive: true });
+    const raced = last(state(joining, racing)).baseline;
+    const barrier = join(directory, "barrier.mjs");
+    writeFileSync(
+      barrier,
+      `import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const read = fs.readFileSync;
+let paused = false;
+fs.readFileSync = function (file, ...rest) {
+  const result = read.call(this, file, ...rest);
+  if (!paused && String(file) === process.env.PAUSE_MANIFEST) {
+    paused = true;
+    fs.writeFileSync(process.env.PAUSE_READY, "");
+    while (!fs.existsSync(process.env.PAUSE_RELEASE)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  }
+  return result;
+};
+syncBuiltinESMExports();
+`,
+    );
+    const ready = join(directory, "ready");
+    const release = join(directory, "release");
+    const background = (args: string[], env: NodeJS.ProcessEnv = process.env) => {
+      const child = spawn(process.execPath, args, { env, stdio: ["ignore", "pipe", "ignore"] });
+      let stdout = "";
+      child.stdout.on("data", (chunk) => (stdout += chunk));
+      return new Promise<{ status: number | null; stdout: string }>((done) =>
+        child.on("close", (status) => done({ status, stdout })),
+      );
+    };
+    const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+    const pruning = background(["--import", barrier, baselines, "prune", racing], {
+      ...process.env,
+      PAUSE_MANIFEST: join(raced, "MANIFEST"),
+      PAUSE_READY: ready,
+      PAUSE_RELEASE: release,
+    });
+    while (!existsSync(ready)) await sleep(10);
+    const writing = background([runner, area, joining, "--store", racing, "--shard", "1/2"]);
+    await sleep(150);
+    writeFileSync(release, "");
+    const [prunedRace, wrote] = await Promise.all([pruning, writing]);
+    assert.match(prunedRace.stdout, /"pruned"/);
+    assert.equal(wrote.status, 1);
+    assert.match(wrote.stdout, /"verified":true/);
+    assert.deepEqual(readdirSync(racing), [raced.split("/").at(-1)]);
+    assert.deepEqual(
+      readFileSync(join(raced, "MANIFEST"), "utf8")
+        .split("\n")
+        .filter((line) => line.startsWith("commit ")),
+      [`commit ${"8".repeat(40)} ${joining}`],
+    );
+    assert.deepEqual(states(state(joining, racing)), ["area partial 1"]);
 
     // a shard cut short (#1542 r1) no longer verifies, and any writer replaces it
     const second = join(baseline, "1of2.runs.jsonl");
