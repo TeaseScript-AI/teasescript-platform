@@ -18,6 +18,7 @@ import { Consumers, STOP_RULE, typedCall } from "./consumers.js";
 import { keyLabel } from "./consumers/names.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import { compareDemandNames, exportNames, importNames } from "./contract/key-ids.js";
+import { labelText } from "./contract/labels.js";
 import { selectLanes } from "./contract/lanes.js";
 import {
   Contract,
@@ -1439,9 +1440,10 @@ class CoreAnswers implements Answers {
   }
 
   public targetName(node: FlowNode): string | null {
-    // (the label the consumer that published the obligation made for the value, its walk's memos answering again)
+    // (the label the consumer that published the obligation made for the value, its walk's memos answering again: its
+    // recipe's text, rendered and charged where it is asked, as a consumer's showing is)
     const value = this.#valueOf(node);
-    return value === null ? null : keyLabel(this.#consumers, value);
+    return value === null ? null : labelText(this.#pass.contract, keyLabel(this.#consumers, value));
   }
 
   public valueAt(node: FlowNode, path: readonly string[]): ValueAnswer {
