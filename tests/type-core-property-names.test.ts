@@ -217,10 +217,11 @@ test("a demand stop with a question stop after it ends the search, its names wit
   assert.ok(retried > 0, "a question stops and is asked again");
 });
 
-test("the search charges each task it takes up, each prefix it visits and each step its pump check walks or compares (#1493)", () => {
+test("the search charges each task it takes up, each prefix it visits, each index entry it copies and each step its pump check walks or compares (#1493)", () => {
   // (the uncharged-work probe's gate, kept here: the ledger's `checks` during a search are its tasks, a seen one too,
-  // its prefixes, its pump checks' earlier tasks and their head steps; those stay within the longest chain per task,
-  // and the head steps within the longest path per earlier task walked)
+  // its prefixes, its index entries, its pump checks' earlier tasks of their own place and their head steps; the entries
+  // stay within the kinds and places on a chain per task, the earlier tasks within the longest walk per task, and the
+  // head steps within the longest path per earlier task walked)
   const nested = (depth: number): string => {
     const path = ".p".repeat(depth);
     return [
@@ -265,9 +266,10 @@ test("the search charges each task it takes up, each prefix it visits and each s
       assert.ok(records.tasks > 0, label);
       assert.equal(
         records.checks,
-        records.tasks + records.prefixes + records.ancestors + records.heads,
+        records.tasks + records.prefixes + records.entries + records.ancestors + records.heads,
         label,
       );
+      assert.ok(records.entries <= records.tasks * records.places, label);
       assert.ok(records.ancestors <= records.tasks * records.depth, label);
       assert.ok(records.heads <= records.ancestors * records.longest, label);
       if (name === "r" && source.startsWith("let t=hostValue")) {
@@ -314,7 +316,7 @@ test("the search charges each task it takes up, each prefix it visits and each s
   }
 });
 
-test("the search makes no uncharged temporary per step beyond a constant, its prefixes the stored keys along the path (#1493)", () => {
+test("the search makes no uncharged temporary per step beyond a constant, its prefixes the stored keys along the path, and its pump check walks no more earlier tasks than it takes up (#1493)", () => {
   // Astra r1's B1: each prefix rebuilt both halves of its path and its key, uncharged, cubic in a mutual feedback's
   // depth. The walk visits only the stored keys along a path (`definitions.stored`), their text its own, and keeps the
   // rest of the path through `keptSlice`. Here every built-in `slice`, `substring`, `join`, `map` and `concat` result
@@ -430,6 +432,10 @@ test("the search makes no uncharged temporary per step beyond a constant, its pr
         assert.deepEqual(names, ["left", "q"], label);
         assert.ok(records.prefixes <= records.tasks, label);
         assert.ok(uncharged <= 2 * records.tasks, label);
+        // (the pump check's walk, through the index, stays within the tasks; walking every earlier task made it quadratic,
+        // 474, 1,714 and 6,498 earlier tasks by the read; the index, a constant set of kinds and places, grows with them)
+        assert.ok(records.ancestors <= records.tasks, label);
+        assert.equal(records.places, rows[0]!.records.places, label);
       }
       for (const [low, high] of [
         [rows[0]!, rows[1]!],

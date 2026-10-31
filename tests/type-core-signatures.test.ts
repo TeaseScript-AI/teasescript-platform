@@ -731,8 +731,9 @@ test("record-valued nested choices compose no record: below their literal analog
  * elements (whose own check of one type, A8, is the literal's), the checks they add are the same at 64 and 128; and
  * `toJson`'s walk of an object k deep reads each level once, each level's path one step longer than the one above it
  * and charged as it is made: the read chain through nested literals, TABLE r4.83 (2)'s gated known limit, with each
- * level's property names, whose kept paths and pump checks the search charges since #1493 (13,685 / 49,747 units at k =
- * 64, 128, 3.700 per doubling of the source; 12,437 / 41,683 and 3.412 before), the depth no real script reaches.
+ * level's property names, whose kept paths, index entries and pump checks the search charges since #1493 (13,749 /
+ * 49,875 units at k = 64, 128, 3.692 per doubling of the source; 12,437 / 41,683 and 3.412 before), the depth no real
+ * script reaches.
  */
 test("join's and sort's element checks take the same work at any width, and toJson's deep walk is the read chain's known product", () => {
   const spent = (source: string) => {

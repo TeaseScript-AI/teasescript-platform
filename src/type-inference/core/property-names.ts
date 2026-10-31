@@ -25,17 +25,28 @@ export type PropertyNamesTask =
   | { readonly literal: PlaceId; readonly path: readonly string[] };
 
 /**
- * A task the search has taken up (`propertyNames`), with the one that scheduled it and how many of that one's last
- * steps its own path keeps untouched: neither cut, changed nor read by the step between them (#1493's pump bound).
+ * A task the search has taken up (`propertyNames`): how many of its scheduling task's last steps its own path keeps
+ * untouched (neither cut, changed nor read by the step between them) and its chain's index (#1493's pump bound).
  */
 interface Visit {
-  readonly kind: "key" | "value" | "literal";
   readonly at: PlaceId;
   readonly path: readonly string[];
-  readonly from: Visit | null;
   readonly kept: number;
-  /** The shortest path on its chain, its own included: no task above one no longer than it can be pumped by it. */
-  readonly shortest: number;
+  /** Its chain's index: each kind and place on the chain, its own included, to that place's nearest visit (`Mark`). */
+  readonly index: ReadonlyMap<number, Mark>;
+  /**
+   * Its own kind and place's nearest visit above it and the least `kept` on the way down since; the shortest path among
+   * it and its place's visits above it.
+   */
+  readonly same: Visit | null;
+  readonly keptSince: number;
+  readonly shortestSame: number;
+}
+
+/** A place's nearest visit on a chain and the least `kept` on the way down from it (`Visit.index`). */
+interface Mark {
+  readonly visit: Visit;
+  readonly kept: number;
 }
 
 /**
@@ -50,6 +61,8 @@ export interface NameRecords {
   depth: number;
   heads: number;
   longest: number;
+  entries: number;
+  places: number;
   checks: number;
 }
 
@@ -68,6 +81,8 @@ export function withNameRecords<T>(run: () => T): {
     depth: 0,
     heads: 0,
     longest: 0,
+    entries: 0,
+    places: 0,
     checks: 0,
   };
   recording = records;
@@ -93,7 +108,7 @@ interface Scheduled {
  * reads and calls standing at its path or above it. Each task it schedules and each prefix it visits is charged, and
  * every key, path and identity it keeps, through the kept helpers.
  *
- * #1493, the pump bound: each task records the task that scheduled it (`from`) and how many of that one's last steps
+ * #1493, the pump bound: each task has the task that scheduled it (`from`) and records how many of that one's last steps
  * its path keeps untouched (`kept`): a key's step at a stored prefix keeps the rest below it (an add's one step less), a
  * literal's at a depth the rest below that depth, a carrier's all but the two steps it reads, and a record path the
  * steps it leaves unchanged. A task pumps an earlier one on its chain where both are of one kind and place, its path is
@@ -102,10 +117,11 @@ interface Scheduled {
  * bounded front of its path and pushes a bounded head, a chain of tasks that never ends holds such a pair, and from it
  * the same steps repeat forever, each turn longer (a feedback copy `w = r.z`: `w|`, `w|z`, `w|z.z`, ...); a search that
  * ends without the bound meets none, so its names are as before, whatever the answer at a key is, stopped or not. The
- * check walks the new task's chain, one charge per earlier task, until no earlier task with a shorter path is left above
- * (each task records the shortest path on its chain), and compares heads only with earlier tasks of its kind and place,
- * one charge per step of the head: at most the new tasks times the longest chain in visits, plus head steps each no
- * longer than the earlier task's path.
+ * check walks only the new task's own place's visits above it, one charge per visit, through each task's index of its
+ * chain (each kind and place on it to that place's nearest visit and the least `kept` since, copied from the scheduling
+ * task with one charge per entry), until none with a shorter path is left; and it compares heads only with those, one
+ * charge per step of the head: at most the new tasks times the longest walk in visits, plus head steps each no longer
+ * than the earlier task's path, plus the index entries, at most the new tasks times the kinds and places on a chain.
  */
 export function propertyNames(
   pass: CorePass,
@@ -125,26 +141,24 @@ export function propertyNames(
     reference: (receiver) => heldReference(run(contract.valueReceiver(receiver))),
     joined: (operand) => pass.lists.joined(operand),
   };
-  /** Whether a visit pumps one before it: the same place, a longer path, that one's head before its untouched tail. */
+  /**
+   * Whether a visit pumps one before it: the same kind and place, a longer path, that one's head before its untouched
+   * tail. Only its place's visits above it are walked, through `same`, until none with a shorter path is left.
+   */
   const pumps = (visit: Visit): boolean => {
-    let tail = visit.kept;
+    let tail = visit.keptSince;
     let depth = 0;
-    // (only an earlier task with a shorter path can be pumped: the walk ends where none is left above)
     for (
-      let above = visit.from;
-      above !== null && above.shortest < visit.path.length;
-      above = above.from
+      let above = visit.same;
+      above !== null && above.shortestSame < visit.path.length;
+      above = above.same
     ) {
       work.charge("checks");
       if (recording !== null) {
         recording.ancestors += 1;
         recording.depth = Math.max(recording.depth, (depth += 1));
       }
-      if (
-        above.kind === visit.kind &&
-        above.at === visit.at &&
-        visit.path.length > above.path.length
-      ) {
+      if (visit.path.length > above.path.length) {
         const head = above.path.length - Math.min(tail, above.path.length);
         work.charge("checks", head);
         if (recording !== null) recording.heads += head;
@@ -153,7 +167,7 @@ export function propertyNames(
           same = visit.path[index] === above.path[index];
         if (same) return true;
       }
-      tail = Math.min(tail, above.kept);
+      tail = Math.min(tail, above.keptSince);
     }
     return false;
   };
@@ -185,14 +199,29 @@ export function propertyNames(
     // boundary and copied out once, G3 stage 1)
     const walk = "key" in task ? keptKeyWalk(contract, task.key) : null;
     const taken: readonly string[] = "key" in task ? stepsArray(walk!.path) : task.path;
+    const at = "key" in task ? walk!.place : "literal" in task ? task.literal : task.value;
+    // (its kind and place's entry in the chain's index; the index copied, one charged entry per kind and place on the
+    // chain, each its least `kept` down to this visit)
+    const slot = at * 3 + ("key" in task ? 0 : "literal" in task ? 2 : 1);
+    const index = new Map<number, Mark>();
+    if (from !== null) {
+      work.charge("checks", from.index.size);
+      if (recording !== null) recording.entries += from.index.size;
+      for (const [each, mark] of from.index)
+        index.set(each, mark.kept <= kept ? mark : { visit: mark.visit, kept });
+    }
+    const above = index.get(slot);
     const visit: Visit = {
-      kind: "key" in task ? "key" : "literal" in task ? "literal" : "value",
-      at: "key" in task ? walk!.place : "literal" in task ? task.literal : task.value,
+      at,
       path: taken,
-      from,
       kept,
-      shortest: Math.min(taken.length, from?.shortest ?? taken.length),
+      index,
+      same: above?.visit ?? null,
+      keptSince: above?.kept ?? Number.POSITIVE_INFINITY,
+      shortestSame: Math.min(taken.length, above?.visit.shortestSame ?? taken.length),
     };
+    index.set(slot, { visit, kept: Number.POSITIVE_INFINITY });
+    if (recording !== null) recording.places = Math.max(recording.places, index.size);
     if (recording !== null) recording.longest = Math.max(recording.longest, visit.path.length);
     // (a pumped task's own names are taken, its sources not followed)
     const follows = !pumps(visit);
