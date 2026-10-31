@@ -298,22 +298,6 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a plain label's text in a test's record (`withLabelRecords`), never kept by an analysis",
   ],
-  "property-names.ts propertyNames at": [
-    1,
-    "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
-  ],
-  "property-names.ts propertyNames inline": [
-    4,
-    "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
-  ],
-  "property-names.ts propertyNames slice": [
-    2,
-    "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
-  ],
-  "property-names.ts propertyNames id": [
-    1,
-    "a properties query's walk, its texts ending with the query (S9b's, TABLE r4.78 (3))",
-  ],
   "consumer.ts #contractTask key": [
     1,
     "the candidate's lowering after the analysis (no ledger): a memo key of a store target's path, cut below",
