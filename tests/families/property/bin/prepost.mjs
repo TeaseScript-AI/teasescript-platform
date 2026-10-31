@@ -155,8 +155,11 @@ try {
       ],
       { file: join(out, side, "results.jsonl"), text: '"status":"FAIL"' },
     );
+    // (with the run's own message, such as a rule's control that does not hold on this tree)
     if (!existsSync(join(out, side, "summary.json")))
-      throw new Error(`run ${side} left no summary`);
+      throw new Error(
+        `run ${side} left no summary: ${ran.stderr.trim().split("\n")[0] || `exit ${ran.code}`}`,
+      );
     summaries[side] = readJson(join(out, side, "summary.json"));
     firstFailures[side] = ran.record.firstMatchMs;
   }
