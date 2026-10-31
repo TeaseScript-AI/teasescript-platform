@@ -10,10 +10,10 @@ import {
   stepsOfId,
   type CanonicalKey,
 } from "./contract/key-ids.js";
-import { keptArray, keptParts, keptSlice, keptSteps } from "./budget.js";
+import { keepText, keptArray, keptParts, keptSlice, keptSteps, type WorkLedger } from "./budget.js";
 import { carried, type Dispatch } from "./carriers.js";
 import { heldReference, type IndexNode } from "./contract.js";
-import { keyPath, recordPath } from "./definitions.js";
+import { keptPath, recordPath, type Key } from "./definitions.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
 import type { Work } from "./solver.js";
@@ -52,7 +52,7 @@ interface Visit {
  * Test-only (`withNameRecords`): what the searches did, all of them together: the tasks they took up (a seen one too),
  * the prefixes they visited, the earlier tasks their pump checks walked and the longest such walk, the head steps those
  * checks compared, the longest path a task held, their path index's entries and longest chain, the tasks that pumped,
- * and the units of `checks` the ledger counted meanwhile.
+ * the keys below a key whose step they read, and the units of `checks` the ledger counted meanwhile.
  */
 export interface NameRecords {
   tasks: number;
@@ -64,6 +64,7 @@ export interface NameRecords {
   entries: number;
   chain: number;
   pumped: number;
+  below: number;
   checks: number;
 }
 
@@ -85,6 +86,7 @@ export function withNameRecords<T>(run: () => T): {
     entries: 0,
     chain: 0,
     pumped: 0,
+    below: 0,
     checks: 0,
   };
   recording = records;
@@ -93,6 +95,21 @@ export function withNameRecords<T>(run: () => T): {
   } finally {
     recording = null;
   }
+}
+
+/**
+ * The step of `below`, a key below the text key `key` (`definitions.keysBelow`), at `key`'s depth: read from the text
+ * after `key`'s own, one charge, and the step alone kept, charged as kept text (#1493: no key's whole text is split to
+ * read one of its steps).
+ */
+function keptStepBelow(work: WorkLedger, key: Key, below: Key): string {
+  work.charge("checks");
+  if (recording !== null) recording.below += 1;
+  const start = key.endsWith("|") ? key.length : key.length + 1;
+  const dot = below.indexOf(".", start);
+  const end = dot < 0 ? below.length : dot;
+  keepText(work, end - start);
+  return below.slice(start, end);
 }
 
 /** A task to take up, the visit that scheduled it, and how many of that visit's last steps it keeps untouched. */
@@ -107,8 +124,9 @@ interface Scheduled {
  * its literals and of the values its collections' adds insert have at its path. One worklist of sources, each once: a value read further at a path is followed
  * through its projections and the operations that pass a value on (the value side's transfers) to a copied key, a
  * call's result key or a literal; a key to its prefixes' stores and their sources' own stores; a literal to the
- * reads and calls standing at its path or above it. Each task it schedules and each prefix it visits is charged, and
- * every key, path and identity it keeps, through the kept helpers.
+ * reads and calls standing at its path or above it. Each task it schedules, each prefix it visits and each key below a
+ * key whose step it reads is charged, and every key, path, step and identity it keeps, through the kept helpers: no
+ * key's text is split uncharged to read its steps (`keptStepBelow`, `keptPath`).
  *
  * #1493, the pump bound: each task has the task that scheduled it (`from`) and records how many of that one's last steps
  * its path keeps untouched (`kept`): a key's step at a stored prefix keeps the rest below it (an add's one step less), a
@@ -283,7 +301,7 @@ export function propertyNames(
         !(isKeyId(source)
           ? contract.pathMembers[keyIdPath(source)] !== 0 &&
             someStep(stepsOfId(contract, source), (step) => dictList(step) !== undefined)
-          : keyPath(source).some((step) => dictList(step) !== undefined))
+          : keptPath(work, source).some((step) => dictList(step) !== undefined))
       ) {
         const record = recorded(path);
         schedule({ key: keptKeyBelowIn(contract, source, record.path) }, record.kept);
@@ -331,8 +349,8 @@ export function propertyNames(
     const place = visit.at;
     const path = visit.path;
     for (const below of isKeyId(key) ? [] : definitions.keysBelow(key)) {
-      const step = keyPath(below)[path.length];
-      if (step !== undefined && step !== "element") names.add(propertyName(step));
+      const step = keptStepBelow(work, key, below);
+      if (step !== "element") names.add(propertyName(step));
     }
     if (!follows) continue;
     // (the prefixes whose stores can schedule a task are the stored keys along the path, `definitions.stored`: any

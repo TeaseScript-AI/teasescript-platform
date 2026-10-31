@@ -219,7 +219,8 @@ test("a demand stop with a question stop after it ends the search, its names wit
 
 test("the search charges each task it takes up, each prefix it visits, each entry of its path's index and each step its pump check walks or compares (#1493)", () => {
   // (the uncharged-work probe's gate, kept here: the ledger's `checks` during a search are its tasks, a seen one too,
-  // its prefixes, its path's index entries, its pump checks' earlier tasks of their own place and their head steps; the
+  // its prefixes, its path's index entries, its pump checks' earlier tasks of their own place and their head steps, and
+  // the keys below a key whose step it reads; the
   // entries stay within 2 + ⌈log₂ D⌉ per task on a chain of D, the earlier tasks within the longest walk per task, and
   // the head steps within the longest path per earlier task walked)
   const nested = (depth: number): string => {
@@ -266,7 +267,12 @@ test("the search charges each task it takes up, each prefix it visits, each entr
       assert.ok(records.tasks > 0, label);
       assert.equal(
         records.checks,
-        records.tasks + records.prefixes + records.entries + records.ancestors + records.heads,
+        records.tasks +
+          records.prefixes +
+          records.entries +
+          records.ancestors +
+          records.heads +
+          records.below,
         label,
       );
       assert.ok(
@@ -338,7 +344,12 @@ test("the search charges each task it takes up, each prefix it visits, each entr
       assert.deepEqual(result, ["kept"], label);
       assert.equal(
         records.checks,
-        records.tasks + records.prefixes + records.entries + records.ancestors + records.heads,
+        records.tasks +
+          records.prefixes +
+          records.entries +
+          records.ancestors +
+          records.heads +
+          records.below,
         label,
       );
       assert.ok(
@@ -381,8 +392,12 @@ test("the search makes no uncharged temporary per step beyond a constant, its pr
   // depth. The walk visits only the stored keys along a path (`definitions.stored`), their text its own, and keeps the
   // rest of the path through `keptSlice`. Here every built-in `slice`, `substring`, `join`, `map` and `concat` result
   // whose first caller past the key and path helpers is the walk, and no kept helper made it, counts as an uncharged
-  // temporary (the uncharged-work probe `transient-probe.mjs` adds `split` and `filter`): by the read and by the place,
-  // at depths 16, 32 and 64, in every mode
+  // temporary (the uncharged-work probe `transient-probe.mjs` adds `split` and `filter`); #1497's key-ids helpers are key
+  // and path helpers too, their `PathSteps.toArray` a charged copy: by the read and by the place, at depths 16, 32 and
+  // 64, in every mode. Two witnesses more: the feedback with one store deep below it, whose every key task split the
+  // deep key's whole text to read one step of it (quadratic); and a host value a literal holds, read at a path, whose
+  // copied source's key below it is a text one's, made charged (`keptKeyBelowIn`), and a projection of it a literal
+  // holds, whose copied source's text the dict check reads charged (`keptPath`)
   const mutual = (depth: number): string =>
     [
       "let a={left:1,q:null}",
@@ -396,8 +411,9 @@ test("the search makes no uncharged temporary per step beyond a constant, its pr
   const walkFrame = (): boolean => {
     // (past this check, the counter and the built-in's wrapper, here in the test)
     for (const frame of (new Error().stack ?? "").split("\n").slice(4)) {
-      if (/\bat kept[A-Z]\w*/.test(frame)) return false;
-      if (/node:internal|\/core\/(definitions|budget)\.(js|ts)/.test(frame)) continue;
+      if (/\bat (kept[A-Z]\w*|PathSteps\.toArray)\b/.test(frame)) return false;
+      if (/node:internal|\/core\/(definitions|budget|contract\/key-ids)\.(js|ts)/.test(frame))
+        continue;
       return /\/core\/property-names\.(js|ts)/.test(frame);
     }
     return false;
@@ -457,24 +473,55 @@ test("the search makes no uncharged temporary per step beyond a constant, its pr
       Object.assign(texts, { slice: textSlice, substring });
     }
   };
-  for (const query of ["read", "place"] as const)
+  const deep = (depth: number): string =>
+    mutual(depth).replace("let read=", `a${".q".repeat(depth)}.k=1\nlet read=`);
+  const host = (depth: number, held: boolean): string => {
+    const path = Array.from({ length: depth }, (_, index) => `.x${index}`).join("");
+    const read = held ? `let o={p:h}\nlet r=o.p${path}` : `let o={p:h${path}}\nlet r=o.p`;
+    return ["let h=hostValue", `h${path}.k=1`, read, "say r", "exit"].join("\n");
+  };
+  const asks = [
+    { query: "read", source: mutual, name: "read", names: ["left", "q"], depths: [16, 32, 64] },
+    { query: "place", source: mutual, name: "a", names: ["left", "q"], depths: [16, 32, 64] },
+    {
+      query: "deep store",
+      source: deep,
+      name: "read",
+      names: ["k", "left", "q"],
+      depths: [16, 32, 64],
+    },
+    // (one store and one read each: two sizes show the copied source's text charged)
+    {
+      query: "held",
+      source: (depth: number) => host(depth, true),
+      name: "r",
+      names: ["k"],
+      depths: [8, 16],
+    },
+    {
+      query: "projection",
+      source: (depth: number) => host(depth, false),
+      name: "r",
+      names: ["k"],
+      depths: [8, 16],
+    },
+  ] as const;
+  for (const { query, source: make, name, names: expected, depths } of asks)
     for (const mode of MODES) {
-      const rows = [16, 32, 64].map((depth) => {
-        const source = mutual(depth);
+      const rows = depths.map((depth) => {
+        const source = make(depth);
         const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
         assert.ok(request !== null);
         return inMode(mode, () => {
           const answers = analyseCore(request);
           const node = answers.graph.nodes.find(
-            (each) =>
-              each.expression?.kind === "identifier" &&
-              each.expression.name === (query === "read" ? "read" : "a"),
+            (each) => each.expression?.kind === "identifier" && each.expression.name === name,
           );
           const place = node === undefined ? null : answers.at(node)?.place;
           assert.ok(node !== undefined && place !== null && place !== undefined);
           const { result, uncharged } = observed(() =>
             withNameRecords(() =>
-              query === "read"
+              query !== "place"
                 ? [...answers.properties(node).keys()]
                 : [
                     ...answers.placeProperties(
@@ -489,7 +536,7 @@ test("the search makes no uncharged temporary per step beyond a constant, its pr
       });
       for (const { depth, names, records, uncharged } of rows) {
         const label = `${query} ${depth} ${JSON.stringify(mode)} ${uncharged} ${JSON.stringify(records)}`;
-        assert.deepEqual(names, ["left", "q"], label);
+        assert.deepEqual(names, expected, label);
         assert.ok(records.prefixes <= records.tasks, label);
         assert.ok(uncharged <= 2 * records.tasks, label);
         // (the pump check walks its own place's earlier tasks only, within the tasks; walking every earlier task made it
@@ -500,12 +547,9 @@ test("the search makes no uncharged temporary per step beyond a constant, its pr
           label,
         );
       }
-      for (const [low, high] of [
-        [rows[0]!, rows[1]!],
-        [rows[1]!, rows[2]!],
-      ] as const)
+      for (const [low, high] of rows.slice(1).map((row, index) => [rows[index]!, row] as const))
         assert.ok(
-          high.uncharged / low.uncharged <= high.records.checks / low.records.checks,
+          high.uncharged / Math.max(low.uncharged, 1) <= high.records.checks / low.records.checks,
           `${query} ${low.depth} → ${high.depth} ${JSON.stringify(mode)}`,
         );
     }
