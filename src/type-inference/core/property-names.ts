@@ -256,17 +256,21 @@ export function propertyNames(
       continue;
     }
     const key = task.key;
+    const place = visit.at;
     const path = visit.path;
     for (const below of isKeyId(key) ? [] : definitions.keysBelow(key)) {
       const step = keyPath(below)[path.length];
       if (step !== undefined && step !== "element") names.add(propertyName(step));
     }
     if (!follows) continue;
-    for (let length = 0; length <= path.length; length += 1) {
+    // (the prefixes whose stores can schedule a task are the stored keys along the path, `definitions.stored`: any
+    // other prefix's frame holds no definition and its stores are empty. One step of the trie each, charged, the stored
+    // key's own text, and the rest of the path below it kept and charged; no prefix key or path half is rebuilt)
+    for (const { key: prefix, depth } of definitions.stored.along(place, path, true)) {
       work.charge("checks");
       if (recording !== null) recording.prefixes += 1;
-      const rest = path.slice(length);
-      const stores = contract.prefixStores(walk!.prefix(length));
+      const rest = keptSlice(work, path, depth);
+      const stores = contract.prefixStores(prefix);
       // the sources' own stores below their roots
       for (const sub of contract.subSources(stores))
         schedule({ key: keptKeyBelowIn(contract, sub, rest) }, rest.length);
@@ -279,7 +283,10 @@ export function propertyNames(
         // at the collection itself
         else if (entry.elem !== undefined && rest[0] === "element")
           schedule(
-            { value: entry.elem, path: keptSteps(work, entry.at ?? [], rest.slice(1)) },
+            {
+              value: entry.elem,
+              path: keptSteps(work, entry.at ?? [], keptSlice(work, path, depth + 1)),
+            },
             rest.length - 1,
           );
       }

@@ -314,6 +314,134 @@ test("the search charges each task it takes up, each prefix it visits and each s
   }
 });
 
+test("the search makes no uncharged temporary per step beyond a constant, its prefixes the stored keys along the path (#1493)", () => {
+  // Astra r1's B1: each prefix rebuilt both halves of its path and its key, uncharged, cubic in a mutual feedback's
+  // depth. The walk visits only the stored keys along a path (`definitions.stored`), their text its own, and keeps the
+  // rest of the path through `keptSlice`. Here every built-in `slice`, `substring`, `join`, `map` and `concat` result
+  // whose first caller past the key and path helpers is the walk, and no kept helper made it, counts as an uncharged
+  // temporary (the uncharged-work probe `transient-probe.mjs` adds `split` and `filter`): by the read and by the place,
+  // at depths 16, 32 and 64, in every mode
+  const mutual = (depth: number): string =>
+    [
+      "let a={left:1,q:null}",
+      "let b={right:2,q:null}",
+      "a.q=b",
+      "b.q=a",
+      `let read=a${".q".repeat(depth)}`,
+      "say read",
+      "exit",
+    ].join("\n");
+  const walkFrame = (): boolean => {
+    // (past this check, the counter and the built-in's wrapper, here in the test)
+    for (const frame of (new Error().stack ?? "").split("\n").slice(4)) {
+      if (/\bat kept[A-Z]\w*/.test(frame)) return false;
+      if (/node:internal|\/core\/(definitions|budget)\.(js|ts)/.test(frame)) continue;
+      return /\/core\/property-names\.(js|ts)/.test(frame);
+    }
+    return false;
+  };
+  const observed = <T>(ask: () => T): { readonly result: T; readonly uncharged: number } => {
+    let uncharged = 0;
+    let counting = true;
+    const seen = (size: number): void => {
+      if (!counting || size === 0) return;
+      counting = false;
+      if (walkFrame()) uncharged += size;
+      counting = true;
+    };
+    const arrays = Array.prototype;
+    const texts = String.prototype;
+    const [slice, join, map, concat] = [arrays.slice, arrays.join, arrays.map, arrays.concat];
+    const [textSlice, substring] = [texts.slice, texts.substring];
+    arrays.slice = function (this: unknown[], start?: number, end?: number): unknown[] {
+      const result = slice.call(this, start, end);
+      seen(result.length);
+      return result;
+    };
+    arrays.join = function (this: unknown[], separator?: string): string {
+      const result = join.call(this, separator);
+      seen(result.length);
+      return result;
+    };
+    arrays.map = function <U>(
+      this: unknown[],
+      callback: (value: unknown, index: number, array: unknown[]) => U,
+    ): U[] {
+      // EVIDENCE: `Array.prototype.map` returns an array of the callback's results.
+      const result = map.call(this, callback) as U[];
+      seen(result.length);
+      return result;
+    };
+    arrays.concat = function (this: unknown[], ...items: unknown[]): unknown[] {
+      const result = concat.apply(this, items);
+      seen(result.length);
+      return result;
+    };
+    texts.slice = function (this: string, start?: number, end?: number): string {
+      const result = textSlice.call(this, start, end);
+      seen(result.length);
+      return result;
+    };
+    texts.substring = function (this: string, start: number, end?: number): string {
+      const result = substring.call(this, start, end);
+      seen(result.length);
+      return result;
+    };
+    try {
+      return { result: ask(), uncharged };
+    } finally {
+      counting = false;
+      Object.assign(arrays, { slice, join, map, concat });
+      Object.assign(texts, { slice: textSlice, substring });
+    }
+  };
+  for (const query of ["read", "place"] as const)
+    for (const mode of MODES) {
+      const rows = [16, 32, 64].map((depth) => {
+        const source = mutual(depth);
+        const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+        assert.ok(request !== null);
+        return inMode(mode, () => {
+          const answers = analyseCore(request);
+          const node = answers.graph.nodes.find(
+            (each) =>
+              each.expression?.kind === "identifier" &&
+              each.expression.name === (query === "read" ? "read" : "a"),
+          );
+          const place = node === undefined ? null : answers.at(node)?.place;
+          assert.ok(node !== undefined && place !== null && place !== undefined);
+          const { result, uncharged } = observed(() =>
+            withNameRecords(() =>
+              query === "read"
+                ? [...answers.properties(node).keys()]
+                : [
+                    ...answers.placeProperties(
+                      place.id,
+                      Array.from({ length: depth }, () => propertyStep("q")),
+                    ),
+                  ],
+            ),
+          );
+          return { depth, names: result.result.sort(), records: result.records, uncharged };
+        });
+      });
+      for (const { depth, names, records, uncharged } of rows) {
+        const label = `${query} ${depth} ${JSON.stringify(mode)} ${uncharged} ${JSON.stringify(records)}`;
+        assert.deepEqual(names, ["left", "q"], label);
+        assert.ok(records.prefixes <= records.tasks, label);
+        assert.ok(uncharged <= 2 * records.tasks, label);
+      }
+      for (const [low, high] of [
+        [rows[0]!, rows[1]!],
+        [rows[1]!, rows[2]!],
+      ] as const)
+        assert.ok(
+          high.uncharged / low.uncharged <= high.records.checks / low.records.checks,
+          `${query} ${low.depth} → ${high.depth} ${JSON.stringify(mode)}`,
+        );
+    }
+});
+
 test("the first property `${...}` shows of a copy comes from its source's literal, in every mode (#1493)", () => {
   const source = 'let a = {x: 1, y: 2}\nlet b = a\nb.y = 3\nsay "${b}"\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
