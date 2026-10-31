@@ -178,8 +178,9 @@ test("every W34, W44 and W45 variant's work and each of its counters grow with t
 });
 
 /**
- * #1466: a stack of k diamonds of copies and its siblings (`LAYER_FAMILIES`), each read answered once per layer and
- * path from the layers below it, at one small doubling, in either order and with the sharing off too: the total and
+ * #1466: a stack of k diamonds of copies, its siblings and a wide join read at sparse paths (`LAYER_FAMILIES`), each
+ * read answered once per layer and path from the layers below it that may hold its property, at one small doubling, in
+ * either order and with the sharing off too: the total and
  * the contract's own counter (`invSteps`), which `main` grew as k³ there (7.85 per doubling from 16 to 32). The support's
  * other counters carry its log factor, which reads above the counters' bound at these sizes. The series to k = 64 in
  * four modes is the PR's evidence, outside CI.
