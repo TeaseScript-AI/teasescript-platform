@@ -193,6 +193,9 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(len(parts), 4)
         self.assertTrue(all(len(part) <= 100 for part in parts))
         self.assertTrue(all(count is not None and count <= 100 for count in counts))
+        # The markers at 51 and 102 still leave room for the remaining parts.
+        self.assertTrue(parts[1].startswith(b"diff --git "))
+        self.assertTrue(parts[2].startswith(b"diff --git "))
 
     def test_byte_fallback_preserves_minimum_count_across_utf8_boundaries(self) -> None:
         patch = b"xx\n" + ("é" * 5).encode()
@@ -240,6 +243,25 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(parts, [patch[:10], patch[10:]])
         self.assertEqual(counts, [10, 5])
         self.assertEqual(b"".join(parts), patch)
+
+    def test_part_count_holds_when_a_longer_part_costs_fewer_tokens(self) -> None:
+        # Token merges at a part's edges: a part ending in "ab" costs two tokens less and
+        # one starting with "b" two more. The greedy split needs six parts; the preferred
+        # boundaries must neither change that nor abort the split.
+        patch = b"b\naba\nax\nabx"
+
+        def count_tokens(value: bytes) -> int:
+            return len(value) - 2 * value.endswith(b"ab") + 2 * value.startswith(b"b")
+
+        parts, counts = SUPPORT.split_utf8_patch(
+            patch, maximum_bytes=3, target_tokens=3, count_tokens=count_tokens
+        )
+
+        self.assertEqual(b"".join(parts), patch)
+        self.assertEqual(len(parts), 6)
+        self.assertTrue(all(len(part) <= 3 for part in parts))
+        self.assertEqual(counts, [count_tokens(part) for part in parts])
+        self.assertTrue(all(count <= 3 for count in counts))
 
     def test_preferred_boundaries_keep_tokenizer_calls_linear(self) -> None:
         # Issue #185: re-splitting the whole remaining suffix for every preferred boundary
