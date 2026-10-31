@@ -2518,20 +2518,20 @@ export const LAYER_FAMILIES: readonly WorkFamily[] = [
     name: "listing-chain",
     measures: "a chain of copies each storing its own property below one step, read at its end",
     program: (k) => listingChain(k),
-    main: { total: 2.735, invSteps: 3.868 },
+    main: { total: 2.733, invSteps: 3.85 },
   },
   {
     name: "listing-chain-joined",
     measures: "the chain's copies all joined into one place, read through it",
     program: (k) => listingChain(k, { joined: true }),
-    main: { total: 4.808, invSteps: 7.341 },
+    main: { total: 4.804, invSteps: 7.327 },
   },
   {
     name: "listing-chain-stored",
     measures:
       "each copy joined from the one before and a stored copy of it, storing its own too, read through a copy",
     program: (k) => listingChain(k, { stored: true }),
-    main: { total: 5.809, invSteps: 7.378 },
+    main: { total: 5.805, invSteps: 7.371 },
   },
   {
     name: "diamonds-unequal-depth",
