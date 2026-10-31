@@ -49,6 +49,8 @@ const WRITERS = new Map(
     open: [0],
   }),
 );
+/** The modules through which code runs that this list does not see. */
+const LOADERS = ["module", "node:module", "vm", "node:vm", "worker_threads", "node:worker_threads"];
 const opOf = (name) => (name.endsWith("Sync") ? name.slice(0, -4) : name);
 const literal = (node) =>
   node !== undefined && ts.isStringLiteralLike(node) ? node.text : undefined;
@@ -196,9 +198,18 @@ export function inventory(checkout = process.cwd()) {
         : ["fs", "promises", "processes"].includes(of) && key !== "constants"
           ? { of, name: key }
           : undefined;
+  const bindingOf = (node) => bindings.get(local(node)) ?? bindings.get(target(local(node)));
+  /** `process.<name>` (a global `process`), or undefined. */
+  const processMember = (node) =>
+    ts.isPropertyAccessExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === "process" &&
+    !local(node.expression)?.declarations?.length
+      ? node.name.text
+      : undefined;
   const valueOf = (expression) => {
     const node = strip(expression);
-    if (ts.isIdentifier(node)) return bindings.get(local(node));
+    if (ts.isIdentifier(node)) return bindingOf(node);
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
       const key = ts.isPropertyAccessExpression(node)
         ? node.name.text
@@ -207,7 +218,10 @@ export function inventory(checkout = process.cwd()) {
       return base?.module !== undefined && key !== undefined ? member(base.module, key) : undefined;
     }
     if (ts.isCallExpression(node)) {
-      if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      if (
+        node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        processMember(node.expression) === "getBuiltinModule"
+      ) {
         const from = Object.keys(MODULES).find((key) =>
           MODULES[key].includes(literal(node.arguments[0])),
         );
@@ -227,7 +241,7 @@ export function inventory(checkout = process.cwd()) {
         MODULES[key].includes(literal(statement.moduleSpecifier)),
       );
       const clause = statement.importClause;
-      if (["module", "node:module"].includes(literal(statement.moduleSpecifier)))
+      if (LOADERS.includes(literal(statement.moduleSpecifier)))
         escape(statement, "a module loader, through which a module escapes this list");
       if (from === undefined) continue;
       if (clause.name !== undefined) bindings.set(local(clause.name), { module: from });
@@ -296,7 +310,16 @@ export function inventory(checkout = process.cwd()) {
     }
     if (value.name !== undefined && ts.isCallExpression(parent) && parent.expression === node)
       return calls.push({ call: parent, ...value });
-    if (ts.isVariableDeclaration(parent) && parent.initializer === node) return;
+    if (ts.isVariableDeclaration(parent) && parent.initializer === node) {
+      // (bound above: a name, or a destructuring of plain names; any other pattern escapes)
+      const plain =
+        ts.isIdentifier(parent.name) ||
+        (ts.isObjectBindingPattern(parent.name) &&
+          parent.name.elements.every(
+            (element) => element.dotDotDotToken === undefined && ts.isIdentifier(element.name),
+          ));
+      return plain ? undefined : escape(node, "an fs or process binding destructured otherwise");
+    }
     if (
       value.name !== undefined &&
       ts.isCallExpression(parent) &&
@@ -311,12 +334,45 @@ export function inventory(checkout = process.cwd()) {
   };
   for (const node of identifiers) {
     if (declares(node)) continue;
-    const value = bindings.get(local(node));
+    const value = bindingOf(node);
     if (value !== undefined) use(node, value);
   }
-  for (const node of identifiers)
-    if (node.text === "require" && ts.isCallExpression(node.parent) && local(node) === undefined)
-      escape(node.parent, "a module loader, through which a module escapes this list");
+  const global = (node) => !local(node)?.declarations?.length;
+  for (const source of sources) {
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && valueOf(node)?.module !== undefined)
+        use(node, valueOf(node));
+      if (
+        (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
+        ts.isIdentifier(node.expression) &&
+        ["require", "eval", "Function"].includes(node.expression.text) &&
+        global(node.expression)
+      )
+        escape(node, "a module loader or code from text, which this list does not see");
+      if (
+        ["binding", "_linkedBinding", "dlopen"].includes(processMember(node)) ||
+        (ts.isCallExpression(node) &&
+          processMember(node.expression) === "getBuiltinModule" &&
+          literal(node.arguments[0]) === undefined)
+      )
+        escape(node, "a module loader, through which a module escapes this list");
+      if (ts.isExportDeclaration(node)) {
+        const from = literal(node.moduleSpecifier);
+        if (Object.values(MODULES).flat().includes(from))
+          escape(node, "an fs or process module exported on");
+        if (
+          from === undefined &&
+          node.exportClause !== undefined &&
+          ts.isNamedExports(node.exportClause)
+        )
+          for (const element of node.exportClause.elements)
+            if (bindings.has(checker.getExportSpecifierLocalTargetSymbol(element)))
+              escape(element, "an fs or process binding exported on");
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
 
   // the gate, the functions passed to it, and the functions only those call
   const gate = sources
@@ -343,6 +399,14 @@ export function inventory(checkout = process.cwd()) {
           (node) => ts.isCallExpression(node.parent) && node.parent.expression === node,
         );
   const gated = new Set(gate === undefined ? [] : [gate]);
+  // (in the gate itself, only what runs once it holds the lock: the `try` whose `finally` lets it go)
+  const locked = gate?.body.statements.find(
+    (statement) => ts.isTryStatement(statement) && statement.finallyBlock !== undefined,
+  )?.tryBlock;
+  const inGate = (node) =>
+    gated.has(contextOf(node)) &&
+    (contextOf(node) !== gate ||
+      (locked !== undefined && node.pos >= locked.pos && node.end <= locked.end));
   for (const node of gateCalls) {
     const action = node.parent.arguments[1];
     if (action !== undefined && isFunction(action)) gated.add(action);
@@ -356,9 +420,7 @@ export function inventory(checkout = process.cwd()) {
         refs.length > 0 &&
         refs.every(
           (node) =>
-            (ts.isCallExpression(node.parent) &&
-              node.parent.expression === node &&
-              gated.has(contextOf(node))) ||
+            (ts.isCallExpression(node.parent) && node.parent.expression === node && inGate(node)) ||
             gateCalls.some((call) => call.parent.arguments[1] === node),
         )
       ) {
@@ -382,27 +444,72 @@ export function inventory(checkout = process.cwd()) {
     ts.isPropertyAccessExpression(call.expression) &&
     call.expression.name.text === "join" &&
     valueOf(call.expression.expression)?.module === "path";
-  const originOf = (expression, seen = new Set()) => {
+  // a name of one path component: a literal one, or a folder's entry as `readdirSync` names it
+  const listed = (expression) => {
+    const node = strip(expression);
+    if (ts.isIdentifier(node)) {
+      const declaration = local(node)?.valueDeclaration;
+      return (
+        declaration !== undefined && isConstant(declaration) && listed(declaration.initializer)
+      );
+    }
+    if (!ts.isCallExpression(node)) return false;
+    if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "filter")
+      return listed(node.expression.expression);
+    const fn = valueOf(node.expression);
+    return fn?.name !== undefined && opOf(fn.name) === "readdir" && node.arguments.length === 1;
+  };
+  const plainName = (expression) => {
+    const node = strip(expression);
+    const text = literal(node);
+    if (text !== undefined) return /^[^/]+$/.test(text) && ![".", ".."].includes(text);
+    const declaration = ts.isIdentifier(node) ? local(node)?.valueDeclaration : undefined;
+    const loop = declaration?.parent?.parent;
+    return (
+      declaration !== undefined &&
+      ts.isVariableDeclaration(declaration) &&
+      loop !== undefined &&
+      ts.isForOfStatement(loop) &&
+      loop.initializer === declaration.parent &&
+      listed(loop.expression)
+    );
+  };
+  // (a node on the path being followed, which a cycle would reach again)
+  const seen = new Set();
+  const originOf = (expression) => {
     const node = strip(expression);
     if (seen.has(node)) return null;
     seen.add(node);
+    try {
+      return originAt(node);
+    } finally {
+      seen.delete(node);
+    }
+  };
+  const originAt = (node) => {
     if (ts.isIdentifier(node) && node.text === "undefined" && !local(node)?.declarations?.length)
       return ["none"];
     if (ts.isCallExpression(node)) {
       if (ours(node, "outside")) return ["outside"];
-      if (ours(node, "beside")) return ["beside"];
+      // (a folder beside the baselines of a folder of baselines proven outside every baseline, or one of its entries)
+      if (ours(node, "beside"))
+        return node.arguments[0] !== undefined && originOf(node.arguments[0]) !== null
+          ? ["beside"]
+          : null;
       const inside =
-        joins(node) && node.arguments[0] !== undefined ? originOf(node.arguments[0], seen) : null;
+        joins(node) && node.arguments[0] !== undefined && node.arguments.slice(1).every(plainName)
+          ? originOf(node.arguments[0])
+          : null;
       return inside?.every((origin) => origin === "beside") ? ["beside"] : null;
     }
     if (ts.isConditionalExpression(node)) {
-      const [yes, no] = [node.whenTrue, node.whenFalse].map((branch) => originOf(branch, seen));
+      const [yes, no] = [node.whenTrue, node.whenFalse].map((branch) => originOf(branch));
       return yes === null || no === null ? null : [...new Set([...yes, ...no])];
     }
     if (!ts.isIdentifier(node)) return null;
     const declaration = local(node)?.valueDeclaration;
     if (declaration !== undefined && isConstant(declaration))
-      return originOf(declaration.initializer, seen);
+      return originOf(declaration.initializer);
     if (
       declaration === undefined ||
       !ts.isParameter(declaration) ||
@@ -417,7 +524,7 @@ export function inventory(checkout = process.cwd()) {
     for (const ref of refs) {
       if (!ts.isCallExpression(ref.parent) || ref.parent.expression !== ref) return null;
       const argument = ref.parent.arguments[index];
-      const origin = argument === undefined ? ["none"] : originOf(argument, seen);
+      const origin = argument === undefined ? ["none"] : originOf(argument);
       if (origin === null) return null;
       for (const one of origin) origins.add(one);
     }
@@ -446,7 +553,7 @@ export function inventory(checkout = process.cwd()) {
     );
   };
   const kindOf = (call, op) => {
-    if (gated.has(contextOf(call))) return "gate";
+    if (inGate(call)) return "gate";
     const origins = (WRITERS.get(op) ?? [0]).map((index) =>
       call.arguments[index] === undefined ? null : originOf(call.arguments[index]),
     );

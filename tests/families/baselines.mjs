@@ -332,20 +332,34 @@ function replaced(file, text) {
   renameSync(temporaryName(file, WRITER), file);
 }
 
-/** The real path of `file`: its links followed, as far as it exists. */
-function realOf(file, links = 0) {
-  const resolved = path.resolve(file);
-  let link;
-  try {
-    link = readlinkSync(resolved);
-  } catch {
-    // (no link: absent, or a file or folder)
+/**
+ * The real path of `file`, as the system resolves it: component by component, each link followed where it lies and a
+ * `..` taken after it, as far as the path exists.
+ */
+function realOf(file) {
+  const pending = (path.isAbsolute(file) ? file : `${process.cwd()}/${file}`).split("/");
+  let real = "/";
+  for (let links = 0; pending.length > 0;) {
+    const part = pending.shift();
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      real = path.dirname(real);
+      continue;
+    }
+    let link;
+    try {
+      link = readlinkSync(path.join(real, part));
+    } catch {
+      // (no link: absent, or a file or folder)
+    }
+    if (link === undefined) real = path.join(real, part);
+    else if ((links += 1) > 40) throw new Error(`${file}: too many links`);
+    else {
+      pending.unshift(...link.split("/"));
+      if (link.startsWith("/")) real = "/";
+    }
   }
-  if (link !== undefined && links < 40)
-    return realOf(path.resolve(path.dirname(resolved), link), links + 1);
-  let existing = path.dirname(resolved);
-  while (!existsSync(existing)) existing = path.dirname(existing);
-  return path.join(realpathSync(existing), path.relative(existing, resolved));
+  return real;
 }
 
 /**
@@ -761,14 +775,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [command, ...args] = process.argv.slice(2);
   const readOnly = args.includes("--read-only");
   const [first, second] = args.filter((arg) => !arg.startsWith("--"));
-  /** A folder of baselines inside a baseline, refused (exit 2). */
+  /** A folder of baselines that lies in a baseline, refused (exit 2). */
   const refused = (why) => {
     console.error(why);
     process.exit(2);
   };
   if (command === "state" && second !== undefined)
     process.exitCode = await state(path.resolve(first), outside(second, [], refused), readOnly);
-  else if (command === "prune" && first !== undefined) await prune(first);
+  else if (command === "prune" && first !== undefined) await prune(outside(first, [], refused));
   else if (command === "start" && second !== undefined)
     process.exitCode = await start(path.resolve(first), second);
   else if (command === "queue" && second !== undefined)

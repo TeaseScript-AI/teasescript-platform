@@ -629,7 +629,8 @@ test("the stored baselines' tools write into a baseline only through its gate, e
   );
 
   // over a copy of the tools: a write added to an imported helper (#1542 r4: imported-helper-write) and writes
-  // through each kind of binding are found, unproven; an fs module passed on is an escape
+  // through each kind of binding are found, unproven, as is one that climbs out of a folder beside the baselines; an
+  // fs binding passed on, exported or destructured otherwise, a module loader and code from text are escapes
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     for (const file of [
@@ -649,6 +650,8 @@ test("the stored baselines' tools write into a baseline only through its gate, e
 import fs, { writeFileSync as written, promises } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { promisify } from "node:util";
+import { Worker } from "node:worker_threads";
+import { beside, outside } from "./baselines.mjs";
 const { appendFileSync } = everything;
 const renamed = promisify(fs.rename);
 const truncated = fs.truncateSync;
@@ -668,6 +671,16 @@ export async function scribble(file, flag) {
   fs.readFileSync(file);
   return [fs];
 }
+export { written };
+export function climb(root) {
+  const away = beside(outside(root, [], () => {}), ".x");
+  everything.rmSync(path.join(away, "..", "y"));
+  everything.rmSync(path.join(beside(root, ".y"), "z"));
+  process.getBuiltinModule("node:fs").rmdirSync(root);
+  const { promises: { rm } } = fs;
+  eval("0");
+  return [rm, Worker];
+}
 `,
     );
     append(
@@ -676,12 +689,22 @@ export async function scribble(file, flag) {
 if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
 `,
     );
+    // (and a write in the gate before it holds the lock)
+    const state = join(directory, "tests/families/baselines.mjs");
+    writeFileSync(
+      state,
+      readFileSync(state, "utf8").replace(
+        "async function gate(dir, action) {\n",
+        'async function gate(dir, action) {\n  rmSync(path.join(dir, "early"), { force: true });\n',
+      ),
+    );
     const copied = await inventoryOf(directory);
     assert.deepEqual(
       copied.sites
         .filter(({ kind }) => kind === "unproven")
         .map(({ site, write }) => `${site.split(":")[0]} ${write}`),
       [
+        "tests/families/baselines.mjs rmSync",
         "tests/families/run.mjs writeFileSync",
         ...[
           "writeFileSync",
@@ -695,12 +718,15 @@ if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
           "cpSync",
           "openSync",
           "readFileSync",
+          "rmSync",
+          "rmSync",
+          "rmdirSync",
         ].map((write) => `tests/families/sources.mjs ${write}`),
       ],
     );
     assert.deepEqual(
       copied.escapes.map(({ code }) => code),
-      ["fs"],
+      ['import { Worker } from "node:worker_threads";', "fs", "written", "fs", 'eval("0")'],
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -886,6 +912,9 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     writeFileSync(notes, "another agent's\n");
     const link = join(directory, "notes-link");
     symlinkSync(notes, link);
+    // (a `..` after a link climbs from the link's target, as the system resolves it)
+    symlinkSync(join(held, "area"), join(directory, "area-link"));
+    const climbing = `${join(directory, "area-link")}/../private-notes.txt`;
     const outTo = (file: string) =>
       run(
         runner,
@@ -896,7 +925,7 @@ test("the stored baselines finish or clear what a writer killed at a write left,
         "--out",
         file,
       );
-    for (const file of [notes, link]) {
+    for (const file of [notes, link, climbing]) {
       const inBaseline = outTo(file);
       assert.equal(inBaseline.status, 2);
       assert.match(inBaseline.stderr, /(private-notes\.txt|notes-link) lies in the baseline /);
