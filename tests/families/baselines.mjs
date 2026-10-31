@@ -50,6 +50,7 @@ import {
   readFileSync,
   readlinkSync,
   readSync,
+  realpathSync,
   renameSync,
   rmdirSync,
   rmSync,
@@ -150,17 +151,61 @@ function startOf(pid) {
   }
 }
 
+// The names this tool gives what it writes. A name counts as one of these only where rendering what it parses back
+// through the same producer gives that name exactly, so that no other spelling (`00of1`, a writer with a leading zero)
+// passes for one of this tool's.
+const writerName = (pid, start) => `${pid}-${start}`;
+const shardName = (shard, shards) => `${shard}of${shards}.runs.jsonl`;
+const claimName = (shard, shards) => `.${shard}of${shards}.claim`;
+const temporaryName = (name, writer) => `${name}.${writer}.tmp`;
+const creatingName = (src, writer) => `.${src}.creating-${writer}`;
+const retiredName = (src, writer) => `.pruning-${src}-${writer}`;
+
 /** This process, as its claims and temporary files and folders name it (`<pid>-<start time>`). */
-export const WRITER = `${process.pid}-${startOf(process.pid)}`;
+export const WRITER = writerName(process.pid, startOf(process.pid));
+
+/** `text` where it is a writer's name as this tool renders one, else undefined. */
+function writerOf(text) {
+  const parts = /^(\d+)-(\d+)$/.exec(text);
+  return parts !== null && writerName(BigInt(parts[1]), BigInt(parts[2])) === text
+    ? text
+    : undefined;
+}
+
+/** A baseline's name, its `src/` tree's id as `identityOf` renders it. */
+const isBaselineName = (name) =>
+  /^[0-9a-f]{40}$/.test(name) && Buffer.from(name, "hex").toString("hex") === name;
+
+/** What a temporary file of this tool's (`<name>.<writer>.tmp`) is named for and who wrote it, else undefined. */
+function temporaryOf(name) {
+  const parts = /^(.+)\.(\d+-\d+)\.tmp$/.exec(name);
+  const writer = parts === null ? undefined : writerOf(parts[2]);
+  return writer !== undefined && temporaryName(parts[1], writer) === name
+    ? { name: parts[1], writer }
+    : undefined;
+}
+
+/** The writer of a folder this tool made beside its baselines (`.creating-`, `.pruning-`), else undefined. */
+function leftoverOf(name) {
+  const parts =
+    /^\.(.+)\.creating-(\d+-\d+)$/.exec(name) ?? /^\.pruning-(.+)-(\d+-\d+)$/.exec(name);
+  const writer = parts === null ? undefined : writerOf(parts[2]);
+  if (writer === undefined || !isBaselineName(parts[1])) return undefined;
+  return [creatingName(parts[1], writer), retiredName(parts[1], writer)].includes(name)
+    ? writer
+    : undefined;
+}
 
 /** Whether a writer (`<pid>-<start time>`) still runs. */
 const running = (writer) => {
-  const [pid, start] = writer.trim().split("-");
-  return start !== undefined && startOf(Number(pid)) === start;
+  const named = writerOf(writer.trim());
+  if (named === undefined) return false;
+  const [pid, start] = named.split("-");
+  return startOf(Number(pid)) === start;
 };
 
 /** Whether a folder carries this tool's MANIFEST (its first line), read without writing anything into the folder. */
-function isOwned(dir) {
+export function isOwned(dir) {
   let fd;
   try {
     fd = openSync(path.join(dir, "MANIFEST"), "r");
@@ -175,18 +220,23 @@ function isOwned(dir) {
   }
 }
 
-/** A path this tool writes at a baseline's top: its MANIFEST, the hook's markers and copy, with their temporary files. */
-const TOOL_TOP = /^(MANIFEST|(STARTED|SUPERSEDED|baseline\.sh)(\.\d+-\d+\.tmp)?)$/;
+/** Whether this tool writes `name` at a baseline's top: its MANIFEST, the hook's markers and copy, their temporary files. */
+const isTopFile = (name) =>
+  name === "MANIFEST" ||
+  ["STARTED", "SUPERSEDED", "baseline.sh"].includes(temporaryOf(name)?.name ?? name);
 
-/** A file this tool writes in an area of `shards` shards: its PLAN, each shard's file and claim, their temporary files. */
-function toolFile(name, shards) {
-  if (/^PLAN(\.\d+-\d+\.tmp)?$/.test(name)) return true;
-  const shard = /^(?:(\d+)of(\d+)\.runs\.jsonl|\.(\d+)of(\d+)\.claim)(?:\.\d+-\d+\.tmp)?$/.exec(
-    name,
+/** Whether this tool writes `name` in an area of `shards` shards: its PLAN, each shard's file and claim, their temporary files. */
+function isAreaFile(name, shards) {
+  const own = temporaryOf(name)?.name ?? name;
+  if (own === "PLAN") return true;
+  const parts = /^\.?(\d+)of(\d+)\.(?:runs\.jsonl|claim)$/.exec(own);
+  if (parts === null) return false;
+  const [shard, count] = [Number(parts[1]), Number(parts[2])];
+  return (
+    count === shards &&
+    shard < shards &&
+    [shardName(shard, count), claimName(shard, count)].includes(own)
   );
-  if (shard === null) return false;
-  const [index, count] = shard[1] !== undefined ? [shard[1], shard[2]] : [shard[3], shard[4]];
-  return Number(count) === shards && Number(index) < shards;
 }
 
 /** The areas a MANIFEST records, each with its count of shards and its PLAN's hash. */
@@ -205,9 +255,9 @@ function foreignIn(dir, text) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory() && areas.has(entry.name)) {
       for (const inner of readdirSync(path.join(dir, entry.name), { withFileTypes: true }))
-        if (!inner.isFile() || !toolFile(inner.name, areas.get(entry.name).shards))
+        if (!inner.isFile() || !isAreaFile(inner.name, areas.get(entry.name).shards))
           foreign.push(`${entry.name}/${inner.name}${inner.isDirectory() ? "/" : ""}`);
-    } else if (!entry.isFile() || !TOOL_TOP.test(entry.name))
+    } else if (!entry.isFile() || !isTopFile(entry.name))
       foreign.push(`${entry.name}${entry.isDirectory() ? "/" : ""}`);
   }
   return foreign.sort();
@@ -252,7 +302,7 @@ async function gate(dir, action) {
     const folders = [dir, ...[...recorded(text).keys()].map((area) => path.join(dir, area))];
     for (const folder of folders.filter((folder) => existsSync(folder)))
       for (const name of readdirSync(folder)) {
-        const writer = /\.(\d+-\d+)\.tmp$/.exec(name)?.[1];
+        const writer = temporaryOf(name)?.writer;
         if (writer !== undefined && !running(writer))
           rmSync(path.join(folder, name), { force: true });
       }
@@ -264,7 +314,7 @@ async function gate(dir, action) {
 
 /** `file` made whole with `text` where it does not exist yet (in a gate), else left as it is: what it holds. */
 function created(file, text) {
-  const tmp = `${file}.${WRITER}.tmp`;
+  const tmp = temporaryName(file, WRITER);
   writeFileSync(tmp, text);
   try {
     linkSync(tmp, file);
@@ -278,8 +328,55 @@ function created(file, text) {
 
 /** `file` replaced whole with `text` (in a gate): written beside it, then renamed over it. */
 function replaced(file, text) {
-  writeFileSync(`${file}.${WRITER}.tmp`, text);
-  renameSync(`${file}.${WRITER}.tmp`, file);
+  writeFileSync(temporaryName(file, WRITER), text);
+  renameSync(temporaryName(file, WRITER), file);
+}
+
+/** The real path of `file`: its links followed, as far as it exists. */
+function realOf(file, links = 0) {
+  const resolved = path.resolve(file);
+  let link;
+  try {
+    link = readlinkSync(resolved);
+  } catch {
+    // (no link: absent, or a file or folder)
+  }
+  if (link !== undefined && links < 40)
+    return realOf(path.resolve(path.dirname(resolved), link), links + 1);
+  let existing = path.dirname(resolved);
+  while (!existsSync(existing)) existing = path.dirname(existing);
+  return path.join(realpathSync(existing), path.relative(existing, resolved));
+}
+
+/**
+ * `file`, a path to write outside every baseline, where it lies (its links followed) in none of the baselines folders
+ * `roots` and in no folder that carries this tool's MANIFEST, nor is one; else `refuse(why)`, which ends the process.
+ */
+export function outside(file, roots, refuse) {
+  const real = realOf(file);
+  const within = (folder) => real === folder || real.startsWith(`${folder}${path.sep}`);
+  const root = roots.find((folder) => within(realOf(folder)));
+  let baseline;
+  for (let folder = real; baseline === undefined; folder = path.dirname(folder)) {
+    if (isOwned(folder)) baseline = folder;
+    if (path.dirname(folder) === folder) break;
+  }
+  const why =
+    baseline !== undefined
+      ? `${file} lies in the baseline ${baseline}: give a path outside it`
+      : root !== undefined
+        ? `${file} lies in the baselines folder ${root}: give a path outside it`
+        : undefined;
+  if (why === undefined) return file;
+  refuse(why);
+  throw new Error(why);
+}
+
+/** `name` in the baselines folder `root`: a folder of this tool's beside its baselines (`.`-named), which no baseline is. */
+export function beside(root, name) {
+  if (!/^\.[^/]+$/.test(name) || name === "..")
+    throw new Error(`${name} is no name of a folder beside the baselines`);
+  return path.join(root, name);
 }
 
 /**
@@ -295,7 +392,7 @@ export async function owned(root, identity, line) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (line !== null && !existsSync(path.join(dir, "MANIFEST"))) {
       mkdirSync(root, { recursive: true });
-      const creating = path.join(root, `.${identity.src}.creating-${WRITER}`);
+      const creating = beside(root, creatingName(identity.src, WRITER));
       mkdirSync(creating);
       writeFileSync(path.join(creating, "MANIFEST"), header);
       try {
@@ -353,7 +450,7 @@ function parsePlan(text) {
 }
 
 /** The file of a shard. */
-export const shardFile = (dir, shard, shards) => path.join(dir, `${shard}of${shards}.runs.jsonl`);
+export const shardFile = (dir, shard, shards) => path.join(dir, shardName(shard, shards));
 
 /** Whether a stored shard verifies: its last line, its total, names `plan` and `places`, and hashes every line before it. */
 export function verified(file, plan, places) {
@@ -377,16 +474,16 @@ export function verified(file, plan, places) {
   );
 }
 
-/** Whether a running writer claims a shard of the area in `dir`, or the shard `shard` of `shards` only. */
-function claimedIn(dir, shard, shards) {
-  if (!existsSync(dir)) return false;
-  return readdirSync(dir).some(
-    (name) =>
-      (shard === undefined
-        ? /^\.\d+of\d+\.claim$/.test(name)
-        : name === `.${shard}of${shards}.claim`) &&
-      running(readFileSync(path.join(dir, name), "utf8")),
-  );
+/** Whether a running writer claims a shard of the area of `shards` shards in `dir`, or the shard `shard` only. */
+function claimedIn(dir, shards, shard) {
+  const claims = shard === undefined ? [...Array(shards).keys()] : [shard];
+  return claims.some((index) => {
+    try {
+      return running(readFileSync(path.join(dir, claimName(index, shards)), "utf8"));
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -434,12 +531,12 @@ export async function beginShard(top, area, shard, shards, plan, places) {
   const file = shardFile(dir, shard, shards);
   const outcome = await gate(top, () => {
     if (verified(file, plan, places)) return { skipped: "stored" };
-    if (!claimed(path.join(dir, `.${shard}of${shards}.claim`)))
+    if (!claimed(path.join(dir, claimName(shard, shards))))
       return { skipped: "being stored by another writer" };
     return {};
   });
   if (outcome === RETIRED) return { refused: `${top} was retired while this writer began a shard` };
-  return { top, dir, file, plan, places, ...outcome };
+  return { top, dir, file, shard, shards, plan, places, ...outcome };
 }
 
 /**
@@ -447,11 +544,11 @@ export async function beginShard(top, area, shard, shards, plan, places) {
  * that does not verify by a rename over it, one another writer published meanwhile kept; the claim released. Whether
  * the shard then verifies, or why the baseline refused it.
  */
-export async function endShard({ top, dir, file, plan, places }, lines, total) {
+export async function endShard({ top, dir, file, shard, shards, plan, places }, lines, total) {
   const body = lines.join("");
   const ended = `${JSON.stringify({ total: { ...total, plan, places, lines: hash(body) } })}\n`;
   const outcome = await gate(top, () => {
-    const tmp = `${file}.${WRITER}.tmp`;
+    const tmp = temporaryName(file, WRITER);
     writeFileSync(tmp, body + ended);
     try {
       linkSync(tmp, file);
@@ -460,7 +557,7 @@ export async function endShard({ top, dir, file, plan, places }, lines, total) {
       if (!verified(file, plan, places)) renameSync(tmp, file);
     }
     rmSync(tmp, { force: true });
-    const claim = path.join(dir, `.${path.basename(file).replace(".runs.jsonl", "")}.claim`);
+    const claim = path.join(dir, claimName(shard, shards));
     if (existsSync(claim) && readFileSync(claim, "utf8").trim() === WRITER)
       rmSync(claim, { force: true });
     return {};
@@ -533,7 +630,7 @@ async function state(tree, root, readOnly) {
         line = { area, folder, state: "another plan" };
       else {
         const store = good.flatMap((ok, shard) =>
-          ok || claimedIn(dir, shard, shards) ? [] : [shard],
+          ok || claimedIn(dir, shards, shard) ? [] : [shard],
         );
         const damaged = good.filter(
           (ok, shard) => !ok && existsSync(shardFile(dir, shard, shards)),
@@ -541,7 +638,7 @@ async function state(tree, root, readOnly) {
         const name =
           count === shards
             ? "complete"
-            : claimedIn(dir)
+            : claimedIn(dir, shards)
               ? "storing"
               : damaged > 0
                 ? "damaged"
@@ -589,8 +686,8 @@ async function start(dir, current) {
 /** The hook's `script` copied into the baseline `dir` for its jobs, and SUPERSEDED undone (through the gate). */
 async function queue(dir, script) {
   const outcome = await gate(dir, () => {
-    copyFileSync(script, path.join(dir, `baseline.sh.${WRITER}.tmp`));
-    renameSync(path.join(dir, `baseline.sh.${WRITER}.tmp`), path.join(dir, "baseline.sh"));
+    copyFileSync(script, path.join(dir, temporaryName("baseline.sh", WRITER)));
+    renameSync(path.join(dir, temporaryName("baseline.sh", WRITER)), path.join(dir, "baseline.sh"));
     rmSync(path.join(dir, "SUPERSEDED"), { force: true });
     return { queued: dir };
   });
@@ -634,20 +731,20 @@ function recover(dir, writer) {
 async function prune(root) {
   if (!existsSync(root)) return;
   for (const entry of readdirSync(root, { withFileTypes: true })) {
-    const dir = path.join(root, entry.name);
     if (!entry.isDirectory()) continue;
-    // (a folder named as this tool names one outside a baseline, which may be another's: `recover` decides)
-    if (/^\.(?:pruning-|[0-9a-f]+\.creating-)/.test(entry.name)) {
-      recover(dir, /-(\d+-\d+)$/.exec(entry.name)?.[1]);
+    // (a folder named as this tool names one beside its baselines, which may be another's: `recover` decides)
+    if (/^\.(?:pruning-|.*\.creating-)/.test(entry.name)) {
+      recover(beside(root, entry.name), leftoverOf(entry.name));
       continue;
     }
-    if (entry.name.startsWith(".") || !isOwned(dir)) continue;
-    const retired = path.join(root, `.pruning-${entry.name}-${WRITER}`);
+    const dir = path.join(root, entry.name);
+    if (!isBaselineName(entry.name) || !isOwned(dir)) continue;
+    const retired = beside(root, retiredName(entry.name, WRITER));
     const outcome = await gate(dir, (text) => {
       const trees = [...text.matchAll(/^commit \S+ (.+)$/gm)].map(([, tree]) => tree);
       if (trees.length === 0 || trees.some((tree) => existsSync(tree))) return null;
-      const areas = readdirSync(dir, { withFileTypes: true }).filter((area) => area.isDirectory());
-      if (areas.some((area) => claimedIn(path.join(dir, area.name)))) return null;
+      const areas = [...recorded(text)];
+      if (areas.some(([area, { shards }]) => claimedIn(path.join(dir, area), shards))) return null;
       renameSync(dir, retired);
       return { pruned: dir };
     });
@@ -664,8 +761,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [command, ...args] = process.argv.slice(2);
   const readOnly = args.includes("--read-only");
   const [first, second] = args.filter((arg) => !arg.startsWith("--"));
+  /** A folder of baselines inside a baseline, refused (exit 2). */
+  const refused = (why) => {
+    console.error(why);
+    process.exit(2);
+  };
   if (command === "state" && second !== undefined)
-    process.exitCode = await state(path.resolve(first), second, readOnly);
+    process.exitCode = await state(path.resolve(first), outside(second, [], refused), readOnly);
   else if (command === "prune" && first !== undefined) await prune(first);
   else if (command === "start" && second !== undefined)
     process.exitCode = await start(path.resolve(first), second);

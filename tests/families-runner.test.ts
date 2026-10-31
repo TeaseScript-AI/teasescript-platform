@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import ts from "typescript";
+import { pathToFileURL } from "node:url";
 
 const runner = resolve(process.cwd(), "tests/families/run.mjs");
 const baselines = resolve(process.cwd(), "tests/families/baselines.mjs");
@@ -550,131 +550,56 @@ syncBuiltinESMExports();
   }
 });
 
-/**
- * Every place the stored baselines' tools write to the filesystem (#1542), each with its kind: `gate`, in the gate's body
- * or inside a callback passed to `gate`, the only way anything is written into a baseline; `helper`, in a function called only from such a
- * callback or another helper; `creation`, a new baseline made outside it (its `.creating-` folder, or the baselines
- * folder itself) and renamed into place onto no folder or an empty one; `recovery`, a `.pruning-` or `.creating-` folder
- * of the tool's outside any baseline; `outside`, the runner's `--out`, the caller's own file. A write this list does not
- * hold fails until it is classified; the hook (`tools/corpus/baseline.sh`) writes nothing.
- */
-const WRITES = [
-  ["baselines.mjs", "created", "writeFileSync(tmp, text)", "helper"],
-  ["baselines.mjs", "created", "linkSync(tmp, file)", "helper"],
-  ["baselines.mjs", "created", "rmSync(tmp, { force: true })", "helper"],
-  ["baselines.mjs", "replaced", "writeFileSync(`${file}.${WRITER}.tmp`, text)", "helper"],
-  ["baselines.mjs", "replaced", "renameSync(`${file}.${WRITER}.tmp`, file)", "helper"],
-  ["baselines.mjs", "owned", "mkdirSync(root, { recursive: true })", "creation"],
-  ["baselines.mjs", "owned", "mkdirSync(creating)", "creation"],
-  ["baselines.mjs", "owned", 'writeFileSync(path.join(creating, "MANIFEST"), header)', "creation"],
-  ["baselines.mjs", "owned", "renameSync(creating, dir)", "creation"],
-  ["baselines.mjs", "owned", "rmSync(creating, { recursive: true, force: true })", "creation"],
-  ["baselines.mjs", "owned", 'appendFileSync(path.join(dir, "MANIFEST"), `${line}\\n`)', "gate"],
-  [
-    "baselines.mjs",
-    "planned",
-    'appendFileSync(path.join(top, "MANIFEST"), `area ${area} ${shards} ${id}\\n`)',
-    "gate",
-  ],
-  ["baselines.mjs", "planned", "mkdirSync(path.join(top, area), { recursive: true })", "gate"],
-  ["baselines.mjs", "gate", "rmSync(path.join(folder, name), { force: true })", "gate"],
-  ["baselines.mjs", "endShard", "writeFileSync(tmp, body + ended)", "gate"],
-  ["baselines.mjs", "endShard", "linkSync(tmp, file)", "gate"],
-  ["baselines.mjs", "endShard", "renameSync(tmp, file)", "gate"],
-  ["baselines.mjs", "endShard", "rmSync(tmp, { force: true })", "gate"],
-  ["baselines.mjs", "endShard", "rmSync(claim, { force: true })", "gate"],
-  ["baselines.mjs", "start", 'rmSync(marker("SUPERSEDED"), { force: true })', "gate"],
-  [
-    "baselines.mjs",
-    "queue",
-    "copyFileSync(script, path.join(dir, `baseline.sh.${WRITER}.tmp`))",
-    "gate",
-  ],
-  [
-    "baselines.mjs",
-    "queue",
-    'renameSync(path.join(dir, `baseline.sh.${WRITER}.tmp`), path.join(dir, "baseline.sh"))',
-    "gate",
-  ],
-  ["baselines.mjs", "queue", 'rmSync(path.join(dir, "SUPERSEDED"), { force: true })', "gate"],
-  [
-    "baselines.mjs",
-    "recover",
-    "rmSync(path.join(dir, entry), { recursive: true, force: true })",
-    "recovery",
-  ],
-  ["baselines.mjs", "recover", 'rmSync(path.join(dir, "MANIFEST"), { force: true })', "recovery"],
-  ["baselines.mjs", "recover", "rmdirSync(dir)", "recovery"],
-  ["baselines.mjs", "prune", "renameSync(dir, retired)", "gate"],
-  ["run.mjs", "(top level)", 'writeFileSync(out, "")', "outside"],
-  ["run.mjs", "(top level)", "appendFileSync(out, `${JSON.stringify(line)}\\n`)", "outside"],
-];
+type Site = {
+  site: string;
+  function: string;
+  call?: string;
+  code?: string;
+  write?: string;
+  kind?: string;
+};
+type Inventory = {
+  modules: string[];
+  sites: Site[];
+  escapes: Site[];
+  processes: Site[];
+  loads: Site[];
+};
 
-test("the stored baselines' tools write into a baseline only through its gate, every write listed by kind (#1542)", () => {
-  const writers =
-    /^(writeFileSync|appendFileSync|mkdirSync|mkdtempSync|renameSync|linkSync|symlinkSync|rmSync|unlinkSync|rmdirSync|copyFileSync|cpSync|truncateSync|createWriteStream|writeSync|openSync)$/;
-  const helpers = new Set(
-    WRITES.filter(([, , , kind]) => kind === "helper").map(([, name]) => name),
+/** Every write of the stored baselines' tools in `checkout`, computed from their modules (`tests/families/writes.mjs`). */
+const inventoryOf = async (checkout: string): Promise<Inventory> =>
+  (await import(pathToFileURL(resolve(process.cwd(), "tests/families/writes.mjs")).href)).inventory(
+    checkout,
   );
-  helpers.add("claimed");
-  const found: string[] = [];
-  const gated = new Map<string, boolean>();
-  const helperCalls: [string, string, boolean][] = [];
-  for (const file of ["baselines.mjs", "run.mjs"]) {
-    const text = readFileSync(join("tests", "families", file), "utf8");
-    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-    // each call with the top-level function it is in and whether it is inside a callback passed to `gate`
-    const visit = (node: ts.Node, top: string, inGate: boolean): void => {
-      if (node.parent === source)
-        top =
-          ts.isFunctionDeclaration(node) && node.name !== undefined
-            ? node.name.text
-            : ts.isVariableStatement(node)
-              ? node.declarationList.declarations[0]!.name.getText(source)
-              : "(top level)";
-      if (ts.isCallExpression(node)) {
-        const callee = node.expression.getText(source);
-        // (a file opened only to read is no write)
-        const read = callee === "openSync" && node.arguments[1]?.getText(source) === '"r"';
-        if (writers.test(callee) && !read) {
-          const call = `${file} ${top} ${node.getText(source).replace(/\s+/g, " ")}`;
-          found.push(call);
-          gated.set(call, inGate);
-        }
-        if (helpers.has(callee)) helperCalls.push([callee, top, inGate]);
-      }
-      const isGate = ts.isCallExpression(node) && node.expression.getText(source) === "gate";
-      ts.forEachChild(node, (child) =>
-        visit(
-          child,
-          top,
-          inGate || (isGate && (ts.isArrowFunction(child) || ts.isFunctionExpression(child))),
-        ),
-      );
-    };
-    // (the gate's own body is the gate)
-    for (const statement of source.statements)
-      visit(
-        statement,
-        "(top level)",
-        ts.isFunctionDeclaration(statement) && statement.name?.text === "gate",
-      );
-  }
-  // every write is listed, and every listed write is there
-  const listed = WRITES.map(([file, top, call]) => `${file} ${top} ${call}`);
-  assert.deepEqual([...found].sort(), [...listed].sort());
-  for (const [file, top, call, kind] of WRITES) {
-    const site = `${file} ${top} ${call}`;
-    if (kind === "gate") assert.equal(gated.get(site), true, `${site} is outside a gate`);
-    else assert.equal(gated.get(site), false, `${site} is in a gate but listed as ${kind}`);
-    if (kind === "creation") assert.equal(top, "owned", site);
-    if (kind === "recovery") assert.equal(top, "recover", site);
-    if (kind === "outside") assert.equal(file, "run.mjs", site);
-    if (kind === "helper") assert.ok(helpers.has(top), site);
-  }
-  // a helper is called only inside a gate or from another helper
-  for (const [callee, top, inGate] of helperCalls)
-    assert.ok(inGate || helpers.has(top), `${callee} called in ${top}, outside a gate`);
+
+test("the stored baselines' tools write into a baseline only through its gate, every write computed from their modules (#1542)", async () => {
+  const { modules, sites, escapes, processes, loads } = await inventoryOf(process.cwd());
+  assert.deepEqual(modules, [
+    "tests/families/baselines.mjs",
+    "tests/families/run.mjs",
+    "tests/families/sources.mjs",
+  ]);
+  // each write is in the gate or proven to lie outside every baseline, and fs is used only by calls
+  assert.deepEqual(
+    sites.filter(({ kind }) => kind === "unproven"),
+    [],
+  );
+  assert.deepEqual(escapes, []);
+  assert.deepEqual(
+    sites.filter(({ kind }) => kind === "creation").map((site) => site.function),
+    ["owned"],
+  );
+  // the child processes: the gate's lock holder, which writes to /dev/null only, and the runner's own child; the
+  // modules loaded by a computed name are a tree's oracle library and an area's generators, which are no tool's
+  for (const { call } of processes)
+    assert.match(
+      call ?? "",
+      /^(spawn\("flock", \[\w+, "-c", "[^">]*> \/dev\/null"\]|fork\( ?fileURLToPath\(import\.meta\.url\),)/,
+    );
+  assert.deepEqual(
+    loads.map((load) => load.function),
+    ["oracles", "generatorsOf"],
+  );
   // the hook writes nothing: no file command, no redirection (after a space, as the script writes them) but to /dev/null
   // or stderr, once its comments and then its single-quoted programs are set aside
   const hook = readFileSync(join("tools", "corpus", "baseline.sh"), "utf8")
@@ -702,6 +627,84 @@ test("the stored baselines' tools write into a baseline only through its gate, e
       .filter((target) => target !== "/dev/stderr"),
     [],
   );
+
+  // over a copy of the tools: a write added to an imported helper (#1542 r4: imported-helper-write) and writes
+  // through each kind of binding are found, unproven; an fs module passed on is an escape
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    for (const file of [
+      "tools/corpus/baseline.sh",
+      "tests/families/baselines.mjs",
+      "tests/families/run.mjs",
+      "tests/families/sources.mjs",
+    ]) {
+      mkdirSync(join(directory, file, ".."), { recursive: true });
+      writeFileSync(join(directory, file), readFileSync(file, "utf8"));
+    }
+    const append = (file: string, text: string) =>
+      writeFileSync(join(directory, file), readFileSync(join(directory, file), "utf8") + text);
+    append(
+      "tests/families/sources.mjs",
+      `import * as everything from "node:fs";
+import fs, { writeFileSync as written, promises } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { promisify } from "node:util";
+const { appendFileSync } = everything;
+const renamed = promisify(fs.rename);
+const truncated = fs.truncateSync;
+export async function scribble(file, flag) {
+  if (flag) written(file, "");
+  everything.rmSync(file);
+  fs["linkSync"](file, file);
+  appendFileSync(file, "");
+  await promises.mkdir(file);
+  await unlink(file);
+  await renamed(file, file);
+  truncated(file);
+  const { cpSync } = await import("node:fs");
+  cpSync(file, file);
+  fs.openSync(file, "w");
+  fs.readFileSync(file, { flag: "w" });
+  fs.readFileSync(file);
+  return [fs];
+}
+`,
+    );
+    append(
+      "tests/families/run.mjs",
+      `import nodeFs from "node:fs";
+if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
+`,
+    );
+    const copied = await inventoryOf(directory);
+    assert.deepEqual(
+      copied.sites
+        .filter(({ kind }) => kind === "unproven")
+        .map(({ site, write }) => `${site.split(":")[0]} ${write}`),
+      [
+        "tests/families/run.mjs writeFileSync",
+        ...[
+          "writeFileSync",
+          "rmSync",
+          "linkSync",
+          "appendFileSync",
+          "mkdir",
+          "unlink",
+          "rename",
+          "truncateSync",
+          "cpSync",
+          "openSync",
+          "readFileSync",
+        ].map((write) => `tests/families/sources.mjs ${write}`),
+      ],
+    );
+    assert.deepEqual(
+      copied.escapes.map(({ code }) => code),
+      ["fs"],
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 /**
@@ -852,6 +855,68 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     run(baselines, "prune", second);
     assert.deepEqual(readdirSync(third), [".pruning-independent-owner"]);
     assert.deepEqual(readdirSync(second), [top.split("/").at(-1)]);
+
+    // (#1542 r4: padded-temporary) names this tool never renders, a shard's or a temporary file's with a padded number,
+    // are foreign as any other file is: status refuses the baseline naming each, prune keeps it, each file untouched
+    const fourth = join(directory, "fourth");
+    const kept = tree("kept", "4", "kept\n");
+    const keeper = tree("keeper", "5", "kept\n");
+    assert.equal(store(kept, fourth, "0/1").status, 0);
+    rmSync(kept, { recursive: true });
+    const held = last(run(baselines, "state", keeper, fourth, "--read-only")).baseline;
+    for (const name of [
+      "00of1.runs.jsonl.999999999-1.tmp",
+      "0of1.runs.jsonl.0999999999-1.tmp",
+      "00of1.runs.jsonl",
+      "notes.txt",
+    ]) {
+      writeFileSync(join(held, "area", name), "another agent's\n");
+      const status = run(baselines, "state", keeper, fourth, "--read-only");
+      assert.equal(status.status, 2);
+      assert.ok(
+        status.stdout.includes(`foreign contents, which this tool did not write: area/${name}`),
+      );
+      assert.match(run(baselines, "prune", fourth).stdout, /"kept"/);
+      assert.equal(readFileSync(join(held, "area", name), "utf8"), "another agent's\n");
+      rmSync(join(held, "area", name));
+    }
+    // (#1542 r4: out-in-baseline) the runner's `--out` in a baseline (also through a link) or beside the baselines,
+    // and a folder of baselines in a baseline, are refused before anything is opened
+    const notes = join(held, "private-notes.txt");
+    writeFileSync(notes, "another agent's\n");
+    const link = join(directory, "notes-link");
+    symlinkSync(notes, link);
+    const outTo = (file: string) =>
+      run(
+        runner,
+        join(keeper, "tests", "families", "area"),
+        keeper,
+        "--store",
+        fourth,
+        "--out",
+        file,
+      );
+    for (const file of [notes, link]) {
+      const inBaseline = outTo(file);
+      assert.equal(inBaseline.status, 2);
+      assert.match(inBaseline.stderr, /(private-notes\.txt|notes-link) lies in the baseline /);
+    }
+    assert.equal(readFileSync(notes, "utf8"), "another agent's\n");
+    const nested = store(keeper, join(held, "nested"), "0/1");
+    assert.equal(nested.status, 2);
+    assert.match(nested.stderr, /nested lies in the baseline /);
+    const inRoot = outTo(join(fourth, "differences.jsonl"));
+    assert.equal(inRoot.status, 2);
+    assert.match(inRoot.stderr, /differences\.jsonl lies in the baselines folder /);
+    rmSync(notes);
+    // prune then removes the baseline, and keeps a folder beside it named as no writer of this tool names one, though
+    // empty
+    const padded = join(fourth, `.pruning-${"a".repeat(40)}-01-1`);
+    mkdirSync(padded);
+    const pruned = run(baselines, "prune", fourth).stdout;
+    assert.match(pruned, /"pruned"/);
+    assert.ok(pruned.includes(`"kept":"${padded}"`));
+    assert.deepEqual(readdirSync(fourth), [padded.split("/").at(-1)]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
