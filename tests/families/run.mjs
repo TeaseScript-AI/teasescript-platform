@@ -367,12 +367,12 @@ if (process.argv[2] === "--child") {
     const identity = identityOf(tree);
     if (identity.src === null) refused(`${tree}/src holds no file`);
     const commit = readFileSync(path.join(tree, ".sha"), "utf8").trim();
-    const top = owned(store, identity, `commit ${commit} ${tree}`);
+    const top = await owned(store, identity, `commit ${commit} ${tree}`);
     if (top.refused !== undefined) refused(top.refused);
     const dir = path.join(top.dir, path.basename(folder));
-    const plan = planned(top.dir, dir, planOf(path.basename(folder), every, shards));
+    const plan = await planned(top.dir, dir, planOf(path.basename(folder), every, shards));
     if (plan.refused !== undefined) refused(plan.refused);
-    storing = beginShard(dir, shard, shards, plan.plan, plan.places[shard]);
+    storing = beginShard(top.dir, dir, shard, shards, plan.plan, plan.places[shard]);
     if (storing.skipped !== undefined) {
       const { file, skipped } = storing;
       console.log(JSON.stringify({ area, shard: `${shard}/${shards}`, stored: file, skipped }));
@@ -456,8 +456,11 @@ if (process.argv[2] === "--child") {
   if (storing !== undefined) {
     // the shard whole, its total last, with what made it
     const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));
-    const whole = endShard(storing, { ...ended, ...storing.made, runner: runner.digest("hex") });
-    Object.assign(ended, { stored: storing.file, verified: whole });
+    const made = { ...ended, ...storing.made, runner: runner.digest("hex") };
+    const published = await endShard(storing, made);
+    // (foreign contents or a retired baseline, found at publication: nothing is published)
+    if (published.refused !== undefined) refused(published.refused);
+    Object.assign(ended, { stored: storing.file, verified: published.verified });
   }
   console.log(JSON.stringify(ended));
   process.exitCode =
