@@ -18,7 +18,8 @@
 // not written into (the writer is refused, exit 2, naming the path). The gate removes the temporary files a writer
 // that ended (killed) left. An area's PLAN, made by its first writer, binds its run: each shard's sources in their
 // order, each generator's checks, the allowances and limits; a writer that would run another is refused ("another
-// plan"). A recorded area not made yet, or made without its PLAN, is the next writer's to finish. One running writer at
+// plan"). A recorded area not made yet, or made without its PLAN or with another one, is the next writer's to
+// finish. One running writer at
 // a time stores a shard (its claim) and publishes it whole: a new shard by a hard link, so the first stays, one that
 // does not count by a rename over it.
 //
@@ -639,7 +640,9 @@ export async function planned(baseline, area, plan) {
         refused: `${top}/${area} is planned otherwise: another plan (set, order, count of shards or checks)`,
       };
     mkdirSync(path.join(top, area), { recursive: true });
-    created(path.join(top, area, "PLAN"), plan);
+    // (a PLAN that is not the recorded one is the next writer's to replace, as a shard that does not count is)
+    if (hash(created(path.join(top, area, "PLAN"), plan)) !== id)
+      replaced(path.join(top, area, "PLAN"), plan);
     return {};
   });
   if (outcome === RETIRED) return { refused: `${top} was replaced while this writer planned it` };

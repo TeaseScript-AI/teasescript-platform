@@ -538,6 +538,11 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
       assert.doesNotMatch(compared.stdout, /"differences"/, witness);
     }
     assert.equal(state(base).status, 0);
+    // (and the next writer of the area replaces a PLAN that is not the recorded one, as it replaces a shard)
+    writeFileSync(join(baseline, "PLAN"), "plan 1\n");
+    assert.equal(state(base).status, 1);
+    assert.match(into(alias, "0/2").stdout, /"skipped":"stored"/);
+    assert.equal(state(base).status, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
