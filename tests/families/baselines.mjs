@@ -28,13 +28,16 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
+  closeSync,
   existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -209,6 +212,22 @@ function foreignIn(dir, text) {
   return foreign.sort();
 }
 
+/** Whether a folder's MANIFEST is this tool's (its first line), read before any lock, so as to write nothing into another's. */
+function isOwned(dir) {
+  let fd;
+  try {
+    fd = openSync(path.join(dir, "MANIFEST"), "r");
+  } catch {
+    return false;
+  }
+  try {
+    const head = Buffer.alloc(11);
+    return head.subarray(0, readSync(fd, head, 0, 11, 0)).toString() === "baseline 3\n";
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Why a baseline holding foreign paths is refused. */
 const foreignly = (dir, foreign) =>
   `${dir} holds foreign contents, which this tool did not write: ${foreign.join(", ")}`;
@@ -236,7 +255,7 @@ export async function owned(root, identity, line) {
       }
     }
     if (!existsSync(dir)) return { dir, absent: true };
-    if (!existsSync(manifest) || !readFileSync(manifest, "utf8").startsWith("baseline 3\n"))
+    if (!isOwned(dir))
       return { dir, refused: `${dir} is not this tool's: it has no MANIFEST of this tool` };
     const joined = await locked(dir, () => {
       const text = readFileSync(manifest, "utf8");
@@ -549,7 +568,8 @@ async function prune(root) {
       rmSync(dir, { recursive: true, force: true });
       continue;
     }
-    if (entry.name.startsWith(".") || !existsSync(path.join(dir, "MANIFEST"))) continue;
+    // (a folder that is not this tool's is never locked: `flock` would write its `.lock` into it)
+    if (entry.name.startsWith(".") || !isOwned(dir)) continue;
     const outcome = await locked(dir, () => {
       const text = readFileSync(path.join(dir, "MANIFEST"), "utf8");
       if (!text.startsWith("baseline 3\n")) return null;
