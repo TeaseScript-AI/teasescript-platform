@@ -51,7 +51,8 @@ interface Visit {
 /**
  * Test-only (`withNameRecords`): what the searches did, all of them together: the tasks they took up (a seen one too),
  * the prefixes they visited, the earlier tasks their pump checks walked and the longest such walk, the head steps those
- * checks compared, the longest path a task held, and the units of `checks` the ledger counted meanwhile.
+ * checks compared, the longest path a task held, their path index's entries and longest chain, the tasks that pumped,
+ * and the units of `checks` the ledger counted meanwhile.
  */
 export interface NameRecords {
   tasks: number;
@@ -62,6 +63,7 @@ export interface NameRecords {
   longest: number;
   entries: number;
   chain: number;
+  pumped: number;
   checks: number;
 }
 
@@ -82,6 +84,7 @@ export function withNameRecords<T>(run: () => T): {
     longest: 0,
     entries: 0,
     chain: 0,
+    pumped: 0,
     checks: 0,
   };
   recording = records;
@@ -264,6 +267,7 @@ export function propertyNames(
     if (recording !== null) recording.longest = Math.max(recording.longest, visit.path.length);
     // (a pumped task's own names are taken, its sources not followed)
     const follows = !pumps(visit);
+    if (!follows && recording !== null) recording.pumped += 1;
     const schedule = (next: PropertyNamesTask, untouched: number): void => {
       if (follows) pending.push({ task: next, from: visit, kept: Math.max(0, untouched) });
     };

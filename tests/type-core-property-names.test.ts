@@ -355,6 +355,27 @@ test("the search charges each task it takes up, each prefix it visits, each entr
   }
 });
 
+test("no pump fires on a search that ends without the bound, whose least kept since an earlier visit of its place is not the last step's (#1493)", () => {
+  // (Astra r1's witness: from `a|x` the store `a.x=b.y.q` keeps none of the path for `b|y.q`, whose copy `a|y.q` keeps
+  // both its steps; the least `kept` since `a|x` is the store's none, so `a|y.q` does not pump it, and base ends here)
+  const source =
+    "let a={x:{y:{kept:1}},y:{q:{other:1}}}\nlet b=a\na.x=b.y.q\nlet read=b.x\nsay read\nexit";
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+  assert.ok(request !== null);
+  for (const mode of MODES) {
+    const { result, records } = inMode(mode, () => {
+      const answers = analyseCore(request);
+      const node = answers.graph.nodes.find(
+        (each) => each.expression?.kind === "identifier" && each.expression.name === "read",
+      );
+      assert.ok(node !== undefined);
+      return withNameRecords(() => [...answers.properties(node).keys()]);
+    });
+    assert.deepEqual(result.sort(), ["other", "y"], JSON.stringify(mode));
+    assert.equal(records.pumped, 0, `${JSON.stringify(mode)} ${JSON.stringify(records)}`);
+  }
+});
+
 test("the search makes no uncharged temporary per step beyond a constant, its prefixes the stored keys along the path, and its pump check walks no more earlier tasks than it takes up (#1493)", () => {
   // Astra r1's B1: each prefix rebuilt both halves of its path and its key, uncharged, cubic in a mutual feedback's
   // depth. The walk visits only the stored keys along a path (`definitions.stored`), their text its own, and keeps the
