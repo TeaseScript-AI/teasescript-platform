@@ -47,17 +47,20 @@ stall are uncompared. `--baseline` reads a folder's `*.runs.jsonl` files, and st
 with other results.
 
 `--store` runs one tree of a commit (an `sx-tree` tree: `src/`, `dist/`, `.sha`) at the runner's defaults and stores
-each source's results as one line in the baseline of its `src/` tree, `<folder>/<src tree>/<area>/<i>of<N>.runs.jsonl`,
-where `<src tree>` is `git rev-parse <commit>:src`: every commit with that tree shares it, and its `MANIFEST` names
-them. A shard is written whole or not at all, by one running writer at a time, and a stored shard is not run again; the
-area's `PLAN` fixes its sources and count of shards for every writer, and its `SHA256SUMS` follow its last shard.
-`bash tools/corpus/baseline.sh status <commit>` says in one line which areas the commit's tree holds, and exits 0 only
-when every one is complete (`SHA256SUMS` present and verified). Before a base run, ask it: compare the head with a
-complete area through `--baseline`, and store an area that is not from the base tree's own runner and areas
-(`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/16`, one job per shard,
-the fixture area as `<base tree>/tools/corpus/fixture`), so that it serves every later run on that tree. The script,
-installed as the desktop's `~/work/trees/hooks/baseline`, fills each new `main`'s tree at low priority where nobody
-stores it.
+one shard of an area, each source's results as one line, in the baseline of its `src/` tree,
+`<folder>/<src tree>/<area>/<i>of<N>.runs.jsonl`, where `<src tree>` is `git rev-parse <commit>:src`. Every commit with
+that tree and the same oracle library, lockfile and Node shares the baseline; one that differs in any of them stores
+none there (base and head run instead). `baselines.mjs` reads and writes the baseline: a folder it made with its
+`MANIFEST` first (what its runs depend on, the commits stored there, each area's `PLAN`) and nothing else; each area's
+`PLAN` binds its shards' sources in their order and its checks, and a writer that would run another is refused (exit 2).
+A shard counts only once its total line verifies its contents and its sources. One running writer at a time stores it,
+and any writer replaces one that does not verify. `bash tools/corpus/baseline.sh status <commit>` says in one line what
+each area of the commit's tree holds, and exits 0 only when each one is complete. Before a base run, ask it: compare
+the head with a complete area through `--baseline`, and store an area that is not from the base tree's own runner and
+areas (`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/16`, one job per
+shard, the fixture area as `<base tree>/tools/corpus/fixture`), so that it serves every later run on that tree. The
+script, installed as the desktop's `~/work/trees/hooks/baseline`, fills each new `main`'s tree at low priority where
+nobody stores it.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
