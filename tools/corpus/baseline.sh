@@ -1,172 +1,96 @@
 #!/bin/bash
-# tools/corpus/baseline.sh <built tree> <its full SHA>   the hook: fills the baseline of a new `main`'s src/ tree
-# tools/corpus/baseline.sh status <commit>               one line: what the baseline of the commit's src/ tree holds
+# tools/corpus/baseline.sh <built tree> <its full SHA>      the hook: fills the baseline of a new `main`'s src/ tree
+# tools/corpus/baseline.sh status <commit or built tree>     one line: what the baseline of its src/ tree holds
 #
-# The stored baseline (owner, 2026-10-30): the corpus runner's runs of one tree, stored so that a pull request runs only
-# its head against them (`tests/families/run.mjs <area> <head> --baseline <baseline>/<area>`). A baseline is keyed by
-# its `src/` tree (lead, 2026-10-31): ~/work/baselines/<src tree>/, named by `git rev-parse <commit>:src` and shared by
-# every commit with that tree, so a merge that leaves `src/` as it was is an alias of the baseline before it and makes
-# no new one. Its MANIFEST names each commit known to share it (appended, never rewritten). The runner writes it
-# (`run.mjs <area> <tree> --store ~/work/baselines --shard i/16`): an area in <baseline>/<area>/, one file per shard,
-# each whole or not at all, beside PLAN (the set of the area's sources and its count of shards) and, once every shard is
-# stored, SHA256SUMS; an area whose SHA256SUMS are missing or do not verify is not complete. Builders store their base
-# this way; `status` says which areas a commit's tree holds, and exits 0 only when every area is complete.
+# The stored baseline (owner, 2026-10-30; keyed by the `src/` tree, #1541): the corpus runner's runs of one tree, stored
+# so that a pull request runs only its head against them (`run.mjs <area> <head> --baseline <baseline>/<area>`).
+# tests/families/baselines.mjs reads and writes every baseline, ~/work/baselines/<src tree>/: its MANIFEST (what its runs
+# depend on, the commits stored there, each area's PLAN), shards that count only once verified, `state` and `prune`.
+# Builders store with `run.mjs <area> <tree> --store ~/work/baselines --shard i/16`. `status` prints `state --read-only`
+# of the commit's shared tree (`sx-tree` builds it once where it is missing) as one line, and exits as it does: 0 only
+# when every area is complete, 2 where the baseline is not this tool's or holds runs of other inputs.
 #
 # The hook, installed on a worker as ~/work/trees/hooks/baseline, which `sx-tree` runs with each new `main`'s tree and
-# SHA, fills what builders did not store. It appends the commit to its tree's MANIFEST, then returns at once where every
-# area is complete, a writer is storing one (a running writer's claim) or a fill is queued (QUEUED); else it queues one
-# job per shard not stored of each area not complete (`sx-queue add --owner baseline`, priority 7, of which the queue runs
-# at most two at once, lead 2026-10-31, so the fill takes idle cores), writes QUEUED and returns. The areas are the
-# folders of tests/families/ with generators and the type-core fixture (tools/corpus/fixture/), in 16 shards each (an
-# area already begun, in its PLAN's count). A job runs the tree's runner, which skips a shard stored or being stored, so
-# a duplicate job ends at once; it ends 0 once its shard is stored or while a running writer stores it, and a job whose
-# area has every shard stored writes its missing SHA256SUMS. After a job died, remove QUEUED and call again. Jobs run the copy of this script the call left in
-# the baseline. A baseline goes with its trees: once none of the trees its MANIFEST names remains (`sx-tree --prune`)
-# and no writer is storing, the next call removes it; a folder of the per-commit hook (#1512) goes with its tree.
+# SHA, fills what builders did not store. It removes what `prune` finds, makes or joins the tree's baseline (`state`,
+# which appends the commit) and returns at once where the baseline is not this tool's or not the tree's, every area is
+# complete or a writer is storing one. Else it removes the tree's SUPERSEDED (the tree is the current one again) and
+# queues one job per shard to store that has no job pending or running (`sx-queue status`): 16 per area or its PLAN's
+# count (`sx-queue add --owner baseline`, priority 7, of which the queue runs at most two at once, lead 2026-10-31, so a
+# fill takes idle cores). Jobs run the copy of this script the call left in the baseline (baseline.sh) and the tree's
+# runner (`--store`), which ends at once where its shard verifies or another running writer stores it; a job ends 0
+# where its shard then verifies or is being stored.
 #
-# A fill none of whose jobs has started is skipped when a newer `main`'s is queued (#1513, by tree): the first job of
-# the fill to start decides for all of them, under the baseline's .start.lock. When another baseline has QUEUED and its
-# MANIFEST names a commit on the clone's origin/main that descends from a commit of this one, and from which none of
-# this one's commits descends, it writes SUPERSEDED (that commit) and every job of the fill ends without running; else
-# it writes STARTED and every job runs. Baselines differ by tree, so a merge that leaves `src/` as it was supersedes
-# nothing. A marker that could not be written fails the job and leaves the decision to the next. A builder's store is
-# never superseded.
+# Supersession (#1513, by tree): the first job to start decides under the baseline's .start.lock. Where its tree is
+# the current one (the `src/` tree of the clone's origin/main), it removes SUPERSEDED and writes STARTED; where it is not
+# and the fill has not STARTED, it writes SUPERSEDED (the current tree) and every such job ends at once; a STARTED fill
+# runs to its end. SUPERSEDED is undone where the tree is current again, by the hook or by a job. A builder's store is
+# never superseded. A marker that could not be written fails the job.
 #
-# A tree whose runner cannot store a baseline (from before this script) is skipped, unless BASELINE_RUNNER names a built
-# checkout whose runner and fixture area run it instead. BASELINE_PRIORITY (7), BASELINE_MEM (3G, each job's memory cap)
-# and BASELINE_REPO (the clone that resolves commits, else sx-tree's) override the defaults.
+# A tree whose runner has no baselines.mjs (from before #1541) is skipped, unless BASELINE_RUNNER names a built
+# checkout that has one. BASELINE_PRIORITY (7), BASELINE_MEM (3G, each job's memory cap) and BASELINE_REPO (the clone
+# that resolves the current tree, else sx-tree's) override the defaults.
 set -uo pipefail
 root=$HOME/work/baselines
 repo=${BASELINE_REPO:-$HOME/src/teasescript-platform}
 [ -n "${BASELINE_REPO:-}" ] || [ -d "$repo" ] || repo=$HOME/src/wqaed401/teasescript-platform
 
-# whether a claim (the pid and start time of its writer, as the runner writes it) names a running process
-running() {
-  local pid start
-  read -r pid start < "$1" 2> /dev/null && [ -n "$start" ] &&
-    [ "$(sed 's/.*) //' "/proc/$pid/stat" 2> /dev/null | cut -d' ' -f20)" = "$start" ]
-}
-
-# whether a writer is storing a shard of the area in folder $1
-claimed() {
-  local claim
-  for claim in "$1"/.*.claim; do
-    [ -e "$claim" ] && running "$claim" && return 0
-  done
-  return 1
-}
-
-# whether a writer is storing into the baseline in folder $1
-storing() {
-  local area
-  for area in "$1"/*/; do
-    claimed "${area%/}" && return 0
-  done
-  return 1
-}
-
-# the commits the MANIFEST of the baseline in folder $1 names
-commits() { sed -n 's/^commit \([0-9a-f]\{40\}\) .*/\1/p' "$1/MANIFEST" 2> /dev/null; }
-
-# the commit of a newer `main`'s fill queued beside the baseline in folder $1, if any (see above)
-superseding() {
-  local out=$1 other newer own descends
-  for other in "${out%/*}"/*/; do
-    other=${other%/}
-    [ "$other" != "$out" ] && [ -e "$other/QUEUED" ] &&
-      [ "$(head -n 1 "$other/MANIFEST" 2> /dev/null)" = "baseline 3" ] || continue
-    for newer in $(commits "$other"); do
-      git -C "$repo" merge-base --is-ancestor "$newer" refs/remotes/origin/main 2> /dev/null || continue
-      descends=0
-      for own in $(commits "$out"); do
-        # (a commit of this baseline that is newer still)
-        git -C "$repo" merge-base --is-ancestor "$newer" "$own" 2> /dev/null && continue 2
-        git -C "$repo" merge-base --is-ancestor "$own" "$newer" 2> /dev/null && descends=1
-      done
-      if [ "$descends" = 1 ]; then
-        echo "$newer"
-        return 0
-      fi
-    done
-  done
-  return 1
-}
-
 if [ "${1:-}" = --job ]; then
   # one shard of a fill, run by its queued job: --job <baseline> <tree> <runner> <area folder> <i> <N> <clone>
   out=$2 tree=$3 runner=$4 folder=$5 i=$6 n=$7 repo=$8
-  # whether the fill runs, decided by its first job and bound by the marker (see above)
+  if ! current=$(git -C "$repo" rev-parse --verify -q refs/remotes/origin/main:src); then
+    echo "baseline ${out##*/}: $repo has no origin/main to name the current tree" >&2
+    exit 1
+  fi
+  # whether the fill runs, decided by its first job (see above)
   exec {start}>> "$out/.start.lock"
   flock "$start"
-  if [ ! -e "$out/STARTED" ] && [ ! -e "$out/SUPERSEDED" ]; then
-    marker=STARTED value=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    if newer=$(superseding "$out"); then marker=SUPERSEDED value=$newer; fi
-    { echo "$value" > "$out/$marker.tmp" && mv "$out/$marker.tmp" "$out/$marker"; } || exit 1
-  fi
-  exec {start}>&-
-  if [ -e "$out/SUPERSEDED" ]; then
-    echo "baseline ${out##*/}: ${folder##*/} $i/$n superseded by $(cat "$out/SUPERSEDED")"
+  if [ "$current" = "${out##*/}" ]; then
+    rm -f "$out/SUPERSEDED"
+    if [ ! -e "$out/STARTED" ]; then
+      { date -u +%Y-%m-%dT%H:%M:%SZ > "$out/STARTED.tmp" && mv "$out/STARTED.tmp" "$out/STARTED"; } || exit 1
+    fi
+  elif [ ! -e "$out/STARTED" ]; then
+    { echo "$current" > "$out/SUPERSEDED.tmp" && mv "$out/SUPERSEDED.tmp" "$out/SUPERSEDED"; } || exit 1
+    echo "baseline ${out##*/}: ${folder##*/} $i/$n superseded by the current tree $current"
     exit 0
   fi
-  node "$runner/tests/families/run.mjs" "$folder" "$tree" --store "${out%/*}" --shard "$i/$n"
-  # (a shard another running writer stores is that writer's)
-  [ -e "$out/${folder##*/}/${i}of$n.runs.jsonl" ] || running "$out/${folder##*/}/.${i}of$n.claim"
+  exec {start}>&-
+  ended=$(node "$runner/tests/families/run.mjs" "$folder" "$tree" --store "${out%/*}" --shard "$i/$n" | tee /dev/stderr |
+    tail -n 1)
+  grep -q '"verified":true\|"skipped":' <<< "$ended"
   exit
 fi
 
 if [ "${1:-}" = status ]; then
   if [ $# -ne 2 ]; then
-    echo "usage: $0 status <commit>" >&2
+    echo "usage: $0 status <commit or built tree>" >&2
     exit 2
   fi
-  commit=$2
-  # the commit in sx-tree's clone (BASELINE_REPO), else in the repository around the current folder
-  git -C "$repo" cat-file -e "$commit^{commit}" 2> /dev/null || repo=.
-  if ! src=$(git -C "$repo" rev-parse --verify -q "$commit:src"); then
-    echo "baseline $commit: no commit with src/ in sx-tree's clone or here" >&2
+  if [ -f "$2/.sha" ]; then tree=$2; elif ! tree=$(sx-tree "$2"); then exit 2; fi
+  if [ ! -e "$tree/tests/families/baselines.mjs" ]; then
+    echo "baseline $2: its runner predates the src/-tree baselines (#1541)" >&2
     exit 2
   fi
-  out=$root/$src
-  areas=()
-  for area in $(git -C "$repo" ls-tree -d --name-only "$commit:tests/families" 2> /dev/null); do
-    git -C "$repo" ls-tree --name-only "$commit:tests/families/$area" | grep -q '\.mjs$' && areas+=("$area")
-  done
-  git -C "$repo" cat-file -e "$commit:tools/corpus/fixture" 2> /dev/null && areas+=(fixture)
-  if [ "${#areas[@]}" -eq 0 ]; then
-    echo "baseline $commit: it has no area of the runner" >&2
-    exit 2
-  fi
-  complete=() states=()
-  for area in "${areas[@]}"; do
-    dir=$out/$area
-    n=$(sed -n 's/^shards //p' "$dir/PLAN" 2> /dev/null)
-    have=$(compgen -G "$dir/*of$n.runs.jsonl" | wc -l)
-    if [ -e "$dir/SHA256SUMS" ] && (cd "$dir" && sha256sum --quiet --status -c SHA256SUMS); then
-      complete+=("$area")
-    elif [ -e "$dir/SHA256SUMS" ]; then
-      states+=("$area damaged")
-    elif [ -n "$n" ] && claimed "$dir"; then
-      states+=("$area storing $have/$n")
-    elif [ -n "$n" ]; then
-      states+=("$area partial $have/$n")
-    else
-      states+=("$area absent")
-    fi
-  done
-  line="baseline $commit: src tree $src, $out:"
-  if [ "${#states[@]}" -eq 0 ]; then
-    echo "$line complete: ${complete[*]}"
-    exit 0
-  fi
-  [ "${#complete[@]}" -eq 0 ] || states=("${complete[*]} complete" "${states[@]}")
-  printf '%s incomplete: %s' "$line" "${states[0]}"
-  printf '; %s' "${states[@]:1}"
-  echo
-  exit 1
+  lines=$(node "$tree/tests/families/baselines.mjs" state "$tree" "$root" --read-only)
+  status=$?
+  [ -n "$lines" ] || exit 2
+  jq -rs --arg of "$2" '
+    (map(select(.area))) as $areas | (map(select(.baseline)) | .[0]) as $baseline |
+    if $baseline.refused then "baseline \($of): \($baseline.refused)"
+    else "baseline \($of): src tree \($baseline.src), \($baseline.baseline): " + (
+      if $baseline.complete then "complete: " + ([$areas[].area] | join(" "))
+      else "incomplete: " + (
+        ([$areas[] | select(.state == "complete") | .area] | if length > 0 then [join(" ") + " complete"] else [] end)
+        + [$areas[] | select(.state != "complete")
+            | .area + " " + .state + (if .shards then " \(.verified)/\(.shards)" else "" end)]
+        | join("; "))
+      end)
+    end' <<< "$lines"
+  exit "$status"
 fi
 
 if [ $# -ne 2 ] || ! [[ $2 =~ ^[0-9a-f]{40}$ ]]; then
-  echo "usage: $0 <built tree> <its full SHA> | status <commit>" >&2
+  echo "usage: $0 <built tree> <its full SHA> | status <commit or built tree>" >&2
   exit 2
 fi
 tree=$1 sha=$2
@@ -174,60 +98,33 @@ if [ "$(cat "$tree/.sha" 2> /dev/null)" != "$sha" ] || [ ! -d "$tree/dist" ]; th
   echo "baseline $sha: $tree is no built tree of it" >&2
   exit 2
 fi
+runner=${BASELINE_RUNNER:-$tree}
+modules=$runner/tests/families
+if [ ! -e "$modules/baselines.mjs" ]; then
+  echo "baseline $sha: skipped, the runner in $runner predates the src/-tree baselines (#1541)"
+  exit 0
+fi
 fail() {
   echo "baseline $sha: $*" >&2
   exit 1
 }
-mkdir -p "$root"
-# a baseline goes with its trees (see above); a per-commit one with its tree
-for manifest in "$root"/*/MANIFEST; do
-  dir=${manifest%/MANIFEST}
-  if [ "$(head -n 1 "$manifest" 2> /dev/null)" = "baseline 3" ]; then
-    named=0 kept=0
-    while read -r _ _ path; do
-      named=$((named + 1))
-      [ -d "$path" ] && kept=1
-    done < <(grep '^commit ' "$manifest")
-    if [ "$named" -gt 0 ] && [ "$kept" = 0 ] && ! storing "$dir"; then
-      rm -rf "$dir" && echo "baseline ${dir##*/}: removed with its trees"
-    fi
-  else
-    old=$(sed -n 's/^tree //p' "$manifest" 2> /dev/null)
-    if [ -n "$old" ] && [ ! -d "$old" ]; then
-      rm -rf "$dir" && echo "baseline ${dir##*/}: removed with its tree"
-    fi
-  fi
-done
-src=$(git -C "$repo" rev-parse --verify -q "$sha:src") || fail "$repo has no src/ tree of it"
-out=$root/$src
-# the commit in the baseline's MANIFEST, made whole on first use
-mkdir -p "$out" || fail "$out could not be made"
-header=$(printf 'baseline 3\nsrc %s' "$src")
-if [ ! -e "$out/MANIFEST" ]; then
-  printf '%s\n' "$header" > "$out/MANIFEST.$$.tmp" && ln "$out/MANIFEST.$$.tmp" "$out/MANIFEST" 2> /dev/null
-  rm -f "$out/MANIFEST.$$.tmp"
-fi
-[ "$(head -n 2 "$out/MANIFEST" 2> /dev/null)" = "$header" ] || fail "$out/MANIFEST is no MANIFEST of this baseline"
-grep -qxF "commit $sha $tree" "$out/MANIFEST" || echo "commit $sha $tree" >> "$out/MANIFEST" ||
-  fail "MANIFEST could not be written"
-runner=${BASELINE_RUNNER:-$tree}
-if ! grep -q 'baseline 3' "$runner/tests/families/run.mjs" 2> /dev/null; then
-  echo "baseline $sha: skipped, the runner in $runner cannot store a baseline"
+node "$modules/baselines.mjs" prune "$root" | jq -r '"baseline \(.pruned): removed with its trees"' ||
+  fail "pruning $root failed"
+lines=$(node "$modules/baselines.mjs" state "$tree" "$root")
+status=$?
+baseline=$(tail -n 1 <<< "$lines")
+src=$(jq -r '.src // empty' <<< "$baseline" 2> /dev/null)
+out=$(jq -r '.baseline // empty' <<< "$baseline" 2> /dev/null)
+[ -n "$src" ] && [ -n "$out" ] || fail "its state could not be read"
+if [ "$status" = 2 ]; then
+  echo "baseline $sha: no fill, $(jq -r .refused <<< "$baseline")"
   exit 0
 fi
-
-# the areas not complete, each with its folder
-missing=()
-for folder in "$tree"/tests/families/*/ "$runner/tools/corpus/fixture/"; do
-  compgen -G "$folder*.mjs" > /dev/null || continue
-  folder=${folder%/}
-  [ -e "$out/${folder##*/}/SHA256SUMS" ] || missing+=("$folder")
-done
-if [ "${#missing[@]}" -eq 0 ]; then
+if [ "$status" = 0 ]; then
   echo "baseline $sha: complete in $out"
   exit 0
 fi
-if storing "$out"; then
+if [ "$(jq -r .storing <<< "$baseline")" = true ]; then
   echo "baseline $sha: a writer is storing into $out"
   exit 0
 fi
@@ -236,24 +133,20 @@ if ! flock -n "$lock"; then
   echo "baseline $sha: another call is queueing $out"
   exit 0
 fi
-if [ -e "$out/QUEUED" ]; then
-  echo "baseline $sha: a fill of $out is queued, running or done"
-  exit 0
-fi
+# the tree is the current one again: its fill runs (see above)
+rm -f "$out/SUPERSEDED"
 # the jobs run this copy, so that a later install does not change a fill already queued
 { cp "$0" "$out/baseline.sh.tmp" && mv "$out/baseline.sh.tmp" "$out/baseline.sh"; } || fail "this script could not be copied"
+# the jobs of the tree pending or running, by name (their files are <priority>-<time>-<name>.job): a shard with one is
+# not queued again
+waiting=$({ sx-queue status --pending && sx-queue status --running; } 2> /dev/null |
+  sed -n "s/^[0-9]*-[0-9]*-\(baseline-${src:0:9}-.*\)\.job$/\1/p")
 queued=0 unqueued=0
-for folder in "${missing[@]}"; do
+while IFS=$'\t' read -r folder n shards; do
   area=${folder##*/}
-  n=$(sed -n 's/^shards //p' "$out/$area/PLAN" 2> /dev/null)
-  [[ $n =~ ^[1-9][0-9]*$ ]] || n=16
-  jobs=()
-  for ((i = 0; i < n; i++)); do
-    [ -e "$out/$area/${i}of$n.runs.jsonl" ] || jobs+=("$i")
-  done
-  # (every shard stored, SHA256SUMS missing: one job writes them)
-  [ "${#jobs[@]}" -gt 0 ] || jobs=(0)
-  for i in "${jobs[@]}"; do
+  if [ "$shards" = all ]; then shards=$(seq -s, 0 $((n - 1))); fi
+  for i in ${shards//,/ }; do
+    grep -qxF -- "baseline-${src:0:9}-$area-$i" <<< "$waiting" && continue
     if SX_HEAVY_MEM=${BASELINE_MEM:-3G} sx-queue add --owner baseline --priority "${BASELINE_PRIORITY:-7}" --dir "$out" \
       --name "baseline-${src:0:9}-$area-$i" -- bash "$out/baseline.sh" --job "$out" "$tree" "$runner" "$folder" "$i" \
       "$n" "$repo" > /dev/null; then
@@ -262,7 +155,13 @@ for folder in "${missing[@]}"; do
       unqueued=$((unqueued + 1))
     fi
   done
-done
+done < <(jq -r 'select(.area and .store and .store != [])
+  | [.folder, (.shards // 16), (if .store == "all" then "all" else (.store | map(tostring) | join(",")) end)] | @tsv' \
+  <<< "$lines")
+jq -r 'select(.state == "another plan") | "baseline: \(.area) is planned otherwise, not filled"' <<< "$lines"
 [ "$unqueued" -eq 0 ] || fail "$unqueued jobs not queued ($queued queued now); call again to queue them"
-date -u +%Y-%m-%dT%H:%M:%SZ > "$out/QUEUED" || fail "QUEUED could not be written; call again"
-echo "baseline $sha: queued $queued jobs for src tree $src in $out"
+if [ "$queued" -eq 0 ]; then
+  echo "baseline $sha: a fill of $out is queued or running"
+else
+  echo "baseline $sha: queued $queued jobs for src tree $src in $out"
+fi
