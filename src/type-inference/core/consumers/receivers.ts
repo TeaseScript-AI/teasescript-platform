@@ -7,6 +7,7 @@ import { keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "../items.js";
+import { described } from "../messages.js";
 import { propertyName } from "../program.js";
 import { offendingKinds, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
@@ -127,10 +128,14 @@ export function memberChecks(
     ...others
       .filter((item) => extra.length === 0 && (isOpaque(item) || isExternal(item)))
       .slice(0, 1)
-      .map((item): Offending => [
-        item,
-        `is a ${MEMBER_KINDS.filter((kind) => takes(kind)).join("|") || "value"} with ${what} before the ${use}`,
-      ]),
+      .map((item): Offending => {
+        // the kinds that have the member in words: `an object`, `text (string) or a list`
+        const takers = MEMBER_KINDS.filter((kind) => takes(kind));
+        return [
+          item,
+          `is ${takers.length === 0 ? "a value" : described(takers)} with ${what} before the ${use}`,
+        ];
+      }),
   ];
   // (a reference's members are the runtime's: a speaker or handle is a kind a test narrows to, with no fallback)
   const having = others.filter((item) => REFERENCE.has(item.tag) || takes(item.tag));

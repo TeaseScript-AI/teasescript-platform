@@ -243,7 +243,7 @@ test("a property named as an internal step keeps its name in the answers (Astra 
   const stored = analysed("let box = hostValue\nbox.element = 1\nexit").answers;
   assert.deepEqual(
     stored.checks.filter((check) => !check.boundary).map((check) => check.on),
-    ["check that box is a object with a store of .element before the store"],
+    ["check that box is an object with a store of .element before the store"],
   );
 });
 

@@ -26,7 +26,7 @@ import { errorSentence, writtenTypeMessage } from "./messages/errors.js";
 import { budgetMessage, warningFix, warningSentence } from "./messages/warnings.js";
 import { contextSentence, originSentence } from "./messages/causes.js";
 export type { Landing, MessageSource } from "./messages/site.js";
-export { pathPhrase } from "./messages/words.js";
+export { described, pathPhrase } from "./messages/words.js";
 
 /*
  * The sentences of the coarse core's diagnostics (the port plan's D1–D3, TABLE r4.53): each diagnostic's code is its
