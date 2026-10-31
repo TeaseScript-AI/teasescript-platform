@@ -12,10 +12,13 @@
 # complete when the runner ended with its total line (exit 0, or 1 for a stall, an exception or nodes left unanswered,
 # which are stored like any outcome) and stored one line per source; a failed shard fails its job. The area's last
 # shard to end writes SHA256SUMS when every shard is complete, else INCOMPLETE naming the failed ones; an area with
-# neither is still running or lost a job. ~/work/baselines/<sha>/MANIFEST holds the plan and each queued job, with
-# this script's and the runner's hashes, and QUEUED marks a baseline whose every job was queued, which is not queued
-# again. A call whose submission failed exits 1; calling it again queues the missing jobs. To redo a baseline, remove
-# its folder. A baseline goes with its tree: once `sx-tree --prune` removed the tree, the next call removes it.
+# neither is still running or lost a job. ~/work/baselines/<sha>/ also holds MANIFEST (what was planned, with this
+# script's and the runner's hashes), PLAN (each shard's job with its tree, runner, priority and memory, written once and
+# ended by `end <shards>`), JOBS (each job the queue accepted) and QUEUED, written once JOBS holds every planned shard;
+# a baseline with QUEUED is not queued again. A call whose submission failed, or that could not read PLAN or JOBS,
+# exits 1; calling it again queues the shards JOBS lacks, as PLAN has them (BASELINE_* then no longer apply). To redo
+# a baseline, remove its folder. A baseline goes with its tree: once `sx-tree --prune` removed the tree, the next call
+# removes it.
 #
 # The tree's own runner runs its own areas. A tree whose runner cannot store runs (from before this script) is skipped,
 # unless BASELINE_RUNNER names a built checkout whose runner and fixture area run it instead. BASELINE_PRIORITY (6),
@@ -69,12 +72,13 @@ for manifest in "$HOME"/work/baselines/*/MANIFEST; do
     rm -rf "$(dirname "$manifest")" && echo "baseline $(basename "$(dirname "$manifest")"): removed with its tree"
   fi
 done
+out=$HOME/work/baselines/$sha
+stores() { grep -q 'option("store")' "$1/tests/families/run.mjs" 2> /dev/null; }
 runner=${BASELINE_RUNNER:-$tree}
-if ! grep -q 'option("store")' "$runner/tests/families/run.mjs"; then
+if [ ! -e "$out/PLAN" ] && ! stores "$runner"; then
   echo "baseline $sha: skipped, the runner in $runner cannot store runs"
   exit 0
 fi
-out=$HOME/work/baselines/$sha
 mkdir -p "$out"
 exec {lock}>> "$out/.queue.lock"
 if ! flock -n "$lock"; then
@@ -85,23 +89,28 @@ if [ -e "$out/QUEUED" ]; then
   echo "baseline $sha: already queued, running or done in $out"
   exit 0
 fi
+fail() {
+  echo "baseline $sha: $*; call again to queue the rest" >&2
+  exit 1
+}
 
-priority=${BASELINE_PRIORITY:-6}
-memory=${BASELINE_MEM:-3G}
-if [ ! -e "$out/MANIFEST" ]; then
+if [ ! -e "$out/PLAN" ]; then
+  stores "$runner" || fail "the runner in $runner cannot store runs"
+  priority=${BASELINE_PRIORITY:-6}
+  memory=${BASELINE_MEM:-3G}
   slots=${BASELINE_SLOTS:-$(systemctl --user show sx-queue-worker@1.service -p Environment --value 2> /dev/null |
     tr ' ' '\n' | sed -n 's/^SX_HEAVY_SLOTS=//p')}
   if [[ $slots =~ ^[0-9]+$ ]] && [ -z "${BASELINE_SLOTS:-}" ]; then slots=$((slots - 1)); fi
   [[ $slots =~ ^[1-9][0-9]*$ ]] || slots=$(nproc)
-  # the jobs run this copy, so that a later install does not change a baseline already queued
-  cp "$0" "$out/baseline.sh"
+  # the jobs run this copy, so that a later install does not change a baseline already planned
+  cp "$0" "$out/baseline.sh" || fail "this script could not be copied"
   folders=()
   for folder in "$tree"/tests/families/*/; do
     compgen -G "$folder*.mjs" > /dev/null && folders+=("${folder%/}")
   done
   folders+=("$runner/tools/corpus/fixture")
-  # the plan: each area's sources, as the runner reads them, and shards, the smallest area first so it ends first
-  plan=()
+  # each area's sources, as the runner reads them, and shards, the smallest area first so that it ends first
+  sized=()
   for folder in "${folders[@]}"; do
     sources=$(cd "$runner" && node --input-type=module -e '
       import { readdirSync } from "node:fs";
@@ -113,11 +122,11 @@ if [ ! -e "$out/MANIFEST" ]; then
       for (const name of readdirSync(folder).filter((file) => file.endsWith(".mjs")))
         count += sourcesOf(await import(pathToFileURL(path.join(folder, name)).href)).length;
       console.log(count);
-    ' "$runner" "$folder") || { echo "baseline $sha: the sources of $folder could not be read" >&2; exit 1; }
+    ' "$runner" "$folder") || fail "the sources of $folder could not be read"
     shards=$((sources / 100))
     [ "$shards" -gt "$slots" ] && shards=$slots
     [ "$shards" -lt 1 ] && shards=1
-    plan+=("$sources $(basename "$folder") $shards $folder")
+    sized+=("$sources $(basename "$folder") $shards $folder")
   done
   {
     echo "sha $sha"
@@ -126,34 +135,66 @@ if [ ! -e "$out/MANIFEST" ]; then
     echo "run.mjs sha256 $(sha256sum < "$runner/tests/families/run.mjs" | cut -d' ' -f1)"
     echo "baseline.sh sha256 $(sha256sum < "$out/baseline.sh" | cut -d' ' -f1)"
     echo "node $(cd "$runner" && node --version)"
-    echo "planned $(date -u +%Y-%m-%dT%H:%M:%SZ), $slots slots"
-    printf '%s\n' "${plan[@]}" | sort -n | sed 's/^/area /'
-  } > "$out/MANIFEST.tmp" && mv "$out/MANIFEST.tmp" "$out/MANIFEST"
+    echo "planned $(date -u +%Y-%m-%dT%H:%M:%SZ), priority $priority, memory $memory, $slots slots"
+    printf '%s\n' "${sized[@]}" | sort -n | sed 's/^/area /'
+  } > "$out/MANIFEST.tmp" || fail "MANIFEST could not be written"
+  mv "$out/MANIFEST.tmp" "$out/MANIFEST" || fail "MANIFEST could not be written"
+  count=0
+  {
+    printf 'tree %s\nrunner %s\npriority %s\nmemory %s\n' "$tree" "$runner" "$priority" "$memory"
+    while read -r _ area shards folder; do
+      for ((i = 0; i < shards; i++)); do
+        echo "shard $area $i $shards $folder"
+        count=$((count + 1))
+      done
+    done < <(printf '%s\n' "${sized[@]}" | sort -n)
+    echo "end $count"
+  } > "$out/PLAN.tmp" || fail "PLAN could not be written"
+  mv "$out/PLAN.tmp" "$out/PLAN" || fail "PLAN could not be written"
 fi
 
-# each planned shard not queued yet (`job <area> <i> <id>` in MANIFEST)
+# the plan, read whole and checked, and the jobs already accepted
+mapfile -t plan < "$out/PLAN" || fail "PLAN could not be read"
+[ "${#plan[@]}" -ge 6 ] && [[ ${plan[0]} == "tree "* && ${plan[1]} == "runner "* ]] &&
+  [[ ${plan[2]} == "priority "* && ${plan[3]} == "memory "* ]] && [ "${plan[-1]}" = "end $((${#plan[@]} - 5))" ] ||
+  fail "PLAN is not a whole plan"
+tree=${plan[0]#tree } runner=${plan[1]#runner } priority=${plan[2]#priority } memory=${plan[3]#memory }
+stores "$runner" || fail "the planned runner in $runner cannot store runs"
+[ -e "$out/baseline.sh" ] || fail "the planned copy of this script is missing"
+accepted=()
+if [ -e "$out/JOBS" ]; then mapfile -t accepted < "$out/JOBS" || fail "JOBS could not be read"; fi
+has() {
+  local job
+  for job in "${accepted[@]}"; do [[ $job == "$1 "* ]] && return 0; done
+  return 1
+}
+
 queued=0 missing=0
-while read -r _ _ area shards folder; do
-  if ! [[ $shards =~ ^[1-9][0-9]*$ ]] || [ ! -d "$folder" ]; then
-    echo "baseline $sha: no plan in $out/MANIFEST for $area" >&2
-    exit 1
-  fi
-  for ((i = 0; i < shards; i++)); do
-    grep -q "^job $area $i " "$out/MANIFEST" && continue
-    if id=$(SX_HEAVY_MEM=$memory sx-queue add --owner baseline --priority "$priority" --dir "$out" \
-      --name "baseline-${sha:0:9}-$area-$i" -- bash "$out/baseline.sh" --job "$out" "$tree" "$runner" "$area" \
-      "$folder" "$i" "$shards"); then
-      echo "job $area $i $id" >> "$out/MANIFEST"
+for line in "${plan[@]:4:${#plan[@]}-5}"; do
+  read -r _ area i shards folder <<< "$line"
+  [[ $line == "shard "* && $shards =~ ^[1-9][0-9]*$ && -d $folder ]] || fail "PLAN has no shard in: $line"
+  has "$area $i" && continue
+  if id=$(SX_HEAVY_MEM=$memory sx-queue add --owner baseline --priority "$priority" --dir "$out" \
+    --name "baseline-${sha:0:9}-$area-$i" -- bash "$out/baseline.sh" --job "$out" "$tree" "$runner" "$area" \
+    "$folder" "$i" "$shards"); then
+    if echo "$area $i $id" >> "$out/JOBS"; then
       queued=$((queued + 1))
     else
+      # a job JOBS does not hold would be queued again: withdrawn, it is queued by the next call
+      sx-queue cancel "$id" > /dev/null
       missing=$((missing + 1))
     fi
-  done
-done < <(grep '^area ' "$out/MANIFEST")
-if [ "$missing" -gt 0 ]; then
-  echo "baseline $sha: $missing jobs not queued ($queued queued now); call again to queue them" >&2
-  exit 1
-fi
-echo "queued $(date -u +%Y-%m-%dT%H:%M:%SZ), priority $priority, memory $memory" >> "$out/MANIFEST"
-touch "$out/QUEUED"
+  else
+    missing=$((missing + 1))
+  fi
+done
+[ "$missing" -eq 0 ] || fail "$missing jobs not queued ($queued queued now)"
+# QUEUED only once JOBS, read again, holds every planned shard
+accepted=()
+mapfile -t accepted < "$out/JOBS" || fail "JOBS could not be read"
+for line in "${plan[@]:4:${#plan[@]}-5}"; do
+  read -r _ area i _ <<< "$line"
+  has "$area $i" || fail "JOBS lacks shard $i of $area"
+done
+date -u +%Y-%m-%dT%H:%M:%SZ > "$out/QUEUED" || fail "QUEUED could not be written"
 echo "baseline $sha: queued $queued jobs in $out"
