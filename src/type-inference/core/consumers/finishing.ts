@@ -325,6 +325,11 @@ interface HostFrontier {
   readonly steps: Map<string, HostFrontier>;
   /** What it stands for as far as followed (`sameOf`): itself, or the copy it holds alone, or one further down. */
   same: HostFrontier | undefined;
+  /**
+   * Whether it is a value's own frontier, one no place holds (`ownFrontier`), or a step below one: there an operand no
+   * place holds is linked, never entered again (`enterValues`).
+   */
+  readonly own: boolean;
   /** The copies standing at levels above it (its owner path's, then further up), in that order: their number. */
   readonly above: number;
   /** Each of those, stepped down to its path (`inheritedAt`), made where it is first asked. */
@@ -335,6 +340,8 @@ interface HostFrontier {
 interface HostFrontiers {
   readonly places: Map<PlaceId, StoreNode>;
   readonly roots: Map<PlaceId, HostFrontier>;
+  /** The value each read's projections start from (`readRoot`), kept for every value on a chain it climbed. */
+  readonly readRoots: Map<PlaceId, PlaceId>;
   readonly reads: Map<PlaceId, HostFrontier>;
   readonly copied: Map<Standing, HostFrontier>;
   /** The host data each place's component of the place-level copy graph reaches (`placeIngress`), `null` for none. */
@@ -437,6 +444,7 @@ const NOTHING: HostFrontier = {
   same: undefined,
   above: 0,
   inherited: [],
+  own: false,
 };
 
 function frontier(
@@ -444,6 +452,7 @@ function frontier(
   host: IngressNode | undefined,
   at: HostFrontier["at"],
   owner: HostFrontier["owner"],
+  own = false,
 ): HostFrontier {
   // (an owner is entered whole before a step below it is made, so its copies are all there)
   const above = owner === null ? 0 : owner.frontier.copies.length + owner.frontier.above;
@@ -458,6 +467,7 @@ function frontier(
     same: undefined,
     above,
     inherited: [],
+    own: owner === null ? own : owner.frontier.own,
   };
 }
 
@@ -500,6 +510,7 @@ function frontiersOf(walk: Consumers): HostFrontiers {
     copied: new Map(),
     unions: new Map(),
     owned: new Map(),
+    readRoots: new Map(),
   };
   hostFrontiers.set(walk, found);
   return found;
@@ -508,7 +519,9 @@ function frontiersOf(walk: Consumers): HostFrontiers {
 /**
  * Enters values standing at a frontier's path: each with the carriers' operands and own contributions at the same path
  * (`expand`'s parts without a step), a host read's ingress its host data, a copy as a copy task; those with cells a
- * step enters kept for the steps.
+ * step enters kept for the steps. In a value's own frontier (`own`) an operand no place holds is linked as a copy at its
+ * strip, its own frontier made once, on every path that enters it: the value's root or a literal's cell (Astra r1's B1 on
+ * #1559: nested defaults entered again below each literal cell made k levels k² tasks).
  */
 function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[]): void {
   const { program } = walk.pass;
@@ -522,7 +535,9 @@ function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[]): vo
     const { cells, operands } = partsOf(walk, task);
     for (const part of operands) {
       program.work.charge("checks");
-      values.push(partOf(walk.admission, part));
+      if (at.own && ownOperand(walk, task.value, part))
+        at.copies.push({ value: part.value, strip: part.strip });
+      else values.push(partOf(walk.admission, part));
     }
     for (const [step, parts] of cells) addCells(walk, at, step, parts);
   }
@@ -681,19 +696,28 @@ function readPlace(walk: Consumers, value: PlaceId): PlaceId | null {
   return target?.root ?? walk.resultOfCall.get(at) ?? null;
 }
 
-/** The value a read's projections start from: its outermost projection's owner, or the read itself. */
+/**
+ * The value a read's projections start from: its outermost projection's owner, or the read itself. Kept for every value
+ * on the chain it climbs (`readRoots`), so the reads along one chain climb it once (Astra r1's B2 on #1559: a cut read
+ * found its root through `readPlace` and `readRoot` again, k reads 2k² steps).
+ */
 function readRoot(walk: Consumers, value: PlaceId): PlaceId {
   const { program } = walk.pass;
+  const { readRoots } = frontiersOf(walk);
+  const chain: PlaceId[] = [];
   let at = value;
   for (
     let projection = program.projOf.get(at);
-    projection !== undefined;
+    projection !== undefined && !readRoots.has(at);
     projection = program.projOf.get(at)
   ) {
     program.work.charge("checks");
+    chain.push(at);
     at = projection.owner;
   }
-  return at;
+  const root = readRoots.get(at) ?? at;
+  for (const each of chain) readRoots.set(each, root);
+  return root;
 }
 
 /** A value's node: its expression's, where its own content is read (`ownFrontier`); `null` for a value without one. */
@@ -746,9 +770,9 @@ function readFrontier(walk: Consumers, value: PlaceId): HostFrontier {
 /**
  * The frontier of a value no place holds (a literal, a fallback, an operation), at its expression's node: what it holds
  * by its own structure, as a store of it brings (`enterValues`), so a read of a literal's projection or of a fallback
- * holds its host data as a read of a stored one does (#1491, #1502). An operand no place holds stands in it as a copy
- * (`ownOperand`), its own frontier made once whatever reads it. Kept as the value's read before it is entered: a carrier's
- * own contribution is a copy of itself, which stands for nothing more.
+ * holds its host data as a read of a stored one does (#1491, #1502). It is `own`: an operand no place holds stands in it
+ * and below it as a copy (`ownOperand`), its own frontier made once whatever reads it. Kept as the value's read before
+ * it is entered: a carrier's own contribution is a copy of itself, which stands for nothing more.
  */
 function ownFrontier(
   walk: Consumers,
@@ -757,16 +781,9 @@ function ownFrontier(
 ): HostFrontier {
   const node = ownNode(walk, value);
   if (node === null) return NOTHING;
-  const at = frontier(null, undefined, null, null);
+  const at = frontier(null, undefined, null, null, true);
   reads.set(value, at);
-  const own = expand(walk.admission, value, node, []);
-  const entered: Expansion[] = own.stop === null ? [] : [own];
-  for (const part of own.stop === null ? own.parts : []) {
-    walk.pass.program.work.charge("checks");
-    if (ownOperand(walk, value, part)) at.copies.push({ value: part.value, strip: part.strip });
-    else entered.push(partOf(walk.admission, part));
-  }
-  enterValues(walk, at, entered);
+  enterValues(walk, at, [expand(walk.admission, value, node, [])]);
   return at;
 }
 

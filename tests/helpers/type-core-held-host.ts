@@ -937,7 +937,7 @@ export function randomCopyGraph(
 }
 
 /**
- * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, and four of
+ * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, and six of
  * reads no place holds.
  */
 function gateShapes(): Record<string, (k: number) => string> {
@@ -963,9 +963,14 @@ function gateShapes(): Record<string, (k: number) => string> {
       `let xs = [1]\nlet root = ${fields0(k, () => "hostValue")}\nrepeat ${lines(k, (i) => `xs.get(${i + 5}, default: `).join("")}root.f0${")".repeat(k)} {}\nexit`,
     "nested-literal": (k) =>
       `repeat ${"[".repeat(k)}hostValue${"]".repeat(k)}${"[0]".repeat(k)} {}\nexit`,
-    // (and below a copy at its root, Codex r1's B1 on #1559)
+    // (and below a copy at its root, Codex r1's B1 on #1559; below two, and a `get`'s default k deep each holding the
+    // next in a literal's cell, Astra r1's B2 and B1)
     "copied-literal": (k) =>
       `repeat [${"[".repeat(k)}hostValue${"]".repeat(k)}].toList()[0]${"[0]".repeat(k)} {}\nexit`,
+    "double-copied-literal": (k) =>
+      `repeat [[${"[".repeat(k)}hostValue${"]".repeat(k)}].toList()].toList()[0][0]${"[0]".repeat(k)} {}\nexit`,
+    "nested-get-cells": (k) =>
+      `repeat ${nest(k, "hostValue", (text) => `[1].get(5, default: [${text}][0])`)} {}\nexit`,
   };
 }
 

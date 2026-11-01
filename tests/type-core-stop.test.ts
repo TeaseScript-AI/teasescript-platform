@@ -2486,13 +2486,24 @@ function boundedKeepsExact(bounded: Walked, exact: Walked, where: string): boole
  * most eight copies met (`FRONTIER_DEPTH`, `FRONTIER_COPIES`); past them the read answers its place's component's.
  * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same stop guard (r4.186), the same writers
  * where a read's walk is not cut and a superset where it is; whole, `boundedKeepsExact`. The topologies at k = 4 (rings
- * and chains of own stores are cut there) and six random copy graphs (two with readers of two places), forward with
+ * and chains of own stores are cut there), two reads no place holds whose links count as copies (#1559), and six random
+ * copy graphs (two with readers of two places), forward with
  * sharing and reversed without, near the first settled stop and at the last, without a demand cap and under the largest
  * that stops a decision. The same check runs at scale, in all four modes, on the workers.
  */
 test("after a settled stop a read's bounded host frontier names its exact writers, or more where it is cut (#1445)", () => {
   const sources = [
     ...topologySources(4),
+    // (reads no place holds, their links counted as copies: a `get`'s default 4 deep, each holding the next in a literal's
+    // cell, and a literal below two copies at its root, Astra r1's B1 and B2 on #1559)
+    {
+      name: "nested-get-cells",
+      source: `repeat ${"[1].get(5, default: [".repeat(4)}hostValue${"][0])".repeat(4)} {}\nexit\n`,
+    },
+    {
+      name: "double-copied-literal",
+      source: "repeat [[[[[[hostValue]]]]].toList()].toList()[0][0][0][0][0][0] {}\nexit\n",
+    },
     ...[1, 2, 3, 4, 5, 6].map((seed) => ({
       name: `random ${seed}`,
       // (seeds 5 and 6 with four readers of two places each, Codex r5's B1)
