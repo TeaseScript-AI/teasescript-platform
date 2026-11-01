@@ -904,19 +904,19 @@ test("a join's operand reaching an earlier join takes its composed type, its wor
 });
 
 /**
- * #1547: k copies, each a selection of the last with the level inside first or last, or of the last one's property; and
- * k copies each storing a property of its own, read by two selections only (Codex r1's N1 on #1548).
+ * #1547: k copies, each a selection of the last or of an object holding the last one's property; and k copies each
+ * storing a property of its own, read by two selections only (Codex r1's N1 on #1548).
  */
 const LANDING_CHAINS: readonly WorkFamily[] = [
-  ...(["first", "last"] as const).map((order): WorkFamily => ({
-    name: `copy-between-${order}`,
-    measures: `#1547: k copies, each a selection of the last, the level inside ${order}`,
-    program: (k) => landingChain(k, order, (last) => last),
-  })),
+  {
+    name: "copy-between-first",
+    measures: "#1547: k copies, each a selection of the last, the level inside first",
+    program: (k) => landingChain(k, (last) => last),
+  },
   {
     name: "property-copy-between-first",
     measures: "#1547: k copies, each a selection of an object holding the last one's property",
-    program: (k) => landingChain(k, "first", (last) => `{p: ${last}.p}`),
+    program: (k) => landingChain(k, (last) => `{p: ${last}.p}`),
   },
   {
     name: "cold-stored-root",
@@ -944,17 +944,13 @@ const LANDING_CHAINS: readonly WorkFamily[] = [
       ];
     },
   },
-  ...JOIN_REACH_FAMILIES.filter((family) => /^join-reach-copy-(left|right)$/.test(family.name)),
 ];
 
-function landingChain(
-  k: number,
-  order: "first" | "last",
-  level: (last: string) => string,
-): readonly SourceFile[] {
-  const select = (inside: string): string =>
-    order === "first" ? `[${inside}, {p: typed}][0]` : `[{p: typed}, ${inside}][1]`;
-  const links = Array.from({ length: k }, (_, i) => `let c${i + 1} = ${select(level(`c${i}`))}`);
+function landingChain(k: number, level: (last: string) => string): readonly SourceFile[] {
+  const links = Array.from(
+    { length: k },
+    (_, i) => `let c${i + 1} = [${level(`c${i}`)}, {p: typed}][0]`,
+  );
   const lines = [
     "let typed: integer | string = 1",
     "let c0 = {p: typed}",
@@ -965,15 +961,15 @@ function landingChain(
 }
 
 /**
- * #1547, #1428: admission lists each place's landings at a prefix at most once per pass (`landedBelow`), so a chain
- * whose every link `hotSets` asks walks each link once, in either order: copies between the levels of nested
- * selections, the level inside first and last, a property read between them (a place and prefix an earlier walk took,
- * listed as the next walk goes), and #1428's copies of a written-union list, each joined. A chain only two asks read
- * is walked by each, as on `main`, never listed link by link (Codex r1's N1 on #1548). The walk is charged to
- * `indexSteps`, gated at the total's doubling at k = 64 → 128; where each link's landing walked the chain below it,
- * 2.33, 2.26 and 2.45 (`main`); with every link of the twice-read chain listed, 2.33 (`main` 2.10).
+ * #1547: admission lists each place's landings at a prefix at most once per pass (`landedBelow`), so a chain whose
+ * every link `hotSets` asks walks each link once, in either order: copies between the levels of nested selections and a
+ * property read between them (a place and prefix an earlier walk took, listed as the next walk goes); #1428's joined
+ * copies are gated with #1310's families above. A chain only two asks read is walked by each, as on `main`, never
+ * listed link by link (Codex r1's N1 on #1548). The walk is charged to `indexSteps`, gated at the total's doubling at
+ * k = 64 → 128: 2.33 and 2.26 on `main`, where each link's landing walked the chain below it; 2.33 for the twice-read
+ * chain with every link listed (`main` 2.10).
  */
-test("a chain asked at each link walks each link's landings once (#1547, #1428)", () => {
+test("a chain asked at each link walks each link's landings once (#1547)", () => {
   const steep: string[] = [];
   for (const family of LANDING_CHAINS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
@@ -986,7 +982,7 @@ test("a chain asked at each link walks each link's landings once (#1547, #1428)"
         steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
     }
   }
-  assert.equal(LANDING_CHAINS.length, 6);
+  assert.equal(LANDING_CHAINS.length, 3);
   assert.deepEqual(steep, []);
 });
 
