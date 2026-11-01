@@ -157,6 +157,34 @@ export interface StepLayers {
   readonly belowOf: readonly number[];
 }
 
+/**
+ * A node of a prefix's step map (`prefixFound`): a layer's map node seen under the set of positions whose layers share
+ * it (`view`), or a branch where such views part, or a step's leaf joining two parts naming different sets.
+ */
+export type PrefixNode =
+  | {
+      readonly id: number;
+      readonly kind: "view";
+      readonly inner: SupportNode;
+      readonly positions: SupportNode;
+    }
+  | {
+      readonly id: number;
+      readonly kind: "branch";
+      readonly bit: number;
+      readonly key: string;
+      readonly left: PrefixNode;
+      readonly right: PrefixNode;
+    }
+  | {
+      readonly id: number;
+      readonly kind: "leaf";
+      readonly key: string;
+      /** The step's two parts united here: views of a map's leaf, or leaves of such parts in turn. */
+      readonly first: PrefixNode;
+      readonly second: PrefixNode;
+    };
+
 /** A listing layer a read may ask, with the stores that brought it below a prefix (`PrefixStores.also`), or none. */
 export interface LayerFound {
   readonly layer: SubLayer;

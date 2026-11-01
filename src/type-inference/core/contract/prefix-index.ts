@@ -53,6 +53,7 @@ import type {
   LayerPath,
   LayerProof,
   PrefixFrame,
+  PrefixNode,
   PrefixStores,
   PresenceStep,
   StepLayers,
@@ -565,13 +566,23 @@ function layerOf(
   const self = setLeaf(contract, id);
   // (below it, each step maps to the listing layers the maps of its parent and joins name for it; its own steps map to
   // itself)
-  let under: SupportNode | null = null;
-  for (const child of covered || parent === null ? kept : [parent, ...kept])
-    under = union(contract, under, child.front);
+  let level: (SupportNode | null)[] = (covered || parent === null ? kept : [parent, ...kept]).map(
+    (child) => child.front,
+  );
+  // (united in halves, so the sets of layers made in turn join at one branch per two halves)
+  while (level.length > 1) {
+    const next: (SupportNode | null)[] = [];
+    for (let at = 0; at < level.length; at += 2)
+      next.push(at + 1 < level.length ? union(contract, level[at]!, level[at + 1]!) : level[at]!);
+    level = next;
+  }
+  const under = level[0] ?? null;
   // (the map below its own steps kept with it, so a listing layer's read finds those below it by one lookup)
   if (under !== null) contract.keep(1);
-  const steps = [...own.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  const front = overlay(contract, under, mapOf(contract, steps, self));
+  const keys = [...own.keys()]
+    .map((step) => stepKey(contract, step))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const front = overlay(contract, under, mapOf(contract, keys, self));
   const layer: SubLayer = {
     own,
     parent,
@@ -638,12 +649,12 @@ function ownPaths(contract: Contract, sub: Key): ReadonlySet<string> {
   return paths;
 }
 
-/** A layer's leaf in a set of layers, by its number (`SubLayer.self`). */
+/** A layer's leaf in a set of layers, by its number (`SubLayer.self`), the sets ordered as the layers were made. */
 function setLeaf(contract: Contract, id: number): SupportNode {
   return {
     id: made(contract, 0),
     bit: Infinity,
-    key: `#${id}`,
+    key: numberKey(id),
     left: null,
     right: null,
     items: null,
@@ -653,16 +664,35 @@ function setLeaf(contract: Contract, id: number): SupportNode {
   };
 }
 
-/** A step map's leaf: `step` mapped to a set of layers, once per step and set. */
-function mapLeaf(contract: Contract, step: string, value: SupportNode): SupportNode {
-  let bySet = contract.mapLeaves.get(step);
-  if (bySet === undefined) contract.mapLeaves.set(step, (bySet = new Map()));
+/**
+ * A step's key in a step map: its number, given at its first listing in a layer and kept (`Contract.stepNumbers`), as two
+ * code units (`numberKey`), so a map's depth follows the number of its steps, never their texts' bits.
+ */
+function stepKey(contract: Contract, step: string): string {
+  let id = contract.stepNumbers.get(step);
+  if (id === undefined) {
+    contract.stepNumbers.set(step, (id = contract.stepNumbers.size));
+    contract.keep(1);
+  }
+  return numberKey(id);
+}
+
+/** A step's key if a layer lists it anywhere (`stepKey`), else `null`: no map has it. */
+function listedKey(contract: Contract, step: string): string | null {
+  const id = contract.stepNumbers.get(step);
+  return id === undefined ? null : numberKey(id);
+}
+
+/** A step map's leaf: a step's key (`stepKey`) mapped to a set of layers, once per key and set. */
+function mapLeaf(contract: Contract, key: string, value: SupportNode): SupportNode {
+  let bySet = contract.mapLeaves.get(key);
+  if (bySet === undefined) contract.mapLeaves.set(key, (bySet = new Map()));
   const known = bySet.get(value.id);
   if (known !== undefined) return known;
   const leaf: SupportNode = {
     id: made(contract, 0),
     bit: Infinity,
-    key: step,
+    key,
     left: null,
     right: null,
     items: null,
@@ -675,9 +705,8 @@ function mapLeaf(contract: Contract, step: string, value: SupportNode): SupportN
 }
 
 /**
- * A step map of `steps`, in their bits' order (UTF-16 code units, a shorter step first), each mapped to `value`: built at
- * once, one branch where the steps part, never a path made again per step. On an explicit stack, as deep as the steps'
- * bits part.
+ * A step map of `steps`' keys (`stepKey`), in their bits' order, each mapped to `value`: built at once, one branch
+ * where the keys part, never a path made again per step. On an explicit stack, as deep as the keys' bits part.
  */
 function mapOf(
   contract: Contract,
@@ -733,9 +762,8 @@ type OverlayTask =
     };
 
 /**
- * `base` with `over`'s steps mapped as `over` maps them instead, once per pair: down to where the two part and no
- * further, every node of either that the other has no key under shared. On an explicit stack, as deep as the steps' bits
- * part.
+ * `base` with `over`'s steps mapped as `over` maps them instead: down to where the two part and no further, every node
+ * of either that the other has no key under shared. On an explicit stack, as deep as the steps' bits part.
  */
 function overlay(
   contract: Contract,
@@ -744,18 +772,12 @@ function overlay(
 ): SupportNode | null {
   const results: (SupportNode | null)[] = [];
   const tasks: OverlayTask[] = [{ base, over }];
-  const remember = (under: SupportNode, top: SupportNode, node: SupportNode): void => {
-    let byOver = contract.supportOverlays.get(under.id);
-    if (byOver === undefined) contract.supportOverlays.set(under.id, (byOver = new Map()));
-    byOver.set(top.id, node);
-    contract.keep(1);
-    results.push(node);
-  };
+  // (no memo: a layer's own map, laid over, is its own alone)
   for (let task = tasks.pop(); task !== undefined; task = tasks.pop()) {
     if (task.bit !== undefined) {
       const right = task.right ?? results.pop()!;
       const left = task.left ?? results.pop()!;
-      remember(task.base, task.over, supportBranch(contract, task.bit, left!, right!));
+      results.push(supportBranch(contract, task.bit, left!, right!));
       continue;
     }
     const { base: under, over: top } = task;
@@ -763,21 +785,14 @@ function overlay(
       results.push(top ?? under);
       continue;
     }
-    const known = contract.supportOverlays.get(under.id)?.get(top.id);
-    if (known !== undefined) {
-      results.push(known);
-      continue;
-    }
     const split = firstDifference(contract, under.key, top.key);
     if (split < Math.min(under.bit, top.bit))
-      remember(
-        under,
-        top,
+      results.push(
         bitOf(under.key, split) === 0
           ? supportBranch(contract, split, under, top)
           : supportBranch(contract, split, top, under),
       );
-    else if (under.bit === Infinity && top.bit === Infinity) remember(under, top, top);
+    else if (under.bit === Infinity && top.bit === Infinity) results.push(top);
     else if (under.bit === top.bit)
       tasks.push(
         { base: under, over: top, bit: under.bit, left: null, right: null },
@@ -814,12 +829,14 @@ function overlay(
   return results.pop() ?? null;
 }
 
-/** The set of layers a step map names for `step`, or `null`: down the step's bits, each node charged. */
+/** The set of layers a step map names for `step`, or `null`: down its key's bits (`stepKey`), each node charged. */
 function mapGet(contract: Contract, map: SupportNode | null, step: string): SupportNode | null {
+  const key = listedKey(contract, step);
+  if (key === null) return null;
   let at = map;
-  for (; at !== null && at.bit !== Infinity; at = bitOf(step, at.bit) === 0 ? at.left : at.right)
+  for (; at !== null && at.bit !== Infinity; at = bitOf(key, at.bit) === 0 ? at.left : at.right)
     contract.pass.program.work.charge("invSteps");
-  return at !== null && at.key === step ? (at.value ?? null) : null;
+  return at !== null && at.key === key ? (at.value ?? null) : null;
 }
 
 /** A set of layers' layers, each node visited and charged. */
@@ -829,21 +846,6 @@ function layersIn(contract: Contract, set: SupportNode | null): SubLayer[] {
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     contract.pass.program.work.charge("invSteps");
     if (node.left === null) out.push(contract.layersById[node.layer!]!);
-    else stack.push(node.right!, node.left);
-  }
-  return out;
-}
-
-/** A step map's steps, each with its set of layers (`SupportNode.value`), in the steps' order: each node visited and charged. */
-function mapEntries(
-  contract: Contract,
-  map: SupportNode | null,
-): (readonly [string, SupportNode | null])[] {
-  const out: (readonly [string, SupportNode | null])[] = [];
-  const stack = map === null ? [] : [map];
-  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
-    contract.pass.program.work.charge("invSteps");
-    if (node.left === null) out.push([node.key, node.value ?? null]);
     else stack.push(node.right!, node.left);
   }
   return out;
@@ -1404,50 +1406,241 @@ function childrenAt(contract: Contract, layer: SubLayer, ref: PathRef, path: num
     : layersIn(contract, holdersIn(contract, set, ref, path, prefixTexts(contract, ref)));
 }
 
-/** A position's key in a tagged map: two code units, so the keys' bits order the positions as numbers. */
-function positionKey(at: number): string {
+/** A number's key in a set (a layer's, a position's): two code units, so the keys' bits order the numbers. */
+function numberKey(at: number): string {
   return String.fromCharCode(at >>> 16, at & 0xffff);
 }
 
-/**
- * A layer's step map with each step's set of layers tagged by the position `at` of the layer among a prefix's (`topAt`):
- * each leaf's set under the position's key (`positionKey`), the map's shape kept. Once per node and position, so a map sharing nodes with
- * one tagged before (a copy's over its original's) is tagged at its new nodes alone; on an explicit stack.
- */
-function tagged(contract: Contract, map: SupportNode | null, at: number): SupportNode | null {
-  if (map === null) return null;
-  const known = (node: SupportNode): SupportNode | undefined =>
-    contract.taggedMaps.get(node.id)?.get(at);
-  const remember = (node: SupportNode, made: SupportNode): void => {
-    let byPosition = contract.taggedMaps.get(node.id);
-    if (byPosition === undefined) contract.taggedMaps.set(node.id, (byPosition = new Map()));
-    byPosition.set(at, made);
-    contract.keep(1);
+/** A position's leaf in a set of positions of a prefix's layers (`topAt`), once per position. */
+function positionLeaf(contract: Contract, at: number): SupportNode {
+  const known = contract.positionLeaves.get(at);
+  if (known !== undefined) return known;
+  const leaf: SupportNode = {
+    id: made(contract, 0),
+    bit: Infinity,
+    key: numberKey(at),
+    left: null,
+    right: null,
+    items: null,
+    count: 0,
+    presence: null,
+    layer: at,
   };
-  const stack: (readonly [SupportNode, boolean])[] = [[map, false]];
-  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
-    const [node, ready] = next;
-    if (known(node) !== undefined) continue;
-    if (node.bit === Infinity) {
-      remember(node, mapLeaf(contract, node.key, mapLeaf(contract, positionKey(at), node.value!)));
-      continue;
-    }
-    if (!ready) {
-      stack.push([node, true], [node.right!, false], [node.left!, false]);
-      continue;
-    }
-    remember(node, supportBranch(contract, node.bit, known(node.left!)!, known(node.right!)!));
+  contract.positionLeaves.set(at, leaf);
+  return leaf;
+}
+
+/** A set of positions' positions, in order, each node visited and charged. */
+function positionsIn(contract: Contract, set: SupportNode): number[] {
+  const out: number[] = [];
+  const stack = [set];
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    contract.pass.program.work.charge("invSteps");
+    if (node.left === null) out.push(node.layer!);
+    else stack.push(node.right!, node.left);
   }
-  return known(map)!;
+  return out;
+}
+
+/** A map node seen under a set of positions, once per node and set. */
+function viewOf(contract: Contract, inner: SupportNode, positions: SupportNode): PrefixNode {
+  let bySet = contract.prefixViews.get(inner.id);
+  if (bySet === undefined) contract.prefixViews.set(inner.id, (bySet = new Map()));
+  const known = bySet.get(positions.id);
+  if (known !== undefined) return known;
+  const view: PrefixNode = { id: made(contract, 2), kind: "view", inner, positions };
+  bySet.set(positions.id, view);
+  return view;
+}
+
+/**
+ * An operand of a prefix union (`prefixUnion`): a prefix map's node, or a layer's map node seen under a set of positions
+ * not yet made a view (`viewOf`), as the descent meets one inside a view; made a view only where the union keeps it.
+ */
+type PrefixOperand =
+  | PrefixNode
+  | { readonly kind: "seen"; readonly inner: SupportNode; readonly positions: SupportNode };
+
+const prefixBit = (node: PrefixOperand): number =>
+  node.kind === "view" || node.kind === "seen"
+    ? node.inner.bit
+    : node.kind === "branch"
+      ? node.bit
+      : Infinity;
+const prefixKey = (node: PrefixOperand): string =>
+  node.kind === "view" || node.kind === "seen" ? node.inner.key : node.key;
+
+/** An operand as a prefix map's node: a seen map node made a view. */
+function prefixNode(contract: Contract, node: PrefixOperand): PrefixNode {
+  return node.kind === "seen" ? viewOf(contract, node.inner, node.positions) : node;
+}
+
+/** An operand's two children: a view's or a seen node's are its inner node's, seen under the same positions. */
+function prefixChildren(node: PrefixOperand): readonly [PrefixOperand, PrefixOperand] {
+  if (node.kind === "branch") return [node.left, node.right];
+  if (node.kind === "leaf") throw new Error("A prefix map's leaf has no children.");
+  return [
+    { kind: "seen", inner: node.inner.left!, positions: node.positions },
+    { kind: "seen", inner: node.inner.right!, positions: node.positions },
+  ];
+}
+
+/** One step in two parts naming different sets: a leaf joining them, enumerated where the step is read (`prefixAt`). */
+function prefixLeaf(contract: Contract, a: PrefixOperand, b: PrefixOperand): PrefixNode {
+  return {
+    id: made(contract, 2),
+    kind: "leaf",
+    key: prefixKey(a),
+    first: prefixNode(contract, a),
+    second: prefixNode(contract, b),
+  };
+}
+
+/** A prefix map's branch at `bit`. */
+function prefixBranch(
+  contract: Contract,
+  bit: number,
+  left: PrefixOperand,
+  right: PrefixOperand,
+): PrefixNode {
+  contract.pass.program.work.charge("invSteps");
+  const [low, high] = [prefixNode(contract, left), prefixNode(contract, right)];
+  return {
+    id: made(contract, 2),
+    kind: "branch",
+    bit,
+    key: prefixKey(low),
+    left: low,
+    right: high,
+  };
+}
+
+/** A prefix union's step on its stack, as `UnionTask`'s. */
+type PrefixTask =
+  | { readonly a: PrefixOperand | null; readonly b: PrefixOperand | null; readonly bit?: undefined }
+  | { readonly bit: number; readonly kept: PrefixOperand | null; readonly keptLeft: boolean };
+
+/**
+ * The union of two prefix maps, once per pair of maps: two views of one map node are one view under both sets of
+ * positions, never descended, so the union descends only where its layers' maps part, through their nodes as seen
+ * (`PrefixOperand`), and makes views only of the nodes it keeps. On an explicit stack.
+ */
+function prefixUnion(
+  contract: Contract,
+  first: PrefixNode | null,
+  second: PrefixNode | null,
+): PrefixNode | null {
+  if (first === null || second === null || first === second) return first ?? second;
+  const known = contract.prefixUnions
+    .get(Math.min(first.id, second.id))
+    ?.get(Math.max(first.id, second.id));
+  if (known !== undefined) return known;
+  const results: PrefixOperand[] = [];
+  const tasks: PrefixTask[] = [{ a: first, b: second }];
+  for (let task = tasks.pop(); task !== undefined; task = tasks.pop()) {
+    if (task.bit !== undefined) {
+      const right = task.kept !== null && !task.keptLeft ? task.kept : results.pop()!;
+      const left = task.kept !== null && task.keptLeft ? task.kept : results.pop()!;
+      results.push(prefixBranch(contract, task.bit, left, right));
+      continue;
+    }
+    const { a, b } = task;
+    if (a === null || b === null || a === b) {
+      results.push((a ?? b)!);
+      continue;
+    }
+    const seenA = a.kind === "view" || a.kind === "seen";
+    const seenB = b.kind === "view" || b.kind === "seen";
+    if (seenA && seenB && a.inner === b.inner) {
+      results.push({
+        kind: "seen",
+        inner: a.inner,
+        positions: union(contract, a.positions, b.positions)!,
+      });
+      continue;
+    }
+    const [aBit, bBit] = [prefixBit(a), prefixBit(b)];
+    const split = firstDifference(contract, prefixKey(a), prefixKey(b));
+    if (split < Math.min(aBit, bBit)) {
+      const [left, right] = bitOf(prefixKey(a), split) === 0 ? [a, b] : [b, a];
+      results.push(prefixBranch(contract, split, left, right));
+    } else if (aBit === Infinity && bBit === Infinity) results.push(prefixLeaf(contract, a, b));
+    else if (aBit === bBit) {
+      const [aLeft, aRight] = prefixChildren(a);
+      const [bLeft, bRight] = prefixChildren(b);
+      tasks.push(
+        { bit: aBit, kept: null, keptLeft: false },
+        { a: aRight, b: bRight },
+        { a: aLeft, b: bLeft },
+      );
+    } else {
+      // (the node parting first holds the other whole on one side)
+      const [upper, lower] = aBit < bBit ? [a, b] : [b, a];
+      const [upperLeft, upperRight] = prefixChildren(upper);
+      const leftward = bitOf(prefixKey(lower), prefixBit(upper)) === 0;
+      tasks.push(
+        { bit: prefixBit(upper), kept: leftward ? upperRight : upperLeft, keptLeft: !leftward },
+        { a: leftward ? upperLeft : upperRight, b: lower },
+      );
+    }
+  }
+  const united = prefixNode(contract, results.pop()!);
+  const [low, high] = first.id < second.id ? [first, second] : [second, first];
+  let byHigh = contract.prefixUnions.get(low.id);
+  if (byHigh === undefined) contract.prefixUnions.set(low.id, (byHigh = new Map()));
+  byHigh.set(high.id, united);
+  contract.keep(1);
+  return united;
+}
+
+/**
+ * A prefix map's sets under `step`, each with its positions: down its bits to a view of a layer's map, read there to the
+ * step's set, or to the step's leaf joining parts (`prefixLeaf`), whose parts are read only when asked; each node
+ * charged. Empty for none.
+ */
+function prefixAt(
+  contract: Contract,
+  map: PrefixNode | null,
+  step: string,
+): (() => (readonly [SupportNode, SupportNode])[]) | null {
+  const work = contract.pass.program.work;
+  const key = listedKey(contract, step);
+  if (key === null) return null;
+  for (let at = map; at !== null;) {
+    work.charge("invSteps");
+    if (at.kind === "view") {
+      const set = mapGet(contract, at.inner, step);
+      const positions = at.positions;
+      return set === null ? null : () => [[set, positions]];
+    }
+    if (at.kind === "leaf") {
+      if (at.key !== key) return null;
+      const leaf = at;
+      return () => {
+        const out: (readonly [SupportNode, SupportNode])[] = [];
+        // (each position in one part: a layer's map names one set per step; a part is a view of a map's leaf)
+        const stack: PrefixNode[] = [leaf];
+        for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+          work.charge("invSteps");
+          if (node.kind === "leaf") stack.push(node.second, node.first);
+          else if (node.kind === "view") out.push([node.inner.value!, node.positions]);
+        }
+        return out;
+      };
+    }
+    at = bitOf(key, at.bit) === 0 ? at.left : at.right;
+  }
+  return null;
 }
 
 /**
  * A prefix's listing layers under `step`, by its per-step map, the only selection of its layers: the listing layers
  * its layers' maps name for the step (`SubLayer.front`), each with the stores that brought the layer it was found
- * under, in their order; `null` where none lists the step. One layer's map is its own (the layer itself where it lists
- * the step). Several layers' map is the union of theirs, each tagged by its position (`tagged`), made once per prefix
- * (`Contract.prefixSteps`) from tags and unions made once per node: a lookup under any step, listed or not, finds the
- * positions listing it and their sets, in the positions' order, never a visit to each layer.
+ * under, in their positions' order; `null` where none lists the step. One layer's map is its own (the layer itself
+ * where it lists the step). Several layers' map is the union of their maps, each seen under its position
+ * (`prefixUnion`), made once per prefix (`Contract.prefixSteps`), in halves of the positions: layers sharing their maps'
+ * nodes (two copies of one place) share them in it. A lookup under any step, listed or not, finds the positions listing
+ * it and their sets, never a visit to each layer.
  */
 function prefixFound(
   contract: Contract,
@@ -1464,25 +1657,30 @@ function prefixFound(
   }
   let map = contract.prefixSteps.get(stores);
   if (map === undefined) {
-    // (united in halves of the positions, so the positions' sets under a step join at one branch per two halves)
-    let level = Array.from({ length: count }, (_, at) =>
-      tagged(contract, topAt(stores, at).layer.front, at),
-    );
+    let level = Array.from({ length: count }, (_, at): PrefixNode | null => {
+      const front = topAt(stores, at).layer.front;
+      return front === null ? null : viewOf(contract, front, positionLeaf(contract, at));
+    });
     while (level.length > 1) {
-      const next: (SupportNode | null)[] = [];
+      const next: (PrefixNode | null)[] = [];
       for (let at = 0; at < level.length; at += 2)
-        next.push(at + 1 < level.length ? union(contract, level[at]!, level[at + 1]!) : level[at]!);
+        next.push(
+          at + 1 < level.length ? prefixUnion(contract, level[at]!, level[at + 1]!) : level[at]!,
+        );
       level = next;
     }
     map = level[0]!;
     contract.prefixSteps.set(stores, map);
     contract.keep(1);
   }
-  const positions = mapGet(contract, map, step);
-  if (positions === null) return null;
+  const sets = prefixAt(contract, map, step);
+  if (sets === null) return null;
   return () =>
-    mapEntries(contract, positions)
-      .map(([key, set]) => [key.charCodeAt(0) * 0x10000 + key.charCodeAt(1), set] as const)
+    sets()
+      .flatMap(([set, positions]) =>
+        positionsIn(contract, positions).map((at) => [at, set] as const),
+      )
+      .sort(([a], [b]) => a - b)
       .flatMap(([at, set]) => {
         const { defs } = topAt(stores, at);
         return layersIn(contract, set).map((layer) => ({ layer, defs }));

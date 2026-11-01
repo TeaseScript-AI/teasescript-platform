@@ -104,6 +104,7 @@ import type {
   PrefixEntry,
   PrefixFrame,
   PrefixLevels,
+  PrefixNode,
   PrefixStores,
   PresenceStep,
   ReadClass,
@@ -246,11 +247,13 @@ export class Contract {
   /** Per set of listing layers and path id, the layers in it or below it holding a source at the path (`holdersIn`). */
   readonly holdersBelow = new WeakMap<SupportNode, Map<number, SupportNode | null>>();
   /**
-   * Per prefix of several layers, its per-step map: the union of its layers' maps, each tagged by its position
-   * (`prefixFound`); per map node and position, its tagged node (`tagged`).
+   * Per prefix of several layers, its per-step map (`prefixFound`): the union of its layers' maps, each seen under its
+   * position; the positions' leaves, the views by map node and set of positions, the unions by their two nodes.
    */
-  readonly prefixSteps = new WeakMap<PrefixStores, SupportNode | null>();
-  readonly taggedMaps = new Map<number, Map<number, SupportNode>>();
+  readonly prefixSteps = new WeakMap<PrefixStores, PrefixNode | null>();
+  readonly positionLeaves = new Map<number, SupportNode>();
+  readonly prefixViews = new Map<number, Map<number, PrefixNode>>();
+  readonly prefixUnions = new Map<number, Map<number, PrefixNode>>();
   readonly aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly projectedLayers = new Map<string, SubLayer | null>();
   /**
@@ -258,14 +261,16 @@ export class Contract {
    * leaf by its source and content, a branch by its bit and children, and the union of each two nodes asked.
    */
   readonly supportLeaves = new Map<Key, SupportNode>();
-  /** A step map's leaves by step and set (`SubLayer.front`); the layers made, by their numbers (`SubLayer.id`). */
+  /**
+   * A step map's leaves by step key and set (`SubLayer.front`); the steps' numbers, their keys in step maps (`stepKey`);
+   * the layers made, by their numbers (`SubLayer.id`).
+   */
   readonly mapLeaves = new Map<string, Map<number, SupportNode>>();
+  readonly stepNumbers = new Map<string, number>();
   readonly layersById: SubLayer[] = [];
   readonly summaryLeaves = new Map<Key, Map<string, SupportNode>>();
   readonly supportBranches = new Map<number, Map<number, Map<number, SupportNode>>>();
   readonly supportUnions = new Map<number, Map<number, SupportNode>>();
-  /** A step map overlaid by another, by the two nodes' ids in order (`overlay`). */
-  readonly supportOverlays = new Map<number, Map<number, SupportNode>>();
   readonly keys = new Map<CanonicalKey, Identity>();
   readonly identities = new Map<PlaceId, Identity>();
   readonly aliases = new Map<PlaceId, { readonly key: Key; readonly guarded: boolean }>();
