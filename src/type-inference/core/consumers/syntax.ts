@@ -4,7 +4,7 @@ import type { Consumers } from "../consumers.js";
 import { defaultOf, termAt, typeTags, writtenOf } from "../contract.js";
 import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
 import type { ItemTag } from "../items.js";
-import { conversionCategory } from "../method-categories.js";
+import { conversionCategory, dictList } from "../method-categories.js";
 import { propertyName, propertyStep, stepName } from "../program.js";
 import { LITERALS } from "./kinds.js";
 import type { CheapDecision, CheapFrontier, CheapShape } from "./model.js";
@@ -63,6 +63,12 @@ function cheapGive(shape: CheapShape, tag: ItemTag, by: Definition): void {
   }
 }
 
+/** A collection or object literal's own type (`OWN_TAGS`); `undefined` for any other value. */
+function literalTag(walk: Consumers, value: PlaceId): ItemTag | undefined {
+  const place = walk.pass.program.places[value]?.kind;
+  return place?.kind === "value" ? OWN_TAGS.get(place.node) : undefined;
+}
+
 /** Each walk's projections of literals no place holds, by value: their cells (`placelessCells`), else `null`. */
 const placeless = new WeakMap<Consumers, Map<PlaceId, readonly Definition[] | null>>();
 
@@ -96,16 +102,20 @@ export function placelessCells(walk: Consumers, value: PlaceId): readonly Defini
 }
 
 /**
- * The collection or object literals a value no place holds is: the literal itself, or each cell of a projection of
- * one (`placelessCells`) that is such a literal in turn; `null` where any is another value.
+ * The collection or object literals a value no place holds is: the literal itself, each cell of a projection of one
+ * (`placelessCells`) that is such a literal in turn, or a dictionary literal's `values` list, whose elements are the
+ * dictionary's own (#1452); `null` where any is another value.
  */
 function placelessLiterals(walk: Consumers, value: PlaceId): readonly PlaceId[] | null {
   const { program } = walk.pass;
-  const place = program.places[value]?.kind;
-  if (place?.kind === "value" && OWN_TAGS.has(place.node) && program.hasOf.has(value))
-    return [value];
+  if (literalTag(walk, value) !== undefined && program.hasOf.has(value)) return [value];
   const cells = placelessCells(walk, value);
-  if (cells === null) return null;
+  if (cells === null) {
+    const projection = program.projOf.get(value);
+    if (projection === undefined || dictList(projection.step) !== "values") return null;
+    const dicts = placelessLiterals(walk, projection.owner);
+    return dicts?.every((dict) => literalTag(walk, dict) === "dict") ? dicts : null;
+  }
   const literals: PlaceId[] = [];
   for (const cell of cells) {
     program.work.charge("checks");
