@@ -246,7 +246,7 @@ export class Contract {
   readonly stepLayers = new WeakMap<PrefixStores | SupportNode, Map<string, StepLayers>>();
   /**
    * Per set of listing layers and made path id, the layers in it or below it holding a source at the path (`holdersIn`;
-   * a path without an id yet is answered per call, never making one).
+   * a read's path without an id yet is answered by the read's own, kept here once its id is made, `ReadPath.holders`).
    */
   readonly holdersBelow = new WeakMap<SupportNode, Map<number, SupportNode | null>>();
   /** Per layer and step, the nearest listing layers below it there (`listingBelow`). */
