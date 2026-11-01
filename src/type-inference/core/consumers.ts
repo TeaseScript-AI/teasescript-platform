@@ -34,7 +34,7 @@ import { cheapDecided } from "./consumers/syntax.js";
 import { speakers, uses } from "./consumers/uses.js";
 import { keptKey, keyOf, type Definition, type Key } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
-import { REASON, STOPPED, type Item, type Writer } from "./items.js";
+import { inKindOrder, REASON, STOPPED, type Item, type Writer } from "./items.js";
 import { Laminar } from "./narrowing.js";
 import type { CoreDiagnostic, Obligation, SiteExpectation } from "./result.js";
 import type { Work } from "./solver.js";
@@ -208,9 +208,12 @@ export class Consumers {
       pass,
       {
         run: (work) => this.solve(work),
-        // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
+        // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126, in the kinds' fixed
+        // order, #1398)
         read: (value, node, at) =>
-          this.finishing ? finishingRead(this, value, node, stepsArray(restSteps(at))) : null,
+          this.finishing
+            ? inKindOrder(finishingRead(this, value, node, stepsArray(restSteps(at))))
+            : null,
       },
       rejected,
       cycling,
@@ -235,7 +238,8 @@ export class Consumers {
   /**
    * A value's items at a node and a path: every consumer's one read, unstopped or finishing, so a stop's obligations
    * come from the same consumers as an unstopped analysis's (TABLE r4.99). In the finishing path it reads what is
-   * settled (`finishingRead`), `STOPPED` only where nothing is.
+   * settled (`finishingRead`), `STOPPED` only where nothing is, its items in the kinds' fixed order as a merged answer's
+   * are (`inKindOrder`, #1398).
    */
   public valueItems(
     value: PlaceId,
@@ -244,7 +248,7 @@ export class Consumers {
     requirement = false,
   ): readonly Item[] {
     return this.finishing
-      ? finishingRead(this, value, node, rest, requirement)
+      ? inKindOrder(finishingRead(this, value, node, rest, requirement))
       : this.valueRun(value, node, rest);
   }
 

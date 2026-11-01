@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { analyseCore } from "../src/type-inference/core/answers.js";
+import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
+import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { ingressLeaves, type Item } from "../src/type-inference/core/items.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
+import { VALUE_KIND_NAMES } from "../src/value-kinds.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
@@ -600,4 +602,63 @@ test("what a program publishes, its answers' orders included, is the same in the
       [["integer", "string"]],
       JSON.stringify(mode),
     );
+});
+
+/**
+ * #1398 (Astra r1 on #1558): a stopped answer takes the same fixed order. A null-defaulted load read beside a list
+ * holding it, alone and beside a second load: at the test demand allowance 256 the reversed modes stop and answer from
+ * the stopped sources (`CoreAnswers.#items`: the typed default's own shape), the source modes from the solver. In every
+ * mode, at that allowance and at the natural one, each occurrence's items, its element's and its properties' stand in
+ * the kinds' table order, then `unknown` and `empty`, whichever source answers.
+ */
+const STOPPED_ORDER_WITNESSES: readonly Program[] = [
+  one(
+    "a null-defaulted load beside a list holding it",
+    'let a = load(hostValue, default: null)\nlet pair = [a]\nsay pair[0]\nsay pair[1].p\nsay a otherwise "fallback"\nexit\n',
+  ),
+  one(
+    "two null-defaulted loads beside a list holding both",
+    'let a = load(hostValue, default: null)\nlet b = load(hostOther, default: null)\nlet pair = [a,b]\nsay pair[0]\nsay pair[1].p\nsay a otherwise "fallback"\nexit\n',
+  ),
+];
+
+test("a stopped answer's items stand in the kinds' table order too, in the four modes (#1398)", () => {
+  const rank = new Map([...VALUE_KIND_NAMES, "unknown", "empty"].map((tag, index) => [tag, index]));
+  const ordered = (items: readonly Item[]): boolean =>
+    items.every(
+      (item, index) => index === 0 || rank.get(items[index - 1]!.tag)! <= rank.get(item.tag)!,
+    );
+  const misordered: string[] = [];
+  let stopped = 0;
+  let lists = 0;
+  for (const program of STOPPED_ORDER_WITNESSES) {
+    const request = coreRequest(program.files, [...GLOBALS, "hostOther"]);
+    assert.ok(request !== null, program.name);
+    for (const allowance of [256, null])
+      for (const mode of MODES) {
+        const run = (): Answers => inMode(mode, () => analyseCore(request));
+        const answers = allowance === null ? run() : withTestDemandAllowance(allowance, run);
+        if (answers.budget.decisions.some((decision) => decision.stopped)) stopped += 1;
+        for (const node of answers.graph.nodes) {
+          const at = answers.at(node);
+          if (at === null) continue;
+          const tags = new Set(at.items.map((item) => item.tag));
+          const each: (readonly Item[])[] = [
+            at.items,
+            ...(tags.has("list") ? [answers.project(node, "element")] : []),
+            ...(tags.has("object") ? [...answers.properties(node).values()] : []),
+          ];
+          for (const items of each) {
+            lists += 1;
+            if (!ordered(items))
+              misordered.push(
+                `${program.name} ${JSON.stringify(mode)} ${allowance ?? "natural"} node ${node.id}: ${items.map((item) => item.tag).join(",")}`,
+              );
+          }
+        }
+      }
+  }
+  assert.deepEqual(misordered, []);
+  assert.ok(stopped > 0, "a decision stops in some mode at the test allowance");
+  assert.ok(lists > 100, `${lists} lists`);
 });
