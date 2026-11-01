@@ -938,17 +938,16 @@ function idMade(contract: Contract, path: ReadPath): number {
 }
 
 /**
- * A read's path's id where it is made already, else `undefined`, making and charging none (r4.262: the selection makes
- * no id): a span's its own, found as its first step was read (`spanRef`); a record's where found (`PathSteps.made`); a
- * plain array's where the selection's walk found every step made (`holdingAt`; a path is made only below its parent's).
+ * A read's path's id where it is made already, else `undefined`, making and charging none: a span's and a record's where
+ * found (`PathRef.made`); a plain array's where the selection's walk found every step made (`holdingAt`; a path is made
+ * only below its parent's).
  */
 function madePathId(path: ReadPath): number | undefined {
   if (path.id !== undefined) return path.id;
   const { ref } = path;
-  if (ref.kind !== "steps") return ref.id();
-  const steps = ref.steps();
-  if (isPathSteps(steps)) return steps.made;
-  return path.found === ref.length ? path.foundId : undefined;
+  if (ref.kind === "steps" && !isPathSteps(ref.steps()))
+    return path.found === ref.length ? path.foundId : undefined;
+  return ref.made();
 }
 
 /** A layer's answers at a path, made where first asked. */
@@ -1331,7 +1330,8 @@ function stepLayersOf(
 /**
  * The found layers listing a source with a store at a prefix of `ref` (`subsByPath`), by their indices. Each prefix's
  * text is made one step longer than the last and only looked up, never kept: kept, they would charge a read the square
- * of its path's length. With `path`, the walk notes the longest prefix of a plain array's steps already made, for its id.
+ * of its path's length. Its steps are read making no id (`PathRef.read`); with `path`, the walk notes the longest prefix
+ * of a plain array's steps already made, for its id.
  */
 function holdingAt(
   contract: Contract,
@@ -1345,9 +1345,9 @@ function holdingAt(
   let found = path === undefined || ref.kind !== "steps" || isPathSteps(ref.steps()) ? -1 : 0;
   for (let length = 1; length <= ref.length && own.size > 0; length += 1) {
     work.charge("invSteps");
-    text = length === 1 ? ref.at(0) : stepText(text, ref.at(length - 1));
+    text = length === 1 ? ref.read(0) : stepText(text, ref.read(length - 1));
     if (found >= 0) {
-      found = pathBelow(contract, found, ref.at(length - 1));
+      found = pathBelow(contract, found, ref.read(length - 1));
       if (found >= 0) [path!.found, path!.foundId] = [length, found];
     }
     const having = contract.subsByPath.get(text);
@@ -1406,7 +1406,7 @@ function holdersIn(
   ref: PathRef,
   path: number | Map<SupportNode, SupportNode | null>,
 ): SupportNode | null {
-  const step = ref.at(0);
+  const step = ref.read(0);
   const answered = (each: SupportNode): SupportNode | null | undefined =>
     typeof path === "number" ? contract.holdersBelow.get(each)?.get(path) : path.get(each);
   const stack: (readonly [SupportNode, ReadonlySet<number> | null])[] = [[set, null]];
@@ -1456,7 +1456,7 @@ function topsAt(
 ): PrefixStores["also"] {
   const work = contract.pass.program.work;
   // (the first read under a step keeps its memo, as `main`'s, whether or not a layer lists it; later reads read it)
-  const step = ref.at(0);
+  const step = ref.read(0);
   const layers = stepLayersOf(
     contract,
     stores,
@@ -1926,6 +1926,12 @@ interface LayersAt {
  * The listing layers a summary of a prefix's layers at `rest` reads (`topsAt`), found without
  * a demand: none where no layer may hold a source there; `undefined` where the prefix's stores are cut at an open copy
  * cycle or a layer has no origin, so the consumer reads each source by itself (`relevantSubs`).
+ *
+ * No path or span id is made while a read's selection runs (TABLE r4.262), here and in `singleSource`'s choice: the
+ * read's steps are read through `PathRef.read`, its id looked up where made (`madePathId`), and the holders below the
+ * layers it passes kept per made id or, without one, in the read's own map (`ReadPath.holders`); an id is made only for
+ * a summary's demand (`pathIdAt`). The holder mark check reads the source's own identity (`keyIdentity`), as every
+ * reading of that source does.
  */
 function layersAt(contract: Contract, stores: PrefixStores, rest: Rest): LayersAt | undefined {
   const ref = restRef(contract, rest);
@@ -1989,7 +1995,7 @@ function summarised(items: readonly Item[]): boolean {
 function singleSource(contract: Contract, at: LayersAt, rest: Rest): Key | null {
   if (at.layers.length !== 1) return null;
   const { layer } = at.layers[0]!;
-  const first = restRef(contract, rest).at(0);
+  const first = restRef(contract, rest).read(0);
   const own = layer.own.get(first);
   if (own?.size !== 1 || listingBelow(contract, layer, first) !== null) return null;
   const [sub] = own;

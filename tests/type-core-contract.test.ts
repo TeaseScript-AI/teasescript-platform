@@ -10,6 +10,7 @@ import {
   summaryItems,
   summaryPresence,
 } from "../src/type-inference/core/contract/prefix-index.js";
+import { PathSteps, spanRef, type Rest } from "../src/type-inference/core/contract/key-ids.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
 import { writerKey } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
@@ -853,27 +854,53 @@ test("a read its one holder's source answers is that source's answer at its whol
 });
 
 /**
- * #1466, r4.262 (Codex r11's F1): a read whose selection passes a listing layer holding nothing at its path (`a`, its
- * own store at `g.r`) to the one holder below it (`seed`) asks that holder's source by reference as a read finding its
- * holder directly does (`direct`, the control): through each of the four consumers, in the four modes, one forwarded
- * demand, no layer demand and no path id made, so the selection's walk charges nothing for an id (`pathIdAt` charges
- * only steps it makes).
+ * #1466, r4.262 (Codex r11's F1, r12's F1 and F2): no path or span id is made while a read's selection runs. A read whose
+ * selection passes a listing layer holding nothing at its path (`a`, its own store at `g.r`) to the one holder below it
+ * (`seed`) asks that holder's source by reference, as a read finding its holder directly does (`direct`, the control):
+ * through each of the four consumers, in the four modes, one forwarded demand and no layer demand, the path arena and the
+ * spans' ids unchanged from the consumer's start to the forwarded demand, for each kind of path a read meets: a plain
+ * array; a span whose suffixes have no id yet, and a span from a later step whose own id has none; a record whose id is
+ * found lazily, a view of one, a join; and a view made again after its first was resolved, which finds the id kept on
+ * the steps it views.
  */
-test("a read passing a listing layer to its one holder below asks that source making no path id (#1466)", () => {
+test("no path or span id is made while a read's selection runs, its one holder's source asked by reference (#1466)", () => {
   const sources = {
     direct:
       "let seed = {g: {p: 1}}\nlet a = seed\na.g.p = hostValue\nlet b = a\nrepeat b.g.p {}\nexit",
     passed:
       "let seed = {g: {p: 1}}\nseed.g.p = hostValue\nlet a = seed\na.g.r = hostOther\nlet b = a\nrepeat b.g.p {}\nexit",
   };
+  const made = (contract: Contract, steps: readonly string[]): number =>
+    steps.reduce((at, step) => contract.pathStep(at, step), 0);
+  const record = (contract: Contract, steps: readonly string[]): PathSteps =>
+    new PathSteps(contract, steps, () => made(contract, steps));
+  const rests: Record<string, (contract: Contract) => Rest> = {
+    array: () => ["g", "p"],
+    span: (contract) => spanRef(contract, made(contract, ["g", "p"])),
+    suffix: (contract) => spanRef(contract, made(contract, ["x", "g", "p"]), 1),
+    lazy: (contract) => record(contract, ["g", "p"]).rest(),
+    viewed: (contract) => {
+      const view = record(contract, ["x", "g", "p"]).from(1);
+      assert.equal(view.made, undefined, "a view not yet resolved has no id");
+      return view.rest();
+    },
+    joined: (contract) => record(contract, ["g"]).followedBy(["p"]).rest(),
+    remade: (contract) => {
+      const steps = record(contract, ["x", "g", "p"]);
+      const id = steps.from(1).path;
+      const view = steps.from(1);
+      assert.equal(view.made, id, "a view made again finds the id kept on the steps it views");
+      return view.rest();
+    },
+  };
   const consumers = {
-    summaryItems: (contract: Contract, stores: PrefixStores, rest: string[], solver: Solver) =>
+    summaryItems: (contract: Contract, stores: PrefixStores, rest: Rest, solver: Solver) =>
       solver.run(summaryItems(contract, stores, rest)),
-    summaryCount: (contract: Contract, stores: PrefixStores, rest: string[], solver: Solver) =>
+    summaryCount: (contract: Contract, stores: PrefixStores, rest: Rest, solver: Solver) =>
       solver.run(summaryCount(contract, stores, rest)),
-    summaryPresence: (contract: Contract, stores: PrefixStores, rest: string[], solver: Solver) =>
+    summaryPresence: (contract: Contract, stores: PrefixStores, rest: Rest, solver: Solver) =>
       summaryPresence(contract, stores, rest, 0, (work) => solver.run(work)),
-    offendingStores: (contract: Contract, stores: PrefixStores, rest: string[], solver: Solver) =>
+    offendingStores: (contract: Contract, stores: PrefixStores, rest: Rest, solver: Solver) =>
       offendingStores(
         contract,
         stores,
@@ -882,36 +909,44 @@ test("a read passing a listing layer to its one holder below asks that source ma
         (work) => solver.run(work),
       ),
   };
+  const arenas = (contract: Contract) => ({
+    paths: contract.pathParents.length,
+    spans: [...contract.pathFacts.values()].reduce(
+      (count, facts) => count + (facts.spans?.size ?? 0),
+      0,
+    ),
+  });
   for (const [name, source] of Object.entries(sources)) {
     const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
     assert.ok(request !== null, name);
     for (const mode of MODES)
       inMode(mode, () => {
-        for (const [consumer, ask] of Object.entries(consumers)) {
-          const { contract, program, solver } = narrowingPass(request);
-          const b = program.places.find(
-            (place) => place.kind.kind === "binding" && place.kind.name === "b",
-          )!.id;
-          const stores = contract.prefixStores(keyOf(b, []));
-          const rest = ["g", "p"];
-          const paths = contract.pathParents.length;
-          let forwarded = 0;
-          const subAt = contract.subAt.bind(contract);
-          contract.subAt = function* (sub, asked) {
-            if (asked === rest) forwarded += 1;
-            return yield* subAt(sub, asked);
-          };
-          ask(contract, stores, rest, solver);
-          assert.deepEqual(
-            {
-              forwarded,
-              demands: contract.facts.layerDemands,
-              paths: contract.pathParents.length - paths,
-            },
-            { forwarded: 1, demands: 0, paths: 0 },
-            `${name}, ${consumer}`,
-          );
-        }
+        for (const [kind, restOf] of Object.entries(rests))
+          for (const [consumer, ask] of Object.entries(consumers)) {
+            const { contract, program, solver } = narrowingPass(request);
+            const b = program.places.find(
+              (place) => place.kind.kind === "binding" && place.kind.name === "b",
+            )!.id;
+            const stores = contract.prefixStores(keyOf(b, []));
+            const rest = restOf(contract);
+            const before = arenas(contract);
+            let forwarded = 0;
+            let selected: ReturnType<typeof arenas> | undefined;
+            const subAt = contract.subAt.bind(contract);
+            contract.subAt = function* (sub, asked) {
+              if (asked === rest) {
+                forwarded += 1;
+                selected ??= arenas(contract);
+              }
+              return yield* subAt(sub, asked);
+            };
+            ask(contract, stores, rest, solver);
+            assert.deepEqual(
+              { forwarded, demands: contract.facts.layerDemands, selected },
+              { forwarded: 1, demands: 0, selected: before },
+              `${name}, ${kind}, ${consumer}`,
+            );
+          }
       });
   }
 });
