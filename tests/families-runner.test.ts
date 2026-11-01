@@ -925,7 +925,7 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     assert.equal(readFileSync(join(top, "SUPERSEDED"), "utf8"), `${newer}\n`);
     const superseded = run(baselines, "state", base, second, "--read-only");
     assert.equal(superseded.status, 1, superseded.stdout);
-    const partial = JSON.parse(superseded.stdout.split("\n")[0]);
+    const partial = JSON.parse(superseded.stdout.split("\n")[0]!);
     assert.deepEqual([partial.state, partial.verified, partial.store], ["partial", 1, [1]]);
     assert.equal(last(run(baselines, "queue", top, hook)).queued, top);
     assert.deepEqual(readdirSync(top).sort(), ["MANIFEST", "STARTED", "area", "baseline.sh"]);
