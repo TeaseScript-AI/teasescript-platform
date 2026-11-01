@@ -1,5 +1,5 @@
 // node tests/families/run.mjs <area> <base> <head> [--sizes 4,8] [--allowances natural,16,256] [--shard i/N]
-//   [--timeout 180] [--memory 2048] [--out differences.jsonl]
+//   [--timeout 180] [--memory 2048] [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl] [--only <index>]
 // node tests/families/run.mjs <area> <head> --baseline <folder> [options]
 // node tests/families/run.mjs <area> <tree> --store <folder> [--shard i/N]
 // Runs every generator of tests/families/<area>/ (or of the folder an absolute <area> names) against two built trees (a
@@ -18,6 +18,9 @@
 // with `src/` and `.sha`) at the runner's defaults and stores one shard of each source's results, one JSON line each, in
 // the baseline of its `src/` tree (`baselines.mjs`), whose area folder `--baseline` then reads, only where the area is
 // complete under the rule status shares (`storedRuns`); it is refused as status refuses it otherwise (exit 1 or 2).
+// `--work` keeps a record of each source: each run's charged work (the units its analyses charge their work ledgers)
+// and milliseconds on each tree, a stalled run's up to the stall, and what the source counted (#1564), which
+// `stalls.mjs` reads; `--only` runs the sources of the area that a stall index lists.
 // Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, uncompared, modes,
 // runs, differences.
 import { fork } from "node:child_process";
@@ -40,13 +43,27 @@ import {
 } from "./baselines.mjs";
 import { generatorsOf, placeOf, sourceKey } from "./sources.mjs";
 
+/** A tree's `dist/`: the checkout's, or the tree itself. */
+const distOf = (root) =>
+  existsSync(path.join(root, "dist", "tests")) ? path.join(root, "dist") : root;
+
 /** A tree's oracle library, from its `dist/`. */
 async function oracles(root) {
-  const dist = existsSync(path.join(root, "dist", "tests")) ? path.join(root, "dist") : root;
-  const file = path.join(dist, "tests", "helpers", "type-core-oracles.js");
+  const file = path.join(distOf(root), "tests", "helpers", "type-core-oracles.js");
   if (!existsSync(file)) throw new Error(`no oracle library at ${file}: build the tree first`);
   return import(pathToFileURL(file).href);
 }
+
+/** A tree's work ledger (`WorkLedger`, whose `charge` every unit of its analyses' work passes), or `null`. */
+async function ledgerOf(root) {
+  const file = path.join(distOf(root), "src", "type-inference", "core", "budget.js");
+  if (!existsSync(file)) return null;
+  const { WorkLedger } = await import(pathToFileURL(file).href);
+  return typeof WorkLedger?.prototype?.charge === "function" ? WorkLedger : null;
+}
+
+/** With `--work`, the units charged between two reports of a run's work. */
+const STEP = 65_536;
 
 /** An oracle's result as text (the publication's own text as it is: encoding it again would double a large one). */
 const textOf = (value) => (typeof value === "string" ? value : JSON.stringify(value));
@@ -132,7 +149,7 @@ function judged(was, is) {
 
 if (process.argv[2] === "--child") {
   // the child: each source's runs in the four modes on each tree (the base and the head, or one)
-  const { roots, allowances } = JSON.parse(process.argv[3]);
+  const { roots, allowances, work } = JSON.parse(process.argv[3]);
   const trees = await Promise.all(roots.map(oracles));
   const head = trees.at(-1);
   /**
@@ -144,12 +161,49 @@ if (process.argv[2] === "--child") {
       process.send(message, (error) => (error ? reject(error) : resolve())),
     );
   /**
+   * With `--work`: the units the running tree's analyses charge (every `WorkLedger.charge`, finishing work included),
+   * reported to the runner (`progress`) as a run starts, each `STEP` units and as it ends. A send writes at once where the
+   * channel has room, also while an analysis holds this process, so a source the runner ends at its deadline keeps the
+   * work its run had charged, less at most `STEP` units (#1564). A tree with no ledger reports `null`.
+   */
+  const ledgers = work ? await Promise.all(roots.map(ledgerOf)) : [];
+  let spent = 0;
+  let next = Infinity;
+  let running = null;
+  const report = (progress) => process.send({ progress }, () => {});
+  for (const ledger of new Set(ledgers.filter((found) => found !== null))) {
+    const { charge } = ledger.prototype;
+    ledger.prototype.charge = function (counter, units = 1) {
+      spent += units;
+      if (spent >= next) {
+        next = spent + STEP;
+        report({ ...running, work: spent });
+      }
+      return charge.call(this, counter, units);
+    };
+  }
+  /** Tree `tree`'s result of the source's run `index` (`run`), with `--work` its units and milliseconds reported. */
+  const counted = (index, tree, mode, check, run) => {
+    if (!work) return attempt(() => digest(run(trees[tree])));
+    const measured = ledgers[tree] !== null;
+    running = { run: index, tree };
+    spent = 0;
+    next = measured ? STEP : Infinity;
+    const started = performance.now();
+    report({ ...running, mode, check, work: measured ? 0 : null });
+    const result = attempt(() => digest(run(trees[tree])));
+    report({ ...running, work: measured ? spent : null, ms: performance.now() - started });
+    next = Infinity;
+    return result;
+  };
+  /**
    * One source's runs in the four modes on its trees, each run's outcome (`run`: a difference or an exception, or one
    * tree's result) sent as it ends and written before the next run starts, so that a later stall in the source keeps
    * it.
    */
   const compared = async ({ files, checks, globals }) => {
     let parsed = true;
+    let index = 0;
     for (const mode of head.MODES) {
       const label = `${mode.reversed ? "rev" : "src"}-${mode.unshared ? "off" : "on"}`;
       const runs = [];
@@ -163,7 +217,8 @@ if (process.argv[2] === "--child") {
           ]);
       for (const [check, run] of runs) {
         // compared by hash, so that the base's text is not held while the head runs
-        const results = trees.map((tree) => attempt(() => digest(run(tree))));
+        const results = trees.map((_, tree) => counted(index, tree, label, check, run));
+        index += 1;
         const is = results.at(-1);
         if (is.value?.unparsed) parsed = false;
         // one tree's result goes to the runner, which compares it with the stored one or stores it
@@ -237,26 +292,33 @@ if (process.argv[2] === "--child") {
   const seconds = Number(option("timeout") ?? DEFAULTS.timeout);
   const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? DEFAULTS.memory);
-  // the runner's own file lies outside every baseline: not in the folder it stores into or reads, nor in the folder of
-  // baselines of the baseline it reads, nor in any baseline (#1542 r4, r5), all as the system resolves them; it is a new
-  // file, never the old one truncated, so that another link to the old one keeps what it holds
-  const out =
-    option("out") === undefined
-      ? undefined
-      : outside(
-          option("out"),
-          [
-            ...(store === undefined ? [] : [pathOf(store, "outside")]),
-            ...(baseline === undefined ? [] : readFrom(baseline)),
-          ],
-          refused,
-        );
+  if (store !== undefined && options.has("only"))
+    refused("--store stores whole shards: drop --only");
+  // the runner's own files (`--out`, and `--work`'s record of each source, #1564) lie outside every baseline: not in the
+  // folder it stores into or reads, nor in the folder of baselines of the baseline it reads, nor in any baseline (#1542
+  // r4, r5), all as the system resolves them; each is a new file, never the old one truncated, so that another link to
+  // the old one keeps what it holds
+  const kept = [
+    ...(store === undefined ? [] : [pathOf(store, "outside")]),
+    ...(baseline === undefined ? [] : readFrom(baseline)),
+  ];
+  const out = option("out") === undefined ? undefined : outside(option("out"), kept, refused);
+  const work = option("work") === undefined ? undefined : outside(option("work"), kept, refused);
+  if (out !== undefined && work !== undefined && pathOf(out, "outside") === pathOf(work, "outside"))
+    refused(`--out and --work name one file: ${option("out")}`);
   if (out !== undefined) {
     rmSync(pathOf(out, "outside"), { force: true });
     writeFileSync(pathOf(out, "outside"), "", { flag: "wx" });
   }
+  if (work !== undefined) {
+    rmSync(pathOf(work, "outside"), { force: true });
+    writeFileSync(pathOf(work, "outside"), "", { flag: "wx" });
+  }
   const record = (line) => {
     if (out !== undefined) appendFileSync(pathOf(out, "outside"), `${JSON.stringify(line)}\n`);
+  };
+  const worked = (line) => {
+    if (work !== undefined) appendFileSync(pathOf(work, "outside"), `${JSON.stringify(line)}\n`);
   };
   /** An exception: on stderr with each message (its first line), in `--out` with each stack and the source. */
   const thrown = (line, source) => {
@@ -275,7 +337,7 @@ if (process.argv[2] === "--child") {
   const fresh = () => {
     const created = fork(
       fileURLToPath(import.meta.url),
-      ["--child", JSON.stringify({ roots, allowances })],
+      ["--child", JSON.stringify({ roots, allowances, work: work !== undefined })],
       {
         execArgv: [`--max-old-space-size=${memory}`],
         serialization: "advanced",
@@ -297,7 +359,9 @@ if (process.argv[2] === "--child") {
   /**
    * One source's reply, or why it stalled (`timeout`, or how the process ended), with the runs that ended (`runs`). At
    * the deadline the process ends and the runs it had written are read before it closes: a source whose timeout
-   * callback has run stalls, with them.
+   * callback has run stalls, with them. With `--work`, each run's mode, check and each tree's units and milliseconds
+   * (`spent`); at a stall the run then going on keeps the units last reported, its milliseconds until the stall, and the
+   * tree that was running it (`running`).
    */
   const analysed = (message) =>
     new Promise((resolve) => {
@@ -305,9 +369,24 @@ if (process.argv[2] === "--child") {
       if (child?.connected !== true) child = fresh();
       const current = child;
       const runs = [];
+      const spent = [];
+      let going = null;
       let expired = false;
+      let ended;
+      const progressed = ({ run, tree, mode, check, work, ms }) => {
+        if (mode !== undefined) {
+          spent[run] ??= { mode, check, work: roots.map(() => null), ms: roots.map(() => null) };
+          going = { run, tree, since: performance.now() };
+        }
+        spent[run].work[tree] = work;
+        if (ms !== undefined) {
+          spent[run].ms[tree] = Math.round(ms);
+          going = null;
+        }
+      };
       const onMessage = (reply) => {
-        if ("run" in reply) runs.push(reply.run);
+        if ("progress" in reply) progressed(reply.progress);
+        else if ("run" in reply) runs.push(reply.run);
         else if (!expired) settle(reply);
       };
       const onError = (error) => settle({ stalled: String(error).slice(0, 200) });
@@ -325,11 +404,17 @@ if (process.argv[2] === "--child") {
           child = null;
           current.kill("SIGKILL");
         }
-        resolve({ ...(expired ? { stalled: "timeout" } : result), runs });
+        if (going !== null) {
+          const { run, tree, since } = going;
+          spent[run].ms[tree] = Math.round((ended ?? performance.now()) - since);
+          spent[run].running = tree;
+        }
+        resolve({ ...(expired ? { stalled: "timeout" } : result), runs, spent });
       };
       // (the process's `close` then settles the source, after the frames it had written)
       const timer = setTimeout(() => {
         expired = true;
+        ended = performance.now();
         current.kill("SIGKILL");
       }, timeout);
       current.on("message", onMessage).on("error", onError).on("close", onClose);
@@ -339,9 +424,34 @@ if (process.argv[2] === "--child") {
   const folder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), area);
   // each generator's sources in this shard, and with `--store` all of them (the area's PLAN)
   const every = await generatorsOf(folder, sizesOption);
+  // `--only`: of this area, the sources a stall index lists (`stalls.mjs`), each of which the area must hold
+  let only;
+  if (options.has("only")) {
+    let entries;
+    try {
+      ({ entries } = JSON.parse(readFileSync(option("only"), "utf8")));
+    } catch (error) {
+      refused(`--only ${option("only")}: ${error.message}`);
+    }
+    if (!Array.isArray(entries)) refused(`--only ${option("only")} is no stall index`);
+    only = new Set(
+      entries
+        .filter((entry) => path.basename(String(entry.area)) === path.basename(folder))
+        .map(({ generator, source, key }) => JSON.stringify([generator, source, key])),
+    );
+    const held = new Set(
+      every.flatMap(({ name, sources }) => sources.map((source) => placeOf(name, source))),
+    );
+    const missing = [...only].filter((place) => !held.has(place));
+    if (missing.length > 0) refused(`--only names sources the area does not hold: ${missing}`);
+  }
   const generators = every.map(({ sources, ...generator }) => ({
     ...generator,
-    sources: sources.filter((_, index) => index % shards === shard),
+    sources: sources.filter(
+      (source, index) =>
+        index % shards === shard &&
+        (only === undefined || only.has(placeOf(generator.name, source))),
+    ),
   }));
   /**
    * The stored runs of this shard's sources (each its line), by their place, from the baseline area: read only through
@@ -407,9 +517,26 @@ if (process.argv[2] === "--child") {
   ];
   const zeros = () => Object.fromEntries(counts.map((key) => [key, 0]));
   const total = { area, generators: 0, ...zeros(), modes: 4 };
+  // `--work`: what ran, then one line per source, then the total
+  worked({
+    work: {
+      area,
+      shard: `${shard}/${shards}`,
+      roots,
+      ...(baseline === undefined ? {} : { baseline }),
+      ...(store === undefined ? {} : { store: option("store") }),
+      ...(only === undefined ? {} : { only: option("only") }),
+      sizes: option("sizes") ?? null,
+      allowances: option("allowances") ?? DEFAULTS.allowances,
+      timeout: seconds,
+      memory,
+      node: process.version,
+    },
+  });
   for (const { name, checks, sources } of generators) {
     const row = { generator: name, ...zeros() };
     for (const source of sources) {
+      const before = { ...row };
       row.sources += 1;
       const reply = await analysed({ files: source.files, checks, globals: source.globals });
       const inputs = { files: source.files, globals: source.globals };
@@ -458,6 +585,20 @@ if (process.argv[2] === "--child") {
         row.exceptions += 1;
         thrown({ generator: name, source: source.name, thrown: failed }, source);
       } else if (stalled === undefined && !reply.parsed) row.unparsed += 1;
+      // the source's record: each run's units and milliseconds on each tree, and what it counted
+      if (work !== undefined)
+        worked({
+          generator: name,
+          source: source.name,
+          key: sourceKey(source),
+          runs: reply.spent,
+          counts: Object.fromEntries(
+            counts
+              .filter((key) => key !== "sources" && row[key] !== before[key])
+              .map((key) => [key, row[key] - before[key]]),
+          ),
+          ...(stalled === undefined ? {} : { stalled }),
+        });
     }
     console.log(JSON.stringify(row));
     total.generators += 1;
@@ -474,6 +615,7 @@ if (process.argv[2] === "--child") {
     if (published.refused !== undefined) refused(published.refused);
     Object.assign(ended, { stored: storing.file, verified: published.verified });
   }
+  worked({ total: ended });
   console.log(JSON.stringify(ended));
   process.exitCode =
     total.differences + total.stalled + total.exceptions + total.unanswered + total.uncompared === 0

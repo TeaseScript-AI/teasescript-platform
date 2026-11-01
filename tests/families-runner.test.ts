@@ -613,15 +613,15 @@ test("the stored baselines' tools show no plain write outside the gate in their 
     ["owned"],
   );
   // the child processes, each of a form the inventory proves creates and changes no path (any other is an unproven
-  // site); the modules loaded by a computed name are a tree's oracle library and an area's generators, which are no
-  // tool's
+  // site); the modules loaded by a computed name are a tree's oracle library and work ledger and an area's generators,
+  // which are no tool's
   assert.deepEqual(
     processes.map((process) => process.allowed),
     ["the gate's lock holder", "the runner's own child"],
   );
   assert.deepEqual(
     loads.map((load) => load.function),
-    ["oracles", "generatorsOf"],
+    ["oracles", "ledgerOf", "generatorsOf"],
   );
   // the hook writes nothing: no file command, no redirection (after a space, as the script writes them) but to /dev/null
   // or stderr, once its comments and then its single-quoted programs are set aside
