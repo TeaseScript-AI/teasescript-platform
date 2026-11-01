@@ -1133,8 +1133,9 @@ const LEDGER = `export class WorkLedger {
 
 /**
  * A built tree's library whose analyses charge its ledger 3,000 units a run: `throws` throws on both trees, `ends` ends
- * the process there; `busy` waits
- * 200 ms on the base; `lagging` waits 600 ms on the head's first run; `slow` charges a billion units more on the head and
+ * the process there, as `twin` does where `FIXTURE_ENDS` is set; else the head's clock (its process's
+ * `performance.now`) moves 3,000 ms on through each of `twin`'s runs in its first repeat or its second
+ * (`FIXTURE_SKEW`), no time passing; `busy` waits 200 ms on the base; `lagging` waits 600 ms on the head's first run; `slow` charges a billion units more on the head and
  * waits 150 ms there; `burst` charges 10,000 times 65,536 units at once on the head, then waits; `changed` publishes its
  * second part otherwise on the head. Its stop sets differ on the head at demand allowance 1 and wait there at 2.
  */
@@ -1145,12 +1146,18 @@ export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
 );
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const clock = performance.now.bind(performance);
+let skew = 0;
+let twins = 0;
+performance.now = () => clock() + skew;
 export function publicationHashes(files, mode) {
   const source = files[0].source;
   const ledger = new WorkLedger();
   for (let unit = 0; unit < 1000; unit += 1) ledger.charge("frames", 3);
   if (source === "throws") throw new Error("independent exception witness");
-  if (source === "ends") process.exit(3);
+  if (source === "ends" || (source === "twin" && process.env.FIXTURE_ENDS)) process.exit(3);
+  if (${head} && source === "twin" && (twins++ < 4) === (process.env.FIXTURE_SKEW === "first"))
+    skew += 3000;
   if (!${head} && source === "busy") wait(200);
   if (${head} && source === "lagging" && mode === MODES[0]) wait(600);
   if (${head} && source === "slow") {
@@ -1278,6 +1285,49 @@ test("the corpus runner records each source's work and time, a stalled run's to 
     const mixed = run(stalls, four, three);
     assert.equal(mixed.status, 2, mixed.stdout);
     assert.match(mixed.stderr, /compares otherwise than the area's other shards \(plan\)/);
+    // a source the plan lists twice (#1582): its repeats, run and counted in two shards, are one source
+    const repeated = area("repeated", ["dup", "fast", "lone", "dup"]);
+    const [half, other] = [join(directory, "half.work.jsonl"), join(directory, "other.work.jsonl")];
+    run(runner, repeated, base, head, "--shard", "0/2", "--work", half);
+    run(runner, repeated, base, head, "--shard", "1/2", "--work", other);
+    const once = run(stalls, half, other);
+    assert.equal(once.status, 0, once.stderr);
+    const { sources, repeats, agreed, closed } = lines(once.stdout).at(-1);
+    assert.deepEqual([sources, repeats, agreed, closed], [3, 1, 3, true]);
+    // a source the plan lists twice whose repeats end alike in a rerun, one of them in times the time clause judges a
+    // candidate, first or second, as the head's clock says (#1583 r1): the candidate stands, so the replay stays open
+    const clocked = area("clocked", ["twin", "twin"]);
+    const withEnv = (env: Record<string, string>, tool: string, ...args: string[]) =>
+      spawnSync(process.execPath, [tool, ...args], {
+        encoding: "utf8",
+        env: { ...process.env, ...env },
+      });
+    for (const skew of ["first", "second"]) {
+      const clockedWork = join(directory, `clocked-${skew}.work.jsonl`);
+      const clockedIndex = join(directory, `clocked-${skew}.json`);
+      withEnv({ FIXTURE_ENDS: "1" }, runner, clocked, base, head, "--work", clockedWork);
+      run(stalls, clockedWork, "--index", clockedIndex);
+      const reran = join(directory, `clocked-${skew}`);
+      withEnv({ FIXTURE_SKEW: skew }, stalls, "rerun", clockedIndex, base, head, reran);
+      const ms = lines(readFileSync(join(reran, "clocked.work.jsonl"), "utf8"))
+        .slice(1, -1)
+        .map(({ runs: ran }) =>
+          ran.reduce((sum: number, { ms: [, of] }: { ms: number[] }) => sum + (of ?? 0), 0),
+        );
+      assert.ok(
+        skew === "first" ? ms[0] >= 12000 && ms[1] < 1000 : ms[1] >= 12000 && ms[0] < 1000,
+        String(ms),
+      );
+      const merged = lines(
+        run(stalls, clockedWork, "--rerun", join(reran, "clocked.work.jsonl")).stdout,
+      );
+      const [twin] = merged.filter(({ source }) => source === "twin");
+      assert.deepEqual([twin.rerun.outcome, twin.rerun.verdict], ["agreed", "candidate"]);
+      assert.deepEqual(
+        [merged.at(-1).repeats, merged.at(-1).candidate, merged.at(-1).closed],
+        [1, 1, false],
+      );
+    }
     // one library (#1564 r3's mixed-dist witness): two heads given as their `dist/`, one compiled `src/` and two oracle
     // libraries, compare otherwise and are refused together; one head's `dist/` in both shards closes
     const twin = join(directory, "twin");
@@ -1635,6 +1685,89 @@ test("the stall index decides each stalled source from its record by one rule: t
     const both = run(half("0/2", "first"), second);
     assert.equal(both.status, 0, both.stderr);
     assert.equal(lines(both.stdout).at(-2).shards, "2/2");
+    // a source the plan lists twice (#1582): one source where its repeats record the same, milliseconds apart; refused,
+    // naming the place, where they differ, in a replay and in a rerun
+    const twice = (name: string, counts: Record<string, number>[], why?: string) =>
+      shard(
+        name,
+        2,
+        counts.map((second, index) => ({
+          source: "dup",
+          stalled: why,
+          runs: [publication([5, 5], [1, index + 1])],
+          counts: second,
+        })),
+      );
+    const alike = lines(run(twice("alike", [{ runs: 1 }, { runs: 1 }])).stdout).at(-1);
+    assert.deepEqual([alike.sources, alike.repeats, alike.closed], [1, 1, true]);
+    const unlike = run(twice("unlike", [{ runs: 1 }, { runs: 1, differences: 1 }]));
+    assert.equal(unlike.status, 2);
+    assert.match(
+      unlike.stderr,
+      /holds a source another record holds otherwise: \["unlike","g.mjs","dup","k"\]/,
+    );
+    const stalledTwice = twice("rerunning", [{ stalled: 1 }, { stalled: 1 }], "timeout");
+    const rerunTwice = join(directory, "rerun-twice.work.jsonl");
+    writeFileSync(
+      rerunTwice,
+      readFileSync(
+        twice("rerunning-again", [{ runs: 1 }, { runs: 1, differences: 1 }]),
+        "utf8",
+      ).replaceAll('"area":"rerunning-again"', '"area":"rerunning"'),
+    );
+    assert.equal(run(stalledTwice).status, 1);
+    assert.match(
+      run(stalledTwice, "--rerun", rerunTwice).stderr,
+      /holds a source another record holds otherwise: \["rerunning","g.mjs","dup","k"\]/,
+    );
+    // repeats whose times differ (#1583 r1): the one the time clause judges a candidate stands for them, in either
+    // order, in one record or across shards, in a replay, its index and its rerun
+    const timed = (ms: number, stall = true) => ({
+      source: "dup",
+      ...(stall ? { stalled: "timeout" } : {}),
+      runs: [publication([100, 100], [1, ms])],
+      counts: stall ? { stalled: 1 } : { runs: 1 },
+    });
+    for (const order of [
+      [1, 30000],
+      [30000, 1],
+    ]) {
+      const name = `timed-${order[0]}`;
+      const index = join(directory, `${name}.json`);
+      const together = lines(
+        run(
+          shard(
+            name,
+            2,
+            order.map((ms) => timed(ms)),
+          ),
+          "--index",
+          index,
+        ).stdout,
+      );
+      assert.equal(together.at(-1).candidate, 1);
+      const [entry] = JSON.parse(readFileSync(index, "utf8")).entries;
+      assert.deepEqual([entry.verdict, entry.runs[0].head.ms], ["candidate", 30000]);
+      const split = order.map((ms, at) =>
+        shard(`${name}-split`, 2, [timed(ms)], { at: `${at}/2`, file: `${name}-${at}` }),
+      );
+      assert.equal(lines(run(...split).stdout).at(-1).candidate, 1);
+      const replayed = shard(`${name}-rerun`, 2, [timed(1), timed(1)]);
+      const reran = join(directory, `${name}-again.work.jsonl`);
+      writeFileSync(
+        reran,
+        readFileSync(
+          shard(
+            `${name}-again`,
+            2,
+            order.map((ms) => timed(ms, false)),
+          ),
+          "utf8",
+        ).replaceAll(`"area":"${name}-again"`, `"area":"${name}-rerun"`),
+      );
+      const closing = lines(run(replayed, "--rerun", reran).stdout).at(-1);
+      assert.deepEqual([closing.agreed, closing.candidate, closing.closed], [1, 1, false]);
+    }
     const otherwise = half("0/2", "otherwise", { ...CONFIGURATION, allowances: [1, 2] });
     assert.match(
       run(otherwise, second).stderr,
