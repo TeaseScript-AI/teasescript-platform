@@ -207,7 +207,8 @@ test("a stack of diamonds of copies and its siblings grow with the program in ei
 /**
  * #1466, Codex r5's F1 (TABLE r4.245): k reads of `h.p<i>` each answered by k layers holding a source on its path, so the
  * summaries' demands are the answers' own pairs P, counted from the program's holders: at k 16 and 32 in the four modes
- * the demands are exactly P (one per pair, never repeated, never a pass-through layer's), `checks` at or under `main`'s,
+ * the demands are exactly P less the pairs one source answers by reference (TABLE r4.251), one per pair a summary
+ * answers, never repeated, never a pass-through layer's, `checks` at or under `main`'s,
  * `invSteps` growing at or under `main`'s, and the total's excess over `main` per pair not rising (r4.245's exception for
  * an output-bound family; the control keeps the total's bound). `main`'s work is the family's measured oracle.
  */
@@ -233,7 +234,11 @@ test("summaries' demands on output-bound reads are their answers' pairs, at main
         );
         const [total, checks, invSteps] = family.main[k][mode]!;
         const name = `${family.name} at ${k}, mode ${mode}`;
-        assert.equal(budget.facts.layerDemands, family.pairs(k), `${name}: one demand per pair`);
+        assert.equal(
+          budget.facts.layerDemands,
+          family.pairs(k) - family.references(k),
+          `${name}: one demand per pair a summary answers`,
+        );
         assert.ok(
           (budget.counts.get("checks") ?? 0) <= checks,
           `${name}: checks at or under main's`,
@@ -268,17 +273,16 @@ test("summaries' demands on output-bound reads are their answers' pairs, at main
 
 /**
  * #1466, the READY replay's `graph/224` and `graph/533` (a mutual feedback whose candidate route asks one `q` deeper per
- * question) and the deep read they showed (TABLE r4.250): a read `depth` properties down walks its path's steps once,
- * each prefix's text made one step longer than the last and only looked up, never kept, and the path's id made below
- * the longest prefix that walk found made. Kept texts made the literal work a power of the depth steeper and took the
- * route past the allowance. At depths 16, 32 and 64 in the four modes, against `main`'s work there (measured on
- * 7d6c4d3d4: a regression oracle of this shape): the literal work grows at or under `main`'s at each doubling, and
- * `invSteps` by r4.231's falling reading (the head's growth falling, within 3 % of `main`'s at the later doubling),
- * which a second walk for the id put 3.4 % over. The total grows faster than `main`'s on this shape and stays above it
- * (clauses (a) and (b): 21 % and 26 % at 64 with the sharing on and off), which r4.250 holds open; the PR's evidence
- * reports both.
+ * question) and the deep read they showed (TABLE r4.250, r4.251): a read `depth` properties down, one holder answering
+ * it, asks that holder's source by reference at the caller's own path (`singleSource`), never a layer's summary rebuilt
+ * from the path's record, and walks its path's steps once, its prefixes' texts never kept. At depths 16 and 32 in the
+ * four modes, against `main`'s work there (measured on 7d6c4d3d4: a regression oracle of this shape): no layer demand;
+ * the total, `invSteps` and `checks` at or under `main`'s and the total's and the literal work's growth too (kept texts
+ * made the literal work a power of the depth steeper, a second walk for the path's id put `invSteps` above `main`'s). At
+ * depths 2 to 7 the head's excess over `main` is at most 6, 14, 11, 8, 5 and 2 units: the reference's fixed setup, 23 − 3D
+ * from 3 on, gone by 8 (the PR's evidence has its ledger).
  */
-test("a deep read walks its path's steps once and keeps no text per prefix (#1466)", () => {
+test("a deep read asks its one holder's source by reference and walks its path's steps once (#1466)", () => {
   const source = (depth: number): string =>
     [
       "let a={left:1,q:null}",
@@ -289,55 +293,72 @@ test("a deep read walks its path's steps once and keeps no text per prefix (#146
       "say read",
       "exit",
     ].join("\n");
-  type Counter = "literalUnits" | "invSteps";
-  // (`main`'s work at depths 16, 32 and 64, the sharing on and off, equal in either order)
-  const shared = { literalUnits: [1974, 6030, 25070], invSteps: [2103, 7187, 26571] };
-  const unshared = { literalUnits: [562, 1782, 10542], invSteps: [2184, 7364, 26940] };
-  const main: readonly Readonly<Record<Counter, readonly number[]>>[] = [
-    shared,
-    unshared,
-    shared,
-    unshared,
-  ];
+  type Counter = "total" | "invSteps" | "checks" | "literalUnits";
+  // (`main`'s work at depths 16 and 32, and its totals at 2 to 7, the sharing on and off, equal in either order)
+  const shared = {
+    total: [8855, 23083],
+    invSteps: [2103, 7187],
+    checks: [260, 356],
+    literalUnits: [1974, 6030],
+    small: [2410, 2712, 3037, 3385, 3758, 4155],
+  };
+  const unshared = {
+    total: [7451, 18875],
+    invSteps: [2184, 7364],
+    checks: [260, 356],
+    literalUnits: [562, 1782],
+    small: [2193, 2453, 2727, 3018, 3328, 3656],
+  };
+  const main = [shared, unshared, shared, unshared];
+  // (the reference's setup at depths 2 to 7)
+  const SETUP = [6, 14, 11, 8, 5, 2];
   const modes = [
     [false, false],
     [false, true],
     [true, false],
     [true, true],
   ] as const;
-  // (r4.231's slack on the head's growth over `main`'s)
-  const SLACK = 1.03;
   modes.forEach(([reversed, unshared], mode) => {
-    const sizes = [16, 32, 64].map((depth) => {
+    const at = (depth: number) => {
       const request = coreRequest([{ path: "main.tease", source: source(depth) }]);
       assert.ok(request !== null, `a read ${depth} deep: its files parse and resolve`);
-      const { counts } = analysed(
-        { name: `a read ${depth} deep`, request },
-        reversed,
-        unshared,
-      ).budget;
-      return {
-        literalUnits: counts.get("literalUnits") ?? 0,
-        invSteps: counts.get("invSteps") ?? 0,
-        nodes: counts.get("syntaxNodes") ?? 1,
+      const { budget } = analysed({ name: `a read ${depth} deep`, request }, reversed, unshared);
+      const counts: Record<Counter, number> = {
+        total: budget.total,
+        invSteps: budget.counts.get("invSteps") ?? 0,
+        checks: budget.counts.get("checks") ?? 0,
+        literalUnits: budget.counts.get("literalUnits") ?? 0,
       };
+      return {
+        counts,
+        demands: budget.facts.layerDemands,
+        nodes: budget.counts.get("syntaxNodes") ?? 1,
+      };
+    };
+    const ours = main[mode]!;
+    const sizes = [at(16), at(32)];
+    sizes.forEach((size, index) => {
+      const name = `mode ${mode}, ${16 << index} deep`;
+      assert.equal(size.demands, 0, `${name}: no layer demand`);
+      for (const counter of ["total", "invSteps", "checks"] as const)
+        assert.ok(
+          size.counts[counter] <= ours[counter][index]!,
+          `${name}: ${counter} ${size.counts[counter]} against main's ${ours[counter][index]}`,
+        );
     });
-    // (the growth per doubling over the syntax nodes' ratio, the head's and `main`'s on the same programs)
-    const growth = (of: readonly number[], at: number): number =>
-      (2 * of[at + 1]!) / of[at]! / (sizes[at + 1]!.nodes / sizes[at]!.nodes);
-    const head = (counter: Counter): number[] => sizes.map((size) => size[counter]);
-    const over = (counter: Counter, at: number): number =>
-      growth(head(counter), at) / growth(main[mode]![counter], at);
-    for (const at of [0, 1])
+    const scale = sizes[1]!.nodes / sizes[0]!.nodes;
+    for (const counter of ["total", "literalUnits"] as const) {
+      const growth = (2 * sizes[1]!.counts[counter]) / sizes[0]!.counts[counter] / scale;
+      const mains = (2 * ours[counter][1]!) / ours[counter][0]! / scale;
       assert.ok(
-        over("literalUnits", at) <= 1,
-        `mode ${mode}: literalUnits ${over("literalUnits", at).toFixed(3)} × main's growth at doubling ${at + 1}`,
+        growth <= mains,
+        `mode ${mode}: ${counter} ${growth.toFixed(4)} against main's ${mains.toFixed(4)}`,
       );
-    const steps = head("invSteps");
-    assert.ok(
-      growth(steps, 1) < growth(steps, 0) && over("invSteps", 1) <= SLACK,
-      `mode ${mode}: invSteps ${growth(steps, 0).toFixed(3)} then ${growth(steps, 1).toFixed(3)}, ${over("invSteps", 1).toFixed(3)} × main's growth`,
-    );
+    }
+    SETUP.forEach((setup, index) => {
+      const excess = at(index + 2).counts.total - ours.small[index]!;
+      assert.ok(excess <= setup, `mode ${mode}, ${index + 2} deep: ${excess} over main's`);
+    });
   });
 });
 
@@ -365,9 +386,11 @@ test("a read finds the joined layer listing its step by the place's map (#1466)"
 
 /**
  * #1466, Codex r2's sibling and its shared shape: a read below nested joins, or below joined copies over a record listing
- * the same step, asks only the layer holding its property, never a joining layer or a copy it passes through, so the
- * summaries' demands are one per property: k, at each size and in either order (r4.227's bound for these families, a
- * regression oracle of the selection).
+ * the same step, asks only the layer holding its property, never a joining layer or a copy it passes through. Below
+ * nested joins that layer's one source answers the read by reference, so no summary's demand is made (TABLE r4.251);
+ * over the shared record a listing layer lies below the step, so each property's holder makes its summary's demand, one
+ * per property: k, at each size and in either order (r4.227's bound; a regression oracle of the selection, where a
+ * joining layer asked too would make the read's summaries' demands).
  */
 test("a read below nested or shared joins asks only the layers holding its path (#1466)", () => {
   const families = LAYER_FAMILIES.filter(
@@ -378,7 +401,7 @@ test("a read below nested or shared joins asks only the layers holding its path 
       for (const reversed of [false, true])
         assert.equal(
           analysed(sized(family, k), reversed).budget.facts.layerDemands,
-          k,
+          family.name === "shared-join" ? k : 0,
           `${family.name} at ${k}${reversed ? " reversed" : ""}`,
         );
 });

@@ -100,7 +100,9 @@ export interface EntryGroup {
  * an alias shares its source's layers and adds only its own sources (r4.38), so k aliases each adding a field are k
  * small layers, never k maps of up to k fields, and a join of two copies references both, never a flattened list
  * (r4.46 (3)). A read below a layer is answered once per layer and path (`layerSupport`, `layerDemand`), from its own
- * sources and its parent's and joins' answers (#1466).
+ * sources and its parent's and joins' answers (#1466); where the read's layers are one layer whose summary would be one
+ * source's answer alone, the read asks that source's own demand instead, a reference, never a summary made
+ * (`singleSource`, TABLE r4.251).
  */
 export interface SubLayer {
   /** Its own sources by their first step. */
@@ -205,7 +207,8 @@ export interface LayerOrigin {
 export interface LayerPath {
   /** The sources there with a store at the path, as a support of source keys (`layerSupport`). */
   support?: SupportNode | null;
-  /** The demand of its summary there (`layerDemand`). */
+  /** The demand of its summary there (`layerDemand`), made only where a read asks a summary, never for a read its one
+   * source answers by reference (`singleSource`). */
   demand?: ProofDemand<LayerProof>;
 }
 
@@ -587,7 +590,8 @@ export interface ContractFacts {
   /**
    * #1466: the layer answers' support nodes made (leaves and branches, each once per pass), the links they and the
    * layers' answers keep (a branch's two children, a union's memo, a layer's answer at a path), the summary demands
-   * made, and the sources the exact enumeration listed (`relevantSubs`, its output's size).
+   * made (a read its one source answers by reference makes none, `singleSource`), and the sources the exact enumeration
+   * listed (`relevantSubs`, its output's size).
    */
   supportNodes: number;
   supportEdges: number;

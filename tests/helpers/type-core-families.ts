@@ -6487,6 +6487,12 @@ export interface OutputBoundFamily {
   readonly source: (k: number) => string;
   /** The answers' distinct holder-layer/path pairs, counted from the program's own holders (`main`'s enumeration). */
   readonly pairs: (k: number) => number;
+  /**
+   * Of those, the pairs one source answers alone, asked by reference with no summary's demand (TABLE r4.251): a holder
+   * layer with one own source under the path's first step and no listing layer below it, counted from the program's
+   * holders (each arm's `unique<i>`, `mixed` its `h.local<i>` too; `pairs` the first arm's `unique0`).
+   */
+  readonly references: (k: number) => number;
   /** Whether the pairs grow with the program's answers (r4.245's exception for its totals), or the family is a control. */
   readonly outputBound: boolean;
   /**
@@ -6503,6 +6509,7 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
       "Codex r5's F1: k joined copies over a seed of k fields, every copy holding `h`, read at each `h.p<i>`",
     source: (k) => sharedReads(k, "shared"),
     pairs: (k) => k * k + 2 * k,
+    references: (k) => k,
     outputBound: true,
     main: {
       16: [
@@ -6524,6 +6531,7 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
     measures: "Codex r5's F1 with the copies joined in reverse",
     source: (k) => sharedReads(k, "shared", true),
     pairs: (k) => k * k + 2 * k,
+    references: (k) => k,
     outputBound: true,
     main: {
       16: [
@@ -6545,6 +6553,7 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
     measures: "Codex r5's F1 with each copy storing below `h` too",
     source: (k) => sharedReads(k, "mixed"),
     pairs: (k) => k * k + 3 * k,
+    references: (k) => 2 * k,
     outputBound: true,
     main: {
       16: [
@@ -6566,6 +6575,7 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
     measures: "Codex r5's control: k places each joining two copies, read at one property of each",
     source: (k) => sharedReads(k, "pairs"),
     pairs: () => 5,
+    references: () => 1,
     outputBound: false,
     main: {
       16: [

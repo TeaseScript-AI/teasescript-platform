@@ -45,7 +45,7 @@ import {
   type HeldCase,
 } from "./helpers/type-core-held-host.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
-import { inMode, keptErrors, MODES, stopIdentity } from "./helpers/type-core-oracles.js";
+import { inMode, keptErrors, MODES, stopIdentity, stopSet } from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 import { stopProblems, type Globals, type StopRun } from "./helpers/type-core-stop-oracle.js";
 
@@ -3558,4 +3558,59 @@ test("after a decision stops through its consumers, every read of an occurrence 
   } finally {
     Contract.prototype.contractOfValue = original;
   }
+});
+
+/**
+ * #1466, the families runner's stops area at demand allowance 256 (`1249-astra-r2-written-origins`,
+ * `1249-astra-copy-and-cycle-cases`): a read one holder's source answers asks that source by reference (TABLE r4.251),
+ * so its decision costs what `main`'s does and stops where `main`'s does; a summary rebuilt from the path's record cost
+ * the decision about 80 units more and stopped `c` at `next.n`, and `other` at `inner.tone`, which `main` completes.
+ * Every stop set in the four modes is `main`'s (measured on 7d6c4d3d4: a regression oracle of these sources).
+ */
+test("a read its one holder's source answers stops where main's does at a small demand allowance (#1466)", () => {
+  const written = (read: boolean): string =>
+    [
+      "let w:integer=1",
+      "let first=w",
+      "let alias=first",
+      "let a={n: alias, next: null}",
+      "a.next=a",
+      'let b={next:{n:"text"}}',
+      "let c=a",
+      "c=b",
+      ...(read ? ["say c.next.n"] : []),
+      "exit",
+    ].join("\n");
+  const cycle = [
+    "let a={tone:1,inner:null}",
+    "a.inner=a",
+    'let bad={inner:{tone:"bad"}}',
+    "let other=bad",
+    "other=a",
+    "say other.inner.tone",
+    "exit",
+  ].join("\n");
+  const tone = (decided: number) => [1, "other", "inner.tone", decided];
+  const cases = [
+    {
+      source: written(false),
+      globals: ["hostValue", "hostInit", "hostOther"],
+      stops: [[], [], [], []],
+    },
+    {
+      source: written(true),
+      globals: ["hostValue", "hostInit", "hostOther"],
+      stops: [[], [], [], []],
+    },
+    {
+      source: cycle,
+      globals: ["hostValue", "hostOther"],
+      stops: [[tone(7)], [], [tone(1)], [tone(1)]],
+    },
+  ];
+  for (const { source, globals, stops } of cases)
+    MODES.forEach((mode, index) => {
+      const set = stopSet([{ path: "main.tease", source }], mode, globals, 256);
+      assert.deepEqual(set?.stops, stops[index], `${source}\nmode ${index}`);
+    });
 });

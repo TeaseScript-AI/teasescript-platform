@@ -780,3 +780,67 @@ test("a stop whose own entries merge into one publishes main's records, its answ
     );
   }
 });
+
+/**
+ * #1466, TABLE r4.251: a read one holder's source answers asks that source by reference at the read's whole path, so
+ * the answer is the source's own there (a reference at the path's first step alone answered the object at `g`,
+ * `unknown`, for every property), and keeps the mark a tested path's guard leaves on the source's holder (§3.2): the
+ * host value stored at `a.g.n`, tested before `b` copies `a`, reads guarded through `b`'s layer, as the source read by
+ * itself does. In the four modes.
+ */
+test("a read its one holder's source answers is that source's answer at its whole path, its marks kept (#1466)", () => {
+  const bindings = (source: string, names: readonly string[], path: readonly string[] = []) => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const places = new CoreProgram(request).places;
+    const ids = names.map(
+      (name) =>
+        places.find((place) => place.kind.kind === "binding" && place.kind.name === name)!.id,
+    );
+    return MODES.map((mode) => {
+      const answers = inMode(mode, () => analyseCore(request));
+      return ids.map((id) => answers.place(id, path).contract);
+    });
+  };
+  // (three copies of one seed, each storing its own property below one step, joined, read at each)
+  const joined = [
+    "let seed = {g: {z: 1}}",
+    "let c0 = seed",
+    "c0.g.p0 = 1",
+    "let c1 = seed",
+    'c1.g.p1 = "s"',
+    "let c2 = seed",
+    "c2.g.p2 = [true]",
+    "let joined = c0",
+    "joined = c1",
+    "joined = c2",
+    "let one = joined.g.p0",
+    "let two = joined.g.p1",
+    "let three = joined.g.p2",
+    "exit",
+  ].join("\n");
+  for (const contracts of bindings(joined, ["one", "two", "three"]))
+    assert.deepEqual(
+      contracts.map(({ kinds }) =>
+        kinds.some((item) => ["integer", "string", "list"].includes(item.tag)),
+      ),
+      [true, true, true],
+    );
+  for (const contracts of bindings(joined, ["one", "two", "three"]))
+    assert.deepEqual(
+      contracts.map(({ kinds }) =>
+        kinds.map((item) => item.tag).filter((tag) => tag !== "unknown"),
+      ),
+      [["integer"], ["string"], ["list"]],
+    );
+  const tested = flagged(
+    "let seed = {g: {n: 1.5}}\nlet a = seed\na.g.n = hostValue\nlet b = a\nif a.g.n is integer { b = a }\nlet x: integer = b.g.n\nexit",
+  );
+  for (const [contract] of bindings(tested, ["b"], ["g", "n"]))
+    assert.ok(
+      contract!.kinds.some(
+        (item) => item.tag === "unknown" && item.ingress !== undefined && item.guarded === true,
+      ),
+      "the host value read through the copy's layer is guarded",
+    );
+});

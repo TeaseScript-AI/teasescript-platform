@@ -183,11 +183,14 @@ const layerRequest = (source: string): CoreAnalysisRequest => {
 };
 
 test("a layer's summary in a copy cycle is solved alike from each member as the entry and in either order (#1466)", () => {
-  for (const source of LAYER_CYCLES) {
+  // (a cycle whose read one source answers asks it by reference, no summary made (TABLE r4.251): its component is solved
+  // alike too; the others' components hold a layer's summary)
+  const layered = LAYER_CYCLES.filter((source) => {
     const found = componentDifferences(source, layerRequest(source));
-    assert.ok(found.layered > 0, `${source}: a component holds a layer's summary`);
-    assert.deepEqual(found.differing, []);
-  }
+    assert.deepEqual(found.differing, [], source);
+    return found.layered > 0;
+  });
+  assert.ok(layered.length > 0, "a cycle's component holds a layer's summary");
 });
 
 /**
