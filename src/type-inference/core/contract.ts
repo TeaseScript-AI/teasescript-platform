@@ -107,6 +107,7 @@ import type {
   PrefixNode,
   PrefixStores,
   PresenceStep,
+  PropertyIndex,
   ReadClass,
   ReadClassGroup,
   ReadEntry,
@@ -402,6 +403,8 @@ export class Contract {
   readonly levelBases = new Map<CanonicalKey, PrefixLevels>();
   /** A prefix's entries that answer by themselves, in groups of one class (`entryGroups`). */
   readonly entryGroupsOf = new WeakMap<PrefixLevels, readonly EntryGroup[]>();
+  /** #1456: per prefix's stores whose entries are closed objects, its property index (`propertyItems`). */
+  readonly propertyIndexes = new WeakMap<PrefixStores, PropertyIndex>();
   readonly groups = new WeakMap<
     readonly unknown[],
     Map<Key, { readonly byCallable: Map<Callable | null, ReadGroup>; readonly list: ReadGroup[] }>
