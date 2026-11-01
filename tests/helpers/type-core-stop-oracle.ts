@@ -6,7 +6,6 @@ import type { Answers } from "../../src/type-inference/core/answers.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
-import { sentences } from "./type-core-oracles.js";
 
 /*
  * The stop oracle (D4 a′, TABLE r4.99, r4.100, r4.108): a compile stopped at some unit against the unstopped compile,
@@ -144,16 +143,89 @@ function offsets(d: Compiled["diagnostics"][number]): Span {
   return { start: d.span.start.offset, end: d.span.end.offset };
 }
 
-/** The texts a sentence holds in single quotes: the names and the code it shows. */
-function quoted(sentence: string): Set<string> {
-  return new Set(Array.from(sentence.matchAll(/'([^']*)'/g), (match) => match[1]!));
+/**
+ * How the message modules (`src/type-inference/core/messages.ts` and `messages/`) word a diagnostic, as closed lists the
+ * oracle's own test checks against every literal text there (#1449): the first word of a fix's sentence (`fix`) and of
+ * any other (`prose`), and the last words before a quoted text, which make it code a fix shows (`code`, as in
+ * `as in 'if n is integer { … }'`) or a name (`name`; none at a sentence's start or after a colon). A word in no list
+ * leaves its sentence or quoted text unknown, and such a sentence is compared exactly.
+ */
+export const MESSAGE_WORDS = {
+  fix:
+    "Add|Assign|Call|Check|Combine|Compare|Convert|Copy|Divide|Give|" +
+    "Join|Keep|Put|Read|Select|Show|Subtract|To|Use|Write",
+  prose: "A|An|Arithmetic|Checking|If|It|Its|Most|The|This",
+  code: "as|as in|type|Use|with|Write|write",
+  name:
+    "A|a|Add|after|an|and|Assign|assign|before|but|by|cannot set|cannot write|change|Check|Checking|Convert|Copy|" +
+    "Divide|for|Give|give|in|Keep|method|no|of|outside|parameter|property|same type with|show|so|that|to|where|without",
+};
+
+const listed = (words: string): ReadonlySet<string> => new Set(words.split("|"));
+const [FIX, CODE, NAME] = [
+  listed(MESSAGE_WORDS.fix),
+  listed(MESSAGE_WORDS.code),
+  listed(MESSAGE_WORDS.name),
+];
+
+/** What a quoted text is by the words before it in its sentence (`MESSAGE_WORDS`), the longest listed words deciding. */
+export function quotedAs(before: string): "code" | "name" | "unknown" {
+  const words = before
+    .split(/\s+/)
+    .filter((word) => word !== "")
+    .map((word) => word.replace(/,$/, ""));
+  if (words.length === 0 || words.at(-1)!.endsWith(":")) return "name";
+  for (let count = Math.min(3, words.length); count > 0; count -= 1) {
+    const last = words.slice(-count).join(" ");
+    if (CODE.has(last)) return "code";
+    if (NAME.has(last)) return "name";
+  }
+  return "unknown";
+}
+
+/** A message's sentence: its text, whether it starts as a fix does, and what each text it quotes is (`quotedAs`). */
+interface Sentence {
+  readonly text: string;
+  readonly fix: boolean;
+  readonly quotes: readonly ReturnType<typeof quotedAs>[];
+}
+
+/**
+ * A message's sentences, each ending at a full stop or question mark outside its quoted texts, so a name or code holding
+ * one stays whole. A quote opens after a space or an opening bracket and closes before a space, punctuation or the end.
+ */
+function spoken(message: string): Sentence[] {
+  const out: Sentence[] = [];
+  let [start, before, inside] = [0, "", false];
+  let quotes: ReturnType<typeof quotedAs>[] = [];
+  const end = (at: number): void => {
+    const text = message.slice(start, at).trim();
+    if (text !== "") out.push({ text, fix: FIX.has(/^[A-Za-z]+/.exec(text)?.[0] ?? ""), quotes });
+    [start, before, quotes] = [at, "", []];
+  };
+  for (let index = 0; index < message.length; index += 1) {
+    const [here, last, next] = [
+      message[index]!,
+      message[index - 1] ?? " ",
+      message[index + 1] ?? " ",
+    ];
+    if (inside) inside = !(here === "'" && /[\s.,;:!?)\]]/.test(next));
+    else if (here === "'" && /[\s([]/.test(last)) {
+      quotes.push(quotedAs(before));
+      [before, inside] = ["", true];
+    } else {
+      before += here;
+      if ((here === "." || here === "?") && /\s/.test(next)) end(index + 1);
+    }
+  }
+  end(message.length);
+  return out;
 }
 
 /**
  * Whether a stopped diagnostic is the unstopped one as a stop keeps it: the same severity, code and span, and the same
- * message but for its fix, which a stop's unchecked region gives in words where the unstopped compile gives code (TABLE
- * r4.162): a sentence after the first that quotes code the stopped one lacks, while the stopped one quotes nothing the
- * unstopped message does not.
+ * message but for a fix a stop's unchecked region gives in words where the unstopped compile shows code (TABLE r4.162):
+ * a sentence that starts as a fix both times, the unstopped one showing code and the stopped one quoting names only.
  */
 function keeps(
   want: Compiled["diagnostics"][number],
@@ -162,17 +234,17 @@ function keeps(
   const { message: before, ...wanted } = want;
   const { message: after, ...found } = got;
   if (JSON.stringify(wanted) !== JSON.stringify(found)) return false;
-  const [was, is] = [sentences(before), sentences(after)];
-  const named = quoted(before);
+  const [was, is] = [spoken(before), spoken(after)];
   return (
     was.length === is.length &&
-    was.every((sentence, index) => {
-      if (sentence === is[index]) return true;
-      const [code, words] = [quoted(sentence), quoted(is[index]!)];
+    was.every((code, index) => {
+      const words = is[index]!;
       return (
-        index > 0 &&
-        [...code].some((text) => !words.has(text)) &&
-        [...words].every((text) => named.has(text))
+        code.text === words.text ||
+        (code.fix &&
+          words.fix &&
+          code.quotes.includes("code") &&
+          words.quotes.every((quote) => quote === "name"))
       );
     })
   );
