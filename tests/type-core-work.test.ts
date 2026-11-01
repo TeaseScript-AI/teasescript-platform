@@ -26,6 +26,7 @@ import {
   INHERITED_FIELD_FAMILIES,
   JOIN_REACH_FAMILIES,
   LAYER_FAMILIES,
+  OUTPUT_BOUND_FAMILIES,
   MIXED_ADD_PRODUCTS,
   NARROWING_FAMILIES,
   NESTED_OBJECT_SELECTIONS,
@@ -201,6 +202,68 @@ test("a stack of diamonds of copies and its siblings grow with the program in ei
     };
     assert.deepEqual(steepCounters(LAYER_FAMILIES, unshared, measure, [16, 32]), []);
   }
+});
+
+/**
+ * #1466, Codex r5's F1 (TABLE r4.245): k reads of `h.p<i>` each answered by k layers holding a source on its path, so the
+ * summaries' demands are the answers' own pairs P, counted from the program's holders: at k 16 and 32 in the four modes
+ * the demands are exactly P (one per pair, never repeated, never a pass-through layer's), `checks` at or under `main`'s,
+ * `invSteps` growing at or under `main`'s, and the total's excess over `main` per pair not rising (r4.245's exception for
+ * an output-bound family; the control keeps the total's bound). `main`'s work is the family's measured oracle.
+ */
+test("summaries' demands on output-bound reads are their answers' pairs, at main's growth per pair (#1466)", () => {
+  const modes = [
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ] as const;
+  for (const family of OUTPUT_BOUND_FAMILIES)
+    modes.forEach(([reversed, unshared], mode) => {
+      const at = (k: 16 | 32) => {
+        const request = coreRequest(
+          [{ path: "main.tease", source: family.source(k) }],
+          ["hostValue", "hostOther"],
+        );
+        assert.ok(request !== null, `${family.name} at ${k}: its files parse and resolve`);
+        const { budget } = analysed(
+          { name: `${family.name} at ${k}`, request },
+          reversed,
+          unshared,
+        );
+        const [total, checks, invSteps] = family.main[k][mode]!;
+        const name = `${family.name} at ${k}, mode ${mode}`;
+        assert.equal(budget.facts.layerDemands, family.pairs(k), `${name}: one demand per pair`);
+        assert.ok(
+          (budget.counts.get("checks") ?? 0) <= checks,
+          `${name}: checks at or under main's`,
+        );
+        return { budget, main: { total, invSteps }, nodes: budget.counts.get("syntaxNodes") ?? 1 };
+      };
+      const [small, large] = [at(16), at(32)];
+      const scale = large.nodes / small.nodes;
+      const growth = (before: number, after: number): number => (2 * after) / before / scale;
+      const name = `${family.name}, mode ${mode}`;
+      assert.ok(
+        growth(
+          small.budget.counts.get("invSteps") ?? 0,
+          large.budget.counts.get("invSteps") ?? 0,
+        ) <= growth(small.main.invSteps, large.main.invSteps),
+        `${name}: invSteps at or under main's growth`,
+      );
+      if (family.outputBound) {
+        const perPair = (at: typeof small, k: 16 | 32): number =>
+          (at.budget.total - at.main.total) / family.pairs(k);
+        assert.ok(
+          perPair(large, 32) <= perPair(small, 16),
+          `${name}: the excess per pair not rising`,
+        );
+      } else
+        assert.ok(
+          growth(small.budget.total, large.budget.total) <= DOUBLING,
+          `${name}: total within the bound`,
+        );
+    });
 });
 
 /**

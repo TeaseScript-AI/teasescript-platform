@@ -6447,3 +6447,139 @@ export const REPAIRED_SHARING_FAULTS: readonly {
     ],
   },
 ];
+
+/**
+ * Codex r5's crossed dimension (`cases.mjs` `make`, the same text): a seed storing k fields, k copies of it each storing
+ * `h = {p<i>: …}`, each copied again with its own `unique<i>` (and, `mixed`, an `h.local<i>`); joined (in reverse with
+ * `reverse`) and copied twice, read at every `unique<i>` and `h.p<i>`; or (`pairs`) k places each joining the first two
+ * copies, read at one property of each. Every copy of the seed stores `h`, so each read of an `h.p<i>` has k layers
+ * holding a source on its path: the summaries' demands are the answers' own pairs, k² of them.
+ */
+function sharedReads(k: number, variant: "shared" | "mixed" | "pairs", reverse = false): string {
+  const out = ["let seed = {z:1}"];
+  for (let i = 0; i < k; i++) out.push(`seed.common${i} = ${i % 2 ? "hostOther" : "hostValue"}`);
+  for (let i = 0; i < k; i++) {
+    out.push(`let root${i} = seed`, `root${i}.h = {p${i}: ${i % 2 ? '"text"' : "[hostOther]"}}`);
+    out.push(`let arm${i} = root${i}`, `arm${i}.unique${i} = hostValue`);
+    if (variant === "mixed") out.push(`arm${i}.h.local${i} = hostOther`);
+  }
+  const names = Array.from({ length: k }, (_, i) => `arm${i}`);
+  if (reverse) names.reverse();
+  if (variant === "pairs") {
+    for (let i = 0; i < k; i++) out.push(`let pair${i} = ${names[0]}`, `pair${i} = ${names[1]}`);
+    for (let i = 0; i < k; i++) out.push(`repeat pair${i}.unique0 {}`, `repeat pair${i}.h.p1 {}`);
+  } else {
+    out.push(
+      `let joined = ${names[0]}`,
+      ...names.slice(1).map((name) => `joined = ${name}`),
+      "let copy0 = joined",
+      "let copy1 = copy0",
+    );
+    for (let i = 0; i < k; i++) out.push(`repeat copy1.unique${i} {}`, `repeat copy1.h.p${i} {}`);
+  }
+  return [...out, "exit"].join("\n");
+}
+
+/** A family whose summaries' demands are its answers' own pairs (TABLE r4.245), with `main`'s work measured once. */
+export interface OutputBoundFamily {
+  readonly name: string;
+  readonly measures: string;
+  readonly source: (k: number) => string;
+  /** The answers' distinct holder-layer/path pairs, counted from the program's own holders (`main`'s enumeration). */
+  readonly pairs: (k: number) => number;
+  /** Whether the pairs grow with the program's answers (r4.245's exception for its totals), or the family is a control. */
+  readonly outputBound: boolean;
+  /**
+   * `main`'s total, `checks` and `invSteps` at k = 16 and 32 in the four modes (source order, sharing on and off, then
+   * reversed), measured on `main` 7d6c4d3d4: a regression oracle of this family's comparison, not a bound elsewhere.
+   */
+  readonly main: Readonly<Record<16 | 32, readonly (readonly [number, number, number])[]>>;
+}
+
+export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
+  {
+    name: "shared-reads",
+    measures:
+      "Codex r5's F1: k joined copies over a seed of k fields, every copy holding `h`, read at each `h.p<i>`",
+    source: (k) => sharedReads(k, "shared"),
+    pairs: (k) => k * k + 2 * k,
+    outputBound: true,
+    main: {
+      16: [
+        [54436, 4782, 6799],
+        [48544, 4782, 7113],
+        [54467, 4782, 6815],
+        [48560, 4782, 7129],
+      ],
+      32: [
+        [128526, 10598, 19143],
+        [110535, 10598, 20281],
+        [128558, 10598, 19175],
+        [110567, 10598, 20313],
+      ],
+    },
+  },
+  {
+    name: "shared-reads-reversed",
+    measures: "Codex r5's F1 with the copies joined in reverse",
+    source: (k) => sharedReads(k, "shared", true),
+    pairs: (k) => k * k + 2 * k,
+    outputBound: true,
+    main: {
+      16: [
+        [54455, 4782, 6796],
+        [48564, 4782, 7110],
+        [54486, 4782, 6812],
+        [48580, 4782, 7126],
+      ],
+      32: [
+        [128577, 10598, 19140],
+        [110587, 10598, 20278],
+        [128609, 10598, 19172],
+        [110619, 10598, 20310],
+      ],
+    },
+  },
+  {
+    name: "shared-reads-mixed",
+    measures: "Codex r5's F1 with each copy storing below `h` too",
+    source: (k) => sharedReads(k, "mixed"),
+    pairs: (k) => k * k + 3 * k,
+    outputBound: true,
+    main: {
+      16: [
+        [65429, 5821, 9406],
+        [58691, 5821, 9776],
+        [65526, 5821, 9486],
+        [58771, 5821, 9856],
+      ],
+      32: [
+        [153196, 12677, 26926],
+        [133514, 12677, 28176],
+        [153356, 12677, 27086],
+        [133674, 12677, 28336],
+      ],
+    },
+  },
+  {
+    name: "shared-reads-pairs",
+    measures: "Codex r5's control: k places each joining two copies, read at one property of each",
+    source: (k) => sharedReads(k, "pairs"),
+    pairs: () => 5,
+    outputBound: false,
+    main: {
+      16: [
+        [47359, 4576, 4148],
+        [43886, 4576, 4238],
+        [47361, 4576, 4150],
+        [43888, 4576, 4240],
+      ],
+      32: [
+        [95303, 10088, 8164],
+        [88409, 10088, 8342],
+        [95305, 10088, 8166],
+        [88411, 10088, 8344],
+      ],
+    },
+  },
+];
