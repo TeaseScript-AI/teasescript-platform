@@ -25,6 +25,7 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { ItemSource } from "./helpers/type-core-items.js";
 import { frontierGrowthProblems } from "./helpers/type-core-held-host.js";
+import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 // The work budget (TABLE §8; the reference model's `budget-check.mjs`, checks 1 and 2): the counters sum to the charged
 // total, and an analysis stops at exactly the unit that crosses its allowance. This proves the accounting, not that
@@ -428,6 +429,103 @@ test("a stop at the first unit finishes a deeply nested literal and a read as de
       `${shape}: ${small.units} -> ${large.units} units: ${doubling.toFixed(3)} per doubling`,
     );
   }
+});
+
+/**
+ * #1364: k functions in a cycle of calls, each passing a host value on unchanged, so each result's ingress cell holds
+ * the next function's. A consumer's boundary resolves a cycle once per pass, as one component: not once per path through
+ * it, where each function returns the next function's or the one after's result (on `main` `7d6c4d3d4`, 18,762 `checks`
+ * at k = 8 and 1,065,770 at k = 12; the corpus unit `GuessMyNumber` stopped there and its finishing did not end), nor
+ * once per read, where a ring whose functions call both neighbours is read at each: every member of a component is
+ * answered with it, not only the node it closed at, so no later read walks the rest of the ring again (Codex r1's F1).
+ * In either order the `checks` grow with the program, and so does the finishing work after a stop at the walk's first
+ * unit.
+ */
+test("a cycle of calls passing host data on is resolved once, unstopped and finished after a stop in the walk (#1364)", () => {
+  const cycles: Record<string, (k: number) => string> = {
+    "two successors, read once": (k) =>
+      [
+        ...Array.from(
+          { length: k },
+          (_, i) =>
+            `function f${i}(n) {\n  if n > 1 {\n    return f${(i + 1) % k}(n - 1)\n  }\n  if n > 0 {\n    return f${(i + 2) % k}(n - 2)\n  }\n  return hostValue\n}`,
+        ),
+        "repeat f0(3) {}",
+      ].join("\n"),
+    "a two-way ring, read at each": (k) =>
+      [
+        ...Array.from(
+          { length: k },
+          (_, i) =>
+            `function f${i}(n) {\n  if n > 1 {\n    return f${(i + 1) % k}(n - 1)\n  }\n  if n > 0 {\n    return f${(i + k - 1) % k}(n - 1)\n  }\n  return hostValue\n}`,
+        ),
+        ...Array.from({ length: k }, (_, i) => `repeat f${i}(3) {}`),
+      ].join("\n"),
+  };
+  // (the walk's first unit: the least allowance whose stop comes in the walk or later)
+  const walkStop = (request: ReturnType<typeof requestOf>, reversed: boolean, total: number) => {
+    let [low, high] = [1, total];
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      const phase = analysed(request, reversed, middle).budget.stoppedIn;
+      if (phase === "setup" || phase === "admission") low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  const steep: string[] = [];
+  for (const [name, cycle] of Object.entries(cycles))
+    for (const reversed of [false, true]) {
+      const [small, large] = [6, 12].map((k) => {
+        const request = requestOf(main(cycle(k)));
+        const { budget } = analysed(request, reversed);
+        assert.equal(budget.exhausted, null, `${name} at ${k}`);
+        const stopped = analysed(
+          request,
+          reversed,
+          walkStop(request, reversed, budget.total),
+        ).budget;
+        assert.equal(stopped.stoppedIn, "walk", `${name} at ${k}`);
+        return {
+          nodes: budget.counts.get("syntaxNodes")!,
+          checks: budget.counts.get("checks")!,
+          finishing: stopped.finishing,
+        };
+      });
+      const doubling = (before: number, after: number) =>
+        (2 * (after / before)) / (large!.nodes / small!.nodes);
+      const where = `${name}${reversed ? " reversed" : ""}`;
+      for (const measure of ["checks", "finishing"] as const)
+        if (doubling(small![measure], large![measure]) > 2.15)
+          steep.push(`${where} ${measure}: ${small![measure]} -> ${large![measure]}`);
+    }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * #1364, Codex r2's witness: a component answers every member with what the whole component reaches. Here a converting
+ * call's default carries host data into a cycle of three calls. That default is no carrier operand, so no landing names
+ * its host data, and each read of the cycle owes the boundary check at its consumer (r4.10). A component closed before
+ * its root, as when a closed child's low number is not passed up, answers `b` and `c` without it, in source order.
+ */
+test("every read of a cycle of calls holding host data no landing names owes its boundary check (#1364)", () => {
+  const request = coreRequest(
+    main(
+      "function a(n) {\n  if n > 0 { return b(n - 1) }\n  return toInteger(hostOther, default: hostValue)\n}\nfunction b(n) { return c(n) }\nfunction c(n) { return a(n) }\nrepeat a(3) {}\nrepeat b(3) {}\nrepeat c(3) {}\nexit",
+    ),
+    ["hostValue", "hostOther"],
+  );
+  assert.ok(request !== null, "the files parse and resolve");
+  const boundaries = (mode: (typeof MODES)[number]): string[] =>
+    inMode(mode, () => analyseCore(request))
+      .checks.filter((check) => check.boundary && check.target.endsWith(".result"))
+      .map((check) => check.on);
+  for (const mode of MODES)
+    assert.deepEqual(
+      boundaries(mode),
+      ["a", "b", "c"].map((name) => `validate external data ${name}.result`),
+      JSON.stringify(mode),
+    );
 });
 
 /**

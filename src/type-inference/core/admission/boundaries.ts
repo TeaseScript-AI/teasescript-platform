@@ -17,31 +17,37 @@ import { keptKeyAt } from "../contract/key-ids.js";
 /**
  * S6-CARRIERS §3.4's resolution of a provenance node, once per node and pass: each leaf's ingress sends its store's
  * boundary, or its own read's check, once; the answer is whether some ingress below the node no walk reached, whose
- * consumer checks it (r4.10). A node on a cycle through a cell is answered again where it is met (its answer then
- * depends on where the cycle was entered).
+ * consumer checks it (r4.10). The nodes of a cycle through a cell reach the same ingresses, so they are answered
+ * together once their component closes (Tarjan's), each node entered once (#1364: entered again wherever it was met,
+ * a cycle's nodes were walked once per path through them).
  */
 function resolve(admission: Admission, root: IngressNode): boolean {
   const known = admission.resolved.get(root);
   if (known !== undefined) return known;
   const { program } = admission.pass;
   const index = landingIndex(admission);
-  const open = new Set<IngressNode>();
+  // (each node entered and not yet answered, with its entry's number: its component is still open)
+  const open = new Map<IngressNode, number>();
+  const members: IngressNode[] = [];
+  let entered = 0;
   const frames: {
     readonly node: IngressNode;
     readonly parts: readonly IngressNode[];
     next: number;
     unreached: boolean;
-    cyclic: boolean;
+    low: number;
   }[] = [];
   const enter = (node: IngressNode): void => {
-    open.add(node);
+    const number = entered++;
+    open.set(node, number);
+    members.push(node);
     const parts =
       "parts" in node
         ? node.parts
         : !("ingress" in node) && node.contents !== null
           ? [node.contents]
           : [];
-    frames.push({ node, parts, next: 0, unreached: false, cyclic: false });
+    frames.push({ node, parts, next: 0, unreached: false, low: number });
   };
   enter(root);
   let answer = false;
@@ -52,12 +58,15 @@ function resolve(admission: Admission, root: IngressNode): boolean {
       const part = frame.parts[frame.next++]!;
       const done = admission.resolved.get(part);
       if (done !== undefined) frame.unreached ||= done;
-      else if (open.has(part)) frame.cyclic = true;
-      else enter(part);
+      else {
+        // (a node of the open component: what it reaches, the component collects where it closes)
+        const number = open.get(part);
+        if (number !== undefined) frame.low = Math.min(frame.low, number);
+        else enter(part);
+      }
       continue;
     }
     frames.pop();
-    open.delete(frame.node);
     if ("ingress" in frame.node) {
       let ingress = leafIngress(admission, frame.node.ingress);
       let found = ingress === null ? undefined : index.byIngress.get(ingress);
@@ -77,12 +86,20 @@ function resolve(admission: Admission, root: IngressNode): boolean {
           ingress !== null && (call === undefined || f18Admission(admission, call) === null);
       }
     }
-    if (!frame.cyclic) admission.resolved.set(frame.node, frame.unreached);
+    // (a component closes at the node it was entered by: every member's answer is what the component reaches)
+    if (frame.low === open.get(frame.node)) {
+      let member: IngressNode;
+      do {
+        member = members.pop()!;
+        open.delete(member);
+        admission.resolved.set(member, frame.unreached);
+      } while (member !== frame.node);
+    }
     const parent = frames.at(-1);
     if (parent === undefined) answer = frame.unreached;
     else {
       parent.unreached ||= frame.unreached;
-      parent.cyclic ||= frame.cyclic;
+      parent.low = Math.min(parent.low, frame.low);
     }
   }
   return answer;
