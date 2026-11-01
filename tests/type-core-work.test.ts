@@ -31,6 +31,7 @@ import {
   NARROWING_FAMILIES,
   NESTED_OBJECT_SELECTIONS,
   ORACLE_PROGRAMS,
+  PROPERTY_STORE_FAMILIES,
   READ_CHAIN_PRODUCTS,
   VALUE_CLASS_SITES,
   VALUE_SHARING_PROGRAMS,
@@ -2037,4 +2038,59 @@ test("a read through wrappers decides its paths as cursors: its work and each co
     ],
     [],
   );
+});
+
+/**
+ * #1456: a place replaced k times by objects of distinct properties, each read after its store, reads a property from
+ * the objects holding it (one `missing` for the others), never every object at every property, so the work grows with
+ * the program in every mode: the issue's shape and each control whose objects are closed (two properties each, a
+ * property every or every other object holds, open values, values of two provenances, each read before its store too,
+ * reversed properties), its total and each counter of at least 200 units at 16 → 32 (2.51 to 2.77 per doubling on
+ * `main`). The series to k = 128 with and without the settled stop, the controls the levels answer and the
+ * uncharged-work probe are the step's evidence, outside CI.
+ */
+test("a place replaced by objects of distinct properties takes work that grows with the program in every mode (#1456)", () => {
+  const closed = [
+    "plain",
+    "two",
+    "shared",
+    "half",
+    "open-value",
+    "provenance",
+    "before",
+    "reverse",
+  ];
+  const families = PROPERTY_STORE_FAMILIES.filter((family) =>
+    closed.some((kind) => family.name === `property-stores-${kind}`),
+  );
+  assert.equal(families.length, closed.length);
+  const steep: string[] = [];
+  for (const family of families) {
+    const [at16, at32] = [16, 32].map((k): Sized => {
+      const request = coreRequest(family.program(k), ["hostValue", "hostOther"]);
+      assert.ok(request !== null, `${family.name} at ${k}: its file parses and resolves`);
+      return { name: `${family.name} at ${k}`, request };
+    });
+    for (const reversed of [false, true])
+      for (const unshared of [false, true]) {
+        const [small, large] = [at16!, at32!].map((at) => analysed(at, reversed, unshared).budget);
+        const scale =
+          (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
+        const doubling = (before: number, after: number): number =>
+          (2 * (after / Math.max(1, before))) / scale;
+        const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}`;
+        if (doubling(small!.total, large!.total) > DOUBLING)
+          steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
+        for (const [counter, after] of large!.counts)
+          if (
+            counter !== "syntaxNodes" &&
+            after >= 200 &&
+            doubling(small!.counts.get(counter) ?? 0, after) > COUNTER_DOUBLING
+          )
+            steep.push(
+              `${name} ${counter}: ${doubling(small!.counts.get(counter) ?? 0, after).toFixed(3)}`,
+            );
+      }
+  }
+  assert.deepEqual(steep, []);
 });

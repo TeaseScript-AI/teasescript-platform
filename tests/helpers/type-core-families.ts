@@ -2896,6 +2896,92 @@ export const COPY_RING_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
+ * #1456: a place replaced k times by objects of distinct properties, each read after its store (the issue's shape,
+ * `plain`), and its controls (Sol's prototype rounds): two properties per object, a property every object holds, one
+ * half of them hold, typed and open property values, every other store a host value (an open root), the reads under a
+ * test (marked), a value of two provenances, each read before its store, the properties in reversed order, every
+ * other object holding a value whose operand's test marks its structure (no level's member), and two objects alike at
+ * the root per property, stored in the other order than their literals stand (F11 names the first stored where the
+ * levels fold them). Host globals `hostValue` and `hostOther`.
+ */
+export const PROPERTY_STORE_FAMILIES: readonly WorkFamily[] = (
+  [
+    ["plain", "the issue's shape"],
+    ["two", "two properties per object, each read"],
+    ["shared", "a property every object holds, read after each store"],
+    ["half", "a property every other object holds, read after each store"],
+    ["typed", "typed property values"],
+    ["open-value", "open property values"],
+    ["open-root", "every other store a host value: no closed object"],
+    ["guarded", "the stores and reads under a test: marked"],
+    ["provenance", "a property value of two provenances"],
+    ["before", "each property read before its store too"],
+    ["reverse", "the properties in reversed order"],
+    ["marked", "every other object's value a carrier of a tested operand: a marked structure"],
+    [
+      "alike",
+      "two objects of each property, stored in turn from bindings written the other way round",
+    ],
+  ] as const
+).map(([kind, measures]): WorkFamily => ({
+  name: `property-stores-${kind}`,
+  measures: `#1456: ${measures}`,
+  program: (k) => {
+    if (kind === "alike")
+      // (each property's two objects alike at the root, so where they lack another they fold into the first stored)
+      return main(
+        lines(
+          "let typed: integer = hostValue",
+          rows(k, (i) => `let b${i} = {f${i}: typed}\nlet a${i} = {f${i}: 1.25}`),
+          rows(
+            k,
+            (i) => `${i === 0 ? "let " : ""}root = a${i}\nroot = b${i}\nrepeat root.f${i} {}`,
+          ),
+          "exit",
+        ),
+      );
+    const ids = Array.from({ length: k }, (_, i) => (kind === "reverse" ? k - 1 - i : i));
+    const object = (i: number): string =>
+      kind === "two"
+        ? `{f${i}: hostValue, g${i}: hostOther}`
+        : kind === "shared"
+          ? `{f${i}: hostValue, common: hostOther}`
+          : kind === "half"
+            ? `{f${i}: hostValue${i % 2 === 0 ? ", common: hostOther" : ""}}`
+            : kind === "typed"
+              ? `{f${i}: typed}`
+              : kind === "open-value"
+                ? `{f${i}: hostValue.member}`
+                : kind === "open-root" && i % 2 === 1
+                  ? "hostOther"
+                  : kind === "guarded"
+                    ? `{f${i}: narrowed}`
+                    : kind === "provenance"
+                      ? `{f${i}: hostValue otherwise hostOther}`
+                      : kind === "marked" && i % 2 === 0
+                        ? `{f${i}: tested otherwise 1}`
+                        : `{f${i}: hostValue}`;
+    let text =
+      kind === "typed"
+        ? "let typed: integer = hostValue\n"
+        : kind === "guarded"
+          ? "let narrowed = hostValue\nif narrowed is integer {\n"
+          : kind === "marked"
+            ? "let tested = hostValue\nif tested.a is integer {\n"
+            : "";
+    text += `let root = ${object(ids[0]!)}\n`;
+    for (const [j, i] of ids.entries()) {
+      if (kind === "before" && j > 0) text += `repeat root.f${i} {}\n`;
+      if (j > 0) text += `root = ${object(i)}\n`;
+      if (kind !== "before" || j === 0) text += `repeat root.f${i} {}\n`;
+      if (kind === "two") text += `repeat root.g${i} {}\n`;
+      if (kind === "shared" || kind === "half") text += "repeat root.common {}\n";
+    }
+    return main(`${text}${kind === "guarded" || kind === "marked" ? "}\n" : ""}exit`);
+  },
+}));
+
+/**
  * #1426: a selection nested k deep whose options are objects, read at a property; each level a literal of two whose one
  * element is the level inside. Each level's literal at the path is read once, its answer composed from the level
  * inside's, never merged again per level above (`mergeItems` 8,969 → 34,313 at k = 64, 128 on `bf9b655a9`). By index

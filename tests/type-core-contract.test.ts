@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
+import type { PlaceId } from "../src/type-inference/graph.js";
+import {
+  analyseCore,
+  coreResult,
+  solveDemands,
+  type Answers,
+  type CorePass,
+} from "../src/type-inference/core/answers.js";
+import { joinSteps } from "../src/type-inference/core/budget.js";
 import type { Contract, ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
 import {
   offendingStores,
@@ -10,18 +18,30 @@ import {
   summaryItems,
   summaryPresence,
 } from "../src/type-inference/core/contract/prefix-index.js";
-import { PathSteps, spanRef, type Rest } from "../src/type-inference/core/contract/key-ids.js";
-import { keyOf } from "../src/type-inference/core/definitions.js";
-import { writerKey } from "../src/type-inference/core/items.js";
+import {
+  exportNames,
+  isSteps,
+  PathSteps,
+  spanRef,
+  stepsRest,
+  type Rest,
+} from "../src/type-inference/core/contract/key-ids.js";
+import { entryGroups, groupsAt, prefixLevels } from "../src/type-inference/core/contract/levels.js";
+import { annotated } from "../src/type-inference/core/contract/marks.js";
+import { keyOf, type Key } from "../src/type-inference/core/definitions.js";
+import { withWriter } from "../src/type-inference/core/exact-path.js";
+import { mergeItems, REASON, writerKey, type Item } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import type { Solver } from "../src/type-inference/core/solver.js";
+import type { Solver, Work } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
+import { PROPERTY_STORE_FAMILIES } from "./helpers/type-core-families.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import {
   inMode,
   inOrder,
+  itemText,
   mergedIdentity,
   MODES,
   publishedAnswers,
@@ -949,4 +969,198 @@ test("no path or span id is made while a read's selection runs, its one holder's
           }
       });
   }
+});
+
+/** Items as the property tests compare them, each by the oracles' `itemText`, in order. */
+const itemsText = (items: readonly Item[]): string => items.map(itemText).join(" ");
+
+/** The place of the binding `name` of a pass's program. */
+const bindingOf = (pass: CorePass, name: string): PlaceId =>
+  pass.program.places.find((place) => place.kind.kind === "binding" && place.kind.name === name)!
+    .id;
+
+/**
+ * A prefix's items at a path from its levels alone, as `contractAlong` read them before #1456: its entries that answer
+ * by themselves in their groups (`entryGroups`), then its literals' groups at the path (`groupsAt`).
+ */
+function* levelsAt(contract: Contract, prefix: Key, rest: Rest): Work<readonly Item[]> {
+  const out: Item[] = [];
+  const levels = prefixLevels(contract, prefix, contract.prefixStores(prefix));
+  for (const group of entryGroups(contract, levels)) {
+    const first = yield* contract.entryAt(group.entries[0]!, rest);
+    if (
+      group.entries.length > 1 &&
+      !first.some((item) => item.tag === "unknown" || item.fan !== undefined)
+    ) {
+      out.push(...withWriter(first, group.w));
+      continue;
+    }
+    out.push(...first);
+    for (const entry of group.entries.slice(1)) out.push(...(yield* contract.entryAt(entry, rest)));
+  }
+  if (levels.base.length > 0)
+    for (const group of groupsAt(contract, prefix, levels.base, rest))
+      out.push(
+        ...annotated(
+          contract,
+          group,
+          rest,
+          withWriter(
+            yield* contract.contractOfValueAt(
+              group.literal,
+              isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
+            ),
+            group.w,
+          ),
+        ),
+      );
+  return out;
+}
+
+/**
+ * #1456: a property of a place replaced by objects answers as the place's levels do: in every mode, for each family's
+ * property read and one no object holds, the place's contract there equals its levels' items at the property, merged,
+ * so the property index reading the objects holding it and one `missing` for the others keeps every holder's answer
+ * (each store by itself with the sharing off), the missing status, its writer (the earliest literal, or with the
+ * sharing on the first stored of objects alike there) and its place among the holders' answers. The objects are
+ * indexed where every store is a closed object literal and, with the sharing on, a level's member, once the levels'
+ * reads of the place's properties reach the index's size (here at the first or second property read); a host value
+ * among them or a test marking the reads leaves the place to its levels, and so does, with the sharing on, a tested
+ * operand marking an object's structure.
+ */
+test("a property of a place replaced by objects answers as its levels do, in every mode (#1456)", () => {
+  const differing: string[] = [];
+  const indexed = new Set<string>();
+  for (const family of PROPERTY_STORE_FAMILIES) {
+    const files = family.program(4);
+    const request = coreRequest(files, ["hostValue", "hostOther"]);
+    assert.ok(request !== null, family.name);
+    const properties = [
+      ...new Set([...files[0]!.source.matchAll(/root\.(\w+)/g)].map((read) => read[1]!)),
+      "absent",
+    ];
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const pass = narrowingPass(request);
+        const root = bindingOf(pass, "root");
+        const prefix = keyOf(root, []);
+        for (const property of properties) {
+          const asked = pass.solver.run(pass.contract.contractOf(keyOf(root, [property])));
+          const levels = pass.solver.run(levelsAt(pass.contract, prefix, stepsRest([property])));
+          if (itemsText(asked) !== itemsText(mergeItems(levels, pass.program.scope)))
+            differing.push(`${family.name} ${property} ${JSON.stringify(mode)}`);
+        }
+        const held = pass.contract.propertyIndexes.get(pass.contract.prefixStores(prefix));
+        if (held !== undefined && "holders" in held)
+          indexed.add(`${family.name}${mode.unshared ? " unshared" : ""}`);
+      });
+  }
+  assert.deepEqual(differing, []);
+  const closed = ["plain", "two", "shared", "half", "typed", "open-value", "provenance", "alike"];
+  assert.deepEqual(
+    [...indexed].sort(),
+    [
+      ...[...closed, "before", "reverse"].flatMap((kind) => [
+        `property-stores-${kind}`,
+        `property-stores-${kind} unshared`,
+      ]),
+      // (a marked structure only keeps an object from its level's groups: with the sharing off each store answers alone)
+      "property-stores-marked unshared",
+    ].sort(),
+  );
+});
+
+/**
+ * #1456 (Sol's prototype r1): a property's answer read from the objects holding it is the read's alone, never the
+ * place's groups at the property, from which a deeper read folds every object's, so the deeper read keeps the `missing`
+ * of the object without the property, with that object's literal as its writer, whether the property is read first,
+ * after it or only by the deeper read's own question of its owner; in every mode.
+ */
+test("a deeper read below a place replaced by objects keeps each object's absence, whichever read comes first (#1456)", () => {
+  const source = "let root = {f0: {n: 1}}\nsay root.f0\nroot = {f1: 2}\nrepeat root.f0.n {}\nexit";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const lacking = source.indexOf("{f1: 2}");
+  const expected = { f0: ["object", "unknown"], "f0.n": ["integer", "unknown"] };
+  for (const mode of MODES)
+    for (const order of [["f0", "f0.n"], ["f0.n", "f0"], ["f0.n"]] as const)
+      inMode(mode, () => {
+        const pass = narrowingPass(request);
+        const root = bindingOf(pass, "root");
+        for (const at of order) {
+          const items = pass.solver.run(pass.contract.contractOf(keyOf(root, at.split("."))));
+          const where = `${at} after ${order.join(", ")} ${JSON.stringify(mode)}`;
+          assert.deepEqual(
+            items.map((item) => item.tag),
+            expected[at],
+            where,
+          );
+          const missing = items.find((item) => item.tag === "unknown")!;
+          assert.deepEqual(
+            [missing.reasons, missing.writer?.start],
+            [REASON.missing, lacking],
+            where,
+          );
+        }
+      });
+});
+
+/**
+ * #1456: the property index is the pass's, made again from the prefix's stores in each pass: a component reaching it
+ * through a wrapper, replayed in a fresh pass through its names' packet from its first and its last member (each
+ * making the paths in its own order), answers as it did; and a pass that made other paths first and asks the
+ * properties in reverse answers each as the first pass did.
+ */
+test("a replayed component below a place replaced by objects answers alike, its paths made in another order (#1456)", () => {
+  const plain = PROPERTY_STORE_FAMILIES.find((family) => family.name === "property-stores-plain")!;
+  const source = plain
+    .program(8)[0]!
+    .source.replace(
+      "exit",
+      "let wrapper = {box: root}\nrepeat wrapper.box.f0 {}\nrepeat wrapper.box.f7 {}\nexit",
+    );
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const reads = ["f0", "f7", "absent"];
+  for (const mode of MODES)
+    inMode(mode, () => {
+      const pass = narrowingPass(request);
+      const wrapper = bindingOf(pass, "wrapper");
+      const first = reads.map((property) =>
+        itemsText(pass.solver.run(pass.contract.contractOf(keyOf(wrapper, ["box", property])))),
+      );
+      const members = pass.solver
+        .demandWork()
+        .filter((demand) => /^(c|cop|rc|s)\|/.test(demand.key))
+        .flatMap((demand) => {
+          const items = pass.solver.answer(demand.key);
+          return items === undefined ? [] : [{ key: demand.key, items }];
+        });
+      const exported = exportNames(
+        pass.contract,
+        members.map((member) => member.key),
+      );
+      const names = exported?.names ?? members.map((member) => member.key);
+      for (const entry of [names[0]!, names.at(-1)!])
+        assert.deepEqual(
+          solveDemands(request, [entry, ...names], exported?.packet)
+            .slice(1)
+            .map(itemsText),
+          members.map((member) => itemsText(member.items)),
+          `${entry} ${JSON.stringify(mode)}`,
+        );
+      const other = narrowingPass(request);
+      for (const name of ["unusedC", "unusedB", "unusedA"]) other.contract.pathIdOf([name]);
+      const again = [...reads]
+        .reverse()
+        .map((property) =>
+          itemsText(
+            other.solver.run(
+              other.contract.contractOf(keyOf(bindingOf(other, "wrapper"), ["box", property])),
+            ),
+          ),
+        )
+        .reverse();
+      assert.deepEqual(again, first, JSON.stringify(mode));
+    });
 });

@@ -200,7 +200,7 @@ export function publishedAnswers(
 }
 
 /** An item with all its marks, writer, context and ingress leaves. */
-function itemText(item: Item): string {
+export function itemText(item: Item): string {
   return [
     item.tag,
     item.cert,

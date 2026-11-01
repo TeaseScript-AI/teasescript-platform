@@ -60,7 +60,7 @@ import {
   REFERENCE,
   unknownItem,
 } from "./kinds.js";
-import { entryGroups, groupsAt, prefixLevels } from "./levels.js";
+import { entryGroups, groupsAt, prefixLevels, propertyItems } from "./levels.js";
 import { annotated, marksAt } from "./marks.js";
 import type { PrefixEntry } from "./model.js";
 import { positionable, positioned, positionOf } from "./positions.js";
@@ -469,7 +469,10 @@ function* contractAlong(
       // a prefix's whole stores, shared by every property below it; its literals by level (§4.6), each group of the
       // same structure below the path once (with a selection step, every entry by itself)
       const stores = contract.prefixStores(prefix);
-      if (someStepOf(rest, (step) => step === SELECTED_VALUE || step === SELECTED_TEXT))
+      // (a property of a prefix of closed objects from its holders alone, #1456)
+      const property = yield* propertyItems(contract, prefix, stores, rest);
+      if (property !== null) for (const item of property) out.push(item);
+      else if (someStepOf(rest, (step) => step === SELECTED_VALUE || step === SELECTED_TEXT))
         for (const entry of stores.list)
           for (const item of yield* contract.entryAt(entry, rest)) out.push(item);
       else {

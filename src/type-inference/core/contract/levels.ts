@@ -1,16 +1,24 @@
 import type { PlaceId } from "../../graph.js";
 import { joinParts, keptParts } from "../budget.js";
-import { keyBelowRef, restPart, restRef, restTo, type Rest } from "./key-ids.js";
+import { keyBelowRef, restPart, restRef, restTo, stepsRest, type Rest } from "./key-ids.js";
 import type { Contract } from "../contract.js";
 import { type Key } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
-import { EMPTY, firstWriter, type Item } from "../items.js";
+import { EMPTY, firstWriter, REASON, type Item } from "../items.js";
 import { stepName } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
-import { plainStep, unknownItem } from "./kinds.js";
-import { indexPaths, namesPart, nodeAt, pathBelow } from "./literal-index.js";
-import { annotated, collectMarks, depthOf, marksAt } from "./marks.js";
+import { plainStep, propertyOnly, unknownItem } from "./kinds.js";
+import {
+  indexPaths,
+  namesPart,
+  nodeAt,
+  pathAt,
+  pathBelow,
+  propertyIndex,
+  propertyLack,
+} from "./literal-index.js";
+import { annotated, collectMarks, depthOf, marksAt, marksNothing } from "./marks.js";
 import type {
   EntryGroup,
   Holder,
@@ -73,15 +81,143 @@ export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStore
   if (known !== undefined) return known;
   const others: PrefixEntry[] = [];
   const base: LevelGroup[] = [];
+  let closed = stores.list.length > 1;
   for (const entry of stores.list) {
     contract.pass.program.work.charge("structureSteps");
     const member = levelMember(contract, entry);
+    closed &&= (member !== null || !sharing()) && closedObject(contract, entry);
     if (member === null) others.push(entry);
     else base.push(member);
   }
-  const levels = { others, base };
+  const levels = { others, base, closed };
   contract.levelBases.set(prefix, levels);
   return levels;
+}
+
+/** #1456: a path no object holds, one step below a prefix (an author's property named `element` is quoted). */
+const LACKED: Rest = ["element"];
+
+/**
+ * #1456: whether a prefix entry is a closed object literal stored whole, whose properties are its object's alone: one
+ * object term, no projection, copied key, element or cell, unguarded, without ingress, its holder marking no path
+ * (`marksNothing`). Its property's answer is then the literal's own there, and a property it lacks F11's `missing`
+ * with the literal's writer; any other entry is unproved.
+ */
+function closedObject(contract: Contract, entry: PrefixEntry): boolean {
+  const { program } = contract.pass;
+  const value = entry.value;
+  if (
+    value === undefined ||
+    entry.at !== undefined ||
+    entry.key !== undefined ||
+    entry.elem !== undefined ||
+    entry.guarded ||
+    entry.ingress !== undefined ||
+    program.cellOwner.has(value)
+  )
+    return false;
+  const terms = program.hasOf.get(value);
+  return (
+    terms?.length === 1 && terms[0]!.type.kind === "object" && marksNothing(contract, entry.holder)
+  );
+}
+
+/**
+ * #1456: a prefix's contributions at a property below it where its entries are closed objects (`PrefixLevels.closed`),
+ * from its property index (`propertyIndex`): the answers of the sources holding the property alone (each entry by
+ * itself, the sharing off; on, their groups at the path, folded from theirs as `groupsAt` folds, never kept as the
+ * prefix's, whose complete list a deeper path folds), and F11's one `missing` for those without it, with the earliest
+ * literal writer, standing where the first of them stands among the holders (`propertyLack`); `null` for any other
+ * prefix or path, which its levels answer, and for the prefix's reads before its index pays.
+ */
+export function* propertyItems(
+  contract: Contract,
+  asked: Key,
+  stores: PrefixStores,
+  rest: Rest,
+): Work<readonly Item[] | null> {
+  if (rest.length !== 1 || !propertyOnly(rest.at(0)!)) return null;
+  const levels = prefixLevels(contract, asked, stores);
+  if (!levels.closed) return null;
+  const { work } = contract.pass.program;
+  let index = contract.propertyIndexes.get(stores);
+  if (index === undefined || !("holders" in index)) {
+    const groups = sharing() ? groupsAt(contract, asked, levels.base, stepsRest([])) : null;
+    const sources = groups ?? stores.list;
+    if (index === undefined) {
+      // (the index's size: its sources' property names)
+      let names = 0;
+      const count = (literal: PlaceId): void => {
+        work.charge("structureSteps");
+        names += contract.literalIndex(literal).root.objects!.list[0]!.names.size;
+      };
+      if (groups === null) for (const entry of stores.list) count(entry.value!);
+      else for (const group of groups) count(group.literal);
+      contract.keep(2);
+      contract.propertyIndexes.set(stores, (index = { asked: 0, names }));
+    }
+    // (its levels read it, a fold of the sources each, while what they read for the prefix's properties is less than
+    // the index's size: a prefix of a few wide objects, as each of k copies of one read once, is never indexed)
+    if ((index.asked + 1) * sources.length < index.names) {
+      index.asked += 1;
+      return null;
+    }
+    let shared: { groups: readonly LevelGroup[]; writers: Set<PlaceId> } | null = null;
+    if (groups !== null) {
+      // (where groups lack a property the levels fold those alike there into the first, whose literal F11 names:
+      // alike by their root and marks, whatever the property, so as at a step no object holds)
+      const writers = new Set<PlaceId>();
+      for (const group of foldGroups(contract, LACKED, groups)) {
+        contract.keep(1);
+        writers.add(group.literal);
+      }
+      shared = { groups, writers };
+    }
+    index = propertyIndex(contract, stores.list, shared);
+    contract.propertyIndexes.set(stores, index);
+  }
+  const step = rest.at(0)!;
+  const path = pathAt(contract, 0, step);
+  const holders = index.holders.get(path) ?? [];
+  const lack = propertyLack(contract, index, path, step);
+  const out: Item[] = [];
+  let placed = lack.writer === null;
+  // (the `missing` before the first holder after the first source without the property)
+  const before = (at: number): void => {
+    if (placed || at < lack.at) return;
+    placed = true;
+    out.push(unknownItem(REASON.missing, lack.writer));
+  };
+  if (!sharing())
+    for (const source of holders) {
+      work.charge("invSteps");
+      before(source.at);
+      for (const item of yield* contract.entryAt(source.entry!, rest)) out.push(item);
+    }
+  else {
+    contract.keep(holders.length);
+    // (a fold's group stands where its first holder does: the holders in order, each group's first among them)
+    let first = 0;
+    for (const group of foldGroups(
+      contract,
+      rest,
+      holders.map((source) => source.group!),
+    )) {
+      work.charge("invSteps");
+      while (holders[first]!.group!.literal !== group.literal) first += 1;
+      before(holders[first]!.at);
+      // (a literal stored whole: its group stands at the prefix itself)
+      for (const item of annotated(
+        contract,
+        group,
+        rest,
+        withWriter(yield* contract.contractOfValueAt(group.literal, rest), group.w),
+      ))
+        out.push(item);
+    }
+  }
+  before(Infinity);
+  return out;
 }
 
 /**
@@ -191,15 +327,33 @@ export function groupsAt(
   const known = contract.levelGroups.get(memoKey);
   if (known !== undefined) return known;
   contract.keepText(memoKey.length);
-  const { program } = contract.pass;
   collectMarks(contract);
-  // each group's key, to its position in the list; the members themselves at the prefix (a projection's literal at
-  // its steps into it)
+  // the members themselves at the prefix (a projection's literal at its steps into it)
+  const groups = foldGroups(
+    contract,
+    path,
+    path.length === 0
+      ? base
+      : groupsAt(contract, prefix, base, restTo(contract, path, path.length - 1)),
+  );
+  contract.levelGroups.set(memoKey, groups);
+  return groups;
+}
+
+/**
+ * `groupsAt`'s fold at a path of the groups one step above it (`parents`), the marks collected; for a property of a
+ * prefix of closed objects, its holders' groups alone (`propertyItems`).
+ */
+function foldGroups(
+  contract: Contract,
+  path: Rest,
+  parents: readonly LevelGroup[],
+): readonly LevelGroup[] {
+  const { program } = contract.pass;
+  // each group's key, to its position in the list
   const merged = new Map<string, number>();
   const groups: LevelGroup[] = [];
-  for (const group of path.length === 0
-    ? base
-    : groupsAt(contract, prefix, base, restTo(contract, path, path.length - 1))) {
+  for (const group of parents) {
     program.work.charge("structureSteps");
     const levels = levelsOf(contract, group.literal);
     // (what stands at each step above the path: entries read below it, objects lacking the next step, a
@@ -239,7 +393,6 @@ export function groupsAt(
       ingress: program.scope.ingress.union(into.ingress, group.ingress),
     };
   }
-  contract.levelGroups.set(memoKey, groups);
   return groups;
 }
 
