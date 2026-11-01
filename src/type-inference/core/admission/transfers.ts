@@ -13,6 +13,7 @@ import { writtenOf } from "../contract.js";
 import { keyPlace, sortCost, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { ItemTag } from "../items.js";
+import { plusSpan } from "../plus-index.js";
 import { sharing } from "../sharing.js";
 import { deciding } from "./kinds.js";
 import { chooses, live, snapshotOf } from "./links.js";
@@ -928,5 +929,16 @@ export function transferredDecider(
     const list = restIds(admission, at.steps());
     ids = (rest) => list[rest]!;
   }
-  return writtenOn(admission, root, at, ids) ? undefined : firstValue(admission, root, at, ids);
+  if (writtenOn(admission, root, at, ids)) return undefined;
+  // #1384: below an indexed run of `+` (`plusSpan`) whose own value holds no definite kind at the path, no value below
+  // it decides: each mask there holds only kinds that value holds definitely (`narrowed`)
+  if (
+    at.length >= 2 &&
+    at.at(0) === "element" &&
+    plusSpan(admission.pass, task.value, at.at(1)) !== null &&
+    deciding(admission.run(admission.pass.values.valueItems(task.value, task.node, asked)))
+      .length === 0
+  )
+    return null;
+  return firstValue(admission, root, at, ids);
 }

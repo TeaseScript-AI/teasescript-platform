@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileProject, createFreshRuntimeSession } from "../src/index.js";
 import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import type { WorkCounter } from "../src/type-inference/core/budget.js";
@@ -943,6 +944,58 @@ test("the composition of an operand's parts visits only its smaller part, its sh
         steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
     }
   assert.deepEqual(steep, []);
+});
+
+/**
+ * #1384: k joins of lists of objects of distinct properties, a variable of objects read beside each operand, along the
+ * left operands and each join in the next one's right, and both with one property throughout: a run's terms are indexed
+ * by the properties they hold once one of its joins is asked at a third (`plusSpan`), so the value side, the contract
+ * side and admission's decider read each property's holders and the ranges between them, never every join below (3.1
+ * to 3.3 at 16 → 32 before, its counters near 4; 3.7 at 64 → 128). One doubling in the four modes; the series to
+ * k = 128 is the evidence, outside CI. Each source compiles and runs, its list of 2k + 1 elements.
+ */
+test("a run of joins read beside a variable of objects grows with the program in the four modes (#1384)", () => {
+  const joins = (k: number, term: (i: number) => string): string =>
+    `let o = [{q: 1}]\nlet xs = o + ${many(k, (i) => `${term(i)} + o`, " + ")}\nsay xs.length\nexit`;
+  const nested = (k: number, term: (i: number) => string, last: string): string =>
+    `let o = [{q: 1}]\nlet xs = ${Array.from({ length: k }).reduce<string>((e, _, i) => `${term(i)} + (o + (${e}))`, last)}\nsay xs.length\nexit`;
+  const family = (name: string, source: (k: number) => string): WorkFamily => ({
+    name: `plus-run-${name}`,
+    measures: "#1384: a run's terms by the properties they hold",
+    program: (k) => [{ path: "main.tease", source: source(k) }],
+  });
+  const runs = [
+    family("left", (k) => joins(k, (i) => `[{p${i}: 1}]`)),
+    family("right", (k) => nested(k, (i) => `[{p${i}: 1}]`, "[{lastValue: 0}]")),
+    family("left-one-name", (k) => joins(k, () => "[{q: 1}]")),
+    family("right-one-name", (k) => nested(k, () => "[{q: 1}]", "[{q: 0}]")),
+  ];
+  for (const { name, program } of runs)
+    for (const k of [16, 32]) {
+      const compiled = compileProject(program(k));
+      assert.ok(compiled.plan !== null, `${name} at ${k} compiles`);
+      const events = createFreshRuntimeSession(compiled.plan, {
+        baseDelayMs: 0,
+        delayPerWordMs: 0,
+        delayPerCharacterMs: 0,
+      }).run().events;
+      assert.deepEqual(
+        events.flatMap((event) =>
+          event.kind === "say" || event.kind === "runtimeFailure"
+            ? [event.kind === "say" ? event.text : event.code]
+            : [],
+        ),
+        [String(2 * k + 1)],
+        `${name} at ${k} runs`,
+      );
+    }
+  assert.deepEqual(
+    [
+      ...steepCounters(runs, false, undefined, [16, 32]),
+      ...steepCounters(runs, true, undefined, [16, 32]),
+    ],
+    [],
+  );
 });
 
 /**
