@@ -3,6 +3,7 @@ import {
   arrayRef,
   type CanonicalKey,
   isKeyId,
+  isPathSteps,
   keptKeyBelowIn,
   keyDepthIn,
   keyIdAt,
@@ -879,14 +880,16 @@ function ownHas(contract: Contract, sub: Key, ref: PathRef): boolean {
 }
 
 /**
- * A path asked below a prefix and its id, made once on its first asking (`pathIdAt`). The selection's walk of an array's
- * steps notes the longest prefix of them already made (`holdingAt`), so the id is made below it: a read walks its steps
- * once, never again for its id.
+ * A path asked below a prefix and its id, made once on its first asking (`pathIdAt`). The selection's walk of a plain
+ * array's steps notes the longest prefix of them already made (`holdingAt`), so the id is made below it: a read walks its
+ * steps once, never again for its id. A record's steps (`PathSteps`) make their own id, lazily and in their own order (a
+ * view's suffix before its join, `PathSteps.after`), charging each step they visit (`convert`), so theirs is always
+ * theirs and never walked again (Codex r7's F1).
  */
 interface ReadPath {
   readonly ref: PathRef;
   id: number | undefined;
-  /** The longest prefix of an array's steps found made (`pathBelow`), its length and its id. */
+  /** The longest prefix of a plain array's steps found made (`pathBelow`), its length and its id. */
   found: number;
   foundId: number;
 }
@@ -897,13 +900,14 @@ function readPath(ref: PathRef): ReadPath {
 }
 
 /**
- * A read's path's id: a span's own; an array's made below the longest prefix its selection found made, each step past it
- * charged: the ids `PathRef.id` makes (`pathAt` per step), in its order.
+ * A read's path's id: a span's and a record's their own (`PathRef.id`, a record's charged as it is made); a plain
+ * array's made below the longest prefix its selection found made, each step past it charged: the ids `PathRef.id` makes
+ * (`pathAt` per step), in its order.
  */
 function pathIdAt(contract: Contract, path: ReadPath): number {
   if (path.id !== undefined) return path.id;
   const { ref } = path;
-  if (ref.kind !== "steps") return (path.id = ref.id());
+  if (ref.kind !== "steps" || isPathSteps(ref.steps())) return (path.id = ref.id());
   if (path.found === ref.length) return (path.id = path.foundId);
   contract.pass.program.work.charge("invSteps", ref.length - path.found);
   if (path.found === 0) return (path.id = ref.id());
@@ -1292,7 +1296,7 @@ function stepLayersOf(
 /**
  * The found layers listing a source with a store at a prefix of `ref` (`subsByPath`), by their indices. Each prefix's
  * text is made one step longer than the last and only looked up, never kept: kept, they would charge a read the square
- * of its path's length. With `path`, the walk notes the longest prefix of an array's steps already made, for its id.
+ * of its path's length. With `path`, the walk notes the longest prefix of a plain array's steps already made, for its id.
  */
 function holdingAt(
   contract: Contract,
@@ -1303,7 +1307,7 @@ function holdingAt(
   const work = contract.pass.program.work;
   const holding = new Set<number>();
   let text = "";
-  let found = path === undefined || ref.kind !== "steps" ? -1 : 0;
+  let found = path === undefined || ref.kind !== "steps" || isPathSteps(ref.steps()) ? -1 : 0;
   for (let length = 1; length <= ref.length && own.size > 0; length += 1) {
     work.charge("invSteps");
     text = length === 1 ? ref.at(0) : stepText(text, ref.at(length - 1));
