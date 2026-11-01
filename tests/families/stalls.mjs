@@ -155,6 +155,8 @@ function shardOf(file) {
           ),
           files: undefined,
           globals: undefined,
+          counts: { stalled: 1 },
+          listed: true,
         })),
     };
   if (ran.store !== undefined) refused(`${file} records a store, which compares nothing`);
@@ -280,10 +282,9 @@ for (const [place, was] of replay) {
     console.log(JSON.stringify({ ...line, stalled: was.stalled, ...verdictOf(was), ...rerunOf }));
   }
   if (is !== was) row.rerun += 1;
-  if (is.counts !== undefined) {
-    row.sources += 1;
-    for (const key of COUNTED) row[key] += is.counts[key] ?? 0;
-  }
+  // (a source an `--out` file lists is a stall of a shard whose other sources are not listed)
+  if (!is.listed) row.sources += 1;
+  for (const key of COUNTED) row[key] += is.counts[key] ?? 0;
   if (outcomeOf(is) === "agreed") row.agreed += 1;
   if (verdict !== undefined) row[verdict.verdict] += 1;
   if (is.stalled !== undefined) {
@@ -299,9 +300,8 @@ for (const [area, row] of rows) {
   const counts = [...shards.keys()].map((shard) => Number(shard.split("/")[1]));
   const complete = counts.length > 0 && counts.every((count) => count === shards.size);
   closed &&= complete;
-  console.log(
-    JSON.stringify({ area, shards: `${shards.size}/${counts[0] ?? "?"}`, complete, ...row }),
-  );
+  const recorded = counts.length > 0 ? `${shards.size}/${counts[0]}` : "stalls only";
+  console.log(JSON.stringify({ area, shards: recorded, complete, ...row }));
   for (const key of Object.keys(total)) total[key] += row[key];
 }
 closed &&= total.sources > 0 && total.agreed === total.sources && total.candidate === 0;
