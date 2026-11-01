@@ -26,5 +26,6 @@ outside the repository").
   `builder-probe/publication.mjs` records any thrown value the same way (#1523). Each folder's `canary-1523.sh` checks
   that; its changed files stay beside it as `<file>.pre-1523` (`PORTED-1523.md`).
 - `desktop:~/work/evidence/corpus/copies/{astra-1423,astra-1499}/`: their readers record any thrown value, as
-  `unprintable <type>` where its conversion to text throws, through a `describeCaught.mjs` in the folder (#1532). Each
+  `unprintable <type>` where its conversion to text throws, through a `describeCaught.mjs` in the folder, and
+  `astra-1499/summarize.py` never compares a library-spot case-mode that threw and rejects the run on one (#1532). Each
   folder's `PORTED-1532.md` lists the changed files, whose originals stay beside them as `<file>.pre-1532`.
