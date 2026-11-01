@@ -662,3 +662,170 @@ test("a stopped answer's items stand in the kinds' table order too, in the four 
   assert.ok(stopped > 0, "a decision stops in some mode at the test allowance");
   assert.ok(lists > 100, `${lists} lists`);
 });
+
+/**
+ * #1398 (Codex r3 on #1558, the PR's inventory): a list that joins a value's kinds with another list takes the same
+ * fixed order where it is completed, the kinds' table order then `unknown`: a receiver beside its contract's reference
+ * kinds, the `besides` gathered from a site's other warnings, a warning's `fits` where a domain stands in for host data,
+ * a sort's families, a fallback's family beside its receiving union (its rule, its check and the check's text), what
+ * two reads take together, and a shown set's elements. Each row's published lists in the four modes; a written type's
+ * spelling beside them keeps its own (the store rows' `[string, integer]`), and the sort's offending kind is the one
+ * its elements' own order picks.
+ */
+const COMPOSED_ORDER_ROWS: readonly {
+  readonly name: string;
+  readonly source: string;
+  readonly lists: (answers: Answers) => readonly (readonly string[])[];
+  readonly expected: readonly string[];
+}[] = (() => {
+  // (each diagnostic of a rule, a budget stop set aside)
+  const ruled = (answers: Answers) =>
+    answers.diagnostics.flatMap((diagnostic) => ("rule" in diagnostic ? [diagnostic] : []));
+  const warnings = (answers: Answers) =>
+    ruled(answers).flatMap((diagnostic) =>
+      diagnostic.class === "warning-runtime-check" ? [diagnostic] : [],
+    );
+  const receivers = (answers: Answers) =>
+    warnings(answers).flatMap((warning) =>
+      warning.provenance.detail.receiver === null ? [] : [warning.provenance.detail.receiver.kinds],
+    );
+  const sort = "let values: (string | integer)[] = hostValue\nvalues.sort()\nexit\n";
+  const fallback =
+    'let direct: string | integer = "s"\nif hostValue == 1 { direct = 1 }\n' +
+    "let value: string | integer | duration = direct otherwise hostOther\nsay value\nexit\n";
+  const fallbacks = (answers: Answers) =>
+    warnings(answers).flatMap((warning) => (warning.rule.rule === "fallback" ? [warning] : []));
+  return [
+    {
+      name: "a receiver beside its contract's reference kinds",
+      source: "let alias: speaker? = null\nsay alias.uppercase()\nexit\n",
+      lists: receivers,
+      expected: ["speaker", "null"],
+    },
+    {
+      name: "a host receiver beside its contract's reference kinds",
+      source: "let alias: speaker? = hostValue\nsay alias.uppercase()\nexit\n",
+      lists: receivers,
+      expected: ["speaker", "unknown"],
+    },
+    {
+      name: "a condition's other kinds at its site",
+      source:
+        'let value: integer | string | duration | boolean = 1\nif hostValue == 1 { value = "s" }\n' +
+        "if hostOther == 1 { value = 1 s }\nif value {}\nexit\n",
+      lists: (answers) =>
+        warnings(answers).flatMap((warning) =>
+          warning.kinds[0] === "integer" && warning.besides.length > 0 ? [warning.besides] : [],
+        ),
+      expected: ["string", "duration"],
+    },
+    {
+      name: "a sort's fits where a domain stands in for host data",
+      source: sort,
+      lists: (answers) =>
+        warnings(answers).flatMap((warning) =>
+          warning.rule.rule === "elements" ? [warning.fits] : [],
+        ),
+      expected: ["integer", "string"],
+    },
+    {
+      name: "a sort's families",
+      source: sort,
+      lists: (answers) =>
+        ruled(answers).flatMap((diagnostic) =>
+          diagnostic.rule.rule === "elements" && diagnostic.rule.families.length > 0
+            ? [diagnostic.rule.families]
+            : [],
+        ),
+      expected: ["number", "string"],
+    },
+    {
+      name: "a sort's offending kind, by its elements' own order",
+      source: sort,
+      lists: (answers) =>
+        warnings(answers).flatMap((warning) =>
+          warning.rule.rule === "elements" ? [warning.kinds] : [],
+        ),
+      expected: ["integer"],
+    },
+    {
+      name: "toJson's fits where a domain stands in for host data",
+      source: "let values: (string | regex | integer)[] = hostValue\nsay toJson(values)\nexit\n",
+      lists: (answers) =>
+        warnings(answers).flatMap((warning) =>
+          warning.rule.rule === "json" ? [warning.fits] : [],
+        ),
+      expected: ["integer", "string"],
+    },
+    {
+      name: "a fallback's family beside its receiving union",
+      source: fallback,
+      lists: (answers) =>
+        fallbacks(answers).flatMap((warning) =>
+          warning.rule.rule === "fallback"
+            ? [
+                warning.rule.type,
+                warning.obligation.against,
+                warning.obligation.on.split(" against ")[1]!.split("|"),
+              ]
+            : [],
+        ),
+      expected: ["integer", "number", "string", "duration"],
+    },
+    {
+      name: "a fallback's family alone",
+      source:
+        'let direct: string | integer = "s"\nif hostValue == 1 { direct = 1 }\n' +
+        "let value = direct otherwise false\nsay value\nexit\n",
+      lists: (answers) =>
+        fallbacks(answers).flatMap((warning) =>
+          warning.rule.rule === "fallback" ? [warning.rule.type, warning.obligation.against] : [],
+        ),
+      expected: ["integer", "number", "string"],
+    },
+    {
+      name: "what two reads take together",
+      source:
+        'let value = [] + "s"\nlet first: number = value\nlet second = value + 1\nsay second\nexit\n',
+      lists: (answers) =>
+        ruled(answers).flatMap((diagnostic) =>
+          diagnostic.class === "compile-error" && diagnostic.expects?.takes
+            ? [diagnostic.expects.takes]
+            : [],
+        ),
+      expected: ["integer", "number"],
+    },
+    {
+      name: "a shown set's elements",
+      source:
+        'let values: (string | integer | object) set = set["s"]\nif hostValue == 1 { values = set[1] }\n' +
+        'say "${values}"\nexit\n',
+      lists: (answers) =>
+        ruled(answers).flatMap((diagnostic) =>
+          diagnostic.rule.rule === "shown" && diagnostic.rule.elements.length > 0
+            ? [diagnostic.rule.elements]
+            : [],
+        ),
+      expected: ["integer", "string", "object"],
+    },
+  ];
+})();
+
+test("a list composed of a value's kinds stands in their fixed order where it is completed, in the four modes (#1398)", () => {
+  const wrong: string[] = [];
+  for (const row of COMPOSED_ORDER_ROWS) {
+    const request = coreRequest(
+      [{ path: "main.tease", source: row.source }],
+      [...GLOBALS, "hostOther"],
+    );
+    assert.ok(request !== null, row.name);
+    for (const mode of MODES) {
+      const lists = row.lists(inMode(mode, () => analyseCore(request)));
+      if (lists.length === 0) wrong.push(`${row.name} ${JSON.stringify(mode)}: none published`);
+      for (const list of lists)
+        if (JSON.stringify(list) !== JSON.stringify(row.expected))
+          wrong.push(`${row.name} ${JSON.stringify(mode)}: ${list.join(",")}`);
+    }
+  }
+  assert.deepEqual(wrong, []);
+});
