@@ -937,7 +937,7 @@ export function randomCopyGraph(
 }
 
 /**
- * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, and three of
+ * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, and four of
  * reads no place holds.
  */
 function gateShapes(): Record<string, (k: number) => string> {
@@ -963,6 +963,9 @@ function gateShapes(): Record<string, (k: number) => string> {
       `let xs = [1]\nlet root = ${fields0(k, () => "hostValue")}\nrepeat ${lines(k, (i) => `xs.get(${i + 5}, default: `).join("")}root.f0${")".repeat(k)} {}\nexit`,
     "nested-literal": (k) =>
       `repeat ${"[".repeat(k)}hostValue${"]".repeat(k)}${"[0]".repeat(k)} {}\nexit`,
+    // (and below a copy at its root, Codex r1's B1 on #1559)
+    "copied-literal": (k) =>
+      `repeat [${"[".repeat(k)}hostValue${"]".repeat(k)}].toList()[0]${"[0]".repeat(k)} {}\nexit`,
   };
 }
 

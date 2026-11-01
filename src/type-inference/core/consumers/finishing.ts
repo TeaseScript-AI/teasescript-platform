@@ -325,8 +325,10 @@ interface HostFrontier {
   readonly steps: Map<string, HostFrontier>;
   /** What it stands for as far as followed (`sameOf`): itself, or the copy it holds alone, or one further down. */
   same: HostFrontier | undefined;
-  /** Whether a copy stands at a level above it (its owner path's or further up), so `eachCopy` climbs there. */
-  readonly above: boolean;
+  /** The copies standing at levels above it (its owner path's, then further up), in that order: their number. */
+  readonly above: number;
+  /** Each of those, stepped down to its path (`inheritedAt`), made where it is first asked. */
+  readonly inherited: HostFrontier[];
 }
 
 /** Per walk: the stored paths of each place, each place's frontier at its root, each read's and each copy's. */
@@ -433,7 +435,8 @@ const NOTHING: HostFrontier = {
   owner: null,
   steps: new Map(),
   same: undefined,
-  above: false,
+  above: 0,
+  inherited: [],
 };
 
 function frontier(
@@ -443,7 +446,7 @@ function frontier(
   owner: HostFrontier["owner"],
 ): HostFrontier {
   // (an owner is entered whole before a step below it is made, so its copies are all there)
-  const above = owner !== null && (owner.frontier.above || owner.frontier.copies.length > 0);
+  const above = owner === null ? 0 : owner.frontier.copies.length + owner.frontier.above;
   return {
     cells: new Map(),
     node,
@@ -454,6 +457,7 @@ function frontier(
     steps: new Map(),
     same: undefined,
     above,
+    inherited: [],
   };
 }
 
@@ -786,24 +790,53 @@ function copyFrontier(walk: Consumers, task: Standing): HostFrontier {
 
 /**
  * Visits the copies standing at a frontier's path, each by its frontier there: its own, then its owner path's one step
- * below, and so on up while a copy stands above (`above`), until `visit` answers `false`. Each level and each copy met
- * is charged, with its steps.
+ * below, and so on up (`inheritedAt`), until `visit` answers `false`. Each copy met is charged, with its steps.
  */
 function eachCopy(walk: Consumers, at: HostFrontier, visit: (copy: HostFrontier) => boolean): void {
   const { program } = walk.pass;
-  const below: string[] = [];
-  for (let level: HostFrontier | null = at; level !== null;) {
+  program.work.charge("checks");
+  for (const task of at.copies) {
     program.work.charge("checks");
-    for (const task of level.copies) {
-      program.work.charge("checks");
-      let copied = copyFrontier(walk, task);
-      for (let i = below.length - 1; i >= 0; i -= 1) copied = stepOwn(walk, copied, below[i]!);
-      if (!visit(copied)) return;
-    }
-    if (level.owner === null || !level.above) return;
-    below.push(level.owner.step);
-    level = level.owner.frontier;
+    if (!visit(copyFrontier(walk, task))) return;
   }
+  for (let index = 0; index < at.above; index += 1) {
+    program.work.charge("checks");
+    if (!visit(inheritedAt(walk, at, index))) return;
+  }
+}
+
+/**
+ * A copy standing above a frontier, stepped down to its path: the `index`th of its owner's own copies and then of those
+ * above its owner, each one step below the owner's. Each frontier's entry is made once, from its owner's, so the reads
+ * along one path share every step of the climb and each read's is bounded by the copies it meets (Codex r1's B1 on
+ * #1559: a copy at a deep path's root, climbed and replayed again for each read below it, made k reads k² steps).
+ */
+function inheritedAt(walk: Consumers, at: HostFrontier, index: number): HostFrontier {
+  const { program } = walk.pass;
+  const chain: [HostFrontier, number][] = [];
+  let found: HostFrontier;
+  for (let level = at, k = index; ;) {
+    program.work.charge("checks");
+    const known = level.inherited[k];
+    if (known !== undefined) {
+      found = known;
+      break;
+    }
+    chain.push([level, k]);
+    const owner = level.owner!.frontier;
+    if (k < owner.copies.length) {
+      found = copyFrontier(walk, owner.copies[k]!);
+      break;
+    }
+    k -= owner.copies.length;
+    level = owner;
+  }
+  for (let n = chain.length - 1; n >= 0; n -= 1) {
+    const [level, k] = chain[n]!;
+    found = stepOwn(walk, found, level.owner!.step);
+    level.inherited[k] = found;
+  }
+  return found;
 }
 
 /**
