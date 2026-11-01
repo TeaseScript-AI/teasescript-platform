@@ -21,6 +21,7 @@ import { pathToFileURL } from "node:url";
 
 const runner = resolve(process.cwd(), "tests/families/run.mjs");
 const baselines = resolve(process.cwd(), "tests/families/baselines.mjs");
+const stalls = resolve(process.cwd(), "tests/families/stalls.mjs");
 
 /** A built tree's oracle library that throws in every mode where a source says `throw`, as #1439's stale caller did. */
 const library = `export const MODES = [false, true].flatMap((reversed) =>
@@ -440,6 +441,29 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     assert.deepEqual(counts(beside), [5, 1, 4, 4, 0, 16, 4]);
     assert.deepEqual(counts(against), counts(beside));
     assert.equal(against.status, 1);
+    // its record (#1564): one tree, whose work these trees without a ledger record as `null`, and each stall's trees,
+    // a stall of both trees for a reason other than time unknown without the base's work
+    const record = join(directory, "against.work.jsonl");
+    assert.equal(run(head, "--baseline", baseline, "--work", record).status, 1);
+    const recorded = readFileSync(record, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .slice(1, -1);
+    assert.deepEqual(
+      recorded.map(({ source }) => source),
+      names,
+    );
+    for (const { runs: ran } of recorded)
+      for (const { work, ms } of ran) assert.deepEqual([work, ms.length], [[null], 1]);
+    assert.deepEqual(recorded.find(({ source }) => source === "ends").stalled, {
+      base: "exit 3",
+      head: "exit 3",
+    });
+    assert.match(
+      spawnSync(process.execPath, [stalls, record], { encoding: "utf8" }).stdout,
+      /"source":"ends".*"verdict":"unknown"/,
+    );
     const runs = ({ kept }: { kept: Record<string, unknown>[] }) =>
       kept.filter(({ mode }) => mode !== undefined).map(({ thrown, ...line }) => line);
     assert.deepEqual(runs(against), runs(beside));
@@ -1082,8 +1106,6 @@ test("the stored baselines finish or clear what a writer killed at a write left,
   }
 });
 
-const stalls = resolve(process.cwd(), "tests/families/stalls.mjs");
-
 /** A built tree's work ledger, which every unit of its analyses' work passes (`--work` counts its charges). */
 const LEDGER = `export class WorkLedger {
   #total = 0;
@@ -1170,6 +1192,15 @@ test("the corpus runner records each source's work and time, a stalled run's to 
     assert.equal(
       readFileSync(join(directory, "recorded.jsonl"), "utf8"),
       readFileSync(join(directory, "plain.jsonl"), "utf8"),
+    );
+    // one tree given twice: one ledger, whose units go to the tree running
+    const twice = join(directory, "twice.work.jsonl");
+    run(runner, ending, base, base, "--work", twice);
+    assert.deepEqual(
+      lines(readFileSync(twice, "utf8"))[1].runs.map(
+        ({ work: units }: { work: number[] }) => units,
+      ),
+      MODES.map(() => [3000, 3000]),
     );
 
     // a replay at a half-second limit: `slow` stalls in the head's long runs, `busy` at the clock; each source's record
