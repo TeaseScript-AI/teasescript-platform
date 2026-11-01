@@ -134,19 +134,18 @@ function fallbackFitsAt(
       : admits(tag, directTags) || (unionHolds && admits(tag, intoTags));
   // the family the fallback is checked against: the direct value's (whole numbers with numbers), a load's or
   // `fromJson`'s written type itself (its `null` C10's exception, never listed), and the receiving union's kinds
-  // (a written type alone keeps its spelling; a family or a union beside it is a composition, in the kinds' fixed
-  // order, #1398)
-  const joined: ItemTag[] = [
-    ...new Set([
-      ...(written
-        ? direct.filter(concrete).map((item) => item.tag)
-        : [...directFamilies].flatMap((found): ItemTag[] =>
-            found === "number" ? ["integer", "number"] : [found],
-          )),
-      ...(unionHolds ? typeTags(into!).filter((tag) => tag !== "null" && tag !== "unknown") : []),
-    ]),
-  ];
-  const against = written && !unionHolds ? joined : kindsInOrder(joined);
+  const own: ItemTag[] = written
+    ? direct.filter(concrete).map((item) => item.tag)
+    : [...directFamilies].flatMap((found): ItemTag[] =>
+        found === "number" ? ["integer", "number"] : [found],
+      );
+  const added = unionHolds
+    ? typeTags(into!).filter((tag) => tag !== "null" && tag !== "unknown" && !own.includes(tag))
+    : [];
+  // (a written type keeps its spelling where nothing beside it adds a kind, the receiving union repeating it included;
+  // a family, or a kind the union adds, is a composition, in the kinds' fixed order, #1398)
+  const joined: ItemTag[] = [...new Set([...own, ...added])];
+  const against = written && added.length === 0 ? joined : kindsInOrder(joined);
   // §3.3: a fallback whose contract every kind of fits asks nothing more at this path
   const quiet = quietKinds(walk, value, rest);
   const fallback =
