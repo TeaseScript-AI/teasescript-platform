@@ -555,7 +555,7 @@ test("the stop oracle sees every change no mark of the stop names", () => {
  * A fix a stop gives in words (TABLE r4.162, #1449): in a settled walk stop's unchecked region the property store's
  * warning checks its value in words where the unstopped compile shows the check's code, the same diagnostic to the
  * oracle; a stopped warning with another code, site or other sentence is not, nor one showing code the unstopped compile
- * gives in words.
+ * gives in words, nor the warning published twice.
  */
 test("the stop oracle takes a fix in words for the unstopped one's code, and nothing else (TABLE r4.162)", () => {
   const source =
@@ -612,6 +612,17 @@ test("the stop oracle takes a fix in words for the unstopped one's code, and not
     [unstopped, changed(stopped, { message: code.replace("is integer", "is number") })],
     [unstopped, changed(stopped, { message: `${words} Check it again.` })],
     [changed(unstopped, { message: words }), changed(stopped, { message: code })],
+    // (the warning published twice)
+    [
+      unstopped,
+      {
+        ...stopped,
+        result: {
+          ...stopped.result,
+          diagnostics: [...stopped.result.diagnostics, warning(stopped)],
+        },
+      },
+    ],
   ] as const)
     assert.notDeepEqual(problems(want, got), []);
 });
