@@ -1606,8 +1606,10 @@ test("a cycle of whole copies read at every member grows with the program in eit
  * elements in its own order, a node of its own, and C1's site walked each such node's leaves though no list's store
  * lands any or brings an ingress at a siting: k orders × k²/8 leaves. With the sharing off the total and each counter
  * grow with the program in either order; with it on only `checks` is gated, since the sharing's union nodes and the
- * contract's class parts grow faster than the program in the fixed order too (#1573). The series to k = 128, the
- * four modes, the subsets and the other orders are the step's evidence, outside CI.
+ * contract's class parts grow faster than the program in the fixed order too (#1573). At 20 → 40, the smallest pair
+ * that shows the walk (18 → 36 does not), the walk grew `checks` ×2.97 per doubling in every mode. The series to
+ * k = 128, the four modes, the subsets and the other orders are the step's evidence, outside CI; a store that reads
+ * the leaves it walks is #1579.
  */
 test("lists of one set of choices in many orders site their host data without walking each order (#1397)", () => {
   const shuffled = (m: number, seed: number): number[] => {
@@ -1640,9 +1642,9 @@ test("lists of one set of choices in many orders site their host data without wa
       return [{ path: "main.tease", source }];
     },
   };
-  const steep = steepCounters([family], true, undefined, [24, 48]);
+  const steep = steepCounters([family], true, undefined, [20, 40]);
   for (const reversed of [false, true]) {
-    const [small, large] = [24, 48].map((k) => analysed(sized(family, k), reversed).budget.counts);
+    const [small, large] = [20, 40].map((k) => analysed(sized(family, k), reversed).budget.counts);
     const scale = large!.get("syntaxNodes")! / small!.get("syntaxNodes")!;
     const doubling = (2 * (large!.get("checks")! / small!.get("checks")!)) / scale;
     if (doubling > COUNTER_DOUBLING)
