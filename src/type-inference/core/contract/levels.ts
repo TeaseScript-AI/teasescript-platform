@@ -94,6 +94,9 @@ export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStore
   return levels;
 }
 
+/** #1456: a path no object holds, one step below a prefix (an author's property named `element` is quoted). */
+const LACKED: Rest = ["element"];
+
 /**
  * #1456: whether a prefix entry is a closed object literal stored whole, whose properties are its object's alone: one
  * object term, no projection, copied key, element or cell, unguarded, without ingress, its holder marking no path
@@ -138,11 +141,19 @@ export function* propertyItems(
   if (!levels.closed) return null;
   let index = contract.propertyIndexes.get(stores);
   if (index === undefined) {
-    index = propertyIndex(
-      contract,
-      stores.list,
-      sharing() ? groupsAt(contract, asked, levels.base, stepsRest([])) : null,
-    );
+    let shared: { groups: readonly LevelGroup[]; writers: Set<PlaceId> } | null = null;
+    if (sharing()) {
+      const groups = groupsAt(contract, asked, levels.base, stepsRest([]));
+      // (where groups lack a property the levels fold those alike there into the first, whose literal F11 names:
+      // alike by their root and marks, whatever the property, so as at a step no object holds)
+      const writers = new Set<PlaceId>();
+      for (const group of foldGroups(contract, LACKED, groups)) {
+        contract.keep(1);
+        writers.add(group.literal);
+      }
+      shared = { groups, writers };
+    }
+    index = propertyIndex(contract, stores.list, shared);
     contract.propertyIndexes.set(stores, index);
   }
   const { work } = contract.pass.program;

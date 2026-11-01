@@ -2899,9 +2899,10 @@ export const COPY_RING_FAMILIES: readonly WorkFamily[] = [
  * #1456: a place replaced k times by objects of distinct properties, each read after its store (the issue's shape,
  * `plain`), and its controls (Sol's prototype rounds): two properties per object, a property every object holds, one
  * half of them hold, typed and open property values, every other store a host value (an open root), the reads under a
- * test (marked), a value of two provenances, each read before its store, the properties in reversed order, and every
- * other object holding a value whose operand's test marks its structure (no level's member). Host globals
- * `hostValue` and `hostOther`.
+ * test (marked), a value of two provenances, each read before its store, the properties in reversed order, every
+ * other object holding a value whose operand's test marks its structure (no level's member), and two objects alike at
+ * the root per property, stored in the other order than their literals stand (F11 names the first stored where the
+ * levels fold them). Host globals `hostValue` and `hostOther`.
  */
 export const PROPERTY_STORE_FAMILIES: readonly WorkFamily[] = (
   [
@@ -2917,11 +2918,28 @@ export const PROPERTY_STORE_FAMILIES: readonly WorkFamily[] = (
     ["before", "each property read before its store too"],
     ["reverse", "the properties in reversed order"],
     ["marked", "every other object's value a carrier of a tested operand: a marked structure"],
+    [
+      "alike",
+      "two objects of each property, stored in turn from bindings written the other way round",
+    ],
   ] as const
 ).map(([kind, measures]): WorkFamily => ({
   name: `property-stores-${kind}`,
   measures: `#1456: ${measures}`,
   program: (k) => {
+    if (kind === "alike")
+      // (each property's two objects alike at the root, so where they lack another they fold into the first stored)
+      return main(
+        lines(
+          "let typed: integer = hostValue",
+          rows(k, (i) => `let b${i} = {f${i}: typed}\nlet a${i} = {f${i}: 1.25}`),
+          rows(
+            k,
+            (i) => `${i === 0 ? "let " : ""}root = a${i}\nroot = b${i}\nrepeat root.f${i} {}`,
+          ),
+          "exit",
+        ),
+      );
     const ids = Array.from({ length: k }, (_, i) => (kind === "reverse" ? k - 1 - i : i));
     const object = (i: number): string =>
       kind === "two"
