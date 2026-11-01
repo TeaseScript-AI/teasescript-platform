@@ -11,9 +11,12 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
-  [--allowances natural,16,256] [--shard i/N] [--timeout 180] [--memory 2048] [--out differences.jsonl]
+  [--allowances natural,16,256] [--shard i/N] [--timeout 180] [--memory 2048] [--out differences.jsonl] \
+  [--work <area>-<i>of<N>.work.jsonl] [--only <stall index>]
 node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base src tree>/<area> [the same options]
 node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/16]
+node tests/families/stalls.mjs <shards' --work records>... [--rerun <rerun's records>...] [--index <new file>]
+node tests/families/stalls.mjs rerun <stall index> <base> <head> <new folder> [--timeout 600]
 ```
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
@@ -45,6 +48,21 @@ outside its runs where either the stored run or the head did. The limits then ap
 both trees shares them in one process, so a source that stalls there may end here, and the head's runs after a stored
 stall are uncompared. `--baseline` reads a folder's `*.runs.jsonl` files, and stops (exit 2) at a source stored twice
 with other results.
+
+`--work` writes a record of each source and changes no other output (#1564): a first line with what ran, one line per
+source with each run's charged work (`work`: the units its analyses charged their work ledgers, `WorkLedger.charge`,
+finishing work included; `null` for a tree without one) and milliseconds (`ms`) on each tree and what the source
+counted, and the total last. A source that stalls keeps the run then going on as the runner ended it: the units last
+reported (each 65,536), the milliseconds until the stall and the tree running it (`running`). `stalls.mjs` reads a
+replay's records (a shard run without `--work` by its `--out` file, which gives its stalls alone) and prints the rule it
+judges each stalled source by (`RULE`: a candidate stall, load or unknown), each stalled source with its verdict, and
+each area's counts and the total: a source counts as `agreed` only where it was compared in every run and agrees, and
+`closed` (exit 0) only where every area's shards are all recorded, every source agreed and no candidate is left.
+`--index` writes the sources still unavailable, with their verdicts and records. Against a stored baseline the base's
+work is not recorded, so a head's timeout is unknown: `stalls.mjs rerun` runs the index's sources alone, one at a time
+with both trees in one process (`run.mjs <area> <base> <head> --only <index>`, an area after another), and `--rerun
+<folder>/*.work.jsonl` reads its records in place of the replay's, so the replay closes without another campaign; a
+rerun that ends does not clear a candidate.
 
 `--store` runs one tree of a commit (an `sx-tree` tree: `src/`, `dist/`, `.sha`) at the runner's defaults and stores one
 shard of an area, each source's results as one line, in the baseline of its `src/` tree,
