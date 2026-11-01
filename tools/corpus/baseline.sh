@@ -56,7 +56,7 @@ if [ "${1:-}" = --job ]; then
     echo "baseline ${out##*/}: $repo has no origin/main to name the current tree" >&2
     exit 1
   fi
-  # whether the fill runs, decided by its first job through the state module (see above)
+  # whether this job stores, decided through the state module (see above)
   if ! decided=$(node "$runner/tests/families/baselines.mjs" start "$out" "$current"); then
     echo "baseline ${out##*/}: $(jq -r .refused <<< "$decided" 2> /dev/null)" >&2
     exit 1
