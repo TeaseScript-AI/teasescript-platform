@@ -223,3 +223,41 @@ test("a read 3,000 and 4,097 index steps deep stops cleanly, never overflowing t
       line,
     );
 });
+
+/**
+ * #1572: a list join of 1,100 terms (`o + [{p0: 1}] + o + …`) and a list `otherwise` chain of 1,100
+ * (`hostValue.l0 otherwise … otherwise o`), each read below its elements. Each operation's answer at a path is a demand
+ * of its own, so the chain deepens neither the native stack per term (read inline, a fresh process overflowed at about
+ * 900 terms) nor the read chain (1,024 levels, `READ_DEPTH_LIMIT`). In a child, in the four modes, each is answered
+ * without a stop, as the same chain of 8 terms is; the deep chain runs first, before anything warms the code.
+ */
+test("a join and an otherwise chain of 1,100 lists read below their elements are answered in the four modes (#1572)", () => {
+  const chain = (terms: number, term: (i: number) => string, last: string): string =>
+    `let o = [{q: 1}]\nlet xs = ${Array.from({ length: terms - 1 }, (_, i) => term(i)).join("")}${last}\nsay "\${xs[0].q}"\nexit\n`;
+  const forms = {
+    join: (terms: number) => chain(terms, (i) => (i % 2 === 0 ? "o + " : `[{p${i}: 1}] + `), "o"),
+    otherwise: (terms: number) => chain(terms, (i) => `hostValue.l${i} otherwise `, "o"),
+  };
+  const sources = Object.entries(forms).flatMap(([name, form]) =>
+    [1_100, 8].map((terms) => [name, terms, form(terms)] as const),
+  );
+  const script = `
+    import {analyseCore} from ${url("../src/type-inference/core/answers.js")};
+    import {coreRequest} from ${url("./helpers/type-core-analysis.js")};
+    import {HELD_MODES} from ${url("./helpers/type-core-held-host.js")};
+    for (const [name, terms, source] of ${JSON.stringify(sources)})
+      for (const mode of HELD_MODES) {
+        const answers = mode.run(() => analyseCore(coreRequest([{path: "main.tease", source}], ["hostValue"])));
+        console.log([terms, name, mode.name, answers.outcome, answers.budget.exhausted].join("\\t"));
+      }
+  `;
+  const lines = childLines("deep chains", script).map((line) => line.split("\t"));
+  assert.equal(lines.length, 16);
+  for (const [terms, name, mode, outcome, exhausted] of lines.filter(
+    ([terms]) => terms === "1100",
+  )) {
+    assert.equal(exhausted, "", `${name} of ${terms} in ${mode}: stopped (${exhausted})`);
+    const small = lines.find((line) => line[0] === "8" && line[1] === name && line[2] === mode);
+    assert.equal(outcome, small?.[3], `${name} of ${terms} in ${mode}`);
+  }
+});
