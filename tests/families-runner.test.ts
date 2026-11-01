@@ -516,6 +516,28 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
             ),
           ),
       ],
+      // (#1542 r6: a header accepted only as this tool writes one, by status and by the comparison alike)
+      [
+        "a token added to its MANIFEST's header",
+        2,
+        (dir) =>
+          writeFileSync(
+            join(dir, "MANIFEST"),
+            readFileSync(join(dir, "MANIFEST"), "utf8").replace(/^(oracles \w+)$/m, "$1 extra"),
+          ),
+      ],
+      [
+        "its MANIFEST's header lines reordered",
+        2,
+        (dir) =>
+          writeFileSync(
+            join(dir, "MANIFEST"),
+            readFileSync(join(dir, "MANIFEST"), "utf8").replace(
+              /^(src \w+)\n(oracles \w+)$/m,
+              "$2\n$1",
+            ),
+          ),
+      ],
       ["a complete shard of another src/ tree", 2, (dir) => cpSync(strange(another), shard(dir))],
       [
         "a complete shard of another src/ tree and oracle library",

@@ -140,17 +140,17 @@ export function identityOf(tree) {
   };
 }
 
-/** What a baseline's runs depend on, as its MANIFEST's header (`text`, below) names it. */
-const identityIn = (text) =>
-  Object.fromEntries(
-    text
-      .split("\n")
-      .slice(1, 5)
-      .map((line) => line.split(" "))
-      .filter(
-        ([key, value]) => ["src", "oracles", "lock", "node"].includes(key) && value !== undefined,
-      ),
-  );
+/**
+ * What a baseline's runs depend on, as its MANIFEST's header (`text`) names it, where that header is exactly one
+ * `headerOf` (below) renders (its five lines, in order, nothing else in them); else undefined. The gate and the
+ * comparison (`storedRuns`) accept a MANIFEST only so (#1542 r6).
+ */
+function identityIn(text) {
+  const parts = /^baseline 3\nsrc (\S+)\noracles (\S+)\nlock (\S+)\nnode (\S+)\n/.exec(text);
+  if (parts === null) return undefined;
+  const identity = { src: parts[1], oracles: parts[2], lock: parts[3], node: parts[4] };
+  return isBaselineName(identity.src) && text.startsWith(headerOf(identity)) ? identity : undefined;
+}
 
 const headerOf = ({ src, oracles, lock, node }) =>
   `baseline 3\nsrc ${src}\noracles ${oracles}\nlock ${lock}\nnode ${node}\n`;
@@ -305,6 +305,8 @@ async function gate(baseline, action) {
         refused: `${dir} holds foreign contents, which this tool did not write: ${foreign.join(", ")}`,
         foreign,
       };
+    if (identityIn(text) === undefined)
+      return { refused: `${dir}'s MANIFEST has a header this tool does not write` };
     // the temporary files a writer left when it ended (killed) before renaming or linking them
     const folders = [dir, ...[...recorded(text).keys()].map((area) => path.join(dir, area))];
     for (const folder of folders.filter((folder) => existsSync(folder)))
@@ -572,7 +574,7 @@ function shardIn(body, plan, places, identity) {
   )
     return {};
   const other = ["src", "oracles", "lock", "node"].filter(
-    (key) => identity[key] === undefined || total[key] !== identity[key],
+    (key) => identity?.[key] === undefined || total[key] !== identity[key],
   );
   return other.length > 0 ? { other } : { lines };
 }
@@ -738,6 +740,8 @@ export function storedRuns(folder) {
       refused: `${dir} holds foreign contents, which this tool did not write: ${foreign.join(", ")}`,
     };
   const identity = identityIn(text);
+  if (identity === undefined)
+    return { status: 2, refused: `${dir}'s MANIFEST has a header this tool does not write` };
   if (identity.src !== path.basename(dir))
     return { status: 2, refused: `${dir}'s MANIFEST names another src tree than its folder` };
   const record = recorded(text).get(area);
