@@ -37,8 +37,9 @@
 // already complete again only with `--read-only`. It exits 0 when every area is complete, 1 when one is not, 2 when the
 // folder is not this tool's, holds a foreign path or holds the runs of other inputs (than the tree's, or than its own
 // MANIFEST names). `start` is a fill job's first decision (`tools/corpus/baseline.sh`): STARTED where the baseline is
-// the current tree's or the fill began, else SUPERSEDED (the current tree). `queue` copies the hook's script into the
-// baseline for its jobs and undoes SUPERSEDED. Nothing here removes a baseline.
+// the current tree's, else SUPERSEDED (the current tree), also once the fill began; its stored shards stay and are read
+// as any others. `queue` copies the hook's script into the baseline for its jobs and undoes SUPERSEDED. Nothing here
+// removes a baseline.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -867,7 +868,8 @@ async function state(tree, root, readOnly) {
 
 /**
  * A fill job's first decision for the baseline `dir` (through the gate): STARTED where the baseline is the current
- * tree's (SUPERSEDED undone) or the fill already began, else SUPERSEDED, naming the current tree. The decision printed.
+ * tree's (SUPERSEDED undone; STARTED written once, when the fill began), else SUPERSEDED, naming the current tree, also
+ * once the fill began (#1567). The decision printed.
  */
 async function start(baseline, current) {
   const dir = pathOf(baseline, "baseline");
@@ -879,7 +881,6 @@ async function start(baseline, current) {
         replaced(marker("STARTED"), `${new Date().toISOString()}\n`);
       return { decision: "started" };
     }
-    if (existsSync(marker("STARTED"))) return { decision: "started" };
     replaced(marker("SUPERSEDED"), `${current}\n`);
     return { decision: "superseded", by: current };
   });
