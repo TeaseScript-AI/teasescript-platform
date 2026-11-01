@@ -431,26 +431,34 @@ test("a stop at the first unit finishes a deeply nested literal and a read as de
 });
 
 /**
- * #1364: k functions in a cycle of calls, each returning the next function's or the one after's result or a host value,
- * so each result's ingress cell holds the next two's. A consumer's boundary resolves the cycle once, as one component,
- * not once per path through it (on `main` `7d6c4d3d4`, 18,762 `checks` at k = 8 and 1,065,770 at k = 12; the corpus
- * unit `GuessMyNumber` stopped there and its finishing did not end). In either order its `checks` grow with the program,
- * and so does the finishing work after a stop at the walk's first unit.
+ * #1364: k functions in a cycle of calls, each passing a host value on unchanged, so each result's ingress cell holds
+ * the next function's. A consumer's boundary resolves a cycle once per pass, as one component: not once per path through
+ * it, where each function returns the next function's or the one after's result (on `main` `7d6c4d3d4`, 18,762 `checks`
+ * at k = 8 and 1,065,770 at k = 12; the corpus unit `GuessMyNumber` stopped there and its finishing did not end), nor
+ * once per read, where a ring of functions is read at each. In either order the `checks` grow with the program, and so
+ * does the finishing work after a stop at the walk's first unit.
  */
 test("a cycle of calls passing host data on is resolved once, unstopped and finished after a stop in the walk (#1364)", () => {
-  const cycle = (k: number) =>
-    requestOf(
-      main(
-        [
-          ...Array.from(
-            { length: k },
-            (_, i) =>
-              `function f${i}(n) {\n  if n > 1 {\n    return f${(i + 1) % k}(n - 1)\n  }\n  if n > 0 {\n    return f${(i + 2) % k}(n - 2)\n  }\n  return hostValue\n}`,
-          ),
-          "repeat f0(3) {}",
-        ].join("\n"),
-      ),
-    );
+  const cycles: Record<string, (k: number) => string> = {
+    "two successors, read once": (k) =>
+      [
+        ...Array.from(
+          { length: k },
+          (_, i) =>
+            `function f${i}(n) {\n  if n > 1 {\n    return f${(i + 1) % k}(n - 1)\n  }\n  if n > 0 {\n    return f${(i + 2) % k}(n - 2)\n  }\n  return hostValue\n}`,
+        ),
+        "repeat f0(3) {}",
+      ].join("\n"),
+    "a ring, read at each": (k) =>
+      [
+        ...Array.from(
+          { length: k },
+          (_, i) =>
+            `function f${i}(n) {\n  if n > 0 {\n    return f${(i + 1) % k}(n - 1)\n  }\n  return hostValue\n}`,
+        ),
+        ...Array.from({ length: k }, (_, i) => `repeat f${i}(3) {}`),
+      ].join("\n"),
+  };
   // (the walk's first unit: the least allowance whose stop comes in the walk or later)
   const walkStop = (request: ReturnType<typeof requestOf>, reversed: boolean, total: number) => {
     let [low, high] = [1, total];
@@ -462,31 +470,33 @@ test("a cycle of calls passing host data on is resolved once, unstopped and fini
     }
     return low;
   };
-  for (const reversed of [false, true]) {
-    const [small, large] = [6, 12].map((k) => {
-      const request = cycle(k);
-      const { budget } = analysed(request, reversed);
-      assert.equal(budget.exhausted, null, `k = ${k}`);
-      const stopped = analysed(request, reversed, walkStop(request, reversed, budget.total)).budget;
-      assert.equal(stopped.stoppedIn, "walk", `k = ${k}`);
-      return {
-        nodes: budget.counts.get("syntaxNodes")!,
-        checks: budget.counts.get("checks")!,
-        finishing: stopped.finishing,
-      };
-    });
-    const doubling = (before: number, after: number) =>
-      (2 * (after / before)) / (large!.nodes / small!.nodes);
-    const where = reversed ? "reversed" : "in source order";
-    assert.ok(
-      doubling(small!.checks, large!.checks) <= 2.15,
-      `${where}: checks ${small!.checks} -> ${large!.checks}`,
-    );
-    assert.ok(
-      doubling(small!.finishing, large!.finishing) <= 2.15,
-      `${where}: finishing ${small!.finishing} -> ${large!.finishing}`,
-    );
-  }
+  const steep: string[] = [];
+  for (const [name, cycle] of Object.entries(cycles))
+    for (const reversed of [false, true]) {
+      const [small, large] = [6, 12].map((k) => {
+        const request = requestOf(main(cycle(k)));
+        const { budget } = analysed(request, reversed);
+        assert.equal(budget.exhausted, null, `${name} at ${k}`);
+        const stopped = analysed(
+          request,
+          reversed,
+          walkStop(request, reversed, budget.total),
+        ).budget;
+        assert.equal(stopped.stoppedIn, "walk", `${name} at ${k}`);
+        return {
+          nodes: budget.counts.get("syntaxNodes")!,
+          checks: budget.counts.get("checks")!,
+          finishing: stopped.finishing,
+        };
+      });
+      const doubling = (before: number, after: number) =>
+        (2 * (after / before)) / (large!.nodes / small!.nodes);
+      const where = `${name}${reversed ? " reversed" : ""}`;
+      for (const measure of ["checks", "finishing"] as const)
+        if (doubling(small![measure], large![measure]) > 2.15)
+          steep.push(`${where} ${measure}: ${small![measure]} -> ${large![measure]}`);
+    }
+  assert.deepEqual(steep, []);
 });
 
 /**
