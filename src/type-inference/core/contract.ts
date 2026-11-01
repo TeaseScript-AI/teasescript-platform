@@ -339,7 +339,7 @@ export class Contract {
     new Map<PlaceId, { readonly third: PlaceId | null; readonly at: number }>(),
     new Map<PlaceId, { readonly third: PlaceId | null; readonly at: number }>(),
   ];
-  /** #1384: the pass's index of its `+` runs' terms by the properties they hold (`plusSpan`), once one is asked. */
+  /** #1384: the pass's index of its `+` runs' terms by the properties they hold (`plusRun`), once one is asked. */
   plusIndex: PlusIndex | null = null;
   /** Each value's structure identity (`structureOf`), and its interned shapes. */
   readonly structures = new Map<PlaceId, string>();

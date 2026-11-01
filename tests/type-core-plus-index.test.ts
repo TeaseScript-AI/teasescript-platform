@@ -17,7 +17,7 @@ import { inMode, MODES, orderedItems, replayAnswer } from "./helpers/type-core-o
 
 /*
  * #1384: a run of `+` asked below its elements at a third property indexes its terms by the properties their objects
- * hold (`plusSpan`) and answers each property from the terms holding it and the ranges of terms between them
+ * hold (`plusRun`) and answers each property from the terms holding it and the ranges of terms between them
  * (`indexedPlus`), on the value side, on the contract side and in admission's decider. Its answers are its operands'
  * walk's: the walk is the reference, asked first in a fresh pass (a pass's first property never indexes), the index
  * asked in another after two other properties of the same `+`.
@@ -36,6 +36,13 @@ function pluses(pass: CorePass): PlaceId[] {
     if (c.kind === "operation" && c.contract.family === "operator" && c.contract.name === "+")
       out.push(c.result);
   return out;
+}
+
+/** Whether no `+` takes a value as an operand: a run's root. */
+function isRoot(pass: CorePass, value: PlaceId): boolean {
+  return !(pass.program.consumersOf.get(value) ?? []).some(
+    (use) => use.kind === "operand" && pluses(pass).includes(use.operation.result),
+  );
 }
 
 /** A `+`'s answer at `path` on one side, at its own expression's node. */
@@ -139,9 +146,11 @@ test("an indexed run of `+` answers below its elements as its operands' walk doe
               for (const value of pluses(walked)) {
                 const expected = asked(walked, value, path, exact);
                 const got = asked(index, value, path, exact);
-                const span = index.contract.plusIndex?.indexed?.spans.get(value) ?? null;
+                // (a root answers from its run once indexed; every `+` below a root keeps its walk)
+                const run = index.contract.plusIndex?.indexed?.runs.get(value) ?? null;
                 const where = `${source.split("\n").at(-3)}: ${value} at ${path.join(".")}, ${exact ? "value" : "contract"}, mode ${m}`;
-                if ((span !== null) !== indexed) differing.push(`indexed: ${where}`);
+                if (isRoot(index, value) && (run !== null) !== indexed)
+                  differing.push(`indexed: ${where}`);
                 if (JSON.stringify(got) !== JSON.stringify(expected)) differing.push(where);
               }
         }
@@ -178,27 +187,38 @@ function observed<T>(run: () => T): {
 
 /** Whether a pass's index published a run. */
 const published = (pass: CorePass): boolean =>
-  [...(pass.contract.plusIndex?.indexed?.spans.values() ?? [])].some((span) => span !== null);
+  [...(pass.contract.plusIndex?.indexed?.runs.values() ?? [])].some((run) => run !== null);
 
 /**
- * Whether every run a pass's index published is whole: each span within its terms, each term a literal posted at its
- * names or one of a binding's reads, each position's next literal found, and the tree of the literals' earliest objects
- * made to its root.
+ * Whether every run a pass's index published is whole: each term a literal posted at its names or one of a binding's
+ * reads, its bindings in both orders and by proof, each binding the run found holding a property among its own, each
+ * position's next literal found, and the tree of the literals' earliest objects made to its root.
  */
 function whole(pass: CorePass): boolean {
-  for (const span of pass.contract.plusIndex?.indexed?.spans.values() ?? []) {
-    if (span === null) continue;
-    const { terms, holders, reads, nextLiteral, width, earliest } = span.run;
+  for (const run of pass.contract.plusIndex?.indexed?.runs.values() ?? []) {
+    if (run === null) continue;
+    const { terms, holders, reads, byWriter, groupOf, holding, nextLiteral, width, earliest } = run;
     const read = new Set(reads.flatMap(({ positions }) => positions));
     const leaves = earliest.slice(width, width + terms.length);
     const next = (at: number): number =>
       leaves.findIndex((writer, index) => index >= at && writer !== null);
+    const writer = (group: (typeof reads)[number]): Writer | null => group.proof.shape.writer;
     if (
-      !(span.lo < span.hi && span.hi <= terms.length) ||
       [...holders.values()].some((list) => list.some((at) => at >= terms.length || read.has(at))) ||
-      leaves.some((writer, at) => (writer === null) !== read.has(at)) ||
+      leaves.some((leaf, at) => (leaf === null) !== read.has(at)) ||
       nextLiteral.some((at, index) => at !== (next(index) < 0 ? terms.length : next(index))) ||
-      earliest[1] !== leaves.reduce<Writer | null>(firstWriter, null)
+      earliest[1] !== leaves.reduce<Writer | null>(firstWriter, null) ||
+      reads.some(
+        (group, index) => index > 0 && group.positions[0]! < reads[index - 1]!.positions[0]!,
+      ) ||
+      byWriter.length !== reads.length ||
+      byWriter.some(
+        (group, index) =>
+          index > 0 &&
+          firstWriter(writer(byWriter[index - 1]!), writer(group)) !== writer(byWriter[index - 1]!),
+      ) ||
+      reads.some((group) => groupOf.get(group.proof) !== group || !byWriter.includes(group)) ||
+      [...holding.values()].some((set) => [...set].some((group) => !reads.includes(group)))
     )
       return false;
   }
@@ -309,13 +329,9 @@ test("a closed object of k properties read k times is one binding's reads, its a
       result.budget.decisions.filter((decision) => decision.stopped),
       [],
     );
-    const runs = admission.flatMap((pass) => [
-      ...new Set(
-        [...(pass.contract.plusIndex?.indexed?.spans.values() ?? [])].flatMap((span) =>
-          span === null ? [] : [span.run],
-        ),
-      ),
-    ]);
+    const runs = admission.flatMap((pass) =>
+      [...(pass.contract.plusIndex?.indexed?.runs.values() ?? [])].filter((run) => run !== null),
+    );
     assert.deepEqual(
       runs.map(({ terms, holders, reads }) => [
         terms.length,

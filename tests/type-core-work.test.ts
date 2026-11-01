@@ -8,6 +8,7 @@ import type { WorkCounter } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { writtenTypeSteps } from "../src/type-inference/core/contract.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
+import { plusIndexVisits } from "../src/type-inference/core/plus-index.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -947,13 +948,37 @@ test("the composition of an operand's parts visits only its smaller part, its sh
 });
 
 /**
+ * The holder cache's witness: k variables holding `q` joined in another run, then a run of k variables lacking it and
+ * one holding it with k properties below it, asked at each of them, so each question looks for the bindings holding
+ * `q` among many.
+ */
+const underOne = (k: number): string =>
+  [
+    many(k, (i) => `let h${i} = [{q: 1, t${i}: 1}]`),
+    `let ys = ${many(k, (i) => `h${i}`, " + ")}`,
+    "say ys[0].t0\nsay ys[1].t1\nsay ys[2].t2",
+    many(k, (i) => `let l${i} = [{u${i}: 1}]`),
+    `let c = [{q: {${many(k, (i) => `x${i}: 1`, ", ")}}}]`,
+    `let xs = ${many(k, (i) => `l${i}`, " + ")} + c`,
+    "say xs[0].u0\nsay xs[1].u1",
+    many(k, (i) => `say xs[${k}].q.x${i}`),
+    "exit",
+  ].join("\n");
+
+/** Codex r2 on #1562: k variables of one property each, joined once each, each element read at its own property. */
+const sparse = (k: number): string =>
+  `${many(k, (i) => `let o${i} = [{p${i}: 1}]`)}\nlet xs = ${many(k, (i) => `o${i}`, " + ")}\n${many(k, (i) => `say xs[${i}].p${i}`)}\nexit`;
+
+/**
  * #1384: k joins of lists of objects of distinct properties, a variable of objects read beside each operand, along the
  * left operands and each join in the next one's right, and both with one property throughout: a run's terms are indexed
- * by the properties they hold once its root is asked at a third (`plusSpan`), so the value side, the contract side and
+ * by the properties they hold once its root is asked at a third (`plusRun`), so the value side, the contract side and
  * admission's decider read each property's holders and the ranges between them, never every join below (3.1 to 3.3 at
  * 16 → 32 before, its counters near 4; 3.7 at 64 → 128). And a variable of k properties joined k times, alone and
  * beside k objects of distinct properties (Codex r1 on #1562: its properties posted at every read measured 3.9 at
- * 256 → 512): its reads are one binding's, its properties never posted per read. One doubling in the four modes; the
+ * 256 → 512): its reads are one binding's, its properties never posted per read; and k variables of one property each
+ * joined once, each element read at its own (Codex r2: every query visited every binding, k(2k − 4) uncharged visits):
+ * a query visits the bindings holding its property and one more (the holder bound). One doubling in the four modes; the
  * series to k = 512 is the evidence, outside CI. Each source at the smaller size compiles and runs, saying its list's length
  * or its first element's three properties.
  */
@@ -1013,6 +1038,7 @@ test("a run of joins read beside a variable of objects grows with the program in
       (k) => [String(2 * k + 1)],
       (k) => joins(k, (i) => `[{x${i}: 1}]`, wide(k)),
     ),
+    family("sparse-bindings", [64, 128], (k) => Array.from({ length: k }, () => "1"), sparse),
   ];
   for (const { name, program, sizes, said } of runs) {
     const compiled = compileProject(program(sizes[0]));
@@ -1039,6 +1065,56 @@ test("a run of joins read beside a variable of objects grows with the program in
     ]),
     [],
   );
+});
+
+/**
+ * The holder bound (#1384, Codex r2 on #1562): an indexed run's query takes one step per literal and per binding holding
+ * its property and one more in each order of its bindings, each charged before it runs. The index counts its query
+ * steps (`plusIndexVisits`): on k variables of one property each, joined once and each read at its own, the steps stay
+ * under the charged `indexSteps` and grow with the program in either order, the sharing on and off; visiting every
+ * binding per query made 32,256 steps at k = 128, none charged. A run asked at k paths below one property that k
+ * bindings elsewhere hold looks for its holders once, not at every question.
+ */
+test("an indexed run's queries take charged steps bounded by the bindings holding their properties (#1384)", () => {
+  const steep: string[] = [];
+  // (the bindings holding `q` found once per run and property: asked again they took k² steps; in the source order,
+  // where the run's root is indexed before its questions below `q`)
+  for (const [shape, sizes, modes] of [
+    [
+      sparse,
+      [64, 128],
+      [
+        [false, false],
+        [true, true],
+      ],
+    ],
+    [underOne, [32, 64], [[false, false]]],
+  ] as const)
+    for (const [reversed, unshared] of modes) {
+      const [small, large] = sizes.map((k) => {
+        const before = plusIndexVisits();
+        const program = () => [{ path: "main.tease", source: shape(k) }];
+        const { budget } = analysed(
+          sized({ name: shape.name, measures: "", program }, k),
+          reversed,
+          unshared,
+        );
+        return {
+          visits: plusIndexVisits() - before,
+          charged: budget.counts.get("indexSteps") ?? 0,
+          nodes: budget.counts.get("syntaxNodes") ?? 0,
+        };
+      });
+      const name = `${shape.name}, ${reversed ? "reversed" : "source order"}${unshared ? ", unshared" : ""}`;
+      assert.ok(large!.visits > 0, `${name}: the run is indexed`);
+      assert.ok(
+        large!.visits <= large!.charged,
+        `${name}: ${large!.visits} steps, ${large!.charged} charged`,
+      );
+      const doubling = (2 * (large!.visits / small!.visits)) / (large!.nodes / small!.nodes);
+      if (doubling > DOUBLING) steep.push(`${name}: ${doubling.toFixed(3)}`);
+    }
+  assert.deepEqual(steep, []);
 });
 
 /**
