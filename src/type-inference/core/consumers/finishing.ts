@@ -799,10 +799,9 @@ function eachCopy(walk: Consumers, at: HostFrontier, visit: (copy: HostFrontier)
     program.work.charge("checks");
     if (!visit(copyFrontier(walk, task))) return;
   }
-  for (let index = 0; index < at.above; index += 1) {
-    program.work.charge("checks");
+  // (each charged in `inheritedAt`)
+  for (let index = 0; index < at.above; index += 1)
     if (!visit(inheritedAt(walk, at, index))) return;
-  }
 }
 
 /**
