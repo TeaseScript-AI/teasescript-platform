@@ -124,8 +124,8 @@ function entryOf(line, area, trees) {
   return { ...line, area, stalled, runs, paired: trees === 2 };
 }
 
-const PROBLEMS = ["differences", "exceptions", "unanswered", "uncompared", "stalled"];
-const COUNTED = ["runs", "unparsed", ...PROBLEMS];
+const PROBLEMS = ["differences", "exceptions", "unanswered", "uncompared"];
+const COUNTED = ["runs", "unparsed", ...PROBLEMS, "stalled"];
 
 /**
  * A shard's sources from its record: a `--work` file (its first line what ran, its last the total, which the sources'
@@ -177,8 +177,7 @@ function shardOf(file) {
 /** What a source did, in one word. */
 function outcomeOf({ counts, stalled }) {
   if (stalled !== undefined) return "stalled";
-  const problem = PROBLEMS.find((key) => (counts?.[key] ?? 0) > 0);
-  return problem === undefined ? "agreed" : problem;
+  return PROBLEMS.find((key) => (counts[key] ?? 0) > 0) ?? "agreed";
 }
 
 if (process.argv[2] === "rerun") {
