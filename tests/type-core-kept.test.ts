@@ -101,7 +101,7 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "consumer.ts stored join": [1, "a store's target name in a message"],
   "consumer.ts takesNull spread": [2, "lookups of a landing's levels, not kept"],
   "contract/identity.ts carriedBy step": [1, "a method's name, two identifiers"],
-  "contract/levels.ts groupsAt composite": [
+  "contract/levels.ts foldGroups composite": [
     3,
     "an entry's text, charged by `kept` before it is kept",
   ],

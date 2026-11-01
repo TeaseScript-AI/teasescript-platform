@@ -118,6 +118,15 @@ export interface PropertyIndex {
   readonly lacking: Map<number, PropertyLack>;
 }
 
+/**
+ * #1456: a prefix of closed objects whose properties its levels read until the index pays (`propertyItems`): the reads
+ * made so far, and the index's size, its sources' property names.
+ */
+export interface PropertyReads {
+  asked: number;
+  readonly names: number;
+}
+
 /** F11 at a prefix's property: the earliest writer of a source without it, and the first one's position (-1: none). */
 export interface PropertyLack {
   readonly writer: Writer | null;
