@@ -19,18 +19,20 @@ import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracl
 /*
  * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3 §5, TABLE
  * r4.113, the mark-ownership rule of S8: a stop changes nothing of the unstopped analysis but what its deferred marks
- * stand for, each carrying its obligation). A generated family over the holder: a list's element, an object's
- * property, a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's
- * store, a parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll` (and the owner
- * reviewer's seven `addAll` texts), a dictionary's values list through a copy and an object's own `values` property
- * (#1452), the copy graph's topology (a ring, two places copying each other, a ring with a tail), and the finishing
- * read's other sources (a typed parse, a written type, an unrestricted written type, its dictionary's values list and a
- * copy projecting below it: #1450). The other axes are its depth; the consumer (an interpolation, a `say`, a repeat
- * count, an arithmetic operand, a fallback's left in requirement mode, a written store); the stores around the read
- * (none, a replacement before it, one after it); and the stop's kind (a program stop alone, or with a demand allowance
- * that stops a decision, `heldDemands`). Each case runs with independent host globals whose values its own predicate
- * sorts (`needs` and the holder's literal), never the checker's, and is judged at every settled stop in four modes
- * (`heldProblems`). CI runs anchors of it; the whole family is a worker run outside CI.
+ * stand for, each carrying its obligation). A generated family over the holder: a list's element, an object's property,
+ * a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's store, a
+ * parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll` (and the owner reviewer's
+ * seven `addAll` texts), a dictionary's values list through a copy and an object's own `values` property (#1452), the
+ * copy graph's topology (a ring, two places copying each other, a ring with a tail), and the finishing read's other
+ * sources (a typed parse, a written type, an unrestricted written type, its dictionary's values list and a copy
+ * projecting below it: #1450), and reads of values no place holds (a dictionary literal's values, a list literal's
+ * element, an object literal's property, a fallback, a `get`'s default: #1491, #1502). The other axes are its depth;
+ * the consumer (an interpolation, a `say`, a repeat count, an arithmetic operand, a fallback's left in requirement
+ * mode, a written store); the stores around the read (none, a replacement before it, one after it); and the stop's kind
+ * (a program stop alone, or with a demand allowance that stops a decision, `heldDemands`). Each case runs with
+ * independent host globals whose values its own predicate sorts (`needs` and the holder's literal), never the
+ * checker's, and is judged at every settled stop in four modes (`heldProblems`). CI runs anchors of it; the whole
+ * family is a worker run outside CI.
  */
 
 /** A holder at a depth: the lines that store the host data, the read's text, and what its literal requires of the data. */
@@ -41,6 +43,8 @@ interface Holder {
   readonly around?: (body: readonly string[]) => readonly string[];
   /** The type the literal around the host data gives it (a list's other element, a receiver's), or none. */
   readonly integer: boolean;
+  /** The value the read gives for the host data's, where it is another (a fallback's for `null`). */
+  readonly gives?: (value: SerializableRuntimeValue) => SerializableRuntimeValue;
 }
 
 const nest = (
@@ -266,6 +270,34 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
     read: `xs${"[0]".repeat(depth - 1)}[1]`,
     integer: true,
   }),
+  // (reads of values no place holds, nested to the depth: a dictionary literal's values list, a list literal's element,
+  // an object literal's property, a fallback and a `get`'s default, #1491, #1502)
+  literalValues: (depth) => ({
+    lines: [],
+    read: nest(depth, "hostValue", (text) => `(dict {a: ${text}, b: 4}).values[0]`),
+    integer: true,
+  }),
+  literalElement: (depth) => ({
+    lines: [],
+    read: nest(depth, "hostValue", (text) => `[${text}, 4][0]`),
+    integer: true,
+  }),
+  literalProperty: (depth) => ({
+    lines: [],
+    read: nest(depth, "hostValue", (text) => `({f: ${text}, g: 4}).f`),
+    integer: false,
+  }),
+  fallbackRead: (depth) => ({
+    lines: ["let root = {f: hostValue}"],
+    read: nest(depth, "root.f", (text) => `(${text} otherwise 2)`),
+    integer: true,
+    gives: (value) => value ?? 2,
+  }),
+  getRead: (depth) => ({
+    lines: ["let items = [1]"],
+    read: nest(depth, "hostValue", (text) => `items.get(4, default: ${text})`),
+    integer: true,
+  }),
   // (the owner reviewer's `addAll` texts, #1445 review of 2026-10-30, at depth 1 alone: host data stored below the
   // source list's element, in a field, a deeper field, a nested list and an object copied into the list, and the
   // controls of a replaced element, an inline literal and a single `add`)
@@ -438,10 +470,12 @@ export function heldFamily(few = false): HeldCase[] {
     for (const depth of few || FIXED_HOLDERS.has(holderName) ? [1] : [1, 2, 4])
       for (const [consumerName, consumer] of Object.entries(CONSUMERS)) {
         if (few && consumerName !== "repeat" && consumerName !== "interpolation") continue;
-        // (of the fixed texts, the anchors take the reviewer's witness alone)
+        // (of the fixed texts, the anchors take the reviewer's witness alone; of the reads no place holds, the issues')
         if (few && FIXED_HOLDERS.has(holderName) && holderName !== "addAllField") continue;
+        if (few && ["literalElement", "literalProperty", "getRead"].includes(holderName)) continue;
         const held = holder(depth);
-        const root = held.read.split(/[.[]/)[0]!;
+        // (a fallback's read starts with its parenthesis)
+        const root = held.read.replace(/^\(+/, "").split(/[.[]/)[0]!;
         const declared = held.lines.find((line) => line.startsWith(`let ${root} = `)) ?? "";
         // (a replacement only of a declaration holding the host data: one of a store below it would drop the data)
         const variants =
@@ -471,6 +505,7 @@ export function heldFamily(few = false): HeldCase[] {
               "typed",
               "dictValues",
               "writtenDictValues",
+              "literalValues",
             ].includes(holderName) &&
             !FIXED_HOLDERS.has(holderName);
           // (the read's global holds the value; the other one, independent of it, a value every holder takes)
@@ -482,13 +517,16 @@ export function heldFamily(few = false): HeldCase[] {
             name: `${holderName}-${depth}-${consumerName}-${variant}`,
             source: `${lines.join("\n")}\n`,
             slice,
-            values: (consumerName === "say" ? SAID : VALUES).map((value) => ({
-              globals: { [read]: host(value), [other]: host(3) },
-              says:
-                consumer.needs(value) && (!held.integer || whole(value))
-                  ? ["BEFORE", ...consumer.says(value), "AFTER"]
-                  : null,
-            })),
+            values: (consumerName === "say" ? SAID : VALUES).map((value) => {
+              const given = held.gives?.(value) ?? value;
+              return {
+                globals: { [read]: host(value), [other]: host(3) },
+                says:
+                  consumer.needs(given) && (!held.integer || whole(given))
+                    ? ["BEFORE", ...consumer.says(given), "AFTER"]
+                    : null,
+              };
+            }),
           });
         }
       }

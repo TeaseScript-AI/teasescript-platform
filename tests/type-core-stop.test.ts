@@ -2399,9 +2399,11 @@ test("a domain read's store boundaries are its owning mark's content (#1448)", (
     const method = `${head}say "\${root.f0.first()}"\nsay "AFTER"\nexit\n`;
     assert.deepEqual(boundaries(method, mode, ["TSV042 70:85"]), ["root@16", "root@39"], where);
     assert.deepEqual(boundaries(method, mode, ["TSV043 70:85"]), [], where);
+    // (the interpolation shows the `get`'s result, which holds its default's host data as unstopped: an owner too, #1491)
     const fallback = `${head}say "\${[1].get(4, default: root.f0)}"\nsay "AFTER"\nexit\n`;
     assert.deepEqual(boundaries(fallback, mode, ["TSV042 70:98"]), ["root@16", "root@39"], where);
-    assert.deepEqual(boundaries(fallback, mode, ["TSV041 90:97"]), [], where);
+    assert.deepEqual(boundaries(fallback, mode, ["TSV041 90:97"]), ["root@16", "root@39"], where);
+    assert.deepEqual(boundaries(fallback, mode, ["TSV041 90:97", "TSV042 70:98"]), [], where);
     // a soft owner, a `get` on an unknown receiver (its key's one warning); and beside a count, two owners (Codex r1's B1)
     const get =
       "let root = {f0: hostValue}\nroot = {f0: hostOther}\nhostValue.get(root.f0, default: 0)\nexit\n";
