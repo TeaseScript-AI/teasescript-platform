@@ -128,7 +128,7 @@ function closedObject(contract: Contract, entry: PrefixEntry): boolean {
  * itself, the sharing off; on, their groups at the path, folded from theirs as `groupsAt` folds, never kept as the
  * prefix's, whose complete list a deeper path folds), and F11's one `missing` for those without it, with the earliest
  * literal writer, standing where the first of them stands among the holders (`propertyLack`); `null` for any other
- * prefix or path, which its levels answer.
+ * prefix or path, which its levels answer, and for the prefix's reads before its index pays.
  */
 export function* propertyItems(
   contract: Contract,
@@ -139,11 +139,31 @@ export function* propertyItems(
   if (rest.length !== 1 || !propertyOnly(rest.at(0)!)) return null;
   const levels = prefixLevels(contract, asked, stores);
   if (!levels.closed) return null;
+  const { work } = contract.pass.program;
   let index = contract.propertyIndexes.get(stores);
-  if (index === undefined) {
+  if (index === undefined || !("holders" in index)) {
+    const groups = sharing() ? groupsAt(contract, asked, levels.base, stepsRest([])) : null;
+    const sources = groups ?? stores.list;
+    if (index === undefined) {
+      // (the index's size: its sources' property names)
+      let names = 0;
+      const count = (literal: PlaceId): void => {
+        work.charge("structureSteps");
+        names += contract.literalIndex(literal).root.objects!.list[0]!.names.size;
+      };
+      if (groups === null) for (const entry of stores.list) count(entry.value!);
+      else for (const group of groups) count(group.literal);
+      contract.keep(2);
+      contract.propertyIndexes.set(stores, (index = { asked: 0, names }));
+    }
+    // (its levels read it, a fold of the sources each, while what they read for the prefix's properties is less than
+    // the index's size: a prefix of a few wide objects, as each of k copies of one read once, is never indexed)
+    if ((index.asked + 1) * sources.length < index.names) {
+      index.asked += 1;
+      return null;
+    }
     let shared: { groups: readonly LevelGroup[]; writers: Set<PlaceId> } | null = null;
-    if (sharing()) {
-      const groups = groupsAt(contract, asked, levels.base, stepsRest([]));
+    if (groups !== null) {
       // (where groups lack a property the levels fold those alike there into the first, whose literal F11 names:
       // alike by their root and marks, whatever the property, so as at a step no object holds)
       const writers = new Set<PlaceId>();
@@ -156,7 +176,6 @@ export function* propertyItems(
     index = propertyIndex(contract, stores.list, shared);
     contract.propertyIndexes.set(stores, index);
   }
-  const { work } = contract.pass.program;
   const step = rest.at(0)!;
   const path = pathAt(contract, 0, step);
   const holders = index.holders.get(path) ?? [];
