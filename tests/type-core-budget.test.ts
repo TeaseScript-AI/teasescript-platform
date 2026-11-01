@@ -431,6 +431,65 @@ test("a stop at the first unit finishes a deeply nested literal and a read as de
 });
 
 /**
+ * #1364: k functions in a cycle of calls, each returning the next function's or the one after's result or a host value,
+ * so each result's ingress cell holds the next two's. A consumer's boundary resolves the cycle once, as one component,
+ * not once per path through it (on `main` `7d6c4d3d4`, 18,762 `checks` at k = 8 and 1,065,770 at k = 12; the corpus
+ * unit `GuessMyNumber` stopped there and its finishing did not end). In either order its `checks` grow with the program,
+ * and so does the finishing work after a stop at the walk's first unit.
+ */
+test("a cycle of calls passing host data on is resolved once, unstopped and finished after a stop in the walk (#1364)", () => {
+  const cycle = (k: number) =>
+    requestOf(
+      main(
+        [
+          ...Array.from(
+            { length: k },
+            (_, i) =>
+              `function f${i}(n) {\n  if n > 1 {\n    return f${(i + 1) % k}(n - 1)\n  }\n  if n > 0 {\n    return f${(i + 2) % k}(n - 2)\n  }\n  return hostValue\n}`,
+          ),
+          "repeat f0(3) {}",
+        ].join("\n"),
+      ),
+    );
+  // (the walk's first unit: the least allowance whose stop comes in the walk or later)
+  const walkStop = (request: ReturnType<typeof requestOf>, reversed: boolean, total: number) => {
+    let [low, high] = [1, total];
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      const phase = analysed(request, reversed, middle).budget.stoppedIn;
+      if (phase === "setup" || phase === "admission") low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  for (const reversed of [false, true]) {
+    const [small, large] = [6, 12].map((k) => {
+      const request = cycle(k);
+      const { budget } = analysed(request, reversed);
+      assert.equal(budget.exhausted, null, `k = ${k}`);
+      const stopped = analysed(request, reversed, walkStop(request, reversed, budget.total)).budget;
+      assert.equal(stopped.stoppedIn, "walk", `k = ${k}`);
+      return {
+        nodes: budget.counts.get("syntaxNodes")!,
+        checks: budget.counts.get("checks")!,
+        finishing: stopped.finishing,
+      };
+    });
+    const doubling = (before: number, after: number) =>
+      (2 * (after / before)) / (large!.nodes / small!.nodes);
+    const where = reversed ? "reversed" : "in source order";
+    assert.ok(
+      doubling(small!.checks, large!.checks) <= 2.15,
+      `${where}: checks ${small!.checks} -> ${large!.checks}`,
+    );
+    assert.ok(
+      doubling(small!.finishing, large!.finishing) <= 2.15,
+      `${where}: finishing ${small!.finishing} -> ${large!.finishing}`,
+    );
+  }
+});
+
+/**
  * PLAN §6b's recursive record types (Astra's rounds 2–3): a linked list built by `chain(n)` and walked by `last(node)`
  * through `node.next` reaches any allowance; the stop answers every value it did not decide `unknown` with `budget`,
  * never asking its contract again, so the fallback is finite (S3 §5) and the count is checked when it runs.
