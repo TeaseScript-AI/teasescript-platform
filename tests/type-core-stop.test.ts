@@ -2361,15 +2361,17 @@ function unusedGet(name: string, setup: readonly string[], receiver: string): He
 /**
  * #1563 (S8's mark-ownership rule; C10): a `get` whose result nothing consumes reads its receiver's element first in the
  * walk, so a walk stop may leave that read unfinished, and the finishing read decides the default's family by structure
- * alone: a projection of a literal no place holds by the literal's cells (`[[hostValue, 4][0]]`, the issue's), a store of
- * one by the stores' syntax through the same cells, and a requirement one domain leaves to several families or to every
- * kind by the next domain that gives one (a written `list` or union receiver: the stores' syntax). At every eighth settled
- * stop of each phase and its last, forward with the sharing and reversed without it, each keeps the unstopped check
- * against the integer family and rejects `bad` before `AFTER`.
+ * alone: a projection of a literal no place holds by the literal's cells (`[[hostValue, 4][0]]`, the issue's; a
+ * dictionary literal's `values` list by the dictionary's), a store of one by the stores' syntax through the same cells,
+ * and a requirement one domain leaves to several families or to every kind by the next domain that gives one (a written
+ * `list` or union receiver: the stores' syntax). At every eighth settled stop of each phase and its last, forward with
+ * the sharing and reversed without it, each keeps the unstopped check against the integer family and rejects `bad`
+ * before `AFTER`.
  */
 test("a settled stop keeps the family of an unused get's default that structure decides (#1563)", () => {
   const cases = [
     unusedGet("projection", [], "[[hostValue, 4][0]]"),
+    unusedGet("dictionary values", [], "[(dict {a: hostValue, b: 4}).values[0]]"),
     unusedGet("stored projection", ["let xs = [({f: 4, g: hostValue}).f]"], "xs"),
     unusedGet("written list", ["let xs: list = [4]"], "xs"),
     unusedGet("written union", ["let xs: (integer|string)[] = [4]"], "xs"),
