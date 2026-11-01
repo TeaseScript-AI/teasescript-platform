@@ -3,12 +3,19 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
-import type { ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
+import type { Contract, ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
+import {
+  offendingStores,
+  summaryCount,
+  summaryItems,
+  summaryPresence,
+} from "../src/type-inference/core/contract/prefix-index.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
 import { writerKey } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
+import type { Solver } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import {
@@ -843,4 +850,68 @@ test("a read its one holder's source answers is that source's answer at its whol
       ),
       "the host value read through the copy's layer is guarded",
     );
+});
+
+/**
+ * #1466, r4.262 (Codex r11's F1): a read whose selection passes a listing layer holding nothing at its path (`a`, its
+ * own store at `g.r`) to the one holder below it (`seed`) asks that holder's source by reference as a read finding its
+ * holder directly does (`direct`, the control): through each of the four consumers, in the four modes, one forwarded
+ * demand, no layer demand and no path id made, so the selection's walk charges nothing for an id (`pathIdAt` charges
+ * only steps it makes).
+ */
+test("a read passing a listing layer to its one holder below asks that source making no path id (#1466)", () => {
+  const sources = {
+    direct:
+      "let seed = {g: {p: 1}}\nlet a = seed\na.g.p = hostValue\nlet b = a\nrepeat b.g.p {}\nexit",
+    passed:
+      "let seed = {g: {p: 1}}\nseed.g.p = hostValue\nlet a = seed\na.g.r = hostOther\nlet b = a\nrepeat b.g.p {}\nexit",
+  };
+  const consumers = {
+    summaryItems: (contract: Contract, stores: PrefixStores, rest: string[], solver: Solver) =>
+      solver.run(summaryItems(contract, stores, rest)),
+    summaryCount: (contract: Contract, stores: PrefixStores, rest: string[], solver: Solver) =>
+      solver.run(summaryCount(contract, stores, rest)),
+    summaryPresence: (contract: Contract, stores: PrefixStores, rest: string[], solver: Solver) =>
+      summaryPresence(contract, stores, rest, 0, (work) => solver.run(work)),
+    offendingStores: (contract: Contract, stores: PrefixStores, rest: string[], solver: Solver) =>
+      offendingStores(
+        contract,
+        stores,
+        rest,
+        (items) => items.some((item) => item.tag === "unknown"),
+        (work) => solver.run(work),
+      ),
+  };
+  for (const [name, source] of Object.entries(sources)) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null, name);
+    for (const mode of MODES)
+      inMode(mode, () => {
+        for (const [consumer, ask] of Object.entries(consumers)) {
+          const { contract, program, solver } = narrowingPass(request);
+          const b = program.places.find(
+            (place) => place.kind.kind === "binding" && place.kind.name === "b",
+          )!.id;
+          const stores = contract.prefixStores(keyOf(b, []));
+          const rest = ["g", "p"];
+          const paths = contract.pathParents.length;
+          let forwarded = 0;
+          const subAt = contract.subAt.bind(contract);
+          contract.subAt = function* (sub, asked) {
+            if (asked === rest) forwarded += 1;
+            return yield* subAt(sub, asked);
+          };
+          ask(contract, stores, rest, solver);
+          assert.deepEqual(
+            {
+              forwarded,
+              demands: contract.facts.layerDemands,
+              paths: contract.pathParents.length - paths,
+            },
+            { forwarded: 1, demands: 0, paths: 0 },
+            `${name}, ${consumer}`,
+          );
+        }
+      });
+  }
 });

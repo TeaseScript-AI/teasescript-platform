@@ -836,6 +836,10 @@ export class PathSteps {
   get path(): number {
     return (this.#id ??= this.#find());
   }
+  /** The id of the path it spells where found already, else `undefined`: it finds none. */
+  get made(): number | undefined {
+    return this.#id;
+  }
   /** Its text, through the record (`textOf`), found once. */
   text(): string {
     if (this.#text !== undefined) return this.#text;

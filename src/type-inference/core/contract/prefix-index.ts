@@ -916,6 +916,20 @@ function pathIdAt(contract: Contract, path: ReadPath): number {
   return (path.id = id);
 }
 
+/**
+ * A read's path's id where it is made already, else `undefined`, making and charging none (r4.262: the selection makes
+ * no id): a span's its own, found as its first step was read (`spanRef`); a record's where found (`PathSteps.made`); a
+ * plain array's where the selection's walk found every step made (`holdingAt`; a path is made only below its parent's).
+ */
+function madePathId(path: ReadPath): number | undefined {
+  if (path.id !== undefined) return path.id;
+  const { ref } = path;
+  if (ref.kind !== "steps") return ref.id();
+  const steps = ref.steps();
+  if (isPathSteps(steps)) return steps.made;
+  return path.found === ref.length ? path.foundId : undefined;
+}
+
 /** A layer's answers at a path, made where first asked. */
 function atPath(contract: Contract, layer: SubLayer, path: number): LayerPath {
   let at = layer.paths.get(path);
@@ -1362,16 +1376,19 @@ function setFound(contract: Contract, set: SupportNode): () => LayerFound[] {
  * (`Contract.holdersBelow`): of the set's layers found under the path's first step (`stepLayersOf`), those listing a
  * source with a store at a prefix of the path; and below any that holds nothing there, which a read passes through, the
  * holders in the set below it (`SubLayer.under`), in turn. On an explicit stack, each set below answered first and once.
+ * A path without an id yet (`madePathId`) has no answers kept: its sets are answered once in this call alone, charged as
+ * kept ones are, so a read's selection makes no id (r4.262).
  */
 function holdersIn(
   contract: Contract,
   set: SupportNode,
   ref: PathRef,
-  path: number,
+  path: number | undefined,
 ): SupportNode | null {
   const step = ref.at(0);
+  const here = path === undefined ? new Map<SupportNode, SupportNode | null>() : undefined;
   const answered = (each: SupportNode): SupportNode | null | undefined =>
-    contract.holdersBelow.get(each)?.get(path);
+    here !== undefined ? here.get(each) : contract.holdersBelow.get(each)?.get(path!);
   const stack: (readonly [SupportNode, ReadonlySet<number> | null])[] = [[set, null]];
   for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
     const [at, ready] = next;
@@ -1389,9 +1406,12 @@ function holdersIn(
     for (const index of holding) root = union(contract, root, layers.found[index]!.layer.self);
     for (const index of passed)
       root = union(contract, root, answered(layers.below[index]!.set) ?? null);
-    let byPath = contract.holdersBelow.get(at);
-    if (byPath === undefined) contract.holdersBelow.set(at, (byPath = new Map()));
-    byPath.set(path, root);
+    if (here !== undefined) here.set(at, root);
+    else {
+      let byPath = contract.holdersBelow.get(at);
+      if (byPath === undefined) contract.holdersBelow.set(at, (byPath = new Map()));
+      byPath.set(path!, root);
+    }
     contract.keep(1);
   }
   return answered(set) ?? null;
@@ -1430,7 +1450,7 @@ function topsAt(
   }
   for (const index of passedBelow(contract, layers, holding)) {
     const { set, defs } = layers.below[index]!;
-    for (const layer of layersIn(contract, holdersIn(contract, set, ref, pathIdAt(contract, path))))
+    for (const layer of layersIn(contract, holdersIn(contract, set, ref, madePathId(path))))
       out.push({ layer, defs: defs! });
   }
   return out;

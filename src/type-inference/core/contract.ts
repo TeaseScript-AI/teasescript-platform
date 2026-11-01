@@ -244,7 +244,10 @@ export class Contract {
    */
   readonly subsByPath = new Map<string, Set<Key>>();
   readonly stepLayers = new WeakMap<PrefixStores | SupportNode, Map<string, StepLayers>>();
-  /** Per set of listing layers and path id, the layers in it or below it holding a source at the path (`holdersIn`). */
+  /**
+   * Per set of listing layers and made path id, the layers in it or below it holding a source at the path (`holdersIn`;
+   * a path without an id yet is answered per call, never making one).
+   */
   readonly holdersBelow = new WeakMap<SupportNode, Map<number, SupportNode | null>>();
   /** Per layer and step, the nearest listing layers below it there (`listingBelow`). */
   readonly layersBelow = new WeakMap<SubLayer, Map<string, SupportNode | null>>();
