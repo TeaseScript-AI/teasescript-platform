@@ -1,4 +1,4 @@
-import { familyOf, type ValueKind } from "../../value-kinds.js";
+import { familyOf, VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
 import type { SourceSite } from "../graph.js";
 import type { WorkLedger } from "./budget.js";
 
@@ -339,10 +339,17 @@ function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
   };
 }
 
+/** Each kind's place in a value's items: the value kinds' table order, then `unknown`, then `empty` (#1398). */
+const TAG_RANK: ReadonlyMap<ItemTag, number> = new Map(
+  [...VALUE_KIND_NAMES, "unknown" as const, "empty" as const].map((tag, index) => [tag, index]),
+);
+
 /**
  * The items of one value, one per kind: an item is definite when one of its kind is (and none is guarded); the reasons
  * and ingress stores of all are kept, so no merge drops a boundary check (C9); the earliest writer and the first context
- * word stand for the kind (F28, §3.4); a guarded one marks the kind (§3.2). Kinds keep the order of their first item.
+ * word stand for the kind (F28, §3.4); a guarded one marks the kind (§3.2). The kinds stand in their fixed order
+ * (`TAG_RANK`), never in the order the analysis met them, which the consumers' and the solver's orders and the sharing
+ * change (#1398); the sort is charged.
  */
 export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
   const byTag = new Map<ItemTag, Item>();
@@ -351,7 +358,12 @@ export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
     const earlier = byTag.get(item.tag);
     byTag.set(item.tag, earlier === undefined ? item : mergePair(earlier, item, scope.ingress));
   }
-  return [...byTag.values()];
+  const merged = [...byTag.values()];
+  if (merged.length > 1) {
+    scope.work.charge("mergeItems", merged.length * Math.ceil(Math.log2(merged.length)));
+    merged.sort((a, b) => TAG_RANK.get(a.tag)! - TAG_RANK.get(b.tag)!);
+  }
+  return merged;
 }
 
 /**
