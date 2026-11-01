@@ -535,7 +535,10 @@ test("every read of a cycle of calls holding host data no landing names owes its
  * cycles through cells. In the reversed order a stop in the walk past its first unit finishes the boundaries against
  * admission's decisions, and before #1364's repair each walked those cycles once per path: on `ceebe3d03`, stopped at the
  * walk's middle, 86,525 finishing units at k = 12 and 1,377,583 at k = 16; at k = 32 the finishing did not end. It ends
- * settled now in work bounded by the program, and the unstopped `checks` grow with it.
+ * settled now, under 16 finishing units per syntax node, and the unstopped `checks` grow with the program. That bound is
+ * a regression oracle for this defect at one size, not a proof of linear finishing: a polynomial re-walk (a stop's
+ * boundaries resolved afresh at each call, Codex r1's mutant on #1570) passes it, and fails #1364's finishing growth
+ * above.
  */
 test("mutual copies stopped in the walk finish in work bounded by the program, in the reversed order (#1462)", () => {
   const request = (k: number) => {
