@@ -1215,6 +1215,51 @@ test("the corpus runner records each source's work and time, a stalled run's to 
       MODES.map(() => [3000, 3000]),
     );
     assert.match(run(runner, ending, base, head, "--shard", "2/2").stderr, /no shard i\/N/);
+    // `--out`, `--work` and its progress record name three files, as the system resolves them, or nothing is touched
+    // (#1564 r2: a progress record that is `--out` or a link to `--work`)
+    const collided = join(directory, "collided.work.jsonl");
+    writeFileSync(`${collided}.progress`, "kept\n");
+    const colliding = run(
+      runner,
+      ending,
+      base,
+      head,
+      "--work",
+      collided,
+      "--out",
+      `${collided}.progress`,
+    );
+    assert.equal(colliding.status, 2, colliding.stderr);
+    assert.deepEqual(
+      [readFileSync(`${collided}.progress`, "utf8"), existsSync(collided)],
+      ["kept\n", false],
+    );
+    const linked = join(directory, "linked.work.jsonl");
+    writeFileSync(linked, "kept\n");
+    symlinkSync(linked, `${linked}.progress`);
+    assert.equal(run(runner, ending, base, head, "--work", linked).status, 2);
+    assert.equal(readFileSync(linked, "utf8"), "kept\n");
+    // one plan (#1564 r2's mismatched-plan witness): shard 0/2 of an area of four sources and shard 1/2 of a copy of
+    // three, each area named `planned`, compare otherwise and are refused together, never closed
+    const planned = (copy: string, names: string[]) => {
+      mkdirSync(join(directory, copy));
+      return area(join(copy, "planned"), names);
+    };
+    const [four, three] = [join(directory, "four.work.jsonl"), join(directory, "three.work.jsonl")];
+    run(
+      runner,
+      planned("four", ["a", "b", "c", "bad"]),
+      base,
+      head,
+      "--shard",
+      "0/2",
+      "--work",
+      four,
+    );
+    run(runner, planned("three", ["a", "b", "c"]), base, head, "--shard", "1/2", "--work", three);
+    const mixed = run(stalls, four, three);
+    assert.equal(mixed.status, 2, mixed.stdout);
+    assert.match(mixed.stderr, /compares otherwise than the area's other shards \(plan\)/);
 
     // charges far faster than the runner reads them, then a wait past the limit: the record holds them all, as the
     // child wrote it over at the last charge (#1564 r1's saturation witness)

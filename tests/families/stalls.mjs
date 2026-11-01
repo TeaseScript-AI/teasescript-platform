@@ -1,19 +1,20 @@
 // node tests/families/stalls.mjs <replay record>... [--rerun <record>...] [--index <new file>]
 // node tests/families/stalls.mjs rerun <index> <base> <head> <new folder> [--timeout 180] [--memory 2048]
-// A replay's comparison from its shards' records (`run.mjs --work`: what was compared, then one line per source with each
-// run's charged work and milliseconds on each tree and what the source counted), with a verdict on each stalled source
-// (`verdictOf`, its rule `RULE`), and a rerun's records read in place of the replay's for the sources it ran (#1564). A
-// replay's `--out` file stands in for a shard recorded without `--work`: it gives the shard's stalls alone, each
-// `unknown`, and no count of what agreed. One comparison is one configuration (`configuration`: the sources' sizes, the
-// stop runs' allowances, each generator's checks, each tree's identity): an area's shards and every rerun record merged
-// into it must share it, and the area is complete only with its shards 0/N to N-1/N, one N. Prints the rule, one line
-// per stalled source of the replay (with what its rerun did), one per area and a total; exits 0 only where every area is
-// complete, every source of it was compared and agrees, an unavailable one (stalled) never counting as agreement, and no
-// candidate stall is left, 1 otherwise, 2 on a record it cannot read or merge. `--index` writes the sources still
-// unavailable, with their verdicts and records, and each area's configuration: the stall index, which `rerun` runs on
-// both trees in one process, one source at a time, an area after another, with that configuration (`run.mjs <area>
-// <base> <head> --only <index>`), into a new folder of records, `<area>.work.jsonl` and `<area>.jsonl` (`--out`), to be
-// read with `--rerun`.
+// A replay's comparison from its shards' records (`run.mjs --work`: what was compared, then one line per source with
+// each run's charged work and milliseconds on each tree and what the source counted), with a verdict on each stalled
+// source (`verdictOf`, its rule `RULE`), and a rerun's records read in place of the replay's for the sources it ran
+// (#1564). A replay's `--out` file stands in for a shard recorded without `--work`: it gives the shard's stalls alone,
+// each `unknown`, and no count of what agreed. One comparison is one configuration (`configuration`: the sources'
+// sizes, the area's plan (the hash of every source's place in its order), the stop runs' allowances, each generator's
+// checks, each tree's identity): an area's shards and every rerun record merged into it must share it (another is
+// refused, exit 2, never closed), and the area is complete only with its shards 0/N to N-1/N, one N, of that plan.
+// Prints the rule, one line per stalled source of the replay (with what its rerun did), one per area and a total; exits
+// 0 only where every area is complete, every source of it was compared and agrees, an unavailable one (stalled) never
+// counting as agreement, and no candidate stall is left, 1 otherwise, 2 on a record it cannot read or merge. `--index`
+// writes the sources still unavailable, with their verdicts and records, and each area's configuration: the stall
+// index, which `rerun` runs on both trees in one process, one source at a time, an area after another, with that
+// configuration (`run.mjs <area> <base> <head> --only <index>`), into a new folder of records, `<area>.work.jsonl` and
+// `<area>.jsonl` (`--out`), to be read with `--rerun`.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -196,7 +197,7 @@ function shardOf(file) {
 
 /** Where two configurations of a comparison differ (`run.mjs`'s `configuration`), by part. */
 const differing = (one, other) =>
-  ["sizes", "allowances", "checks", "trees"].filter(
+  ["sizes", "plan", "allowances", "checks", "trees"].filter(
     (part) => JSON.stringify(one[part]) !== JSON.stringify(other[part]),
   );
 

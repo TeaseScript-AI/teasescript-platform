@@ -327,11 +327,15 @@ if (process.argv[2] === "--child") {
   ];
   const out = option("out") === undefined ? undefined : outside(option("out"), kept, refused);
   const work = option("work") === undefined ? undefined : outside(option("work"), kept, refused);
-  if (out !== undefined && work !== undefined && pathOf(out, "outside") === pathOf(work, "outside"))
-    refused(`--out and --work name one file: ${option("out")}`);
   // (`--work`'s progress record, which each child writes over and this process reads at a stall, removed at the end)
   const progress =
     work === undefined ? undefined : outside(`${option("work")}.progress`, kept, refused);
+  // the three name three files, as the system resolves them, before any is removed or made (#1564 r2)
+  const named = [out, work, progress]
+    .filter((file) => file !== undefined)
+    .map((file) => pathOf(file, "outside"));
+  if (new Set(named).size < named.length)
+    refused(`--out, --work and its progress record (<work>.progress) name one file: ${named}`);
   if (out !== undefined) {
     rmSync(pathOf(out, "outside"), { force: true });
     writeFileSync(pathOf(out, "outside"), "", { flag: "wx" });
@@ -467,6 +471,11 @@ if (process.argv[2] === "--child") {
   const folder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), area);
   // each generator's sources in this shard, and with `--store` all of them (the area's PLAN)
   const every = await generatorsOf(folder, sizesOption);
+  // with `--work` or `--only`, every source's place in the area's order, before a shard or `--only` selects any
+  const places =
+    work === undefined && !options.has("only")
+      ? []
+      : every.flatMap(({ name, sources }) => sources.map((source) => placeOf(name, source)));
   // `--only`: of this area, the sources a stall index lists (`stalls.mjs`), each of which the area must hold
   let only;
   if (options.has("only")) {
@@ -482,9 +491,7 @@ if (process.argv[2] === "--child") {
         .filter((entry) => path.basename(String(entry.area)) === path.basename(folder))
         .map(({ generator, source, key }) => JSON.stringify([generator, source, key])),
     );
-    const held = new Set(
-      every.flatMap(({ name, sources }) => sources.map((source) => placeOf(name, source))),
-    );
+    const held = new Set(places);
     const missing = [...only].filter((place) => !held.has(place));
     if (missing.length > 0) refused(`--only names sources the area does not hold: ${missing}`);
   }
@@ -573,10 +580,12 @@ if (process.argv[2] === "--child") {
       ...(only === undefined ? {} : { only: option("only") }),
       timeout: seconds,
       memory,
-      // what the comparison is (stalls.mjs merges only records of one): the sources' sizes, the stop runs' allowances,
-      // each generator's checks, and each tree's identity (`identityOf`; a stored base's, its baseline's)
+      // what the comparison is (stalls.mjs merges only records of one): the sources' sizes, the area's plan (the hash of
+      // every source's place in its order, whichever shard or index runs), the stop runs' allowances, each generator's
+      // checks, and each tree's identity (`identityOf`; a stored base's, its baseline's)
       configuration: {
         sizes: sizesOption ?? null,
+        plan: hash(places.join("\n")),
         allowances,
         checks: Object.fromEntries(every.map(({ name, checks }) => [name, checks])),
         trees: [
