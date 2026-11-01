@@ -349,7 +349,8 @@ const TAG_RANK: ReadonlyMap<ItemTag, number> = new Map(
  * and ingress stores of all are kept, so no merge drops a boundary check (C9); the earliest writer and the first context
  * word stand for the kind (F28, §3.4); a guarded one marks the kind (§3.2). The kinds stand in their fixed order
  * (`TAG_RANK`), never in the order the analysis met them, which the consumers' and the solver's orders and the sharing
- * change (#1398); the sort is charged.
+ * change (#1398). The sort, of at most one item per kind of the table, is a bounded constant inside the merge's charge of
+ * one unit per item, so it charges nothing of its own (TABLE r4.261).
  */
 export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
   const byTag = new Map<ItemTag, Item>();
@@ -358,12 +359,7 @@ export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
     const earlier = byTag.get(item.tag);
     byTag.set(item.tag, earlier === undefined ? item : mergePair(earlier, item, scope.ingress));
   }
-  const merged = [...byTag.values()];
-  if (merged.length > 1) {
-    scope.work.charge("mergeItems", merged.length * Math.ceil(Math.log2(merged.length)));
-    merged.sort((a, b) => TAG_RANK.get(a.tag)! - TAG_RANK.get(b.tag)!);
-  }
-  return merged;
+  return [...byTag.values()].sort((a, b) => TAG_RANK.get(a.tag)! - TAG_RANK.get(b.tag)!);
 }
 
 /**
