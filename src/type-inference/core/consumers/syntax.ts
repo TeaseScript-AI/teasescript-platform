@@ -112,28 +112,20 @@ export function cheapDecided(
     if (earlier !== decider) inherited = written;
     decider = earlier;
   };
-  let shaped = false;
   for (const shape of told ? frontier.shapes : []) {
-    for (const tag of shape.tags)
-      if (tag !== "null") {
-        shaped = true;
-        take(tag, shape.first!, false);
-      }
+    for (const tag of shape.tags) if (tag !== "null") take(tag, shape.first!, false);
     if (shape.tags.has("null")) tags.add("null");
     for (const name of shape.names) names.add(name);
   }
-  const spellings = new Set<string>();
   for (const { term, by } of told ? frontier.written : []) {
     const written = typeTags(term);
     if (written.length === 0 || written.includes("unknown")) told = false;
-    spellings.add(written.join("|"));
     for (const tag of written) take(tag, by, true);
     for (const name of termNames(term)) names.add(name);
   }
-  // (one borrowed written type keeps its spelling; a literal's shape, or written types of several spellings, make a
-  // composition, in the kinds' fixed order, #1398)
-  let kinds = [...tags].filter((tag) => tag !== "null");
-  if (shaped || spellings.size > 1) kinds = kindsInOrder(kinds);
+  // (the stores' kinds together, in the kinds' fixed order, #1398; a written type a copy borrows admission's copies
+  // decide before)
+  let kinds = kindsInOrder([...tags].filter((tag) => tag !== "null"));
   if (kinds.includes("integer") && kinds.includes("number"))
     kinds = kinds.filter((tag) => tag !== "integer");
   const decision: CheapDecision | null =
