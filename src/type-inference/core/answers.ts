@@ -1118,15 +1118,12 @@ class CoreAnswers implements Answers {
   #items(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
     const answered = this.#run(this.#pass.values.valueItems(value, node, path));
     if (!this.#stopped || !answered.some(isStopped)) return answered;
-    return inKindOrder(this.#stoppedItems(value, node, path));
-  }
-
-  /** `#items` after a stop: its sources in their order, each answer's items as that source gives them. */
-  #stoppedItems(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
     const own = this.#stoppedShape(value, path).items;
-    if (own !== STOPPED) return own;
+    if (own !== STOPPED) return inKindOrder(own);
     const finished = this.#consumers.finishedItems(value, node, path);
-    return finished.every(isStopped) ? (this.#lazilyDecided(value, path) ?? finished) : finished;
+    return inKindOrder(
+      finished.every(isStopped) ? (this.#lazilyDecided(value, path) ?? finished) : finished,
+    );
   }
 
   /**
