@@ -11,6 +11,7 @@ import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import {
   EMPTY,
+  inKindOrder,
   makeItem,
   ingressLeaves,
   REASON,
@@ -86,7 +87,8 @@ export function finishingRead(
   requirement = false,
 ): readonly Item[] {
   // (below a literal, its children's own reads, each through every source: a child no leaf kind decides keeps what the
-  // later sources give and a host read's ingress, as unstopped each child is its own value, TABLE r4.126)
+  // later sources give and a host read's ingress, as unstopped each child is its own value, TABLE r4.126; together in
+  // the kinds' fixed order, #1398)
   const { program } = walk.pass;
   if (rest.length > 0 && program.places[value]?.kind.kind === "value" && program.hasOf.has(value)) {
     const items: Item[] = [];
@@ -101,7 +103,7 @@ export function finishingRead(
             requirement,
           ),
         );
-    if (items.length > 0) return items;
+    if (items.length > 0) return inKindOrder(items);
   }
   const own = leafKind(walk, value, rest);
   if (own !== null) return own;
@@ -170,7 +172,7 @@ function typedRead(
             ? null
             : own === STOPPED
               ? STOPPED
-              : decision.answer(decision.choose(own), own);
+              : inKindOrder(decision.answer(decision.choose(own), own));
       }
     }
   }
