@@ -851,9 +851,20 @@ function layersIn(contract: Contract, set: SupportNode | null): SubLayer[] {
   return out;
 }
 
-/** The nearest layers below `layer` that list `step`, as one set: one lookup in its map below its own steps (`under`). */
+/**
+ * The nearest layers below `layer` that list `step`, as one set: one lookup in its map below its own steps (`under`), once
+ * per layer and step.
+ */
 function listingBelow(contract: Contract, layer: SubLayer, step: string): SupportNode | null {
-  return mapGet(contract, layer.under, step);
+  // (a layer's set below it at a step is the same for every path under the step: found once per layer and step)
+  let bySteps = contract.layersBelow.get(layer);
+  if (bySteps === undefined) contract.layersBelow.set(layer, (bySteps = new Map()));
+  const known = bySteps.get(step);
+  if (known !== undefined) return known;
+  const set = mapGet(contract, layer.under, step);
+  bySteps.set(step, set);
+  contract.keep(1);
+  return set;
 }
 
 /** Whether a source has a store of its own at a prefix of `ref` below its root (`ownPaths`). */
@@ -1880,13 +1891,29 @@ function* summaryOf(
 
 /** The union of the summaries of the layers `layersAt` found; `undefined` where one declines. */
 function* unionOf(contract: Contract, at: LayersAt): Work<SupportNode | null | undefined> {
-  let root: SupportNode | null = null;
+  const roots: SupportNode[] = [];
   for (const { layer } of at.layers) {
     const { proof } = yield* contract.pass.solver.proven(layerDemand(contract, layer, at.path));
     if (proof === null || proof.declined) return undefined;
-    root = union(contract, root, proof.root);
+    if (proof.root !== null) roots.push(proof.root);
   }
-  return root;
+  // (united in halves of the summaries in their first keys' order, so summaries of different sources join at one
+  // branch per two halves; a union is the same in any order)
+  let level: (SupportNode | null)[] = roots.sort((a, b) =>
+    a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
+  );
+  contract.pass.program.work.charge("invSteps", level.length);
+  while (level.length > 1) {
+    const next: (SupportNode | null)[] = [];
+    for (let index = 0; index < level.length; index += 2)
+      next.push(
+        index + 1 < level.length
+          ? union(contract, level[index]!, level[index + 1]!)
+          : level[index]!,
+      );
+    level = next;
+  }
+  return level[0] ?? null;
 }
 
 /** `contractAlong`'s items of a prefix's layers at `rest`: every source's answer merged in their keys' order. */
