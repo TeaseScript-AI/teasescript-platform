@@ -2399,9 +2399,11 @@ test("a domain read's store boundaries are its owning mark's content (#1448)", (
     const method = `${head}say "\${root.f0.first()}"\nsay "AFTER"\nexit\n`;
     assert.deepEqual(boundaries(method, mode, ["TSV042 70:85"]), ["root@16", "root@39"], where);
     assert.deepEqual(boundaries(method, mode, ["TSV043 70:85"]), [], where);
+    // (the interpolation shows the `get`'s result, which holds its default's host data as unstopped: an owner too, #1491)
     const fallback = `${head}say "\${[1].get(4, default: root.f0)}"\nsay "AFTER"\nexit\n`;
     assert.deepEqual(boundaries(fallback, mode, ["TSV042 70:98"]), ["root@16", "root@39"], where);
-    assert.deepEqual(boundaries(fallback, mode, ["TSV041 90:97"]), [], where);
+    assert.deepEqual(boundaries(fallback, mode, ["TSV041 90:97"]), ["root@16", "root@39"], where);
+    assert.deepEqual(boundaries(fallback, mode, ["TSV041 90:97", "TSV042 70:98"]), [], where);
     // a soft owner, a `get` on an unknown receiver (its key's one warning); and beside a count, two owners (Codex r1's B1)
     const get =
       "let root = {f0: hostValue}\nroot = {f0: hostOther}\nhostValue.get(root.f0, default: 0)\nexit\n";
@@ -2484,13 +2486,24 @@ function boundedKeepsExact(bounded: Walked, exact: Walked, where: string): boole
  * most eight copies met (`FRONTIER_DEPTH`, `FRONTIER_COPIES`); past them the read answers its place's component's.
  * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same stop guard (r4.186), the same writers
  * where a read's walk is not cut and a superset where it is; whole, `boundedKeepsExact`. The topologies at k = 4 (rings
- * and chains of own stores are cut there) and six random copy graphs (two with readers of two places), forward with
+ * and chains of own stores are cut there), two reads no place holds whose links count as copies (#1559), and six random
+ * copy graphs (two with readers of two places), forward with
  * sharing and reversed without, near the first settled stop and at the last, without a demand cap and under the largest
  * that stops a decision. The same check runs at scale, in all four modes, on the workers.
  */
 test("after a settled stop a read's bounded host frontier names its exact writers, or more where it is cut (#1445)", () => {
   const sources = [
     ...topologySources(4),
+    // (reads no place holds, their links counted as copies: a `get`'s default 4 deep, each holding the next in a literal's
+    // cell, and a literal below two copies at its root, Astra r1's B1 and B2 on #1559)
+    {
+      name: "nested-get-cells",
+      source: `repeat ${"[1].get(5, default: [".repeat(4)}hostValue${"][0])".repeat(4)} {}\nexit\n`,
+    },
+    {
+      name: "double-copied-literal",
+      source: "repeat [[[[[[hostValue]]]]].toList()].toList()[0][0][0][0][0][0] {}\nexit\n",
+    },
     ...[1, 2, 3, 4, 5, 6].map((seed) => ({
       name: `random ${seed}`,
       // (seeds 5 and 6 with four readers of two places each, Codex r5's B1)
