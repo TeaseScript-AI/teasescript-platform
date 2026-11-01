@@ -596,7 +596,11 @@ test("the stop oracle takes a fix in words for the unstopped one's code, and not
     [
       unstopped,
       changed(stopped, {
-        span: { start: { ...span.start, ...place(at) }, end: { ...span.end, ...place(at + 7) } },
+        span: {
+          ...span,
+          start: { ...span.start, ...place(at) },
+          end: { ...span.end, ...place(at + 7) },
+        },
       }),
     ],
     // (the first sentence, a cause, other code, one more sentence; code where the unstopped compile gives words)

@@ -155,7 +155,7 @@ function quoted(sentence: string): Set<string> {
  * r4.162): a sentence after the first that quotes code the stopped one lacks, while the stopped one quotes nothing the
  * unstopped message does not.
  */
-function kept(
+function keeps(
   want: Compiled["diagnostics"][number],
   got: Compiled["diagnostics"][number],
 ): boolean {
@@ -251,7 +251,7 @@ export function stopProblems(c: StopCase): string[] {
     );
   const [before, after] = [shown(unstopped), shown(stopped)];
   const text = (list: typeof before): string => list.map((d) => JSON.stringify(d)).join(" | ");
-  if (before.length !== after.length || before.some((d, index) => !kept(d, after[index]!)))
+  if (before.length !== after.length || before.some((d, index) => !keeps(d, after[index]!)))
     problems.push(`diagnostics ${text(after)} against ${text(before)}`);
   // the checks, in their published order: an unstopped one a mark's record owns or one of a marked store's records; a
   // stopped one a mark's record owns, one of a marked store's records the unstopped analysis has too (the record kept,
