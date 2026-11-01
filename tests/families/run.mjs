@@ -1,7 +1,7 @@
 // node tests/families/run.mjs <area> <base> <head> [--sizes 4,8] [--allowances natural,16,256] [--shard i/N]
 //   [--timeout 180] [--memory 2048] [--out differences.jsonl]
 // node tests/families/run.mjs <area> <head> --baseline <folder> [options]
-// node tests/families/run.mjs <area> <tree> --store <file> [options]
+// node tests/families/run.mjs <area> <tree> --store <folder> [--shard i/N]
 // Runs every generator of tests/families/<area>/ (or of the folder an absolute <area> names) against two built trees (a
 // checkout with `dist/`, or `dist/` itself), in the four modes (source and reversed order, the sharing on and off), and
 // compares what the sources publish (`publication`, part by part: a difference names the first part that differs,
@@ -14,16 +14,31 @@
 // oracle left nodes unanswered at its own budget stop (`publicationHashes`'s `unanswered`) on either tree is never
 // compared either, and is counted apart (`unanswered`) and kept in `--out`. With `--baseline`, the head alone runs, and
 // each run is judged against the stored base result of the same source, mode and check (a source with each run it
-// does not hold is kept in `--out` as `uncompared`, never agreement); `--store` runs one tree and stores each source's
-// results as a JSON line, which a folder's `*.runs.jsonl` files then hold for `--baseline`. Prints one JSON line per
-// generator and a total: sources, unparsed, stalled, exceptions, unanswered, uncompared, modes, runs, differences.
+// does not hold is kept in `--out` as `uncompared`, never agreement); `--store` runs one tree of a commit (sx-tree's,
+// with `src/` and `.sha`) at the runner's defaults and stores one shard of each source's results, one JSON line each, in
+// the baseline of its `src/` tree (`baselines.mjs`), whose area folder `--baseline` then reads, only where the area is
+// complete under the rule status shares (`storedRuns`); it is refused as status refuses it otherwise (exit 1 or 2).
+// Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, uncompared, modes,
+// runs, differences.
 import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, createReadStream, existsSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { sourceKey, sourcesOf } from "./sources.mjs";
+import {
+  beginShard,
+  DEFAULTS,
+  endShard,
+  identityOf,
+  outside,
+  owned,
+  pathOf,
+  planned,
+  planOf,
+  readFrom,
+  storedRuns,
+} from "./baselines.mjs";
+import { generatorsOf, placeOf, sourceKey } from "./sources.mjs";
 
 /** A tree's oracle library, from its `dist/`. */
 async function oracles(root) {
@@ -178,31 +193,70 @@ if (process.argv[2] === "--child") {
     return !arg.startsWith("--") && !args[index - 1]?.startsWith("--");
   });
   const option = (name) => options.get(name);
-  // the base against the head, the head against a stored baseline (`--baseline`), or one tree's runs stored (`--store`)
+  /** A usage the runner refuses (exit 2), before any source runs. */
+  const refused = (problem) => {
+    console.error(problem);
+    process.exit(2);
+  };
+  // the base against the head, the head against a stored baseline (`--baseline`), or one tree's runs stored (`--store`,
+  // into a folder of baselines that lies in no baseline)
   const baseline = option("baseline");
-  const store = option("store");
+  const store = option("store") === undefined ? undefined : outside(option("store"), [], refused);
   const single = baseline !== undefined || store !== undefined;
-  if (area === undefined || roots.length !== (single ? 1 : 2) || (baseline && store)) {
-    console.error(
+  if (area === undefined || roots.length !== (single ? 1 : 2) || (baseline && store))
+    refused(
       "usage: node tests/families/run.mjs <area> <base> <head> [options]\n" +
         "       node tests/families/run.mjs <area> <head> --baseline <folder> [options]\n" +
-        "       node tests/families/run.mjs <area> <tree> --store <file> [options]",
+        "       node tests/families/run.mjs <area> <tree> --store <folder> [--shard i/N]",
     );
-    process.exit(2);
-  }
   const sizesOption = option("sizes")?.split(",").map(Number);
-  const allowances = (option("allowances") ?? "natural,16,256")
+  const allowances = (option("allowances") ?? DEFAULTS.allowances)
     .split(",")
     .map((text) => (text === "natural" ? null : Number(text)));
   const [shard, shards] = (option("shard") ?? "0/1").split("/").map(Number);
+  // a baseline holds the runs of a commit's tree at the runner's defaults, so that every writer stores the same ones
+  if (store !== undefined) {
+    const changed = ["sizes", "allowances", "timeout", "memory"].filter((name) =>
+      options.has(name),
+    );
+    const tree = roots[0];
+    if (changed.length > 0)
+      refused(`--store runs at the runner's defaults: drop --${changed.join(", --")}`);
+    if (!(
+      Number.isInteger(shards) &&
+      shards > 0 &&
+      Number.isInteger(shard) &&
+      shard >= 0 &&
+      shard < shards
+    ))
+      refused(`--shard ${option("shard")} is no shard i/N`);
+    if (!existsSync(path.join(tree, "src")) || !existsSync(path.join(tree, ".sha")))
+      refused(`${tree} is no built tree of a commit (sx-tree's, with src/ and .sha) to store`);
+  }
   // 180 s by default, 60 s in CI (GitHub Actions sets `CI`), whose runs are the runner's own tests (owner, 2026-10-30)
-  const seconds = Number(option("timeout") ?? (process.env.CI === "true" ? 60 : 180));
+  const seconds = Number(option("timeout") ?? DEFAULTS.timeout);
   const timeout = seconds * 1000;
-  const memory = Number(option("memory") ?? 2048);
-  const out = option("out");
-  if (out !== undefined) writeFileSync(out, "");
+  const memory = Number(option("memory") ?? DEFAULTS.memory);
+  // the runner's own file lies outside every baseline: not in the folder it stores into or reads, nor in the folder of
+  // baselines of the baseline it reads, nor in any baseline (#1542 r4, r5), all as the system resolves them; it is a new
+  // file, never the old one truncated, so that another link to the old one keeps what it holds
+  const out =
+    option("out") === undefined
+      ? undefined
+      : outside(
+          option("out"),
+          [
+            ...(store === undefined ? [] : [pathOf(store, "outside")]),
+            ...(baseline === undefined ? [] : readFrom(baseline)),
+          ],
+          refused,
+        );
+  if (out !== undefined) {
+    rmSync(pathOf(out, "outside"), { force: true });
+    writeFileSync(pathOf(out, "outside"), "", { flag: "wx" });
+  }
   const record = (line) => {
-    if (out !== undefined) appendFileSync(out, `${JSON.stringify(line)}\n`);
+    if (out !== undefined) appendFileSync(pathOf(out, "outside"), `${JSON.stringify(line)}\n`);
   };
   /** An exception: on stderr with each message (its first line), in `--out` with each stack and the source. */
   const thrown = (line, source) => {
@@ -283,47 +337,61 @@ if (process.argv[2] === "--child") {
     });
 
   const folder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), area);
-  const generators = [];
-  for (const name of readdirSync(folder)
-    .filter((file) => file.endsWith(".mjs"))
-    .sort()) {
-    const generator = await import(pathToFileURL(path.join(folder, name)).href);
-    const sources = sourcesOf(generator, sizesOption).filter(
-      (_, index) => index % shards === shard,
-    );
-    generators.push({ name, checks: generator.checks ?? ["publication"], sources });
-  }
-  /** A source's place in a baseline: its generator, its name and its key, so that an edited source is a new one. */
-  const placeOf = (name, source) => JSON.stringify([name, source.name, sourceKey(source)]);
-  /** The stored runs of this shard's sources (each its line), by their place, from the baseline's `*.runs.jsonl`. */
+  // each generator's sources in this shard, and with `--store` all of them (the area's PLAN)
+  const every = await generatorsOf(folder, sizesOption);
+  const generators = every.map(({ sources, ...generator }) => ({
+    ...generator,
+    sources: sources.filter((_, index) => index % shards === shard),
+  }));
+  /**
+   * The stored runs of this shard's sources (each its line), by their place, from the baseline area: read only through
+   * the rule status shares (`storedRuns`), never its files directly; an area that does not verify whole is refused as
+   * status refuses it (#1542, the owner's reviewer)
+   */
   const stored = new Map();
   if (baseline !== undefined) {
-    const files = existsSync(baseline)
-      ? readdirSync(baseline).filter((file) => file.endsWith(".runs.jsonl"))
-      : [];
-    if (files.length === 0) {
-      console.error(`no stored runs (*.runs.jsonl) in ${baseline}`);
-      process.exit(2);
+    const runs = storedRuns(baseline);
+    if (runs.refused !== undefined) {
+      console.error(runs.refused);
+      process.exit(runs.status);
     }
     const places = new Set(
       generators.flatMap(({ name, sources }) => sources.map((source) => placeOf(name, source))),
     );
-    for (const file of files.sort())
-      for await (const line of createInterface({
-        input: createReadStream(path.join(baseline, file)),
-      })) {
-        const { generator, source, key } = JSON.parse(line);
-        const place = JSON.stringify([generator, source, key]);
-        if (!places.has(place)) continue;
-        // a source stored twice with other results has no one baseline
-        if (stored.has(place) && stored.get(place) !== line) {
-          console.error(`${place} is stored twice, with other results, in ${baseline}`);
-          process.exit(2);
-        }
-        stored.set(place, line);
-      }
+    // (each source is in one shard only: a shard counts only with its planned sources)
+    for (const line of runs.lines) {
+      const { generator, source, key } = JSON.parse(line);
+      const place = JSON.stringify([generator, source, key]);
+      if (places.has(place)) stored.set(place, line);
+    }
   }
-  if (store !== undefined) writeFileSync(store, "");
+  // `--store`: this shard of the area in the baseline of the tree's `src/` tree (`baselines.mjs`), which the tree must
+  // share (its oracle library, lockfile and Node) and whose PLAN the area's sources must have; a shard that verifies, or
+  // that a running writer stores, ends here
+  let storing;
+  if (store !== undefined) {
+    const tree = path.resolve(roots[0]);
+    const identity = identityOf(tree);
+    if (identity.src === null) refused(`${tree}/src holds no file`);
+    const commit = readFileSync(path.join(tree, ".sha"), "utf8").trim();
+    const top = await owned(store, identity, `commit ${commit} ${tree}`);
+    if (top.refused !== undefined) refused(top.refused);
+    const name = path.basename(folder);
+    const plan = await planned(top.baseline, name, planOf(name, every, shards));
+    if (plan.refused !== undefined) refused(plan.refused);
+    storing = await beginShard(top.baseline, name, shard, shards, plan.plan, plan.places[shard]);
+    if (storing.refused !== undefined) refused(storing.refused);
+    if (storing.skipped !== undefined) {
+      const { file, skipped } = storing;
+      console.log(JSON.stringify({ area, shard: `${shard}/${shards}`, stored: file, skipped }));
+      process.exit(0);
+    }
+    // (the shard's lines, held until it is published whole: nothing is written into the baseline before)
+    Object.assign(storing, {
+      made: { shard: `${shard}/${shards}`, commit, tree, ...identity },
+      lines: [],
+    });
+  }
   /** What the stored tree and the head did (a stall's or an exception's text), where either did. */
   const either = (base, head) =>
     base === undefined && head === undefined ? undefined : { base, head };
@@ -376,10 +444,10 @@ if (process.argv[2] === "--child") {
       const stalled = baseline === undefined ? reply.stalled : either(kept?.stalled, reply.stalled);
       const failed =
         baseline === undefined ? reply.thrown : either(kept?.thrown?.runner, reply.thrown?.runner);
-      if (store !== undefined) {
+      if (storing !== undefined) {
         const key = sourceKey(source);
         const entry = { generator: name, source: source.name, key, stalled, thrown: failed };
-        appendFileSync(store, `${JSON.stringify({ ...entry, runs: results })}\n`);
+        storing.lines.push(`${JSON.stringify({ ...entry, runs: results })}\n`);
       }
       // (with a baseline, one tree may stall where the other threw)
       if (stalled !== undefined) {
@@ -396,7 +464,17 @@ if (process.argv[2] === "--child") {
     for (const key of counts) total[key] += row[key];
   }
   child?.kill();
-  console.log(JSON.stringify({ ...total, timeout: seconds, node: process.version }));
+  const ended = { ...total, timeout: seconds, node: process.version };
+  if (storing !== undefined) {
+    // the shard whole, its total last, with what made it
+    const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));
+    const made = { ...ended, ...storing.made, runner: runner.digest("hex") };
+    const published = await endShard(storing.claim, storing.lines, made);
+    // (foreign contents or a retired baseline, found at publication: nothing is published)
+    if (published.refused !== undefined) refused(published.refused);
+    Object.assign(ended, { stored: storing.file, verified: published.verified });
+  }
+  console.log(JSON.stringify(ended));
   process.exitCode =
     total.differences + total.stalled + total.exceptions + total.unanswered + total.uncompared === 0
       ? 0

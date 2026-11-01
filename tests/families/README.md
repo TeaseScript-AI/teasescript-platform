@@ -12,7 +12,8 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
   [--allowances natural,16,256] [--shard i/N] [--timeout 180] [--memory 2048] [--out differences.jsonl]
-node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base SHA>/<area> [the same options]
+node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base src tree>/<area> [the same options]
+node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/16]
 ```
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
@@ -42,11 +43,37 @@ result of the same source (its generator, name and key, so an edited source is n
 baseline does not hold is `uncompared`, never agreement (`--out` names its source and runs); a source stalls or throws
 outside its runs where either the stored run or the head did. The limits then apply to each tree alone, where a run of
 both trees shares them in one process, so a source that stalls there may end here, and the head's runs after a stored
-stall are uncompared. `--store <file>` runs one tree and stores each source's results as one line; `--baseline` reads a
-folder's `*.runs.jsonl` files, and stops (exit 2) at a source stored twice with other results.
-`tools/corpus/baseline.sh`, installed as the desktop's `~/work/trees/hooks/baseline`, stores every runner area and the
-type-core fixture (`tools/corpus/fixture/`) of each new `main` in `~/work/baselines/<sha>/<area>/`; an area without its
-`SHA256SUMS` is not complete.
+stall are uncompared. `--baseline` reads a folder's `*.runs.jsonl` files, and stops (exit 2) at a source stored twice
+with other results.
+
+`--store` runs one tree of a commit (an `sx-tree` tree: `src/`, `dist/`, `.sha`) at the runner's defaults and stores one
+shard of an area, each source's results as one line, in the baseline of its `src/` tree,
+`<folder>/<src tree>/<area>/<i>of<N>.runs.jsonl`, where `<src tree>` is `git rev-parse <commit>:src`. Every commit with
+that tree and the same oracle library, lockfile and Node shares the baseline; one that differs in any of them stores
+none there (base and head run instead). `baselines.mjs` reads and writes the baseline: a folder whose `MANIFEST` it
+wrote while the folder held nothing else (what its runs depend on, the commits stored there, each area's `PLAN`),
+holding only paths it writes, each named exactly as it names them; a folder holding another path is not written into,
+and the refusal names the path. Each area's `PLAN` binds its shards' sources in their order and its checks, and a
+writer that would run another is refused (exit 2). One rule says whether a stored shard counts, and status, the store
+and `--baseline` all read shards through it: its total line names its own baseline's inputs (the `MANIFEST`'s `src/`
+tree, oracle library, lockfile and Node; any commit of that tree), the `PLAN` and the shard's planned sources, which
+are its lines in their order, and hashes every line before it. A shard that would count but names other inputs makes
+the baseline hold runs of other inputs (exit 2); one that does not verify leaves the area damaged (exit 1), and the
+next writer of that shard replaces it. `--baseline` reads an area only where it is complete under that rule, and is
+refused as status refuses it otherwise. One running writer at a time stores a shard. Every write into the baseline
+but its `MANIFEST`'s making goes through one gate in `baselines.mjs`, which holds the baseline's lock. A store writes
+into its tree's baseline only (and its `--out`), and runs where only that folder and its scratch are writable:
+`sx-sandbox --write ~/work/baselines/<src tree> --write <scratch> -- node … --store ~/work/baselines …`, with
+`TMPDIR=<scratch>`, as the hook queues its jobs; a write anywhere else fails (EROFS). `node tests/families/writes.mjs`
+lists the writes the tools' source shows, an advisory check for the plain forms of a write outside the gate. Nothing
+removes a baseline.
+`bash tools/corpus/baseline.sh status <commit>` says in one line what each area of the commit's tree holds, and exits 0
+only when each one is complete. Before a base run, ask it: compare the head with a complete area through `--baseline`,
+and store an area that is not from the base tree's own runner and areas
+(`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/16`, one job per shard,
+the fixture area as `<base tree>/tools/corpus/fixture`), so that it serves every later run on that tree. The script,
+installed as the desktop's `~/work/trees/hooks/baseline`, fills each new `main`'s tree at low priority where nobody
+stores it.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
