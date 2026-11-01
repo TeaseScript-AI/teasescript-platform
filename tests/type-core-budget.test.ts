@@ -516,16 +516,16 @@ test("every read of a cycle of calls holding host data no landing names owes its
     ["hostValue", "hostOther"],
   );
   assert.ok(request !== null, "the files parse and resolve");
-  for (const mode of MODES) {
-    const { checks } = inMode(mode, () => analyseCore(request));
+  const boundaries = (mode: (typeof MODES)[number]): string[] =>
+    inMode(mode, () => analyseCore(request))
+      .checks.filter((check) => check.boundary && check.target.endsWith(".result"))
+      .map((check) => check.on);
+  for (const mode of MODES)
     assert.deepEqual(
-      checks
-        .filter((check) => check.boundary === true && check.target.endsWith(".result"))
-        .map((check) => check.on),
+      boundaries(mode),
       ["a", "b", "c"].map((name) => `validate external data ${name}.result`),
       JSON.stringify(mode),
     );
-  }
 });
 
 /**
