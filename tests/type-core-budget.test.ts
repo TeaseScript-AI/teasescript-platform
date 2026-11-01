@@ -435,8 +435,10 @@ test("a stop at the first unit finishes a deeply nested literal and a read as de
  * the next function's. A consumer's boundary resolves a cycle once per pass, as one component: not once per path through
  * it, where each function returns the next function's or the one after's result (on `main` `7d6c4d3d4`, 18,762 `checks`
  * at k = 8 and 1,065,770 at k = 12; the corpus unit `GuessMyNumber` stopped there and its finishing did not end), nor
- * once per read, where a ring of functions is read at each. In either order the `checks` grow with the program, and so
- * does the finishing work after a stop at the walk's first unit.
+ * once per read, where a ring whose functions call both neighbours is read at each: every member of a component is
+ * answered with it, not only the node it closed at, so no later read walks the rest of the ring again (Codex r1's F1).
+ * In either order the `checks` grow with the program, and so does the finishing work after a stop at the walk's first
+ * unit.
  */
 test("a cycle of calls passing host data on is resolved once, unstopped and finished after a stop in the walk (#1364)", () => {
   const cycles: Record<string, (k: number) => string> = {
@@ -449,12 +451,12 @@ test("a cycle of calls passing host data on is resolved once, unstopped and fini
         ),
         "repeat f0(3) {}",
       ].join("\n"),
-    "a ring, read at each": (k) =>
+    "a two-way ring, read at each": (k) =>
       [
         ...Array.from(
           { length: k },
           (_, i) =>
-            `function f${i}(n) {\n  if n > 0 {\n    return f${(i + 1) % k}(n - 1)\n  }\n  return hostValue\n}`,
+            `function f${i}(n) {\n  if n > 1 {\n    return f${(i + 1) % k}(n - 1)\n  }\n  if n > 0 {\n    return f${(i + k - 1) % k}(n - 1)\n  }\n  return hostValue\n}`,
         ),
         ...Array.from({ length: k }, (_, i) => `repeat f${i}(3) {}`),
       ].join("\n"),
