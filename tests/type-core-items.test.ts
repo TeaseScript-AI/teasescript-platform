@@ -19,7 +19,7 @@ import {
   type Writer,
 } from "../src/type-inference/core/items.js";
 import { operationItems } from "../src/type-inference/core/operator-table.js";
-import { familyOf } from "../src/value-kinds.js";
+import { familyOf, VALUE_KIND_NAMES } from "../src/value-kinds.js";
 import { ItemSource, itemScope } from "./helpers/type-core-items.js";
 
 // The item algebra by its laws (the reference model's `algebra14.mjs`, restated for the port's items): random items,
@@ -304,6 +304,21 @@ test("the empty mark stays itself beside two families, which become possibilitie
     result.map((item) => `${item.tag} ${item.cert}`),
     ["integer pos", "string pos", "empty def"],
   );
+});
+
+/**
+ * #1398: a merge gives its kinds in one fixed order, the value kinds' table (`VALUE_KIND_NAMES`) then `unknown` and
+ * `empty`, whichever order it meets them in, so no analysis order reaches what a value publishes.
+ */
+test("a merge gives every kind in the value kinds' table order, then unknown and empty, from any order (#1398)", () => {
+  const scope = itemScope();
+  const table: readonly ItemTag[] = [...VALUE_KIND_NAMES, "unknown", "empty"];
+  const items = table.map((tag) => makeItem(tag));
+  for (const order of [[...items].reverse(), [...items.slice(1), items[0]!]])
+    assert.deepEqual(
+      mergeItems(order, scope).map((item) => item.tag),
+      table,
+    );
 });
 
 test("an operation's result follows the runtime's rows (F16)", () => {
