@@ -80,8 +80,9 @@ export function placelessCells(walk: Consumers, value: PlaceId): readonly Defini
   const { program } = walk.pass;
   const projection = program.projOf.get(value);
   let found: readonly Definition[] | null = null;
+  // (a constant step inside the charged read or store that asks it; each literal's cells charged where they are found,
+  // `literalChildren`, and each cell stepped through, TABLE r4.261)
   if (projection !== undefined && projection.step !== "iteration") {
-    program.work.charge("checks");
     const literals = placelessLiterals(walk, projection.owner);
     if (literals !== null) {
       const step = stepName(projection.step);
