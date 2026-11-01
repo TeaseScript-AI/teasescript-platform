@@ -20,3 +20,7 @@ outside the repository").
   whose `progress.mjs` records any value a publication throws, as `unprintable <type>` where its conversion to text
   throws, through the folder's `describeCaught.mjs` (#1523; `canary-1523.sh`, `progress.mjs.pre-1523`,
   `PORTED-1523.md`).
+- `desktop:~/work/evidence/corpus/tooling/{astra-1457,astra-1490,g3-probe}/`: their readers, the probe kit's master
+  `publication.mjs` among them, record any thrown value, as `unprintable <type>` where its conversion to text throws,
+  through a `describeCaught.mjs` in the folder (#1532). Each folder's `PORTED-1532.md` lists the changed files, whose
+  originals stay beside them as `<file>.pre-1532`.
