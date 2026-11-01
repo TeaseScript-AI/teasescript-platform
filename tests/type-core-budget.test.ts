@@ -25,6 +25,7 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { ItemSource } from "./helpers/type-core-items.js";
 import { frontierGrowthProblems } from "./helpers/type-core-held-host.js";
+import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 // The work budget (TABLE §8; the reference model's `budget-check.mjs`, checks 1 and 2): the counters sum to the charged
 // total, and an analysis stops at exactly the unit that crosses its allowance. This proves the accounting, not that
@@ -499,6 +500,32 @@ test("a cycle of calls passing host data on is resolved once, unstopped and fini
           steep.push(`${where} ${measure}: ${small![measure]} -> ${large![measure]}`);
     }
   assert.deepEqual(steep, []);
+});
+
+/**
+ * #1364, Codex r2's witness: a component answers every member with what the whole component reaches. Here a converting
+ * call's default carries host data into a cycle of three calls. That default is no carrier operand, so no landing names
+ * its host data, and each read of the cycle owes the boundary check at its consumer (r4.10). A component closed before
+ * its root, as when a closed child's low number is not passed up, answers `b` and `c` without it, in source order.
+ */
+test("every read of a cycle of calls holding host data no landing names owes its boundary check (#1364)", () => {
+  const request = coreRequest(
+    main(
+      "function a(n) {\n  if n > 0 { return b(n - 1) }\n  return toInteger(hostOther, default: hostValue)\n}\nfunction b(n) { return c(n) }\nfunction c(n) { return a(n) }\nrepeat a(3) {}\nrepeat b(3) {}\nrepeat c(3) {}\nexit",
+    ),
+    ["hostValue", "hostOther"],
+  );
+  assert.ok(request !== null, "the files parse and resolve");
+  for (const mode of MODES) {
+    const { checks } = inMode(mode, () => analyseCore(request));
+    assert.deepEqual(
+      checks
+        .filter((check) => check.boundary === true && check.target.endsWith(".result"))
+        .map((check) => check.on),
+      ["a", "b", "c"].map((name) => `validate external data ${name}.result`),
+      JSON.stringify(mode),
+    );
+  }
 });
 
 /**
