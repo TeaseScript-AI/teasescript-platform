@@ -86,6 +86,41 @@ export interface LevelGroup {
 export interface PrefixLevels {
   readonly others: readonly PrefixEntry[];
   readonly base: readonly LevelGroup[];
+  /**
+   * #1456: its entries, two or more, each a closed object literal stored whole and, with the sharing on, a level's
+   * member (`closedObject`): a property below the prefix is read from its property index (`propertyItems`).
+   */
+  readonly closed: boolean;
+}
+
+/**
+ * #1456: a source of a prefix whose entries are closed objects (`PrefixLevels.closed`): its entry (the sharing off) or
+ * its group at the prefix (on), its object's property names and its literal's writer (`IndexObject`), and its position.
+ */
+export interface PropertySource {
+  readonly entry: PrefixEntry | null;
+  readonly group: LevelGroup | null;
+  readonly names: ReadonlySet<string>;
+  readonly writer: Writer;
+  readonly at: number;
+}
+
+/**
+ * #1456: a prefix's property index, once per its stores (`Contract.propertyIndexes`): its sources in order and in their
+ * writers' order (F28); per property's path below the prefix (`pathAt`), the sources holding it, in order; and, as a
+ * property is asked, F11's witness of those without it (`propertyLack`).
+ */
+export interface PropertyIndex {
+  readonly sources: readonly PropertySource[];
+  readonly byWriter: readonly PropertySource[];
+  readonly holders: ReadonlyMap<number, readonly PropertySource[]>;
+  readonly lacking: Map<number, PropertyLack>;
+}
+
+/** F11 at a prefix's property: the earliest writer of a source without it, and the first one's position (-1: none). */
+export interface PropertyLack {
+  readonly writer: Writer | null;
+  readonly at: number;
 }
 
 /** A prefix's entries of one shape (`entryGroups`), the first answering for all where no ingress store differs. */
