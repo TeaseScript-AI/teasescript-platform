@@ -158,7 +158,8 @@ export const MESSAGE_WORDS = {
   code: "as|as in|type|Use|with|Write|write",
   name:
     "A|a|Add|after|an|and|Assign|assign|before|but|by|cannot set|cannot write|change|Check|Checking|Convert|Copy|" +
-    "Divide|for|Give|give|in|Keep|method|no|of|outside|parameter|property|same type with|show|so|that|to|where|without",
+    "default|Divide|fallback|for|Give|give|in|Keep|method|no|of|outside|parameter|property|same type with|show|so|that|" +
+    "to|where|without",
 };
 
 const listed = (words: string): ReadonlySet<string> => new Set(words.split("|"));
@@ -183,49 +184,98 @@ export function quotedAs(before: string): "code" | "name" | "unknown" {
   return "unknown";
 }
 
-/** A message's sentence: its text, whether it starts as a fix does, and what each text it quotes is (`quotedAs`). */
-interface Sentence {
+/** A quoted text as read: the words before it in its sentence, whether a value inserted there stands right before them. */
+interface Quoted {
+  readonly before: string;
+  readonly inserted: boolean;
   readonly text: string;
-  readonly fix: boolean;
-  readonly quotes: readonly ReturnType<typeof quotedAs>[];
+}
+
+/** A sentence as read: its text, its first word (`null` where a value inserted there starts it), and its quoted texts. */
+export interface ReadSentence {
+  readonly text: string;
+  readonly first: string | null;
+  readonly quotes: readonly Quoted[];
 }
 
 /**
- * A message's sentences, each ending at a full stop or question mark outside its quoted texts, so a name or code holding
- * one stays whole. A quote opens after a space or an opening bracket and closes before a space, punctuation or the end.
+ * A text's sentences, read from its literal pieces with `null` for each value inserted there (a template's; a rendered
+ * message is one piece). A sentence ends at a full stop or question mark outside quoted texts. A quote opens after a space,
+ * an opening bracket or the start, and closes before a space, punctuation or the end, outside a text literal it holds
+ * (`"…"`, escapes included, whose apostrophes and full stops are its own: Codex r2's F1). `null` where a quote or such a
+ * literal is left open: then the quotes can be read more than one way.
  */
-function spoken(message: string): Sentence[] {
-  const out: Sentence[] = [];
-  let [start, before, inside] = [0, "", false];
-  let quotes: ReturnType<typeof quotedAs>[] = [];
-  const end = (at: number): void => {
-    const text = message.slice(start, at).trim();
-    if (text !== "") out.push({ text, fix: FIX.has(/^[A-Za-z]+/.exec(text)?.[0] ?? ""), quotes });
-    [start, before, quotes] = [at, "", []];
+export function readSentences(pieces: readonly (string | null)[]): ReadSentence[] | null {
+  const out: ReadSentence[] = [];
+  let [text, before, quoted, last] = ["", "", "", " "];
+  let [inside, literal, escaped, inserted] = [false, false, false, false];
+  let first: string | null | undefined;
+  let quotes: Quoted[] = [];
+  const end = (): void => {
+    if (text.trim() !== "") out.push({ text: text.trim(), first: first ?? null, quotes });
+    [text, before, quotes, first, inserted] = ["", "", [], undefined, false];
   };
-  for (let index = 0; index < message.length; index += 1) {
-    const [here, last, next] = [
-      message[index]!,
-      message[index - 1] ?? " ",
-      message[index + 1] ?? " ",
-    ];
-    if (inside) inside = !(here === "'" && /[\s.,;:!?)\]]/.test(next));
-    else if (here === "'" && /[\s([]/.test(last)) {
-      quotes.push(quotedAs(before));
-      [before, inside] = ["", true];
-    } else {
-      before += here;
-      if ((here === "." || here === "?") && /\s/.test(next)) end(index + 1);
+  for (const piece of pieces) {
+    // (a quote right after an inserted value opens with no words before it, which only the value could decide)
+    if (piece === null) {
+      if (!inside)
+        [before, inserted, first, last] = ["", true, first === undefined ? null : first, " "];
+      continue;
+    }
+    for (let index = 0; index < piece.length; index += 1) {
+      const [here, next] = [piece[index]!, piece[index + 1] ?? " "];
+      text += here;
+      if (inside && literal) {
+        if (escaped) escaped = false;
+        else if (here === "\\") escaped = true;
+        else if (here === '"') literal = false;
+        quoted += here;
+      } else if (inside && here === "'" && /[\s.,;:!?)\]]/.test(next)) {
+        quotes.push({ before, inserted, text: quoted });
+        [inside, before, inserted] = [false, "", false];
+      } else if (inside) {
+        if (here === '"') literal = true;
+        quoted += here;
+      } else if (here === "'" && /[\s([]/.test(last)) {
+        if (first === undefined) first = "";
+        [inside, quoted] = [true, ""];
+      } else {
+        if (first === undefined && /\w/.test(here)) first = /^\w+/.exec(piece.slice(index))![0];
+        else if (first === undefined && /\S/.test(here)) first = "";
+        before += here;
+        if ((here === "." || here === "?") && /\s/.test(next)) end();
+      }
+      last = here;
     }
   }
-  end(message.length);
+  if (inside) return null;
+  end();
   return out;
+}
+
+/** A message's sentence: its text, whether it starts as a fix does, and its quoted texts, each with what it is. */
+interface Sentence {
+  readonly text: string;
+  readonly fix: boolean;
+  readonly quotes: readonly { readonly as: ReturnType<typeof quotedAs>; readonly text: string }[];
+}
+
+/** A rendered message's sentences (`readSentences`), or `null` where its quotes can be read more than one way. */
+function spoken(message: string): Sentence[] | null {
+  return (
+    readSentences([message])?.map((sentence) => ({
+      text: sentence.text,
+      fix: FIX.has(sentence.first ?? ""),
+      quotes: sentence.quotes.map((quote) => ({ as: quotedAs(quote.before), text: quote.text })),
+    })) ?? null
+  );
 }
 
 /**
  * Whether a stopped diagnostic is the unstopped one as a stop keeps it: the same severity, code and span, and the same
  * message but for a fix a stop's unchecked region gives in words where the unstopped compile shows code (TABLE r4.162):
- * a sentence that starts as a fix both times, the unstopped one showing code and the stopped one quoting names only.
+ * a sentence that starts as a fix both times, the unstopped one showing code and the stopped one quoting only names the
+ * unstopped message quotes, as they stand there. A message whose quotes can be read more than one way is compared whole.
  */
 function keeps(
   want: Compiled["diagnostics"][number],
@@ -234,20 +284,24 @@ function keeps(
   const { message: before, ...wanted } = want;
   const { message: after, ...found } = got;
   if (JSON.stringify(wanted) !== JSON.stringify(found)) return false;
+  if (before === after) return true;
   const [was, is] = [spoken(before), spoken(after)];
-  return (
-    was.length === is.length &&
-    was.every((code, index) => {
-      const words = is[index]!;
-      return (
-        code.text === words.text ||
-        (code.fix &&
-          words.fix &&
-          code.quotes.includes("code") &&
-          words.quotes.every((quote) => quote === "name"))
-      );
-    })
+  if (was === null || is === null || was.length !== is.length) return false;
+  const named = new Set(
+    was.flatMap((sentence) =>
+      sentence.quotes.filter((quote) => quote.as === "name").map((quote) => quote.text),
+    ),
   );
+  return was.every((code, index) => {
+    const words = is[index]!;
+    return (
+      code.text === words.text ||
+      (code.fix &&
+        words.fix &&
+        code.quotes.some((quote) => quote.as === "code") &&
+        words.quotes.every((quote) => quote.as === "name" && named.has(quote.text)))
+    );
+  });
 }
 
 /** Whether `inner` lies within `outer`. */
