@@ -32,7 +32,10 @@ import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
 import {
   ingressAnswers,
+  inMode,
   inOrder,
+  MODES,
+  publication,
   publishedAnswers,
   publishedRoute,
 } from "./helpers/type-core-oracles.js";
@@ -520,4 +523,81 @@ test("S6's sharing faults that reordered their diagnostics are output-neutral in
   }
   assert.deepEqual(differing, []);
   assert.deepEqual(reordered, []);
+});
+
+/**
+ * #1398, #1299: a value's kinds stand in their fixed order (`mergeItems`), so what a program publishes, every
+ * occurrence's answer with the order of its items included, is the same in the four modes. On `main` before, each
+ * source here published another order in one mode: a copy ring whose cut a reversed walk meets elsewhere (#1398's
+ * reduction of G5's `cut/s49`), its suggested test's kinds with it, and a list whose elements are added under a
+ * condition, whose element read's `empty` the sharing placed first or last (#1299); two kind pairs each.
+ */
+const ORDER_WITNESSES: readonly Program[] = [
+  ...[
+    ['"x"', "integer", "1"],
+    ["true", "string", '"y"'],
+  ].map(([value, type, initial]) =>
+    one(
+      `a copy ring of ${value} and a written ${type}`,
+      [
+        `let bad = {p0: ${value}, p1: ${value}}`,
+        "let host = hostValue",
+        `let wint: ${type} = ${initial}`,
+        `let wnull: ${type}? = null`,
+        "let written = {p0: wint, p1: wnull}",
+        "let a5 = bad",
+        "let a4 = a5",
+        "let a3 = a4",
+        "let a2 = a3",
+        "let a0 = written",
+        "if a2 != null {",
+        "  a3 = a2",
+        "}",
+        "a4 = a3",
+        "a5 = a4",
+        "a0 = a5",
+        "a2 = a4",
+        "a4 = a0",
+        'say "${a2.p0}"',
+        "a3 = host",
+        "exit",
+      ].join("\n"),
+    ),
+  ),
+  ...[
+    ["1", "2"],
+    ["true", "1"],
+  ].map(([first, second]) =>
+    one(
+      `elements ${first} and ${second} added under a condition`,
+      [
+        'let flag = askBoolean "go"',
+        "let xs = []",
+        "if flag {",
+        `  xs.add(${first})`,
+        `  xs.add(${second})`,
+        "}",
+        "say xs[0]",
+        "exit",
+      ].join("\n"),
+    ),
+  ),
+];
+
+test("what a program publishes, its answers' orders included, is the same in the four modes (#1398, #1299)", () => {
+  const differing = ORDER_WITNESSES.flatMap(({ name, files }) => {
+    const [first, ...others] = MODES.map((mode) => publication(files, mode, GLOBALS));
+    return others.every((other) => other === first) ? [] : [name];
+  });
+  assert.deepEqual(differing, []);
+  // (the suggested test names the kinds in the kinds' table order, whichever the source or the walk meets first)
+  const { request } = prepared(ORDER_WITNESSES[0]!);
+  for (const mode of MODES)
+    assert.deepEqual(
+      inMode(mode, () => analyseCore(request)).diagnostics.flatMap((diagnostic) =>
+        diagnostic.code === "TSV042" && "fits" in diagnostic ? [diagnostic.fits] : [],
+      ),
+      [["integer", "string"]],
+      JSON.stringify(mode),
+    );
 });
