@@ -204,6 +204,28 @@ test("a stack of diamonds of copies and its siblings grow with the program in ei
 });
 
 /**
+ * #1466, Codex r4's positive hits: k joined layers, each listing a step of its own, read at each, one doubling later, where
+ * a read finding its layer by visiting each joined layer grows past the bound (2.40 against the selection's 2.02,
+ * `invSteps`): a read finds the one layer listing its step by the place's per-step map, its descent the map's depth.
+ */
+test("a read finds the joined layer listing its step by the place's map (#1466)", () => {
+  const family = LAYER_FAMILIES.find((each) => each.name === "distinct-steps")!;
+  for (const unshared of [false, true]) {
+    const measure = (at: Sized, reversed: boolean): Measured => {
+      const { total, counts } = analysed(at, reversed, unshared).budget;
+      return {
+        total,
+        counts: new Map([
+          ["syntaxNodes", counts.get("syntaxNodes") ?? 0],
+          ["invSteps", counts.get("invSteps") ?? 0],
+        ]),
+      };
+    };
+    assert.deepEqual(steepCounters([family], unshared, measure, [32, 64]), []);
+  }
+});
+
+/**
  * #1466, Codex r2's sibling and its shared shape: a read below nested joins, or below joined copies over a record listing
  * the same step, asks only the layer holding its property, never a joining layer or a copy it passes through, so the
  * summaries' demands are one per property: k, at each size and in either order (r4.227's bound for these families, a
