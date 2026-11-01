@@ -82,6 +82,7 @@ import {
 } from "./items.js";
 import { Laminar, narrowedItems, type Narrowing } from "./narrowing.js";
 import { operationItems } from "./operator-table.js";
+import { indexedPlus } from "./plus-index.js";
 import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";
 import { Position, positions, UNPOSITIONED } from "./positions.js";
 import type { Proof, ProofDemand, Proven, Work } from "./solver.js";
@@ -1369,6 +1370,11 @@ export class Values {
       ];
     }
     if (family === "operator" && name === "+" && rest.length > 0) {
+      // #1384: an indexed run's terms holding the property, and those between them
+      const indexed = yield* indexedPlus(this.pass, c.result, rest, true, (term) =>
+        this.valueItems(term, at, rest),
+      );
+      if (indexed !== null) return indexed;
       // TABLE r4.87: a `+` fourth or later in a run of terms answers below its root as the run's third
       const repeated = contract.plusRepeatOf(c.result, true);
       if (repeated !== c.result) return [...(yield* this.valueItems(repeated, at, rest))];

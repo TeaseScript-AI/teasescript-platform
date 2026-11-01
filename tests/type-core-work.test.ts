@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileProject, createFreshRuntimeSession } from "../src/index.js";
 import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import type { WorkCounter } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { writtenTypeSteps } from "../src/type-inference/core/contract.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
+import { isPlusValue, plusIndexVisits } from "../src/type-inference/core/plus-index.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
+import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
@@ -37,7 +40,7 @@ import {
   type WorkFamily,
 } from "./helpers/type-core-families.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
-import { askEveryRead, narrowingPassIn } from "./helpers/type-core-narrowing.js";
+import { askEveryRead, narrowingPass, narrowingPassIn } from "./helpers/type-core-narrowing.js";
 
 /**
  * The work of the coarse core (checkpoint 9, TABLE §8 and §10.1's W rows) as a sampled regression oracle: every
@@ -943,6 +946,265 @@ test("the composition of an operand's parts visits only its smaller part, its sh
         steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
     }
   assert.deepEqual(steep, []);
+});
+
+/**
+ * The holder cache's witness: k variables holding `q` joined in another run, then a run of k variables lacking it and
+ * one holding it with k properties below it, asked at each of them, so each question looks for the bindings holding
+ * `q` among many.
+ */
+const underOne = (k: number): string =>
+  [
+    many(k, (i) => `let h${i} = [{q: 1, t${i}: 1}]`),
+    `let ys = ${many(k, (i) => `h${i}`, " + ")}`,
+    "say ys[0].t0\nsay ys[1].t1\nsay ys[2].t2",
+    many(k, (i) => `let l${i} = [{u${i}: 1}]`),
+    `let c = [{q: {${many(k, (i) => `x${i}: 1`, ", ")}}}]`,
+    `let xs = ${many(k, (i) => `l${i}`, " + ")} + c`,
+    "say xs[0].u0\nsay xs[1].u1",
+    many(k, (i) => `say xs[${k}].q.x${i}`),
+    "exit",
+  ].join("\n");
+
+/** Codex r2 on #1562: k variables of one property each, joined once each, each element read at its own property. */
+const sparse = (k: number): string =>
+  `${many(k, (i) => `let o${i} = [{p${i}: 1}]`)}\nlet xs = ${many(k, (i) => `o${i}`, " + ")}\n${many(k, (i) => `say xs[${i}].p${i}`)}\nexit`;
+
+/**
+ * #1384: k joins of lists of objects of distinct properties, a variable of objects read beside each operand, along the
+ * left operands and each join in the next one's right, and both with one property throughout: a run's terms are indexed
+ * by the properties they hold once its root is asked at a third (`plusRun`), so the value side, the contract side and
+ * admission's decider read each property's holders and the ranges between them, never every join below (3.1 to 3.3 at
+ * 16 → 32 before, its counters near 4; 3.7 at 64 → 128). And a variable of k properties joined k times, alone and
+ * beside k objects of distinct properties (Codex r1 on #1562: its properties posted at every read measured 3.9 at
+ * 256 → 512): its reads are one binding's, its properties never posted per read; and k variables of one property each
+ * joined once, each element read at its own (Codex r2: every query visited every binding, k(2k − 4) uncharged visits):
+ * a query visits the bindings holding its property and one more (the holder bound). One doubling in the four modes; the
+ * series to k = 512 is the evidence, outside CI. Each source at the smaller size compiles and runs, saying its list's length
+ * or its first element's three properties.
+ */
+test("a run of joins read beside a variable of objects grows with the program in the four modes (#1384)", () => {
+  const joins = (k: number, term: (i: number) => string, o = "{q: 1}"): string =>
+    `let o = [${o}]\nlet xs = o + ${many(k, (i) => `${term(i)} + o`, " + ")}\nsay xs.length\nexit`;
+  const nested = (k: number, term: (i: number) => string, last: string): string =>
+    `let o = [{q: 1}]\nlet xs = ${Array.from({ length: k }).reduce<string>((e, _, i) => `${term(i)} + (o + (${e}))`, last)}\nsay xs.length\nexit`;
+  const wide = (k: number): string => `{${many(k, (i) => `p${i}: 1`, ", ")}}`;
+  const family = (
+    name: string,
+    sizes: readonly [number, number],
+    said: (k: number) => readonly string[],
+    source: (k: number) => string,
+  ) => ({
+    name: `plus-run-${name}`,
+    measures: "#1384: a run's terms by the properties they hold",
+    program: (k: number) => [{ path: "main.tease", source: source(k) }],
+    sizes,
+    said,
+  });
+  const runs = [
+    family(
+      "left",
+      [16, 32],
+      (k) => [String(2 * k + 1)],
+      (k) => joins(k, (i) => `[{p${i}: 1}]`),
+    ),
+    family(
+      "right",
+      [16, 32],
+      (k) => [String(2 * k + 1)],
+      (k) => nested(k, (i) => `[{p${i}: 1}]`, "[{lastValue: 0}]"),
+    ),
+    family(
+      "left-one-name",
+      [16, 32],
+      (k) => [String(2 * k + 1)],
+      (k) => joins(k, () => "[{q: 1}]"),
+    ),
+    family(
+      "right-one-name",
+      [16, 32],
+      (k) => [String(2 * k + 1)],
+      (k) => nested(k, () => "[{q: 1}]", "[{q: 0}]"),
+    ),
+    family(
+      "wide-reuse",
+      [64, 128],
+      () => ["1", "1", "1"],
+      (k) =>
+        `let o = [${wide(k)}]\nlet xs = ${many(k, () => "o", " + ")}\nsay xs.first.p0\nsay xs.first.p1\nsay xs.first.p2\nexit`,
+    ),
+    family(
+      "wide-beside",
+      [64, 128],
+      (k) => [String(2 * k + 1)],
+      (k) => joins(k, (i) => `[{x${i}: 1}]`, wide(k)),
+    ),
+    family("sparse-bindings", [64, 128], (k) => Array.from({ length: k }, () => "1"), sparse),
+  ];
+  for (const { name, program, sizes, said } of runs) {
+    const compiled = compileProject(program(sizes[0]));
+    assert.ok(compiled.plan !== null, `${name} at ${sizes[0]} compiles`);
+    const events = createFreshRuntimeSession(compiled.plan, {
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    }).run().events;
+    assert.deepEqual(
+      events.flatMap((event) =>
+        event.kind === "say" || event.kind === "runtimeFailure"
+          ? [event.kind === "say" ? event.text : event.code]
+          : [],
+      ),
+      said(sizes[0]),
+      `${name} at ${sizes[0]} runs`,
+    );
+  }
+  assert.deepEqual(
+    runs.flatMap((run) => [
+      ...steepCounters([run], false, undefined, run.sizes),
+      ...steepCounters([run], true, undefined, run.sizes),
+    ]),
+    [],
+  );
+});
+
+/**
+ * The holder bound (#1384, Codex r2 on #1562): an indexed run's query takes one step per literal and per binding holding
+ * its property and per item of their answers and one more in each order of its bindings, each charged before it runs. The index counts its query
+ * steps (`plusIndexVisits`): on k variables of one property each, joined once and each read at its own, the steps stay
+ * under the charged `indexSteps` and grow with the program in either order, the sharing on and off; visiting every
+ * binding per query made 32,256 steps at k = 128, none charged. A run asked at k paths below one property that k
+ * bindings elsewhere hold looks for its holders once, not at every question.
+ */
+test("an indexed run's queries take charged steps bounded by the bindings holding their properties (#1384)", () => {
+  const steep: string[] = [];
+  // (the bindings holding `q` found once per run and property: asked again they took k² steps; in the source order,
+  // where the run's root is indexed before its questions below `q`)
+  for (const [shape, sizes, modes] of [
+    [
+      sparse,
+      [64, 128],
+      [
+        [false, false],
+        [true, true],
+      ],
+    ],
+    [underOne, [32, 64], [[false, false]]],
+  ] as const)
+    for (const [reversed, unshared] of modes) {
+      const [small, large] = sizes.map((k) => {
+        const before = plusIndexVisits();
+        const program = () => [{ path: "main.tease", source: shape(k) }];
+        const { budget } = analysed(
+          sized({ name: shape.name, measures: "", program }, k),
+          reversed,
+          unshared,
+        );
+        return {
+          visits: plusIndexVisits() - before,
+          charged: budget.counts.get("indexSteps") ?? 0,
+          nodes: budget.counts.get("syntaxNodes") ?? 0,
+        };
+      });
+      const name = `${shape.name}, ${reversed ? "reversed" : "source order"}${unshared ? ", unshared" : ""}`;
+      assert.ok(large!.visits > 0, `${name}: the run is indexed`);
+      assert.ok(
+        large!.visits <= large!.charged,
+        `${name}: ${large!.visits} steps, ${large!.charged} charged`,
+      );
+      const doubling = (2 * (large!.visits / small!.visits)) / (large!.nodes / small!.nodes);
+      if (doubling > DOUBLING) steep.push(`${name}: ${doubling.toFixed(3)}`);
+    }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * The holder bound's whole query (#1384, Codex r3 on #1562): an indexed root asked at a new path below a property whose
+ * holders its run already found charges `indexSteps` for exactly the steps it counts, on both sides: with no term holding
+ * the property the same few at every width (a range's earliest object is its first literal's, not a tree's height), and
+ * with every term holding it one per term and per item, linear (its holders kept in first-read order, never sorted per
+ * query: k variables read in another order than the pass found them sorted them at every query, k log k uncounted).
+ */
+test("an indexed run's warm query charges its counted steps alone, a few without holders, linear in them (#1384)", () => {
+  const shuffled = (k: number): string =>
+    Array.from({ length: k }, (_, i) => `b${(i * 37 + 11) % k}`).join(" + ");
+  const shapes: readonly (readonly [string, string, readonly number[], (k: number) => string])[] = [
+    [
+      "no holder",
+      "c",
+      [16, 64, 256],
+      (k) =>
+        `${many(k, (i) => `let o${i} = [{p${i}: 1}]`)}\nlet xs = ${many(k, (i) => (i % 2 ? `o${i}` : `[{s${i}: 1}]`), " + ")}\nsay xs.length\nexit`,
+    ],
+    [
+      "holding variables",
+      "q",
+      [16, 64],
+      (k) =>
+        `${many(k, (i) => `let b${i} = [{q: {p${i}: 1}}]`)}\nlet ys = ${many(k, (i) => `b${i}`, " + ")}\nlet xs = ${shuffled(k)}\nsay ys.length\nsay xs.length\nexit`,
+    ],
+    [
+      "holding literals",
+      "q",
+      [16, 64],
+      (k) => `let xs = ${many(k, (i) => `[{q: {p${i}: 1}}]`, " + ")}\nsay xs.length\nexit`,
+    ],
+  ];
+  const failing: string[] = [];
+  for (const [name, step, sizes, source] of shapes) {
+    const steps = sizes.map((k) => {
+      const request = coreRequest([{ path: "main.tease", source: source(k) }]);
+      assert.ok(request !== null, `${name} at ${k}: its files parse and resolve`);
+      const pass = narrowingPass(request);
+      const { program } = pass;
+      const ask = (value: PlaceId, path: readonly string[], exact: boolean) => {
+        const c = program.opOf.get(value)!;
+        const node = c.kind === "operation" ? program.exprAt(c.site) : null;
+        pass.solver.run(
+          exact
+            ? pass.values.valueItems(value, node, path)
+            : pass.contract.contractOfValueAt(value, path),
+        );
+      };
+      const roots = [...program.opOf.values()].flatMap((c) =>
+        c.kind === "operation" &&
+        isPlusValue(pass, c.result) &&
+        !(program.consumersOf.get(c.result) ?? []).some(
+          (use) => use.kind === "operand" && isPlusValue(pass, use.operation.result),
+        )
+          ? [c.result]
+          : [],
+      );
+      // (each root indexed and its holders of the property found; the last asked at a new path below it)
+      for (const exact of [true, false])
+        for (const root of roots)
+          for (const first of ["t", "u", "v", step]) ask(root, ["element", first, "warm"], exact);
+      return [true, false].map((exact) => {
+        const charged = () => program.work.counts().get("indexSteps") ?? 0;
+        const [visits, units] = [plusIndexVisits(), charged()];
+        ask(roots.at(-1)!, ["element", step, "fresh"], exact);
+        const counted = plusIndexVisits() - visits;
+        if (counted === 0 || charged() - units !== counted)
+          failing.push(
+            `${name} at ${k}, ${exact ? "value" : "contract"}: ${counted} steps, ${charged() - units} charged`,
+          );
+        return counted;
+      });
+    });
+    for (const side of [0, 1]) {
+      const [small, ...larger] = steps.map((counted) => counted[side]!);
+      for (const [index, counted] of larger.entries())
+        if (
+          name === "no holder"
+            ? counted !== small
+            : counted > (small! * sizes[index + 1]!) / sizes[0]!
+        )
+          failing.push(
+            `${name} at ${sizes[index + 1]}, side ${side}: ${counted} steps, ${small} at ${sizes[0]}`,
+          );
+    }
+  }
+  assert.deepEqual(failing, []);
 });
 
 /**

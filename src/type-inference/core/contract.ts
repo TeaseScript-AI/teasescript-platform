@@ -141,6 +141,7 @@ import {
 } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { ContextWord, IngressNode, Item, Writer } from "./items.js";
+import type { PlusIndex } from "./plus-index.js";
 import type { ValueConstraint } from "./program.js";
 import type { Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";
@@ -338,6 +339,8 @@ export class Contract {
     new Map<PlaceId, { readonly third: PlaceId | null; readonly at: number }>(),
     new Map<PlaceId, { readonly third: PlaceId | null; readonly at: number }>(),
   ];
+  /** #1384: the pass's index of its `+` runs' terms by the properties they hold (`plusRun`), once one is asked. */
+  plusIndex: PlusIndex | null = null;
   /** Each value's structure identity (`structureOf`), and its interned shapes. */
   readonly structures = new Map<PlaceId, string>();
   readonly #structureIds = new Map<string, string>();

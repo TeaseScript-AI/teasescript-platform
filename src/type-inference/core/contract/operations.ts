@@ -16,6 +16,7 @@ import {
   shownResult,
 } from "../method-categories.js";
 import { operationItems, type Operator } from "../operator-table.js";
+import { indexedPlus } from "../plus-index.js";
 import type { ValueConstraint } from "../program.js";
 import type { Work } from "../solver.js";
 import { choiceItems } from "./choices.js";
@@ -171,6 +172,11 @@ export function* contractOfOp(
     ];
   }
   if (family === "operator" && name === "+" && rest.length > 0) {
+    // #1384: an indexed run's terms holding the property, and those between them
+    const indexed = yield* indexedPlus(contract.pass, c.result, rest, false, (term) =>
+      contract.contractOfValueAt(term, rest),
+    );
+    if (indexed !== null) return indexed;
     // TABLE r4.87: a `+` fourth or later in a run of terms answers below its root as the run's third
     const repeated = contract.plusRepeatOf(c.result, false);
     if (repeated !== c.result) return yield* contract.contractOfValueAt(repeated, rest);
