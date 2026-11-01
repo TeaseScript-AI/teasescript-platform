@@ -937,7 +937,7 @@ export function transferredDecider(
     at.length >= 2 &&
     isPlusValue(admission.pass, task.value) &&
     at.at(0) === "element" &&
-    plusSpan(admission.pass, task.value, at.at(1)) !== null &&
+    plusSpan(admission.pass, task.value, at.at(1), true) !== null &&
     deciding(admission.run(admission.pass.values.valueItems(task.value, task.node, asked)))
       .length === 0
   )

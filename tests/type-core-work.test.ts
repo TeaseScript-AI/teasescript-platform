@@ -949,51 +949,94 @@ test("the composition of an operand's parts visits only its smaller part, its sh
 /**
  * #1384: k joins of lists of objects of distinct properties, a variable of objects read beside each operand, along the
  * left operands and each join in the next one's right, and both with one property throughout: a run's terms are indexed
- * by the properties they hold once one of its joins is asked at a third (`plusSpan`), so the value side, the contract
- * side and admission's decider read each property's holders and the ranges between them, never every join below (3.1
- * to 3.3 at 16 → 32 before, its counters near 4; 3.7 at 64 → 128). One doubling in the four modes; the series to
- * k = 128 is the evidence, outside CI. Each source compiles and runs, its list of 2k + 1 elements.
+ * by the properties they hold once its root is asked at a third (`plusSpan`), so the value side, the contract side and
+ * admission's decider read each property's holders and the ranges between them, never every join below (3.1 to 3.3 at
+ * 16 → 32 before, its counters near 4; 3.7 at 64 → 128). And a variable of k properties joined k times, alone and
+ * beside k objects of distinct properties (Codex r1 on #1562: its properties posted at every read measured 3.9 at
+ * 256 → 512): its reads are one binding's, its properties never posted per read. One doubling in the four modes; the
+ * series to k = 512 is the evidence, outside CI. Each source at the smaller size compiles and runs, saying its list's length
+ * or its first element's three properties.
  */
 test("a run of joins read beside a variable of objects grows with the program in the four modes (#1384)", () => {
-  const joins = (k: number, term: (i: number) => string): string =>
-    `let o = [{q: 1}]\nlet xs = o + ${many(k, (i) => `${term(i)} + o`, " + ")}\nsay xs.length\nexit`;
+  const joins = (k: number, term: (i: number) => string, o = "{q: 1}"): string =>
+    `let o = [${o}]\nlet xs = o + ${many(k, (i) => `${term(i)} + o`, " + ")}\nsay xs.length\nexit`;
   const nested = (k: number, term: (i: number) => string, last: string): string =>
     `let o = [{q: 1}]\nlet xs = ${Array.from({ length: k }).reduce<string>((e, _, i) => `${term(i)} + (o + (${e}))`, last)}\nsay xs.length\nexit`;
-  const family = (name: string, source: (k: number) => string): WorkFamily => ({
+  const wide = (k: number): string => `{${many(k, (i) => `p${i}: 1`, ", ")}}`;
+  const family = (
+    name: string,
+    sizes: readonly [number, number],
+    said: (k: number) => readonly string[],
+    source: (k: number) => string,
+  ) => ({
     name: `plus-run-${name}`,
     measures: "#1384: a run's terms by the properties they hold",
-    program: (k) => [{ path: "main.tease", source: source(k) }],
+    program: (k: number) => [{ path: "main.tease", source: source(k) }],
+    sizes,
+    said,
   });
   const runs = [
-    family("left", (k) => joins(k, (i) => `[{p${i}: 1}]`)),
-    family("right", (k) => nested(k, (i) => `[{p${i}: 1}]`, "[{lastValue: 0}]")),
-    family("left-one-name", (k) => joins(k, () => "[{q: 1}]")),
-    family("right-one-name", (k) => nested(k, () => "[{q: 1}]", "[{q: 0}]")),
+    family(
+      "left",
+      [16, 32],
+      (k) => [String(2 * k + 1)],
+      (k) => joins(k, (i) => `[{p${i}: 1}]`),
+    ),
+    family(
+      "right",
+      [16, 32],
+      (k) => [String(2 * k + 1)],
+      (k) => nested(k, (i) => `[{p${i}: 1}]`, "[{lastValue: 0}]"),
+    ),
+    family(
+      "left-one-name",
+      [16, 32],
+      (k) => [String(2 * k + 1)],
+      (k) => joins(k, () => "[{q: 1}]"),
+    ),
+    family(
+      "right-one-name",
+      [16, 32],
+      (k) => [String(2 * k + 1)],
+      (k) => nested(k, () => "[{q: 1}]", "[{q: 0}]"),
+    ),
+    family(
+      "wide-reuse",
+      [64, 128],
+      () => ["1", "1", "1"],
+      (k) =>
+        `let o = [${wide(k)}]\nlet xs = ${many(k, () => "o", " + ")}\nsay xs.first.p0\nsay xs.first.p1\nsay xs.first.p2\nexit`,
+    ),
+    family(
+      "wide-beside",
+      [64, 128],
+      (k) => [String(2 * k + 1)],
+      (k) => joins(k, (i) => `[{x${i}: 1}]`, wide(k)),
+    ),
   ];
-  for (const { name, program } of runs)
-    for (const k of [16, 32]) {
-      const compiled = compileProject(program(k));
-      assert.ok(compiled.plan !== null, `${name} at ${k} compiles`);
-      const events = createFreshRuntimeSession(compiled.plan, {
-        baseDelayMs: 0,
-        delayPerWordMs: 0,
-        delayPerCharacterMs: 0,
-      }).run().events;
-      assert.deepEqual(
-        events.flatMap((event) =>
-          event.kind === "say" || event.kind === "runtimeFailure"
-            ? [event.kind === "say" ? event.text : event.code]
-            : [],
-        ),
-        [String(2 * k + 1)],
-        `${name} at ${k} runs`,
-      );
-    }
+  for (const { name, program, sizes, said } of runs) {
+    const compiled = compileProject(program(sizes[0]));
+    assert.ok(compiled.plan !== null, `${name} at ${sizes[0]} compiles`);
+    const events = createFreshRuntimeSession(compiled.plan, {
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    }).run().events;
+    assert.deepEqual(
+      events.flatMap((event) =>
+        event.kind === "say" || event.kind === "runtimeFailure"
+          ? [event.kind === "say" ? event.text : event.code]
+          : [],
+      ),
+      said(sizes[0]),
+      `${name} at ${sizes[0]} runs`,
+    );
+  }
   assert.deepEqual(
-    [
-      ...steepCounters(runs, false, undefined, [16, 32]),
-      ...steepCounters(runs, true, undefined, [16, 32]),
-    ],
+    runs.flatMap((run) => [
+      ...steepCounters([run], false, undefined, run.sizes),
+      ...steepCounters([run], true, undefined, run.sizes),
+    ]),
     [],
   );
 });

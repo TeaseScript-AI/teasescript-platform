@@ -5,22 +5,15 @@ import { Admission } from "../src/type-inference/core/admission.js";
 import { analyseCore, solveDemands, type CorePass } from "../src/type-inference/core/answers.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { Consumers } from "../src/type-inference/core/consumers.js";
-import {
-  firstWriter,
-  ingressLeaves,
-  itemsSignature,
-  writerKey,
-  type Item,
-  type Writer,
-} from "../src/type-inference/core/items.js";
+import { firstWriter, type Item, type Writer } from "../src/type-inference/core/items.js";
 import type { PlusIndex } from "../src/type-inference/core/plus-index.js";
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
+import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { itemScope } from "./helpers/type-core-items.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
-import { inMode, MODES } from "./helpers/type-core-oracles.js";
+import { inMode, MODES, orderedItems, replayAnswer } from "./helpers/type-core-oracles.js";
 
 /*
  * #1384: a run of `+` asked below its elements at a third property indexes its terms by the properties their objects
@@ -36,17 +29,6 @@ function request(source: string): CoreAnalysisRequest {
   return made;
 }
 
-/** An answer's items in their order, every field each carries, its writer and its ingress leaves by their keys. */
-function ordered(items: readonly Item[]): string[] {
-  return items.map((item) =>
-    JSON.stringify({
-      ...item,
-      writer: item.writer === null ? null : writerKey(item.writer),
-      ingress: item.ingress === undefined ? undefined : ingressLeaves(item.ingress).map(writerKey),
-    }),
-  );
-}
-
 /** The `+` operations of a pass's program, by their result places. */
 function pluses(pass: CorePass): PlaceId[] {
   const out: PlaceId[] = [];
@@ -60,7 +42,7 @@ function pluses(pass: CorePass): PlaceId[] {
 function asked(pass: CorePass, value: PlaceId, path: readonly string[], exact: boolean): string[] {
   const c = pass.program.opOf.get(value)!;
   const node = c.kind === "operation" ? pass.program.exprAt(c.site) : null;
-  return ordered(
+  return orderedItems(
     pass.solver.run(
       exact
         ? pass.values.valueItems(value, node, path)
@@ -111,6 +93,27 @@ const RUNS: readonly { readonly source: string; readonly indexed: boolean }[] = 
     indexed: false,
   },
   { source: `let o = hostValue\nlet xs = ${run}\nsay xs.length\nexit`, indexed: false },
+  // a binding's reads, one shape read again (Codex r1 on #1562: its width times its reads): alone, beside literals and
+  // another binding, holding the property in some objects, and in two runs
+  {
+    source: "let o = [{p: 1, q: 2, r: 3, s: 4}]\nlet xs = o + o + o + o\nsay xs.length\nexit",
+    indexed: true,
+  },
+  {
+    source:
+      "let o = [{p: 1, q: 2}]\nlet w = [{r: 1}, {s: 2, p: 3}]\nlet xs = o + [{s: 1}] + w + o + [{q: 2}] + w + o\nsay xs.length\nexit",
+    indexed: true,
+  },
+  {
+    source:
+      "let o = [{p: 1, q: 2, r: 3}]\nlet xs = o + [{s: 1}] + o\nlet ys = [{q: 2}] + (o + [{p: 3}])\nsay xs.length\nsay ys.length\nexit",
+    indexed: true,
+  },
+  // (below a property its reads hold as a scalar, none of them an element: the one other term's kinds stay definite)
+  {
+    source: "let o = [{p: 1, q: 2}]\nlet xs = o + o + [{p: {a: 1}}]\nsay xs.length\nexit",
+    indexed: true,
+  },
 ];
 
 const STEPS: readonly string[] = ["p", "q", "r", "s", "absent"];
@@ -121,9 +124,11 @@ test("an indexed run of `+` answers below its elements as its operands' walk doe
     const made = request(source);
     for (const [m, mode] of MODES.entries())
       inMode(mode, () => {
-        // (the index: its first `+` asked at two other properties first; the walk: each property a pass's first)
+        // (the index: each `+` asked at three other properties first, so each root indexes its run; the walk: each
+        // property a pass's first)
         const index = narrowingPass(made);
-        for (const step of ["t", "u"]) asked(index, pluses(index)[0]!, ["element", step], true);
+        for (const value of pluses(index))
+          for (const step of ["t", "u", "v"]) asked(index, value, ["element", step], true);
         for (const step of STEPS) {
           const walked = narrowingPass(made);
           for (const path of [
@@ -176,19 +181,24 @@ const published = (pass: CorePass): boolean =>
   [...(pass.contract.plusIndex?.indexed?.spans.values() ?? [])].some((span) => span !== null);
 
 /**
- * Whether every run a pass's index published is whole: each span within its terms, each holder one of them, and the
- * tree of their earliest objects made to its root.
+ * Whether every run a pass's index published is whole: each span within its terms, each term a literal posted at its
+ * names or one of a binding's reads, each position's next literal found, and the tree of the literals' earliest objects
+ * made to its root.
  */
 function whole(pass: CorePass): boolean {
   for (const span of pass.contract.plusIndex?.indexed?.spans.values() ?? []) {
     if (span === null) continue;
-    const { run, lo, hi } = span;
-    const leaves = run.earliest.slice(run.width, run.width + run.terms.length);
+    const { terms, holders, reads, nextLiteral, width, earliest } = span.run;
+    const read = new Set(reads.flatMap(({ positions }) => positions));
+    const leaves = earliest.slice(width, width + terms.length);
+    const next = (at: number): number =>
+      leaves.findIndex((writer, index) => index >= at && writer !== null);
     if (
-      !(lo < hi && hi <= run.terms.length) ||
-      [...run.holders.values()].some((list) => list.some((at) => at >= run.terms.length)) ||
-      leaves.some((writer) => writer === null) ||
-      run.earliest[1] !== leaves.reduce<Writer | null>(firstWriter, null)
+      !(span.lo < span.hi && span.hi <= terms.length) ||
+      [...holders.values()].some((list) => list.some((at) => at >= terms.length || read.has(at))) ||
+      leaves.some((writer, at) => (writer === null) !== read.has(at)) ||
+      nextLiteral.some((at, index) => at !== (next(index) < 0 ? terms.length : next(index))) ||
+      earliest[1] !== leaves.reduce<Writer | null>(firstWriter, null)
     )
       return false;
   }
@@ -227,14 +237,6 @@ test("a stop while a run is indexed publishes none of it, and a fresh pass finis
   );
 });
 
-/** A member's answer as a replay compares it: its items' signature and their ingress stores. */
-function signature(items: readonly Item[]): string {
-  const stores = items.map((item) =>
-    item.ingress === undefined ? "" : ingressLeaves(item.ingress).map(writerKey).join(","),
-  );
-  return `${itemsSignature(items, itemScope())} ${stores.sort().join(";")}`;
-}
-
 test("an indexed run's answers replay by their names, and a cycle through its terms keeps its solver (#1384)", () => {
   for (const source of [left(3), right(3)]) {
     const made = request(source);
@@ -248,8 +250,8 @@ test("an indexed run's answers replay by their names, and a cycle through its te
     assert.ok(names.length > 0);
     for (const name of names)
       assert.deepEqual(
-        ordered(solveDemands(made, [name])[0]!),
-        ordered(pass.solver.answer(name)!),
+        orderedItems(solveDemands(made, [name])[0]!),
+        orderedItems(pass.solver.answer(name)!),
         name,
       );
   }
@@ -272,16 +274,56 @@ test("an indexed run's answers replay by their names, and a cycle through its te
     for (const pass of admission) assert.ok(!published(pass), source);
     for (const { members, replay } of components) {
       const keys = replay?.names ?? members.map((member) => member.key);
-      const expected = members.map((member) => signature(member.items));
+      const expected = members.map((member) => replayAnswer(member.items));
       for (const entry of keys)
         for (const reverseWorklist of [false, true])
           assert.deepEqual(
             withSolverSeam({ reverseWorklist }, () =>
               solveDemands(made, [entry, ...keys], replay?.packet).slice(1),
-            ).map(signature),
+            ).map(replayAnswer),
             expected,
             `${entry}${reverseWorklist ? " reversed" : ""}`,
           );
     }
+  }
+});
+
+/**
+ * Codex r1 on #1562: one closed object of k properties read k times is k reads of one binding, never k² postings, so
+ * the analysis at k = 512 answers as `main` does: valid, no check owed, no decision stopped (before the repair its
+ * decision at `xs.element.p2` stopped and owed two checks; the source is valid, as it compiles and runs). With the
+ * sharing on the run keeps its collapse (TABLE r4.87) and is not indexed; with it off the index holds the reads.
+ */
+test("a closed object of k properties read k times is one binding's reads, its analysis as main's at k = 512 (#1384)", () => {
+  const k = 512;
+  const source = `let o = [{${Array.from({ length: k }, (_, i) => `p${i}: 1`).join(", ")}}]\nlet xs = ${Array.from({ length: k }, () => "o").join(" + ")}\nsay xs.first.p0\nsay xs.first.p1\nsay xs.first.p2\nexit`;
+  const made = request(source);
+  for (const unshared of [false, true]) {
+    const { result, admission } = observed(() =>
+      unshared ? withoutSharing(() => analyseCore(made)) : analyseCore(made),
+    );
+    assert.equal(result.outcome, "valid", `unshared: ${unshared}`);
+    assert.deepEqual(result.diagnostics, []);
+    assert.deepEqual(result.checks, []);
+    assert.deepEqual(
+      result.budget.decisions.filter((decision) => decision.stopped),
+      [],
+    );
+    const runs = admission.flatMap((pass) => [
+      ...new Set(
+        [...(pass.contract.plusIndex?.indexed?.spans.values() ?? [])].flatMap((span) =>
+          span === null ? [] : [span.run],
+        ),
+      ),
+    ]);
+    assert.deepEqual(
+      runs.map(({ terms, holders, reads }) => [
+        terms.length,
+        holders.size,
+        reads.map(({ positions }) => positions.length),
+      ]),
+      unshared ? admission.map(() => [k, 0, [k]]) : [],
+      `unshared: ${unshared}`,
+    );
   }
 });

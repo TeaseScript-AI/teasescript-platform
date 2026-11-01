@@ -18,7 +18,12 @@ import { BudgetExhausted, withTestDemandAllowance } from "../../src/type-inferen
 import { asked, checkedResult } from "../../src/type-inference/core/consumer.js";
 import { Consumers, withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import type { FlowNode } from "../../src/type-inference/core/flow-graph.js";
-import { ingressLeaves, type Item, writerKey } from "../../src/type-inference/core/items.js";
+import {
+  ingressLeaves,
+  type Item,
+  itemsSignature,
+  writerKey,
+} from "../../src/type-inference/core/items.js";
 import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
 import {
   type CoreAnalysisRequest,
@@ -30,6 +35,7 @@ import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import type { PlaceId } from "../../src/type-inference/graph.js";
 import { coreRequest, type SourceFile } from "./type-core-analysis.js";
+import { itemScope } from "./type-core-items.js";
 
 /*
  * The type core's oracles, one library for the tests and for the generator corpus (`tests/families/`): the
@@ -358,6 +364,29 @@ function ingressLines(answers: Answers): string {
       return answer === null ? [] : [`${node.id} ${answer.items.map(itemText).join(" ")}`];
     })
     .join("\n");
+}
+
+/**
+ * An answer's items in their order, each with every field it carries, its writer and its ingress leaves by their keys:
+ * where an answer's order, certainty, reasons, context and writers all count (#1384: a publication's hashes sort some
+ * answers' items).
+ */
+export function orderedItems(items: readonly Item[]): string[] {
+  return items.map((item) =>
+    JSON.stringify({
+      ...item,
+      writer: item.writer === null ? null : writerKey(item.writer),
+      ingress: item.ingress === undefined ? undefined : ingressLeaves(item.ingress).map(writerKey),
+    }),
+  );
+}
+
+/** An answer as a replay compares it: its items' signature, their order aside, and their ingress stores. */
+export function replayAnswer(items: readonly Item[]): string {
+  const stores = items.map((item) =>
+    item.ingress === undefined ? "" : ingressLeaves(item.ingress).map(writerKey).join(","),
+  );
+  return `${itemsSignature(items, itemScope())} ${stores.sort().join(";")}`;
 }
 
 /** An array or an object `jsonText` walks: an array by index to its length on entry, an object by its own keys. */

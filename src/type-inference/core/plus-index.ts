@@ -1,7 +1,7 @@
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import { unknownItem } from "./contract/kinds.js";
-import { keyOf, keyPlace } from "./definitions.js";
+import { keyOf, keyPlace, sortCost } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
 import {
   firstWriter,
@@ -12,7 +12,8 @@ import {
   type Item,
   type Writer,
 } from "./items.js";
-import type { ValueConstraint } from "./program.js";
+import type { CoreProgram, ValueConstraint } from "./program.js";
+import { sharing } from "./sharing.js";
 import type { Work } from "./solver.js";
 
 // #1384: a run of `+`'s terms by the properties their objects hold, read below its elements one property at a time.
@@ -23,19 +24,36 @@ interface Shape {
   readonly writer: Writer | null;
 }
 
-/** A binding's closed initializer (`bindingProof`): where it is stored, and its literal's shape. */
+/** A binding's closed initializer (`bindingProof`): where it is stored, its literal's shape and that one's names. */
 interface Proof {
   readonly node: FlowNode;
   readonly shape: Shape;
+  readonly names: ReadonlySet<string>;
+}
+
+/** A closed term (`termOf`): its shape, and for a read the proof every read of its binding shares, else `null`. */
+interface Term {
+  readonly shape: Shape;
+  readonly read: Proof | null;
+}
+
+/** A run's reads of one binding: their positions in order. Each answers as the others at every path (`termOf`). */
+interface Reads {
+  readonly proof: Proof;
+  readonly positions: readonly number[];
 }
 
 /**
- * An indexed run: its terms in source order, per first property the positions of the terms holding it, and a tree of
- * the terms' earliest objects (`width` leaves from `width` on, each inner slot the earlier of its two below).
+ * An indexed run: its terms in source order; per first property the positions of the literals holding it, and per
+ * binding its reads, whose names are never posted, so a binding of k properties read k times is k positions, not k²
+ * postings (#1384, Codex r1); per position the first literal at or after it; and a tree of the literals' earliest
+ * objects (`width` leaves from `width` on, a read's `null`, each inner slot the earlier of its two below).
  */
 interface Run {
   readonly terms: readonly PlaceId[];
   readonly holders: ReadonlyMap<string, readonly number[]>;
+  readonly reads: readonly Reads[];
+  readonly nextLiteral: readonly number[];
   readonly width: number;
   readonly earliest: readonly (Writer | null)[];
 }
@@ -53,14 +71,14 @@ interface Indexed {
   readonly below: ReadonlySet<PlaceId>;
   readonly shapes: Map<PlaceId, Shape | null>;
   readonly bindings: Map<PlaceId, Proof | null>;
-  readonly terms: Map<PlaceId, Shape | null>;
+  readonly terms: Map<PlaceId, Term | null>;
   /** Per `+`, its span in its run; `null` for a run that is not indexed. */
   readonly spans: Map<PlaceId, PlusSpan | null>;
 }
 
 /**
- * A pass's state of the index (`Contract.plusIndex`): the first property any `+` was asked at, per `+` the first other
- * one, and the index once a `+` is asked at a second other one (`plusSpan`).
+ * A pass's state of the index (`Contract.plusIndex`): the first property any `+` was asked at, per root the first other
+ * one, and the index once a root is asked at a second other one (`plusSpan`).
  */
 export interface PlusIndex {
   readonly seed: string;
@@ -85,14 +103,21 @@ function isPlus(
 }
 
 /**
- * A `+`'s span among the terms of its run, asked below its elements at the property `step`. A run is the outermost
- * `+` reached up through `+` operands, with every `+` below it through theirs. It keeps its operations' walk until one
- * of its `+` is asked at a third property: the pass's first one, asked of any `+`, and a first other one per `+` cost a
- * walk each, which stays linear; a second other one indexes the whole run, which from then on answers each property it
- * is asked at, the first included. `null` where the walk answers: before that, or for a run admission rejected an
- * operand of (A6, `joinElements`) or with a term that is not closed (`termOf`), which is found once.
+ * A `+`'s span among the terms of its run, asked below its elements at the property `step` on one side (`exact`: the
+ * value side). A run is a `+` no `+` takes as an operand, its root, with every `+` below it through their operands. It
+ * keeps its operations' walk until its root is asked at a third property: the pass's first one, asked of any `+`, and a
+ * first other one per root cost a walk each, which stays linear; a second other one indexes the whole run, which from
+ * then on answers each property any of its `+` is asked at, the first included. `null` where the walk answers: before
+ * that, below a root not yet indexed, for a run whose walk on that side the collapse already answers (`collapsed`), or
+ * for a run admission rejected an operand of (A6, `joinElements`) or with a term that is not closed (`termOf`), which
+ * is found once.
  */
-export function plusSpan(pass: CorePass, value: PlaceId, step: string): PlusSpan | null {
+export function plusSpan(
+  pass: CorePass,
+  value: PlaceId,
+  step: string,
+  exact: boolean,
+): PlusSpan | null {
   const { program, contract } = pass;
   if (!isPlus(program.opOf.get(value)) || step.includes("#")) return null;
   let state = contract.plusIndex;
@@ -102,14 +127,48 @@ export function plusSpan(pass: CorePass, value: PlaceId, step: string): PlusSpan
   }
   const known = state.indexed?.spans.get(value);
   if (known !== undefined) return known;
-  if (step === state.seed) return null;
+  if (step === state.seed || !isRoot(program, value)) return null;
   const first = state.seen.get(value);
   if (first === undefined) {
     contract.keep(2);
     state.seen.set(value, step);
     return null;
   }
-  return first === step ? null : runSpan(pass, state.indexed ?? indexed(pass, state), value);
+  return first === step || collapsed(pass, value, exact)
+    ? null
+    : runSpan(pass, state.indexed ?? indexed(pass, state), value);
+}
+
+/** Whether no `+` takes a value as an operand: a run's root (`plusSpan`). */
+function isRoot(program: CoreProgram, value: PlaceId): boolean {
+  for (const use of program.consumersOf.get(value) ?? [])
+    if (use.kind === "operand" && isPlus(use.operation)) return false;
+  return true;
+}
+
+/**
+ * TABLE r4.87: whether a run is one class along its left operands down to its terms on one side, the sharing on
+ * (`plusRepeatOf`, which that side's walk asks next): its root answers below its elements as its third, whose walk
+ * reads three `+` and four terms, so each property its root is asked at costs a few steps, and an index would only add
+ * its own work.
+ */
+function collapsed(pass: CorePass, root: PlaceId, exact: boolean): boolean {
+  if (!sharing()) return false;
+  const { program, contract } = pass;
+  const operands = (value: PlaceId): readonly PlaceId[] | null => {
+    const c = program.opOf.get(value);
+    return isPlus(c) ? c.arguments : null;
+  };
+  const third = contract.plusRepeatOf(root, exact);
+  if (third === root) return false;
+  // (the third, the second and the first `+` of its run, and the terms they join)
+  const own = operands(third)!;
+  const second = operands(own[0]!);
+  const first = second === null ? null : operands(second[0]!);
+  return (
+    first !== null &&
+    [first[0]!, first[1]!, second![1]!, own[1]!].every((operand) => operands(operand) === null)
+  );
 }
 
 /** The index's shared parts, made at its first run. */
@@ -133,34 +192,14 @@ function indexed(pass: CorePass, state: PlusIndex): Indexed {
 }
 
 /**
- * The run of `value`'s `+` indexed: its spans published once its positions and tree are complete and kept, so a stop
- * while it is made leaves no run; a run that is not indexed is found once for every `+` in it.
+ * The run of a root (`plusSpan`) indexed: its spans published once its positions and tree are complete and kept, so a
+ * stop while it is made leaves no run; a run that is not indexed is found once for every `+` in it.
  */
-function runSpan(pass: CorePass, ix: Indexed, value: PlaceId): PlusSpan | null {
+function runSpan(pass: CorePass, ix: Indexed, root: PlaceId): PlusSpan | null {
   const { program, contract, lists } = pass;
   const work = program.work;
-  // (the run's root: each `+` up the operands' consumers, to one no `+` takes; an operand of two leaves each `+` on
-  // the way to its walk)
-  const above: PlaceId[] = [];
-  let root = value;
-  for (;;) {
-    let parent: PlaceId | null = null;
-    for (const use of program.consumersOf.get(root) ?? []) {
-      work.charge("indexSteps");
-      if (use.kind !== "operand" || !isPlus(use.operation)) continue;
-      if (parent !== null && parent !== use.operation.result) {
-        contract.keep(2 * above.length + 2);
-        for (const operation of [value, ...above]) ix.spans.set(operation, null);
-        return null;
-      }
-      parent = use.operation.result;
-    }
-    if (parent === null) break;
-    above.push(parent);
-    root = parent;
-  }
   const terms: PlaceId[] = [];
-  const shapes: Shape[] = [];
+  const kinds: Term[] = [];
   const spans: { readonly value: PlaceId; readonly lo: number; hi: number }[] = [];
   // (the terms in source order, each `+`'s span closed after its right operand's)
   const stack: { readonly value: PlaceId; readonly span: (typeof spans)[number] | null }[] = [
@@ -186,11 +225,11 @@ function runSpan(pass: CorePass, ix: Indexed, value: PlaceId): PlusSpan | null {
       );
       continue;
     }
-    const shape = termOf(pass, ix, top.value);
-    if (shape === null) closed = false;
+    const term = termOf(pass, ix, top.value);
+    if (term === null) closed = false;
     else {
       terms.push(top.value);
-      shapes.push(shape);
+      kinds.push(term);
     }
   }
   contract.keep(3 * spans.length + terms.length);
@@ -198,8 +237,23 @@ function runSpan(pass: CorePass, ix: Indexed, value: PlaceId): PlusSpan | null {
     for (const span of spans) ix.spans.set(span.value, null);
     return null;
   }
+  // (a literal's names posted at its position, a literal standing once in one run; a binding's reads by its proof)
   const holders = new Map<string, number[]>();
-  for (const [index, shape] of shapes.entries())
+  const byProof = new Map<Proof, number[]>();
+  const reads: Reads[] = [];
+  for (const [index, { shape, read }] of kinds.entries()) {
+    work.charge("indexSteps");
+    if (read !== null) {
+      let positions = byProof.get(read);
+      if (positions === undefined) {
+        byProof.set(read, (positions = []));
+        reads.push({ proof: read, positions });
+        contract.keep(2);
+      }
+      positions.push(index);
+      contract.keep(1);
+      continue;
+    }
     for (const name of shape.names) {
       work.charge("indexSteps");
       let list = holders.get(name);
@@ -207,43 +261,54 @@ function runSpan(pass: CorePass, ix: Indexed, value: PlaceId): PlusSpan | null {
       list.push(index);
       contract.keep(1);
     }
+  }
   let width = 1;
   while (width < terms.length) width *= 2;
-  contract.keep(2 * width + holders.size);
+  contract.keep(2 * width + holders.size + terms.length + 1);
   const earliest: (Writer | null)[] = new Array<Writer | null>(2 * width).fill(null);
-  for (const [index, shape] of shapes.entries()) earliest[width + index] = shape.writer;
+  const nextLiteral: number[] = new Array<number>(terms.length + 1);
+  nextLiteral[terms.length] = terms.length;
+  for (let index = terms.length - 1; index >= 0; index -= 1) {
+    work.charge("indexSteps");
+    const literal = kinds[index]!.read === null;
+    if (literal) earliest[width + index] = kinds[index]!.shape.writer;
+    nextLiteral[index] = literal ? index : nextLiteral[index + 1]!;
+  }
   for (let index = width - 1; index > 0; index -= 1) {
     work.charge("indexSteps");
     earliest[index] = firstWriter(earliest[2 * index]!, earliest[2 * index + 1]!);
   }
-  const run: Run = { terms, holders, width, earliest };
+  const run: Run = { terms, holders, reads, nextLiteral, width, earliest };
   for (const { value: operation, lo, hi } of spans) ix.spans.set(operation, { run, lo, hi });
-  return ix.spans.get(value)!;
+  return ix.spans.get(root)!;
 }
 
 /**
  * A term of a run as a closed shape: a list literal's (`shapeOf`), or a read's whose binding's closed initializer
- * (`bindingProof`) dominates its node, so that initializer is its reaching definition (X2). `null` for any other term.
+ * (`bindingProof`) dominates its node, so that initializer is its reaching definition (X2): every such read of one
+ * binding has its value, untested, so it answers as the others at every path. `null` for any other term.
  */
-function termOf(pass: CorePass, ix: Indexed, value: PlaceId): Shape | null {
+function termOf(pass: CorePass, ix: Indexed, value: PlaceId): Term | null {
   const known = ix.terms.get(value);
   if (known !== undefined) return known;
   const { program, contract } = pass;
   program.work.charge("indexSteps");
   const binding = program.occurrenceOf.get(value);
-  let shape: Shape | null;
-  if (binding === undefined) shape = shapeOf(pass, ix, value);
-  else {
+  let term: Term | null;
+  if (binding === undefined) {
+    const shape = shapeOf(pass, ix, value);
+    term = shape === null ? null : { shape, read: null };
+  } else {
     const proof = bindingProof(pass, ix, binding);
     const node = program.occNode.get(value) ?? null;
-    shape =
+    term =
       proof !== null && node !== null && program.dom.dominates(proof.node, node)
-        ? proof.shape
+        ? { shape: proof.shape, read: proof }
         : null;
   }
-  contract.keep(2 + (shape === null ? 0 : 1));
-  ix.terms.set(value, shape);
-  return shape;
+  contract.keep(2 + (term === null ? 0 : 2));
+  ix.terms.set(value, term);
+  return term;
 }
 
 /**
@@ -273,9 +338,14 @@ function bindingProof(pass: CorePass, ix: Indexed, binding: PlaceId): Proof | nu
     kind.written === null
   ) {
     const shape = shapeOf(pass, ix, own[0]!.value);
-    if (shape !== null) proof = { node: own[0]!.node, shape };
+    if (shape !== null) {
+      // (its names once per binding, whatever reads it: a query asks each run's reads of it whether they hold one)
+      program.work.charge("indexSteps", shape.names.length);
+      contract.keep(3 + shape.names.length);
+      proof = { node: own[0]!.node, shape, names: new Set(shape.names) };
+    }
   }
-  contract.keep(2 + (proof === null ? 0 : 2));
+  contract.keep(2);
   ix.bindings.set(binding, proof);
   return proof;
 }
@@ -337,8 +407,10 @@ function closedShape(pass: CorePass, literal: PlaceId): Shape | null {
   return { names, writer };
 }
 
-/** The first of `positions` at or after `at`. */
+/** The first of `positions` at or after `at` (a root's span, the whole run, found at either end). */
 function firstFrom(pass: CorePass, positions: readonly number[], at: number): number {
+  if (positions.length === 0 || at <= positions[0]!) return 0;
+  if (at > positions.at(-1)!) return positions.length;
   let low = 0;
   let high = positions.length;
   while (low < high) {
@@ -350,7 +422,7 @@ function firstFrom(pass: CorePass, positions: readonly number[], at: number): nu
   return low;
 }
 
-/** The earliest object of the run's terms from `from` to before `to`. */
+/** The earliest object of the run's literals from `from` to before `to`. */
 function earliestOf(pass: CorePass, run: Run, from: number, to: number): Writer | null {
   let writer: Writer | null = null;
   for (let low = from + run.width, high = to + run.width; low < high; low >>= 1, high >>= 1) {
@@ -363,11 +435,12 @@ function earliestOf(pass: CorePass, run: Run, from: number, to: number): Writer 
 
 /**
  * A `+` of an indexed run (`plusSpan`) below its elements at a property, as its operands' walk answers there
- * (`plusElements`): each term holding the property by `read`, its side's own answer, and the terms between them,
- * whose objects all lack it, as their earliest object's missing property (F11), at that property or below it, with the
- * side's context; merged in the terms' order, possibilities (`member`) where more than one term gives an element.
- * `null` where the walk answers: a path not below an element's property, a `+` without an indexed span, or a term's
- * answer with an element step's mark.
+ * (`plusElements`): each term holding the property by `read`, its side's own answer, a binding's reads by the first of
+ * them in the span, and the terms whose objects all lack it as their earliest object's missing property (F11), at that
+ * property or below it, with the side's context, where the first of them stands; merged in the terms' order (a kind
+ * keeps its first item's place, so a read again and a missing property again add nothing), possibilities (`member`)
+ * where more than one term gives an element. `null` where the walk answers: a path not below an element's property, a
+ * `+` without an indexed span, or a term's answer with an element step's mark.
  */
 export function* indexedPlus(
   pass: CorePass,
@@ -378,32 +451,63 @@ export function* indexedPlus(
 ): Work<Item[] | null> {
   if (rest.length < 2 || rest[0] !== "element") return null;
   const step = rest[1]!;
-  const span = plusSpan(pass, value, step);
+  const span = plusSpan(pass, value, step, exact);
   if (span === null) return null;
+  const { program } = pass;
   const { run, lo, hi } = span;
+  // (each contribution where it first stands; `empty`: the terms giving no element)
+  const parts: { readonly at: number; readonly items: readonly Item[] }[] = [];
+  let missingAt = hi;
+  let missingWriter: Writer | null = null;
+  let empty = 0;
+  const lacking = (at: number, writer: Writer | null): void => {
+    missingAt = Math.min(missingAt, at);
+    missingWriter = firstWriter(missingWriter, writer);
+  };
+  // the literals holding it, and those between them lacking it
   const holders = run.holders.get(step) ?? [];
-  const operands: (readonly Item[])[] = [];
   let at = lo;
-  let giving = 0;
   for (let index = firstFrom(pass, holders, lo), end = firstFrom(pass, holders, hi); ; index += 1) {
     const holder = index < end ? holders[index]! : hi;
-    if (holder > at) {
-      const writer = earliestOf(pass, run, at, holder);
-      operands.push([
-        exact
-          ? makeItem("unknown", writer, { reasons: REASON.missing, context: "missing" })
-          : unknownItem(REASON.missing, writer),
-      ]);
-      giving += holder - at;
-    }
+    if (run.nextLiteral[at]! < holder)
+      lacking(run.nextLiteral[at]!, earliestOf(pass, run, at, holder));
     if (index === end) break;
-    pass.program.work.charge("indexSteps");
+    program.work.charge("indexSteps");
     const items = yield* read(run.terms[holder]!);
     if (items.some((item) => item.tag === "empty")) return null;
-    operands.push(items);
-    if (items.length > 0) giving += 1;
+    parts.push({ at: holder, items });
+    if (items.length === 0) empty += 1;
     at = holder + 1;
   }
-  const items = mergeItems(operands.flat(), pass.program.scope);
-  return giving > 1 ? weaken(items, "member") : items;
+  // each binding's reads in the span, holding it or lacking it alike
+  for (const { proof, positions } of run.reads) {
+    const first = firstFrom(pass, positions, lo);
+    if (first === positions.length || positions[first]! >= hi) continue;
+    const position = positions[first]!;
+    if (!proof.names.has(step)) {
+      lacking(position, proof.shape.writer);
+      continue;
+    }
+    program.work.charge("indexSteps");
+    const items = yield* read(run.terms[position]!);
+    if (items.some((item) => item.tag === "empty")) return null;
+    parts.push({ at: position, items });
+    if (items.length === 0) empty += firstFrom(pass, positions, hi) - first;
+  }
+  if (missingAt < hi)
+    parts.push({
+      at: missingAt,
+      items: [
+        exact
+          ? makeItem("unknown", missingWriter, { reasons: REASON.missing, context: "missing" })
+          : unknownItem(REASON.missing, missingWriter),
+      ],
+    });
+  program.work.charge("indexSteps", sortCost(parts.length));
+  parts.sort((a, b) => a.at - b.at);
+  const items = mergeItems(
+    parts.flatMap((part) => part.items),
+    program.scope,
+  );
+  return hi - lo - empty > 1 ? weaken(items, "member") : items;
 }
