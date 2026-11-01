@@ -681,7 +681,10 @@ const COMPOSED_ORDER_ROWS: readonly {
   readonly name: string;
   readonly source: string;
   readonly analyse?: (request: CoreAnalysisRequest) => Answers;
-  readonly lists: (answers: Answers, request: CoreAnalysisRequest) => readonly (readonly string[])[];
+  readonly lists: (
+    answers: Answers,
+    request: CoreAnalysisRequest,
+  ) => readonly (readonly string[])[];
   readonly expected: readonly string[];
 }[] = (() => {
   // (each diagnostic of a rule, a budget stop set aside)
