@@ -78,7 +78,8 @@ export function verdictOf({ stalled = {}, runs, paired }) {
       alone +
       (started === 0
         ? "the head started no run"
-        : `on each of the ${started} runs it started the head charged no more work than the base` +
+        : `on ${started === 1 ? "the one run" : `each of the ${started} runs`} it started the head charged no more ` +
+          "work than the base" +
           (paired ? ", in at most twice the base's time for it and ten seconds" : "")),
   };
 }
