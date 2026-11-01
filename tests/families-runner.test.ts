@@ -1121,7 +1121,7 @@ export function publicationHashes(files) {
 test("the corpus runner records each source's work and time, a stalled run's to the stall, and a rerun of the stall index on both trees closes a timeout but never a stall or a candidate (#1564)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
-    const [base, head] = [false, true].map((isHead) => {
+    const built = (isHead: boolean) => {
       const tree = join(directory, isHead ? "head" : "base");
       mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
       mkdirSync(join(tree, "dist", "src", "type-inference", "core"), { recursive: true });
@@ -1132,7 +1132,8 @@ test("the corpus runner records each source's work and time, a stalled run's to 
         charging(isHead),
       );
       return tree;
-    });
+    };
+    const [base, head] = [built(false), built(true)];
     const area = (name: string, names: string[]) => {
       const folder = join(directory, name);
       mkdirSync(folder);
@@ -1153,16 +1154,16 @@ test("the corpus runner records each source's work and time, a stalled run's to 
 
     // sources that end: the runner's output and `--out` as without the record
     const ending = area("ending", ["fast", "changed"]);
-    const [plain, recorded] = ["plain", "recorded"].map((name) =>
-      run(
-        runner,
-        ending,
-        base,
-        head,
-        "--out",
-        join(directory, `${name}.jsonl`),
-        ...(name === "plain" ? [] : ["--work", join(directory, "ending.work.jsonl")]),
-      ),
+    const plain = run(runner, ending, base, head, "--out", join(directory, "plain.jsonl"));
+    const recorded = run(
+      runner,
+      ending,
+      base,
+      head,
+      "--out",
+      join(directory, "recorded.jsonl"),
+      "--work",
+      join(directory, "ending.work.jsonl"),
     );
     assert.equal(recorded.status, 1, recorded.stderr);
     assert.equal(recorded.stdout, plain.stdout);
