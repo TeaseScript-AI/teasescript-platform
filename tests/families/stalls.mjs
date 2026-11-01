@@ -22,14 +22,16 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const RULE =
   "A stalled source is a candidate stall where the head alone stalled for a reason other than time (memory, a fatal " +
   "error), where on one run the head charged more work than the base charged in the whole run, or where the trees ran " +
-  "in one process and on one run the head took more than twice the time the base's rate of work gives the head's work, " +
-  "plus a second, which a rerun that runs it to its end does not clear; it is load where the base's work is recorded " +
-  "for every run the head started, none of these holds and the stall is a timeout or the base's alone; else it is " +
-  "unknown (no work of the base recorded, as against a stored baseline): rerun it on both trees.";
+  "in one process and over the runs the head started it took more than twice the time the base's rate of work gives " +
+  "the head's work, plus ten seconds; a rerun that runs it to its end does not clear the last two. It is load where the " +
+  "base's work is recorded for every run the head started, none of these holds and the stall is a timeout or the " +
+  "base's alone; else it is unknown (no work of the base recorded, as against a stored baseline): rerun it on both " +
+  "trees.";
 
 /**
  * A stalled source's verdict from its normalized record (`entryOf`): `candidate`, `load` or `unknown` (`RULE`), and why,
- * naming the run that decides.
+ * naming the run that decides. Work is compared run by run, as each tree's work on a run does not depend on the load;
+ * time over the runs the head started, as one run's time on a loaded worker can double at equal work.
  */
 export function verdictOf({ stalled = {}, runs, paired }) {
   const { base, head, source } = stalled;
@@ -37,6 +39,7 @@ export function verdictOf({ stalled = {}, runs, paired }) {
     return { verdict: "candidate", why: `the head alone stalled: ${head}` };
   if (runs === undefined)
     return { verdict: "unknown", why: "no work recorded (a shard run without --work)" };
+  const spent = { work: [0, 0], ms: [0, 0] };
   let started = 0;
   for (const { mode, check, base: was, head: is } of runs) {
     if (is === null) continue;
@@ -52,13 +55,18 @@ export function verdictOf({ stalled = {}, runs, paired }) {
         verdict: "candidate",
         why: `on ${run} the head charged ${is.work} units${is.done ? "" : " before the stall"}, the base ${was.work}`,
       };
-    const expected = was.work > 0 ? (is.work * was.ms) / was.work : was.ms;
-    if (paired && is.ms > 2 * expected + 1000)
-      return {
-        verdict: "candidate",
-        why: `on ${run} the head took ${is.ms} ms for ${is.work} units, the base ${was.ms} ms for ${was.work}`,
-      };
+    [was, is].forEach((tree, index) => {
+      spent.work[index] += tree.work;
+      spent.ms[index] += tree.ms;
+    });
   }
+  const [work, ms] = [spent.work, spent.ms];
+  const expected = work[0] > 0 ? (work[1] * ms[0]) / work[0] : ms[0];
+  if (paired && ms[1] > 2 * expected + 10_000)
+    return {
+      verdict: "candidate",
+      why: `over its ${started} runs the head took ${ms[1]} ms for ${work[1]} units, the base ${ms[0]} ms for ${work[0]}`,
+    };
   const reason = head ?? source;
   if (reason !== undefined && reason !== "timeout")
     return { verdict: "unknown", why: `the source stalled (${reason}) between its runs` };
@@ -71,7 +79,7 @@ export function verdictOf({ stalled = {}, runs, paired }) {
       (started === 0
         ? "the head started no run"
         : `on each of the ${started} runs it started the head charged no more work than the base` +
-          (paired ? ", in at most twice the base's time for it" : "")),
+          (paired ? ", in at most twice the base's time for it and ten seconds" : "")),
   };
 }
 
@@ -274,7 +282,8 @@ for (const [place, was] of replay) {
   const row = rows.get(nameOf(was.area));
   // where it stalls, its verdict; where a rerun ran it to its end, a candidate's still, which agreement does not clear
   const judged = verdictOf(is);
-  const verdict = is.stalled !== undefined || judged.verdict === "candidate" ? judged : undefined;
+  const verdict =
+    is.stalled !== undefined || (is !== was && judged.verdict === "candidate") ? judged : undefined;
   if (was.stalled !== undefined) {
     const line = { area: nameOf(was.area), generator: was.generator, source: was.source };
     const rerunOf = is === was ? {} : { rerun: { outcome: outcomeOf(is), ...verdict } };

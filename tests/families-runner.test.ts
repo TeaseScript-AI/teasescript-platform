@@ -1308,8 +1308,14 @@ test("the stall index decides each stalled source from its record by one rule: t
         publication([100, 100], [10, 10]),
         publication([100, 150], [10, 500], 1),
       ]),
-      stalled("slower", "timeout", [publication([1000, 500], [100, 1101], 1)]),
-      stalled("boundary", "timeout", [publication([1000, 500], [100, 1100], 1)]),
+      stalled("slower", "timeout", [
+        publication([1000, 1000], [100, 100]),
+        publication([1000, 500], [100, 10201], 1),
+      ]),
+      stalled("boundary", "timeout", [
+        publication([1000, 1000], [100, 100]),
+        publication([1000, 500], [100, 10200], 1),
+      ]),
       stalled("based", "timeout", [
         publication([100, 100], [10, 10]),
         publication([50, null], [180000, null], 0),
@@ -1317,6 +1323,8 @@ test("the stall index decides each stalled source from its record by one rule: t
       stalled("unmeasured", "timeout", [publication([null, null], [10, 180000], 1)]),
       stalled("between", "exit 3", [publication([5, 5], [1, 1])]),
       { source: "agreed", runs: [publication([5, 5], [1, 1])], counts: { runs: 1 } },
+      // a source that ended in the replay is judged by agreement alone: its work is the growth gates'
+      { source: "costlier", runs: [publication([5, 9], [1, 30000])], counts: { runs: 1 } },
     ]);
     // the head against a stored base, which records no work
     const stored = shard("stored", 1, [
@@ -1366,11 +1374,17 @@ test("the stall index decides each stalled source from its record by one rule: t
     assert.deepEqual(
       printed
         .filter(({ area, complete }) => area !== undefined && complete !== undefined)
-        .map(({ area, complete, agreed, unavailable }) => [area, complete, agreed, unavailable]),
+        .map(({ area, complete, agreed, unavailable, candidate }) => [
+          area,
+          complete,
+          agreed,
+          unavailable,
+          candidate,
+        ]),
       [
-        ["paired", true, 1, 7],
-        ["property", false, 0, 1],
-        ["stored", true, 0, 3],
+        ["paired", true, 2, 7, 3],
+        ["property", false, 0, 1, 0],
+        ["stored", true, 0, 3, 1],
       ],
     );
     // closed where every source agrees; refused, a record cut short, one whose sources do not add up to its total, and
