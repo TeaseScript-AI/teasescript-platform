@@ -106,9 +106,10 @@ export interface PropertySource {
 }
 
 /**
- * #1456: a prefix's property index, once per its stores (`Contract.propertyIndexes`): its sources in order and in their
- * writers' order (F28); per property's path below the prefix (`pathAt`), the sources holding it, in order; and, as a
- * property is asked, F11's witness of those without it (`propertyLack`).
+ * #1456: a prefix's property index, once per its stores (`Contract.propertyIndexes`): its sources in order, and those
+ * F11's `missing` names in their writers' order (F28; with the sharing on, the first of the groups the levels fold
+ * alike where they lack a property); per property's path below the prefix (`pathAt`), the sources holding it, in
+ * order; and, as a property is asked, F11's witness of those without it (`propertyLack`).
  */
 export interface PropertyIndex {
   readonly sources: readonly PropertySource[];

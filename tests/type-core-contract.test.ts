@@ -10,6 +10,7 @@ import {
   type Answers,
   type CorePass,
 } from "../src/type-inference/core/answers.js";
+import { joinSteps } from "../src/type-inference/core/budget.js";
 import type { Contract, ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
 import {
   offendingStores,
@@ -19,17 +20,21 @@ import {
 } from "../src/type-inference/core/contract/prefix-index.js";
 import {
   exportNames,
+  isSteps,
   PathSteps,
   spanRef,
   stepsRest,
   type Rest,
 } from "../src/type-inference/core/contract/key-ids.js";
-import { keyOf } from "../src/type-inference/core/definitions.js";
+import { entryGroups, groupsAt, prefixLevels } from "../src/type-inference/core/contract/levels.js";
+import { annotated } from "../src/type-inference/core/contract/marks.js";
+import { keyOf, type Key } from "../src/type-inference/core/definitions.js";
+import { withWriter } from "../src/type-inference/core/exact-path.js";
 import { mergeItems, REASON, writerKey, type Item } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import type { Solver } from "../src/type-inference/core/solver.js";
+import type { Solver, Work } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { PROPERTY_STORE_FAMILIES } from "./helpers/type-core-families.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
@@ -975,15 +980,54 @@ const bindingOf = (pass: CorePass, name: string): PlaceId =>
     .id;
 
 /**
- * #1456: a property of a place replaced by objects answers as each of its stores does at the property, merged: in
- * every mode, for each family's property read and one no object holds, the place's contract there equals its stores'
- * answers one by one (`entryAt`, each store by itself), so the property index reading the objects holding it and one
- * `missing` for the others keeps every holder's answer apart, the missing status, its earliest literal writer and its
- * place among the holders' answers. The objects are indexed where every store is a closed object literal and, with the
- * sharing on, a level's member; a host value among them or a test marking the reads leaves the place to its levels, and
- * so does, with the sharing on, a tested operand marking an object's structure.
+ * A prefix's items at a path from its levels alone, as `contractAlong` read them before #1456: its entries that answer
+ * by themselves in their groups (`entryGroups`), then its literals' groups at the path (`groupsAt`).
  */
-test("a property of a place replaced by objects answers as each of its stores does, in every mode (#1456)", () => {
+function* levelsAt(contract: Contract, prefix: Key, rest: Rest): Work<readonly Item[]> {
+  const out: Item[] = [];
+  const levels = prefixLevels(contract, prefix, contract.prefixStores(prefix));
+  for (const group of entryGroups(contract, levels)) {
+    const first = yield* contract.entryAt(group.entries[0]!, rest);
+    if (
+      group.entries.length > 1 &&
+      !first.some((item) => item.tag === "unknown" || item.fan !== undefined)
+    ) {
+      out.push(...withWriter(first, group.w));
+      continue;
+    }
+    out.push(...first);
+    for (const entry of group.entries.slice(1)) out.push(...(yield* contract.entryAt(entry, rest)));
+  }
+  if (levels.base.length > 0)
+    for (const group of groupsAt(contract, prefix, levels.base, rest))
+      out.push(
+        ...annotated(
+          contract,
+          group,
+          rest,
+          withWriter(
+            yield* contract.contractOfValueAt(
+              group.literal,
+              isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
+            ),
+            group.w,
+          ),
+        ),
+      );
+  return out;
+}
+
+/**
+ * #1456: a property of a place replaced by objects answers as the place's levels do: in every mode, for each family's
+ * property read and one no object holds, the place's contract there equals its levels' items at the property, merged,
+ * so the property index reading the objects holding it and one `missing` for the others keeps every holder's answer
+ * (each store by itself with the sharing off), the missing status, its writer (the earliest literal, or with the
+ * sharing on the first stored of objects alike there) and its place among the holders' answers. The objects are
+ * indexed where every store is a closed object literal and, with the sharing on, a level's member; a host value among
+ * them or a test marking the reads leaves the place to its levels, and so does, with the sharing on, a tested operand
+ * marking an object's structure.
+ */
+test("a property of a place replaced by objects answers as its levels do, in every mode (#1456)", () => {
   const differing: string[] = [];
   const indexed = new Set<string>();
   for (const family of PROPERTY_STORE_FAMILIES) {
@@ -998,22 +1042,19 @@ test("a property of a place replaced by objects answers as each of its stores do
       inMode(mode, () => {
         const pass = narrowingPass(request);
         const root = bindingOf(pass, "root");
+        const prefix = keyOf(root, []);
         for (const property of properties) {
           const asked = pass.solver.run(pass.contract.contractOf(keyOf(root, [property])));
-          const each = pass.contract
-            .prefixStores(keyOf(root, []))
-            .list.flatMap((entry) =>
-              pass.solver.run(pass.contract.entryAt(entry, stepsRest([property]))),
-            );
-          if (itemsText(asked) !== itemsText(mergeItems(each, pass.program.scope)))
+          const levels = pass.solver.run(levelsAt(pass.contract, prefix, stepsRest([property])));
+          if (itemsText(asked) !== itemsText(mergeItems(levels, pass.program.scope)))
             differing.push(`${family.name} ${property} ${JSON.stringify(mode)}`);
         }
-        if (pass.contract.propertyIndexes.has(pass.contract.prefixStores(keyOf(root, []))))
+        if (pass.contract.propertyIndexes.has(pass.contract.prefixStores(prefix)))
           indexed.add(`${family.name}${mode.unshared ? " unshared" : ""}`);
       });
   }
   assert.deepEqual(differing, []);
-  const closed = ["plain", "two", "shared", "half", "typed", "open-value", "provenance"];
+  const closed = ["plain", "two", "shared", "half", "typed", "open-value", "provenance", "alike"];
   assert.deepEqual(
     [...indexed].sort(),
     [

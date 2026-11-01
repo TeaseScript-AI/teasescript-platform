@@ -641,14 +641,16 @@ export function* loadsBelow(
 
 /**
  * #1456: a prefix's property index over its sources (`PropertyIndex`), each a closed object literal stored whole: its
- * entries (the sharing off) or its groups at the prefix (`groups`, on). Each source keeps its literal's one object's
- * property names and writer (`IndexObject`), each name its path below the prefix (`pathAt`) and the source a holder
- * there, each charged as it is made, and the writers' order charged as a sort.
+ * entries (the sharing off) or its groups at the prefix (`shared.groups`, on). Each source keeps its literal's one
+ * object's property names and writer (`IndexObject`), each name its path below the prefix (`pathAt`) and the source a
+ * holder there, each charged as it is made; the sources F11's `missing` names (each, the sharing off; on, the groups of
+ * `shared.writers`, the first of those its levels fold alike where they lack a property) in their writers' order,
+ * charged as a sort.
  */
 export function propertyIndex(
   contract: Contract,
   entries: readonly PrefixEntry[],
-  groups: readonly LevelGroup[] | null,
+  shared: { readonly groups: readonly LevelGroup[]; readonly writers: ReadonlySet<PlaceId> } | null,
 ): PropertyIndex {
   const { work } = contract.pass.program;
   const sources: PropertySource[] = [];
@@ -671,11 +673,15 @@ export function propertyIndex(
       list.push(source);
     }
   };
-  if (groups === null) for (const entry of entries) add(entry.value!, entry, null);
-  else for (const group of groups) add(group.literal, null, group);
-  contract.keep(sources.length);
-  work.charge("structureSteps", sortCost(sources.length));
-  const byWriter = [...sources].sort((a, b) =>
+  if (shared === null) for (const entry of entries) add(entry.value!, entry, null);
+  else for (const group of shared.groups) add(group.literal, null, group);
+  const writing =
+    shared === null
+      ? sources
+      : sources.filter((source) => shared.writers.has(source.group!.literal));
+  contract.keep(writing.length);
+  work.charge("structureSteps", sortCost(writing.length));
+  const byWriter = [...writing].sort((a, b) =>
     firstWriter(a.writer, b.writer) !== a.writer
       ? 1
       : firstWriter(b.writer, a.writer) !== b.writer
@@ -688,8 +694,8 @@ export function propertyIndex(
 
 /**
  * F11 at a property of a prefix's index (its path `path`, `step` its name), once per property: the earliest writer of
- * a source without it (F28), by a walk of the writers' order that passes only its holders, and the first such
- * source's position, by a walk of the sources' order, where its `missing` stands among the holders' answers.
+ * a source without it that F11 names (F28), by a walk of the writers' order that passes only its holders, and the first
+ * such source's position, by a walk of the sources' order, where its `missing` stands among the holders' answers.
  */
 export function propertyLack(
   contract: Contract,
