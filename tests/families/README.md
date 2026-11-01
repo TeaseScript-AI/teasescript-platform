@@ -64,7 +64,9 @@ running it (`running`). `stalls.mjs` reads a replay's records (a shard run witho
 gives its stalls alone) and prints the rule it judges each stalled source by (`RULE`: a candidate stall, load or
 unknown; its time clause a heuristic), each stalled source with its verdict, and each area's counts and the total. An
 area's records must share one configuration (another is refused, exit 2), so the area is complete only with its shards
-0/N to N-1/N of one N, together every source of one plan; a source counts as `agreed` only where it was compared in
+0/N to N-1/N of one N, together every source of one plan, and a source a plan lists more than once (a repeat, which the
+runner runs and counts each time) is one source where its repeats record the same counts, stall and runs, milliseconds
+apart, refused (exit 2, naming the place) where they differ; a source counts as `agreed` only where it was compared in
 every run and agrees, and `closed` (exit 0) needs every area complete, every source agreed and no candidate left.
 `--index` writes the sources still unavailable, with their verdicts and records and each area's configuration. Against a
 stored baseline the base's work is not recorded, so a head's timeout is unknown: `stalls.mjs rerun` runs the index's

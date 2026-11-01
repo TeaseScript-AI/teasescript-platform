@@ -7,14 +7,17 @@
 // each `unknown`, and no count of what agreed. One comparison is one configuration (`configuration`: the sources'
 // sizes, the area's plan (the hash of every source's place in its order), the stop runs' allowances, each generator's
 // checks, each tree's identity): an area's shards and every rerun record merged into it must share it (another is
-// refused, exit 2, never closed), and the area is complete only with its shards 0/N to N-1/N, one N, of that plan.
-// Prints the rule, one line per stalled source of the replay (with what its rerun did), one per area and a total; exits
-// 0 only where every area is complete, every source of it was compared and agrees, an unavailable one (stalled) never
-// counting as agreement, and no candidate stall is left, 1 otherwise, 2 on a record it cannot read or merge. `--index`
-// writes the sources still unavailable, with their verdicts and records, and each area's configuration: the stall
-// index, which `rerun` runs on both trees in one process, one source at a time, an area after another, with that
-// configuration (`run.mjs <area> <base> <head> --only <index>`), into a new folder of records, `<area>.work.jsonl` and
-// `<area>.jsonl` (`--out`), to be read with `--rerun`.
+// refused, exit 2, never closed), and the area is complete only with its shards 0/N to N-1/N, one N, of that plan. A
+// plan may list one source more than once: its repeats (one place, each run and counted by the runner, and each shard's
+// lines checked against its total) are one source where they record the same counts, stall and runs, milliseconds apart
+// (`repeats` counts the others), and are refused (exit 2, naming the place) where they differ, in a replay and in a
+// rerun alike (#1582). Prints the rule, one line per stalled source of the replay (with what its rerun did), one per
+// area and a total; exits 0 only where every area is complete, every source of it was compared and agrees, an
+// unavailable one (stalled) never counting as agreement, and no candidate stall is left, 1 otherwise, 2 on a record it
+// cannot read or merge. `--index` writes the sources still unavailable, with their verdicts and records, and each
+// area's configuration: the stall index, which `rerun` runs on both trees in one process, one source at a time, an area
+// after another, with that configuration (`run.mjs <area> <base> <head> --only <index>`), into a new folder of records,
+// `<area>.work.jsonl` and `<area>.jsonl` (`--out`), to be read with `--rerun`.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -216,6 +219,34 @@ const differing = (one, other, rerun = false) =>
       : JSON.stringify(one[part]) !== JSON.stringify(other[part]),
   );
 
+/**
+ * What a source's record says apart from its milliseconds: its counts, its stall and each run's mode, check and each
+ * tree's work and end. A plan's repeats of one source (one place, run and counted by the runner each time) must say the
+ * same (#1582).
+ */
+const sayingOf = ({ counts, stalled, runs }) =>
+  JSON.stringify([
+    counts,
+    stalled,
+    runs?.map(({ mode, check, base, head }) => [
+      mode,
+      check,
+      ...[base, head].map((tree) => tree && [tree.work, tree.done]),
+    ]),
+  ]);
+
+/**
+ * `entry` (of `file`) into `into`, a map by place: a repeat of a place it holds is that one source where it says the same
+ * (`repeats` counted), and refused (exit 2) where it does not.
+ */
+function merge(into, entry, file) {
+  const place = placeOf(entry);
+  const held = into.get(place);
+  if (held === undefined) into.set(place, entry);
+  else if (sayingOf(held) === sayingOf(entry)) held.repeats = (held.repeats ?? 0) + 1;
+  else refused(`${file} holds a source another record holds otherwise: ${place}`);
+}
+
 /** What a source did, in one word. */
 function outcomeOf({ counts, stalled }) {
   if (stalled !== undefined) return "stalled";
@@ -310,9 +341,7 @@ for (const shard of replayFiles.map(shardOf)) {
   if (shard.ran?.only !== undefined)
     refused(`${shard.file} records a rerun: give it after --rerun`);
   for (const entry of shard.entries) {
-    const place = placeOf(entry);
-    if (replay.has(place)) refused(`${shard.file} holds a source another record holds: ${place}`);
-    replay.set(place, entry);
+    merge(replay, entry, shard.file);
     areaNamed(nameOf(entry.area));
   }
   if (shard.ran === undefined) continue;
@@ -339,7 +368,7 @@ for (const shard of rerunFiles.map(shardOf)) {
   for (const entry of shard.entries) {
     const place = placeOf(entry);
     if (!replay.has(place)) refused(`${shard.file} holds a source the replay does not: ${place}`);
-    rerun.set(place, entry);
+    merge(rerun, entry, shard.file);
   }
 }
 
@@ -347,7 +376,10 @@ console.log(JSON.stringify({ rule: RULE }));
 const VERDICTS = ["load", "candidate", "unknown"];
 const zeros = () =>
   Object.fromEntries(
-    ["sources", "agreed", ...COUNTED, "unavailable", ...VERDICTS, "rerun"].map((key) => [key, 0]),
+    ["sources", "repeats", "agreed", ...COUNTED, "unavailable", ...VERDICTS, "rerun"].map((key) => [
+      key,
+      0,
+    ]),
   );
 const rows = new Map([...areas.keys()].sort().map((area) => [area, zeros()]));
 const index = [];
@@ -366,6 +398,7 @@ for (const [place, was] of replay) {
   if (is !== was) row.rerun += 1;
   // (a source an `--out` file lists is a stall of a shard whose other sources are not listed)
   if (!is.listed) row.sources += 1;
+  row.repeats += was.repeats ?? 0;
   for (const key of COUNTED) row[key] += is.counts[key] ?? 0;
   if (outcomeOf(is) === "agreed") row.agreed += 1;
   if (verdict !== undefined) row[verdict.verdict] += 1;

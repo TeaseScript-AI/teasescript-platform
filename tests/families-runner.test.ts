@@ -1278,6 +1278,15 @@ test("the corpus runner records each source's work and time, a stalled run's to 
     const mixed = run(stalls, four, three);
     assert.equal(mixed.status, 2, mixed.stdout);
     assert.match(mixed.stderr, /compares otherwise than the area's other shards \(plan\)/);
+    // a source the plan lists twice (#1582): its repeats, run and counted in two shards, are one source
+    const repeated = area("repeated", ["dup", "fast", "lone", "dup"]);
+    const [half, other] = [join(directory, "half.work.jsonl"), join(directory, "other.work.jsonl")];
+    run(runner, repeated, base, head, "--shard", "0/2", "--work", half);
+    run(runner, repeated, base, head, "--shard", "1/2", "--work", other);
+    const once = run(stalls, half, other);
+    assert.equal(once.status, 0, once.stderr);
+    const { sources, repeats, agreed, closed } = lines(once.stdout).at(-1);
+    assert.deepEqual([sources, repeats, agreed, closed], [3, 1, 3, true]);
     // one library (#1564 r3's mixed-dist witness): two heads given as their `dist/`, one compiled `src/` and two oracle
     // libraries, compare otherwise and are refused together; one head's `dist/` in both shards closes
     const twin = join(directory, "twin");
@@ -1635,6 +1644,41 @@ test("the stall index decides each stalled source from its record by one rule: t
     const both = run(half("0/2", "first"), second);
     assert.equal(both.status, 0, both.stderr);
     assert.equal(lines(both.stdout).at(-2).shards, "2/2");
+    // a source the plan lists twice (#1582): one source where its repeats record the same, milliseconds apart; refused,
+    // naming the place, where they differ, in a replay and in a rerun
+    const twice = (name: string, counts: Record<string, number>[], why?: string) =>
+      shard(
+        name,
+        2,
+        counts.map((second, index) => ({
+          source: "dup",
+          stalled: why,
+          runs: [publication([5, 5], [1, index + 1])],
+          counts: second,
+        })),
+      );
+    const alike = lines(run(twice("alike", [{ runs: 1 }, { runs: 1 }])).stdout).at(-1);
+    assert.deepEqual([alike.sources, alike.repeats, alike.closed], [1, 1, true]);
+    const unlike = run(twice("unlike", [{ runs: 1 }, { runs: 1, differences: 1 }]));
+    assert.equal(unlike.status, 2);
+    assert.match(
+      unlike.stderr,
+      /holds a source another record holds otherwise: \["unlike","g.mjs","dup","k"\]/,
+    );
+    const stalledTwice = twice("rerunning", [{ stalled: 1 }, { stalled: 1 }], "timeout");
+    const rerunTwice = join(directory, "rerun-twice.work.jsonl");
+    writeFileSync(
+      rerunTwice,
+      readFileSync(
+        twice("rerunning-again", [{ runs: 1 }, { runs: 1, differences: 1 }]),
+        "utf8",
+      ).replaceAll('"area":"rerunning-again"', '"area":"rerunning"'),
+    );
+    assert.equal(run(stalledTwice).status, 1);
+    assert.match(
+      run(stalledTwice, "--rerun", rerunTwice).stderr,
+      /holds a source another record holds otherwise: \["rerunning","g.mjs","dup","k"\]/,
+    );
     const otherwise = half("0/2", "otherwise", { ...CONFIGURATION, allowances: [1, 2] });
     assert.match(
       run(otherwise, second).stderr,
