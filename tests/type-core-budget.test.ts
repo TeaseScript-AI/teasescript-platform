@@ -431,6 +431,18 @@ test("a stop at the first unit finishes a deeply nested literal and a read as de
   }
 });
 
+/** The walk's first unit: the least allowance whose stop comes in the walk or later. */
+function walkStop(request: ReturnType<typeof requestOf>, reversed: boolean, total: number): number {
+  let [low, high] = [1, total];
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const phase = analysed(request, reversed, middle).budget.stoppedIn;
+    if (phase === "setup" || phase === "admission") low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 /**
  * #1364: k functions in a cycle of calls, each passing a host value on unchanged, so each result's ingress cell holds
  * the next function's. A consumer's boundary resolves a cycle once per pass, as one component: not once per path through
@@ -461,17 +473,6 @@ test("a cycle of calls passing host data on is resolved once, unstopped and fini
         ),
         ...Array.from({ length: k }, (_, i) => `repeat f${i}(3) {}`),
       ].join("\n"),
-  };
-  // (the walk's first unit: the least allowance whose stop comes in the walk or later)
-  const walkStop = (request: ReturnType<typeof requestOf>, reversed: boolean, total: number) => {
-    let [low, high] = [1, total];
-    while (low < high) {
-      const middle = Math.floor((low + high) / 2);
-      const phase = analysed(request, reversed, middle).budget.stoppedIn;
-      if (phase === "setup" || phase === "admission") low = middle + 1;
-      else high = middle;
-    }
-    return low;
   };
   const steep: string[] = [];
   for (const [name, cycle] of Object.entries(cycles))
@@ -526,6 +527,52 @@ test("every read of a cycle of calls holding host data no landing names owes its
       ["a", "b", "c"].map((name) => `validate external data ${name}.result`),
       JSON.stringify(mode),
     );
+});
+
+/**
+ * #1462: k pairs of mutual copies (#1445's Astra r1 shape `two-way-spokes`): each `b` a copy of its `a`, that `a` a
+ * copy of its `b` again, then each `b` but the last a copy of the next `a`, every `b` read. Their ingress nodes form
+ * cycles through cells. In the reversed order a stop in the walk past its first unit finishes the boundaries against
+ * admission's decisions, and before #1364's repair each walked those cycles once per path: on `ceebe3d03`, stopped at the
+ * walk's middle, 86,525 finishing units at k = 12 and 1,377,583 at k = 16; at k = 32 the finishing did not end. It ends
+ * settled now in work bounded by the program, and the unstopped `checks` grow with it.
+ */
+test("mutual copies stopped in the walk finish in work bounded by the program, in the reversed order (#1462)", () => {
+  const request = (k: number) => {
+    const rows = (n: number, row: (i: number) => string) =>
+      Array.from({ length: n }, (_, i) => row(i));
+    const source = [
+      ...rows(k, (i) => `let a${i} = {f: ${i % 2 ? "hostValue" : "hostOther"}}`),
+      ...rows(k, (i) => `let b${i} = a${i}`),
+      ...rows(k, (i) => `a${i} = b${i}`),
+      ...rows(k - 1, (i) => `b${i} = a${i + 1}`),
+      'say "BEFORE"',
+      ...rows(k, (i) => `repeat b${k - 1 - i}.f {say "ok"}`),
+      'say "AFTER"',
+      "exit",
+    ].join("\n");
+    const made = coreRequest(main(source), ["hostValue", "hostOther"]);
+    assert.ok(made !== null, "the files parse and resolve");
+    return made;
+  };
+  const [small, large] = [16, 32].map((k) => analysed(request(k), true).budget.counts);
+  const growth = (counter: "syntaxNodes" | "checks") => large!.get(counter)! / small!.get(counter)!;
+  const doubling = (2 * growth("checks")) / growth("syntaxNodes");
+  assert.ok(
+    doubling <= 2.15,
+    `checks ${small!.get("checks")} -> ${large!.get("checks")}: ${doubling.toFixed(3)} per doubling`,
+  );
+  const twelve = request(12);
+  const { total, counts } = analysed(twelve, true).budget;
+  const walk = walkStop(twelve, true, total);
+  const stopped = analysed(twelve, true, walk + Math.floor((total - walk) / 2)).budget;
+  assert.equal(stopped.stoppedIn, "walk");
+  assert.ok(stopped.settled);
+  const nodes = counts.get("syntaxNodes")!;
+  assert.ok(
+    stopped.finishing <= 16 * nodes,
+    `${stopped.finishing} finishing units for ${nodes} nodes`,
+  );
 });
 
 /**
