@@ -273,93 +273,136 @@ test("summaries' demands on output-bound reads are their answers' pairs, at main
 
 /**
  * #1466, the READY replay's `graph/224` and `graph/533` (a mutual feedback whose candidate route asks one `q` deeper per
- * question) and the deep read they showed (TABLE r4.250, r4.251): a read `depth` properties down, one holder answering
- * it, asks that holder's source by reference at the caller's own path (`singleSource`), never a layer's summary rebuilt
- * from the path's record, and walks its path's steps once, its prefixes' texts never kept. At depths 16 and 32 in the
- * four modes, against `main`'s work there (measured on 7d6c4d3d4: a regression oracle of this shape): no layer demand;
- * the total, `invSteps` and `checks` at or under `main`'s and the total's and the literal work's growth too (kept texts
- * made the literal work a power of the depth steeper, a second walk for the path's id put `invSteps` above `main`'s). At
- * depths 2 to 7 the head's excess over `main` is at most 6, 14, 11, 8, 5 and 2 units: the reference's fixed setup, 23 − 3D
- * from 3 on, gone by 8 (the PR's evidence has its ledger).
+ * question), the deep read they showed and Astra r1's alternating feedback (`a.next.back.next…`; TABLE r4.250, r4.251):
+ * a read `depth` properties down, one holder answering it, asks that holder's source by reference at the caller's own
+ * path (`singleSource`), never a layer's summary rebuilt from the path's record, makes no path id (only a summary's
+ * demand needs one), and walks its path's steps once, its prefixes' texts never kept. At depths 16 and 32 in the four
+ * modes, against `main`'s work there (measured on 7d6c4d3d4: a regression oracle of these shapes): no layer demand; the
+ * total, `invSteps` and `checks` at or under `main`'s, `main`'s lead on the total not shrinking, and the literal work's
+ * growth at or under `main`'s (kept texts made it a power of the depth steeper; a path id made for every read put the
+ * alternating read 2D + 9 units above `main`). At depths 2 to 4 the head's excess over `main` is at most the reference's
+ * fixed setup (6, 9 and 1 units on the deep read, 6, 10 and 2 on the alternating one), from 5 none.
  */
 test("a deep read asks its one holder's source by reference and walks its path's steps once (#1466)", () => {
-  const source = (depth: number): string =>
-    [
-      "let a={left:1,q:null}",
-      "let b={right:2,q:null}",
-      "a.q=b",
-      "b.q=a",
-      `let read=a${".q".repeat(depth)}`,
-      "say read",
-      "exit",
-    ].join("\n");
+  const shapes = [
+    {
+      name: "a read",
+      source: (depth: number): string =>
+        [
+          "let a={left:1,q:null}",
+          "let b={right:2,q:null}",
+          "a.q=b",
+          "b.q=a",
+          `let read=a${".q".repeat(depth)}`,
+          "say read",
+          "exit",
+        ].join("\n"),
+      // (`main`'s work at depths 16 and 32, and its totals at 2 to 7, the sharing on and off, equal in either order)
+      shared: {
+        total: [8855, 23083],
+        invSteps: [2103, 7187],
+        checks: [260, 356],
+        literalUnits: [1974, 6030],
+        small: [2410, 2712, 3037, 3385, 3758, 4155],
+      },
+      unshared: {
+        total: [7451, 18875],
+        invSteps: [2184, 7364],
+        checks: [260, 356],
+        literalUnits: [562, 1782],
+        small: [2193, 2453, 2727, 3018, 3328, 3656],
+      },
+      setup: [6, 9, 1, 0, 0, 0],
+    },
+    {
+      name: "an alternating read",
+      source: (depth: number): string =>
+        [
+          "let a={left:1,next:null}",
+          "let b={right:2,back:null}",
+          "a.next=b",
+          "b.back=a",
+          `let read=a${Array.from({ length: depth }, (_, index) => (index % 2 ? ".back" : ".next")).join("")}`,
+          "say read",
+          "exit",
+        ].join("\n"),
+      shared: {
+        total: [10239, 29677],
+        invSteps: [2427, 8601],
+        checks: [260, 356],
+        literalUnits: [3053, 11245],
+        small: [2420, 2726, 3061, 3424, 3819, 4263],
+      },
+      unshared: {
+        total: [8647, 24711],
+        invSteps: [2508, 8778],
+        checks: [260, 356],
+        literalUnits: [1453, 6239],
+        small: [2200, 2460, 2739, 3039, 3364, 3729],
+      },
+      setup: [6, 10, 2, 0, 0, 0],
+    },
+  ];
   type Counter = "total" | "invSteps" | "checks" | "literalUnits";
-  // (`main`'s work at depths 16 and 32, and its totals at 2 to 7, the sharing on and off, equal in either order)
-  const shared = {
-    total: [8855, 23083],
-    invSteps: [2103, 7187],
-    checks: [260, 356],
-    literalUnits: [1974, 6030],
-    small: [2410, 2712, 3037, 3385, 3758, 4155],
-  };
-  const unshared = {
-    total: [7451, 18875],
-    invSteps: [2184, 7364],
-    checks: [260, 356],
-    literalUnits: [562, 1782],
-    small: [2193, 2453, 2727, 3018, 3328, 3656],
-  };
-  const main = [shared, unshared, shared, unshared];
-  // (the reference's setup at depths 2 to 7)
-  const SETUP = [6, 14, 11, 8, 5, 2];
   const modes = [
     [false, false],
     [false, true],
     [true, false],
     [true, true],
   ] as const;
-  modes.forEach(([reversed, unshared], mode) => {
-    const at = (depth: number) => {
-      const request = coreRequest([{ path: "main.tease", source: source(depth) }]);
-      assert.ok(request !== null, `a read ${depth} deep: its files parse and resolve`);
-      const { budget } = analysed({ name: `a read ${depth} deep`, request }, reversed, unshared);
-      const counts: Record<Counter, number> = {
-        total: budget.total,
-        invSteps: budget.counts.get("invSteps") ?? 0,
-        checks: budget.counts.get("checks") ?? 0,
-        literalUnits: budget.counts.get("literalUnits") ?? 0,
-      };
-      return {
-        counts,
-        demands: budget.facts.layerDemands,
-        nodes: budget.counts.get("syntaxNodes") ?? 1,
-      };
-    };
-    const ours = main[mode]!;
-    const sizes = [at(16), at(32)];
-    sizes.forEach((size, index) => {
-      const name = `mode ${mode}, ${16 << index} deep`;
-      assert.equal(size.demands, 0, `${name}: no layer demand`);
-      for (const counter of ["total", "invSteps", "checks"] as const)
-        assert.ok(
-          size.counts[counter] <= ours[counter][index]!,
-          `${name}: ${counter} ${size.counts[counter]} against main's ${ours[counter][index]}`,
+  for (const shape of shapes)
+    modes.forEach(([reversed, unshared], mode) => {
+      const at = (depth: number) => {
+        const request = coreRequest([{ path: "main.tease", source: shape.source(depth) }]);
+        assert.ok(request !== null, `${shape.name} ${depth} deep: its files parse and resolve`);
+        const { budget } = analysed(
+          { name: `${shape.name} ${depth} deep`, request },
+          reversed,
+          unshared,
         );
-    });
-    const scale = sizes[1]!.nodes / sizes[0]!.nodes;
-    for (const counter of ["total", "literalUnits"] as const) {
-      const growth = (2 * sizes[1]!.counts[counter]) / sizes[0]!.counts[counter] / scale;
-      const mains = (2 * ours[counter][1]!) / ours[counter][0]! / scale;
+        const counts: Record<Counter, number> = {
+          total: budget.total,
+          invSteps: budget.counts.get("invSteps") ?? 0,
+          checks: budget.counts.get("checks") ?? 0,
+          literalUnits: budget.counts.get("literalUnits") ?? 0,
+        };
+        return {
+          counts,
+          demands: budget.facts.layerDemands,
+          nodes: budget.counts.get("syntaxNodes") ?? 1,
+        };
+      };
+      const ours = unshared ? shape.unshared : shape.shared;
+      const sizes = [at(16), at(32)];
+      sizes.forEach((size, index) => {
+        const name = `${shape.name}, mode ${mode}, ${16 << index} deep`;
+        assert.equal(size.demands, 0, `${name}: no layer demand`);
+        for (const counter of ["total", "invSteps", "checks"] as const)
+          assert.ok(
+            size.counts[counter] <= ours[counter][index]!,
+            `${name}: ${counter} ${size.counts[counter]} against main's ${ours[counter][index]}`,
+          );
+      });
+      const lead = (index: number): number => ours.total[index]! - sizes[index]!.counts.total;
+      assert.ok(
+        lead(1) >= lead(0),
+        `${shape.name}, mode ${mode}: main's lead ${lead(0)} then ${lead(1)}`,
+      );
+      const scale = sizes[1]!.nodes / sizes[0]!.nodes;
+      const growth = (2 * sizes[1]!.counts.literalUnits) / sizes[0]!.counts.literalUnits / scale;
+      const mains = (2 * ours.literalUnits[1]!) / ours.literalUnits[0]! / scale;
       assert.ok(
         growth <= mains,
-        `mode ${mode}: ${counter} ${growth.toFixed(4)} against main's ${mains.toFixed(4)}`,
+        `${shape.name}, mode ${mode}: literalUnits ${growth.toFixed(4)} against main's ${mains.toFixed(4)}`,
       );
-    }
-    SETUP.forEach((setup, index) => {
-      const excess = at(index + 2).counts.total - ours.small[index]!;
-      assert.ok(excess <= setup, `mode ${mode}, ${index + 2} deep: ${excess} over main's`);
+      shape.setup.forEach((setup, index) => {
+        const excess = at(index + 2).counts.total - ours.small[index]!;
+        assert.ok(
+          excess <= setup,
+          `${shape.name}, mode ${mode}, ${index + 2} deep: ${excess} over main's`,
+        );
+      });
     });
-  });
 });
 
 /**

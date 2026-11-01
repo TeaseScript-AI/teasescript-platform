@@ -1863,13 +1863,17 @@ function* layerMade(
   return { items: root?.items ?? [], proof: summaryProof(contract, root) };
 }
 
-/** The layers a summary of a prefix's layers reads at a path, each with the stores that brought its top, and the path. */
+/**
+ * The layers a summary of a prefix's layers reads at a path, each with the stores that brought its top, and the path,
+ * its id made only where a summary's demand needs it (`pathIdAt`): a read one source answers by reference makes none
+ * (Astra r1's F1).
+ */
 interface LayersAt {
   readonly layers: readonly {
     readonly layer: SubLayer;
     readonly defs: ReadonlySet<Definition | null>;
   }[];
-  readonly path: number;
+  readonly path: ReadPath;
 }
 
 /**
@@ -1879,24 +1883,26 @@ interface LayersAt {
  */
 function layersAt(contract: Contract, stores: PrefixStores, rest: Rest): LayersAt | undefined {
   const ref = restRef(contract, rest);
-  if (ref.length === 0) return { layers: [], path: 0 };
   const read = readPath(ref);
+  if (ref.length === 0) return { layers: [], path: read };
   const tops = topsAt(contract, stores, ref, read);
-  if (tops.length === 0) return { layers: [], path: 0 };
+  if (tops.length === 0) return { layers: [], path: read };
   if (stores.cut) return undefined;
   const layers: LayersAt["layers"][number][] = [];
   for (const { layer, defs } of tops) {
     if (layer.origin === null) return undefined;
     layers.push({ layer, defs });
   }
-  return { layers, path: pathIdAt(contract, read) };
+  return { layers, path: read };
 }
 
 /** The union of the summaries of the layers `layersAt` found; `undefined` where one declines. */
 function* unionOf(contract: Contract, at: LayersAt): Work<SupportNode | null | undefined> {
   const roots: SupportNode[] = [];
   for (const { layer } of at.layers) {
-    const { proof } = yield* contract.pass.solver.proven(layerDemand(contract, layer, at.path));
+    const { proof } = yield* contract.pass.solver.proven(
+      layerDemand(contract, layer, pathIdAt(contract, at.path)),
+    );
     if (proof === null || proof.declined) return undefined;
     if (proof.root !== null) roots.push(proof.root);
   }
@@ -2046,7 +2052,7 @@ export function offendingStores(
       }
       for (const { layer, defs } of at.layers) {
         const { items, proof } = yield* contract.pass.solver.proven(
-          layerDemand(contract, layer, at.path),
+          layerDemand(contract, layer, pathIdAt(contract, at.path)),
         );
         if (proof === null || proof.declined) return null;
         if (!offends(items)) continue;
