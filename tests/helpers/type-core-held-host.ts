@@ -271,16 +271,17 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
     integer: true,
   }),
   // (reads of values no place holds, nested to the depth: a dictionary literal's values list, a list literal's element,
-  // an object literal's property, a fallback and a `get`'s default, #1491, #1502)
+  // an object literal's property, a fallback and a `get`'s default, #1491, #1502; a literal no store holds, and a
+  // fallback's left, leave the host data's type open, a `get`'s default fits the list's element)
   literalValues: (depth) => ({
     lines: [],
     read: nest(depth, "hostValue", (text) => `(dict {a: ${text}, b: 4}).values[0]`),
-    integer: true,
+    integer: false,
   }),
   literalElement: (depth) => ({
     lines: [],
     read: nest(depth, "hostValue", (text) => `[${text}, 4][0]`),
-    integer: true,
+    integer: false,
   }),
   literalProperty: (depth) => ({
     lines: [],
@@ -290,7 +291,7 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
   fallbackRead: (depth) => ({
     lines: ["let root = {f: hostValue}"],
     read: nest(depth, "root.f", (text) => `(${text} otherwise 2)`),
-    integer: true,
+    integer: false,
     gives: (value) => value ?? 2,
   }),
   getRead: (depth) => ({
