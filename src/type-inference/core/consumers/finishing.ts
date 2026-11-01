@@ -105,7 +105,16 @@ export function finishingRead(
   }
   const own = leafKind(walk, value, rest);
   if (own !== null) return own;
-  const items = laterSources(walk, value, node, rest, requirement);
+  // (a projection of a literal no place holds, its own answer unfinished: the literal's cells along its steps, each its
+  // own value as above, `placelessCells`, as the stores' syntax takes them, #1563)
+  const cells = placelessCells(walk, value);
+  const exact = cells === null ? null : finishedAnswer(walk, value, node, rest);
+  const read: Item[] = [];
+  for (const cell of exact === null ? (cells ?? []) : [])
+    if (cell.value !== undefined && stands(walk, cell))
+      read.push(...finishingRead(walk, cell.value, cell.node ?? node, rest, requirement));
+  const items =
+    exact ?? (read.length > 0 ? read : laterSources(walk, value, node, rest, requirement));
   // (a host read's ingress is structural whatever the script stores into its global: its C9 boundary forms from it,
   // beside the kinds the later sources give, TABLE r4.113)
   const ingress = requirement ? null : hostIngress(walk, value);
@@ -218,16 +227,6 @@ function laterSources(
   // the value at the read: its own finished answer
   const exact = finishedAnswer(walk, value, node, rest);
   if (exact !== null) return exact;
-  // else, a projection of a literal no place holds: the literal's cells along its steps, each its own value as a read
-  // of the literal there reads it (`placelessCells`, as the stores' syntax takes it, #1563)
-  const cells = placelessCells(walk, value);
-  if (cells !== null) {
-    const items: Item[] = [];
-    for (const cell of cells)
-      if (cell.value !== undefined && stands(walk, cell))
-        items.push(...finishingRead(walk, cell.value, cell.node ?? node, rest, requirement));
-    if (items.length > 0) return items;
-  }
   // else its own syntax: a typed parse's or load's expected type (F18), as the route's stopped answers read it; a type,
   // so a domain like those below (a typed list may be empty: C6), but external data where no type reaches it
   const typed = typedRead(walk, value, rest);
