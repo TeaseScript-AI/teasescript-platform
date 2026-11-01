@@ -25,13 +25,7 @@ import {
   type Rest,
 } from "../src/type-inference/core/contract/key-ids.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
-import {
-  ingressLeaves,
-  mergeItems,
-  REASON,
-  writerKey,
-  type Item,
-} from "../src/type-inference/core/items.js";
+import { mergeItems, REASON, writerKey, type Item } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -42,6 +36,7 @@ import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import {
   inMode,
   inOrder,
+  itemText,
   mergedIdentity,
   MODES,
   publishedAnswers,
@@ -971,15 +966,8 @@ test("no path or span id is made while a read's selection runs, its one holder's
   }
 });
 
-/** Items as the property tests compare them: each item whole, its ingress node as its stores' writers, in order. */
-const itemsText = (items: readonly Item[]): string =>
-  JSON.stringify(
-    items.map((item) => ({
-      ...item,
-      ingress:
-        item.ingress === undefined ? null : ingressLeaves(item.ingress).map(writerKey).sort(),
-    })),
-  );
+/** Items as the property tests compare them, each by the oracles' `itemText`, in order. */
+const itemsText = (items: readonly Item[]): string => items.map(itemText).join(" ");
 
 /** The place of the binding `name` of a pass's program. */
 const bindingOf = (pass: CorePass, name: string): PlaceId =>
