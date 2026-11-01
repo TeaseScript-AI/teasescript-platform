@@ -3,6 +3,7 @@ import type { InstructionPlan } from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { Answers } from "../../src/type-inference/core/answers.js";
+import { withMessagesInWords } from "../../src/type-inference/core/consumer.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
@@ -143,6 +144,25 @@ function offsets(d: Compiled["diagnostics"][number]): Span {
   return { start: d.span.start.offset, end: d.span.end.offset };
 }
 
+/** A diagnostic's message with every fix in words, which a compile under `withMessagesInWords` gives it, or none. */
+function inWords(d: Compiled["diagnostics"][number]): string | undefined {
+  return "words" in d && typeof d.words === "string" ? d.words : undefined;
+}
+
+/**
+ * Whether a stopped diagnostic is the unstopped one as a stop keeps it: every field the same, and its message the
+ * unstopped one's or that one with every fix in words (`words`), as a stop's unchecked region gives a fix (TABLE r4.162).
+ */
+function keeps(
+  want: Compiled["diagnostics"][number],
+  got: Compiled["diagnostics"][number],
+  words: () => string | undefined,
+): boolean {
+  const fields = (d: Compiled["diagnostics"][number]) =>
+    JSON.stringify({ ...d, message: undefined, words: undefined });
+  return fields(want) === fields(got) && (got.message === want.message || got.message === words());
+}
+
 /** Whether `inner` lies within `outer`. */
 function within(inner: Span, outer: Span): boolean {
   return outer.start <= inner.start && inner.end <= outer.end;
@@ -153,12 +173,12 @@ function within(inner: Span, outer: Span): boolean {
  * sound stop, settled or not. A mark excuses the record with its code at its site and nothing else; before admission
  * settled, a store marked with its type undecided also stands for its records within its value and for the errors it
  * brought, a written store's mark for its records within its value (TABLE r4.152 (1)), and C5's error at a literal for
- * the mark of the store that owes it. The diagnostics, whole, and the checks
- * are compared in their published order (r4.86 (1)) besides those records, what forms only with the marks, and the stop's
- * own warning. The plans are compared whole; a difference stands only inside the plan content of a mark whose obligation
- * is not the unstopped one at its code and site (one that is owes the same check), or of a marked store's records: the
- * content that leaving them out of each compile's analysis and discharge removes. The fitting runs are unchanged; a
- * violating run differs only where the run that stops first fails in a node holding such content.
+ * the mark of the store that owes it. The diagnostics, each whole but for a fix the stop gives in words (r4.162), and the
+ * checks are compared in their published order (r4.86 (1)) besides those records, what forms only with the marks, and the
+ * stop's own warning. The plans are compared whole; a difference stands only inside the plan content of a mark whose
+ * obligation is not the unstopped one at its code and site (one that is owes the same check), or of a marked store's
+ * records: the content that leaving them out of each compile's analysis and discharge removes. The fitting runs are
+ * unchanged; a violating run differs only where the run that stops first fails in a node holding such content.
  */
 export function stopProblems(c: StopCase): string[] {
   const { unstopped, stopped } = c;
@@ -209,14 +229,26 @@ export function stopProblems(c: StopCase): string[] {
         storeRecords.add(recordOf(d.code, d.site));
     }
   for (const record of storeRecords) excused.add(record);
-  // the diagnostics, in their published order
-  const shown = (each: StopRun): string[] =>
-    each.result.diagnostics
-      .filter((d) => d.code !== "TSV076" && !excused.has(recordOf(d.code, offsets(d))))
-      .map((d) => JSON.stringify(d));
+  // the diagnostics, in their published order, each whole but for its fix in words (r4.162): the unstopped ones in words
+  // compiled once, where a message alone differs
+  const shown = (each: Pick<StopRun, "result">) =>
+    each.result.diagnostics.filter(
+      (d) => d.code !== "TSV076" && !excused.has(recordOf(d.code, offsets(d))),
+    );
   const [before, after] = [shown(unstopped), shown(stopped)];
-  if (JSON.stringify(before) !== JSON.stringify(after))
-    problems.push(`diagnostics ${after.join(" | ")} against ${before.join(" | ")}`);
+  let words: readonly (string | undefined)[] | undefined;
+  const wordsAt = (index: number): string | undefined => {
+    words ??= shown(
+      withMessagesInWords(() => unstopped.without(omission(new Set())[0], "#words")),
+    ).map(inWords);
+    return words[index];
+  };
+  const text = (list: typeof before): string => list.map((d) => JSON.stringify(d)).join(" | ");
+  if (
+    before.length !== after.length ||
+    before.some((d, index) => !keeps(d, after[index]!, () => wordsAt(index)))
+  )
+    problems.push(`diagnostics ${text(after)} against ${text(before)}`);
   // the checks, in their published order: an unstopped one a mark's record owns or one of a marked store's records; a
   // stopped one a mark's record owns, one of a marked store's records the unstopped analysis has too (the record kept,
   // on both sides alike, TABLE r4.122), or one that forms only with the marks, their content (r4.110 (a): the stopped

@@ -9,6 +9,20 @@ import { expressionKind, OPERANDS, ownText, POSTFIX } from "./words.js";
 
 // The code forms a fix offers (TABLE r4.151): where each stands, and whether its code holds there.
 
+/** Whether every code form is withheld (`inWords`). */
+let withheld = false;
+
+/** `render` with every code form withheld (`codeAt` gives none), so each fix gives its advice in words (TABLE r4.162). */
+export function inWords<T>(render: () => T): T {
+  const was = withheld;
+  withheld = true;
+  try {
+    return render();
+  } finally {
+    withheld = was;
+  }
+}
+
 /**
  * What one operation of a code form takes of a subject: the subject's kinds, each of which it must take; `held`, a
  * value it holds (a list's element), whose structure must fit too.
@@ -150,6 +164,7 @@ function standsAt(code: string, position: Position): boolean {
  * words.
  */
 export function codeAt(form: CodeForm, site: SiteExpectation | Position): string | null {
+  if (withheld) return null;
   const proved = (kinds: readonly ItemTag[]): boolean =>
     kinds.length > 0 && kinds.every((kind) => kind !== "unknown" && kind !== "empty");
   const fit = (kinds: readonly ItemTag[], takes: readonly ItemTag[]): boolean =>

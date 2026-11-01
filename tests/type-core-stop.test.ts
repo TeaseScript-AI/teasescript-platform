@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
-import { compileProject, compileSourceWithBackend } from "../src/compiler.js";
+import {
+  compileProject,
+  compileProjectWithBackend,
+  compileSourceWithBackend,
+  type ProjectDiagnostic,
+} from "../src/compiler.js";
+import type { Diagnostic } from "../src/diagnostics.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
@@ -25,7 +31,7 @@ import { withSolverSeam, type Proof, type ProofDemand } from "../src/type-infere
 import { REASON, type Item } from "../src/type-inference/core/items.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   heldDemands,
   heldFamily,
@@ -548,6 +554,182 @@ test("the stop oracle sees every change no mark of the stop names", () => {
     { ...first.span, end: { ...first.span.end, column: first.span.end.column + 1 } },
   ])
     assert.notDeepEqual(problems(unstopped, diagnostics([{ ...first, span }, ...others])), []);
+});
+
+/**
+ * A fix a stop gives in words (TABLE r4.162, #1449): at a settled walk stop whose unchecked region holds a store, its
+ * warning gives the fix in words where the unstopped compile shows code, and the oracle takes it for the same diagnostic:
+ * the unstopped one with every fix in words. The sources cover a check, a project's second file, and a kept value whose
+ * text holds the author's own: a full stop, an apostrophe, quotes and listed words in a text literal or a comment (Codex
+ * r1's F3, r2's F1, r3's F1; the comment's fix is words unstopped too). Generated over the stopped warning's sentences
+ * (its first, its consequence, its cause and its fix) and the changes a stop could make, every one is reported: other
+ * wording, a quoted name lost (Codex r1's F1), code kept from the unstopped fix (its F2), other code, code or other words
+ * where the unstopped compile gives words (r2's F1, r3's F1), one more sentence, another severity, code, site or file, and
+ * the warning published twice.
+ */
+const IN_WORDS: readonly (readonly SourceFile[])[] = [
+  'let root = {f0: 1}\nroot.f0 = hostValue\nsay "BEFORE"\nrepeat root.f0 {say "ok"}\nsay "AFTER"\nexit\n',
+  ...[
+    "2.5",
+    ...["a. B", "a' as in 'b", "it's", "'b'", "use it as in Write"].map((text) =>
+      JSON.stringify(text),
+    ),
+  ]
+    .map((text) => JSON.stringify(text))
+    .concat(["/* a' as in 'b */ \"2.5\""])
+    .map(
+      (value) =>
+        `let state = {amount: 2.5}\nstate.amount = 17\nstate.amount = fromJson(${value}, default: null)\nsay state.amount\nexit\n`,
+    ),
+].map((source) => [{ path: "main.tease", source }]);
+
+test("the stop oracle takes a fix in words for the unstopped one's code, and nothing else (TABLE r4.162)", () => {
+  const globals = ["hostValue", "hostOther"];
+  const projects = [
+    ...IN_WORDS,
+    [
+      { path: "main.tease", source: 'say "main"\nexit\n' },
+      { ...IN_WORDS[0]![0]!, path: "part.tease" },
+    ],
+  ];
+  for (const files of projects) {
+    const request = coreRequest(files, globals);
+    assert.ok(request !== null);
+    const allowed = <T>(allowance: number | undefined, make: () => T): T =>
+      allowance === undefined ? make() : withTestAllowance(allowance, make);
+    const compile = () => compileProjectWithBackend(files, { globals }, CORE_BACKEND);
+    // (a run's omissions, its compile in words among them, made once each)
+    const runAt = (allowance?: number): StopRun => {
+      const both = () => ({ result: compile(), answers: analyseCore(request) });
+      const made = new Map<string, ReturnType<typeof both>>();
+      return {
+        ...allowed(allowance, both),
+        without: (omit, key) => {
+          if (!made.has(key))
+            made.set(
+              key,
+              allowed(allowance, () => withoutRecords(omit, both)),
+            );
+          return made.get(key)!;
+        },
+      };
+    };
+    // (the project's warning, in its last file)
+    const path = files.at(-1)!.path;
+    const warning = (each: StopRun): Diagnostic => {
+      const found = each.result.diagnostics.filter((d) => d.code === "TSV041");
+      assert.equal(found.length, 1);
+      assert.equal("path" in found[0]! ? found[0].path : null, path);
+      return found[0]!;
+    };
+    // a settled walk stop whose warning gives the fix in words
+    const unstopped = runAt();
+    const code = warning(unstopped).message;
+    const walk = phaseEnds(analyseCore(request).budget.total, (allowance) => {
+      const { stoppedIn, settled } = allowed(allowance, () => analyseCore(request)).budget;
+      return settled ? stoppedIn : null;
+    }).get("walk");
+    assert.ok(walk !== undefined);
+    const inWords = (allowance: number) =>
+      allowed(allowance, compile).diagnostics.find((d) => d.code === "TSV041")?.message !== code;
+    // (the walk's stops every twelfth allowance from its first, as the anchors take them; the first where the unstopped
+    // fix is words already)
+    let at = walk[0];
+    while (at <= walk[1] && !inWords(at)) at += 12;
+    if (at > walk[1]) at = walk[0];
+    const stopped = runAt(at);
+    const words = warning(stopped).message;
+    const where = `${path} @${at}`;
+    const problems = (want: StopRun, got: StopRun) =>
+      stopProblems({ unstopped: want, stopped: got, fitting: [], violating: [] });
+    assert.deepEqual(problems(unstopped, stopped), [], where);
+    // each message's sentences: its first, its consequence, its fix and its cause, whose subject is quoted
+    const parts = (message: string) => {
+      const consequence = "If it is, the Tease stops with an error at this line.";
+      const [first = "", rest = "", ...more] = message.split(` ${consequence} `);
+      assert.equal(more.length, 0, message);
+      // (the fix ends where the cause's quoted subject starts)
+      const cause = rest.indexOf(". '") + 1;
+      return { first, consequence, fix: rest.slice(0, cause), cause: rest.slice(cause + 1) };
+    };
+    const [was, is] = [parts(code), parts(words)];
+    assert.ok(!is.fix.includes(", as in '"), where);
+    assert.equal(
+      [is.first, is.consequence, is.fix, is.cause].join(" "),
+      words,
+      `${where}: the stopped warning's four sentences`,
+    );
+    const said = (change: Partial<typeof is>) => {
+      const { first, consequence, fix, cause } = { ...is, ...change };
+      return `${first} ${consequence} ${fix} ${cause}`;
+    };
+    // `each` with its warning changed
+    const changed = (each: StopRun, change: Partial<ProjectDiagnostic>): StopRun => ({
+      ...each,
+      result: {
+        ...each.result,
+        diagnostics: each.result.diagnostics.map((d) =>
+          d.code === "TSV041" ? { ...d, ...change } : d,
+        ),
+      },
+    });
+    // (each code example of the unstopped fix, its quoted text ending before a comma or a full stop)
+    const examples = [...was.fix.matchAll(/, as in '.*?'(?=[,.](?:\s|$))/g)].map(
+      (match) => match[0],
+    );
+    const { span } = warning(stopped);
+    const shifted = (position: typeof span.start) => ({
+      ...position,
+      offset: position.offset + 1,
+      column: position.column + 1,
+    });
+    const messages = [
+      said({ first: is.first.replace(" holds ", " keeps ") }),
+      said({ first: is.first.replace(/^'[^']*'/, "It") }),
+      said({ consequence: "If not, the Tease stops with an error at this line." }),
+      said({ cause: is.cause.replace("comes from outside", "is set outside") }),
+      said({ cause: "Its type is known before the script runs." }),
+      // (other words, with or without the names)
+      said({ fix: is.fix.replace(/ first\.$/, " at once.") }),
+      said({ fix: `${is.fix.split(" ")[0]!} the value first.` }),
+      // (code added to the words, one code example of two kept, other code)
+      ...(examples.length > 0
+        ? [
+            said({ fix: is.fix.replace(/\.$/, `${examples.at(-1)!}.`) }),
+            said({ fix: `${was.fix.slice(0, was.fix.lastIndexOf(", as in '"))}, as in 'say 0'.` }),
+          ]
+        : []),
+      ...(examples.length > 1 ? [said({ fix: was.fix.replace(examples[0]!, "") })] : []),
+      `${words} Check it again.`,
+    ];
+    const cases = [
+      ...messages.map((message) => [unstopped, changed(stopped, { message })] as const),
+      // (code where the unstopped compile gives words)
+      ...(code === words
+        ? []
+        : [[changed(unstopped, { message: words }), changed(stopped, { message: code })] as const]),
+      [unstopped, changed(stopped, { severity: "error" })],
+      [unstopped, changed(stopped, { code: "TSV042" })],
+      [
+        unstopped,
+        changed(stopped, { span: { ...span, start: shifted(span.start), end: shifted(span.end) } }),
+      ],
+      [unstopped, changed(stopped, { path: path === "main.tease" ? "part.tease" : "main.tease" })],
+      [
+        unstopped,
+        {
+          ...stopped,
+          result: {
+            ...stopped.result,
+            diagnostics: [...stopped.result.diagnostics, warning(stopped)],
+          },
+        },
+      ],
+    ] as const;
+    cases.forEach(([want, got], index) =>
+      assert.notDeepEqual(problems(want, got), [], `${where}: change ${index}`),
+    );
+  }
 });
 
 /**

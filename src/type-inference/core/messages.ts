@@ -21,7 +21,7 @@ import {
   UNGUARDED,
 } from "./messages/site.js";
 import { isLiteral, setsProperty } from "./messages/words.js";
-import type { Diagnosed } from "./messages/code-forms.js";
+import { inWords, type Diagnosed } from "./messages/code-forms.js";
 import { errorSentence, writtenTypeMessage } from "./messages/errors.js";
 import { budgetMessage, warningFix, warningSentence } from "./messages/warnings.js";
 import { contextSentence, originSentence } from "./messages/causes.js";
@@ -313,6 +313,11 @@ function staticMessage(rule: StaticRule): string {
       return `This range contains no numbers, so ${rule.use === "loop" ? "the loop never runs" : "toList() returns []"}: ${reason}`;
     }
   }
+}
+
+/** A diagnostic's message with every fix in words (`inWords`), as a stop's unchecked region gives a fix (TABLE r4.162). */
+export function coreMessageInWords(diagnostic: CheckedDiagnostic, source: MessageSource): string {
+  return inWords(() => coreMessage(diagnostic, source));
 }
 
 /** A diagnostic's message: its first sentence, and a warning's consequence, fix and cause after it. */

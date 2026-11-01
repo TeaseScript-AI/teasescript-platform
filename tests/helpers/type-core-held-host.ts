@@ -438,9 +438,6 @@ export function heldFamily(few = false): HeldCase[] {
     for (const depth of few || FIXED_HOLDERS.has(holderName) ? [1] : [1, 2, 4])
       for (const [consumerName, consumer] of Object.entries(CONSUMERS)) {
         if (few && consumerName !== "repeat" && consumerName !== "interpolation") continue;
-        // (a class the oracle reports, outside this family's rule, judged in the whole family outside CI: a property
-        // store's warning gives its fix in words in a stop's unchecked region, #1449)
-        if (few && consumerName === "repeat" && holderName === "field") continue;
         // (of the fixed texts, the anchors take the reviewer's witness alone)
         if (few && FIXED_HOLDERS.has(holderName) && holderName !== "addAllField") continue;
         const held = holder(depth);
