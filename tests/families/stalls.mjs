@@ -19,7 +19,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { identityOf } from "./baselines.mjs";
+import { comparedOf } from "./baselines.mjs";
 import { sourceKey } from "./sources.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -227,7 +227,7 @@ if (process.argv[2] === "rerun") {
       refused(
         `${indexFile} holds no configuration of ${nameOf(area)}: rerun its replay's sources with run.mjs --only`,
       );
-    const trees = [base, head].map((tree) => identityOf(path.resolve(tree)));
+    const trees = [base, head].map((tree) => comparedOf(path.resolve(tree)));
     const other = [0, 1].filter(
       (tree) => JSON.stringify(trees[tree]) !== JSON.stringify(configuration.trees.at(tree - 2)),
     );

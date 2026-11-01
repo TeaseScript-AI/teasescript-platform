@@ -131,6 +131,19 @@ function oraclesId(helpers) {
   );
 }
 
+/** A built tree's `dist/`: the checkout's, or the tree itself where it is a `dist/` (the runner loads from it). */
+export const distOf = (root) =>
+  existsSync(path.join(root, "dist", "tests")) ? path.join(root, "dist") : root;
+
+/**
+ * A tree as a comparison of the runner names it (#1564): `identityOf`'s, with the oracle library of the folder the runner
+ * loads it from (`distOf`), for a checkout and for its `dist/` alike, the library deciding the modes and what is
+ * compared.
+ */
+export function comparedOf(root) {
+  return { ...identityOf(root), oracles: oraclesId(path.join(distOf(root), "tests", "helpers")) };
+}
+
 /** What a tree's stored runs depend on: its `src/` tree, its oracle library, its lockfile and this Node. */
 export function identityOf(tree) {
   return {

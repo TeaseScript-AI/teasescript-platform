@@ -1260,6 +1260,25 @@ test("the corpus runner records each source's work and time, a stalled run's to 
     const mixed = run(stalls, four, three);
     assert.equal(mixed.status, 2, mixed.stdout);
     assert.match(mixed.stderr, /compares otherwise than the area's other shards \(plan\)/);
+    // one library (#1564 r3's mixed-dist witness): two heads given as their `dist/`, one compiled `src/` and two oracle
+    // libraries, compare otherwise and are refused together; one head's `dist/` in both shards closes
+    const twin = join(directory, "twin");
+    cpSync(head, twin, { recursive: true });
+    writeFileSync(
+      join(twin, "dist", "tests", "helpers", "type-core-oracles.js"),
+      `${charging(true)}// another library\n`,
+    );
+    const pair = area("pair", ["a", "b"]);
+    const own = join(directory, "own.work.jsonl");
+    const twinned = join(directory, "twinned.work.jsonl");
+    const both = join(directory, "both.work.jsonl");
+    run(runner, pair, base, join(head, "dist"), "--shard", "0/2", "--work", own);
+    run(runner, pair, base, join(twin, "dist"), "--shard", "1/2", "--work", twinned);
+    run(runner, pair, base, join(head, "dist"), "--shard", "1/2", "--work", both);
+    const libraries = run(stalls, own, twinned);
+    assert.equal(libraries.status, 2, libraries.stdout);
+    assert.match(libraries.stderr, /compares otherwise than the area's other shards \(trees\)/);
+    assert.equal(run(stalls, own, both).status, 0);
 
     // charges far faster than the runner reads them, then a wait past the limit: the record holds them all, as the
     // child wrote it over at the last charge (#1564 r1's saturation witness)

@@ -30,7 +30,9 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   beginShard,
+  comparedOf,
   DEFAULTS,
+  distOf,
   endShard,
   identityOf,
   outside,
@@ -42,10 +44,6 @@ import {
   storedRuns,
 } from "./baselines.mjs";
 import { generatorsOf, placeOf, sourceKey } from "./sources.mjs";
-
-/** A tree's `dist/`: the checkout's, or the tree itself. */
-const distOf = (root) =>
-  existsSync(path.join(root, "dist", "tests")) ? path.join(root, "dist") : root;
 
 /** A tree's oracle library, from its `dist/`. */
 async function oracles(root) {
@@ -582,7 +580,7 @@ if (process.argv[2] === "--child") {
       memory,
       // what the comparison is (stalls.mjs merges only records of one): the sources' sizes, the area's plan (the hash of
       // every source's place in its order, whichever shard or index runs), the stop runs' allowances, each generator's
-      // checks, and each tree's identity (`identityOf`; a stored base's, its baseline's)
+      // checks, and each tree's identity as compared (`comparedOf`; a stored base's, its baseline's)
       configuration: {
         sizes: sizesOption ?? null,
         plan: hash(places.join("\n")),
@@ -590,7 +588,7 @@ if (process.argv[2] === "--child") {
         checks: Object.fromEntries(every.map(({ name, checks }) => [name, checks])),
         trees: [
           ...(baseline === undefined ? [] : [storedIdentity]),
-          ...roots.map((root) => identityOf(path.resolve(root))),
+          ...roots.map((root) => comparedOf(path.resolve(root))),
         ],
       },
     },
