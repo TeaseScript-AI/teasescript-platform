@@ -3,6 +3,7 @@ import type { InstructionPlan } from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { Answers } from "../../src/type-inference/core/answers.js";
+import { withMessagesInWords } from "../../src/type-inference/core/consumer.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
@@ -143,165 +144,23 @@ function offsets(d: Compiled["diagnostics"][number]): Span {
   return { start: d.span.start.offset, end: d.span.end.offset };
 }
 
-/**
- * How the message modules (`src/type-inference/core/messages.ts` and `messages/`) word a diagnostic, as closed lists the
- * oracle's own test checks against every literal text there (#1449): the first word of a fix's sentence (`fix`) and of
- * any other (`prose`), and the last words before a quoted text, which make it code a fix shows (`code`, as in
- * `as in 'if n is integer { … }'`) or a name (`name`; none at a sentence's start or after a colon). A word in no list
- * leaves its sentence or quoted text unknown, and such a sentence is compared exactly.
- */
-export const MESSAGE_WORDS = {
-  fix:
-    "Add|Assign|Call|Check|Combine|Compare|Convert|Copy|Divide|Give|" +
-    "Join|Keep|Put|Read|Select|Show|Subtract|To|Use|Write",
-  prose: "A|An|Arithmetic|Checking|If|It|Its|Most|The|This",
-  code: "as|as in|type|Use|with|Write|write",
-  name:
-    "A|a|Add|after|an|and|Assign|assign|before|but|by|cannot set|cannot write|change|Check|Checking|Convert|Copy|" +
-    "default|Divide|fallback|for|Give|give|in|Keep|method|no|of|outside|parameter|property|same type with|show|so|that|" +
-    "to|where|without",
-};
-
-const listed = (words: string): ReadonlySet<string> => new Set(words.split("|"));
-const [FIX, CODE, NAME] = [
-  listed(MESSAGE_WORDS.fix),
-  listed(MESSAGE_WORDS.code),
-  listed(MESSAGE_WORDS.name),
-];
-
-/** What a quoted text is by the words before it in its sentence (`MESSAGE_WORDS`), the longest listed words deciding. */
-export function quotedAs(before: string): "code" | "name" | "unknown" {
-  const words = before
-    .split(/\s+/)
-    .filter((word) => word !== "")
-    .map((word) => word.replace(/,$/, ""));
-  if (words.length === 0 || words.at(-1)!.endsWith(":")) return "name";
-  for (let count = Math.min(3, words.length); count > 0; count -= 1) {
-    const last = words.slice(-count).join(" ");
-    if (CODE.has(last)) return "code";
-    if (NAME.has(last)) return "name";
-  }
-  return "unknown";
-}
-
-/** A quoted text as read: the words before it in its sentence, whether a value inserted there stands right before them. */
-interface Quoted {
-  readonly before: string;
-  readonly inserted: boolean;
-  readonly text: string;
-}
-
-/** A sentence as read: its text, its first word (`null` where a value inserted there starts it), and its quoted texts. */
-export interface ReadSentence {
-  readonly text: string;
-  readonly first: string | null;
-  readonly quotes: readonly Quoted[];
+/** A diagnostic's message with every fix in words, which a compile under `withMessagesInWords` gives it, or none. */
+function inWords(d: Compiled["diagnostics"][number]): string | undefined {
+  return "words" in d && typeof d.words === "string" ? d.words : undefined;
 }
 
 /**
- * A text's sentences, read from its literal pieces with `null` for each value inserted there (a template's; a rendered
- * message is one piece). A sentence ends at a full stop or question mark outside quoted texts. A quote opens after a space,
- * an opening bracket or the start, and closes before a space, punctuation or the end, outside a text literal it holds
- * (`"…"`, escapes included, whose apostrophes and full stops are its own: Codex r2's F1). `null` where a quote or such a
- * literal is left open: then the quotes can be read more than one way.
- */
-export function readSentences(pieces: readonly (string | null)[]): ReadSentence[] | null {
-  const out: ReadSentence[] = [];
-  let [text, before, quoted, last] = ["", "", "", " "];
-  let [inside, literal, escaped, inserted] = [false, false, false, false];
-  let first: string | null | undefined;
-  let quotes: Quoted[] = [];
-  const end = (): void => {
-    if (text.trim() !== "") out.push({ text: text.trim(), first: first ?? null, quotes });
-    [text, before, quotes, first, inserted] = ["", "", [], undefined, false];
-  };
-  for (const piece of pieces) {
-    // (a quote right after an inserted value opens with no words before it, which only the value could decide)
-    if (piece === null) {
-      if (!inside)
-        [before, inserted, first, last] = ["", true, first === undefined ? null : first, " "];
-      continue;
-    }
-    for (let index = 0; index < piece.length; index += 1) {
-      const [here, next] = [piece[index]!, piece[index + 1] ?? " "];
-      text += here;
-      if (inside && literal) {
-        if (escaped) escaped = false;
-        else if (here === "\\") escaped = true;
-        else if (here === '"') literal = false;
-        quoted += here;
-      } else if (inside && here === "'" && /[\s.,;:!?)\]]/.test(next)) {
-        quotes.push({ before, inserted, text: quoted });
-        [inside, before, inserted] = [false, "", false];
-      } else if (inside) {
-        if (here === '"') literal = true;
-        quoted += here;
-      } else if (here === "'" && /[\s([]/.test(last)) {
-        if (first === undefined) first = "";
-        [inside, quoted] = [true, ""];
-      } else {
-        if (first === undefined && /\w/.test(here)) first = /^\w+/.exec(piece.slice(index))![0];
-        else if (first === undefined && /\S/.test(here)) first = "";
-        before += here;
-        if ((here === "." || here === "?") && /\s/.test(next)) end();
-      }
-      last = here;
-    }
-  }
-  if (inside) return null;
-  end();
-  return out;
-}
-
-/** A message's sentence: its text, whether it starts as a fix does, and its quoted texts, each with what it is. */
-interface Sentence {
-  readonly text: string;
-  readonly fix: boolean;
-  readonly quotes: readonly { readonly as: ReturnType<typeof quotedAs>; readonly text: string }[];
-}
-
-/** A rendered message's sentences (`readSentences`), or `null` where its quotes can be read more than one way. */
-function spoken(message: string): Sentence[] | null {
-  return (
-    readSentences([message])?.map((sentence) => ({
-      text: sentence.text,
-      fix: FIX.has(sentence.first ?? ""),
-      quotes: sentence.quotes.map((quote) => ({ as: quotedAs(quote.before), text: quote.text })),
-    })) ?? null
-  );
-}
-
-/**
- * Whether a stopped diagnostic is the unstopped one as a stop keeps it: the same severity, code and span, and the same
- * message but for a fix a stop's unchecked region gives in words where the unstopped compile shows code (TABLE r4.162):
- * a sentence that starts as a fix both times, the unstopped one showing code and the stopped one quoting only names the
- * unstopped message quotes, as they stand there. A message whose quotes can be read more than one way is compared whole.
+ * Whether a stopped diagnostic is the unstopped one as a stop keeps it: every field the same, and its message the
+ * unstopped one's or that one with every fix in words (`words`), as a stop's unchecked region gives a fix (TABLE r4.162).
  */
 function keeps(
   want: Compiled["diagnostics"][number],
   got: Compiled["diagnostics"][number],
+  words: () => string | undefined,
 ): boolean {
-  const { message: before, ...wanted } = want;
-  const { message: after, ...found } = got;
-  if (JSON.stringify(wanted) !== JSON.stringify(found)) return false;
-  if (before === after) return true;
-  const [was, is] = [spoken(before), spoken(after)];
-  if (was === null || is === null || was.length !== is.length) return false;
-  const named = new Set(
-    was.flatMap((sentence) =>
-      sentence.quotes.filter((quote) => quote.as === "name").map((quote) => quote.text),
-    ),
-  );
-  return was.every((code, index) => {
-    const words = is[index]!;
-    return (
-      code.text === words.text ||
-      (code.fix &&
-        words.fix &&
-        code.quotes.some((quote) => quote.as === "code") &&
-        words.quotes.every((quote) => quote.as === "name" && named.has(quote.text)))
-    );
-  });
+  const fields = (d: Compiled["diagnostics"][number]) =>
+    JSON.stringify({ ...d, message: undefined, words: undefined });
+  return fields(want) === fields(got) && (got.message === want.message || got.message === words());
 }
 
 /** Whether `inner` lies within `outer`. */
@@ -370,14 +229,25 @@ export function stopProblems(c: StopCase): string[] {
         storeRecords.add(recordOf(d.code, d.site));
     }
   for (const record of storeRecords) excused.add(record);
-  // the diagnostics, in their published order, each whole but for its fix in words (r4.162)
-  const shown = (each: StopRun) =>
+  // the diagnostics, in their published order, each whole but for its fix in words (r4.162): the unstopped ones in words
+  // compiled once, where a message alone differs
+  const shown = (each: Pick<StopRun, "result">) =>
     each.result.diagnostics.filter(
       (d) => d.code !== "TSV076" && !excused.has(recordOf(d.code, offsets(d))),
     );
   const [before, after] = [shown(unstopped), shown(stopped)];
+  let words: readonly (string | undefined)[] | undefined;
+  const wordsAt = (index: number): string | undefined => {
+    words ??= shown(
+      withMessagesInWords(() => unstopped.without(omission(new Set())[0], "#words")),
+    ).map(inWords);
+    return words[index];
+  };
   const text = (list: typeof before): string => list.map((d) => JSON.stringify(d)).join(" | ");
-  if (before.length !== after.length || before.some((d, index) => !keeps(d, after[index]!)))
+  if (
+    before.length !== after.length ||
+    before.some((d, index) => !keeps(d, after[index]!, () => wordsAt(index)))
+  )
     problems.push(`diagnostics ${text(after)} against ${text(before)}`);
   // the checks, in their published order: an unstopped one a mark's record owns or one of a marked store's records; a
   // stopped one a mark's record owns, one of a marked store's records the unstopped analysis has too (the record kept,

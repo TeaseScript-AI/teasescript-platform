@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
-
-import ts from "typescript";
 
 import {
   compileProject,
@@ -50,14 +47,7 @@ import {
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { inMode, keptErrors, MODES, stopIdentity } from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
-import {
-  MESSAGE_WORDS,
-  quotedAs,
-  readSentences,
-  stopProblems,
-  type Globals,
-  type StopRun,
-} from "./helpers/type-core-stop-oracle.js";
+import { stopProblems, type Globals, type StopRun } from "./helpers/type-core-stop-oracle.js";
 
 /*
  * The program stop through the candidate route, in its three layers (the owner's D4, option a′, TABLE r4.54; the
@@ -568,14 +558,14 @@ test("the stop oracle sees every change no mark of the stop names", () => {
 
 /**
  * A fix a stop gives in words (TABLE r4.162, #1449): at a settled walk stop whose unchecked region holds a store, its
- * warning gives the fix in words where the unstopped compile shows code, and the oracle takes it for the same diagnostic.
- * The sources cover a check, a project's second file, and a kept value whose quoted text holds the author's text: a full
- * stop, an apostrophe, a quoted word and listed words in a text literal (Codex r1's F3, r2's F1). Generated over the
- * stopped warning's sentences (its first, its consequence, its cause and its fix) and the changes a stop could make,
- * every one is reported: other wording, a quoted name lost (Codex r1's F1), code kept from the unstopped fix (its F2),
- * other code, a name the unstopped message does not quote, code or other words where the unstopped compile gives words
- * (r2's F1), code turned to words outside the fix, a quote left open, one more sentence, another severity, code, site or
- * file, and the warning published twice.
+ * warning gives the fix in words where the unstopped compile shows code, and the oracle takes it for the same diagnostic:
+ * the unstopped one with every fix in words. The sources cover a check, a project's second file, and a kept value whose
+ * text holds the author's own: a full stop, an apostrophe, quotes and listed words in a text literal or a comment (Codex
+ * r1's F3, r2's F1, r3's F1; the comment's fix is words unstopped too). Generated over the stopped warning's sentences
+ * (its first, its consequence, its cause and its fix) and the changes a stop could make, every one is reported: other
+ * wording, a quoted name lost (Codex r1's F1), code kept from the unstopped fix (its F2), other code, code or other words
+ * where the unstopped compile gives words (r2's F1, r3's F1), one more sentence, another severity, code, site or file, and
+ * the warning published twice.
  */
 const IN_WORDS: readonly (readonly SourceFile[])[] = [
   'let root = {f0: 1}\nroot.f0 = hostValue\nsay "BEFORE"\nrepeat root.f0 {say "ok"}\nsay "AFTER"\nexit\n',
@@ -584,10 +574,13 @@ const IN_WORDS: readonly (readonly SourceFile[])[] = [
     ...["a. B", "a' as in 'b", "it's", "'b'", "use it as in Write"].map((text) =>
       JSON.stringify(text),
     ),
-  ].map(
-    (text) =>
-      `let state = {amount: 2.5}\nstate.amount = 17\nstate.amount = fromJson(${JSON.stringify(text)}, default: null)\nsay state.amount\nexit\n`,
-  ),
+  ]
+    .map((text) => JSON.stringify(text))
+    .concat(["/* a' as in 'b */ \"2.5\""])
+    .map(
+      (value) =>
+        `let state = {amount: 2.5}\nstate.amount = 17\nstate.amount = fromJson(${value}, default: null)\nsay state.amount\nexit\n`,
+    ),
 ].map((source) => [{ path: "main.tease", source }]);
 
 test("the stop oracle takes a fix in words for the unstopped one's code, and nothing else (TABLE r4.162)", () => {
@@ -605,11 +598,20 @@ test("the stop oracle takes a fix in words for the unstopped one's code, and not
     const allowed = <T>(allowance: number | undefined, make: () => T): T =>
       allowance === undefined ? make() : withTestAllowance(allowance, make);
     const compile = () => compileProjectWithBackend(files, { globals }, CORE_BACKEND);
+    // (a run's omissions, its compile in words among them, made once each)
     const runAt = (allowance?: number): StopRun => {
       const both = () => ({ result: compile(), answers: analyseCore(request) });
+      const made = new Map<string, ReturnType<typeof both>>();
       return {
         ...allowed(allowance, both),
-        without: (omit) => allowed(allowance, () => withoutRecords(omit, both)),
+        without: (omit, key) => {
+          if (!made.has(key))
+            made.set(
+              key,
+              allowed(allowance, () => withoutRecords(omit, both)),
+            );
+          return made.get(key)!;
+        },
       };
     };
     // (the project's warning, in its last file)
@@ -630,10 +632,11 @@ test("the stop oracle takes a fix in words for the unstopped one's code, and not
     assert.ok(walk !== undefined);
     const inWords = (allowance: number) =>
       allowed(allowance, compile).diagnostics.find((d) => d.code === "TSV041")?.message !== code;
-    // (the walk's stops every twelfth allowance from its first, as the anchors take them)
+    // (the walk's stops every twelfth allowance from its first, as the anchors take them; the first where the unstopped
+    // fix is words already)
     let at = walk[0];
     while (at <= walk[1] && !inWords(at)) at += 12;
-    assert.ok(at <= walk[1], path);
+    if (at > walk[1]) at = walk[0];
     const stopped = runAt(at);
     const words = warning(stopped).message;
     const where = `${path} @${at}`;
@@ -650,7 +653,7 @@ test("the stop oracle takes a fix in words for the unstopped one's code, and not
       return { first, consequence, fix: rest.slice(0, cause), cause: rest.slice(cause + 1) };
     };
     const [was, is] = [parts(code), parts(words)];
-    assert.ok(was.fix.includes(", as in '") && !is.fix.includes(", as in '"), where);
+    assert.ok(!is.fix.includes(", as in '"), where);
     assert.equal(
       [is.first, is.consequence, is.fix, is.cause].join(" "),
       words,
@@ -686,49 +689,25 @@ test("the stop oracle takes a fix in words for the unstopped one's code, and not
       said({ consequence: "If not, the Tease stops with an error at this line." }),
       said({ cause: is.cause.replace("comes from outside", "is set outside") }),
       said({ cause: "Its type is known before the script runs." }),
-      said({ fix: is.fix.replace(/\.$/, `${examples.at(-1)!}.`) }),
-      // (one code example of two kept)
+      // (other words, with or without the names)
+      said({ fix: is.fix.replace(/ first\.$/, " at once.") }),
+      said({ fix: `${is.fix.split(" ")[0]!} the value first.` }),
+      // (code added to the words, one code example of two kept, other code)
+      ...(examples.length > 0
+        ? [
+            said({ fix: is.fix.replace(/\.$/, `${examples.at(-1)!}.`) }),
+            said({ fix: `${was.fix.slice(0, was.fix.lastIndexOf(", as in '"))}, as in 'say 0'.` }),
+          ]
+        : []),
       ...(examples.length > 1 ? [said({ fix: was.fix.replace(examples[0]!, "") })] : []),
-      said({ fix: `${was.fix.slice(0, was.fix.lastIndexOf(", as in '"))}, as in 'say 0'.` }),
-      // (a name the unstopped message does not quote)
-      said({ fix: is.fix.replace(/\.$/, ", the same as the value of 'elsewhere'.") }),
       `${words} Check it again.`,
     ];
-    // (without the cause, so the fix ends the message: a quote left open there cannot be read one way)
-    const ending = (parts: typeof is) => `${parts.first} ${parts.consequence} ${parts.fix}`;
-    assert.deepEqual(
-      problems(
-        changed(unstopped, { message: ending(was) }),
-        changed(stopped, { message: ending(is) }),
-      ),
-      [],
-      `${where}: the fix ending the message`,
-    );
     const cases = [
       ...messages.map((message) => [unstopped, changed(stopped, { message })] as const),
-      [changed(unstopped, { message: words }), changed(stopped, { message: code })],
-      // (other words where the unstopped compile gives words, with or without its names, and code turned to words outside
-      // the fix)
-      ...[
-        is.fix.replace(/ first\.$/, " at once."),
-        `${is.fix.split(" ")[0]!} the value first.`,
-      ].map(
-        (fix) =>
-          [
-            changed(unstopped, { message: words }),
-            changed(stopped, { message: said({ fix }) }),
-          ] as const,
-      ),
-      [
-        changed(unstopped, {
-          message: `${was.first} ${was.consequence} ${was.fix} ${was.cause.replace(/\.$/, ", as in 'say 0'.")}`,
-        }),
-        stopped,
-      ],
-      [
-        changed(unstopped, { message: ending(was) }),
-        changed(stopped, { message: ending({ ...is, fix: is.fix.replace(/\.$/, " 'as left.") }) }),
-      ],
+      // (code where the unstopped compile gives words)
+      ...(code === words
+        ? []
+        : [[changed(unstopped, { message: words }), changed(stopped, { message: code })] as const]),
       [unstopped, changed(stopped, { severity: "error" })],
       [unstopped, changed(stopped, { code: "TSV042" })],
       [
@@ -751,113 +730,6 @@ test("the stop oracle takes a fix in words for the unstopped one's code, and not
       assert.notDeepEqual(problems(want, got), [], `${where}: change ${index}`),
     );
   }
-});
-
-/**
- * Where literal texts of the message modules (`text`, the source of `file`) word a quoted text or a sentence's start as
- * `MESSAGE_WORDS` does not list, each text read whole (`readSentences`): a `+` chain's literals and a template's parts in
- * order, a value inserted there unknown. A quote whose words a value inserted right before it would decide is reported,
- * and so is a text whose quotes cannot be read one way (Codex r2's F2).
- */
-function unlisted(
-  file: string,
-  text: string,
-): { readonly quotes: number; readonly missing: string[] } {
-  const tree = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-  const starts = new Set(`${MESSAGE_WORDS.fix}|${MESSAGE_WORDS.prose}`.split("|"));
-  const plus = (node: ts.Node): node is ts.BinaryExpression =>
-    ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken;
-  const read = new Set<ts.Node>();
-  const missing: string[] = [];
-  let quotes = 0;
-  // a text as pieces, once for each text its inserted choices between literals give (`a ? "x" : "y"`): its literals'
-  // texts, and `null` for each other value inserted there
-  const literal = (node: ts.Node): node is ts.StringLiteral | ts.NoSubstitutionTemplateLiteral =>
-    ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
-  type Pieces = (string | null)[][];
-  const product = (left: Pieces, right: Pieces): Pieces =>
-    left.flatMap((one) => right.map((other) => [...one, ...other]));
-  const variants = (node: ts.Expression): Pieces => {
-    read.add(node);
-    if (ts.isParenthesizedExpression(node)) return variants(node.expression);
-    if (plus(node)) return product(variants(node.left), variants(node.right));
-    if (literal(node)) return [[node.text]];
-    if (ts.isConditionalExpression(node) && literal(node.whenTrue) && literal(node.whenFalse))
-      return [...variants(node.whenTrue), ...variants(node.whenFalse)];
-    if (ts.isTemplateExpression(node))
-      return node.templateSpans.reduce<Pieces>(
-        (texts, span) => product(product(texts, variants(span.expression)), [[span.literal.text]]),
-        [[node.head.text]],
-      );
-    return [[null]];
-  };
-  const visit = (node: ts.Node): void => {
-    // (an internal error's text is no diagnostic)
-    if (ts.isNewExpression(node) && node.expression.getText() === "Error") return;
-    if (
-      !read.has(node) &&
-      (plus(node) ||
-        ts.isStringLiteral(node) ||
-        ts.isNoSubstitutionTemplateLiteral(node) ||
-        ts.isTemplateExpression(node))
-    ) {
-      const where = `${file}:${tree.getLineAndCharacterOfPosition(node.getStart()).line + 1}`;
-      const texts = variants(node).map(readSentences);
-      if (texts.includes(null)) missing.push(`${where} a quote or text literal left open`);
-      for (const sentence of texts.flatMap((sentences) => sentences ?? [])) {
-        if (
-          sentence.first !== null &&
-          /^[A-Z][a-z]*$/.test(sentence.first) &&
-          !starts.has(sentence.first)
-        )
-          missing.push(`${where} a sentence starting "${sentence.first}"`);
-        for (const quote of sentence.quotes) {
-          quotes += 1;
-          if (quote.inserted && quote.before.trim() === "")
-            missing.push(`${where} quoted right after an inserted value`);
-          else if (quotedAs(quote.before) === "unknown")
-            missing.push(`${where} quoted after "${quote.before.trim()}"`);
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(tree);
-  return { quotes, missing: [...new Set(missing)] };
-}
-
-/**
- * The oracle's words for how the message modules word a diagnostic (`MESSAGE_WORDS`) cover every literal text there
- * (#1449): the words before each quoted text make it code or a name, and each sentence starts as a fix or as prose. A
- * template worded otherwise is named here with its file, line and words, to be listed (an unlisted word leaves its
- * sentence compared exactly): the selection fix's code introduced by other words across a `+` (Codex r2's F2), and a
- * quote right after an inserted value.
- */
-test("the stop oracle knows the words before every quoted text and sentence of the message modules", () => {
-  const dir = new URL("../../src/type-inference/core/", import.meta.url);
-  const source = (file: string): string => readFileSync(new URL(file, dir), "utf8");
-  let quotes = 0;
-  for (const file of [
-    "messages.ts",
-    ...readdirSync(new URL("messages/", dir)).map((name) => `messages/${name}`),
-  ]) {
-    const found = unlisted(file, source(file));
-    quotes += found.quotes;
-    assert.deepEqual(found.missing, [], file);
-  }
-  assert.ok(quotes > 100, `${quotes} quoted texts`);
-  const warnings = source("messages/warnings.ts");
-  const across = "and check its length, as in ` +";
-  assert.equal(warnings.split(across).length, 2);
-  const words = (file: string, text: string): string[] =>
-    unlisted(file, text).missing.map((found) => found.replace(/^\S+ /, ""));
-  assert.deepEqual(
-    words("warnings.ts", warnings.replace(across, "and check its length, for example ` +")),
-    ['quoted after ", and check its length, for example"'],
-  );
-  assert.deepEqual(words("inserted.ts", "const said = `Write ${kind}'${code}' first.`;"), [
-    "quoted right after an inserted value",
-  ]);
 });
 
 /**

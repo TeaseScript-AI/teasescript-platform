@@ -63,7 +63,13 @@ import { leftOutCheck, leftOutWarning } from "./consumers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import { REASON, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
-import { coreMessage, messageSource, staticCode, type MessageSource } from "./messages.js";
+import {
+  coreMessage,
+  coreMessageInWords,
+  messageSource,
+  staticCode,
+  type MessageSource,
+} from "./messages.js";
 import {
   outcomeOf,
   type CheckedDiagnostic,
@@ -497,13 +503,30 @@ function declarationOf(
   return declaration;
 }
 
+/** Whether each core diagnostic a compile reports carries its message in words too (`withMessagesInWords`). */
+let messagesInWords = false;
+
+/**
+ * Test-only: runs `callback` with each core diagnostic a compile inside it reports carrying `words`, its message with every
+ * fix in words (`coreMessageInWords`), which the stop oracle compares with a stop's (TABLE r4.162, #1449).
+ */
+export function withMessagesInWords<T>(callback: () => T): T {
+  if (messagesInWords) throw new Error("Messages in words are already on.");
+  messagesInWords = true;
+  try {
+    return callback();
+  } finally {
+    messagesInWords = false;
+  }
+}
+
 /**
  * A diagnostic of the core as the compiler reports it: its rule's code (D3 (a)), the severity of its class ("not
  * checked (budget)" at the editor's information level, TABLE r4.54), its sentences (`messages.ts`, D1) and its site's
- * span (D2).
+ * span (D2); under `withMessagesInWords` also its message in words.
  */
 function diagnosticOf(diagnostic: CheckedDiagnostic, source: MessageSource): Diagnostic {
-  return createDiagnostic(
+  const shown = createDiagnostic(
     diagnostic.class === "compile-error"
       ? DiagnosticSeverity.Error
       : diagnostic.class === "not-checked-budget"
@@ -516,6 +539,9 @@ function diagnosticOf(diagnostic: CheckedDiagnostic, source: MessageSource): Dia
       positionAt(source, diagnostic.site.file, diagnostic.site.end),
     ),
   );
+  return messagesInWords
+    ? Object.freeze({ ...shown, words: coreMessageInWords(diagnostic, source) })
+    : shown;
 }
 
 /** A source position at an offset of a file, its line and column from the source's line index (each file's once). */
