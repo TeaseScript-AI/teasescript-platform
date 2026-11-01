@@ -267,6 +267,59 @@ test("summaries' demands on output-bound reads are their answers' pairs, at main
 });
 
 /**
+ * #1466, the READY replay's `graph/224` and `graph/533` (a mutual feedback whose candidate route asks one `q` deeper per
+ * question): a read's prefixes' texts are made one step longer at a time and looked up, never kept, so a read `depth`
+ * properties down charges no literal work by its prefixes' lengths. Kept, they made the literal work a power of the depth
+ * steeper and took the route past the allowance. At depths 32 and 64 in the four modes, the literal work grows at or
+ * under `main`'s (measured on 7d6c4d3d4: a regression oracle of this shape).
+ */
+test("a deep read keeps no text per prefix of its path (#1466)", () => {
+  const source = (depth: number): string =>
+    [
+      "let a={left:1,q:null}",
+      "let b={right:2,q:null}",
+      "a.q=b",
+      "b.q=a",
+      `let read=a${".q".repeat(depth)}`,
+      "say read",
+      "exit",
+    ].join("\n");
+  // (`main`'s literal work at depths 32 and 64: in the source order and reversed, the sharing on and off)
+  const main = [
+    [6030, 25070],
+    [1782, 10542],
+    [6030, 25070],
+    [1782, 10542],
+  ] as const;
+  const modes = [
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ] as const;
+  modes.forEach(([reversed, unshared], mode) => {
+    const at = (depth: number): { literal: number; nodes: number } => {
+      const request = coreRequest([{ path: "main.tease", source: source(depth) }]);
+      assert.ok(request !== null, `a read ${depth} deep: its files parse and resolve`);
+      const { counts } = analysed(
+        { name: `a read ${depth} deep`, request },
+        reversed,
+        unshared,
+      ).budget;
+      return { literal: counts.get("literalUnits") ?? 0, nodes: counts.get("syntaxNodes") ?? 1 };
+    };
+    const [small, large] = [at(32), at(64)];
+    const growth = (before: number, after: number): number =>
+      (2 * after) / before / (large.nodes / small.nodes);
+    const [main32, main64] = main[mode]!;
+    assert.ok(
+      growth(small.literal, large.literal) <= growth(main32, main64),
+      `mode ${mode}: literalUnits ${growth(small.literal, large.literal).toFixed(3)} against main's ${growth(main32, main64).toFixed(3)}`,
+    );
+  });
+});
+
+/**
  * #1466, Codex r4's positive hits: k joined layers, each listing a step of its own, read at each, one doubling later, where
  * a read finding its layer by visiting each joined layer grows past the bound (2.40 against the selection's 2.02,
  * `invSteps`): a read finds the one layer listing its step by the place's per-step map, its descent the map's depth.
