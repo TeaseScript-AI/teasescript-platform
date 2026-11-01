@@ -548,7 +548,7 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
       keyed("null"),
       [
         ["box[0].f0", "box", "unknown"],
-        ["box[2]", "box", "unknown,null"],
+        ["box[2]", "box", "null,unknown"],
       ],
     ],
     [
@@ -598,7 +598,7 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
       [
         ["box[0].field0", "box", "unknown"],
         ["box[3].field1", "box", "unknown"],
-        ["box[1]", "box", "unknown,null"],
+        ["box[1]", "box", "null,unknown"],
       ],
     ],
     // the linear control: one load copied, its one leaf
