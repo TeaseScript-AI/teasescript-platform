@@ -68,6 +68,11 @@ export interface PlusIndex {
   indexed: Indexed | null;
 }
 
+/** Whether a value is a `+` of two operands, which a run may hold (`plusSpan`). */
+export function isPlusValue(pass: CorePass, value: PlaceId): boolean {
+  return isPlus(pass.program.opOf.get(value));
+}
+
 function isPlus(
   c: ValueConstraint | undefined,
 ): c is Extract<ValueConstraint, { readonly kind: "operation" }> {
@@ -80,12 +85,12 @@ function isPlus(
 }
 
 /**
- * The span of a `+` below its elements at the property `step`: its place among the terms of its run, the `+` of two
- * operands that holds it with every `+` below it whose operand each is. A run stays its operations' walk until one of
- * them is asked at a third property: the pass's first one, asked of any `+`, and a first other one per `+` cost a walk
- * each, which stays linear; a second other one indexes the whole run, which from then on answers each property it is
- * asked at, the first included. `null` where the walk answers: below that, or for a run admission rejected an operand
- * of (A6, `joinElements`) or with a term that is not closed (`termOf`), which is found once.
+ * A `+`'s span among the terms of its run, asked below its elements at the property `step`. A run is the outermost
+ * `+` reached up through `+` operands, with every `+` below it through theirs. It keeps its operations' walk until one
+ * of its `+` is asked at a third property: the pass's first one, asked of any `+`, and a first other one per `+` cost a
+ * walk each, which stays linear; a second other one indexes the whole run, which from then on answers each property it
+ * is asked at, the first included. `null` where the walk answers: before that, or for a run admission rejected an
+ * operand of (A6, `joinElements`) or with a term that is not closed (`termOf`), which is found once.
  */
 export function plusSpan(pass: CorePass, value: PlaceId, step: string): PlusSpan | null {
   const { program, contract } = pass;
@@ -134,7 +139,9 @@ function indexed(pass: CorePass, state: PlusIndex): Indexed {
 function runSpan(pass: CorePass, ix: Indexed, value: PlaceId): PlusSpan | null {
   const { program, contract, lists } = pass;
   const work = program.work;
-  // (the run's root: each `+` up the operands' consumers, to one no `+` takes)
+  // (the run's root: each `+` up the operands' consumers, to one no `+` takes; an operand of two leaves each `+` on
+  // the way to its walk)
+  const above: PlaceId[] = [];
   let root = value;
   for (;;) {
     let parent: PlaceId | null = null;
@@ -142,13 +149,14 @@ function runSpan(pass: CorePass, ix: Indexed, value: PlaceId): PlusSpan | null {
       work.charge("indexSteps");
       if (use.kind !== "operand" || !isPlus(use.operation)) continue;
       if (parent !== null && parent !== use.operation.result) {
-        contract.keep(2);
-        ix.spans.set(value, null);
+        contract.keep(2 * above.length + 2);
+        for (const operation of [value, ...above]) ix.spans.set(operation, null);
         return null;
       }
       parent = use.operation.result;
     }
     if (parent === null) break;
+    above.push(parent);
     root = parent;
   }
   const terms: PlaceId[] = [];
