@@ -14,7 +14,7 @@ import { REFERENCE } from "../contract.js";
 import { labelBelow } from "../contract/labels.js";
 import { keptParts, keptSteps, READ_DEPTH_LIMIT } from "../budget.js";
 import type { FlowNode } from "../flow-graph.js";
-import { REASON, STOPPED, type Item, type ItemTag } from "../items.js";
+import { kindsInOrder, REASON, STOPPED, type Item, type ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
 import { propertyNames } from "../property-names.js";
 import { offendingKinds, type DiagnosticRule } from "../result.js";
@@ -200,7 +200,8 @@ export function methodElements(
     rule: "elements",
     callee: name,
     receiver: text,
-    families: mixed.length > 1 ? mixed : [],
+    // (published in the kinds' fixed order, #1398; the earliest family below is read from the elements' own order)
+    families: mixed.length > 1 ? kindsInOrder(mixed) : [],
   };
   if (
     (mixed.length > 1 || unfit.length === items.length) &&

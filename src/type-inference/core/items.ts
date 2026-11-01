@@ -345,16 +345,28 @@ const TAG_RANK: ReadonlyMap<ItemTag, number> = new Map(
 );
 
 /**
- * A value's items in their kinds' fixed order (`TAG_RANK`), never in the order the analysis met them, which the
- * consumers' and the solver's orders and the sharing change (#1398); items of one kind keep their order. The one order
- * every published list of a value's items takes: a merge's, and a stopped answer's (`CoreAnswers`). One pass over the
- * items and one over the ranks, so it costs no more than the items it is given, each already charged where it was
- * made, and it charges nothing of its own (TABLE r4.261).
+ * Entries in their kinds' fixed order (`TAG_RANK`), never in the order the analysis met them, which the consumers' and
+ * the solver's orders and the sharing change (#1398); entries of one kind keep their order. The one order every
+ * published list of a value's inferred kinds takes (`inKindOrder`, `kindsInOrder`): it is made here (a merge, a stopped
+ * answer, a finishing read) and reaches its publication through steps that keep it, and a list composed with another
+ * one passes here again where it is completed. A written type's spelling, a fixed table's order and a tuple by position
+ * keep their own. One pass over the entries and one over the ranks, so it costs no more than the entries it is given,
+ * each already charged where it was made, and it charges nothing of its own (TABLE r4.261).
  */
-export function inKindOrder(items: Iterable<Item>): Item[] {
-  const byRank: Item[][] = [];
-  for (const item of items) (byRank[TAG_RANK.get(item.tag)!] ??= []).push(item);
+function byKind<T>(entries: Iterable<T>, kindOf: (entry: T) => ItemTag): T[] {
+  const byRank: T[][] = [];
+  for (const entry of entries) (byRank[TAG_RANK.get(kindOf(entry))!] ??= []).push(entry);
   return byRank.flat();
+}
+
+/** A value's items in their kinds' fixed order (`byKind`). */
+export function inKindOrder(items: Iterable<Item>): Item[] {
+  return byKind(items, (item) => item.tag);
+}
+
+/** Kinds taken from a value's items, in their fixed order (`byKind`). */
+export function kindsInOrder<Kind extends ItemTag>(kinds: Iterable<Kind>): Kind[] {
+  return byKind(kinds, (kind) => kind);
 }
 
 /**
