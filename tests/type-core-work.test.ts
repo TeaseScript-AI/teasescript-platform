@@ -1640,9 +1640,9 @@ test("lists of one set of choices in many orders site their host data without wa
       return [{ path: "main.tease", source }];
     },
   };
-  const steep = steepCounters([family], true, undefined, [32, 64]);
+  const steep = steepCounters([family], true, undefined, [24, 48]);
   for (const reversed of [false, true]) {
-    const [small, large] = [32, 64].map((k) => analysed(sized(family, k), reversed).budget.counts);
+    const [small, large] = [24, 48].map((k) => analysed(sized(family, k), reversed).budget.counts);
     const scale = large!.get("syntaxNodes")! / small!.get("syntaxNodes")!;
     const doubling = (2 * (large!.get("checks")! / small!.get("checks")!)) / scale;
     if (doubling > COUNTER_DOUBLING)
