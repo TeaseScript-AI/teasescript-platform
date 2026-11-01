@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
-import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
+import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { ingressLeaves, type Item } from "../src/type-inference/core/items.js";
-import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
+import {
+  type CoreAnalysisRequest,
+  CoreProgram,
+  propertyStep,
+} from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { VALUE_KIND_NAMES } from "../src/value-kinds.js";
@@ -668,14 +672,16 @@ test("a stopped answer's items stand in the kinds' table order too, in the four 
  * fixed order where it is completed, the kinds' table order then `unknown`: a receiver beside its contract's reference
  * kinds, the `besides` gathered from a site's other warnings, a warning's `fits` where a domain stands in for host data,
  * a sort's families, a fallback's family beside its receiving union (its rule, its check and the check's text), what
- * two reads take together, and a shown set's elements. Each row's published lists in the four modes; a written type's
- * spelling beside them keeps its own (the store rows' `[string, integer]`), and the sort's offending kind is the one
- * its elements' own order picks.
+ * two reads take together, a shown set's elements, one place's decision after a stop (Codex r4), and the sort's warning
+ * the stop defers at a test allowance. Each row's published lists in the four modes; a written type's spelling keeps
+ * its own (the store rows' `[string, integer]`, a written type a decision borrows, one a fallback's receiving type only
+ * repeats), and the sort's offending kind is the one its elements' own order picks, deferred or not.
  */
 const COMPOSED_ORDER_ROWS: readonly {
   readonly name: string;
   readonly source: string;
-  readonly lists: (answers: Answers) => readonly (readonly string[])[];
+  readonly analyse?: (request: CoreAnalysisRequest) => Answers;
+  readonly lists: (answers: Answers, request: CoreAnalysisRequest) => readonly (readonly string[])[];
   readonly expected: readonly string[];
 }[] = (() => {
   // (each diagnostic of a rule, a budget stop set aside)
@@ -695,6 +701,21 @@ const COMPOSED_ORDER_ROWS: readonly {
     "let value: string | integer | duration = direct otherwise hostOther\nsay value\nexit\n";
   const fallbacks = (answers: Answers) =>
     warnings(answers).flatMap((warning) => (warning.rule.rule === "fallback" ? [warning] : []));
+  const stopped = (request: CoreAnalysisRequest) => analyseCore(request).stoppedAt("work");
+  // (the admitted decision of `box`'s `n` elements, borrowed from a written type or not)
+  const decided =
+    (inherited: boolean) =>
+    (answers: Answers, request: CoreAnalysisRequest): readonly (readonly string[])[] => {
+      const box = new CoreProgram(request).places.find(
+        ({ kind }) => kind.kind === "binding" && kind.name === "box",
+      )!.id;
+      const { admitted } = answers.place(box, [propertyStep("n"), "element"]);
+      return admitted.by === "decided" && admitted.inherited === inherited ? [admitted.kinds] : [];
+    };
+  const deferred = (answers: Answers) =>
+    answers.budget.deferred.flatMap((warning) =>
+      warning.rule.rule === "elements" ? [{ warning, families: warning.rule.families }] : [],
+    );
   return [
     {
       name: "a receiver beside its contract's reference kinds",
@@ -808,6 +829,56 @@ const COMPOSED_ORDER_ROWS: readonly {
         ),
       expected: ["integer", "string", "object"],
     },
+    {
+      name: "one place's decision after a stop",
+      source: 'let box = {n: [1, "s"]}\nexit\n',
+      analyse: stopped,
+      lists: decided(false),
+      expected: ["integer", "string"],
+    },
+    {
+      name: "a written type a place's decision borrows after a stop",
+      source: "let w: string | integer = 1\nlet box = {n: [w]}\nexit\n",
+      analyse: stopped,
+      lists: decided(true),
+      expected: ["string", "integer"],
+    },
+    {
+      name: "a written type a fallback's receiving type repeats",
+      source: 'let value: string | integer = load("key", default: false)\nsay value\nexit\n',
+      lists: (answers) =>
+        ruled(answers).flatMap((diagnostic) =>
+          diagnostic.rule.rule === "fallback" ? [diagnostic.rule.type] : [],
+        ),
+      expected: ["string", "integer"],
+    },
+    ...[40, 160].flatMap((allowance) => {
+      const analyse = (request: CoreAnalysisRequest) =>
+        withTestAllowance(allowance, () => analyseCore(request));
+      return [
+        {
+          name: `a deferred sort's offending kind at the allowance ${allowance}`,
+          source: sort,
+          analyse,
+          lists: (answers: Answers) => deferred(answers).map(({ warning }) => warning.kinds),
+          expected: ["integer"],
+        },
+        {
+          name: `a deferred sort's fits at the allowance ${allowance}`,
+          source: sort,
+          analyse,
+          lists: (answers: Answers) => deferred(answers).map(({ warning }) => warning.fits),
+          expected: ["integer", "string"],
+        },
+        {
+          name: `a deferred sort's families at the allowance ${allowance}`,
+          source: sort,
+          analyse,
+          lists: (answers: Answers) => deferred(answers).map(({ families }) => families),
+          expected: ["number", "string"],
+        },
+      ];
+    }),
   ];
 })();
 
@@ -820,7 +891,10 @@ test("a list composed of a value's kinds stands in their fixed order where it is
     );
     assert.ok(request !== null, row.name);
     for (const mode of MODES) {
-      const lists = row.lists(inMode(mode, () => analyseCore(request)));
+      const lists = row.lists(
+        inMode(mode, () => (row.analyse ?? analyseCore)(request)),
+        request,
+      );
       if (lists.length === 0) wrong.push(`${row.name} ${JSON.stringify(mode)}: none published`);
       for (const list of lists)
         if (JSON.stringify(list) !== JSON.stringify(row.expected))
