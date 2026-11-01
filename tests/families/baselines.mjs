@@ -136,12 +136,19 @@ export const distOf = (root) =>
   existsSync(path.join(root, "dist", "tests")) ? path.join(root, "dist") : root;
 
 /**
- * A tree as a comparison of the runner names it (#1564): `identityOf`'s, with the oracle library of the folder the runner
- * loads it from (`distOf`), for a checkout and for its `dist/` alike, the library deciding the modes and what is
- * compared.
+ * A tree as a comparison of the runner names it (#1564): what the runner executes, read from the build it loads
+ * (`distOf`, resolved once), the compiled compiler (`compiled`, its `src/` folder's tree) and the oracle library
+ * (`oracles`), for a checkout, its `dist/` and a tree without sources alike; and its `identityOf` (`identity`), by which
+ * it is matched against a stored base's MANIFEST.
  */
 export function comparedOf(root) {
-  return { ...identityOf(root), oracles: oraclesId(path.join(distOf(root), "tests", "helpers")) };
+  const dist = distOf(root);
+  const compiled = path.join(dist, "src");
+  return {
+    compiled: existsSync(compiled) ? (treeId(compiled)?.toString("hex") ?? null) : null,
+    oracles: oraclesId(path.join(dist, "tests", "helpers")),
+    identity: identityOf(root),
+  };
 }
 
 /** What a tree's stored runs depend on: its `src/` tree, its oracle library, its lockfile and this Node. */

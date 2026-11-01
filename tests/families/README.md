@@ -52,25 +52,26 @@ with other results.
 `--work` writes a record of each source and changes no other output (#1564): a first line with what ran and the
 comparison's configuration (`configuration`: the sources' sizes, the area's plan (the hash of every source's place, its
 generator, name and key, in the area's order, before a shard or `--only` selects), the stop runs' allowances, each
-generator's checks, each tree's identity with the oracle library the runner loads from it, for a checkout or its `dist/`
-alike, a stored base's its baseline's), one line per source with each run's charged work (`work`: the units its analyses
-charged their work ledgers, `WorkLedger.charge`, finishing work included; `null` for a tree without one) and
-milliseconds (`ms`) on each tree and what the source counted, and the total last. A source that stalls keeps the run
-then going on as the runner ended it, from a progress record the child writes over beside the record (`<file>.progress`,
-removed at the end; `--out`, `--work` and it must name three files) as a tree starts a run, every 65,536 units and as it
-ends it: the units charged, at most 65,536 short, the milliseconds until the stall and the tree running it (`running`).
-`stalls.mjs` reads a replay's records (a shard run without `--work` by its `--out` file, which gives its stalls alone)
-and prints the rule it judges each stalled source by (`RULE`: a candidate stall, load or unknown; its time clause a
-heuristic), each stalled source with its verdict, and each area's counts and the total. An area's records must share one
-configuration (another is refused, exit 2), so the area is complete only with its shards 0/N to N-1/N of one N, together
-every source of one plan; a source counts as `agreed` only where it was compared in every run and agrees, and `closed`
-(exit 0) needs every area complete, every source agreed and no candidate left. `--index` writes the sources still
-unavailable, with their verdicts and records and each area's configuration. Against a stored baseline the base's work is
-not recorded, so a head's timeout is unknown: `stalls.mjs rerun` runs the index's sources alone, one at a time with both
-trees in one process and the replay's configuration (`run.mjs <area> <base> <head> --only <index>`, an area after
-another; only `--timeout` and `--memory` may differ), and `--rerun <folder>/*.work.jsonl` reads its records in place of
-the replay's, so the replay closes without another campaign; a record of another configuration is refused, and a rerun
-that ends does not clear a candidate.
+generator's checks, each tree as the runner executes it, its compiled compiler and oracle library read from the build it
+loads, for a checkout, its `dist/` or a tree without sources alike, and a stored base as its baseline's MANIFEST names
+it, which a rerun's base matches by its own identity), one line per source with each run's charged work (`work`: the
+units its analyses charged their work ledgers, `WorkLedger.charge`, finishing work included; `null` for a tree without
+one) and milliseconds (`ms`) on each tree and what the source counted, and the total last. A source that stalls keeps
+the run then going on as the runner ended it, from a progress record the child writes over beside the record
+(`<file>.progress`, removed at the end; `--out`, `--work` and it must name three files) as a tree starts a run, every
+65,536 units and as it ends it: the units charged, at most 65,536 short, the milliseconds until the stall and the tree
+running it (`running`). `stalls.mjs` reads a replay's records (a shard run without `--work` by its `--out` file, which
+gives its stalls alone) and prints the rule it judges each stalled source by (`RULE`: a candidate stall, load or
+unknown; its time clause a heuristic), each stalled source with its verdict, and each area's counts and the total. An
+area's records must share one configuration (another is refused, exit 2), so the area is complete only with its shards
+0/N to N-1/N of one N, together every source of one plan; a source counts as `agreed` only where it was compared in
+every run and agrees, and `closed` (exit 0) needs every area complete, every source agreed and no candidate left.
+`--index` writes the sources still unavailable, with their verdicts and records and each area's configuration. Against a
+stored baseline the base's work is not recorded, so a head's timeout is unknown: `stalls.mjs rerun` runs the index's
+sources alone, one at a time with both trees in one process and the replay's configuration (`run.mjs <area> <base>
+<head> --only <index>`, an area after another; only `--timeout` and `--memory` may differ), and `--rerun
+<folder>/*.work.jsonl` reads its records in place of the replay's, so the replay closes without another campaign; a
+record of another configuration is refused, and a rerun that ends does not clear a candidate.
 
 `--store` runs one tree of a commit (an `sx-tree` tree: `src/`, `dist/`, `.sha`) at the runner's defaults and stores one
 shard of an area, each source's results as one line, in the baseline of its `src/` tree,

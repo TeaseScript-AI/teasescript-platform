@@ -580,14 +580,14 @@ if (process.argv[2] === "--child") {
       memory,
       // what the comparison is (stalls.mjs merges only records of one): the sources' sizes, the area's plan (the hash of
       // every source's place in its order, whichever shard or index runs), the stop runs' allowances, each generator's
-      // checks, and each tree's identity as compared (`comparedOf`; a stored base's, its baseline's)
+      // checks, and each tree as compared (`comparedOf`; a stored base as its baseline's MANIFEST names it, `stored`)
       configuration: {
         sizes: sizesOption ?? null,
         plan: hash(places.join("\n")),
         allowances,
         checks: Object.fromEntries(every.map(({ name, checks }) => [name, checks])),
         trees: [
-          ...(baseline === undefined ? [] : [storedIdentity]),
+          ...(baseline === undefined ? [] : [{ stored: storedIdentity }]),
           ...roots.map((root) => comparedOf(path.resolve(root))),
         ],
       },

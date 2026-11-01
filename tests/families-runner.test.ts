@@ -464,6 +464,22 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
       spawnSync(process.execPath, [stalls, record], { encoding: "utf8" }).stdout,
       /"source":"ends".*"verdict":"unknown"/,
     );
+    // its index rerun on both trees: a base of the MANIFEST's identity is the stored base, one of another oracle
+    // library is not (#1564 r4)
+    const index = join(directory, "index.json");
+    spawnSync(process.execPath, [stalls, record, "--index", index]);
+    const rerun = (from: string, folder: string) =>
+      spawnSync(process.execPath, [stalls, "rerun", index, from, head, join(directory, folder)], {
+        encoding: "utf8",
+      });
+    assert.match(rerun(other, "rerun-other").stderr, /is not the tree/);
+    assert.equal(rerun(alias, "rerun-alias").status, 1);
+    const merged = spawnSync(
+      process.execPath,
+      [stalls, record, "--rerun", join(directory, "rerun-alias", "area.work.jsonl")],
+      { encoding: "utf8" },
+    );
+    assert.equal(merged.status, 1, merged.stderr);
     const runs = ({ kept }: { kept: Record<string, unknown>[] }) =>
       kept.filter(({ mode }) => mode !== undefined).map(({ thrown, ...line }) => line);
     assert.deepEqual(runs(against), runs(beside));
@@ -1116,7 +1132,8 @@ const LEDGER = `export class WorkLedger {
 `;
 
 /**
- * A built tree's library whose analyses charge its ledger 3,000 units a run: `throws` throws on both trees; `busy` waits
+ * A built tree's library whose analyses charge its ledger 3,000 units a run: `throws` throws on both trees, `ends` ends
+ * the process there; `busy` waits
  * 200 ms on the base; `lagging` waits 600 ms on the head's first run; `slow` charges a billion units more on the head and
  * waits 150 ms there; `burst` charges 10,000 times 65,536 units at once on the head, then waits; `changed` publishes its
  * second part otherwise on the head. Its stop sets differ on the head at demand allowance 1 and wait there at 2.
@@ -1133,6 +1150,7 @@ export function publicationHashes(files, mode) {
   const ledger = new WorkLedger();
   for (let unit = 0; unit < 1000; unit += 1) ledger.charge("frames", 3);
   if (source === "throws") throw new Error("independent exception witness");
+  if (source === "ends") process.exit(3);
   if (!${head} && source === "busy") wait(200);
   if (${head} && source === "lagging" && mode === MODES[0]) wait(600);
   if (${head} && source === "slow") {
@@ -1279,6 +1297,40 @@ test("the corpus runner records each source's work and time, a stalled run's to 
     assert.equal(libraries.status, 2, libraries.stdout);
     assert.match(libraries.stderr, /compares otherwise than the area's other shards \(trees\)/);
     assert.equal(run(stalls, own, both).status, 0);
+    // one compiler (#1564 r4's witnesses): two checkouts of one TypeScript `src/` and oracle library whose compiled
+    // compilers differ compare otherwise, as shards and as a replay and its rerun; the same checkout merges and reruns
+    const checkout = (name: string, compiler: string) => {
+      const copy = join(directory, name);
+      cpSync(head, copy, { recursive: true });
+      mkdirSync(join(copy, "src"));
+      writeFileSync(join(copy, "src", "a.ts"), "a\n");
+      writeFileSync(join(copy, "dist", "src", "type-inference", "core", "budget.js"), compiler);
+      return copy;
+    };
+    const [one, another] = [checkout("one", LEDGER), checkout("another", `${LEDGER}// another\n`)];
+    const compiled = area("compiled", ["a", "ends"]);
+    const [first, second, same] = [0, 1, 2].map((index) =>
+      join(directory, `compiled-${index}.work.jsonl`),
+    );
+    run(runner, compiled, base, one, "--shard", "0/2", "--work", first!);
+    run(runner, compiled, base, another, "--shard", "1/2", "--work", second!);
+    run(runner, compiled, base, one, "--shard", "1/2", "--work", same!);
+    const compilers = run(stalls, first!, second!);
+    assert.equal(compilers.status, 2, compilers.stdout);
+    assert.match(compilers.stderr, /compares otherwise than the area's other shards \(trees\)/);
+    assert.equal(run(stalls, first!, same!).status, 1);
+    const ended = join(directory, "ended.work.jsonl");
+    const endedIndex = join(directory, "ended-index.json");
+    run(runner, compiled, base, one, "--work", ended);
+    run(stalls, ended, "--index", endedIndex);
+    const wrong = run(stalls, "rerun", endedIndex, base, another, join(directory, "wrong"));
+    assert.match(wrong.stderr, /is not the tree compiled's replay compared/);
+    assert.equal(existsSync(join(directory, "wrong")), false);
+    assert.equal(run(stalls, "rerun", endedIndex, base, one, join(directory, "right")).status, 1);
+    assert.equal(
+      run(stalls, ended, "--rerun", join(directory, "right", "compiled.work.jsonl")).status,
+      1,
+    );
 
     // charges far faster than the runner reads them, then a wait past the limit: the record holds them all, as the
     // child wrote it over at the last charge (#1564 r1's saturation witness)

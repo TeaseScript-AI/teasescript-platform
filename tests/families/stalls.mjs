@@ -195,10 +195,25 @@ function shardOf(file) {
   return { file, ran, entries };
 }
 
-/** Where two configurations of a comparison differ (`run.mjs`'s `configuration`), by part. */
-const differing = (one, other) =>
-  ["sizes", "plan", "allowances", "checks", "trees"].filter(
-    (part) => JSON.stringify(one[part]) !== JSON.stringify(other[part]),
+/**
+ * Whether a configuration's tree `expected` is the tree `actual` names (`comparedOf`'s): a stored base (`stored`) where
+ * `actual` is that base or a tree of its MANIFEST's identity, any other where `actual` is the same.
+ */
+const sameTree = (expected, actual) =>
+  expected.stored !== undefined
+    ? JSON.stringify(expected.stored) === JSON.stringify(actual?.stored ?? actual?.identity)
+    : JSON.stringify(expected) === JSON.stringify(actual);
+
+/**
+ * Where two configurations of a comparison differ (`run.mjs`'s `configuration`), by part: shards of one area in every
+ * part, a rerun (`rerun`) in its trees as `sameTree` matches them against the replay's.
+ */
+const differing = (one, other, rerun = false) =>
+  ["sizes", "plan", "allowances", "checks", "trees"].filter((part) =>
+    part === "trees" && rerun
+      ? one.trees.length !== other.trees.length ||
+        one.trees.some((tree, index) => !sameTree(tree, other.trees[index]))
+      : JSON.stringify(one[part]) !== JSON.stringify(other[part]),
   );
 
 /** What a source did, in one word. */
@@ -228,9 +243,7 @@ if (process.argv[2] === "rerun") {
         `${indexFile} holds no configuration of ${nameOf(area)}: rerun its replay's sources with run.mjs --only`,
       );
     const trees = [base, head].map((tree) => comparedOf(path.resolve(tree)));
-    const other = [0, 1].filter(
-      (tree) => JSON.stringify(trees[tree]) !== JSON.stringify(configuration.trees.at(tree - 2)),
-    );
+    const other = [0, 1].filter((tree) => !sameTree(configuration.trees.at(tree - 2), trees[tree]));
     if (other.length > 0)
       refused(
         `${other.map((tree) => [base, head][tree])} is not the tree ${nameOf(area)}'s replay compared`,
@@ -320,7 +333,7 @@ for (const shard of rerunFiles.map(shardOf)) {
     refused(
       `${shard.file} reruns ${nameOf(shard.ran.area)}, whose replay records no configuration`,
     );
-  const other = differing(configuration, shard.ran.configuration);
+  const other = differing(configuration, shard.ran.configuration, true);
   if (other.length > 0)
     refused(`${shard.file} compares otherwise than its replay (${other}): it is not merged`);
   for (const entry of shard.entries) {
