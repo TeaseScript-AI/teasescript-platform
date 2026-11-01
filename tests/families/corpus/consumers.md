@@ -19,6 +19,10 @@ outside the repository").
   (`spot-{head,base}/publication.mjs`) record any thrown value, as `unprintable <type>` where its conversion to text
   throws, through the folder's `describeCaught.mjs` (#1523). Its `canary-1523.sh` checks that; its changed files stay
   beside them as `<file>.pre-1523` (`PORTED-1523.md`).
+- `desktop:~/work/evidence/corpus/consumers/{astra-1539,owner-s9b,sol-1437-r5,sol-1455-r2}/`: their readers record any
+  thrown value, as `unprintable <type>` where its conversion to text throws, through a `describeCaught.mjs` in the
+  folder (#1532). Each folder's `PORTED-1532.md` lists the changed files, whose originals stay beside them as
+  `<file>.pre-1532`.
 
 ## Known problems
 
