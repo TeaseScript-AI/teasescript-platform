@@ -1124,18 +1124,16 @@ class CoreAnswers implements Answers {
    * literal's own kinds, a typed call's expected type at every depth); else the domains the consumers' finishing read
    * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`); where none
    * of them retains anything after a stop where admission had settled, the type admission gives the read's place there,
-   * as `place` answers it (`#lazilyDecided`). A stopped answer takes the kinds' fixed order as a merged one does
-   * (`inKindOrder`, #1398), whichever of them gives it.
+   * as `place` answers it (`#lazilyDecided`). Each source gives its list in its own order: an answer, a decision or a
+   * composition in the kinds' fixed order where it is made (#1398), a written type in its spelling's.
    */
   #items(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
     const answered = this.#run(this.#pass.values.valueItems(value, node, path));
     if (!this.#stopped || !answered.some(isStopped)) return answered;
     const own = this.#stoppedShape(value, path).items;
-    if (own !== STOPPED) return inKindOrder(own);
+    if (own !== STOPPED) return own;
     const finished = this.#consumers.finishedItems(value, node, path);
-    return inKindOrder(
-      finished.every(isStopped) ? (this.#lazilyDecided(value, path) ?? finished) : finished,
-    );
+    return finished.every(isStopped) ? (this.#lazilyDecided(value, path) ?? finished) : finished;
   }
 
   /**
@@ -1215,14 +1213,14 @@ class CoreAnswers implements Answers {
           found = this.#typedShapes.get(joinParts(at, path)) ?? null;
           chain.push(at);
         } else {
-          // the default itself: its own shape, as a typed default reads it
+          // the default itself: its own shape, as a typed default reads it (the answer in the kinds' fixed order, #1398)
           const own = this.#literalShape(at, path);
           const decision = typedDefault(path, false);
           found = {
             items:
               own.items === STOPPED
                 ? STOPPED
-                : decision.answer(decision.choose(own.items), own.items),
+                : inKindOrder(decision.answer(decision.choose(own.items), own.items)),
             names: own.names,
           };
         }
@@ -1283,7 +1281,8 @@ class CoreAnswers implements Answers {
     }
     // each child at the path's own step (`literalChildren` keys a collection's elements and a dict's values alike): its
     // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question,
-    // TABLE r4.158), beside its known siblings; its names its own syntax's alone
+    // TABLE r4.158), beside its known siblings, the composition in the kinds' fixed order (#1398); its names its own
+    // syntax's alone
     const items: Item[] = [];
     const names = new Set<string>();
     const rest = path.slice(1);
@@ -1292,7 +1291,7 @@ class CoreAnswers implements Answers {
       for (const name of this.#stoppedShape(child.value, rest).names) names.add(name);
       for (const item of this.#items(child.value, child.node, rest)) items.push(item);
     }
-    return { items: items.length === 0 ? STOPPED : items, names };
+    return { items: items.length === 0 ? STOPPED : inKindOrder(items), names };
   }
 
   /** The value place of an expression node, the place a statement stores into, or `null`. */
