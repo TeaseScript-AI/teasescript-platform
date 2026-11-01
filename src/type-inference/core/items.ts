@@ -345,12 +345,23 @@ const TAG_RANK: ReadonlyMap<ItemTag, number> = new Map(
 );
 
 /**
- * The items of one value, one per kind: an item is definite when one of its kind is (and none is guarded); the reasons
- * and ingress stores of all are kept, so no merge drops a boundary check (C9); the earliest writer and the first context
- * word stand for the kind (F28, §3.4); a guarded one marks the kind (§3.2). The kinds stand in their fixed order
- * (`TAG_RANK`), never in the order the analysis met them, which the consumers' and the solver's orders and the sharing
- * change (#1398). The sort, of at most one item per kind of the table, is a bounded constant inside the merge's charge of
- * one unit per item, so it charges nothing of its own (TABLE r4.261).
+ * A value's items in their kinds' fixed order (`TAG_RANK`), never in the order the analysis met them, which the
+ * consumers' and the solver's orders and the sharing change (#1398); items of one kind keep their order. The one order
+ * every published list of a value's items takes: a merge's, and a stopped answer's (`CoreAnswers`). One pass over the
+ * items and one over the ranks, so it costs no more than the items it is given, each already charged where it was
+ * made, and it charges nothing of its own (TABLE r4.261).
+ */
+export function inKindOrder(items: Iterable<Item>): Item[] {
+  const byRank: Item[][] = [];
+  for (const item of items) (byRank[TAG_RANK.get(item.tag)!] ??= []).push(item);
+  return byRank.flat();
+}
+
+/**
+ * The items of one value, one per kind, in their kinds' fixed order (`inKindOrder`): an item is definite when one of its
+ * kind is (and none is guarded); the reasons and ingress stores of all are kept, so no merge drops a boundary check
+ * (C9); the earliest writer and the first context word stand for the kind (F28, §3.4); a guarded one marks the kind
+ * (§3.2).
  */
 export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
   const byTag = new Map<ItemTag, Item>();
@@ -359,7 +370,7 @@ export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
     const earlier = byTag.get(item.tag);
     byTag.set(item.tag, earlier === undefined ? item : mergePair(earlier, item, scope.ingress));
   }
-  return [...byTag.values()].sort((a, b) => TAG_RANK.get(a.tag)! - TAG_RANK.get(b.tag)!);
+  return inKindOrder(byTag.values());
 }
 
 /**
