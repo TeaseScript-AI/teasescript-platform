@@ -1379,9 +1379,15 @@ function topsAt(
   path: () => number,
 ): PrefixStores["also"] {
   const work = contract.pass.program.work;
-  const find = prefixFound(contract, stores, ref.at(0));
-  if (find === null) return [];
-  const layers = stepLayersOf(contract, stores, find, ref.at(0));
+  // (the first read under a step keeps its memo, as `main`'s, whether or not a layer lists it; later reads read it)
+  const step = ref.at(0);
+  const layers = stepLayersOf(
+    contract,
+    stores,
+    () => prefixFound(contract, stores, step)?.() ?? [],
+    step,
+  );
+  if (layers.found.length === 0) return [];
   const texts = prefixTexts(contract, ref);
   const holding = holdingAt(contract, layers.own, ref, texts);
   const out: PrefixStores["also"][number][] = [];
