@@ -25,7 +25,7 @@ import type { Work } from "../solver.js";
 import { stands } from "./fresh.js";
 import { LITERALS, unsettledItem } from "./kinds.js";
 import { readKey } from "./names.js";
-import { syntaxRead } from "./syntax.js";
+import { placelessCells, syntaxRead } from "./syntax.js";
 
 // The finishing read after a stop (D4 a′): a value's items, a key's, a typed parse's or load's, from what remains.
 
@@ -218,6 +218,16 @@ function laterSources(
   // the value at the read: its own finished answer
   const exact = finishedAnswer(walk, value, node, rest);
   if (exact !== null) return exact;
+  // else, a projection of a literal no place holds: the literal's cells along its steps, each its own value as a read
+  // of the literal there reads it (`placelessCells`, as the stores' syntax takes it, #1563)
+  const cells = placelessCells(walk, value);
+  if (cells !== null) {
+    const items: Item[] = [];
+    for (const cell of cells)
+      if (cell.value !== undefined && stands(walk, cell))
+        items.push(...finishingRead(walk, cell.value, cell.node ?? node, rest, requirement));
+    if (items.length > 0) return items;
+  }
   // else its own syntax: a typed parse's or load's expected type (F18), as the route's stopped answers read it; a type,
   // so a domain like those below (a typed list may be empty: C6), but external data where no type reaches it
   const typed = typedRead(walk, value, rest);
@@ -230,8 +240,12 @@ function laterSources(
   // values list, holds the host data its key's stores hold, as an admitted or a syntax domain does below, #1450; a
   // restricted one holds its kinds, its stores' boundaries checking them): a contract by an `unknown` no reason but the
   // opaque one explains (a written open domain's carries it, #1501)
-  if (held !== null) {
-    if (requirement) return required(withoutEmpty(held).map((item) => item.tag));
+  // (a requirement: from the first domain that decides it, each holding the value; the next asked where one holds
+  // several families or `unknown`, #1563)
+  const decided =
+    held !== null && requirement ? required(withoutEmpty(held).map((item) => item.tag)) : STOPPED;
+  if (decided !== STOPPED) return decided;
+  if (held !== null && !requirement) {
     const domain = markDomain(walk, value, held);
     return held.some((item) => item.tag === "unknown" && (item.reasons & ~REASON.opaque) === 0)
       ? [...domain, ...heldIngress(walk, value, rest)]
@@ -247,12 +261,18 @@ function laterSources(
       : walk.settled
         ? (retainedRead(walk, value, rest) ?? [])
         : [];
+  // (a requirement follows from the concrete kinds alone, as unstopped, where external data decides none: the stores'
+  // syntax asked where this domain leaves it undecided, as above)
+  if (requirement) {
+    const own = required(typedTags ?? retained);
+    return own !== STOPPED || typedTags !== null
+      ? own
+      : required(syntaxRead(walk, value, rest) ?? []);
+  }
   // else, at a settled stop, the stores' syntax (source 4, TABLE r4.100, r4.135): every store's syntax decides the key
   // together
   const tags =
     typedTags ?? (retained.length > 0 ? retained : (syntaxRead(walk, value, rest) ?? []));
-  // (a requirement follows from the concrete kinds alone, as unstopped, where external data decides none)
-  if (requirement) return required(tags);
   // (an admitted or a syntax domain holds the host data its key's stores hold there, as the unstopped read does: its
   // consumer owes its check for that data, and its boundaries form from it, #1432, #1415; so does a written domain whose
   // nearest written prefix admits every kind, above)

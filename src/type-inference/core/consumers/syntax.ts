@@ -63,6 +63,58 @@ function cheapGive(shape: CheapShape, tag: ItemTag, by: Definition): void {
   }
 }
 
+/** Each walk's projections of literals no place holds, by value: their cells (`placelessCells`), else `null`. */
+const placeless = new WeakMap<Consumers, Map<PlaceId, readonly Definition[] | null>>();
+
+/**
+ * A projection of a collection or object literal no place holds, through such projections (`[hostValue, 4][0]`,
+ * `[[1, 2]][0][1]`, #1563): the literal's cells it reads along its steps, each its own value, as a read of the literal
+ * at that path reads them; `null` for any other value, and where a step finds no cell or meets a value that is no
+ * such literal. Structure only, the finishing read's and the stores' syntax's alike; each projection made once a walk.
+ */
+export function placelessCells(walk: Consumers, value: PlaceId): readonly Definition[] | null {
+  let memo = placeless.get(walk);
+  if (memo === undefined) placeless.set(walk, (memo = new Map()));
+  const known = memo.get(value);
+  if (known !== undefined) return known;
+  const { program } = walk.pass;
+  const projection = program.projOf.get(value);
+  let found: readonly Definition[] | null = null;
+  if (projection !== undefined && projection.step !== "iteration") {
+    program.work.charge("checks");
+    const literals = placelessLiterals(walk, projection.owner);
+    if (literals !== null) {
+      const step = stepName(projection.step);
+      const cells: Definition[] = [];
+      for (const literal of literals) cells.push(...walk.admission.literalChildren(literal, step));
+      found = cells.length === 0 ? null : cells;
+    }
+  }
+  memo.set(value, found);
+  return found;
+}
+
+/**
+ * The collection or object literals a value no place holds is: the literal itself, or each cell of a projection of
+ * one (`placelessCells`) that is such a literal in turn; `null` where any is another value.
+ */
+function placelessLiterals(walk: Consumers, value: PlaceId): readonly PlaceId[] | null {
+  const { program } = walk.pass;
+  const place = program.places[value]?.kind;
+  if (place?.kind === "value" && OWN_TAGS.has(place.node) && program.hasOf.has(value))
+    return [value];
+  const cells = placelessCells(walk, value);
+  if (cells === null) return null;
+  const literals: PlaceId[] = [];
+  for (const cell of cells) {
+    program.work.charge("checks");
+    const inner = cell.value === undefined ? null : placelessLiterals(walk, cell.value);
+    if (inner === null) return null;
+    literals.push(...inner);
+  }
+  return literals;
+}
+
 /**
  * What the stores' syntax decides at a read's key path and `rest` (`cheapDecided`), else `null`; the key made only
  * where syntax may decide (`syntaxDecides`).
@@ -220,6 +272,15 @@ function cheapShapeOf(walk: Consumers, key: Key): CheapShape {
     program.work.charge("checks");
     const place = program.places[value]?.kind;
     const node = place?.kind === "value" ? place.node : null;
+    // a projection of a literal no place holds: what its cells give, each its own value (or its elements), as the
+    // finishing read takes them (#1563)
+    const cells = placelessCells(walk, value);
+    if (cells !== null) {
+      for (const cell of cells)
+        if (cell.value === undefined) at.opaque = true;
+        else pending.push([at, cell.value, d, elements]);
+      continue;
+    }
     if (elements) {
       // a collection's elements: a list's or a set's literal ones, a written copy's element type, a host value's none
       if (node === "listLiteral" || node === "setLiteral") {
