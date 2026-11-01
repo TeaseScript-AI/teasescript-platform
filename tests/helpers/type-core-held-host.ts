@@ -937,7 +937,7 @@ export function randomCopyGraph(
 }
 
 /**
- * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, and six of
+ * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, and seven of
  * reads no place holds.
  */
 function gateShapes(): Record<string, (k: number) => string> {
@@ -971,6 +971,9 @@ function gateShapes(): Record<string, (k: number) => string> {
       `repeat [[${"[".repeat(k)}hostValue${"]".repeat(k)}].toList()].toList()[0][0]${"[0]".repeat(k)} {}\nexit`,
     "nested-get-cells": (k) =>
       `repeat ${nest(k, "hostValue", (text) => `[1].get(5, default: [${text}][0])`)} {}\nexit`,
+    // (a literal of k copies read k deep: past eight copies every read is cut, its root found once along the chain)
+    "cut-chain": (k) =>
+      `${rows(k, (i) => `let x${i} = hostValue`)}\nrepeat [${lines(k, (i) => `x${i}`).join(", ")}][0]${"[0]".repeat(k)} {}\nexit`,
   };
 }
 
