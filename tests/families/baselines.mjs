@@ -134,7 +134,9 @@ function oraclesId(helpers) {
 /** What a tree's stored runs depend on: its `src/` tree, its oracle library, its lockfile and this Node. */
 export function identityOf(tree) {
   return {
-    src: treeId(path.join(tree, "src"))?.toString("hex") ?? null,
+    src: existsSync(path.join(tree, "src"))
+      ? (treeId(path.join(tree, "src"))?.toString("hex") ?? null)
+      : null,
     oracles: oraclesId(path.join(tree, "dist", "tests", "helpers")),
     lock: blobId(path.join(tree, "package-lock.json")),
     node: process.version,
@@ -721,9 +723,10 @@ const otherInputs = (dir, file, other) =>
  * The runs stored in the baseline area `folder` (`--baseline`, as the system resolves it), read only through the rule
  * of `shardIn`, as status reads them: an area recorded in the MANIFEST of a baseline of this tool that holds no foreign
  * path and is named by its MANIFEST's src tree, its PLAN the recorded one and every planned shard counting. Its lines
- * (each source's, the totals left out); else why not, with the exit status status gives it: 2 where the folder is no
- * area of such a baseline, the baseline holds a foreign path or a shard of other inputs, 1 where the area is not
- * complete (not recorded, its PLAN not the recorded one, a shard absent or damaged).
+ * (each source's, the totals left out) and its MANIFEST's identity (what its runs depend on); else why not, with the
+ * exit status status gives it: 2 where the folder is no area of such a baseline, the baseline holds a foreign path or a
+ * shard of other inputs, 1 where the area is not complete (not recorded, its PLAN not the recorded one, a shard absent
+ * or damaged).
  */
 export function storedRuns(folder) {
   const real = realOf(folder);
@@ -763,7 +766,7 @@ export function storedRuns(folder) {
       incomplete ??= `${folder} is no complete area: ${shardName(shard, shards)} ${existsSync(file) ? "does not verify" : "is absent"}`;
     else lines.push(...read.lines);
   }
-  return incomplete === undefined ? { lines } : { status: 1, refused: incomplete };
+  return incomplete === undefined ? { lines, identity } : { status: 1, refused: incomplete };
 }
 
 /** A built tree's areas: the folders of tests/families/ with generators, and tools/corpus/fixture/. */

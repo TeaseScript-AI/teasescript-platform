@@ -62,8 +62,9 @@ async function ledgerOf(root) {
   return typeof WorkLedger?.prototype?.charge === "function" ? WorkLedger : null;
 }
 
-/** With `--work`, the units charged between two reports of a run's work. */
+/** With `--work`, the units charged between two writes of a run's progress record, and the record's length. */
 const STEP = 65_536;
+const RECORD = 512;
 
 /** An oracle's result as text (the publication's own text as it is: encoding it again would double a large one). */
 const textOf = (value) => (typeof value === "string" ? value : JSON.stringify(value));
@@ -149,7 +150,7 @@ function judged(was, is) {
 
 if (process.argv[2] === "--child") {
   // the child: each source's runs in the four modes on each tree (the base and the head, or one)
-  const { roots, allowances, work } = JSON.parse(process.argv[3]);
+  const { roots, allowances, progress } = JSON.parse(process.argv[3]);
   const trees = await Promise.all(roots.map(oracles));
   const head = trees.at(-1);
   /**
@@ -161,47 +162,64 @@ if (process.argv[2] === "--child") {
       process.send(message, (error) => (error ? reject(error) : resolve())),
     );
   /**
-   * With `--work`: the units the running tree's analyses charge (every `WorkLedger.charge`, finishing work included),
-   * reported to the runner (`progress`) as a run starts, each `STEP` units and as it ends. A send writes at once where the
-   * channel has room, also while an analysis holds this process, so a source the runner ends at its deadline keeps the
-   * work its run had charged, less at most `STEP` units (#1564). A tree with no ledger reports `null`.
+   * With `--work` (#1564): the units the running tree's analyses charge (every `WorkLedger.charge`, finishing work
+   * included), counted while it runs. Its progress record, the runner's file beside `--work`, holds the run going on: it
+   * is written over as a tree starts a run, each `STEP` units and as the tree ends it, by a write that completes while an
+   * analysis holds this process, so the runner reads the work a run had charged when it ended the process, less at most
+   * `STEP` units. A tree with no ledger counts `null`.
    */
-  const ledgers = work ? await Promise.all(roots.map(ledgerOf)) : [];
+  const record = progress === undefined ? undefined : outside(progress, [], () => {});
+  const ledgers = record === undefined ? [] : await Promise.all(roots.map(ledgerOf));
   let spent = 0;
   let next = Infinity;
   let running = null;
-  const report = (progress) => process.send({ progress }, () => {});
+  const write = (fields) => {
+    try {
+      const text = JSON.stringify({ ...running, ...fields }).padEnd(RECORD);
+      writeFileSync(pathOf(record, "outside"), text, { flag: "r+" });
+    } catch {
+      // (a record not written leaves the one before it)
+    }
+  };
   for (const ledger of new Set(ledgers.filter((found) => found !== null))) {
     const { charge } = ledger.prototype;
     ledger.prototype.charge = function (counter, units = 1) {
       spent += units;
       if (spent >= next) {
         next = spent + STEP;
-        report({ ...running, work: spent });
+        write({ work: spent });
       }
       return charge.call(this, counter, units);
     };
   }
-  /** Tree `tree`'s result of the source's run `index` (`run`), with `--work` its units and milliseconds reported. */
-  const counted = (index, tree, mode, check, run) => {
-    if (!work) return attempt(() => digest(run(trees[tree])));
-    const measured = ledgers[tree] !== null;
-    running = { run: index, tree };
-    spent = 0;
-    next = measured ? STEP : Infinity;
+  /**
+   * Tree `tree`'s result of the source's run `index` (`run`), its units and milliseconds added to `used`, through one call
+   * whether or not they are recorded, so that an exception's stack is the same.
+   */
+  const counted = (seq, index, tree, mode, check, run, used) => {
+    const measured = ledgers[tree] !== undefined && ledgers[tree] !== null;
+    if (record !== undefined) {
+      const before = used.work.map((units, earlier) => [units, used.ms[earlier]]);
+      running = { seq, run: index, tree, mode, check, since: Date.now(), before };
+      spent = 0;
+      next = measured ? STEP : Infinity;
+      write({ work: measured ? 0 : null });
+    }
     const started = performance.now();
-    report({ ...running, mode, check, work: measured ? 0 : null });
     const result = attempt(() => digest(run(trees[tree])));
-    report({ ...running, work: measured ? spent : null, ms: performance.now() - started });
+    const ms = Math.round(performance.now() - started);
+    used.work.push(measured ? spent : null);
+    used.ms.push(ms);
+    if (record !== undefined) write({ work: measured ? spent : null, ms, done: true });
     next = Infinity;
     return result;
   };
   /**
    * One source's runs in the four modes on its trees, each run's outcome (`run`: a difference or an exception, or one
    * tree's result) sent as it ends and written before the next run starts, so that a later stall in the source keeps
-   * it.
+   * it; with `--work`, each tree's units and milliseconds with it (`spent`).
    */
-  const compared = async ({ files, checks, globals }) => {
+  const compared = async ({ files, checks, globals, seq }) => {
     let parsed = true;
     let index = 0;
     for (const mode of head.MODES) {
@@ -217,13 +235,17 @@ if (process.argv[2] === "--child") {
           ]);
       for (const [check, run] of runs) {
         // compared by hash, so that the base's text is not held while the head runs
-        const results = trees.map((_, tree) => counted(index, tree, label, check, run));
+        const used = { work: [], ms: [] };
+        const results = trees.map((_, tree) => counted(seq, index, tree, label, check, run, used));
         index += 1;
         const is = results.at(-1);
         if (is.value?.unparsed) parsed = false;
         // one tree's result goes to the runner, which compares it with the stored one or stores it
         const outcome = results.length === 2 ? judged(results[0], is) : { result: is };
-        await sent({ run: { mode: label, check, ...outcome } });
+        await sent({
+          run: { mode: label, check, ...outcome },
+          ...(record === undefined ? {} : { spent: used }),
+        });
       }
     }
     return { parsed };
@@ -269,6 +291,15 @@ if (process.argv[2] === "--child") {
     .split(",")
     .map((text) => (text === "natural" ? null : Number(text)));
   const [shard, shards] = (option("shard") ?? "0/1").split("/").map(Number);
+  // shards 0/N to N-1/N together hold the area's sources once (#1564: another index runs none)
+  if (!(
+    Number.isInteger(shards) &&
+    shards > 0 &&
+    Number.isInteger(shard) &&
+    shard >= 0 &&
+    shard < shards
+  ))
+    refused(`--shard ${option("shard")} is no shard i/N with 0 <= i < N`);
   // a baseline holds the runs of a commit's tree at the runner's defaults, so that every writer stores the same ones
   if (store !== undefined) {
     const changed = ["sizes", "allowances", "timeout", "memory"].filter((name) =>
@@ -277,14 +308,6 @@ if (process.argv[2] === "--child") {
     const tree = roots[0];
     if (changed.length > 0)
       refused(`--store runs at the runner's defaults: drop --${changed.join(", --")}`);
-    if (!(
-      Number.isInteger(shards) &&
-      shards > 0 &&
-      Number.isInteger(shard) &&
-      shard >= 0 &&
-      shard < shards
-    ))
-      refused(`--shard ${option("shard")} is no shard i/N`);
     if (!existsSync(path.join(tree, "src")) || !existsSync(path.join(tree, ".sha")))
       refused(`${tree} is no built tree of a commit (sx-tree's, with src/ and .sha) to store`);
   }
@@ -306,6 +329,9 @@ if (process.argv[2] === "--child") {
   const work = option("work") === undefined ? undefined : outside(option("work"), kept, refused);
   if (out !== undefined && work !== undefined && pathOf(out, "outside") === pathOf(work, "outside"))
     refused(`--out and --work name one file: ${option("out")}`);
+  // (`--work`'s progress record, which each child writes over and this process reads at a stall, removed at the end)
+  const progress =
+    work === undefined ? undefined : outside(`${option("work")}.progress`, kept, refused);
   if (out !== undefined) {
     rmSync(pathOf(out, "outside"), { force: true });
     writeFileSync(pathOf(out, "outside"), "", { flag: "wx" });
@@ -313,6 +339,8 @@ if (process.argv[2] === "--child") {
   if (work !== undefined) {
     rmSync(pathOf(work, "outside"), { force: true });
     writeFileSync(pathOf(work, "outside"), "", { flag: "wx" });
+    rmSync(pathOf(progress, "outside"), { force: true });
+    writeFileSync(pathOf(progress, "outside"), "", { flag: "wx" });
   }
   const record = (line) => {
     if (out !== undefined) appendFileSync(pathOf(out, "outside"), `${JSON.stringify(line)}\n`);
@@ -337,7 +365,14 @@ if (process.argv[2] === "--child") {
   const fresh = () => {
     const created = fork(
       fileURLToPath(import.meta.url),
-      ["--child", JSON.stringify({ roots, allowances, work: work !== undefined })],
+      [
+        "--child",
+        JSON.stringify({
+          roots,
+          allowances,
+          progress: progress === undefined ? undefined : pathOf(progress, "outside"),
+        }),
+      ],
       {
         execArgv: [`--max-old-space-size=${memory}`],
         serialization: "advanced",
@@ -357,11 +392,31 @@ if (process.argv[2] === "--child") {
       process.kill(process.pid, signal);
     });
   /**
+   * With `--work`, the run a stalled source's child had going on, from its progress record where that is the source's
+   * (`seq`) and its run after those that ended (`run`), else none: each tree's units and milliseconds so far, the tree
+   * then running (`running`) counted to `at` (the clock's milliseconds).
+   */
+  const cutOf = (seq, run, at) => {
+    if (progress === undefined) return undefined;
+    let state;
+    try {
+      state = JSON.parse(readFileSync(pathOf(progress, "outside"), "utf8"));
+    } catch {
+      return undefined;
+    }
+    if (state.seq !== seq || state.run !== run) return undefined;
+    const work = roots.map((_, tree) => state.before[tree]?.[0] ?? null);
+    const ms = roots.map((_, tree) => state.before[tree]?.[1] ?? null);
+    work[state.tree] = state.work;
+    ms[state.tree] = state.done ? state.ms : Math.max(0, at - state.since);
+    const { mode, check } = state;
+    return { mode, check, work, ms, ...(state.done ? {} : { running: state.tree }) };
+  };
+  /**
    * One source's reply, or why it stalled (`timeout`, or how the process ended), with the runs that ended (`runs`). At
    * the deadline the process ends and the runs it had written are read before it closes: a source whose timeout
-   * callback has run stalls, with them. With `--work`, each run's mode, check and each tree's units and milliseconds
-   * (`spent`); at a stall the run then going on keeps the units last reported, its milliseconds until the stall, and the
-   * tree that was running it (`running`).
+   * callback has run stalls, with them. With `--work`, each ended run's mode, check and each tree's units and
+   * milliseconds (`spent`), and at a stall the run then going on (`cutOf`).
    */
   const analysed = (message) =>
     new Promise((resolve) => {
@@ -370,24 +425,14 @@ if (process.argv[2] === "--child") {
       const current = child;
       const runs = [];
       const spent = [];
-      let going = null;
       let expired = false;
       let ended;
-      const progressed = ({ run, tree, mode, check, work, ms }) => {
-        if (mode !== undefined) {
-          spent[run] ??= { mode, check, work: roots.map(() => null), ms: roots.map(() => null) };
-          going = { run, tree, since: performance.now() };
-        }
-        spent[run].work[tree] = work;
-        if (ms !== undefined) {
-          spent[run].ms[tree] = Math.round(ms);
-          going = null;
-        }
-      };
       const onMessage = (reply) => {
-        if ("progress" in reply) progressed(reply.progress);
-        else if ("run" in reply) runs.push(reply.run);
-        else if (!expired) settle(reply);
+        if ("run" in reply) {
+          runs.push(reply.run);
+          const { mode, check } = reply.run;
+          if (reply.spent !== undefined) spent.push({ mode, check, ...reply.spent });
+        } else if (!expired) settle(reply);
       };
       const onError = (error) => settle({ stalled: String(error).slice(0, 200) });
       // after `close`, the process's error output is complete
@@ -404,17 +449,15 @@ if (process.argv[2] === "--child") {
           child = null;
           current.kill("SIGKILL");
         }
-        if (going !== null) {
-          const { run, tree, since } = going;
-          spent[run].ms[tree] = Math.round((ended ?? performance.now()) - since);
-          spent[run].running = tree;
-        }
+        const cut =
+          "stalled" in result ? cutOf(message.seq, spent.length, ended ?? Date.now()) : undefined;
+        if (cut !== undefined) spent.push(cut);
         resolve({ ...(expired ? { stalled: "timeout" } : result), runs, spent });
       };
       // (the process's `close` then settles the source, after the frames it had written)
       const timer = setTimeout(() => {
         expired = true;
-        ended = performance.now();
+        ended = Date.now();
         current.kill("SIGKILL");
       }, timeout);
       current.on("message", onMessage).on("error", onError).on("close", onClose);
@@ -459,12 +502,14 @@ if (process.argv[2] === "--child") {
    * status refuses it (#1542, the owner's reviewer)
    */
   const stored = new Map();
+  let storedIdentity;
   if (baseline !== undefined) {
     const runs = storedRuns(baseline);
     if (runs.refused !== undefined) {
       console.error(runs.refused);
       process.exit(runs.status);
     }
+    storedIdentity = runs.identity;
     const places = new Set(
       generators.flatMap(({ name, sources }) => sources.map((source) => placeOf(name, source))),
     );
@@ -526,19 +571,34 @@ if (process.argv[2] === "--child") {
       ...(baseline === undefined ? {} : { baseline }),
       ...(store === undefined ? {} : { store: option("store") }),
       ...(only === undefined ? {} : { only: option("only") }),
-      sizes: option("sizes") ?? null,
-      allowances: option("allowances") ?? DEFAULTS.allowances,
       timeout: seconds,
       memory,
-      node: process.version,
+      // what the comparison is (stalls.mjs merges only records of one): the sources' sizes, the stop runs' allowances,
+      // each generator's checks, and each tree's identity (`identityOf`; a stored base's, its baseline's)
+      configuration: {
+        sizes: sizesOption ?? null,
+        allowances,
+        checks: Object.fromEntries(every.map(({ name, checks }) => [name, checks])),
+        trees: [
+          ...(baseline === undefined ? [] : [storedIdentity]),
+          ...roots.map((root) => identityOf(path.resolve(root))),
+        ],
+      },
     },
   });
+  let sequence = 0;
   for (const { name, checks, sources } of generators) {
     const row = { generator: name, ...zeros() };
     for (const source of sources) {
       const before = { ...row };
       row.sources += 1;
-      const reply = await analysed({ files: source.files, checks, globals: source.globals });
+      sequence += 1;
+      const reply = await analysed({
+        files: source.files,
+        checks,
+        globals: source.globals,
+        seq: sequence,
+      });
       const inputs = { files: source.files, globals: source.globals };
       const line = stored.get(placeOf(name, source));
       const kept = line === undefined ? undefined : JSON.parse(line);
@@ -605,6 +665,7 @@ if (process.argv[2] === "--child") {
     for (const key of counts) total[key] += row[key];
   }
   child?.kill();
+  if (progress !== undefined) rmSync(pathOf(progress, "outside"), { force: true });
   const ended = { ...total, timeout: seconds, node: process.version };
   if (storing !== undefined) {
     // the shard whole, its total last, with what made it
