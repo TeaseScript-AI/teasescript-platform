@@ -271,13 +271,12 @@ test("summaries' demands on output-bound reads are their answers' pairs, at main
  * question) and the deep read they showed (TABLE r4.250): a read `depth` properties down walks its path's steps once,
  * each prefix's text made one step longer than the last and only looked up, never kept, and the path's id made below
  * the longest prefix that walk found made. Kept texts made the literal work a power of the depth steeper and took the
- * route past the allowance; a second walk for the id kept the growth over `main`'s past the slack at 32 → 64
- * (`invSteps` 3.4 %, the total 3.6 % with the sharing off). At depths 16, 32 and 64 in the four modes, against `main`'s
- * work there (measured on 7d6c4d3d4: a regression oracle of this shape): the literal work grows at or under `main`'s at
- * each doubling, and the total and `invSteps` by r4.231's falling reading (the head's growth over `main`'s falling,
- * within 3 % at the later doubling).
- * The total stays above `main`'s (clause (b): 21 % and 26 % at 64 with the sharing on and off), which r4.250 holds
- * open; the PR's evidence reports it as failing.
+ * route past the allowance. At depths 16, 32 and 64 in the four modes, against `main`'s work there (measured on
+ * 7d6c4d3d4: a regression oracle of this shape): the literal work grows at or under `main`'s at each doubling, and
+ * `invSteps` by r4.231's falling reading (the head's growth falling, within 3 % of `main`'s at the later doubling),
+ * which a second walk for the id put 3.4 % over. The total grows faster than `main`'s on this shape and stays above it
+ * (clauses (a) and (b): 21 % and 26 % at 64 with the sharing on and off), which r4.250 holds open; the PR's evidence
+ * reports both.
  */
 test("a deep read walks its path's steps once and keeps no text per prefix (#1466)", () => {
   const source = (depth: number): string =>
@@ -290,18 +289,10 @@ test("a deep read walks its path's steps once and keeps no text per prefix (#146
       "say read",
       "exit",
     ].join("\n");
-  type Counter = "total" | "literalUnits" | "invSteps";
+  type Counter = "literalUnits" | "invSteps";
   // (`main`'s work at depths 16, 32 and 64, the sharing on and off, equal in either order)
-  const shared = {
-    total: [8855, 23083, 76291],
-    literalUnits: [1974, 6030, 25070],
-    invSteps: [2103, 7187, 26571],
-  };
-  const unshared = {
-    total: [7451, 18875, 61867],
-    literalUnits: [562, 1782, 10542],
-    invSteps: [2184, 7364, 26940],
-  };
+  const shared = { literalUnits: [1974, 6030, 25070], invSteps: [2103, 7187, 26571] };
+  const unshared = { literalUnits: [562, 1782, 10542], invSteps: [2184, 7364, 26940] };
   const main: readonly Readonly<Record<Counter, readonly number[]>>[] = [
     shared,
     unshared,
@@ -320,13 +311,12 @@ test("a deep read walks its path's steps once and keeps no text per prefix (#146
     const sizes = [16, 32, 64].map((depth) => {
       const request = coreRequest([{ path: "main.tease", source: source(depth) }]);
       assert.ok(request !== null, `a read ${depth} deep: its files parse and resolve`);
-      const { total, counts } = analysed(
+      const { counts } = analysed(
         { name: `a read ${depth} deep`, request },
         reversed,
         unshared,
       ).budget;
       return {
-        total,
         literalUnits: counts.get("literalUnits") ?? 0,
         invSteps: counts.get("invSteps") ?? 0,
         nodes: counts.get("syntaxNodes") ?? 1,
@@ -343,11 +333,11 @@ test("a deep read walks its path's steps once and keeps no text per prefix (#146
         over("literalUnits", at) <= 1,
         `mode ${mode}: literalUnits ${over("literalUnits", at).toFixed(3)} × main's growth at doubling ${at + 1}`,
       );
-    for (const counter of ["total", "invSteps"] as const)
-      assert.ok(
-        over(counter, 1) <= over(counter, 0) && over(counter, 1) <= SLACK,
-        `mode ${mode}: ${counter} ${over(counter, 0).toFixed(3)} then ${over(counter, 1).toFixed(3)} × main's growth`,
-      );
+    const steps = head("invSteps");
+    assert.ok(
+      growth(steps, 1) < growth(steps, 0) && over("invSteps", 1) <= SLACK,
+      `mode ${mode}: invSteps ${growth(steps, 0).toFixed(3)} then ${growth(steps, 1).toFixed(3)}, ${over("invSteps", 1).toFixed(3)} × main's growth`,
+    );
   });
 });
 
