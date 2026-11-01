@@ -9,7 +9,7 @@ import { defaultOf, termAt, typeTags } from "../contract.js";
 import { operatorOf } from "../contract.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { makeItem, type Item, type ItemTag } from "../items.js";
+import { kindsInOrder, makeItem, type Item, type ItemTag } from "../items.js";
 import { builtinResult, conversionCategory } from "../method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "../operator-table.js";
 import type { ValueConstraint } from "../program.js";
@@ -231,9 +231,10 @@ function operation(
       : null;
     // (a set's elements' and a dict's values' kinds, which a fix may join only where `${...}` shows each, #1268; an
     // empty one joins to empty text)
+    // (two reads joined, a composition: the kinds' fixed order, #1398)
     const elements = kinds.some((item) => item.tag === "set" || item.tag === "dict")
-      ? [
-          ...new Set(
+      ? kindsInOrder(
+          new Set(
             [
               ...walk.run(walk.pass.values.valueItems(value, node, ["element"])),
               ...walk.run(walk.pass.values.valueItems(value, node, ["entry"])),
@@ -241,7 +242,7 @@ function operation(
               .map((item) => item.tag)
               .filter((tag) => tag !== "empty"),
           ),
-        ]
+        )
       : [];
     consume(
       walk,

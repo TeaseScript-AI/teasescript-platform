@@ -45,7 +45,16 @@ import { ExactPath, withoutEmpty } from "./exact-path.js";
 import type { Callable, FileRegion, FlowGraph, FlowNode, FunctionRegion } from "./flow-graph.js";
 import { GuardIndex } from "./guards.js";
 import { HandlerIndex } from "./handlers.js";
-import { EMPTY, inKindOrder, makeItem, REASON, STOPPED, type Item, type ItemTag } from "./items.js";
+import {
+  EMPTY,
+  inKindOrder,
+  kindsInOrder,
+  makeItem,
+  REASON,
+  STOPPED,
+  type Item,
+  type ItemTag,
+} from "./items.js";
 import { selectsElement } from "./method-categories.js";
 import {
   CoreProgram,
@@ -904,12 +913,15 @@ function withBesides(diagnostics: readonly CoreDiagnostic[]): CoreDiagnostic[] {
   return diagnostics.map((diagnostic) => {
     if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget")
       return diagnostic;
-    const besides = [...reported.get(key(diagnostic.site, diagnostic.rule.rule))!].filter(
-      (kind) =>
-        !diagnostic.kinds.includes(kind) &&
-        kind !== "null" &&
-        kind !== "unknown" &&
-        kind !== "empty",
+    // (gathered from diagnostics in their published order: put in the kinds' fixed order, #1398)
+    const besides = kindsInOrder(
+      [...reported.get(key(diagnostic.site, diagnostic.rule.rule))!].filter(
+        (kind) =>
+          !diagnostic.kinds.includes(kind) &&
+          kind !== "null" &&
+          kind !== "unknown" &&
+          kind !== "empty",
+      ),
     );
     return besides.length === 0 ? diagnostic : { ...diagnostic, besides };
   });
