@@ -6,6 +6,7 @@ import type { Answers } from "../../src/type-inference/core/answers.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
+import { sentences } from "./type-core-oracles.js";
 
 /*
  * The stop oracle (D4 a′, TABLE r4.99, r4.100, r4.108): a compile stopped at some unit against the unstopped compile,
@@ -143,6 +144,40 @@ function offsets(d: Compiled["diagnostics"][number]): Span {
   return { start: d.span.start.offset, end: d.span.end.offset };
 }
 
+/** The texts a sentence holds in single quotes: the names and the code it shows. */
+function quoted(sentence: string): Set<string> {
+  return new Set(Array.from(sentence.matchAll(/'([^']*)'/g), (match) => match[1]!));
+}
+
+/**
+ * Whether a stopped diagnostic is the unstopped one as a stop keeps it: the same severity, code and span, and the same
+ * message but for its fix, which a stop's unchecked region gives in words where the unstopped compile gives code (TABLE
+ * r4.162): a sentence after the first that quotes code the stopped one lacks, while the stopped one quotes nothing the
+ * unstopped message does not.
+ */
+function kept(
+  want: Compiled["diagnostics"][number],
+  got: Compiled["diagnostics"][number],
+): boolean {
+  const { message: before, ...wanted } = want;
+  const { message: after, ...found } = got;
+  if (JSON.stringify(wanted) !== JSON.stringify(found)) return false;
+  const [was, is] = [sentences(before), sentences(after)];
+  const named = quoted(before);
+  return (
+    was.length === is.length &&
+    was.every((sentence, index) => {
+      if (sentence === is[index]) return true;
+      const [code, words] = [quoted(sentence), quoted(is[index]!)];
+      return (
+        index > 0 &&
+        [...code].some((text) => !words.has(text)) &&
+        [...words].every((text) => named.has(text))
+      );
+    })
+  );
+}
+
 /** Whether `inner` lies within `outer`. */
 function within(inner: Span, outer: Span): boolean {
   return outer.start <= inner.start && inner.end <= outer.end;
@@ -153,12 +188,12 @@ function within(inner: Span, outer: Span): boolean {
  * sound stop, settled or not. A mark excuses the record with its code at its site and nothing else; before admission
  * settled, a store marked with its type undecided also stands for its records within its value and for the errors it
  * brought, a written store's mark for its records within its value (TABLE r4.152 (1)), and C5's error at a literal for
- * the mark of the store that owes it. The diagnostics, whole, and the checks
- * are compared in their published order (r4.86 (1)) besides those records, what forms only with the marks, and the stop's
- * own warning. The plans are compared whole; a difference stands only inside the plan content of a mark whose obligation
- * is not the unstopped one at its code and site (one that is owes the same check), or of a marked store's records: the
- * content that leaving them out of each compile's analysis and discharge removes. The fitting runs are unchanged; a
- * violating run differs only where the run that stops first fails in a node holding such content.
+ * the mark of the store that owes it. The diagnostics, each whole but for a fix the stop gives in words (r4.162), and the
+ * checks are compared in their published order (r4.86 (1)) besides those records, what forms only with the marks, and the
+ * stop's own warning. The plans are compared whole; a difference stands only inside the plan content of a mark whose
+ * obligation is not the unstopped one at its code and site (one that is owes the same check), or of a marked store's
+ * records: the content that leaving them out of each compile's analysis and discharge removes. The fitting runs are
+ * unchanged; a violating run differs only where the run that stops first fails in a node holding such content.
  */
 export function stopProblems(c: StopCase): string[] {
   const { unstopped, stopped } = c;
@@ -209,14 +244,15 @@ export function stopProblems(c: StopCase): string[] {
         storeRecords.add(recordOf(d.code, d.site));
     }
   for (const record of storeRecords) excused.add(record);
-  // the diagnostics, in their published order
-  const shown = (each: StopRun): string[] =>
-    each.result.diagnostics
-      .filter((d) => d.code !== "TSV076" && !excused.has(recordOf(d.code, offsets(d))))
-      .map((d) => JSON.stringify(d));
+  // the diagnostics, in their published order, each whole but for its fix in words (r4.162)
+  const shown = (each: StopRun) =>
+    each.result.diagnostics.filter(
+      (d) => d.code !== "TSV076" && !excused.has(recordOf(d.code, offsets(d))),
+    );
   const [before, after] = [shown(unstopped), shown(stopped)];
-  if (JSON.stringify(before) !== JSON.stringify(after))
-    problems.push(`diagnostics ${after.join(" | ")} against ${before.join(" | ")}`);
+  const text = (list: typeof before): string => list.map((d) => JSON.stringify(d)).join(" | ");
+  if (before.length !== after.length || before.some((d, index) => !kept(d, after[index]!)))
+    problems.push(`diagnostics ${text(after)} against ${text(before)}`);
   // the checks, in their published order: an unstopped one a mark's record owns or one of a marked store's records; a
   // stopped one a mark's record owns, one of a marked store's records the unstopped analysis has too (the record kept,
   // on both sides alike, TABLE r4.122), or one that forms only with the marks, their content (r4.110 (a): the stopped
