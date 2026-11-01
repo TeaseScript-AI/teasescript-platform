@@ -21,6 +21,7 @@ import { pathToFileURL } from "node:url";
 
 const runner = resolve(process.cwd(), "tests/families/run.mjs");
 const baselines = resolve(process.cwd(), "tests/families/baselines.mjs");
+const stalls = resolve(process.cwd(), "tests/families/stalls.mjs");
 
 /** A built tree's oracle library that throws in every mode where a source says `throw`, as #1439's stale caller did. */
 const library = `export const MODES = [false, true].flatMap((reversed) =>
@@ -440,6 +441,45 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     assert.deepEqual(counts(beside), [5, 1, 4, 4, 0, 16, 4]);
     assert.deepEqual(counts(against), counts(beside));
     assert.equal(against.status, 1);
+    // its record (#1564): one tree, whose work these trees without a ledger record as `null`, and each stall's trees,
+    // a stall of both trees for a reason other than time unknown without the base's work
+    const record = join(directory, "against.work.jsonl");
+    assert.equal(run(head, "--baseline", baseline, "--work", record).status, 1);
+    const recorded = readFileSync(record, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .slice(1, -1);
+    assert.deepEqual(
+      recorded.map(({ source }) => source),
+      names,
+    );
+    for (const { runs: ran } of recorded)
+      for (const { work, ms } of ran) assert.deepEqual([work, ms.length], [[null], 1]);
+    assert.deepEqual(recorded.find(({ source }) => source === "ends").stalled, {
+      base: "exit 3",
+      head: "exit 3",
+    });
+    assert.match(
+      spawnSync(process.execPath, [stalls, record], { encoding: "utf8" }).stdout,
+      /"source":"ends".*"verdict":"unknown"/,
+    );
+    // its index rerun on both trees: a base of the MANIFEST's identity is the stored base, one of another oracle
+    // library is not (#1564 r4)
+    const index = join(directory, "index.json");
+    spawnSync(process.execPath, [stalls, record, "--index", index]);
+    const rerun = (from: string, folder: string) =>
+      spawnSync(process.execPath, [stalls, "rerun", index, from, head, join(directory, folder)], {
+        encoding: "utf8",
+      });
+    assert.match(rerun(other, "rerun-other").stderr, /is not the tree/);
+    assert.equal(rerun(alias, "rerun-alias").status, 1);
+    const merged = spawnSync(
+      process.execPath,
+      [stalls, record, "--rerun", join(directory, "rerun-alias", "area.work.jsonl")],
+      { encoding: "utf8" },
+    );
+    assert.equal(merged.status, 1, merged.stderr);
     const runs = ({ kept }: { kept: Record<string, unknown>[] }) =>
       kept.filter(({ mode }) => mode !== undefined).map(({ thrown, ...line }) => line);
     assert.deepEqual(runs(against), runs(beside));
@@ -613,15 +653,15 @@ test("the stored baselines' tools show no plain write outside the gate in their 
     ["owned"],
   );
   // the child processes, each of a form the inventory proves creates and changes no path (any other is an unproven
-  // site); the modules loaded by a computed name are a tree's oracle library and an area's generators, which are no
-  // tool's
+  // site); the modules loaded by a computed name are a tree's oracle library and work ledger and an area's generators,
+  // which are no tool's
   assert.deepEqual(
     processes.map((process) => process.allowed),
     ["the gate's lock holder", "the runner's own child"],
   );
   assert.deepEqual(
     loads.map((load) => load.function),
-    ["oracles", "generatorsOf"],
+    ["oracles", "ledgerOf", "generatorsOf"],
   );
   // the hook writes nothing: no file command, no redirection (after a space, as the script writes them) but to /dev/null
   // or stderr, once its comments and then its single-quoted programs are set aside
@@ -1077,6 +1117,541 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     renameSync(held, `${held}-moved`);
     cpSync(`${held}-moved`, held, { recursive: true });
     assert.match((await state.planned(joined.baseline, "area", planText)).refused, /was replaced/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/** A built tree's work ledger, which every unit of its analyses' work passes (`--work` counts its charges). */
+const LEDGER = `export class WorkLedger {
+  #total = 0;
+  charge(counter, units = 1) {
+    this.#total += units;
+  }
+}
+`;
+
+/**
+ * A built tree's library whose analyses charge its ledger 3,000 units a run: `throws` throws on both trees, `ends` ends
+ * the process there; `busy` waits
+ * 200 ms on the base; `lagging` waits 600 ms on the head's first run; `slow` charges a billion units more on the head and
+ * waits 150 ms there; `burst` charges 10,000 times 65,536 units at once on the head, then waits; `changed` publishes its
+ * second part otherwise on the head. Its stop sets differ on the head at demand allowance 1 and wait there at 2.
+ */
+const charging = (
+  head: boolean,
+): string => `import { WorkLedger } from "../../src/type-inference/core/budget.js";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+export function publicationHashes(files, mode) {
+  const source = files[0].source;
+  const ledger = new WorkLedger();
+  for (let unit = 0; unit < 1000; unit += 1) ledger.charge("frames", 3);
+  if (source === "throws") throw new Error("independent exception witness");
+  if (source === "ends") process.exit(3);
+  if (!${head} && source === "busy") wait(200);
+  if (${head} && source === "lagging" && mode === MODES[0]) wait(600);
+  if (${head} && source === "slow") {
+    ledger.charge("frames", 1e9);
+    wait(150);
+  }
+  if (${head} && source === "burst") {
+    for (let unit = 0; unit < 10000; unit += 1) ledger.charge("frames", 65536);
+    wait(10000);
+  }
+  return { parts: ["a", ${head} && source === "changed" ? "c" : "b"], unanswered: 0 };
+}
+export function stopSet(files, mode, globals, allowance) {
+  if (${head} && allowance === 1) return { stops: [[1, "x", "y", 1]] };
+  if (${head} && allowance === 2) wait(10000);
+  return { stops: [] };
+}
+`;
+
+test("the corpus runner records each source's work and time, a stalled run's to the stall, and a rerun of the stall index on both trees closes a timeout but never a stall, a candidate or a difference (#1564)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const built = (isHead: boolean) => {
+      const tree = join(directory, isHead ? "head" : "base");
+      mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+      mkdirSync(join(tree, "dist", "src", "type-inference", "core"), { recursive: true });
+      writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(tree, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
+      writeFileSync(
+        join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+        charging(isHead),
+      );
+      return tree;
+    };
+    const [base, head] = [built(false), built(true)];
+    const area = (name: string, names: string[], checks = ["publication"]) => {
+      const folder = join(directory, name);
+      mkdirSync(folder);
+      const cases = JSON.stringify(names.map((source) => [source, source]));
+      writeFileSync(
+        join(folder, "g.mjs"),
+        `export const cases = ${cases};\nexport const checks = ${JSON.stringify(checks)};\n`,
+      );
+      return folder;
+    };
+    const lines = (text: string) =>
+      text
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+    const run = (tool: string, ...args: string[]) =>
+      spawnSync(process.execPath, [tool, ...args], { encoding: "utf8" });
+    const MODES = ["src-on", "src-off", "rev-on", "rev-off"];
+
+    // sources that end or throw: the runner's output and `--out`, exceptions' stacks included, as without the record
+    const ending = area("ending", ["fast", "changed", "throws"]);
+    const plain = run(runner, ending, base, head, "--out", join(directory, "plain.jsonl"));
+    const recorded = run(
+      runner,
+      ending,
+      base,
+      head,
+      "--out",
+      join(directory, "recorded.jsonl"),
+      "--work",
+      join(directory, "ending.work.jsonl"),
+    );
+    assert.equal(recorded.status, 1, recorded.stderr);
+    assert.equal(recorded.stdout, plain.stdout);
+    const kept = readFileSync(join(directory, "recorded.jsonl"), "utf8");
+    assert.equal(kept, readFileSync(join(directory, "plain.jsonl"), "utf8"));
+    assert.match(kept, /independent exception witness\\n {4}at /);
+    // one tree given twice: one ledger, whose units go to the tree running; no shard but 0/N to N-1/N
+    const twice = join(directory, "twice.work.jsonl");
+    run(runner, ending, base, base, "--work", twice);
+    assert.deepEqual(
+      lines(readFileSync(twice, "utf8"))[1].runs.map(
+        ({ work: units }: { work: number[] }) => units,
+      ),
+      MODES.map(() => [3000, 3000]),
+    );
+    assert.match(run(runner, ending, base, head, "--shard", "2/2").stderr, /no shard i\/N/);
+    // `--out`, `--work` and its progress record name three files, as the system resolves them, or nothing is touched
+    // (#1564 r2: a progress record that is `--out` or a link to `--work`)
+    const collided = join(directory, "collided.work.jsonl");
+    writeFileSync(`${collided}.progress`, "kept\n");
+    const colliding = run(
+      runner,
+      ending,
+      base,
+      head,
+      "--work",
+      collided,
+      "--out",
+      `${collided}.progress`,
+    );
+    assert.equal(colliding.status, 2, colliding.stderr);
+    assert.deepEqual(
+      [readFileSync(`${collided}.progress`, "utf8"), existsSync(collided)],
+      ["kept\n", false],
+    );
+    const linked = join(directory, "linked.work.jsonl");
+    writeFileSync(linked, "kept\n");
+    symlinkSync(linked, `${linked}.progress`);
+    assert.equal(run(runner, ending, base, head, "--work", linked).status, 2);
+    assert.equal(readFileSync(linked, "utf8"), "kept\n");
+    // one plan (#1564 r2's mismatched-plan witness): shard 0/2 of an area of four sources and shard 1/2 of a copy of
+    // three, each area named `planned`, compare otherwise and are refused together, never closed
+    const planned = (copy: string, names: string[]) => {
+      mkdirSync(join(directory, copy));
+      return area(join(copy, "planned"), names);
+    };
+    const [four, three] = [join(directory, "four.work.jsonl"), join(directory, "three.work.jsonl")];
+    run(
+      runner,
+      planned("four", ["a", "b", "c", "bad"]),
+      base,
+      head,
+      "--shard",
+      "0/2",
+      "--work",
+      four,
+    );
+    run(runner, planned("three", ["a", "b", "c"]), base, head, "--shard", "1/2", "--work", three);
+    const mixed = run(stalls, four, three);
+    assert.equal(mixed.status, 2, mixed.stdout);
+    assert.match(mixed.stderr, /compares otherwise than the area's other shards \(plan\)/);
+    // one library (#1564 r3's mixed-dist witness): two heads given as their `dist/`, one compiled `src/` and two oracle
+    // libraries, compare otherwise and are refused together; one head's `dist/` in both shards closes
+    const twin = join(directory, "twin");
+    cpSync(head, twin, { recursive: true });
+    writeFileSync(
+      join(twin, "dist", "tests", "helpers", "type-core-oracles.js"),
+      `${charging(true)}// another library\n`,
+    );
+    const pair = area("pair", ["a", "b"]);
+    const own = join(directory, "own.work.jsonl");
+    const twinned = join(directory, "twinned.work.jsonl");
+    const both = join(directory, "both.work.jsonl");
+    run(runner, pair, base, join(head, "dist"), "--shard", "0/2", "--work", own);
+    run(runner, pair, base, join(twin, "dist"), "--shard", "1/2", "--work", twinned);
+    run(runner, pair, base, join(head, "dist"), "--shard", "1/2", "--work", both);
+    const libraries = run(stalls, own, twinned);
+    assert.equal(libraries.status, 2, libraries.stdout);
+    assert.match(libraries.stderr, /compares otherwise than the area's other shards \(trees\)/);
+    assert.equal(run(stalls, own, both).status, 0);
+    // one compiler (#1564 r4's witnesses): two checkouts of one TypeScript `src/` and oracle library whose compiled
+    // compilers differ compare otherwise, as shards and as a replay and its rerun; the same checkout merges and reruns
+    const checkout = (name: string, compiler: string) => {
+      const copy = join(directory, name);
+      cpSync(head, copy, { recursive: true });
+      mkdirSync(join(copy, "src"));
+      writeFileSync(join(copy, "src", "a.ts"), "a\n");
+      writeFileSync(join(copy, "dist", "src", "type-inference", "core", "budget.js"), compiler);
+      return copy;
+    };
+    const [one, another] = [checkout("one", LEDGER), checkout("another", `${LEDGER}// another\n`)];
+    const compiled = area("compiled", ["a", "ends"]);
+    const [first, second, same] = [0, 1, 2].map((index) =>
+      join(directory, `compiled-${index}.work.jsonl`),
+    );
+    run(runner, compiled, base, one, "--shard", "0/2", "--work", first!);
+    run(runner, compiled, base, another, "--shard", "1/2", "--work", second!);
+    run(runner, compiled, base, one, "--shard", "1/2", "--work", same!);
+    const compilers = run(stalls, first!, second!);
+    assert.equal(compilers.status, 2, compilers.stdout);
+    assert.match(compilers.stderr, /compares otherwise than the area's other shards \(trees\)/);
+    assert.equal(run(stalls, first!, same!).status, 1);
+    const ended = join(directory, "ended.work.jsonl");
+    const endedIndex = join(directory, "ended-index.json");
+    run(runner, compiled, base, one, "--work", ended);
+    run(stalls, ended, "--index", endedIndex);
+    const wrong = run(stalls, "rerun", endedIndex, base, another, join(directory, "wrong"));
+    assert.match(wrong.stderr, /is not the tree compiled's replay compared/);
+    assert.equal(existsSync(join(directory, "wrong")), false);
+    assert.equal(run(stalls, "rerun", endedIndex, base, one, join(directory, "right")).status, 1);
+    assert.equal(
+      run(stalls, ended, "--rerun", join(directory, "right", "compiled.work.jsonl")).status,
+      1,
+    );
+
+    // charges far faster than the runner reads them, then a wait past the limit: the record holds them all, as the
+    // child wrote it over at the last charge (#1564 r1's saturation witness)
+    const burst = join(directory, "burst.work.jsonl");
+    run(runner, area("burst", ["burst"]), base, head, "--timeout", "1.5", "--work", burst);
+    const flooded = lines(readFileSync(burst, "utf8"))[1].runs.at(-1);
+    assert.deepEqual([flooded.work, flooded.running], [[3000, 3000 + 10_000 * 65_536], 1]);
+
+    // a replay at a half-second limit: `slow` stalls in the head's long runs, `busy` in the base's turn, `lagging` in the
+    // head's first run; each source's record holds each run's units and milliseconds on each tree, a stalled run's
+    // those it had when the runner ended it
+    const replay = area("replay", ["fast", "slow", "busy", "lagging"]);
+    const work = join(directory, "replay.work.jsonl");
+    const ran = run(runner, replay, base, head, "--timeout", "0.5", "--work", work);
+    assert.equal(ran.status, 1, ran.stderr);
+    const [header, fast, slow, busy, lagging, total] = lines(readFileSync(work, "utf8"));
+    assert.deepEqual(
+      [
+        header.work.area,
+        header.work.shard,
+        header.work.roots,
+        header.work.configuration.allowances,
+      ],
+      [replay, "0/1", [base, head], [null, 16, 256]],
+    );
+    assert.deepEqual(total.total, JSON.parse(ran.stdout.trim().split("\n").at(-1)!));
+    assert.deepEqual(
+      fast.runs.map(({ mode, work: units }: { mode: string; work: number[] }) => [mode, ...units]),
+      MODES.map((mode) => [mode, 3000, 3000]),
+    );
+    assert.deepEqual([fast.counts, fast.stalled], [{ runs: 4 }, undefined]);
+    assert.deepEqual(
+      [slow.stalled, busy.stalled, lagging.stalled],
+      ["timeout", "timeout", "timeout"],
+    );
+    const cut = slow.runs.at(-1);
+    assert.deepEqual([cut.work, cut.running], [[3000, 1e9 + 3000], 1]);
+    assert.ok(cut.ms[1] > 0 && cut.ms[1] <= 200, String(cut.ms));
+    assert.equal(busy.runs.at(-1).running, 0);
+    assert.deepEqual(lagging.runs.at(-1).running, 1);
+
+    // the index: `slow` a candidate (the head charged more than the base on a run), `busy` load (the base's turn ran
+    // out), `lagging` unknown (the head's run cut short of the base's work); none agreement
+    const index = join(directory, "index.json");
+    const indexed = run(stalls, work, "--index", index);
+    assert.equal(indexed.status, 1, indexed.stderr);
+    const printed = lines(indexed.stdout);
+    assert.match(printed[0].rule, /^A stalled source is a candidate stall/);
+    assert.deepEqual(
+      printed.slice(1, 4).map(({ source, verdict }) => [source, verdict]),
+      [
+        ["slow", "candidate"],
+        ["busy", "load"],
+        ["lagging", "unknown"],
+      ],
+    );
+    const counted = (row: Record<string, unknown>) =>
+      ["sources", "agreed", "unavailable", "load", "candidate", "unknown", "rerun", "closed"].map(
+        (key) => row[key],
+      );
+    assert.deepEqual(counted(printed[5]), [4, 1, 3, 1, 1, 1, 0, false]);
+    assert.deepEqual(
+      JSON.parse(readFileSync(index, "utf8")).entries.map(
+        ({ source }: { source: string }) => source,
+      ),
+      ["slow", "busy", "lagging"],
+    );
+
+    // an index naming a source its area does not hold is refused before any runs
+    mkdirSync(join(directory, "elsewhere"));
+    const fewer = area(join("elsewhere", "replay"), ["fast"]);
+    assert.match(run(runner, fewer, base, head, "--only", index).stderr, /does not hold/);
+
+    // the rerun: each source alone, both trees in one process; all three end and agree, but `slow` charged the head
+    // more, so the replay stays open
+    const again = join(directory, "again");
+    const rerun = run(stalls, "rerun", index, base, head, again, "--timeout", "5");
+    assert.equal(rerun.status, 0, rerun.stderr);
+    const merged = run(stalls, work, "--rerun", join(again, "replay.work.jsonl"));
+    assert.equal(merged.status, 1, merged.stderr);
+    const after = lines(merged.stdout);
+    assert.deepEqual(
+      after
+        .slice(1, 4)
+        .map(({ source, rerun: { outcome, verdict } }) => [source, outcome, verdict]),
+      [
+        ["slow", "agreed", "candidate"],
+        ["busy", "agreed", undefined],
+        ["lagging", "agreed", undefined],
+      ],
+    );
+    assert.deepEqual(counted(after.at(-1)), [4, 4, 0, 0, 1, 0, 3, false]);
+
+    // a replay of other stop allowances (#1564 r1's false-closure witness): its index keeps them, so its rerun runs
+    // them again, keeps the difference at allowance 1 and stalls again at 2; a rerun record of other allowances is not
+    // merged
+    const checks = area("checks", ["checked"], ["publication", "stops"]);
+    const checked = join(directory, "checks.work.jsonl");
+    run(runner, checks, base, head, "--allowances", "1,2", "--timeout", "0.5", "--work", checked);
+    const checkIndex = join(directory, "checks-index.json");
+    assert.equal(run(stalls, checked, "--index", checkIndex).status, 1);
+    assert.match(
+      run(stalls, "rerun", checkIndex, base, head, join(directory, "x"), "--allowances", "1")
+        .stderr,
+      /drop --allowances/,
+    );
+    const rechecked = join(directory, "rechecked");
+    assert.equal(
+      run(stalls, "rerun", checkIndex, base, head, rechecked, "--timeout", "1").status,
+      1,
+    );
+    const reran = run(stalls, checked, "--rerun", join(rechecked, "checks.work.jsonl"));
+    assert.equal(reran.status, 1, reran.stderr);
+    assert.deepEqual(
+      [lines(reran.stdout).at(-1).differences, lines(reran.stdout).at(-1).unavailable],
+      [1, 1],
+    );
+    const defaults = join(directory, "defaults.work.jsonl");
+    run(runner, checks, base, head, "--only", checkIndex, "--timeout", "1", "--work", defaults);
+    const refusedMerge = run(stalls, checked, "--rerun", defaults);
+    assert.equal(refusedMerge.status, 2);
+    assert.match(refusedMerge.stderr, /compares otherwise than its replay \(allowances\)/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the stall index decides each stalled source from its record by one rule: the head's work on each run, its time where both trees ran in one process, and which tree stalled and why (#1564)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const KEYS = [
+      "unparsed",
+      "stalled",
+      "exceptions",
+      "unanswered",
+      "uncompared",
+      "runs",
+      "differences",
+    ];
+    type Entry = { source: string; counts: Record<string, number> } & Record<string, unknown>;
+    const CONFIGURATION = {
+      sizes: null,
+      allowances: [null, 16, 256],
+      checks: { "g.mjs": ["publication"] },
+      trees: [{ src: null }, { src: null }],
+    };
+    /**
+     * A shard's `--work` record (shard `at` of the area `name`, in the file `file`) of `trees` trees, its total the sum of
+     * its sources' counts, cut before its total where `cut`.
+     */
+    const shard = (
+      name: string,
+      trees: number,
+      entries: Entry[],
+      { cut = false, at = "0/1", file: called = name, configuration = CONFIGURATION } = {},
+    ) => {
+      const sum = (key: string) =>
+        entries.reduce((total, { counts }) => total + (counts[key] ?? 0), 0);
+      const total = {
+        area: name,
+        sources: entries.length,
+        ...Object.fromEntries(KEYS.map((key) => [key, sum(key)])),
+      };
+      const file = join(directory, `${called}.work.jsonl`);
+      const roots = Array.from({ length: trees }, () => "tree");
+      const header = { work: { area: name, shard: at, roots, configuration } };
+      const lines = [
+        header,
+        ...entries.map((entry) => ({ generator: "g.mjs", key: "k", ...entry })),
+      ];
+      writeFileSync(
+        file,
+        [...lines, ...(cut ? [] : [{ total }])].map((line) => `${JSON.stringify(line)}\n`).join(""),
+      );
+      return file;
+    };
+    const publication = (work: (number | null)[], ms: (number | null)[], running?: number) => ({
+      mode: "src-on",
+      check: "publication",
+      work,
+      ms,
+      ...(running === undefined ? {} : { running }),
+    });
+    const stalled = (source: string, why: unknown, runs: Record<string, unknown>[]): Entry => ({
+      source,
+      stalled: why,
+      runs,
+      counts: { stalled: 1 },
+    });
+    const heap =
+      "SIGABRT: FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory";
+    // both trees in one process: the tree that stalled is the one still running
+    const paired = shard("paired", 2, [
+      stalled("memory", heap, [publication([10, 5], [5, 3], 1)]),
+      stalled("charged", "timeout", [
+        publication([100, 100], [10, 10]),
+        publication([100, 150], [10, 500], 1),
+      ]),
+      stalled("slower", "timeout", [
+        publication([1000, 1000], [100, 100]),
+        publication([1000, 500], [100, 10201], 1),
+      ]),
+      stalled("boundary", "timeout", [
+        publication([1000, 1000], [100, 100]),
+        publication([1000, 500], [100, 10200], 1),
+      ]),
+      stalled("based", "timeout", [
+        publication([100, 100], [10, 10]),
+        publication([50, null], [180000, null], 0),
+      ]),
+      stalled("unmeasured", "timeout", [publication([null, null], [10, 180000], 1)]),
+      stalled("between", "exit 3", [publication([5, 5], [1, 1])]),
+      { source: "agreed", runs: [publication([5, 5], [1, 1])], counts: { runs: 1 } },
+      // a source that ended in the replay is judged by agreement alone: its work is the growth gates'
+      { source: "costlier", runs: [publication([5, 9], [1, 30000])], counts: { runs: 1 } },
+    ]);
+    // the head against a stored base, which records no work
+    const stored = shard("stored", 1, [
+      stalled("timedout", { head: "timeout" }, [publication([500], [180000], 0)]),
+      stalled("crashed", { head: heap }, [publication([500], [100], 0)]),
+      stalled("inherited", { base: "timeout", head: "timeout" }, [publication([500], [180000], 0)]),
+    ]);
+    // a replay's `--out` file for a shard run without `--work`: its stalls alone
+    const out = join(directory, "property-0of1.jsonl");
+    const files = [{ path: "main.tease", source: "x" }];
+    writeFileSync(
+      out,
+      `${JSON.stringify({ generator: "s8-stores.mjs", source: "x", stalled: { head: "timeout" }, files, globals: [] })}\n`,
+    );
+    const run = (...args: string[]) =>
+      spawnSync(process.execPath, [stalls, ...args], { encoding: "utf8" });
+    const lines = (text: string) =>
+      text
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+    const result = run(paired, stored, out);
+    assert.equal(result.status, 1, result.stderr);
+    const printed = lines(result.stdout);
+    assert.deepEqual(
+      printed
+        .filter(({ verdict }) => verdict !== undefined)
+        .map(({ source, verdict }) => `${source} ${verdict}`),
+      [
+        "memory candidate",
+        "charged candidate",
+        "slower candidate",
+        "boundary unknown",
+        "based load",
+        "unmeasured unknown",
+        "between unknown",
+        "timedout unknown",
+        "crashed candidate",
+        "inherited unknown",
+        "x unknown",
+      ],
+    );
+    assert.match(
+      printed.find(({ source }) => source === "based").why,
+      /^the base alone stalled \(timeout\)/,
+    );
+    assert.deepEqual(
+      printed
+        .filter(({ area, complete }) => area !== undefined && complete !== undefined)
+        .map(({ area, complete, agreed, unavailable, candidate }) => [
+          area,
+          complete,
+          agreed,
+          unavailable,
+          candidate,
+        ]),
+      [
+        ["paired", true, 2, 7, 3],
+        ["property", false, 0, 1, 0],
+        ["stored", true, 0, 3, 1],
+      ],
+    );
+    // closed where every source agrees; refused, a record cut short, one whose sources do not add up to its total, and
+    // a rerun of a source the replay does not hold
+    const agreed = shard("agreed", 2, [
+      { source: "agreed", runs: [publication([5, 5], [1, 1])], counts: { runs: 1 } },
+    ]);
+    const closed = run(agreed);
+    assert.equal(closed.status, 0, closed.stderr);
+    assert.equal(lines(closed.stdout).at(-1).closed, true);
+    // an area complete only with its shards 0/N to N-1/N, one N (#1564 r1's coverage witness), of one configuration
+    const half = (at: string, file: string, configuration = CONFIGURATION) =>
+      shard(
+        "halves",
+        2,
+        [{ source: `s${at}`, runs: [publication([5, 5], [1, 1])], counts: { runs: 1 } }],
+        { at, file, configuration },
+      );
+    const second = half("1/2", "second");
+    const alone = lines(run(second).stdout);
+    assert.deepEqual(
+      [alone.at(-2).complete, alone.at(-2).missing, alone.at(-1).closed],
+      [false, ["0/2"], false],
+    );
+    const beyond = lines(run(second, half("2/2", "beyond")).stdout);
+    assert.deepEqual([beyond.at(-2).complete, beyond.at(-2).missing], [false, ["0/2"]]);
+    const both = run(half("0/2", "first"), second);
+    assert.equal(both.status, 0, both.stderr);
+    assert.equal(lines(both.stdout).at(-2).shards, "2/2");
+    const otherwise = half("0/2", "otherwise", { ...CONFIGURATION, allowances: [1, 2] });
+    assert.match(
+      run(otherwise, second).stderr,
+      /compares otherwise than the area's other shards \(allowances\)/,
+    );
+    assert.equal(run(shard("cut", 2, [], { cut: true })).status, 2);
+    const uneven = shard("uneven", 2, [{ source: "a", runs: [], counts: { runs: 2 } }]);
+    writeFileSync(uneven, readFileSync(uneven, "utf8").replace('"runs":2}}', '"runs":1}}'));
+    assert.equal(run(uneven).status, 2);
+    const other = join(directory, "other.work.jsonl");
+    writeFileSync(
+      other,
+      readFileSync(agreed, "utf8")
+        .replace('"shard":"0/1"', '"shard":"0/1","only":"index"')
+        .replace('"source":"agreed"', '"source":"another"'),
+    );
+    assert.equal(run(agreed, "--rerun", other).status, 2);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

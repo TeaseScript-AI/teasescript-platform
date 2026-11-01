@@ -167,6 +167,10 @@ const ALLOWED = {
       (call, { named, file }) => file === "run.mjs" && named === "oracles",
       "the built tree's own library, the code under test that the runner exists to run, not the tools",
     ],
+    "a tree's work ledger": [
+      (call, { named, file }) => file === "run.mjs" && named === "ledgerOf",
+      "the built tree's own budget module, the code under test whose charges `--work` counts, not the tools",
+    ],
     "an area's generators": [
       (call, { named, file }) => file === "sources.mjs" && named === "generatorsOf",
       "an area's generator modules, the cases under test that the runner exists to run, not the tools",
