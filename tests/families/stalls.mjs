@@ -237,14 +237,20 @@ const sayingOf = ({ counts, stalled, runs }) =>
 
 /**
  * `entry` (of `file`) into `into`, a map by place: a repeat of a place it holds is that one source where it says the same
- * (`repeats` counted), and refused (exit 2) where it does not.
+ * (`repeats` counted), and refused (exit 2) where it does not. Repeats that say the same may differ in their times only;
+ * where the time clause judges one a candidate (`verdictOf`), its runs stand for the source, whatever their order.
  */
 function merge(into, entry, file) {
   const place = placeOf(entry);
   const held = into.get(place);
   if (held === undefined) into.set(place, entry);
-  else if (sayingOf(held) === sayingOf(entry)) held.repeats = (held.repeats ?? 0) + 1;
-  else refused(`${file} holds a source another record holds otherwise: ${place}`);
+  else if (sayingOf(held) !== sayingOf(entry))
+    refused(`${file} holds a source another record holds otherwise: ${place}`);
+  else {
+    held.repeats = (held.repeats ?? 0) + 1;
+    if (verdictOf(entry).verdict === "candidate" && verdictOf(held).verdict !== "candidate")
+      held.runs = entry.runs;
+  }
 }
 
 /** What a source did, in one word. */
