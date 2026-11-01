@@ -672,8 +672,8 @@ test("a stopped answer's items stand in the kinds' table order too, in the four 
  * fixed order where it is completed, the kinds' table order then `unknown`: a receiver beside its contract's reference
  * kinds, the `besides` gathered from a site's other warnings, a warning's `fits` where a domain stands in for host data,
  * a sort's families, a fallback's family beside its receiving union (its rule, its check and the check's text), what
- * two reads take together, a shown set's elements, one place's decision after a stop (Codex r4), and the sort's warning
- * the stop defers at a test allowance. Each row's published lists in the four modes; a written type's spelling keeps
+ * two reads take together, a shown set's elements, one place's decision after a stop (Codex r4), the sort's warning the
+ * stop defers at a test allowance, and a literal's sorted elements after a stop. Each row's published lists in the four modes; a written type's spelling keeps
  * its own (the store rows' `[string, integer]`, a written type a decision borrows, one a fallback's receiving type only
  * repeats), and the sort's offending kind is the one its elements' own order picks, deferred or not.
  */
@@ -879,6 +879,16 @@ const COMPOSED_ORDER_ROWS: readonly {
         },
       ];
     }),
+    {
+      name: "a literal's sorted elements after a stop",
+      source: 'let ys = ["s", 1].sort()\nexit\n',
+      analyse: (request) => withTestAllowance(40, () => analyseCore(request)),
+      lists: (answers) =>
+        ruled(answers).flatMap((diagnostic) =>
+          diagnostic.rule.rule === "elements" ? [diagnostic.kinds] : [],
+        ),
+      expected: ["integer", "string"],
+    },
   ];
 })();
 
