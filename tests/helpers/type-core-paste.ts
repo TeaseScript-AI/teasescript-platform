@@ -435,7 +435,7 @@ export function pasteCases(sample = false): PasteCase[] {
     const stores = sample ? [STORES[index % STORES.length]!] : STORES;
     for (const store of stores)
       for (const value of sample
-        ? values.filter((value, at) => at === 0 || value === ANSWERED)
+        ? values.filter((candidate, position) => position === 0 || candidate === ANSWERED)
         : values) {
         const site = store(type, start);
         const head =
