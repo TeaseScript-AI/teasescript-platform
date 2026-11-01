@@ -1,7 +1,11 @@
 import type { Expression, Statement } from "../../src/ast.js";
 import { compileProject, compileProjectWithBackend } from "../../src/compiler.js";
 import { handlerBlocks, nestedStatements, unwrap } from "../../src/expression-children.js";
-import { createFreshRuntimeSession } from "../../src/index.js";
+import {
+  createFreshRuntimeSession,
+  type InstructionPlan,
+  type RuntimeSessionView,
+} from "../../src/index.js";
 import { parse } from "../../src/parser.js";
 import type { SourceSpan } from "../../src/source.js";
 import type { TypeAnalysisBackend } from "../../src/type-inference/backend.js";
@@ -16,7 +20,8 @@ import { coreRequest } from "./type-core-analysis.js";
  * receiver or list needs, the element and value kinds varied) at one site (`SITES`: a declaration, typed or not, a
  * store, an operand per operator class, an argument, a condition, an interpolation, an element, a receiver, a count, a
  * loop's iterable, a range's bound, a side of `otherwise`, a default, a variable or a parameter without a type, as its
- * reads take it, also in a compound assignment). A pasted form compiles with both checkers and runs; a declaration
+ * reads take it, also in a compound assignment). A pasted form compiles with both checkers and runs to its end through
+ * the pasted code, answered where it asks (#1586); a declaration
  * form under the new core alone where the current checker's recorded difference from the accepted text is its only
  * rejection (#1412: a list join whose written destination admits every operand), as the checker whose message offers it
  * decides (the lead's ruling on #1310): the joins whose value the declaration's written type receives, and no other
@@ -296,6 +301,9 @@ const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
   ),
 ];
 
+/** A value the player answers, which its store receives only after the answer (#1586); the sample takes it too. */
+const ANSWERED = 'askInteger("How many?")';
+
 /** A store's place of one written type, its start value, and values of other kinds stored into it. */
 const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
   [
@@ -333,7 +341,7 @@ const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
       "fine.n",
       // (Codex r13: an ask's, a `say`'s and a button's operand, read by a key or there)
       'askInteger("${d["absent"]}")',
-      'askInteger("How many?")',
+      ANSWERED,
       '[say("${d["absent"]}", instant)].length',
       '[say("Strokes: 0", instant)].length',
       '[(showButton "${d["absent"]}")].length',
@@ -381,7 +389,10 @@ export interface PasteCase {
   readonly end: number;
 }
 
-/** The family's cases: every offer at every site, or with `sample`, every offer once, the sites in turn (each once). */
+/**
+ * The family's cases: every offer at every site, or with `sample`, every offer once, the sites in turn (each once), and
+ * a store's first value and `ANSWERED`.
+ */
 export function pasteCases(sample = false): PasteCase[] {
   const cases: PasteCase[] = [];
   const offers = [
@@ -423,7 +434,9 @@ export function pasteCases(sample = false): PasteCase[] {
   PLACES.forEach(([type, start, values], index) => {
     const stores = sample ? [STORES[index % STORES.length]!] : STORES;
     for (const store of stores)
-      for (const value of sample ? values.slice(0, 1) : values) {
+      for (const value of sample
+        ? values.filter((value, at) => at === 0 || value === ANSWERED)
+        : values) {
         const site = store(type, start);
         const head =
           [
@@ -454,10 +467,14 @@ export function pasteCases(sample = false): PasteCase[] {
   return cases;
 }
 
-/** A pasted form: the code a fix offered, and the source with it pasted at its position; a declaration's span there. */
+/**
+ * A pasted form: the code a fix offered, the source with it pasted at its position, and its span there (`at`; for a
+ * declaration whose own text is not there, the diagnosed expression's); a declaration's span there.
+ */
 export interface Pasted {
   readonly code: string;
   readonly source: string;
+  readonly at: { readonly start: number; readonly end: number };
   readonly declared?: { readonly start: number; readonly end: number };
 }
 
@@ -517,6 +534,7 @@ export function pastedForms(
             source.slice(0, diagnostic.site.start) +
             fallback +
             source.slice(diagnostic.site.start + subject.length),
+          at: { start: diagnostic.site.start, end: diagnostic.site.start + fallback.length },
         });
       continue;
     }
@@ -529,22 +547,28 @@ export function pastedForms(
       const typed = start === "" ? "(?:: [^=,)\\n]+)?" : "(?:: [^=\\n]+?)?";
       const own = new RegExp(`(?<![\\w.])${literally(head!)}${typed}${literally(start)}(?![\\w])`);
       const found = own.exec(source);
-      forms.push(
-        found === null
-          ? { code: code!, source }
-          : {
-              code: code!,
-              source:
-                source.slice(0, found.index) + code + source.slice(found.index + found[0].length),
-              declared: { start: found.index, end: found.index + code!.length },
-            },
-      );
+      if (found === null)
+        forms.push({
+          code: code!,
+          source,
+          at: { start: diagnostic.site.start, end: diagnostic.site.end },
+        });
+      else {
+        const span = { start: found.index, end: found.index + code!.length };
+        forms.push({
+          code: code!,
+          source: source.slice(0, found.index) + code + source.slice(found.index + found[0].length),
+          at: span,
+          declared: span,
+        });
+      }
     }
     for (const [, code, statement] of fixes.matchAll(CODE)) {
       if (statement === undefined) {
         forms.push({
           code: code!,
           source: source.slice(0, diagnostic.site.start) + code + source.slice(diagnostic.site.end),
+          at: { start: diagnostic.site.start, end: diagnostic.site.start + code!.length },
         });
         continue;
       }
@@ -559,6 +583,7 @@ export function pastedForms(
           source.slice(lineStart, start) +
           list +
           source.slice(end),
+        at: { start: lineStart, end: lineStart + code!.length },
       });
     }
   }
@@ -627,15 +652,61 @@ function recorded(landing: ReadonlySet<string>): TypeAnalysisBackend {
   };
 }
 
+/** How many answers a pasted program's run gets before it counts as incomplete; the family's runs need one (#1586). */
+const COMPLETIONS = 4;
+
 /**
- * Why a pasted source fails: its compile errors, the new core's among them (Codex r9), or its run's failure; `null`
- * where it compiles and runs. A pasted declaration's (`declared`) compile errors leave out the current checker's recorded
+ * The scripted answer to what a run waits for: a valid number to a number request, the button's activation to a button;
+ * `undefined` for anything else, whose run stays incomplete.
+ */
+function answer(view: RuntimeSessionView): object | undefined {
+  const action = view.foregroundAction;
+  if (action?.kind !== "interaction") return undefined;
+  const payload =
+    action.interactionKind === "number"
+      ? { kind: "submittedText", submittedText: "2" }
+      : action.interactionKind === "button"
+        ? { kind: "activate" }
+        : undefined;
+  return payload === undefined
+    ? undefined
+    : {
+        actionId: action.actionId,
+        actionKind: "interaction",
+        interactionKind: action.interactionKind,
+        payload,
+      };
+}
+
+/**
+ * Whether a run executed the pasted code at `at`: of the plan's instructions whose span holds all of it, the innermost
+ * (the prompt that shows it, the store, call or statement that receives its value) include one the run executed. An
+ * instruction inside the code, as an ask it wraps, does not hold it: a store receiving an answer counts only once it ran
+ * (#1586).
+ */
+function reached(plan: InstructionPlan, executed: ReadonlySet<number>, at: Pasted["at"]): boolean {
+  let innermost = Infinity;
+  let ran = false;
+  plan.instructions.forEach(({ span }, index) => {
+    if (span.so > at.start || span.eo < at.end) return;
+    const width = span.eo - span.so;
+    if (width < innermost) {
+      innermost = width;
+      ran = false;
+    }
+    if (width === innermost && executed.has(index)) ran = true;
+  });
+  return ran;
+}
+
+/**
+ * Why a pasted form fails: its compile errors, the new core's among them (Codex r9), its run's failure, or a run that
+ * does not show it runs (#1586): one still waiting after `COMPLETIONS` scripted answers (`answer`) or for what none
+ * answers, or one that ended without executing the pasted code (`reached`). `null` where it compiles, runs to its end
+ * and executed the code. A pasted declaration's (`declared`) compile errors leave out the current checker's recorded
  * difference at its own join (#1412), which the new core decides.
  */
-export function pasteFailure(
-  source: string,
-  declared?: { readonly start: number; readonly end: number },
-): string | null {
+export function pasteFailure({ source, at, declared }: Omit<Pasted, "code">): string | null {
   const files = [{ path: "main.tease", source }];
   const compiled =
     declared === undefined
@@ -653,12 +724,29 @@ export function pasteFailure(
       .map((diagnostic) => `core ${diagnostic.code}: ${coreMessage(diagnostic, text)}`)
       .join(" | ");
   if (compiled.plan === null) return "no plan";
-  const failure = createFreshRuntimeSession(compiled.plan, {
+  const session = createFreshRuntimeSession(compiled.plan, {
     baseDelayMs: 0,
     delayPerWordMs: 0,
     delayPerCharacterMs: 0,
-  })
-    .run()
-    .events.find((event) => event.kind === "runtimeFailure");
-  return failure === undefined ? null : JSON.stringify(failure);
+  });
+  const executed = new Set<number>();
+  for (let completions = 0; ; completions += 1) {
+    const { events, instructionTrace } = session.run({ instructionTrace: true });
+    for (const index of instructionTrace?.instructions ?? []) executed.add(index);
+    const failure = events.find((event) => event.kind === "runtimeFailure");
+    if (failure !== undefined) return JSON.stringify(failure);
+    const view = session.view();
+    if (view.status === "halted")
+      return reached(compiled.plan, executed, at)
+        ? null
+        : `unreached: the run ended without executing '${source.slice(at.start, at.end)}'`;
+    const request = answer(view);
+    const action = view.foregroundAction;
+    const awaited = action?.kind === "interaction" ? action.interactionKind : action?.kind;
+    if (request === undefined || completions === COMPLETIONS)
+      return `incomplete execution: ${view.status} for ${awaited ?? "nothing"} after ${completions} completions`;
+    const { outcome } = session.completeAction(request);
+    if (outcome.kind !== "completed")
+      return `incomplete execution: the scripted answer to ${awaited} was not taken (${outcome.kind})`;
+  }
 }

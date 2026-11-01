@@ -16,7 +16,7 @@ import {
 import type { CheckedDiagnostic } from "../src/type-inference/core/result.js";
 import { VALUE_KINDS } from "../src/value-kinds.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
-import { pasteCases, pastedForms, pasteFailure } from "./helpers/type-core-paste.js";
+import { pasteCases, pastedForms, pasteFailure, type Pasted } from "./helpers/type-core-paste.js";
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
 import { sentences } from "./helpers/type-core-oracles.js";
 
@@ -1438,8 +1438,8 @@ test("a list fix's add, on a line of its own, compiles and runs where the fix of
 
 /**
  * TABLE r4.151 (#1241): the paste family's sample (`type-core-paste.ts`): every offer once, the sites in turn, every
- * code form its fix offers pasted at its own position compiles and runs. The whole family, every offer at every site,
- * is the step's evidence outside CI.
+ * code form its fix offers pasted at its own position compiles and runs to its end through it, a store that receives an
+ * answer among them (#1586). The whole family, every offer at every site, is the step's evidence outside CI.
  */
 test("every code form a fix offers compiles and runs where pasted, on the paste family's sample (TABLE r4.151)", () => {
   const failures: string[] = [];
@@ -1449,12 +1449,38 @@ test("every code form a fix offers compiles and runs where pasted, on the paste 
     if (!diagnosed) failures.push(`${name}: no error at the expression`);
     for (const form of forms) {
       pasted += 1;
-      const failure = pasteFailure(form.source, form.declared);
+      const failure = pasteFailure(form);
       if (failure !== null) failures.push(`${name}: '${form.code}': ${failure}`);
     }
   }
   assert.deepEqual(failures, []);
   assert.ok(pasted > 0, `${pasted} forms pasted`);
+});
+
+test("a pasted form counts as run only where its run ends through it, answered where it asks (#1586)", () => {
+  const pasted = (source: string, code: string): Pasted => {
+    const start = source.indexOf(code);
+    return { code, source, at: { start, end: start + code.length } };
+  };
+  // (a failure after a valid answer)
+  const canary = 'let answer = askInteger("Number?")\nsay 1 / (answer - answer)\nexit\n';
+  assert.match(pasteFailure(pasted(canary, "1 / (answer - answer)")) ?? "", /"code":"TSR036"/);
+  // (a list's addition that receives the answer, as the family's duration stores do)
+  const added =
+    'let ps: duration[] = [1 s]\nps.add((askInteger("How many?")) s)\nsay ps.length\nexit\n';
+  assert.equal(pasteFailure(pasted(added, '(askInteger("How many?")) s')), null);
+  // (code in a branch the answer does not take)
+  const skipped = 'let n = askInteger("How many?")\nif n > 5 {\n  say n * 1 s\n}\nexit\n';
+  assert.equal(
+    pasteFailure(pasted(skipped, "n * 1 s")),
+    "unreached: the run ended without executing 'n * 1 s'",
+  );
+  // (a run that still asks once its answers run out)
+  const asking = 'repeat 5 {\n  say askInteger("Again?")\n}\nexit\n';
+  assert.equal(
+    pasteFailure(pasted(asking, 'askInteger("Again?")')),
+    "incomplete execution: waiting for number after 4 completions",
+  );
 });
 
 test("a join's pasted declaration is checked under the core alone at the joins its type receives, and the current checker's other join errors stand (#1412, Codex r12 and r13 on #1310)", () => {
@@ -1464,7 +1490,7 @@ test("a join's pasted declaration is checked under the core alone at the joins i
       (form) => form.declared !== undefined,
     );
     assert.equal(forms.length, 1, source);
-    return pasteFailure(forms[0]!.source, forms[0]!.declared);
+    return pasteFailure(forms[0]!);
   };
   const objects = 'let a = [{n: 1}]\nlet b = [{n: "x"}]\n';
   assert.equal(pasted('let xs = [1]\nlet both = xs + ["x"]\nexit\n', 'xs + ["x"]'), null);
