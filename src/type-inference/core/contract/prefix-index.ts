@@ -43,6 +43,7 @@ import {
 import type { ProofDemand, Proven, Work } from "../solver.js";
 import { copyOnly, subFirstOf } from "./identity.js";
 import { ingressLeafOf } from "./ingress.js";
+import { pathAt, pathBelow } from "./literal-index.js";
 import { holderAt, marksAt } from "./marks.js";
 import type {
   CopyRing,
@@ -877,10 +878,38 @@ function ownHas(contract: Contract, sub: Key, ref: PathRef): boolean {
   return false;
 }
 
-/** The id of a path asked below a prefix: a span's own; an array's each step charged (`PathRef.id`). */
-function pathOf(contract: Contract, ref: PathRef): number {
-  if (ref.kind === "steps") contract.pass.program.work.charge("invSteps", ref.length);
-  return ref.id();
+/**
+ * A path asked below a prefix and its id, made once on its first asking (`pathIdAt`). The selection's walk of an array's
+ * steps notes the longest prefix of them already made (`holdingAt`), so the id is made below it: a read walks its steps
+ * once, never again for its id.
+ */
+interface ReadPath {
+  readonly ref: PathRef;
+  id: number | undefined;
+  /** The longest prefix of an array's steps found made (`pathBelow`), its length and its id. */
+  found: number;
+  foundId: number;
+}
+
+/** A path asked below a prefix, its id not yet made (`pathIdAt`). */
+function readPath(ref: PathRef): ReadPath {
+  return { ref, id: undefined, found: 0, foundId: 0 };
+}
+
+/**
+ * A read's path's id: a span's own; an array's made below the longest prefix its selection found made, each step past it
+ * charged: the ids `PathRef.id` makes (`pathAt` per step), in its order.
+ */
+function pathIdAt(contract: Contract, path: ReadPath): number {
+  if (path.id !== undefined) return path.id;
+  const { ref } = path;
+  if (ref.kind !== "steps") return (path.id = ref.id());
+  if (path.found === ref.length) return (path.id = path.foundId);
+  contract.pass.program.work.charge("invSteps", ref.length - path.found);
+  if (path.found === 0) return (path.id = ref.id());
+  let id = path.foundId;
+  for (let at = path.found; at < ref.length; at += 1) id = pathAt(contract, id, ref.at(at));
+  return (path.id = id);
 }
 
 /** A layer's answers at a path, made where first asked. */
@@ -1263,19 +1292,25 @@ function stepLayersOf(
 /**
  * The found layers listing a source with a store at a prefix of `ref` (`subsByPath`), by their indices. Each prefix's
  * text is made one step longer than the last and only looked up, never kept: kept, they would charge a read the square
- * of its path's length.
+ * of its path's length. With `path`, the walk notes the longest prefix of an array's steps already made, for its id.
  */
 function holdingAt(
   contract: Contract,
   own: ReadonlyMap<Key, readonly number[]>,
   ref: PathRef,
+  path?: ReadPath,
 ): Set<number> {
   const work = contract.pass.program.work;
   const holding = new Set<number>();
   let text = "";
+  let found = path === undefined || ref.kind !== "steps" ? -1 : 0;
   for (let length = 1; length <= ref.length && own.size > 0; length += 1) {
     work.charge("invSteps");
     text = length === 1 ? ref.at(0) : stepText(text, ref.at(length - 1));
+    if (found >= 0) {
+      found = pathBelow(contract, found, ref.at(length - 1));
+      if (found >= 0) [path!.found, path!.foundId] = [length, found];
+    }
     const having = contract.subsByPath.get(text);
     if (having === undefined) continue;
     // (from the smaller of the sources found and the sources with a store there)
@@ -1370,7 +1405,7 @@ function topsAt(
   contract: Contract,
   stores: PrefixStores,
   ref: PathRef,
-  path: () => number,
+  path: ReadPath,
 ): PrefixStores["also"] {
   const work = contract.pass.program.work;
   // (the first read under a step keeps its memo, as `main`'s, whether or not a layer lists it; later reads read it)
@@ -1382,7 +1417,7 @@ function topsAt(
     step,
   );
   if (layers.found.length === 0) return [];
-  const holding = holdingAt(contract, layers.own, ref);
+  const holding = holdingAt(contract, layers.own, ref, path);
   const out: PrefixStores["also"][number][] = [];
   for (const index of [...holding].sort((a, b) => a - b)) {
     work.charge("invSteps");
@@ -1391,7 +1426,7 @@ function topsAt(
   }
   for (const index of passedBelow(contract, layers, holding)) {
     const { set, defs } = layers.below[index]!;
-    for (const layer of layersIn(contract, holdersIn(contract, set, ref, path())))
+    for (const layer of layersIn(contract, holdersIn(contract, set, ref, pathIdAt(contract, path))))
       out.push({ layer, defs: defs! });
   }
   return out;
@@ -1684,12 +1719,6 @@ function prefixFound(
       });
 }
 
-/** A path's id, made and charged once on its first asking (`pathOf`). */
-function pathOnce(contract: Contract, ref: PathRef): () => number {
-  let id: number | undefined;
-  return () => (id ??= pathOf(contract, ref));
-}
-
 /**
  * The sources a prefix's property reads apart from the shared entries, in their keys' order, each with the prefix's
  * stores that brought a layer listing it (A5's candidates): those its layers list under the property's first step with
@@ -1703,10 +1732,10 @@ export function relevantSubs(
 ): readonly SubSource[] {
   const ref = restRef(contract, asked);
   if (ref.length === 0) return [];
-  const pathId = pathOnce(contract, ref);
-  const tops = topsAt(contract, stores, ref, pathId);
+  const read = readPath(ref);
+  const tops = topsAt(contract, stores, ref, read);
   if (tops.length === 0) return [];
-  const path = pathId();
+  const path = pathIdAt(contract, read);
   // (a source's stores: the set of the one layer listing it, shared; a set of its own, made and charged as the second
   // layer listing it is met, where several do)
   const found = new Map<Key, ReadonlySet<Definition | null>>();
@@ -1847,8 +1876,8 @@ interface LayersAt {
 function layersAt(contract: Contract, stores: PrefixStores, rest: Rest): LayersAt | undefined {
   const ref = restRef(contract, rest);
   if (ref.length === 0) return { layers: [], path: 0 };
-  const path = pathOnce(contract, ref);
-  const tops = topsAt(contract, stores, ref, path);
+  const read = readPath(ref);
+  const tops = topsAt(contract, stores, ref, read);
   if (tops.length === 0) return { layers: [], path: 0 };
   if (stores.cut) return undefined;
   const layers: LayersAt["layers"][number][] = [];
@@ -1856,7 +1885,7 @@ function layersAt(contract: Contract, stores: PrefixStores, rest: Rest): LayersA
     if (layer.origin === null) return undefined;
     layers.push({ layer, defs });
   }
-  return { layers, path: path() };
+  return { layers, path: pathIdAt(contract, read) };
 }
 
 /** The summary of a prefix's layers at `rest`: the union of each layer's (`layerDemand`); `undefined` where one declines. */

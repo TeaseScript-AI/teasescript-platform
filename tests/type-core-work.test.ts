@@ -268,12 +268,18 @@ test("summaries' demands on output-bound reads are their answers' pairs, at main
 
 /**
  * #1466, the READY replay's `graph/224` and `graph/533` (a mutual feedback whose candidate route asks one `q` deeper per
- * question): a read's prefixes' texts are made one step longer at a time and looked up, never kept, so a read `depth`
- * properties down charges no literal work by its prefixes' lengths. Kept, they made the literal work a power of the depth
- * steeper and took the route past the allowance. At depths 32 and 64 in the four modes, the literal work grows at or
- * under `main`'s (measured on 7d6c4d3d4: a regression oracle of this shape).
+ * question) and the deep read they showed (TABLE r4.250): a read `depth` properties down walks its path's steps once,
+ * each prefix's text made one step longer than the last and only looked up, never kept, and the path's id made below
+ * the longest prefix that walk found made. Kept texts made the literal work a power of the depth steeper and took the
+ * route past the allowance; a second walk for the id kept the growth over `main`'s past the slack at 32 → 64
+ * (`invSteps` 3.4 %, the total 3.6 % with the sharing off). At depths 16, 32 and 64 in the four modes, against `main`'s
+ * work there (measured on 7d6c4d3d4: a regression oracle of this shape): the literal work grows at or under `main`'s at
+ * each doubling, and the total and `invSteps` by r4.231's falling reading (the head's growth over `main`'s falling,
+ * within 3 % at the later doubling).
+ * The total stays above `main`'s (clause (b): 21 % and 26 % at 64 with the sharing on and off), which r4.250 holds
+ * open; the PR's evidence reports it as failing.
  */
-test("a deep read keeps no text per prefix of its path (#1466)", () => {
+test("a deep read walks its path's steps once and keeps no text per prefix (#1466)", () => {
   const source = (depth: number): string =>
     [
       "let a={left:1,q:null}",
@@ -284,38 +290,64 @@ test("a deep read keeps no text per prefix of its path (#1466)", () => {
       "say read",
       "exit",
     ].join("\n");
-  // (`main`'s literal work at depths 32 and 64: in the source order and reversed, the sharing on and off)
-  const main = [
-    [6030, 25070],
-    [1782, 10542],
-    [6030, 25070],
-    [1782, 10542],
-  ] as const;
+  type Counter = "total" | "literalUnits" | "invSteps";
+  // (`main`'s work at depths 16, 32 and 64, the sharing on and off, equal in either order)
+  const shared = {
+    total: [8855, 23083, 76291],
+    literalUnits: [1974, 6030, 25070],
+    invSteps: [2103, 7187, 26571],
+  };
+  const unshared = {
+    total: [7451, 18875, 61867],
+    literalUnits: [562, 1782, 10542],
+    invSteps: [2184, 7364, 26940],
+  };
+  const main: readonly Readonly<Record<Counter, readonly number[]>>[] = [
+    shared,
+    unshared,
+    shared,
+    unshared,
+  ];
   const modes = [
     [false, false],
     [false, true],
     [true, false],
     [true, true],
   ] as const;
+  // (r4.231's slack on the head's growth over `main`'s)
+  const SLACK = 1.03;
   modes.forEach(([reversed, unshared], mode) => {
-    const at = (depth: number): { literal: number; nodes: number } => {
+    const sizes = [16, 32, 64].map((depth) => {
       const request = coreRequest([{ path: "main.tease", source: source(depth) }]);
       assert.ok(request !== null, `a read ${depth} deep: its files parse and resolve`);
-      const { counts } = analysed(
+      const { total, counts } = analysed(
         { name: `a read ${depth} deep`, request },
         reversed,
         unshared,
       ).budget;
-      return { literal: counts.get("literalUnits") ?? 0, nodes: counts.get("syntaxNodes") ?? 1 };
-    };
-    const [small, large] = [at(32), at(64)];
-    const growth = (before: number, after: number): number =>
-      (2 * after) / before / (large.nodes / small.nodes);
-    const [main32, main64] = main[mode]!;
-    assert.ok(
-      growth(small.literal, large.literal) <= growth(main32, main64),
-      `mode ${mode}: literalUnits ${growth(small.literal, large.literal).toFixed(3)} against main's ${growth(main32, main64).toFixed(3)}`,
-    );
+      return {
+        total,
+        literalUnits: counts.get("literalUnits") ?? 0,
+        invSteps: counts.get("invSteps") ?? 0,
+        nodes: counts.get("syntaxNodes") ?? 1,
+      };
+    });
+    // (the growth per doubling over the syntax nodes' ratio, the head's and `main`'s on the same programs)
+    const growth = (of: readonly number[], at: number): number =>
+      (2 * of[at + 1]!) / of[at]! / (sizes[at + 1]!.nodes / sizes[at]!.nodes);
+    const head = (counter: Counter): number[] => sizes.map((size) => size[counter]);
+    const over = (counter: Counter, at: number): number =>
+      growth(head(counter), at) / growth(main[mode]![counter], at);
+    for (const at of [0, 1])
+      assert.ok(
+        over("literalUnits", at) <= 1,
+        `mode ${mode}: literalUnits ${over("literalUnits", at).toFixed(3)} × main's growth at doubling ${at + 1}`,
+      );
+    for (const counter of ["total", "invSteps"] as const)
+      assert.ok(
+        over(counter, 1) <= over(counter, 0) && over(counter, 1) <= SLACK,
+        `mode ${mode}: ${counter} ${over(counter, 0).toFixed(3)} then ${over(counter, 1).toFixed(3)} × main's growth`,
+      );
   });
 });
 
