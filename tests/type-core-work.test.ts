@@ -8,11 +8,12 @@ import type { WorkCounter } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { writtenTypeSteps } from "../src/type-inference/core/contract.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
-import { plusIndexVisits } from "../src/type-inference/core/plus-index.js";
+import { isPlusValue, plusIndexVisits } from "../src/type-inference/core/plus-index.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
+import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
@@ -39,7 +40,7 @@ import {
   type WorkFamily,
 } from "./helpers/type-core-families.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
-import { askEveryRead, narrowingPassIn } from "./helpers/type-core-narrowing.js";
+import { askEveryRead, narrowingPass, narrowingPassIn } from "./helpers/type-core-narrowing.js";
 
 /**
  * The work of the coarse core (checkpoint 9, TABLE §8 and §10.1's W rows) as a sampled regression oracle: every
@@ -1069,7 +1070,7 @@ test("a run of joins read beside a variable of objects grows with the program in
 
 /**
  * The holder bound (#1384, Codex r2 on #1562): an indexed run's query takes one step per literal and per binding holding
- * its property and one more in each order of its bindings, each charged before it runs. The index counts its query
+ * its property and per item of their answers and one more in each order of its bindings, each charged before it runs. The index counts its query
  * steps (`plusIndexVisits`): on k variables of one property each, joined once and each read at its own, the steps stay
  * under the charged `indexSteps` and grow with the program in either order, the sharing on and off; visiting every
  * binding per query made 32,256 steps at k = 128, none charged. A run asked at k paths below one property that k
@@ -1115,6 +1116,95 @@ test("an indexed run's queries take charged steps bounded by the bindings holdin
       if (doubling > DOUBLING) steep.push(`${name}: ${doubling.toFixed(3)}`);
     }
   assert.deepEqual(steep, []);
+});
+
+/**
+ * The holder bound's whole query (#1384, Codex r3 on #1562): an indexed root asked at a new path below a property whose
+ * holders its run already found charges `indexSteps` for exactly the steps it counts, on both sides: with no term holding
+ * the property the same few at every width (a range's earliest object is its first literal's, not a tree's height), and
+ * with every term holding it one per term and per item, linear (its holders kept in first-read order, never sorted per
+ * query: k variables read in another order than the pass found them sorted them at every query, k log k uncounted).
+ */
+test("an indexed run's warm query charges its counted steps alone, a few without holders, linear in them (#1384)", () => {
+  const shuffled = (k: number): string =>
+    Array.from({ length: k }, (_, i) => `b${(i * 37 + 11) % k}`).join(" + ");
+  const shapes: readonly (readonly [string, string, readonly number[], (k: number) => string])[] = [
+    [
+      "no holder",
+      "c",
+      [16, 64, 256],
+      (k) =>
+        `${many(k, (i) => `let o${i} = [{p${i}: 1}]`)}\nlet xs = ${many(k, (i) => (i % 2 ? `o${i}` : `[{s${i}: 1}]`), " + ")}\nsay xs.length\nexit`,
+    ],
+    [
+      "holding variables",
+      "q",
+      [16, 64],
+      (k) =>
+        `${many(k, (i) => `let b${i} = [{q: {p${i}: 1}}]`)}\nlet ys = ${many(k, (i) => `b${i}`, " + ")}\nlet xs = ${shuffled(k)}\nsay ys.length\nsay xs.length\nexit`,
+    ],
+    [
+      "holding literals",
+      "q",
+      [16, 64],
+      (k) => `let xs = ${many(k, (i) => `[{q: {p${i}: 1}}]`, " + ")}\nsay xs.length\nexit`,
+    ],
+  ];
+  const failing: string[] = [];
+  for (const [name, step, sizes, source] of shapes) {
+    const steps = sizes.map((k) => {
+      const request = coreRequest([{ path: "main.tease", source: source(k) }]);
+      assert.ok(request !== null, `${name} at ${k}: its files parse and resolve`);
+      const pass = narrowingPass(request);
+      const { program } = pass;
+      const ask = (value: PlaceId, path: readonly string[], exact: boolean) => {
+        const c = program.opOf.get(value)!;
+        const node = c.kind === "operation" ? program.exprAt(c.site) : null;
+        pass.solver.run(
+          exact
+            ? pass.values.valueItems(value, node, path)
+            : pass.contract.contractOfValueAt(value, path),
+        );
+      };
+      const roots = [...program.opOf.values()].flatMap((c) =>
+        c.kind === "operation" &&
+        isPlusValue(pass, c.result) &&
+        !(program.consumersOf.get(c.result) ?? []).some(
+          (use) => use.kind === "operand" && isPlusValue(pass, use.operation.result),
+        )
+          ? [c.result]
+          : [],
+      );
+      // (each root indexed and its holders of the property found; the last asked at a new path below it)
+      for (const exact of [true, false])
+        for (const root of roots)
+          for (const first of ["t", "u", "v", step]) ask(root, ["element", first, "warm"], exact);
+      return [true, false].map((exact) => {
+        const charged = () => program.work.counts().get("indexSteps") ?? 0;
+        const [visits, units] = [plusIndexVisits(), charged()];
+        ask(roots.at(-1)!, ["element", step, "fresh"], exact);
+        const counted = plusIndexVisits() - visits;
+        if (counted === 0 || charged() - units !== counted)
+          failing.push(
+            `${name} at ${k}, ${exact ? "value" : "contract"}: ${counted} steps, ${charged() - units} charged`,
+          );
+        return counted;
+      });
+    });
+    for (const side of [0, 1]) {
+      const [small, ...larger] = steps.map((counted) => counted[side]!);
+      for (const [index, counted] of larger.entries())
+        if (
+          name === "no holder"
+            ? counted !== small
+            : counted > (small! * sizes[index + 1]!) / sizes[0]!
+        )
+          failing.push(
+            `${name} at ${sizes[index + 1]}, side ${side}: ${counted} steps, ${small} at ${sizes[0]}`,
+          );
+    }
+  }
+  assert.deepEqual(failing, []);
 });
 
 /**

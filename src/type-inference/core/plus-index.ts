@@ -47,9 +47,11 @@ interface Reads {
  * A root's indexed run: its terms in source order; per first property the positions of the literals holding it (a
  * literal stands once, in one run); per binding read its reads (`reads` by their first position, `byWriter` by their
  * earliest object, `groupOf` by proof), whose properties are never posted, so a binding of k properties read k times is
- * k positions, not k² postings (#1384, Codex r1); per property asked, the bindings holding it (`holding`, found once:
- * `holdersOf`); per position the first literal at or after it; and a tree of the literals' earliest objects (`width`
- * leaves from `width` on, a read's `null`, each inner slot the earlier of its two below).
+ * k positions, not k² postings (#1384, Codex r1); per property asked, the bindings holding it in first-read order
+ * (`holding`, found once: `holdersOf`); and per position the first literal at or after it and a literal's earliest
+ * object (a read's `null`). A run's literals are list literals among its `+` operands, which only binary expressions
+ * (left before right) and compound assignments (whose current value is a read) make, so in its order their texts are
+ * disjoint and ascending: the earliest object of a range's literals is its first literal's (`firstWriter`, Codex r3).
  */
 interface Run {
   readonly terms: readonly PlaceId[];
@@ -59,8 +61,7 @@ interface Run {
   readonly groupOf: ReadonlyMap<Proof, Reads>;
   readonly holding: Map<string, ReadonlySet<Reads>>;
   readonly nextLiteral: readonly number[];
-  readonly width: number;
-  readonly earliest: readonly (Writer | null)[];
+  readonly writers: readonly (Writer | null)[];
 }
 
 /** What an index shares in its pass once made: proofs per literal, binding and term, and every root's run. */
@@ -88,7 +89,7 @@ export interface PlusIndex {
 
 /**
  * The steps the index's queries took so far in this process (`visit`), each charged before it is taken: the work test
- * compares them with the charged `indexSteps` (the holder bound, Codex r2 on #1562).
+ * compares them with the charged `indexSteps` (the holder bound, Codex r2 and r3 on #1562).
  */
 let visits = 0;
 
@@ -97,10 +98,10 @@ export function plusIndexVisits(): number {
   return visits;
 }
 
-/** One step of a query, charged before it runs (the holder bound). */
-function visit(program: CoreProgram): void {
-  visits += 1;
-  program.work.charge("indexSteps");
+/** Steps of a query, charged before they run (the holder bound): every query step is one. */
+function visit(program: CoreProgram, steps = 1): void {
+  visits += steps;
+  program.work.charge("indexSteps", steps);
 }
 
 /** Whether a value is a `+` of two operands, which a run may hold (`plusRun`). */
@@ -205,7 +206,7 @@ function indexed(pass: CorePass, state: PlusIndex): Indexed {
 }
 
 /**
- * The run of a root (`plusRun`) indexed: published once its positions, groups and tree are complete and kept, so a
+ * The run of a root (`plusRun`) indexed: published once its positions, groups and tables are complete and kept, so a
  * stop while it is made leaves no run; a run that is not indexed is found once.
  */
 function runOf(pass: CorePass, ix: Indexed, root: PlaceId): Run | null {
@@ -275,21 +276,15 @@ function runOf(pass: CorePass, ix: Indexed, root: PlaceId): Run | null {
         ? -1
         : 1,
   );
-  let width = 1;
-  while (width < terms.length) width *= 2;
-  contract.keep(2 * width + holders.size + terms.length + 2);
-  const earliest: (Writer | null)[] = new Array<Writer | null>(2 * width).fill(null);
+  contract.keep(holders.size + 2 * terms.length + 2);
+  const writers: (Writer | null)[] = new Array<Writer | null>(terms.length).fill(null);
   const nextLiteral: number[] = new Array<number>(terms.length + 1);
   nextLiteral[terms.length] = terms.length;
   for (let index = terms.length - 1; index >= 0; index -= 1) {
     work.charge("indexSteps");
     const literal = kinds[index]!.read === null;
-    if (literal) earliest[width + index] = kinds[index]!.shape.writer;
+    if (literal) writers[index] = kinds[index]!.shape.writer;
     nextLiteral[index] = literal ? index : nextLiteral[index + 1]!;
-  }
-  for (let index = width - 1; index > 0; index -= 1) {
-    work.charge("indexSteps");
-    earliest[index] = firstWriter(earliest[2 * index]!, earliest[2 * index + 1]!);
   }
   const run: Run = {
     terms,
@@ -299,36 +294,40 @@ function runOf(pass: CorePass, ix: Indexed, root: PlaceId): Run | null {
     groupOf,
     holding: new Map(),
     nextLiteral,
-    width,
-    earliest,
+    writers,
   };
   ix.runs.set(root, run);
   return run;
 }
 
 /**
- * The bindings a run reads that hold a property, found once per run and property through the pass's bindings holding
- * it (`bindingsHolding`) or the run's own, whichever are fewer, each step charged before it runs: the holder bound's one
- * exception, at most the run's own bindings once per run and property, a walk of the run on `main` costing as much.
+ * The bindings a run reads that hold a property, in first-read order, found once per run and property: by the run's
+ * own, or where the pass's bindings holding it (`bindingsHolding`) and a sort of those the run reads cost less, by
+ * those; each step charged before it runs. The holder bound's one exception: at most the run's own bindings once per
+ * run and property, a walk of the run on `main` costing as much.
  */
 function holdersOf(pass: CorePass, ix: Indexed, run: Run, step: string): ReadonlySet<Reads> {
   const known = run.holding.get(step);
   if (known !== undefined) return known;
   const { program, contract } = pass;
-  const holding = new Set<Reads>();
+  const found: Reads[] = [];
   const proofs = ix.bindingsHolding.get(step) ?? [];
-  if (proofs.length <= run.reads.length)
+  if (run.reads.length <= proofs.length + sortCost(proofs.length))
+    for (const group of run.reads) {
+      visit(program);
+      if (group.proof.names.has(step)) found.push(group);
+    }
+  else {
     for (const proof of proofs) {
       visit(program);
       const group = run.groupOf.get(proof);
-      if (group !== undefined) holding.add(group);
+      if (group !== undefined) found.push(group);
     }
-  else
-    for (const group of run.reads) {
-      visit(program);
-      if (group.proof.names.has(step)) holding.add(group);
-    }
-  contract.keep(2 + holding.size);
+    visit(program, sortCost(found.length));
+    found.sort((a, b) => a.positions[0]! - b.positions[0]!);
+  }
+  contract.keep(2 + found.length);
+  const holding = new Set(found);
   run.holding.set(step, holding);
   return holding;
 }
@@ -462,15 +461,18 @@ function closedShape(pass: CorePass, literal: PlaceId): Shape | null {
   return { names, writer };
 }
 
-/** The earliest object of the run's literals from `from` to before `to`. */
-function earliestOf(pass: CorePass, run: Run, from: number, to: number): Writer | null {
-  let writer: Writer | null = null;
-  for (let low = from + run.width, high = to + run.width; low < high; low >>= 1, high >>= 1) {
-    visit(pass.program);
-    if ((low & 1) === 1) writer = firstWriter(writer, run.earliest[low++]!);
-    if ((high & 1) === 1) writer = firstWriter(writer, run.earliest[--high]!);
-  }
-  return writer;
+/** A term's answer where it stands in its run. */
+interface Part {
+  readonly at: number;
+  readonly items: readonly Item[];
+}
+
+/** Two lists of parts each in their terms' order merged in it, no two at one position: one step per part. */
+function merged(a: readonly Part[], b: readonly Part[]): Part[] {
+  const out: Part[] = [];
+  for (let i = 0, j = 0; i < a.length || j < b.length;)
+    out.push(j === b.length || (i < a.length && a[i]!.at < b[j]!.at) ? a[i++]! : b[j++]!);
+  return out;
 }
 
 /**
@@ -479,10 +481,11 @@ function earliestOf(pass: CorePass, run: Run, from: number, to: number): Writer 
  * and the terms whose objects all lack it as their earliest object's missing property (F11), at that property or below
  * it, with the side's context, where the first of them stands; merged in the terms' order (a kind keeps its first
  * item's place, so a read again and a missing property again add nothing), possibilities (`member`) where more than
- * one term gives an element. Its steps are the holder bound's: one per literal and binding holding the property, one
- * per step of the literals' tree between them, and one in each order of the run's bindings to the first lacking it,
- * each charged before it runs (`visit`), its fixed work on one more. `null` where the walk answers: a path not below an
- * element's property, a `+` that is no indexed root, or a term's answer with an element step's mark.
+ * one term gives an element. Its steps are the holder bound's: one per literal and binding holding the property and
+ * per item of their answers, and one in each order of the run's bindings to the first lacking it, each charged before
+ * it runs (`visit`), its fixed work on one more: a gap and a merged part each on the step of their holder, the last gap
+ * and the missing item on the fixed one. `null` where the walk answers: a path not below an element's property, a `+`
+ * that is no indexed root, or a term's answer with an element step's mark.
  */
 export function* indexedPlus(
   pass: CorePass,
@@ -498,8 +501,10 @@ export function* indexedPlus(
   const { program } = pass;
   visit(program);
   const length = run.terms.length;
-  // (each contribution where it first stands; `empty`: the terms giving no element)
-  const parts: { readonly at: number; readonly items: readonly Item[] }[] = [];
+  // (each contribution where it first stands, the literals' and the bindings' each in order; `empty`: the terms giving
+  // no element)
+  const literals: Part[] = [];
+  const bindings: Part[] = [];
   let missingAt = length;
   let missingWriter: Writer | null = null;
   let empty = 0;
@@ -507,28 +512,32 @@ export function* indexedPlus(
     missingAt = Math.min(missingAt, at);
     missingWriter = firstWriter(missingWriter, writer);
   };
-  // the literals holding it, and those between them lacking it
+  // the literals holding it, and those between them lacking it: a gap's first literal, its earliest object the gap's
   const holders = run.holders.get(step) ?? [];
   let at = 0;
-  for (let index = 0; ; index += 1) {
-    const holder = index < holders.length ? holders[index]! : length;
-    if (run.nextLiteral[at]! < holder)
-      lacking(run.nextLiteral[at]!, earliestOf(pass, run, at, holder));
-    if (index === holders.length) break;
+  const gap = (to: number): void => {
+    const first = run.nextLiteral[at]!;
+    if (first < to) lacking(first, run.writers[first]!);
+  };
+  for (const holder of holders) {
     visit(program);
+    gap(holder);
     const items = yield* read(run.terms[holder]!);
+    visit(program, items.length);
     if (items.some((item) => item.tag === "empty")) return null;
-    parts.push({ at: holder, items });
+    literals.push({ at: holder, items });
     if (items.length === 0) empty += 1;
     at = holder + 1;
   }
+  gap(length);
   // the bindings holding it, by their first reads; the earliest object and the first read of those lacking it
   const holding = holdersOf(pass, pass.contract.plusIndex!.indexed!, run, step);
   for (const group of holding) {
     visit(program);
     const items = yield* read(run.terms[group.positions[0]!]!);
+    visit(program, items.length);
     if (items.some((item) => item.tag === "empty")) return null;
-    parts.push({ at: group.positions[0]!, items });
+    bindings.push({ at: group.positions[0]!, items });
     if (items.length === 0) empty += group.positions.length;
   }
   for (const group of run.byWriter) {
@@ -545,19 +554,15 @@ export function* indexedPlus(
       break;
     }
   }
-  if (missingAt < length)
-    parts.push({
-      at: missingAt,
-      items: [
-        exact
-          ? makeItem("unknown", missingWriter, { reasons: REASON.missing, context: "missing" })
-          : unknownItem(REASON.missing, missingWriter),
-      ],
-    });
-  program.work.charge("indexSteps", sortCost(parts.length));
-  parts.sort((a, b) => a.at - b.at);
+  const missing: Part[] = [];
+  if (missingAt < length) {
+    const item = exact
+      ? makeItem("unknown", missingWriter, { reasons: REASON.missing, context: "missing" })
+      : unknownItem(REASON.missing, missingWriter);
+    missing.push({ at: missingAt, items: [item] });
+  }
   const items = mergeItems(
-    parts.flatMap((part) => part.items),
+    merged(merged(literals, bindings), missing).flatMap((part) => part.items),
     program.scope,
   );
   return length - empty > 1 ? weaken(items, "member") : items;

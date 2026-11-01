@@ -121,6 +121,18 @@ const RUNS: readonly { readonly source: string; readonly indexed: boolean }[] = 
     source: "let o = [{p: 1, q: 2}]\nlet xs = o + o + [{p: {a: 1}}]\nsay xs.length\nexit",
     indexed: true,
   },
+  // bindings of other kinds at `q` read in another order than the pass found them (Codex r3 on #1562): the run's own
+  // in its order, and the pass's two holding `q` among the run's five, put in its order
+  {
+    source:
+      'let a = [{q: 1}]\nlet b = [{q: "s"}]\nlet ys = a + b\nlet xs = b + a\nsay ys.length\nsay xs.length\nexit',
+    indexed: true,
+  },
+  {
+    source:
+      'let a = [{q: 1}]\nlet b = [{q: "s"}]\nlet l = [{p: 1}]\nlet m = [{r: 1}]\nlet n = [{s: 1}]\nlet ys = b + a\nlet xs = a + l + m + n + b\nsay ys.length\nsay xs.length\nexit',
+    indexed: true,
+  },
 ];
 
 const STEPS: readonly string[] = ["p", "q", "r", "s", "absent"];
@@ -154,6 +166,7 @@ test("an indexed run of `+` answers below its elements as its operands' walk doe
                 if (JSON.stringify(got) !== JSON.stringify(expected)) differing.push(where);
               }
         }
+        if (!whole(index)) differing.push(`whole: ${source.split("\n").at(-3)}, mode ${m}`);
       });
   }
   assert.deepEqual(differing, []);
@@ -191,23 +204,33 @@ const published = (pass: CorePass): boolean =>
 
 /**
  * Whether every run a pass's index published is whole: each term a literal posted at its names or one of a binding's
- * reads, its bindings in both orders and by proof, each binding the run found holding a property among its own, each
- * position's next literal found, and the tree of the literals' earliest objects made to its root.
+ * reads, its bindings in both orders and by proof, each binding the run found holding a property among its own in
+ * first-read order, each position's next literal found, and the literals' earliest objects in the run's order (a
+ * range's earliest its first literal's).
  */
 function whole(pass: CorePass): boolean {
   for (const run of pass.contract.plusIndex?.indexed?.runs.values() ?? []) {
     if (run === null) continue;
-    const { terms, holders, reads, byWriter, groupOf, holding, nextLiteral, width, earliest } = run;
+    const { terms, holders, reads, byWriter, groupOf, holding, nextLiteral, writers } = run;
     const read = new Set(reads.flatMap(({ positions }) => positions));
-    const leaves = earliest.slice(width, width + terms.length);
     const next = (at: number): number =>
-      leaves.findIndex((writer, index) => index >= at && writer !== null);
+      writers.findIndex((writer, index) => index >= at && writer !== null);
     const writer = (group: (typeof reads)[number]): Writer | null => group.proof.shape.writer;
+    const literals = writers.filter((leaf) => leaf !== null);
     if (
       [...holders.values()].some((list) => list.some((at) => at >= terms.length || read.has(at))) ||
-      leaves.some((leaf, at) => (leaf === null) !== read.has(at)) ||
+      writers.length !== terms.length ||
+      writers.some((leaf, at) => (leaf === null) !== read.has(at)) ||
       nextLiteral.some((at, index) => at !== (next(index) < 0 ? terms.length : next(index))) ||
-      earliest[1] !== leaves.reduce<Writer | null>(firstWriter, null) ||
+      literals.some(
+        (leaf, index) =>
+          index > 0 && firstWriter(literals[index - 1]!, leaf) !== literals[index - 1],
+      ) ||
+      [...holding.values()].some((set) =>
+        [...set].some(
+          (group, index, list) => index > 0 && group.positions[0]! < list[index - 1]!.positions[0]!,
+        ),
+      ) ||
       reads.some(
         (group, index) => index > 0 && group.positions[0]! < reads[index - 1]!.positions[0]!,
       ) ||
