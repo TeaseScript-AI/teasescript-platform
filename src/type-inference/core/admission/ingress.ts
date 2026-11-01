@@ -63,17 +63,19 @@ export function ingressSiteOf(
   // (the item's own ingress among them first, where it names one: the contribution that brought it; an item carrying
   // named data the store brings beside its inline data, or a fallback's or a default's own read's data (a typed
   // default's is its call's), is that data's C1, sited by its rule (an own read's at the store), the inline data owing
-  // only its boundary and a host member beside it its own place's C1: r4.63 (1), (2), TABLE r4.67 (3), r4.70 (1))
+  // only its boundary and a host member beside it its own place's C1: r4.63 (1), (2), TABLE r4.67 (3), r4.70 (1)). Its
+  // leaves are walked only where they are read, beside the store's landing stops or at a siting that brings an ingress:
+  // an item united from its elements in one of many orders is a node of its own, walked by no store that reads neither
+  // (#1397)
   const node = item?.ingress;
-  const own = node === undefined ? null : leafIngresses(admission, node);
   const stops = landingIndex(admission).byStore.get(d);
   const named =
-    own !== null &&
+    node !== undefined &&
     stops !== undefined &&
-    (perNode(admission.someOwn, d, node!, () =>
-      meet(admission, own, ownLeaves(admission, d, false)),
+    (perNode(admission.someOwn, d, node, () =>
+      meet(admission, leafIngresses(admission, node), ownLeaves(admission, d, false)),
     ) ||
-      meet(admission, own, namedBeside(admission, d, at)));
+      meet(admission, leafIngresses(admission, node), namedBeside(admission, d, at)));
   let first: SourceSite | null = null;
   // (each prefix's sitings once per store, read in evaluation order only as far as the answer: Codex r23 F1; for named
   // data only its own sitings, the inline ones it skips never read, Codex r24 F2's neighbours)
@@ -100,7 +102,8 @@ export function ingressSiteOf(
     const { stop, ingress } = lists[best]![positions[best]!++]!;
     if (ingress === null) return contributionSite(admission, stop, d);
     if (named) continue;
-    if (own === null || own.has(ingress)) return contributionSite(admission, stop, d);
+    if (node === undefined || leafIngresses(admission, node).has(ingress))
+      return contributionSite(admission, stop, d);
     first ??= contributionSite(admission, stop, d);
   }
   return first ?? d.site;
