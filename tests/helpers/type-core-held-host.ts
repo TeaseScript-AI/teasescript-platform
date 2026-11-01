@@ -936,7 +936,10 @@ export function randomCopyGraph(
   return `${rows.join("\n")}\nexit\n`;
 }
 
-/** The finishing growth gate's shapes: the copy graph's topologies and three shapes of a place's many stores. */
+/**
+ * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, and three of
+ * reads no place holds.
+ */
 function gateShapes(): Record<string, (k: number) => string> {
   const rows = (k: number, line: (i: number) => string) => lines(k, line).join("\n");
   return {
@@ -952,6 +955,14 @@ function gateShapes(): Record<string, (k: number) => string> {
       `${rows(k, (i) => `let c${i} = {f${i}: hostValue}`)}\nlet root = c0\n${rows(k, (i) => `${i === 0 ? "" : `root = c${i}\n`}repeat root.f${i} {}`)}\nexit`,
     selected: (k) =>
       `${rows(k, (i) => `let c${i} = {f${i}: hostValue}`)}\nlet root = [c0, c0][0]\n${rows(k, (i) => `${i === 0 ? "" : `root = [c${i}, c${i}][0]\n`}repeat root.f${i} {}`)}\nexit`,
+    // (reads no place holds, #1491, #1502: k fallbacks nested in their right, k `get` defaults nested, a literal read k
+    // levels down)
+    "fallback-right": (k) =>
+      `let root = ${fields0(k, () => "hostValue")}\nrepeat ${lines(k, (i) => `(root.f${i} otherwise `).join("")}2${")".repeat(k)} {}\nexit`,
+    "get-default": (k) =>
+      `let xs = [1]\nlet root = ${fields0(k, () => "hostValue")}\nrepeat ${lines(k, (i) => `xs.get(${i + 5}, default: `).join("")}root.f0${")".repeat(k)} {}\nexit`,
+    "nested-literal": (k) =>
+      `repeat ${"[".repeat(k)}hostValue${"]".repeat(k)}${"[0]".repeat(k)} {}\nexit`,
   };
 }
 
