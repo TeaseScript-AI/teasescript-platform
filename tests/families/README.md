@@ -73,7 +73,9 @@ and store an area that is not from the base tree's own runner and areas
 (`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/16`, one job per shard,
 the fixture area as `<base tree>/tools/corpus/fixture`), so that it serves every later run on that tree. The script,
 installed as the desktop's `~/work/trees/hooks/baseline`, fills each new `main`'s tree at low priority where nobody
-stores it.
+stores it. Once `main` has another `src/` tree, the remaining jobs of an older tree's fill end without running, also
+after the fill began: its stored shards stay and count, and what it left unstored waits for a builder's store or for
+that tree to be `main`'s again.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never

@@ -914,6 +914,25 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     await killedAt("^copyFileSync ", baselines, "queue", top, hook);
     assert.equal(last(run(baselines, "queue", top, hook)).queued, top);
     assert.deepEqual(readdirSync(top).sort(), ["MANIFEST", "STARTED", "baseline.sh"]);
+    // (#1567) a fill that STARTED and stored a shard is SUPERSEDED once another src/ tree is current, so that its other
+    // jobs end; its stored shard is still read, the area partial; `queue` undoes SUPERSEDED when the tree is current again;
+    // STARTED keeps the time the fill began throughout
+    assert.equal(store(alias, second, "0/2").status, 0);
+    const began = readFileSync(join(top, "STARTED"), "utf8");
+    const newer = "f".repeat(40);
+    assert.deepEqual(last(run(baselines, "start", top, newer)), {
+      decision: "superseded",
+      by: newer,
+    });
+    assert.equal(readFileSync(join(top, "SUPERSEDED"), "utf8"), `${newer}\n`);
+    assert.equal(readFileSync(join(top, "STARTED"), "utf8"), began);
+    const superseded = run(baselines, "state", base, second, "--read-only");
+    assert.equal(superseded.status, 1, superseded.stdout);
+    const partial = JSON.parse(superseded.stdout.split("\n")[0]!);
+    assert.deepEqual([partial.state, partial.verified, partial.store], ["partial", 1, [1]]);
+    assert.equal(last(run(baselines, "queue", top, hook)).queued, top);
+    assert.deepEqual(readdirSync(top).sort(), ["MANIFEST", "STARTED", "area", "baseline.sh"]);
+    assert.equal(readFileSync(join(top, "STARTED"), "utf8"), began);
     // (#1542 r3: queued-job-foreign-contents) a job's decision in a baseline that holds a foreign path is refused,
     // nothing written
     writeFileSync(join(top, "foreign-late"), "x\n");

@@ -32,10 +32,12 @@
 # once where its shard verifies or another running writer stores it; a job ends 0 where its shard then verifies or is
 # being stored.
 #
-# Supersession (#1513, by tree): `start` decides for a fill's first job. Where the tree is the current one (the `src/`
-# tree of the clone's origin/main), it undoes SUPERSEDED and writes STARTED; where it is not and the fill has not
-# STARTED, it writes SUPERSEDED (the current tree) and every such job ends at once; a STARTED fill runs to its end.
-# SUPERSEDED is undone where the tree is current again, by the hook (`queue`) or by a job. A builder's store is never
+# Supersession (#1513, by tree; #1567): `start` decides for each job of a fill. Where the tree is the current one (the
+# `src/` tree of the clone's origin/main), it undoes SUPERSEDED and writes STARTED, the time the fill began, once; where
+# it is not, it writes SUPERSEDED (the current tree) and the job ends at once, also where the fill STARTED, so that the
+# current tree's fill does not wait behind it. A job already storing finishes its shard; the shards stored stay and
+# status reads them as any others, so a fill cut short stays incomplete. SUPERSEDED is undone where the tree is current
+# again, by the hook (`queue`) or by a job, and the fill resumes with its stored shards. A builder's store is never
 # superseded. A decision that could not be written fails the job.
 #
 # A tree whose runner has no baselines.mjs (from before #1541) is skipped, unless BASELINE_RUNNER names a built
@@ -54,7 +56,7 @@ if [ "${1:-}" = --job ]; then
     echo "baseline ${out##*/}: $repo has no origin/main to name the current tree" >&2
     exit 1
   fi
-  # whether the fill runs, decided by its first job through the state module (see above)
+  # whether this job stores, decided through the state module (see above)
   if ! decided=$(node "$runner/tests/families/baselines.mjs" start "$out" "$current"); then
     echo "baseline ${out##*/}: $(jq -r .refused <<< "$decided" 2> /dev/null)" >&2
     exit 1
