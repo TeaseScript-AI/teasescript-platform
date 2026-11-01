@@ -620,8 +620,8 @@ test("a settled stop finishes the host data of every copy-graph topology in line
           ? [4, 8]
           : // (a chain's read follows up to `FRONTIER_COPIES` = 8 of its links, keeping the furthest found for the next
             // read: read deepest first, from 8 → 16 the reads' work ramps up toward that bound, which reads as growth
-            // though each read's work is bounded)
-            shape === "chain" || shape === "chain-own"
+            // though each read's work is bounded; an `addAll` of k copies meets them all at one read, cut from 9 on)
+            shape === "chain" || shape === "chain-own" || shape === "addAll-copies"
             ? [16, 32]
             : [8, 16],
     ),

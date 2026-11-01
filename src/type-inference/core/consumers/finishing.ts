@@ -325,6 +325,8 @@ interface HostFrontier {
   readonly steps: Map<string, HostFrontier>;
   /** What it stands for as far as followed (`sameOf`): itself, or the copy it holds alone, or one further down. */
   same: HostFrontier | undefined;
+  /** Whether a copy stands at a level above it (its owner path's or further up), so `eachCopy` climbs there. */
+  readonly above: boolean;
 }
 
 /** Per walk: the stored paths of each place, each place's frontier at its root, each read's and each copy's. */
@@ -431,6 +433,7 @@ const NOTHING: HostFrontier = {
   owner: null,
   steps: new Map(),
   same: undefined,
+  above: false,
 };
 
 function frontier(
@@ -439,7 +442,19 @@ function frontier(
   at: HostFrontier["at"],
   owner: HostFrontier["owner"],
 ): HostFrontier {
-  return { cells: new Map(), node, at, copies: [], host, owner, steps: new Map(), same: undefined };
+  // (an owner is entered whole before a step below it is made, so its copies are all there)
+  const above = owner !== null && (owner.frontier.above || owner.frontier.copies.length > 0);
+  return {
+    cells: new Map(),
+    node,
+    at,
+    copies: [],
+    host,
+    owner,
+    steps: new Map(),
+    same: undefined,
+    above,
+  };
 }
 
 /** The walk's frontiers, its places' stored paths made once from the definitions (each store, add and transfer). */
@@ -771,8 +786,8 @@ function copyFrontier(walk: Consumers, task: Standing): HostFrontier {
 
 /**
  * Visits the copies standing at a frontier's path, each by its frontier there: its own, then its owner path's one step
- * below, and so on to its place's root, until `visit` answers `false`. Each level and each copy met is charged, with its
- * steps.
+ * below, and so on up while a copy stands above (`above`), until `visit` answers `false`. Each level and each copy met
+ * is charged, with its steps.
  */
 function eachCopy(walk: Consumers, at: HostFrontier, visit: (copy: HostFrontier) => boolean): void {
   const { program } = walk.pass;
@@ -785,7 +800,7 @@ function eachCopy(walk: Consumers, at: HostFrontier, visit: (copy: HostFrontier)
       for (let i = below.length - 1; i >= 0; i -= 1) copied = stepOwn(walk, copied, below[i]!);
       if (!visit(copied)) return;
     }
-    if (level.owner === null) return;
+    if (level.owner === null || !level.above) return;
     below.push(level.owner.step);
     level = level.owner.frontier;
   }
