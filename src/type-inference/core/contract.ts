@@ -104,7 +104,9 @@ import type {
   PrefixEntry,
   PrefixFrame,
   PrefixLevels,
+  PrefixNode,
   PrefixStores,
+  PresenceStep,
   ReadClass,
   ReadClassGroup,
   ReadEntry,
@@ -116,12 +118,20 @@ import type {
   StoredClass,
   SubLayer,
   SubSource,
+  SupportNode,
   ValueEntry,
   WrapperHop,
 } from "./contract/model.js";
 import { choiceOptions, plusRepeatOf } from "./contract/others.js";
 import { chainOf, literalHop, remember } from "./contract/positions.js";
-import { prefixStores, prefixWork, relevantSubs, subSources } from "./contract/prefix-index.js";
+import {
+  offendingStores,
+  prefixStores,
+  prefixWork,
+  relevantSubs,
+  subSources,
+  summaryPresence,
+} from "./contract/prefix-index.js";
 import {
   contractOfValue,
   contractOfValueAt,
@@ -172,6 +182,7 @@ export type {
   LiteralIndex,
   LoneRead,
   PrefixStores,
+  PresenceStep,
   StoppedKey,
   StoredChoiceKeys,
   SubSource,
@@ -188,6 +199,7 @@ export {
   writtenOf,
   writtenTypeSteps,
 } from "./contract/terms.js";
+export { presenceSteps } from "./contract/prefix-index.js";
 export { withOwnSelection } from "./contract/value-kinds.js";
 
 /*
@@ -215,6 +227,10 @@ export class Contract {
     ringComponents: 0,
     ringPorts: 0,
     ringStops: 0,
+    supportNodes: 0,
+    supportEdges: 0,
+    layerDemands: 0,
+    listedSources: 0,
   };
   readonly prefix = new Map<CanonicalKey, PrefixStores>();
   /** Per copy-only place its copies reach, the cycle of whole copies it is a port of, `null` for none (`ringOf`). */
@@ -223,13 +239,43 @@ export class Contract {
   readonly discovering = new Map<CanonicalKey, PrefixFrame>();
   readonly subPaths = new Map<Key, ReadonlySet<string>>();
   /**
-   * Per relative path of a source's own live keys, the sources holding it (`ownPaths`); per prefix and step, its
-   * layers there (`stepLayers`).
+   * Per relative path of a source's own live keys, the sources holding it (`ownPaths`); per prefix or set of listing
+   * layers and step, the listing layers found there (`stepLayers`).
    */
   readonly subsByPath = new Map<string, Set<Key>>();
-  readonly stepLayers = new WeakMap<PrefixStores, Map<string, StepLayers>>();
+  readonly stepLayers = new WeakMap<PrefixStores | SupportNode, Map<string, StepLayers>>();
+  /**
+   * Per set of listing layers and made path id, the layers in it or below it holding a source at the path (`holdersIn`;
+   * a read's path without an id yet is answered by the read's own, kept here once its id is made, `ReadPath.holders`).
+   */
+  readonly holdersBelow = new WeakMap<SupportNode, Map<number, SupportNode | null>>();
+  /** Per layer and step, the nearest listing layers below it there (`listingBelow`). */
+  readonly layersBelow = new WeakMap<SubLayer, Map<string, SupportNode | null>>();
+  /**
+   * Per prefix of several layers, its per-step map (`prefixFound`): the union of its layers' maps, each seen under its
+   * position; the positions' leaves, the views by map node and set of positions, the unions by their two nodes.
+   */
+  readonly prefixSteps = new WeakMap<PrefixStores, PrefixNode | null>();
+  readonly positionLeaves = new Map<number, SupportNode>();
+  readonly prefixViews = new Map<number, Map<number, PrefixNode>>();
+  readonly prefixUnions = new Map<number, Map<number, PrefixNode>>();
   readonly aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly projectedLayers = new Map<string, SubLayer | null>();
+  /**
+   * #1466: the layers' answers' support nodes, each made once per pass (`prefix-index.ts`): a source's leaf, a summary's
+   * leaf by its source and content, a branch by its bit and children, and the union of each two nodes asked.
+   */
+  readonly supportLeaves = new Map<Key, SupportNode>();
+  /**
+   * A step map's leaves by step key and set (`SubLayer.front`); the steps' numbers, their keys in step maps (`stepKey`);
+   * the layers made, by their numbers (`SubLayer.id`).
+   */
+  readonly mapLeaves = new Map<string, Map<number, SupportNode>>();
+  readonly stepNumbers = new Map<string, number>();
+  readonly layersById: SubLayer[] = [];
+  readonly summaryLeaves = new Map<Key, Map<string, SupportNode>>();
+  readonly supportBranches = new Map<number, Map<number, Map<number, SupportNode>>>();
+  readonly supportUnions = new Map<number, Map<number, SupportNode>>();
   readonly keys = new Map<CanonicalKey, Identity>();
   readonly identities = new Map<PlaceId, Identity>();
   readonly aliases = new Map<PlaceId, { readonly key: Key; readonly guarded: boolean }>();
@@ -927,6 +973,26 @@ export class Contract {
 
   public subSources(stores: PrefixStores): Key[] {
     return subSources(stores);
+  }
+
+  public offendingStores(
+    stores: PrefixStores,
+    rest: Rest,
+    offends: (items: readonly Item[]) => boolean,
+    run: (
+      work: Work<ReadonlySet<Definition | null> | null>,
+    ) => ReadonlySet<Definition | null> | null,
+  ): ReadonlySet<Definition | null> | null {
+    return offendingStores(this, stores, rest, offends, run);
+  }
+
+  public summaryPresence(
+    stores: PrefixStores,
+    rest: Rest,
+    mask: number,
+    run: (work: Work<readonly Item[]>) => readonly Item[],
+  ): PresenceStep | null {
+    return summaryPresence(this, stores, rest, mask, run);
   }
 
   public entered(value: PlaceId, items: readonly Item[]): readonly Item[] {

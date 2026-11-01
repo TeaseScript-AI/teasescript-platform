@@ -11,6 +11,12 @@ export interface WorkFamily {
   readonly name: string;
   readonly measures: string;
   readonly program: (k: number) => readonly SourceFile[];
+  /**
+   * Where `main` grows faster than the gate's bound: `main`'s growth per doubling at the gate's sizes, the least of the
+   * four orders and sharings, for the total and `invSteps` (TABLE r4.233: at or under `main`'s), a regression oracle of
+   * this family's shape, measured once.
+   */
+  readonly main?: { readonly total: number; readonly invSteps: number };
 }
 
 const rows = (k: number, row: (index: number) => string): string =>
@@ -2290,6 +2296,292 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
           `let root = {${fields(k, () => "typed")}}`,
           "root.q = root",
           copiesOf(k, "fan-out"),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
+ * #1466's stack of k diamonds of copies (`topologySources`' `diamond`; TABLE r4.224, r4.227): each copies one object
+ * into two places, stores into one of them and replaces the next place by the other, every next place read; and its
+ * siblings: both places stored, the replacing order reversed, every second right place a shared ancestor, the next place
+ * written `object` with a misfitting store, the reads guarded, and the branches of unequal depth (Astra's design review).
+ * A read below the shared layers is answered once per layer and path from the layers below it (`prefix-index.ts`), so
+ * each grows as k log k where `main` grew as k³. Beside them, Codex r1's B1 dimension: k copies of one record, each
+ * storing its own property below one step, joined into one place and read at each property, directly and through a
+ * copy of the place, so each read asks only the layer that holds its property (#1078).
+ */
+function diamonds(
+  k: number,
+  { both = false, reverse = false, shared = false, typed = false, guarded = false } = {},
+): readonly SourceFile[] {
+  return main(
+    lines(
+      "let d0 = {f: hostValue, g: 1}",
+      ...(shared ? ["let shared = d0"] : []),
+      rows(k, (i) => {
+        const [first, second] = reverse ? [`r${i}`, `l${i}`] : [`l${i}`, `r${i}`];
+        return lines(
+          `let l${i} = d${i}`,
+          `let r${i} = ${shared && i % 2 === 1 ? "shared" : `d${i}`}`,
+          `l${i}.g = ${typed ? '"bad"' : "hostValue"}`,
+          ...(both ? [`r${i}.g = hostValue`] : []),
+          `let d${i + 1}${typed ? ": object" : ""} = ${first}`,
+          `d${i + 1} = ${second}`,
+        );
+      }),
+      rows(k, (i) =>
+        guarded ? `if d${i + 1}.g != null { repeat d${i + 1}.g {} }` : `repeat d${i + 1}.g {}`,
+      ),
+      "exit",
+    ),
+  );
+}
+
+/** k copies of one record joined into one place (or a copy of it), each storing and read at its own property below `g`. */
+function wideJoin(k: number, copied: boolean): readonly SourceFile[] {
+  const place = copied ? "copy" : "joined";
+  return main(
+    lines(
+      "let seed = {g: {z: 1}}",
+      rows(k, (i) => `let arm${i} = seed\narm${i}.g.p${i} = hostValue`),
+      "let joined = arm0",
+      rows(k - 1, (i) => `joined = arm${i + 1}`),
+      ...(copied ? ["let copy = joined"] : []),
+      rows(k, (i) => `repeat ${place}.g.p${i} {}`),
+      "exit",
+    ),
+  );
+}
+
+/**
+ * Codex r2's `shared` shape: k copies of one record that stores below `g` itself, each storing its own property below
+ * `g`, joined into one place and read at each property through a copy; a copy holding nothing at the property read is
+ * passed through, so a read asks the copy holding its property and the record below, never every copy.
+ */
+function sharedJoin(k: number): readonly SourceFile[] {
+  return main(
+    lines(
+      "let seed = {g: {z: 1}}",
+      "seed.g.q = hostValue",
+      rows(k, (i) => `let arm${i} = seed\narm${i}.g.p${i} = hostValue`),
+      "let joined = arm0",
+      rows(k - 1, (i) => `joined = arm${i + 1}`),
+      "let copy = joined",
+      rows(k, (i) => `repeat copy.g.p${i} {}`),
+      "exit",
+    ),
+  );
+}
+
+/**
+ * A chain of k copies, each storing its own property below `g`, read at each at the chain's end, or (`joined`) through
+ * one place joining every copy of the chain; and (`stored`) each copy joined from the one before it and a copy of that
+ * storing a property, storing its own too, read through a copy. Every copy lists `g`, and only one holds a read's
+ * property; `main` grows superlinearly on each.
+ */
+function listingChain(k: number, { joined = false, stored = false } = {}): readonly SourceFile[] {
+  const link = (i: number): string =>
+    stored
+      ? `let a${i} = d${i}\na${i}.g.p${i} = hostValue\nlet d${i + 1} = d${i}\nd${i + 1} = a${i}\nd${i + 1}.g.q${i} = hostValue`
+      : `let d${i + 1} = d${i}\nd${i + 1}.g.p${i} = hostValue`;
+  const read = stored ? "copy" : joined ? "x" : `d${k}`;
+  return main(
+    lines(
+      "let d0 = {g: {z: 1}}",
+      rows(k, link),
+      ...(joined ? ["let x = d1", rows(k - 1, (i) => `x = d${i + 2}`)] : []),
+      ...(stored ? [`let copy = d${k}`] : []),
+      rows(k, (i) =>
+        stored ? `repeat copy.g.p${i} {}\nrepeat copy.g.q${i} {}` : `repeat ${read}.g.p${i} {}`,
+      ),
+      "exit",
+    ),
+  );
+}
+
+/**
+ * Codex r4's positive-hit dimension: k records each storing two properties of their own, each copied and storing its own
+ * property below a step of its own, joined into one place and read at each property: every read's step is listed by one
+ * of the k layers joined, so a read finds that layer by the place's map, never by each layer joined.
+ */
+function distinctSteps(k: number): readonly SourceFile[] {
+  return main(
+    lines(
+      "let seed = {z: 1}",
+      rows(
+        k,
+        (i) =>
+          `let root${i} = seed\nroot${i}.h = hostValue\nroot${i}.j = hostValue\nlet arm${i} = root${i}\narm${i}.g${i} = hostValue`,
+      ),
+      "let joined = arm0",
+      rows(k - 1, (i) => `joined = arm${i + 1}`),
+      rows(k, (i) => `repeat joined.g${i} {}`),
+      "exit",
+    ),
+  );
+}
+
+/**
+ * Codex r2's sibling: k copies of one record, each storing its own property below `depth` steps, joined in pairs `levels`
+ * times (pairs, then pairs of pairs), then all into one place, read at each property directly or through `copies`
+ * copies of the place; a read asks only the layer that lists its property's first step, never a joining one.
+ */
+function nestedJoin(k: number, { levels = 2, depth = 1, copies = 0 } = {}): readonly SourceFile[] {
+  const path = `${"g.".repeat(depth)}p`;
+  const out = [
+    `let seed = ${"{g: ".repeat(depth)}{z: 1}${"}".repeat(depth)}`,
+    rows(k, (i) => `let arm${i} = seed\narm${i}.${path}${i} = hostValue`),
+  ];
+  let tops = Array.from({ length: k }, (_, i) => `arm${i}`);
+  for (let level = 1; level <= levels; level++) {
+    const pairs = Array.from({ length: tops.length / 2 }, (_, i) => `join${level}_${i}`);
+    out.push(
+      rows(
+        pairs.length,
+        (i) => `let ${pairs[i]} = ${tops[2 * i]}\n${pairs[i]} = ${tops[2 * i + 1]}`,
+      ),
+    );
+    tops = pairs;
+  }
+  out.push(`let place = ${tops[0]}`, ...tops.slice(1).map((top) => `place = ${top}`));
+  let read = "place";
+  for (let i = 1; i <= copies; i++) {
+    out.push(`let copy${i} = ${read}`);
+    read = `copy${i}`;
+  }
+  return main(
+    lines(
+      ...out,
+      rows(k, (i) => `repeat ${read}.${path}${i} {}`),
+      "exit",
+    ),
+  );
+}
+
+export const LAYER_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "diamonds",
+    measures: "#1466: a stack of k diamonds of copies",
+    program: (k) => diamonds(k),
+  },
+  {
+    name: "diamonds-both",
+    measures: "#1466: each diamond storing into both places",
+    program: (k) => diamonds(k, { both: true }),
+  },
+  {
+    name: "diamonds-reversed",
+    measures: "#1466: each next place replaced by the stored one",
+    program: (k) => diamonds(k, { reverse: true }),
+  },
+  {
+    name: "diamonds-shared",
+    measures: "#1466: every second right place a copy of one shared ancestor",
+    program: (k) => diamonds(k, { shared: true }),
+  },
+  {
+    name: "diamonds-typed",
+    measures: "#1466: every next place written `object`, each stored place's property misfitting",
+    program: (k) => diamonds(k, { typed: true }),
+  },
+  {
+    name: "diamonds-guarded",
+    measures: "#1466: every read guarded",
+    program: (k) => diamonds(k, { guarded: true }),
+  },
+  {
+    name: "wide-join",
+    measures:
+      "Codex r1's B1: k copies each storing its own property below one step, joined, read at each",
+    program: (k) => wideJoin(k, false),
+  },
+  {
+    name: "wide-join-copied",
+    measures: "Codex r1's B1, one layer down: the same join read through a copy of the place",
+    program: (k) => wideJoin(k, true),
+  },
+  {
+    name: "nested-join",
+    measures:
+      "Codex r2's sibling: the copies joined in pairs of pairs, then into one place, read at each",
+    program: (k) => nestedJoin(k),
+  },
+  {
+    name: "nested-join-copied",
+    measures: "Codex r2's sibling: the pairs of pairs read through a copy of the place",
+    program: (k) => nestedJoin(k, { copies: 1 }),
+  },
+  {
+    name: "nested-join-deep",
+    measures: "Codex r2's sibling: the pairs of pairs, each property below three steps",
+    program: (k) => nestedJoin(k, { depth: 3 }),
+  },
+  {
+    name: "nested-join-deep-copied",
+    measures:
+      "Codex r2's sibling: the pairs of pairs, each property below three steps, read through two copies",
+    program: (k) => nestedJoin(k, { depth: 3, copies: 2 }),
+  },
+  {
+    name: "nested-join-witness",
+    measures:
+      "Codex r2's witness: the copies joined in pairs, then into one place, read through a copy",
+    program: (k) => nestedJoin(k, { levels: 1, copies: 1 }),
+  },
+  {
+    name: "distinct-steps",
+    measures:
+      "Codex r4's positive hits: k joined layers, each listing a step of its own, read at each",
+    program: (k) => distinctSteps(k),
+  },
+  {
+    name: "shared-join",
+    measures:
+      "Codex r2's shared shape: the joined copies over a record that stores below the same step",
+    program: (k) => sharedJoin(k),
+  },
+  {
+    name: "listing-chain",
+    measures: "a chain of copies each storing its own property below one step, read at its end",
+    program: (k) => listingChain(k),
+    main: { total: 2.733, invSteps: 3.85 },
+  },
+  {
+    name: "listing-chain-joined",
+    measures: "the chain's copies all joined into one place, read through it",
+    program: (k) => listingChain(k, { joined: true }),
+    main: { total: 4.804, invSteps: 7.327 },
+  },
+  {
+    name: "listing-chain-stored",
+    measures:
+      "each copy joined from the one before and a stored copy of it, storing its own too, read through a copy",
+    program: (k) => listingChain(k, { stored: true }),
+    main: { total: 5.805, invSteps: 7.371 },
+  },
+  {
+    name: "diamonds-unequal-depth",
+    measures:
+      "#1466, Astra's design review: branches of one to two and two to four copies, both stored",
+    program: (k) =>
+      main(
+        lines(
+          "let d0 = {f: hostValue, g: 1}",
+          rows(k, (i) => {
+            const left = Array.from({ length: 1 + (i % 2) }, (_, j) => `l${i}x${j}`);
+            const right = Array.from({ length: 2 + (i % 3) }, (_, j) => `r${i}x${j}`);
+            return lines(
+              ...left.map((name, j) => `let ${name} = ${j === 0 ? `d${i}` : left[j - 1]}`),
+              ...right.map((name, j) => `let ${name} = ${j === 0 ? `d${i}` : right[j - 1]}`),
+              `${left.at(-1)}.g = hostValue`,
+              `${right.at(-1)}.g = hostValue`,
+              `let d${i + 1} = ${left.at(-1)}`,
+              `d${i + 1} = ${right.at(-1)}`,
+            );
+          }),
+          rows(k, (i) => `repeat d${i + 1}.g {}`),
           "exit",
         ),
       ),
@@ -6153,5 +6445,151 @@ export const REPAIRED_SHARING_FAULTS: readonly {
         ].join("\n")}\nexit\n`,
       },
     ],
+  },
+];
+
+/**
+ * Codex r5's crossed dimension (`cases.mjs` `make`, the same text): a seed storing k fields, k copies of it each storing
+ * `h = {p<i>: …}`, each copied again with its own `unique<i>` (and, `mixed`, an `h.local<i>`); joined (in reverse with
+ * `reverse`) and copied twice, read at every `unique<i>` and `h.p<i>`; or (`pairs`) k places each joining the first two
+ * copies, read at one property of each. Every copy of the seed stores `h`, so each read of an `h.p<i>` has k layers
+ * holding a source on its path: the summaries' demands are the answers' own pairs, k² of them.
+ */
+function sharedReads(k: number, variant: "shared" | "mixed" | "pairs", reverse = false): string {
+  const out = ["let seed = {z:1}"];
+  for (let i = 0; i < k; i++) out.push(`seed.common${i} = ${i % 2 ? "hostOther" : "hostValue"}`);
+  for (let i = 0; i < k; i++) {
+    out.push(`let root${i} = seed`, `root${i}.h = {p${i}: ${i % 2 ? '"text"' : "[hostOther]"}}`);
+    out.push(`let arm${i} = root${i}`, `arm${i}.unique${i} = hostValue`);
+    if (variant === "mixed") out.push(`arm${i}.h.local${i} = hostOther`);
+  }
+  const names = Array.from({ length: k }, (_, i) => `arm${i}`);
+  if (reverse) names.reverse();
+  if (variant === "pairs") {
+    for (let i = 0; i < k; i++) out.push(`let pair${i} = ${names[0]}`, `pair${i} = ${names[1]}`);
+    for (let i = 0; i < k; i++) out.push(`repeat pair${i}.unique0 {}`, `repeat pair${i}.h.p1 {}`);
+  } else {
+    out.push(
+      `let joined = ${names[0]}`,
+      ...names.slice(1).map((name) => `joined = ${name}`),
+      "let copy0 = joined",
+      "let copy1 = copy0",
+    );
+    for (let i = 0; i < k; i++) out.push(`repeat copy1.unique${i} {}`, `repeat copy1.h.p${i} {}`);
+  }
+  return [...out, "exit"].join("\n");
+}
+
+/** A family whose summaries' demands are its answers' own pairs (TABLE r4.245), with `main`'s work measured once. */
+export interface OutputBoundFamily {
+  readonly name: string;
+  readonly measures: string;
+  readonly source: (k: number) => string;
+  /** The answers' distinct holder-layer/path pairs, counted from the program's own holders (`main`'s enumeration). */
+  readonly pairs: (k: number) => number;
+  /**
+   * Of those, the pairs one source answers alone, asked by reference with no summary's demand (TABLE r4.251): a holder
+   * layer with one own source under the path's first step and no listing layer below it, counted from the program's
+   * holders (each arm's `unique<i>`, `mixed` its `h.local<i>` too; `pairs` the first arm's `unique0`).
+   */
+  readonly references: (k: number) => number;
+  /** Whether the pairs grow with the program's answers (r4.245's exception for its totals), or the family is a control. */
+  readonly outputBound: boolean;
+  /**
+   * `main`'s total, `checks` and `invSteps` at k = 16 and 32 in the four modes (source order, sharing on and off, then
+   * reversed), measured on `main` 7d6c4d3d4: a regression oracle of this family's comparison, not a bound elsewhere.
+   */
+  readonly main: Readonly<Record<16 | 32, readonly (readonly [number, number, number])[]>>;
+}
+
+export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
+  {
+    name: "shared-reads",
+    measures:
+      "Codex r5's F1: k joined copies over a seed of k fields, every copy holding `h`, read at each `h.p<i>`",
+    source: (k) => sharedReads(k, "shared"),
+    pairs: (k) => k * k + 2 * k,
+    references: (k) => k,
+    outputBound: true,
+    main: {
+      16: [
+        [54436, 4782, 6799],
+        [48544, 4782, 7113],
+        [54467, 4782, 6815],
+        [48560, 4782, 7129],
+      ],
+      32: [
+        [128526, 10598, 19143],
+        [110535, 10598, 20281],
+        [128558, 10598, 19175],
+        [110567, 10598, 20313],
+      ],
+    },
+  },
+  {
+    name: "shared-reads-reversed",
+    measures: "Codex r5's F1 with the copies joined in reverse",
+    source: (k) => sharedReads(k, "shared", true),
+    pairs: (k) => k * k + 2 * k,
+    references: (k) => k,
+    outputBound: true,
+    main: {
+      16: [
+        [54455, 4782, 6796],
+        [48564, 4782, 7110],
+        [54486, 4782, 6812],
+        [48580, 4782, 7126],
+      ],
+      32: [
+        [128577, 10598, 19140],
+        [110587, 10598, 20278],
+        [128609, 10598, 19172],
+        [110619, 10598, 20310],
+      ],
+    },
+  },
+  {
+    name: "shared-reads-mixed",
+    measures: "Codex r5's F1 with each copy storing below `h` too",
+    source: (k) => sharedReads(k, "mixed"),
+    pairs: (k) => k * k + 3 * k,
+    references: (k) => 2 * k,
+    outputBound: true,
+    main: {
+      16: [
+        [65429, 5821, 9406],
+        [58691, 5821, 9776],
+        [65526, 5821, 9486],
+        [58771, 5821, 9856],
+      ],
+      32: [
+        [153196, 12677, 26926],
+        [133514, 12677, 28176],
+        [153356, 12677, 27086],
+        [133674, 12677, 28336],
+      ],
+    },
+  },
+  {
+    name: "shared-reads-pairs",
+    measures: "Codex r5's control: k places each joining two copies, read at one property of each",
+    source: (k) => sharedReads(k, "pairs"),
+    pairs: () => 5,
+    references: () => 1,
+    outputBound: false,
+    main: {
+      16: [
+        [47359, 4576, 4148],
+        [43886, 4576, 4238],
+        [47361, 4576, 4150],
+        [43888, 4576, 4240],
+      ],
+      32: [
+        [95303, 10088, 8164],
+        [88409, 10088, 8342],
+        [95305, 10088, 8166],
+        [88411, 10088, 8344],
+      ],
+    },
   },
 ];

@@ -262,10 +262,15 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
       work.charge("checks");
       if (offends(admission.run(contract.entryAt(entry, rest)))) takeAll(entry.ds);
     }
-    for (const sub of contract.relevantSubs(stored, rest)) {
-      work.charge("checks");
-      if (offends(admission.run(contract.subAt(sub.key, rest)))) takeAll(sub.defs);
-    }
+    // (the prefix's layers' summaries: an offending item in one is an offending source of it, whose layer's stores
+    // are the candidates, #1466; each source by itself where a summary declines)
+    const offended = contract.offendingStores(stored, rest, offends, (work) => admission.run(work));
+    if (offended !== null) takeAll(offended);
+    else
+      for (const sub of contract.relevantSubs(stored, rest)) {
+        work.charge("checks");
+        if (offends(admission.run(contract.subAt(sub.key, rest)))) takeAll(sub.defs);
+      }
     // A6: a rejected store is decided again in every pass, where it was rejected
     const retaken = admission.retaken.get(key) ?? [];
     work.charge("checks", retaken.length);

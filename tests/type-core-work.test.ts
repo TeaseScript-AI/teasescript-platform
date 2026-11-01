@@ -25,6 +25,8 @@ import {
   HOT_CANDIDATE_FAMILIES,
   INHERITED_FIELD_FAMILIES,
   JOIN_REACH_FAMILIES,
+  LAYER_FAMILIES,
+  OUTPUT_BOUND_FAMILIES,
   MIXED_ADD_PRODUCTS,
   NARROWING_FAMILIES,
   NESTED_OBJECT_SELECTIONS,
@@ -156,13 +158,19 @@ function steepCounters(
       const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}${sizes[0] === 64 ? "" : ` ${sizes[0]} → ${sizes[1]}`}`;
       const doubling = (before: number, after: number): number =>
         (2 * (after / Math.max(1, before))) / scale;
-      if (doubling(small.total, large.total) > DOUBLING)
+      // (where `main` grows faster on the family's shape, at or under `main`'s growth, TABLE r4.233)
+      const bound = Math.max(DOUBLING, family.main?.total ?? 0);
+      const counterBound = (counter: string): number =>
+        counter === "invSteps"
+          ? Math.max(COUNTER_DOUBLING, family.main?.invSteps ?? 0)
+          : COUNTER_DOUBLING;
+      if (doubling(small.total, large.total) > bound)
         steep.push(`${name}: ${doubling(small.total, large.total).toFixed(3)}`);
       for (const [counter, after] of large.counts)
         if (
           counter !== "syntaxNodes" &&
           after >= 200 &&
-          doubling(small.counts.get(counter) ?? 0, after) > COUNTER_DOUBLING
+          doubling(small.counts.get(counter) ?? 0, after) > counterBound(counter)
         )
           steep.push(
             `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,
@@ -174,6 +182,271 @@ function steepCounters(
 
 test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters([...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS]), []);
+});
+
+/**
+ * #1466: a stack of k diamonds of copies, its siblings, wide and nested joins and chains of listing layers read at
+ * sparse paths (`LAYER_FAMILIES`), each read answered once per layer and path from the layers below it that hold its
+ * property, at one small doubling, in either order and with the sharing off too: the total and the contract's own
+ * counter (`invSteps`), which `main` grew as k³ on the diamonds (7.85 per doubling from 16 to 32); where `main` grows
+ * faster than the bound on a family's shape, at or under `main`'s growth (`WorkFamily.main`, TABLE r4.233). The
+ * support's other counters carry its log factor, which reads above the counters' bound at these sizes. The series to
+ * k = 64 in four modes is the PR's evidence, outside CI.
+ */
+test("a stack of diamonds of copies and its siblings grow with the program in either order (#1466)", () => {
+  for (const unshared of [false, true]) {
+    const measure = (at: Sized, reversed: boolean): Measured => {
+      const { total, counts } = analysed(at, reversed, unshared).budget;
+      const kept = ["syntaxNodes", "invSteps"] as const;
+      return { total, counts: new Map(kept.map((counter) => [counter, counts.get(counter) ?? 0])) };
+    };
+    assert.deepEqual(steepCounters(LAYER_FAMILIES, unshared, measure, [16, 32]), []);
+  }
+});
+
+/**
+ * #1466, Codex r5's F1 (TABLE r4.245): k reads of `h.p<i>` each answered by k layers holding a source on its path, so the
+ * summaries' demands are the answers' own pairs P, counted from the program's holders: at k 16 and 32 in the four modes
+ * the demands are exactly P less the pairs one source answers by reference (TABLE r4.251), one per pair a summary
+ * answers, never repeated, never a pass-through layer's, `checks` at or under `main`'s,
+ * `invSteps` growing at or under `main`'s, and the total's excess over `main` per pair not rising (r4.245's exception for
+ * an output-bound family; the control keeps the total's bound). `main`'s work is the family's measured oracle.
+ */
+test("summaries' demands on output-bound reads are their answers' pairs, at main's growth per pair (#1466)", () => {
+  const modes = [
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ] as const;
+  for (const family of OUTPUT_BOUND_FAMILIES)
+    modes.forEach(([reversed, unshared], mode) => {
+      const at = (k: 16 | 32) => {
+        const request = coreRequest(
+          [{ path: "main.tease", source: family.source(k) }],
+          ["hostValue", "hostOther"],
+        );
+        assert.ok(request !== null, `${family.name} at ${k}: its files parse and resolve`);
+        const { budget } = analysed(
+          { name: `${family.name} at ${k}`, request },
+          reversed,
+          unshared,
+        );
+        const [total, checks, invSteps] = family.main[k][mode]!;
+        const name = `${family.name} at ${k}, mode ${mode}`;
+        assert.equal(
+          budget.facts.layerDemands,
+          family.pairs(k) - family.references(k),
+          `${name}: one demand per pair a summary answers`,
+        );
+        assert.ok(
+          (budget.counts.get("checks") ?? 0) <= checks,
+          `${name}: checks at or under main's`,
+        );
+        return { budget, main: { total, invSteps }, nodes: budget.counts.get("syntaxNodes") ?? 1 };
+      };
+      const [small, large] = [at(16), at(32)];
+      const scale = large.nodes / small.nodes;
+      const growth = (before: number, after: number): number => (2 * after) / before / scale;
+      const name = `${family.name}, mode ${mode}`;
+      assert.ok(
+        growth(
+          small.budget.counts.get("invSteps") ?? 0,
+          large.budget.counts.get("invSteps") ?? 0,
+        ) <= growth(small.main.invSteps, large.main.invSteps),
+        `${name}: invSteps at or under main's growth`,
+      );
+      if (family.outputBound) {
+        const perPair = (at: typeof small, k: 16 | 32): number =>
+          (at.budget.total - at.main.total) / family.pairs(k);
+        assert.ok(
+          perPair(large, 32) <= perPair(small, 16),
+          `${name}: the excess per pair not rising`,
+        );
+      } else
+        assert.ok(
+          growth(small.budget.total, large.budget.total) <= DOUBLING,
+          `${name}: total within the bound`,
+        );
+    });
+});
+
+/**
+ * #1466, the READY replay's `graph/224` and `graph/533` (a mutual feedback whose candidate route asks one `q` deeper per
+ * question), the deep read they showed and Astra r1's alternating feedback (`a.next.back.next…`; TABLE r4.250, r4.251):
+ * a read `depth` properties down, one holder answering it, asks that holder's source by reference at the caller's own
+ * path (`singleSource`), never a layer's summary rebuilt from the path's record, makes no path id (only a summary's
+ * demand needs one), and walks its path's steps once, its prefixes' texts never kept. At depths 16 and 32 in the four
+ * modes, against `main`'s work there (measured on 7d6c4d3d4: a regression oracle of these shapes): no layer demand; the
+ * total, `invSteps` and `checks` at or under `main`'s, `main`'s lead on the total not shrinking, and the literal work's
+ * growth at or under `main`'s (kept texts made it a power of the depth steeper; a path id made for every read put the
+ * alternating read 2D + 9 units above `main`). At depths 2 to 4 the head's excess over `main` is at most the reference's
+ * fixed setup (6, 9 and 1 units on the deep read, 6, 10 and 2 on the alternating one), from 5 none.
+ */
+test("a deep read asks its one holder's source by reference and walks its path's steps once (#1466)", () => {
+  const shapes = [
+    {
+      name: "a read",
+      source: (depth: number): string =>
+        [
+          "let a={left:1,q:null}",
+          "let b={right:2,q:null}",
+          "a.q=b",
+          "b.q=a",
+          `let read=a${".q".repeat(depth)}`,
+          "say read",
+          "exit",
+        ].join("\n"),
+      // (`main`'s work at depths 16 and 32, and its totals at 2 to 7, the sharing on and off, equal in either order)
+      shared: {
+        total: [8855, 23083],
+        invSteps: [2103, 7187],
+        checks: [260, 356],
+        literalUnits: [1974, 6030],
+        small: [2410, 2712, 3037, 3385, 3758, 4155],
+      },
+      unshared: {
+        total: [7451, 18875],
+        invSteps: [2184, 7364],
+        checks: [260, 356],
+        literalUnits: [562, 1782],
+        small: [2193, 2453, 2727, 3018, 3328, 3656],
+      },
+      setup: [6, 9, 1, 0, 0, 0],
+    },
+    {
+      name: "an alternating read",
+      source: (depth: number): string =>
+        [
+          "let a={left:1,next:null}",
+          "let b={right:2,back:null}",
+          "a.next=b",
+          "b.back=a",
+          `let read=a${Array.from({ length: depth }, (_, index) => (index % 2 ? ".back" : ".next")).join("")}`,
+          "say read",
+          "exit",
+        ].join("\n"),
+      shared: {
+        total: [10239, 29677],
+        invSteps: [2427, 8601],
+        checks: [260, 356],
+        literalUnits: [3053, 11245],
+        small: [2420, 2726, 3061, 3424, 3819, 4263],
+      },
+      unshared: {
+        total: [8647, 24711],
+        invSteps: [2508, 8778],
+        checks: [260, 356],
+        literalUnits: [1453, 6239],
+        small: [2200, 2460, 2739, 3039, 3364, 3729],
+      },
+      setup: [6, 10, 2, 0, 0, 0],
+    },
+  ];
+  type Counter = "total" | "invSteps" | "checks" | "literalUnits";
+  const modes = [
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ] as const;
+  for (const shape of shapes)
+    modes.forEach(([reversed, unshared], mode) => {
+      const at = (depth: number) => {
+        const request = coreRequest([{ path: "main.tease", source: shape.source(depth) }]);
+        assert.ok(request !== null, `${shape.name} ${depth} deep: its files parse and resolve`);
+        const { budget } = analysed(
+          { name: `${shape.name} ${depth} deep`, request },
+          reversed,
+          unshared,
+        );
+        const counts: Record<Counter, number> = {
+          total: budget.total,
+          invSteps: budget.counts.get("invSteps") ?? 0,
+          checks: budget.counts.get("checks") ?? 0,
+          literalUnits: budget.counts.get("literalUnits") ?? 0,
+        };
+        return {
+          counts,
+          demands: budget.facts.layerDemands,
+          nodes: budget.counts.get("syntaxNodes") ?? 1,
+        };
+      };
+      const ours = unshared ? shape.unshared : shape.shared;
+      const sizes = [at(16), at(32)];
+      sizes.forEach((size, index) => {
+        const name = `${shape.name}, mode ${mode}, ${16 << index} deep`;
+        assert.equal(size.demands, 0, `${name}: no layer demand`);
+        for (const counter of ["total", "invSteps", "checks"] as const)
+          assert.ok(
+            size.counts[counter] <= ours[counter][index]!,
+            `${name}: ${counter} ${size.counts[counter]} against main's ${ours[counter][index]}`,
+          );
+      });
+      const lead = (index: number): number => ours.total[index]! - sizes[index]!.counts.total;
+      assert.ok(
+        lead(1) >= lead(0),
+        `${shape.name}, mode ${mode}: main's lead ${lead(0)} then ${lead(1)}`,
+      );
+      const scale = sizes[1]!.nodes / sizes[0]!.nodes;
+      const growth = (2 * sizes[1]!.counts.literalUnits) / sizes[0]!.counts.literalUnits / scale;
+      const mains = (2 * ours.literalUnits[1]!) / ours.literalUnits[0]! / scale;
+      assert.ok(
+        growth <= mains,
+        `${shape.name}, mode ${mode}: literalUnits ${growth.toFixed(4)} against main's ${mains.toFixed(4)}`,
+      );
+      shape.setup.forEach((setup, index) => {
+        const excess = at(index + 2).counts.total - ours.small[index]!;
+        assert.ok(
+          excess <= setup,
+          `${shape.name}, mode ${mode}, ${index + 2} deep: ${excess} over main's`,
+        );
+      });
+    });
+});
+
+/**
+ * #1466, Codex r4's positive hits: k joined layers, each listing a step of its own, read at each, one doubling later, where
+ * a read finding its layer by visiting each joined layer grows past the bound (2.40 against the selection's 2.02,
+ * `invSteps`): a read finds the one layer listing its step by the place's per-step map, its descent the map's depth.
+ */
+test("a read finds the joined layer listing its step by the place's map (#1466)", () => {
+  const family = LAYER_FAMILIES.find((each) => each.name === "distinct-steps")!;
+  for (const unshared of [false, true]) {
+    const measure = (at: Sized, reversed: boolean): Measured => {
+      const { total, counts } = analysed(at, reversed, unshared).budget;
+      return {
+        total,
+        counts: new Map([
+          ["syntaxNodes", counts.get("syntaxNodes") ?? 0],
+          ["invSteps", counts.get("invSteps") ?? 0],
+        ]),
+      };
+    };
+    assert.deepEqual(steepCounters([family], unshared, measure, [32, 64]), []);
+  }
+});
+
+/**
+ * #1466, Codex r2's sibling and its shared shape: a read below nested joins, or below joined copies over a record listing
+ * the same step, asks only the layer holding its property, never a joining layer or a copy it passes through. Below
+ * nested joins that layer's one source answers the read by reference, so no summary's demand is made (TABLE r4.251);
+ * over the shared record a listing layer lies below the step, so each property's holder makes its summary's demand, one
+ * per property: k, at each size and in either order (r4.227's bound; a regression oracle of the selection, where a
+ * joining layer asked too would make the read's summaries' demands).
+ */
+test("a read below nested or shared joins asks only the layers holding its path (#1466)", () => {
+  const families = LAYER_FAMILIES.filter(
+    (each) => each.name.startsWith("nested-join") || each.name === "shared-join",
+  );
+  for (const family of families)
+    for (const k of [8, 16, 32, 64])
+      for (const reversed of [false, true])
+        assert.equal(
+          analysed(sized(family, k), reversed).budget.facts.layerDemands,
+          family.name === "shared-join" ? k : 0,
+          `${family.name} at ${k}${reversed ? " reversed" : ""}`,
+        );
 });
 
 /**

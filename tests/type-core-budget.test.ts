@@ -606,28 +606,25 @@ test("a linked record list stops at the allowance with its count checked when it
  * Codex r5's readers of unrelated lineages and lineage ties, Sol's staggered pairs and branch readers, the owner
  * reviewer's overlapping ancestor and two-holder ladder), and a place's many stores (Astra r1's B1), plainly, through
  * copies and through a selection (Codex r3's B1). Here at the smaller size pair, one doubling (8 → 16; chains 16 → 32,
- * diamonds 4 → 8, a shared base read at every field 2 → 4); the worker-side probe runs the same gate at the larger pair
- * (16 → 32), with the uncharged-work probe beside it.
+ * a shared base read at every field 2 → 4); the worker-side probe runs the same gate at the larger pair (16 → 32), with
+ * the uncharged-work probe beside it.
  */
 test("a settled stop finishes the host data of every copy-graph topology in linear work", () => {
-  // (a shared base read at every field grows as k², and the diamonds' admission grows faster on `main` already, #1466:
-  // their sizes are smaller)
+  // (a shared base read at every field grows as k²: its sizes are smaller)
   assert.deepEqual(
     frontierGrowthProblems((shape) =>
       shape === "shared-deltas"
         ? [2, 4]
-        : shape === "diamond"
-          ? [4, 8]
-          : // (a chain's read follows up to `FRONTIER_COPIES` = 8 of its links, keeping the furthest found for the next
-            // read: read deepest first, from 8 → 16 the reads' work ramps up toward that bound, which reads as growth
-            // though each read's work is bounded; an `addAll` of k copies meets them all at one read, and a literal of k
-            // copies read k deep cuts every read, each from 9 on)
-            shape === "chain" ||
-              shape === "chain-own" ||
-              shape === "addAll-copies" ||
-              shape === "cut-chain"
-            ? [16, 32]
-            : [8, 16],
+        : // (a chain's read follows up to `FRONTIER_COPIES` = 8 of its links, keeping the furthest found for the next
+          // read: read deepest first, from 8 → 16 the reads' work ramps up toward that bound, which reads as growth
+          // though each read's work is bounded; an `addAll` of k copies meets them all at one read, and a literal of k
+          // copies read k deep cuts every read, each from 9 on)
+          shape === "chain" ||
+            shape === "chain-own" ||
+            shape === "addAll-copies" ||
+            shape === "cut-chain"
+          ? [16, 32]
+          : [8, 16],
     ),
     [],
   );

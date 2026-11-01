@@ -48,7 +48,8 @@ import {
 } from "../src/type-inference/core/contract/lanes.js";
 import type { WrapperHop } from "../src/type-inference/core/contract/model.js";
 import { keyOf, type Key } from "../src/type-inference/core/definitions.js";
-import { CoreProgram } from "../src/type-inference/core/program.js";
+import { pathIdOf } from "../src/type-inference/core/contract/literal-index.js";
+import { CoreProgram, propertyStep } from "../src/type-inference/core/program.js";
 import { REASON, type Item } from "../src/type-inference/core/items.js";
 import { memberStep } from "../src/type-inference/core/method-categories.js";
 import type { Demand, Work } from "../src/type-inference/core/solver.js";
@@ -1116,4 +1117,39 @@ test("a wrapper's own cell copying a written binding lands below its place's own
   const { result, records } = withKeyRecords(() => publishedRoute(files, GLOBALS));
   assert.ok(records.some((record) => record.kind === "lane" && record.lane === "cursor"));
   assert.equal(result.text, withTextKeys(() => publishedRoute(files, GLOBALS)).text);
+});
+
+test("a prefix's read of a record's view makes the path's id as the record does, in its order (#1466, Codex r7 F1)", () => {
+  // (a record's view below a joined step (`PathSteps.after`) makes its own path's id lazily, its suffix first; a read that
+  // made the id by its own walk of the view's steps made the same paths in another order, so ids differed)
+  const source = coreRequest([
+    {
+      path: "main.tease",
+      source:
+        "let seed={q:{r:1}}\nseed.q.r=2\nlet copy=seed\ncopy.q={r:hostValue}\nrepeat copy.q.r {}\nexit",
+    },
+  ]);
+  assert.ok(source !== null);
+  const read = (recordFirst: boolean) => {
+    const pass = narrowingPass(source);
+    const { contract } = pass;
+    const stores = contract.prefixStores(keyOf(bindingOf(pass, "copy"), []));
+    const made = pathIdOf(contract, ["lead", propertyStep("r"), "tail"]);
+    const view = stepsOfId(contract, keyIdAt(0, made))
+      .from(1)
+      .to(1)
+      .after([propertyStep("q")])
+      .rest();
+    pathIdOf(contract, [propertyStep("q")]);
+    // (the record's own id made first, or after the read)
+    if (recordFirst) view.id();
+    const sources = contract
+      .relevantSubs(stores, view)
+      .map(({ key, defs }) => [key, [...defs].map((def) => def?.uid ?? null)]);
+    const id = view.id();
+    return { sources, id, parents: [...contract.pathParents], steps: [...contract.pathLastSteps] };
+  };
+  const [after, first] = [read(false), read(true)];
+  assert.ok(after.sources.length > 0, "the read finds the stored sources");
+  assert.deepEqual(after, first);
 });

@@ -64,6 +64,7 @@ import { entryGroups, groupsAt, prefixLevels } from "./levels.js";
 import { annotated, marksAt } from "./marks.js";
 import type { PrefixEntry } from "./model.js";
 import { positionable, positioned, positionOf } from "./positions.js";
+import { summaryCount, summaryItems } from "./prefix-index.js";
 import { termAt, typeAtPath, typeKinds, writtenOf } from "./terms.js";
 import { members } from "./value-kinds.js";
 
@@ -236,11 +237,16 @@ function* severalWork(contract: Contract, at: Key): Work<readonly Item[]> {
       if (count >= 2) break;
       count += yield* elementsOf(contract, entry, below);
     }
-    for (const sub of contract.relevantSubs(stored, below)) {
-      if (count >= 2) break;
-      contract.pass.program.work.charge("invSteps");
-      if (withoutEmpty(yield* contract.subAt(sub.key, below)).length > 0) count += 1;
-    }
+    // (the prefix's layers' distinct sources with elements, counted to two by their summary, #1466; each by itself
+    // where it declines)
+    const several = count >= 2 ? 0 : yield* summaryCount(contract, stored, below);
+    if (several !== null) count += several;
+    else
+      for (const sub of contract.relevantSubs(stored, below)) {
+        if (count >= 2) break;
+        contract.pass.program.work.charge("invSteps");
+        if (withoutEmpty(yield* contract.subAt(sub.key, below)).length > 0) count += 1;
+      }
   }
   return count >= 2 ? SEVERAL : [];
 }
@@ -499,16 +505,20 @@ function* contractAlong(
               ),
             );
       }
-      // a replaced source's own stores below the prefix, only where they lie, marked as its copies' entries are
+      // a replaced source's own stores below the prefix, only where they lie: its layers' summary, their sources'
+      // answers merged in order (#1466); where it declines, each source by itself, marked as its copies' entries are
       // (§3.2: a guarded read of a copy of it is a mark of its holder)
-      for (const sub of contract.relevantSubs(stores, rest)) {
-        const items = yield* contract.subAt(sub.key, rest);
-        out.push(
-          ...(marksAt(contract, contract.keyIdentity(sub.key).holder, rest)
-            ? marked(items)
-            : items),
-        );
-      }
+      const summary = yield* summaryItems(contract, stores, rest);
+      if (summary !== null) for (const item of summary) out.push(item);
+      else
+        for (const sub of contract.relevantSubs(stores, rest)) {
+          const items = yield* contract.subAt(sub.key, rest);
+          out.push(
+            ...(marksAt(contract, contract.keyIdentity(sub.key).holder, rest)
+              ? marked(items)
+              : items),
+          );
+        }
       continue;
     }
     for (const d of definitions.byKey.get(prefix) ?? []) {

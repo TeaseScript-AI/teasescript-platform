@@ -423,6 +423,11 @@ function spanId(contract: Contract, path: number, from: number): number {
   return id;
 }
 
+/** The id of `path`'s span from `from` on where `spanId` has found it, else `undefined`: it finds none. */
+function spanMade(contract: Contract, path: number, from: number): number | undefined {
+  return from === 0 ? path : contract.pathFacts.get(path)?.spans?.get(from);
+}
+
 /**
  * The id of the prefix of `path` of `length` steps (`length` at most its depth): from its path's prefixes where they
  * are kept (`prefixesOf`), else found from the nearest of its ancestors whose prefix of that length is kept (each
@@ -480,6 +485,16 @@ export interface PathRef extends Iterable<string> {
   readonly length: number;
   /** The step at `index`. */
   at(index: number): string;
+  /**
+   * The step at `index`, read making no path or span id (a read's selection, TABLE r4.262): an array's as `at`, a span's
+   * from its steps, made once per view at the charged boundary (`steps`).
+   */
+  read(index: number): string;
+  /**
+   * Its path's id where made already, else `undefined`, making none: a span's own where found (`spanId`'s entries), a
+   * record's where found (`PathSteps.made`); a plain array's `undefined` (its walk looks its prefixes up, `pathBelow`).
+   */
+  made(): number | undefined;
   /** The steps from `from` on, a view. */
   from(from: number): PathRef;
   /** Its first `length` steps, a view. */
@@ -609,6 +624,8 @@ export function arrayRef(contract: Contract, steps: Steps): PathRef {
     kind: "steps",
     length: steps.length,
     at: (index) => steps.at(index)!,
+    read: (index) => steps.at(index)!,
+    made: () => (isPathSteps(steps) ? steps.made : undefined),
     from: below,
     to: above,
     steps: () => steps,
@@ -629,12 +646,16 @@ export function spanRef(contract: Contract, path: number, from = 0): PathRef {
   // (its own path's id, found once per view: `spanId`)
   let own: number | undefined;
   const ownId = (): number => (own ??= spanId(contract, path, from));
+  // (its steps for a read that makes no id, made once per view: `stepsOfId`)
+  let kept: PathSteps | undefined;
   const ref: PathRef = {
     kind: "span",
     length,
     // (a step its span's first: the span's id kept per offset in its path's facts, shared by the paths below it)
     at: (index) =>
       contract.pathFirstSteps[index === 0 ? ownId() : spanId(contract, path, from + index)]!,
+    read: (index) => (kept ??= stepsOfId(contract, keyIdAt(0, path), from)).at(index)!,
+    made: () => own ?? spanMade(contract, path, from),
     from: (more) => (more === 0 ? ref : spanRef(contract, path, from + more)),
     to: (count) => (count >= length ? ref : spanRef(contract, prefixId(contract, ownId(), count))),
     steps: () => stepsOfId(contract, keyIdAt(0, path), from),
@@ -835,6 +856,17 @@ export class PathSteps {
   /** The id of the path it spells, found once (`spanId`, `prefixId`, `joinedId`). */
   get path(): number {
     return (this.#id ??= this.#find());
+  }
+  /**
+   * The id of the path it spells where found already, else `undefined`: it finds none. A view's is found once and kept on
+   * the steps it views (`#view`), so a view made again finds it there.
+   */
+  get made(): number | undefined {
+    if (this.#id !== undefined) return this.#id;
+    const of = this.#of;
+    return of === null
+      ? undefined
+      : of.#views?.get(this.#offset * (of.length + 1) + this.length)?.id;
   }
   /** Its text, through the record (`textOf`), found once. */
   text(): string {
@@ -1151,7 +1183,8 @@ export function exportNames(
 
 /**
  * Names a packet came with (`exportNames`) in this pass: its paths made here, parent first (`importKeyIds`), each
- * cursor's token its key's text and each span's its path's, so this pass asks each demand in its own identity.
+ * cursor's token its key's text and each span's its path's, so this pass asks each demand in its own identity; a layer
+ * summary's (`protoLayer|`, #1466) keeps them as this pass's cursor and span, the tokens its demand is named by.
  */
 export function importNames(
   contract: Contract,
@@ -1159,18 +1192,21 @@ export function importNames(
   packet: unknown,
 ): string[] {
   const ids = importKeyIds(contract, packet);
-  return names.map((name) =>
-    name
+  return names.map((name) => {
+    const native = name.startsWith("protoLayer|");
+    return name
       .split("|")
-      .map((part) =>
-        isCursorToken(part)
-          ? keyOfId(contract, ids[keyIdPath(part)]!)
-          : SPAN.test(part)
-            ? textOf(contract, keyIdPath(ids[Number(part.slice(1))]!))
-            : part,
-      )
-      .join("|"),
-  );
+      .map((part) => {
+        if (isCursorToken(part)) {
+          const id = ids[keyIdPath(part)]!;
+          return native ? id : keyOfId(contract, id);
+        }
+        if (!SPAN.test(part)) return part;
+        const path = keyIdPath(ids[Number(part.slice(1))]!);
+        return native ? spanRef(contract, path).name() : textOf(contract, path);
+      })
+      .join("|");
+  });
 }
 
 /**

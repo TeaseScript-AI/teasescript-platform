@@ -3,8 +3,14 @@ import test from "node:test";
 
 import { createXorShift32State, nextXorShift32 } from "../src/runtime/random/random.js";
 import { analyseCore, solveDemands } from "../src/type-inference/core/answers.js";
-import { BudgetExhausted, withTestAllowance } from "../src/type-inference/core/budget.js";
+import {
+  BudgetExhausted,
+  joinParts,
+  withTestAllowance,
+} from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { exportNames } from "../src/type-inference/core/contract/key-ids.js";
+import { keyOf } from "../src/type-inference/core/definitions.js";
 import {
   ingressLeaves,
   itemsSignature,
@@ -29,6 +35,7 @@ import {
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { itemScope } from "./helpers/type-core-items.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
+import { narrowingPass } from "./helpers/type-core-narrowing.js";
 
 /**
  * The determinism of the coarse core (ADR 0021 1.6; the port plan's S3 note §1): the answers depend on the program,
@@ -109,7 +116,12 @@ function answer(items: readonly Item[]): string {
 function componentDifferences(
   name: string,
   request: CoreAnalysisRequest,
-): { readonly components: number; readonly differing: readonly string[] } {
+): {
+  readonly components: number;
+  readonly differing: readonly string[];
+  /** The components holding a layer's summary (`protoLayer|`, #1466). */
+  readonly layered: number;
+} {
   const solved: {
     readonly members: readonly SolvedMember[];
     readonly replay: { readonly names: readonly string[]; readonly packet: unknown } | null;
@@ -118,9 +130,11 @@ function componentDifferences(
     compactAnalysis(request),
   );
   const differing: string[] = [];
+  let layered = 0;
   for (const { members, replay } of solved) {
     // (a cursor's name replayed through its component's packet, never by its ids: #1422 B1)
     const keys = replay?.names ?? members.map((member) => member.key);
+    if (keys.some((key) => key.startsWith("protoLayer|"))) layered += 1;
     const expected = members.map((member) => answer(member.items));
     for (const entry of keys)
       for (const reverseWorklist of [false, true]) {
@@ -133,7 +147,7 @@ function componentDifferences(
         });
       }
   }
-  return { components: solved.length, differing };
+  return { components: solved.length, differing, layered };
 }
 
 test("every component is solved alike from each member as the entry and in either order", () => {
@@ -146,6 +160,91 @@ test("every component is solved alike from each member as the entry and in eithe
   }
   assert.ok(components > 0, "the set produces components");
   assert.deepEqual(differing, []);
+});
+
+/**
+ * #1466 (TABLE r4.225's B1, r4.227): a layer's summary is a demand named by its layer's origin and the path
+ * (`protoLayer|alias|<place>||<path>`, `protoLayer|projected|<place>|<projection>|<path>` as their texts), never by a
+ * number its pass allocated: Astra's B1 witness and sibling, and Sol's copy cycles through a list element, of nested
+ * copies and below a projected prefix, each a component holding one.
+ */
+const LAYER_CYCLES: readonly string[] = [
+  "let a = {g: hostValue}\nlet b = a\nb.g = a.g\na = b\nrepeat a.g {}\nexit",
+  "let a = {g: hostValue}\nlet b = a\nlet c = b\na = c\nb.g = c.g\nc.g = a.g\nrepeat b.g {}\nexit",
+  "let a = [{g: hostValue}]\nlet b = a\nb[0].g = a[0].g\na = b\nrepeat a[0].g {}\nexit",
+  "let a = {g: {g: hostValue}}\nlet b = a\nlet c = b\nb.g.g = c.g.g\na = c\nrepeat a.g.g {}\nexit",
+  "let root = {box: {g: 1}}\nroot.box.g = hostValue\nlet a = root.box\nlet b = a\nb.g = a.g\na = b\nrepeat a.g {}\nexit",
+];
+
+const layerRequest = (source: string): CoreAnalysisRequest => {
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null, source);
+  return request;
+};
+
+test("a layer's summary in a copy cycle is solved alike from each member as the entry and in either order (#1466)", () => {
+  // (a cycle whose read one source answers asks it by reference, no summary made (TABLE r4.251): its component is solved
+  // alike too; the others' components hold a layer's summary)
+  const layered = LAYER_CYCLES.filter((source) => {
+    const found = componentDifferences(source, layerRequest(source));
+    assert.deepEqual(found.differing, [], source);
+    return found.layered > 0;
+  });
+  assert.ok(layered.length > 0, "a cycle's component holds a layer's summary");
+});
+
+/**
+ * #1466: every finished layer summary is asked again in a fresh pass from its name and packet alone (`exportNames`,
+ * `solveDemands`): its layer found again by its origin through that pass's own stores, after the producing pass met
+ * other paths first, so no id of the one pass names anything in the other. A name of no origin kind and an origin
+ * without a layer (the host value's place) are rejected, never answered by a guess.
+ */
+test("every finished layer summary is asked again in a fresh pass by its name and packet alone (#1466)", () => {
+  const kinds = new Set<string>();
+  const sources = [
+    ...LAYER_CYCLES,
+    "let d0 = {f: hostValue, g: 1}\nlet l0 = d0\nlet r0 = d0\nl0.g = hostValue\nlet d1 = l0\nd1 = r0\nlet l1 = d1\nlet r1 = d1\nl1.g = hostValue\nlet d2 = l1\nd2 = r1\nrepeat d2.g {}\nexit",
+  ];
+  for (const source of sources) {
+    const request = layerRequest(source);
+    const pass = narrowingPass(request);
+    // (the producing pass's arena made other paths first)
+    pass.contract.pathIdOf(["shifted", "first"]);
+    for (const place of pass.program.places)
+      if (place.kind.kind === "binding")
+        for (const path of [["g"], ["element", "g"], ["g", "g"]])
+          pass.solver.run(pass.contract.contractOf(keyOf(place.id, path)));
+    for (const { key } of pass.solver.demandWork()) {
+      if (!key.startsWith("protoLayer|")) continue;
+      kinds.add(key.split("|")[1]!);
+      const exported = exportNames(pass.contract, [key])!;
+      const packet: unknown = JSON.parse(JSON.stringify(exported.packet));
+      assert.equal(
+        answer(solveDemands(request, exported.names, packet)[0]!),
+        answer(pass.solver.answer(key)!),
+        `${source}: ${key}`,
+      );
+      const [, kind, origin, path] = exported.names[0]!.split("|");
+      assert.throws(
+        () => solveDemands(request, [joinParts("protoLayer", "copied", origin!, path!)], packet),
+        /No layer is written/,
+      );
+      // (the host value's place: no store makes a layer of it)
+      const host = pass.program.places.find((place) => pass.program.isHost(place.id))!.id;
+      assert.throws(
+        () =>
+          solveDemands(request, [joinParts("protoLayer", kind!, `${host}#0`, ".1")], {
+            nodes: [[-1, "g"]],
+            keys: [
+              [host, -1],
+              [0, 0],
+            ],
+          }),
+        /No layer comes from/,
+      );
+    }
+  }
+  assert.deepEqual([...kinds].sort(), ["alias", "projected"]);
 });
 
 /**

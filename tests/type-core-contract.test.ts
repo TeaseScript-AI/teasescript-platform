@@ -3,13 +3,21 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
-import type { ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
+import type { Contract, ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
+import {
+  offendingStores,
+  summaryCount,
+  summaryItems,
+  summaryPresence,
+} from "../src/type-inference/core/contract/prefix-index.js";
+import { PathSteps, spanRef, type Rest } from "../src/type-inference/core/contract/key-ids.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
 import { writerKey } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import type { Solver } from "../src/type-inference/core/solver.js";
+import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import {
   inMode,
@@ -292,6 +300,30 @@ test("a tested path's mark reaches every entry of its source, and only that path
     "let seed = {n: 1.5, m: 2.5}\nlet w = {q: seed}\nlet a = w.q\nif w.q.n is integer { a = w.q }\nlet b = w.q\nif flagHost { b = w.q }\nlet x: integer = b.n\nexit",
   );
   assert.deepEqual(result(wrapped), { outcome: "warning-runtime-check", checked: true });
+});
+
+/**
+ * #1466: A5's candidates through a prefix's layers are the stores that brought each layer whose summary holds an
+ * offending item, a joined layer's too: `t` decided a whole number by its start value, then copied `a2`, whose own
+ * store below its root brings host data, owes its check at that copy, in either order.
+ */
+test("a copy that joins a layer of host data owes its check where the layer's summary offends (#1466)", () => {
+  const source =
+    "let a = {g: 1}\nlet b = {g: 1}\nlet a2 = a\na2.g = hostValue\nlet b2 = b\nb2.g = 2\nlet t = b2\nt = a2\nrepeat t.g {}\nexit";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  for (const reversed of [false, true]) {
+    const { checks } = inOrder(reversed, () => compactAnalysis(request));
+    assert.ok(
+      checks.some(
+        (check) =>
+          check.kind === "copy-type" &&
+          check.target === "t.g" &&
+          source.slice(check.site.offset, check.site.end) === "a2",
+      ),
+      `reversed: ${reversed}`,
+    );
+  }
 });
 
 test("a chain of whole copies read at k fields resolves each copy once (W34)", () => {
@@ -754,5 +786,167 @@ test("a stop whose own entries merge into one publishes main's records, its answ
       expected,
       `${name}: main's records`,
     );
+  }
+});
+
+/**
+ * #1466, TABLE r4.251: a read one holder's source answers asks that source by reference at the read's whole path, so
+ * the answer is the source's own there (a reference at the path's first step alone answered the object at `g`,
+ * `unknown`, for every property), and keeps the mark a tested path's guard leaves on the source's holder (§3.2): the
+ * host value stored at `a.g.n`, tested before `b` copies `a`, reads guarded through `b`'s layer, as the source read by
+ * itself does. In the four modes.
+ */
+test("a read its one holder's source answers is that source's answer at its whole path, its marks kept (#1466)", () => {
+  const bindings = (source: string, names: readonly string[], path: readonly string[] = []) => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const places = new CoreProgram(request).places;
+    const ids = names.map(
+      (name) =>
+        places.find((place) => place.kind.kind === "binding" && place.kind.name === name)!.id,
+    );
+    return MODES.map((mode) => {
+      const answers = inMode(mode, () => analyseCore(request));
+      return ids.map((id) => answers.place(id, path).contract);
+    });
+  };
+  // (three copies of one seed, each storing its own property below one step, joined, read at each)
+  const joined = [
+    "let seed = {g: {z: 1}}",
+    "let c0 = seed",
+    "c0.g.p0 = 1",
+    "let c1 = seed",
+    'c1.g.p1 = "s"',
+    "let c2 = seed",
+    "c2.g.p2 = [true]",
+    "let joined = c0",
+    "joined = c1",
+    "joined = c2",
+    "let one = joined.g.p0",
+    "let two = joined.g.p1",
+    "let three = joined.g.p2",
+    "exit",
+  ].join("\n");
+  for (const contracts of bindings(joined, ["one", "two", "three"]))
+    assert.deepEqual(
+      contracts.map(({ kinds }) =>
+        kinds.some((item) => ["integer", "string", "list"].includes(item.tag)),
+      ),
+      [true, true, true],
+    );
+  for (const contracts of bindings(joined, ["one", "two", "three"]))
+    assert.deepEqual(
+      contracts.map(({ kinds }) =>
+        kinds.map((item) => item.tag).filter((tag) => tag !== "unknown"),
+      ),
+      [["integer"], ["string"], ["list"]],
+    );
+  const tested = flagged(
+    "let seed = {g: {n: 1.5}}\nlet a = seed\na.g.n = hostValue\nlet b = a\nif a.g.n is integer { b = a }\nlet x: integer = b.g.n\nexit",
+  );
+  for (const [contract] of bindings(tested, ["b"], ["g", "n"]))
+    assert.ok(
+      contract!.kinds.some(
+        (item) => item.tag === "unknown" && item.ingress !== undefined && item.guarded === true,
+      ),
+      "the host value read through the copy's layer is guarded",
+    );
+});
+
+/**
+ * #1466, r4.262 (Codex r11's F1, r12's F1 and F2): no path or span id is made while a read's selection runs. A read whose
+ * selection passes a listing layer holding nothing at its path (`a`, its own store at `g.r`) to the one holder below it
+ * (`seed`) asks that holder's source by reference, as a read finding its holder directly does (`direct`, the control):
+ * through each of the four consumers, in the four modes, one forwarded demand and no layer demand, the path arena and the
+ * spans' ids unchanged from the consumer's start to the forwarded demand, for each kind of path a read meets: a plain
+ * array; a span whose suffixes have no id yet, and a span from a later step whose own id has none; a record whose id is
+ * found lazily, a view of one, a join; and a view made again after its first was resolved, which finds the id kept on
+ * the steps it views.
+ */
+test("no path or span id is made while a read's selection runs, its one holder's source asked by reference (#1466)", () => {
+  const sources = {
+    direct:
+      "let seed = {g: {p: 1}}\nlet a = seed\na.g.p = hostValue\nlet b = a\nrepeat b.g.p {}\nexit",
+    passed:
+      "let seed = {g: {p: 1}}\nseed.g.p = hostValue\nlet a = seed\na.g.r = hostOther\nlet b = a\nrepeat b.g.p {}\nexit",
+  };
+  const made = (contract: Contract, steps: readonly string[]): number =>
+    steps.reduce((at, step) => contract.pathStep(at, step), 0);
+  const record = (contract: Contract, steps: readonly string[]): PathSteps =>
+    new PathSteps(contract, steps, () => made(contract, steps));
+  const rests: Record<string, (contract: Contract) => Rest> = {
+    array: () => ["g", "p"],
+    span: (contract) => spanRef(contract, made(contract, ["g", "p"])),
+    suffix: (contract) => spanRef(contract, made(contract, ["x", "g", "p"]), 1),
+    lazy: (contract) => record(contract, ["g", "p"]).rest(),
+    viewed: (contract) => {
+      const view = record(contract, ["x", "g", "p"]).from(1);
+      assert.equal(view.made, undefined, "a view not yet resolved has no id");
+      return view.rest();
+    },
+    joined: (contract) => record(contract, ["g"]).followedBy(["p"]).rest(),
+    remade: (contract) => {
+      const steps = record(contract, ["x", "g", "p"]);
+      const id = steps.from(1).path;
+      const view = steps.from(1);
+      assert.equal(view.made, id, "a view made again finds the id kept on the steps it views");
+      return view.rest();
+    },
+  };
+  const consumers = {
+    summaryItems: (contract: Contract, stores: PrefixStores, rest: Rest, solver: Solver) =>
+      solver.run(summaryItems(contract, stores, rest)),
+    summaryCount: (contract: Contract, stores: PrefixStores, rest: Rest, solver: Solver) =>
+      solver.run(summaryCount(contract, stores, rest)),
+    summaryPresence: (contract: Contract, stores: PrefixStores, rest: Rest, solver: Solver) =>
+      summaryPresence(contract, stores, rest, 0, (work) => solver.run(work)),
+    offendingStores: (contract: Contract, stores: PrefixStores, rest: Rest, solver: Solver) =>
+      offendingStores(
+        contract,
+        stores,
+        rest,
+        (items) => items.some((item) => item.tag === "unknown"),
+        (work) => solver.run(work),
+      ),
+  };
+  const arenas = (contract: Contract) => ({
+    paths: contract.pathParents.length,
+    spans: [...contract.pathFacts.values()].reduce(
+      (count, facts) => count + (facts.spans?.size ?? 0),
+      0,
+    ),
+  });
+  for (const [name, source] of Object.entries(sources)) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null, name);
+    for (const mode of MODES)
+      inMode(mode, () => {
+        for (const [kind, restOf] of Object.entries(rests))
+          for (const [consumer, ask] of Object.entries(consumers)) {
+            const { contract, program, solver } = narrowingPass(request);
+            const b = program.places.find(
+              (place) => place.kind.kind === "binding" && place.kind.name === "b",
+            )!.id;
+            const stores = contract.prefixStores(keyOf(b, []));
+            const rest = restOf(contract);
+            const before = arenas(contract);
+            let forwarded = 0;
+            let selected: ReturnType<typeof arenas> | undefined;
+            const subAt = contract.subAt.bind(contract);
+            contract.subAt = function* (sub, asked) {
+              if (asked === rest) {
+                forwarded += 1;
+                selected ??= arenas(contract);
+              }
+              return yield* subAt(sub, asked);
+            };
+            ask(contract, stores, rest, solver);
+            assert.deepEqual(
+              { forwarded, demands: contract.facts.layerDemands, selected },
+              { forwarded: 1, demands: 0, selected: before },
+              `${name}, ${kind}, ${consumer}`,
+            );
+          }
+      });
   }
 });
