@@ -1550,6 +1550,33 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     const misrecorded = tool("status", at("misrecorded"), src);
     assert.equal(misrecorded.status, 2);
     assert.match(misrecorded.stdout, /its line 9 is no line this tool writes: "area missing -1 /);
+    // (a PLAN of its record's count without its last shard's entry, the record's hash repaired: refused by `import` and by
+    // `status`; and a stored shard of the central store whose lines are not a store's, its digest repaired, which
+    // `status` refuses)
+    copied("seed", "entryless", (dir) => {
+      const text = readFileSync(join(dir, "area", "PLAN"), "utf8").replace(/^shard 15 .*\n/m, "");
+      writeFileSync(join(dir, "area", "PLAN"), text);
+      edit(
+        join(dir, "MANIFEST"),
+        /^area area 16 \w+$/m,
+        `area area 16 ${createHash("sha256").update(text).digest("hex")}`,
+      );
+    });
+    assert.match(
+      said(tool("import", at("entryless-central"), at("entryless"))).refused,
+      /area's PLAN is not one this tool writes: its entry of shard 15 is missing or out of order/,
+    );
+    const entryless = tool("status", at("entryless"), src);
+    assert.equal(entryless.status, 2);
+    assert.match(entryless.stdout, /its entry of shard 15 is missing or out of order/);
+    cpSync(central, at("malformed-store"), { recursive: true });
+    cpSync(
+      at("no-runs", src, "area", "0of16.runs.jsonl"),
+      at("malformed-store", src, "area", "0of16.runs.jsonl"),
+    );
+    const malformed = tool("status", at("malformed-store"), src);
+    assert.equal(malformed.status, 2);
+    assert.match(malformed.stdout, /0of16\.runs\.jsonl: stored\.mjs same: its runs are no object/);
     copied("seed", "arealess", (dir) => {
       rmSync(join(dir, "area"), { recursive: true });
       edit(join(dir, "MANIFEST"), /^area area .*\n/m, "");

@@ -1043,13 +1043,11 @@ function manifestFault(text, src) {
 }
 
 /**
- * Why `text` is no PLAN that `planOf` writes for `area` in `shards` shards, a positive count (its version, area and
- * count, its limits, allowances and checks, then each shard's entry in order and nothing after), else undefined (zero
- * shards would read complete with no run in them).
+ * Why `text` is no PLAN that `planOf` writes for `area` in `shards` shards (its version, area and count, its limits,
+ * allowances and checks, then each shard's entry in order and nothing after), else undefined; its MANIFEST record, which
+ * gives `shards`, counts at least one (`manifestFault`: zero would read complete with no run in it).
  */
 function planFault(text, area, shards) {
-  if (!Number.isInteger(shards) || shards < 1)
-    return `its count of shards, ${shards}, is not positive`;
   const lines = text.split("\n");
   if (lines.pop() !== "") return "its last line does not end";
   const head = ["plan 1", `area ${area}`, `shards ${shards}`];
