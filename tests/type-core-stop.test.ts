@@ -2365,8 +2365,9 @@ function unusedGet(name: string, setup: readonly string[], receiver: string): He
  * dictionary literal's `values` list by the dictionary's), a store of one by the stores' syntax through the same cells,
  * and a requirement one domain leaves to several families or to every kind by the next domain that gives one (a written
  * `list` or union receiver: the stores' syntax). At every eighth settled stop of each phase and its last, forward with
- * the sharing and reversed without it, each keeps the unstopped check against the integer family and rejects `bad`
- * before `AFTER`.
+ * the sharing and reversed without it, all five preserve the unstopped check against the integer family. The
+ * projection, stored projection and written-list cases also reject `bad` before `AFTER`; dictionary values and the
+ * written union are analysis-only (the candidate route declines them).
  */
 test("a settled stop keeps the family of an unused get's default that structure decides (#1563)", () => {
   const cases = [
