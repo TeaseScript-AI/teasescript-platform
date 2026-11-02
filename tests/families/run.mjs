@@ -11,18 +11,20 @@
 // process (a fatal V8 error) is counted as stalled, with the reason, and the next source runs in a fresh process. A run
 // that throws on either tree is an exception, never compared (#1439): printed to stderr with its source, mode and
 // check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. A publication whose
-// oracle left nodes unanswered at its own budget stop (`publicationHashes`'s `unanswered`) on either tree is never
-// compared either, and is counted apart (`unanswered`) and kept in `--out`. With `--baseline`, the head alone runs, and
-// each run is judged against the stored base result of the same source, mode and check (a source with each run it
-// does not hold is kept in `--out` as `uncompared`, never agreement); `--store` runs one tree of a commit (sx-tree's,
-// with `src/` and `.sha`) at the runner's defaults and stores one shard of each source's results, one JSON line each, in
-// the baseline of its `src/` tree (`baselines.mjs`), whose area folder `--baseline` then reads, only where the area is
-// complete under the rule status shares (`storedRuns`); it is refused as status refuses it otherwise (exit 1 or 2).
+// oracle left nodes unanswered at its own budget stop (`publicationHashes`'s `unanswered`) on either tree agrees only
+// where both trees left the same count unanswered and published the same parts up to it (`unansweredAlike`, #1592,
+// counted apart from agreement); any other is neither agreement nor a difference, and is counted apart (`unanswered`)
+// and kept in `--out`. With `--baseline`, the head alone runs, and each run is judged against the stored base result of
+// the same source, mode and check (a source with each run it does not hold is kept in `--out` as `uncompared`, never
+// agreement); `--store` runs one tree of a commit (sx-tree's, with `src/` and `.sha`) at the runner's defaults and
+// stores one shard of each source's results, one JSON line each, in the baseline of its `src/` tree (`baselines.mjs`),
+// whose area folder `--baseline` then reads, only where the area is complete under the rule status shares
+// (`storedRuns`); it is refused as status refuses it otherwise (exit 1 or 2).
 // `--work` keeps a record of each source: each run's charged work (the units its analyses charge their work ledgers)
 // and milliseconds on each tree, a stalled run's up to the stall, and what the source counted (#1564), which
 // `stalls.mjs` reads; `--only` runs the sources of the area that a stall index lists.
-// Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, uncompared, modes,
-// runs, differences.
+// Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, unansweredAlike,
+// uncompared, modes, runs, differences.
 import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -127,14 +129,20 @@ function firstPart(was, is) {
 
 /**
  * A run's outcome from the base's result (`was`, run or stored; none where the baseline has none) and the head's
- * (`is`): an exception on either, never compared (#1439); nodes left unanswered on either; with no base, `uncompared`,
- * never agreement; else a difference, or nothing where they agree.
+ * (`is`): an exception on either, never compared (#1439); nodes left unanswered on either, agreement apart
+ * (`unansweredAlike`, #1592) only where the base's result holds its parts and both trees left the same count
+ * unanswered and published the same answered part (the parts up to the stop, by their hash), else `unanswered`; with no
+ * base, `uncompared`, never agreement; else a difference, or nothing where they agree.
  */
 function judged(was, is) {
   if (was?.thrown !== undefined || is.thrown !== undefined)
     return { thrown: { base: was?.thrown, head: is.thrown } };
   if (was?.value.unanswered > 0 || is.value.unanswered > 0)
-    return { unanswered: { base: was?.value.unanswered, head: is.value.unanswered } };
+    return Array.isArray(was?.value.parts) &&
+      was.value.unanswered === is.value.unanswered &&
+      was.value.hash === is.value.hash
+      ? { unansweredAlike: is.value.unanswered }
+      : { unanswered: { base: was?.value.unanswered, head: is.value.unanswered } };
   if (was === undefined) return { uncompared: true };
   if (was.value.hash === is.value.hash) return {};
   return {
@@ -561,6 +569,7 @@ if (process.argv[2] === "--child") {
     "stalled",
     "exceptions",
     "unanswered",
+    "unansweredAlike",
     "uncompared",
     "runs",
     "differences",
@@ -618,14 +627,22 @@ if (process.argv[2] === "--child") {
         const id = `${run.mode} ${run.check}`;
         results[id] = result;
         const outcome = result === undefined ? run : { ...run, ...judged(kept?.runs[id], result) };
-        const { thrown: exception, unanswered, difference, uncompared: alone, ...where } = outcome;
+        const {
+          thrown: exception,
+          unanswered,
+          unansweredAlike,
+          difference,
+          uncompared: alone,
+          ...where
+        } = outcome;
         if (exception !== undefined) {
           row.exceptions += 1;
           thrown({ generator: name, source: source.name, ...where, thrown: exception }, source);
         } else if (unanswered !== undefined) {
           row.unanswered += 1;
           record({ generator: name, source: source.name, ...where, unanswered, ...inputs });
-        } else if (difference !== undefined) {
+        } else if (unansweredAlike !== undefined) row.unansweredAlike += 1;
+        else if (difference !== undefined) {
           row.differences += 1;
           record({ generator: name, source: source.name, ...where, ...difference, ...inputs });
         } else if (alone && baseline !== undefined) uncompared.push(id);

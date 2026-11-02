@@ -13,13 +13,15 @@
 // (`repeats` counts the others), and are refused (exit 2, naming the place) where they differ, in a replay and in a
 // rerun record alike (#1582). Rerun records are judgement attempts, read in the order given: a source's latest stands
 // where it or an earlier one stalled, and two that ended must say the same (#1587); the replay's are never replaced.
-// Prints the rule, one line per stalled source of the replay (with what its rerun did), one per
-// area and a total; exits 0 only where every area is complete, every source of it was compared and agrees, an
-// unavailable one (stalled) never counting as agreement, and no candidate stall is left, 1 otherwise, 2 on a record it
-// cannot read or merge. `--index` writes the sources still unavailable, with their verdicts and records, and each
+// Prints the rule, one line per stalled source of the replay (with what its rerun did) and per source whose runs agree
+// but for some left unanswered alike on both trees (`unansweredAlike`, #1592: agreement named apart), one per area and a
+// total; exits 0 only where every area is complete, every source of it was compared and agrees or is unanswered alike,
+// an unavailable one (stalled) never counting as agreement, and no candidate stall is left, 1 otherwise, 2 on a record
+// it cannot read or merge. `--index` writes the sources still unavailable, with their verdicts and records, and each
 // area's configuration: the stall index, which `rerun` runs on both trees in one process, one source at a time, an area
 // after another, with that configuration (`run.mjs <area> <base> <head> --only <index>`), into a new folder of records,
-// `<area>.work.jsonl` and `<area>.jsonl` (`--out`), to be read with `--rerun`.
+// `<area>.work.jsonl` and `<area>.jsonl` (`--out`), to be read with `--rerun`; the index names the sources unanswered
+// alike apart (`unansweredAlike`), which `rerun` does not run.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -191,10 +193,15 @@ function shardOf(file) {
     refused(`${file} has no total: its shard did not end`);
   const entries = lines.slice(1, -1).map((line) => entryOf(line, ran.area, ran.roots.length));
   const sums = Object.fromEntries(
-    COUNTED.map((key) => [key, entries.reduce((sum, { counts }) => sum + (counts[key] ?? 0), 0)]),
+    [...COUNTED, "unansweredAlike"].map((key) => [
+      key,
+      entries.reduce((sum, { counts }) => sum + (counts[key] ?? 0), 0),
+    ]),
   );
-  const differ = ["sources", ...COUNTED].filter(
-    (key) => (key === "sources" ? entries.length : sums[key]) !== total[key],
+  // (a runner before #1592 counts no run unanswered alike, and its total has none)
+  const expected = { unansweredAlike: 0, ...total };
+  const differ = ["sources", ...COUNTED, "unansweredAlike"].filter(
+    (key) => (key === "sources" ? entries.length : sums[key]) !== expected[key],
   );
   if (differ.length > 0) refused(`${file}: its sources do not add up to its total (${differ})`);
   return { file, ran, entries };
@@ -269,10 +276,16 @@ function mergeRerun(into, within, file) {
   }
 }
 
-/** What a source did, in one word. */
+/**
+ * What a source did, in one word: `unansweredAlike` where its runs agree but for some that both trees left unanswered
+ * alike (#1592), agreement named apart.
+ */
 function outcomeOf({ counts, stalled }) {
   if (stalled !== undefined) return "stalled";
-  return PROBLEMS.find((key) => (counts[key] ?? 0) > 0) ?? "agreed";
+  return (
+    PROBLEMS.find((key) => (counts[key] ?? 0) > 0) ??
+    ((counts.unansweredAlike ?? 0) > 0 ? "unansweredAlike" : "agreed")
+  );
 }
 
 if (process.argv[2] === "rerun") {
@@ -400,13 +413,20 @@ console.log(JSON.stringify({ rule: RULE }));
 const VERDICTS = ["load", "candidate", "unknown"];
 const zeros = () =>
   Object.fromEntries(
-    ["sources", "repeats", "agreed", ...COUNTED, "unavailable", ...VERDICTS, "rerun"].map((key) => [
-      key,
-      0,
-    ]),
+    [
+      "sources",
+      "repeats",
+      "agreed",
+      "unansweredAlike",
+      ...COUNTED,
+      "unavailable",
+      ...VERDICTS,
+      "rerun",
+    ].map((key) => [key, 0]),
   );
 const rows = new Map([...areas.keys()].sort().map((area) => [area, zeros()]));
 const index = [];
+const alike = [];
 for (const [place, was] of replay) {
   const is = rerun.get(place) ?? was;
   const row = rows.get(nameOf(was.area));
@@ -424,7 +444,15 @@ for (const [place, was] of replay) {
   if (!is.listed) row.sources += 1;
   row.repeats += was.repeats ?? 0;
   for (const key of COUNTED) row[key] += is.counts[key] ?? 0;
-  if (outcomeOf(is) === "agreed") row.agreed += 1;
+  const outcome = outcomeOf(is);
+  if (outcome === "agreed" || outcome === "unansweredAlike") row[outcome] += 1;
+  // (a source left unanswered alike is named, with its count of such runs)
+  if (outcome === "unansweredAlike") {
+    const { area, generator, source, key, counts } = is;
+    const named = { generator, source, unansweredAlike: counts.unansweredAlike };
+    console.log(JSON.stringify({ area: nameOf(area), ...named }));
+    alike.push({ area, ...named, key });
+  }
   if (verdict !== undefined) row[verdict.verdict] += 1;
   if (is.stalled !== undefined) {
     row.unavailable += 1;
@@ -457,7 +485,10 @@ for (const [area, row] of rows) {
   console.log(JSON.stringify({ area, shards: recorded, complete, ...gaps, ...row }));
   for (const key of Object.keys(total)) total[key] += row[key];
 }
-closed &&= total.sources > 0 && total.agreed === total.sources && total.candidate === 0;
+closed &&=
+  total.sources > 0 &&
+  total.agreed + total.unansweredAlike === total.sources &&
+  total.candidate === 0;
 console.log(JSON.stringify({ total: true, ...total, closed }));
 if (indexFile !== undefined) {
   try {
@@ -466,7 +497,12 @@ if (indexFile !== undefined) {
         .filter((area) => areas.get(area).configuration !== undefined)
         .map((area) => [area, areas.get(area).configuration]),
     );
-    const text = JSON.stringify({ rule: RULE, configurations, entries: index });
+    const text = JSON.stringify({
+      rule: RULE,
+      configurations,
+      entries: index,
+      unansweredAlike: alike,
+    });
     writeFileSync(indexFile, `${text}\n`, { flag: "wx" });
   } catch (error) {
     refused(`--index ${indexFile}: ${error.message} (a new file)`);
