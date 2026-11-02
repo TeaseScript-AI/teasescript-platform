@@ -19,7 +19,8 @@ One problem gets one code, whichever pass finds it
 ([One home for each language rule](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#one-home-for-each-language-rule)).
 The codes that more than one owner reports are listed in
 [Codes with more than one owner](#codes-with-more-than-one-owner). A runtime failure uses the compile-time error's code
-and text in the cases listed there for the runtime; the other runtime checks use the `TSR` codes of
+and text in the cases listed there for the runtime, apart from wording that depends on the source as written, such as
+the unit the compiler suggests for a number. The other runtime checks use the `TSR` codes of
 [Runtime errors](RUNTIME.md#runtime-errors), also where the compiler checks the same rule, such as `TSR058` for a value
 that does not fit its receiving place and `TSR024` for a list index that is not a whole number.
 
