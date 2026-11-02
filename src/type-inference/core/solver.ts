@@ -1053,6 +1053,8 @@ export class Solver {
     for (const member of above) this.#stack.push(member);
     const parent = this.#frames.at(-1)!;
     parent.low = Math.min(parent.low, component.low);
+    // (its reader read a demand not finished: Codex r1's R1 on #1601)
+    this.#keepReader(parent, solving.closing.node!.demand.key);
     parent.pending = solving.closing.node!.value;
   }
 }

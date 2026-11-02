@@ -25,6 +25,7 @@ import {
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
 import {
   Solver,
+  withEveryRecord,
   withSolverSeam,
   type Demand,
   type Proof,
@@ -552,6 +553,56 @@ test("a forget reaches every reader of a demand a stop may forget, and none of o
       assert.equal(kept, reachable ? 0 : readers, `${readers} readers, reachable ${reachable}`);
     }
   }
+});
+
+/**
+ * #1601's Codex r1 (R1): a component abandoned into a larger one hands its closing demand's provisional answer to that
+ * demand's reader, which a stop may then reach: `G` reads `A`, which reads `G` and `B`; `B` reads itself and `A` and may
+ * be forgotten. Forgetting `B` forgets all three, as with every record kept (`withEveryRecord`), so reading `G` again
+ * charges what reading it the first time did.
+ */
+test("a forget reaches the reader of a component abandoned into a larger one (#1599)", () => {
+  const forgotten = (every: boolean) =>
+    (every ? withEveryRecord : <T>(run: () => T): T => run())(() => {
+      const scope = itemScope();
+      const solver = new Solver(scope);
+      const demand = (key: string, offset: number, make: () => Work<readonly Item[]>): Demand => ({
+        key,
+        kind: "contract",
+        file: 0,
+        offset,
+        make,
+      });
+      const g: Demand = demand("G", 0, function* () {
+        return mergeItems([makeItem("integer"), ...(yield a)], scope);
+      });
+      const a: Demand = demand("A", 1, function* () {
+        const read = yield g;
+        if (!read.some((item) => item.tag === "integer")) yield b;
+        return [makeItem("string")];
+      });
+      const b: Demand = demand("B", 2, function* () {
+        solver.mayForget("B");
+        const own = yield b;
+        if (own.length > 0) yield a;
+        return [makeItem("integer")];
+      });
+      const query = function* (): Work<readonly Item[]> {
+        return yield g;
+      };
+      solver.run(query());
+      const first = scope.work.total;
+      solver.forget(["B"]);
+      const kept = [g, a, b]
+        .filter((one) => solver.answer(one.key) !== undefined)
+        .map((one) => one.key);
+      solver.run(query());
+      return { kept, first, again: scope.work.total - first };
+    });
+  const run = forgotten(false);
+  assert.deepEqual(run.kept, []);
+  assert.equal(run.again, run.first);
+  assert.deepEqual(run, forgotten(true));
 });
 
 test("a component found while another is solved is solved on the explicit stack", () => {
