@@ -35,6 +35,14 @@ export interface StopCase {
   readonly stopped: StopRun;
   readonly fitting: readonly Globals[];
   readonly violating: readonly Globals[];
+  /**
+   * What a combined stop's rule accepts of its demand-only reference (`combinedStop`, TABLE r4.285): records, each
+   * `code start:end`, excused as a mark's are, and checks (as `JSON.stringify` gives them) owed on neither side.
+   */
+  readonly excused?: {
+    readonly records: ReadonlySet<string>;
+    readonly checks: ReadonlySet<string>;
+  };
 }
 
 /** A site's offsets. */
@@ -193,7 +201,11 @@ export function stopProblems(c: StopCase): string[] {
       ];
       if (a !== b) problems.push(`fitting ${b} against ${a}`);
     });
-  const excused = new Set(marks.map((mark) => recordOf(mark.code, mark.site)));
+  const excused = new Set([
+    ...marks.map((mark) => recordOf(mark.code, mark.site)),
+    ...(c.excused?.records ?? []),
+  ]);
+  const accepted = c.excused?.checks ?? new Set<string>();
   // before admission settled no decision is read (r4.110 (3)): each store marked with its type undecided stands for its
   // records within its value and for the errors it brought (r4.111), and C5's error at a literal may stand as the mark
   // of the store that owes it, its receiver's shape undecided (r4.108 (2)); a written store's mark stands for its
@@ -260,14 +272,17 @@ export function stopProblems(c: StopCase): string[] {
   );
   const ofStores = unstopped.answers.checks
     .filter((check) => !marked.has(check) && ofStore(check.site))
-    .map((check) => JSON.stringify(check));
+    .map((check) => JSON.stringify(check))
+    .filter((check) => !accepted.has(check));
   const owed = unstopped.answers.checks
     .filter((check) => !marked.has(check) && !ofStore(check.site))
-    .map((check) => JSON.stringify(check));
+    .map((check) => JSON.stringify(check))
+    .filter((check) => !accepted.has(check));
   let kept = beyond(
     stopped.answers.checks
       .filter((check) => !marked.has(check))
-      .map((check) => JSON.stringify(check)),
+      .map((check) => JSON.stringify(check))
+      .filter((check) => !accepted.has(check)),
     ofStores,
   );
   // (an extra the stopped analysis without its marks lacks is their content; a check both have stays compared)

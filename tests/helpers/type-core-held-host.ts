@@ -14,12 +14,15 @@ import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { coreRequest } from "./type-core-analysis.js";
 import { runGlobals } from "./type-core-route.js";
+import type { Obligation } from "../../src/type-inference/core/result.js";
 import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
 
 /*
  * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3 §5, TABLE
  * r4.113, the mark-ownership rule of S8: a stop changes nothing of the unstopped analysis but what its deferred marks
- * stand for, each carrying its obligation). A generated family over the holder: a list's element, an object's property,
+ * stand for, each carrying its obligation; at a combined stop the unstopped analysis is the run at the same demand
+ * allowance, except where the finishing walk answers a read the demand stop left `unknown`, TABLE r4.285,
+ * `combinedStop`). A generated family over the holder: a list's element, an object's property,
  * a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's store, a
  * parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll` (and the owner reviewer's
  * seven `addAll` texts), a dictionary's values list through a copy and an object's own `values` property (#1452), the
@@ -635,33 +638,242 @@ export function heldStops(
   return stops;
 }
 
+/** A diagnostic's record: its code at its site. */
+const recordOf = (d: { readonly code: string; readonly site: { start: number; end: number } }) =>
+  `${d.code} ${d.site.start}:${d.site.end}`;
+
+/** An obligation's slot: its kind, target, site and boundary flag. */
+const slotOf = (check: Obligation): string =>
+  JSON.stringify([check.kind, check.target, check.site.start, check.site.end, check.boundary]);
+
+/** What a combined stop's rule accepts of the demand-only reference, each check and record with its clause. */
+export interface CombinedStop {
+  readonly checks: ReadonlyMap<string, "a" | "w" | "z">;
+  readonly records: ReadonlyMap<string, "a" | "w" | "z">;
+  /** #1595's named exception: the reference's checks and records the stop names by another label alone. */
+  readonly relabelled: {
+    readonly checks: ReadonlySet<string>;
+    readonly records: ReadonlySet<string>;
+  };
+  /** The stopped analysis's checks at the accepted slots, which the reference does not have. */
+  readonly owing: ReadonlySet<string>;
+}
+
+/** A check's `on` words with every dotted or indexed path left out (#1595: a label alone differs). */
+const withoutLabels = (on: string): string =>
+  on.replace(/[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[^\]\s]*\])+/g, "·");
+
+/**
+ * A combined stop's rule (S8, TABLE r4.285): the demand-only run is the reference, but where the finishing walk answers a
+ * read the demand stop left `unknown`, the stopped analysis owes, at a check's kind, target and site, what the natural
+ * analysis owes there (a), or marks whose checks the finishing read made from the written type there, the read's kinds
+ * exactly the written type's (w); and a boundary against `unknown`, which has no plan content (S3 §4), is owned by the
+ * undecided store mark at the store whose value holds it (z). Each unowned reference check and record is accepted only
+ * by one of these, or named #1595's where the stop owes the same check by another label alone (its kind, site,
+ * `against` and boundary, and its words but for their labels).
+ */
+export function combinedStop(reference: Answers, natural: Answers, stopped: Answers): CombinedStop {
+  const marks = stopped.budget.deferred;
+  const markChecks = new Set(marks.map((mark) => JSON.stringify(mark.obligation)));
+  const owed = [...stopped.checks, ...marks.map((mark) => mark.obligation)];
+  const owedTexts = new Set(owed.map((check) => JSON.stringify(check)));
+  const naturalTexts = new Set(natural.checks.map((check) => JSON.stringify(check)));
+  const againsts = (list: readonly Obligation[], slot: string): string =>
+    JSON.stringify(
+      [
+        ...new Set(
+          list.filter((x) => slotOf(x) === slot).map((x) => [...x.against].sort().join("|")),
+        ),
+      ].sort(),
+    );
+  // (w) the read a mark's check is about: a member's or a selection's receiver, else the value at its site
+  const written = (mark: (typeof marks)[number]): boolean => {
+    const graph = natural.graph;
+    let node = graph.expressionAt(mark.site);
+    if (
+      (mark.rule.rule === "member" || mark.rule.rule === "selection") &&
+      node?.expression !== undefined
+    ) {
+      const expression = node.expression;
+      const receiver =
+        expression.kind === "propertyAccessExpression" || expression.kind === "indexExpression"
+          ? expression.object
+          : null;
+      node =
+        receiver === null
+          ? undefined
+          : graph.expressionAt({
+              file: mark.site.file,
+              start: receiver.span.start.offset,
+              end: receiver.span.end.offset,
+            });
+    }
+    const place = node === undefined ? null : (natural.at(node)?.place ?? null);
+    if (place === null) return false;
+    const admitted = natural.place(place.id, place.path).admitted;
+    if (admitted.by !== "written") return false;
+    const read = new Set([...mark.kinds, ...mark.fits].filter((kind) => kind !== "empty"));
+    const type = new Set(admitted.kinds.filter((kind) => kind !== "empty"));
+    return read.size === type.size && [...read].every((kind) => type.has(kind));
+  };
+  const relabelledTo = (u: Obligation): boolean =>
+    owed.some(
+      (x) =>
+        x.kind === u.kind &&
+        x.site.start === u.site.start &&
+        x.site.end === u.site.end &&
+        x.boundary === u.boundary &&
+        JSON.stringify([...x.against].sort()) === JSON.stringify([...u.against].sort()) &&
+        (x.target !== u.target || x.on !== u.on) &&
+        withoutLabels(x.on) === withoutLabels(u.on),
+    );
+  const checks = new Map<string, "a" | "w" | "z">();
+  const relabelled = { checks: new Set<string>(), records: new Set<string>() };
+  const owing = new Set<string>();
+  const classOf = (u: Obligation): "a" | "w" | "z" | "relabelled" | null => {
+    const text = JSON.stringify(u);
+    if (owedTexts.has(text)) return null;
+    const slot = slotOf(u);
+    if (!naturalTexts.has(text) && againsts(natural.checks, slot) === againsts(owed, slot))
+      return "a";
+    // (marks at the read's target and site, of any kind, each made from the written type there)
+    const here = marks.filter(
+      (mark) =>
+        mark.obligation.target === u.target &&
+        mark.obligation.site.start === u.site.start &&
+        mark.obligation.site.end === u.site.end &&
+        mark.obligation.boundary === u.boundary,
+    );
+    const others = owed.filter(
+      (x) =>
+        x.target === u.target &&
+        x.site.start === u.site.start &&
+        x.site.end === u.site.end &&
+        x.boundary === u.boundary,
+    );
+    if (
+      here.length > 0 &&
+      others.every((x) => markChecks.has(JSON.stringify(x))) &&
+      here.every(written)
+    )
+      return "w";
+    if (
+      u.boundary &&
+      u.against.length === 1 &&
+      u.against[0] === "unknown" &&
+      againsts(owed, slot) === "[]" &&
+      [...stopped.diagnostics, ...marks].some(
+        (d) =>
+          "rule" in d &&
+          d.rule.rule === "store" &&
+          "obligation" in d &&
+          d.obligation.against.length === 1 &&
+          d.obligation.against[0] === "unknown" &&
+          d.site.start <= u.site.start &&
+          u.site.end <= d.site.end,
+      )
+    )
+      return "z";
+    return relabelledTo(u) ? "relabelled" : null;
+  };
+  for (const u of reference.checks) {
+    const found = classOf(u);
+    if (found === null) continue;
+    const text = JSON.stringify(u);
+    if (found === "relabelled") relabelled.checks.add(text);
+    else {
+      checks.set(text, found);
+      for (const x of owed) if (slotOf(x) === slotOf(u)) owing.add(JSON.stringify(x));
+    }
+  }
+  // a record goes with its obligations, never one the natural analysis reports itself
+  const records = new Map<string, "a" | "w" | "z">();
+  const kept = new Set([...stopped.diagnostics, ...marks].map(recordOf));
+  const naturalRecords = new Set(natural.diagnostics.map(recordOf));
+  for (const d of reference.diagnostics) {
+    const record = recordOf(d);
+    if (d.kind === "budget" || kept.has(record) || naturalRecords.has(record)) continue;
+    const all = reference.diagnostics.filter((x) => x.kind !== "budget" && recordOf(x) === record);
+    const each = all.map((x) => ("obligation" in x ? JSON.stringify(x.obligation) : null));
+    if (each.some((text) => text === null)) continue;
+    if (
+      each.every((text) => checks.has(text!) || owedTexts.has(text!)) &&
+      each.some((text) => checks.has(text!))
+    )
+      records.set(record, checks.get(each.find((text) => checks.has(text!))!)!);
+    else if (
+      each.every(
+        (text) => relabelled.checks.has(text!) || checks.has(text!) || owedTexts.has(text!),
+      )
+    )
+      relabelled.records.add(record);
+  }
+  return { checks, records, relabelled, owing };
+}
+
 /**
  * The mark-ownership rule at the analysis (S8): every check of the unstopped analysis the stop removed is a deferred
- * mark's obligation, and every warning or error it removed is a mark's record (its code at its site).
+ * mark's obligation, and every warning or error it removed is a mark's record (its code at its site). At a combined stop
+ * (`rule`), what the combined stop's rule accepts is owned too, and #1595's relabelled checks and records are named.
  */
-function ownership(unstopped: Answers, stopped: Answers): string[] {
+function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): string[] {
   const marks = stopped.budget.deferred;
   const owned = new Set(marks.map((mark) => JSON.stringify(mark.obligation)));
   const kept = new Set(stopped.checks.map((check) => JSON.stringify(check)));
-  const record = (d: { readonly code: string; readonly site: { start: number; end: number } }) =>
-    `${d.code} ${d.site.start}:${d.site.end}`;
-  const records = new Set([...stopped.diagnostics, ...marks].map(record));
-  return [
-    ...unstopped.checks
-      .map((check) => JSON.stringify(check))
-      .filter((check) => !kept.has(check) && !owned.has(check))
-      .map((check) => `unowned check ${check}`),
-    ...unstopped.diagnostics
-      .filter((d) => d.kind !== "budget" && !records.has(record(d)))
-      .map((d) => `unowned record ${record(d)}`),
-  ];
+  const records = new Set([...stopped.diagnostics, ...marks].map(recordOf));
+  const problems: string[] = [];
+  for (const check of unstopped.checks.map((each) => JSON.stringify(each)))
+    if (kept.has(check) || owned.has(check) || rule?.checks.has(check)) continue;
+    else if (rule?.relabelled.checks.has(check))
+      problems.push(`exception #1595 relabelled check ${check}`);
+    else problems.push(`unowned check ${check}`);
+  for (const d of unstopped.diagnostics) {
+    const record = recordOf(d);
+    if (d.kind === "budget" || records.has(record) || rule?.records.has(record)) continue;
+    if (rule?.relabelled.records.has(record))
+      problems.push(`exception #1595 relabelled record ${record}`);
+    else problems.push(`unowned record ${record}`);
+  }
+  return problems;
+}
+
+/**
+ * Whether a problem `heldProblems` reports is a named exception an issue owns (counted, never a pass).
+ *
+ * @public (the whole family's driver outside CI reads it)
+ */
+export function isNamedException(problem: string): boolean {
+  return problem.startsWith("exception #");
+}
+
+/** The natural analysis (no demand allowance, no stop) beside each demand-only reference run, made once per run. */
+const naturals = new WeakMap<StopRun, Answers>();
+
+/**
+ * At a combined stop (a demand allowance that stops a decision, with a settled program stop), the combined stop's rule
+ * against the demand-only run `unstopped` (`combinedStop`).
+ */
+export function combinedStopRule(
+  c: HeldCase,
+  mode: HeldMode,
+  unstopped: StopRun,
+  stopped: Answers,
+): CombinedStop {
+  let natural = naturals.get(unstopped);
+  if (natural === undefined) {
+    const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS)!;
+    natural = mode.run(() => analyseCore(request));
+    naturals.set(unstopped, natural);
+  }
+  return combinedStop(unstopped.answers, natural, stopped);
 }
 
 /**
  * What a settled stop changed of a case that its marks do not stand for, in a mode (`unstopped`: the case's unstopped
- * run there, made once): the mark-ownership rule at the analysis; in the slice the stop oracle (`stopProblems`) and the
- * runs: a fitting value says what its predicate does, and a value that does not fit is rejected before the consumer's
- * effect, having said at most `BEFORE`.
+ * run there, made once; with `demand`, the run at that demand allowance, a combined stop's reference under its rule): the
+ * mark-ownership rule at the analysis; in the slice the stop oracle (`stopProblems`) and the runs: a fitting value says
+ * what its predicate does, and a value that does not fit is rejected before the consumer's effect, having said at most
+ * `BEFORE`. A named exception is reported as one (`isNamedException`).
  */
 export function heldProblems(
   c: HeldCase,
@@ -671,7 +883,9 @@ export function heldProblems(
   demand?: number,
 ): string[] {
   const stopped = heldRun(c, mode, allowance, demand);
-  const problems = ownership(unstopped.answers, stopped.answers);
+  const rule =
+    demand === undefined ? undefined : combinedStopRule(c, mode, unstopped, stopped.answers);
+  const problems = ownership(unstopped.answers, stopped.answers, rule);
   if (!c.slice || declined.has(c)) return problems;
   problems.push(
     ...stopProblems({
@@ -679,6 +893,14 @@ export function heldProblems(
       stopped,
       fitting: c.values.filter((each) => each.says !== null).map((each) => each.globals),
       violating: c.values.filter((each) => each.says === null).map((each) => each.globals),
+      ...(rule === undefined
+        ? {}
+        : {
+            excused: {
+              records: new Set([...rule.records.keys(), ...rule.relabelled.records]),
+              checks: new Set([...rule.checks.keys(), ...rule.owing, ...rule.relabelled.checks]),
+            },
+          }),
     }),
   );
   return [...problems, ...runProblems(c, stopped)];
@@ -717,7 +939,7 @@ export function heldUnstopped(
 /**
  * The stop kinds beside a settled program stop (S3 §5): demand allowances that stop a decision of a case, alone (a
  * decision stop) and with a program stop (a combined one), each judged against the unstopped run at the same demand
- * allowance. Tried one unit below each decision's work in the case's unstopped analysis, largest first, then halving
+ * allowance, a combined one under its rule (`combinedStop`). Tried one unit below each decision's work in the case's unstopped analysis, largest first, then halving
  * below the smallest; kept only where a decision then stops, up to three. A case with none has no such rows.
  *
  * @public (the whole family's driver outside CI reads it, with the family)

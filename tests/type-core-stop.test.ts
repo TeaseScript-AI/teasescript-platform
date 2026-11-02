@@ -46,6 +46,8 @@ import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
+  combinedStop,
+  combinedStopRule,
   heldDemands,
   heldFamily,
   heldProblems,
@@ -2520,6 +2522,295 @@ test("a settled stop reports an unused get's default lost where only a rule deci
     );
   }
   assert.ok(reported > 0);
+});
+
+/** A held case `let r = <receiver>.get(4, default: hostOther)`, its runs `hostValue` 2 and `hostOther` each of `values`. */
+function storedGet(
+  name: string,
+  setup: readonly string[],
+  receiver: string,
+  values: readonly [SerializableRuntimeValue, boolean][],
+): HeldCase {
+  return {
+    name,
+    source: [
+      ...setup,
+      'say "BEFORE"',
+      `let r = ${receiver}.get(4, default: hostOther)`,
+      'say "AFTER"',
+      "exit",
+      "",
+    ].join("\n"),
+    slice: true,
+    values: values.map(([value, fits]) => ({
+      globals: { hostValue: 2, hostOther: value },
+      says: fits ? ["BEFORE", "AFTER"] : null,
+    })),
+  };
+}
+
+/** A held case from #1487's kit: `lines`, then `use` between `BEFORE` and `AFTER`, its runs `hostValue` each of these. */
+function keptCase(
+  name: string,
+  lines: readonly string[],
+  use: string,
+  says: (value: SerializableRuntimeValue) => readonly string[] | null,
+  slice = true,
+): HeldCase {
+  return {
+    name,
+    source: [...lines, 'say "BEFORE"', use, 'say "AFTER"', "exit", ""].join("\n"),
+    slice,
+    values: [2, 0, 2.5, -1, "bad", true, null].map((value) => ({
+      globals: { hostValue: value, hostOther: 3 },
+      says: says(value),
+    })),
+  };
+}
+
+/** `repeat <count> {say "ok"}`'s lines for a count, or `null` where the count is no whole number of zero or more. */
+const repeated = (count: SerializableRuntimeValue): readonly string[] | null =>
+  typeof count === "number" && Number.isInteger(count) && count >= 0
+    ? ["BEFORE", ...Array<string>(count).fill("ok"), "AFTER"]
+    : null;
+
+/**
+ * Every eighth settled stop of each phase and its last, under a demand allowance that stops a decision (the `which`th
+ * largest), in a mode: the case's problems there (`heldProblems` under the combined stop's rule) and the clauses the rule
+ * accepted.
+ */
+function combinedStops(
+  c: HeldCase,
+  mode: (typeof HELD_MODES)[number],
+  each: (where: string, problems: readonly string[], clauses: readonly string[]) => void,
+  which = 0,
+): void {
+  const request = coreRequest(
+    [{ path: "main.tease", source: c.source }],
+    ["hostValue", "hostOther"],
+  )!;
+  const demand = heldDemands(c, mode)[which];
+  assert.ok(demand !== undefined, `${c.name}, ${mode.name}: no decision stops`);
+  const { run: unstopped } = heldUnstopped(c, mode, demand);
+  for (const { allowance, phase } of heldStops(c, mode, 8, demand)) {
+    const stopped = mode.run(() =>
+      withTestAllowance(allowance, () =>
+        withTestDemandAllowance(demand, () => analyseCore(request)),
+      ),
+    );
+    each(
+      `${c.name}, ${mode.name}, demand ${demand}, ${phase} @${allowance}`,
+      heldProblems(c, mode, allowance, unstopped, demand),
+      [...combinedStopRule(c, mode, unstopped, stopped).checks.values()],
+    );
+  }
+}
+
+/**
+ * #1560, #1561 (S8's mark-ownership rule at a combined stop, TABLE r4.285): under a demand allowance that stops a
+ * decision, a read the demand stop leaves `unknown` owes a conservative check, but after a settled program stop the
+ * finishing walk answers that read itself, by structure or a domain, and owes what the natural analysis owes there: no
+ * check at `1` in `x otherwise 1` where the left is a literal's projection, the natural family's at a `get`'s default,
+ * none on a written `list` receiver, none at an interpolation whose operand is a number. The issues' four witnesses
+ * at every eighth settled stop in four modes: nothing changed that the demand-only run's marks or the rule's first clause
+ * do not stand for, which some stop takes.
+ */
+test("a combined stop owes what the natural analysis owes where its finishing walk answers a read (#1560, #1561)", () => {
+  const held = heldFamily(false);
+  const cases = [
+    held.find((c) => c.name === "literalProperty-1-fallback-plain")!,
+    held.find((c) => c.name === "getRead-1-fallback-plain")!,
+    keptCase(
+      "written list receiver",
+      ["let xs: list = [hostValue, 4]"],
+      'repeat (xs[0] otherwise 2) {say "ok"}',
+      (value) => repeated(value ?? 2),
+    ),
+    keptCase(
+      "interpolated get",
+      ["let items = [1]"],
+      'repeat 2 {say "x"}\nsay "${items.get(4, default: items.get(4, default: hostValue)) * 2}"',
+      () => null,
+      false,
+    ),
+  ];
+  let first = 0;
+  for (const c of cases)
+    for (const mode of HELD_MODES)
+      combinedStops(c, mode, (where, problems, clauses) => {
+        assert.deepEqual(problems, [], where);
+        first += clauses.filter((clause) => clause === "a").length;
+      });
+  assert.ok(first > 0);
+});
+
+/**
+ * #1560 (TABLE r4.285): the finishing read's host frontier reaches through a copy whose decision stopped, as the
+ * demand-only run's read does, so the host data `root` holds keeps its boundary (`copy-type root against object` at
+ * `hostValue`) through two copies, the first stopped whole. In four modes at every eighth settled stop under each demand
+ * allowance that stops a decision.
+ */
+test("a combined stop's finishing read reaches through a copy whose decision stopped (#1560)", () => {
+  const c = heldFamily(false).find((each) => each.name === "copies-2-interpolation-plain")!;
+  for (const mode of HELD_MODES)
+    for (const which of heldDemands(c, mode).keys())
+      combinedStops(c, mode, (where, problems) => assert.deepEqual(problems, [], where), which);
+});
+
+/**
+ * TABLE r4.285's other clauses at a combined stop: a mark whose check the finishing read made from the written type
+ * there, its read's kinds exactly the written type's (a `list?` receiver's null check, an `integer?` element's count by a
+ * null check), is accepted; so is a boundary against `unknown`, which has no plan content, dropped inside the store the
+ * stop marks undecided (a dictionary's value read through its `values`, forward). Each case at every eighth settled stop,
+ * forward with the sharing and reversed without it where the clause arises, nothing left over and the clause taken.
+ */
+test("a combined stop owes a mark made from the written type, or a boundary's undecided store mark (#1561)", () => {
+  const cases = [
+    {
+      clause: "w",
+      modes: [HELD_MODES[0]!, HELD_MODES[3]!],
+      c: keptCase(
+        "nullable list",
+        ["let xs: list? = [hostValue, 4]"],
+        'repeat xs[0] {say "ok"}',
+        repeated,
+      ),
+    },
+    {
+      clause: "w",
+      modes: [HELD_MODES[0]!, HELD_MODES[3]!],
+      c: keptCase(
+        "nullable integer elements",
+        ["let xs: integer?[] = [hostValue, 4]"],
+        'repeat xs[0] {say "ok"}',
+        repeated,
+      ),
+    },
+    {
+      clause: "z",
+      modes: [HELD_MODES[0]!],
+      c: keptCase(
+        "dictionary values of a result",
+        ["function build {return dict {a: hostValue, b: 4}}"],
+        'repeat build().values[0] {say "ok"}',
+        repeated,
+        false,
+      ),
+    },
+  ];
+  for (const { clause, modes, c } of cases)
+    for (const mode of modes) {
+      let taken = 0;
+      combinedStops(c, mode, (where, problems, clauses) => {
+        assert.deepEqual(problems, [], where);
+        taken += clauses.filter((each) => each === clause).length;
+      });
+      assert.ok(taken > 0, `${c.name}, ${mode.name}: no stop takes ${clause}`);
+    }
+});
+
+/**
+ * TABLE r4.285's limits at a combined stop, each a stop the oracle fails: a check the natural analysis owes that the
+ * finishing read cannot give (a comparison's element, #1580's form, where the decision stop leaves the used `get`'s
+ * read to the walk); a mark whose read is wider than the written type (an unrestricted `object`'s property read, under
+ * the second largest demand allowance that stops a decision); a
+ * dropped boundary with plan content inside an undecided store (the copies' `root against object`, left out of the
+ * stopped analysis); and a value the demand-only run itself lets through (`bad` at a stored property's default, #1526),
+ * which the runs report where the combined stop keeps that run's check (reversed). Forward with the sharing otherwise.
+ */
+test("a combined stop's rule takes nothing the natural analysis owes, nothing wider, and no boundary with plan content", () => {
+  const mode = HELD_MODES[0]!;
+  const reported = (c: HeldCase, found: (problem: string) => boolean, which = 0): void => {
+    let count = 0;
+    combinedStops(
+      c,
+      mode,
+      (_, problems) => {
+        count += problems.filter(found).length;
+      },
+      which,
+    );
+    assert.ok(count > 0, c.name);
+  };
+  reported(
+    storedGet("compared element", [], "[hostValue == 2]", [
+      [true, true],
+      ["bad", false],
+    ]),
+    (problem) => problem.startsWith("unowned check") && problem.includes('"against":["boolean"]'),
+  );
+  reported(
+    heldFamily(false).find((c) => c.name === "writtenObjectBelow-1-arithmetic-plain")!,
+    (problem) =>
+      problem.startsWith("unowned check") &&
+      problem.includes('"kind":"null-check","target":"root"'),
+    1,
+  );
+  // (the decision stop alone lets `bad` through, its default checked against `unknown`; a combined stop that keeps that
+  // check runs it alike, reversed with the sharing)
+  const stored = storedGet("stored property", ["let xs = [({f: 4, g: hostValue}).f]"], "xs", [
+    [2, true],
+    ["bad", false],
+  ]);
+  const reversed = HELD_MODES[1]!;
+  const storedRequest = coreRequest(
+    [{ path: "main.tease", source: stored.source }],
+    ["hostValue", "hostOther"],
+  )!;
+  const demand = heldDemands(stored, reversed)[0]!;
+  const bad = 'forbidden {"hostValue":2,"hostOther":"bad"} said ["BEFORE","AFTER"]';
+  const alone = heldUnstopped(stored, reversed, demand);
+  assert.ok(alone.problems.includes(bad));
+  const theirs = JSON.stringify(
+    alone.run.answers.checks.find((check) => check.target === "hostOther" && !check.boundary),
+  );
+  let kept = 0;
+  for (const { allowance } of heldStops(stored, reversed, 1, demand)) {
+    const stopped = reversed.run(() =>
+      withTestAllowance(allowance, () =>
+        withTestDemandAllowance(demand, () => analyseCore(storedRequest)),
+      ),
+    );
+    const owed = [...stopped.checks, ...stopped.budget.deferred.map((mark) => mark.obligation)];
+    if (!owed.some((check) => JSON.stringify(check) === theirs)) continue;
+    assert.ok(
+      heldProblems(stored, reversed, allowance, alone.run, demand).includes(bad),
+      `@${allowance}`,
+    );
+    if (++kept === 2) break;
+  }
+  assert.ok(kept > 0);
+  // (the copies' boundary left out of a stopped analysis that owes it: no clause takes it)
+  const copies = heldFamily(false).find((c) => c.name === "copies-2-interpolation-plain")!;
+  const request = coreRequest(
+    [{ path: "main.tease", source: copies.source }],
+    ["hostValue", "hostOther"],
+  )!;
+  const natural = mode.run(() => analyseCore(request));
+  const boundary = (check: Answers["checks"][number]): boolean =>
+    check.boundary && check.target === "root" && isDeepStrictEqual(check.against, ["object"]);
+  let tried = 0;
+  for (const copiesDemand of heldDemands(copies, mode)) {
+    const { run: unstopped } = heldUnstopped(copies, mode, copiesDemand);
+    if (!unstopped.answers.checks.some(boundary)) continue;
+    for (const { allowance } of heldStops(copies, mode, 8, copiesDemand)) {
+      const stopped = mode.run(() =>
+        withTestAllowance(allowance, () =>
+          withTestDemandAllowance(copiesDemand, () => analyseCore(request)),
+        ),
+      );
+      const owed = stopped.checks.find(boundary);
+      if (owed === undefined || !stopped.budget.decisions.some((d) => d.stopped)) continue;
+      tried += 1;
+      const without = { ...stopped, checks: stopped.checks.filter((check) => !boundary(check)) };
+      assert.equal(
+        combinedStop(unstopped.answers, natural, without).checks.has(JSON.stringify(owed)),
+        false,
+        `demand ${copiesDemand} @${allowance}`,
+      );
+    }
+  }
+  assert.ok(tried > 0);
 });
 
 /**
