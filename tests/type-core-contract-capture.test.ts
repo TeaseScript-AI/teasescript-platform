@@ -180,3 +180,37 @@ test("each analysis's captured contracts are its own final pass's", () => {
     assert.deepEqual(result.ref, lowered[0].ref, source);
   }
 });
+
+test("a stop while the capture runs keeps what admission found before it", () => {
+  // (admission's own check of a written store stands at every stop in the capture: the capture runs after its findings
+  // are marked, so a stop there takes none of them back)
+  const source =
+    'let n: integer = 1\nlet a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nn = hostOther\nb.f = hostValue\nsay "AFTER"\nexit\n';
+  const written = spanOf(source, "n = hostOther");
+  let stops = 0;
+  for (const mode of HELD_MODES)
+    for (const { allowance, phase } of heldStops(
+      { name: "written", source, slice: true, values: [] },
+      mode,
+      4,
+    )) {
+      if (phase !== "extraction") continue;
+      stops += 1;
+      const { plan } = mode.run(() =>
+        withTestAllowance(allowance, () =>
+          compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+        ),
+      );
+      assert.deepEqual(
+        storeRunProblems(
+          plan!,
+          written,
+          [{ hostValue: L(L(2)), hostOther: 2 }],
+          [{ hostValue: L(L(2)), hostOther: "x" }],
+        ),
+        [],
+        `${mode.name}, extraction stop at ${allowance}`,
+      );
+    }
+  assert.ok(stops > 0);
+});
