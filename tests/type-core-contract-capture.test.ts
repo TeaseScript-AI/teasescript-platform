@@ -187,8 +187,16 @@ test("a stop while the capture runs keeps what admission found before it", () =>
   const source =
     'let n: integer = 1\nlet a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nn = hostOther\nb.f = hostValue\nsay "AFTER"\nexit\n';
   const written = spanOf(source, "n = hostOther");
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+  // (the warning admission gives the written store, as unstopped)
+  const warned = (answers: ReturnType<typeof analyseCore>): string[] =>
+    answers.diagnostics
+      .filter((d) => d.site.start >= written.start && d.site.end <= written.end)
+      .map((d) => d.code);
   let stops = 0;
-  for (const mode of HELD_MODES)
+  for (const mode of HELD_MODES) {
+    const natural = warned(mode.run(() => analyseCore(request)));
+    assert.ok(natural.length > 0, mode.name);
     for (const { allowance, phase } of heldStops(
       { name: "written", source, slice: true, values: [] },
       mode,
@@ -196,6 +204,12 @@ test("a stop while the capture runs keeps what admission found before it", () =>
     )) {
       if (phase !== "extraction") continue;
       stops += 1;
+      const at = `${mode.name}, extraction stop at ${allowance}`;
+      assert.deepEqual(
+        warned(mode.run(() => withTestAllowance(allowance, () => analyseCore(request)))),
+        natural,
+        at,
+      );
       const { plan } = mode.run(() =>
         withTestAllowance(allowance, () =>
           compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
@@ -209,8 +223,9 @@ test("a stop while the capture runs keeps what admission found before it", () =>
           [{ hostValue: L(L(2)), hostOther: "x" }],
         ),
         [],
-        `${mode.name}, extraction stop at ${allowance}`,
+        at,
       );
     }
+  }
   assert.ok(stops > 0);
 });
