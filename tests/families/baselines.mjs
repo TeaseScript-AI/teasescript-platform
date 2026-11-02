@@ -1063,15 +1063,14 @@ function differenceOf(held, given) {
 }
 
 /**
- * A seed's MANIFEST and PLANs (`held`, `heldIn`) adopted into the folder of baselines `central` (#1590): its baseline
- * made with that MANIFEST where it is absent or empty, else checked equal and never written over (`differs`); then each
+ * A seed's MANIFEST and PLANs (`held`, `heldIn`, naming the build of the compiler its shards are stored from) adopted
+ * into the folder of baselines `central` (#1590): its baseline made with that MANIFEST where it is absent or empty, else checked equal and never written over (`differs`); then each
  * area's PLAN made where the baseline lacks it (`planned`). `seed` says whether anything was written.
  */
 async function adopt(central, held) {
-  const builds = compiledIn(held.text);
-  if (builds.length !== 1)
+  if (compiledIn(held.text).length === 0)
     return {
-      refused: `${held.dir}'s MANIFEST names ${builds.length} builds of the compiler (dist/src/), where a seed names one`,
+      refused: `${held.dir}'s MANIFEST names no build of the compiler (dist/src/) its shards are stored from`,
     };
   const dir = pathOf(baselineIn(central, held.identity.src), "baseline");
   let wrote = !isOwned(dir);
