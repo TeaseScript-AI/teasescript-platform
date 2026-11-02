@@ -1498,9 +1498,11 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     assert.deepEqual(Object.keys(said(imported("zero", 0))), ["equal"]);
     const differs = copied("zero", "differs", (dir) => {
       const file = join(dir, "area", "0of16.runs.jsonl");
-      const [line, total] = readFileSync(file, "utf8").trim().split("\n");
-      const changed = `${line!.replace(/"hash":"\w/, '"hash":"_')}\n`;
-      const ended = JSON.parse(total!);
+      const [line, ...rest] = readFileSync(file, "utf8").trim().split("\n");
+      const ended = JSON.parse(rest.pop()!);
+      const changed = [line!.replace(/"hash":"\w/, '"hash":"_'), ...rest]
+        .map((one) => `${one}\n`)
+        .join("");
       ended.total.lines = createHash("sha256").update(changed).digest("hex");
       writeFileSync(file, `${changed}${JSON.stringify(ended)}\n`);
     });
