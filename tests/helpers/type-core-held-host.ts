@@ -1087,7 +1087,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     ...values: readonly (Parameters<Consumers["valueItems"]>[0] | undefined)[]
   ) {
     for (const value of values) if (value !== undefined) record(this, value, [], [], false, true);
-    Reflect.apply(skip, this, values);
+    skip.call(this, ...values);
   };
   try {
     const made = make();
