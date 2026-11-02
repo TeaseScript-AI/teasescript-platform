@@ -16,7 +16,11 @@ import { analyseCore, type Answers, type CorePass } from "../src/type-inference/
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { Contract } from "../src/type-inference/core/contract.js";
-import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
+import {
+  DemandExhausted,
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../src/type-inference/core/budget.js";
 import {
   Consumers,
   withConsumerOrder,
@@ -3882,6 +3886,85 @@ test("a demand made again after a forget stays forgettable until forgetting clos
             );
           });
   }
+});
+
+/**
+ * #1601's Codex r3 (R1): a run cut short at a demand's allowance drops what has not finished, after each pending read of
+ * it keeps its reader as the read's return would have (`Solver.run`), so a demand made again after it and after a stop
+ * is reached by the next stop as with every record kept. Codex's witness (every value read in one demand of a few
+ * hundred units, which stops; `c` stops and its decision ends; every value is read again; `a` stops), at a few
+ * allowances from that one up, in the four modes and both read orders: what the second stop forgets, every answer and
+ * the charged counters equal those with every record kept (`withEveryRecord`).
+ */
+test("a run cut short keeps the readers its returns would have kept (#1599)", () => {
+  const source =
+    "let a: integer? = null\nlet b = 1\nlet c = a otherwise b\nlet d = [c]\nsay d.first\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  interface Witnessed {
+    readonly cut: boolean;
+    readonly before: readonly string[][];
+    readonly forgotten: readonly string[];
+    readonly after: readonly string[][];
+    readonly total: number;
+    readonly counts: readonly (readonly [string, number])[];
+  }
+  const run = (allowance: number, reversed: boolean): Witnessed => {
+    const { program, contract, solver } = narrowingPass(request);
+    const bindings = program.places.filter((place) => place.kind.kind === "binding");
+    contract.openDecisions(bindings.map(({ id }) => ({ root: id })));
+    const at = (label: string): PlaceId => bindings.find((place) => place.label === label)!.id;
+    const values = program.places
+      .filter((place) => place.kind.kind === "value" || place.kind.kind === "target")
+      .map((place) => place.id);
+    if (reversed) values.reverse();
+    const ask = () =>
+      values.map((value) => solver.run(contract.contractOfValue(value)).map(itemText));
+    let cut = false;
+    try {
+      solver.demand(
+        (function* () {
+          for (const value of values) yield* contract.contractOfValue(value);
+          return [];
+        })(),
+        allowance,
+      );
+    } catch (error) {
+      if (!(error instanceof DemandExhausted)) throw error;
+      cut = true;
+    }
+    contract.stop(at("c"), []);
+    contract.decided(at("c"));
+    const before = ask();
+    const memo = [...new Set(solver.demandWork().map(({ key }) => key))]
+      .filter((key) => solver.answer(key) !== undefined)
+      .sort();
+    contract.stop(at("a"), []);
+    const forgotten = memo.filter((key) => solver.answer(key) === undefined);
+    const after = ask();
+    return {
+      cut,
+      before,
+      forgotten,
+      after,
+      total: program.work.total,
+      counts: [...program.work.counts()],
+    };
+  };
+  let cut = 0;
+  for (const allowance of [96, 192, 392, 600])
+    for (const mode of MODES)
+      for (const reversed of [false, true])
+        inMode(mode, () => {
+          const own = run(allowance, reversed);
+          if (own.cut) cut += 1;
+          assert.deepEqual(
+            own,
+            withEveryRecord(() => run(allowance, reversed)),
+            `at ${allowance}, ${JSON.stringify(mode)}${reversed ? ", reversed" : ""}`,
+          );
+        });
+  assert.ok(cut > 0, "a run is cut short");
 });
 
 /**
