@@ -96,10 +96,9 @@ export function operations(walk: Consumers): void {
           (rest) => {
             const term = termAt(written, rest);
             if (term === null) return [];
-            // (its kinds with the written type's spelling, #1398)
-            const tags = typeTags(term).filter((tag) => tag !== "unknown");
-            const spelled = spelledBy(tags);
-            return tags.map((tag) => makeItem(tag, null, spelled));
+            // (one item per kind the written type spells, with its spelling, #1398)
+            const { spelling } = spelledBy(typeTags(term));
+            return spelling.map((tag) => makeItem(tag, null, { spelling }));
           },
           fallback,
           true,

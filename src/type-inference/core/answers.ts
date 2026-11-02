@@ -48,6 +48,7 @@ import { HandlerIndex } from "./handlers.js";
 import {
   EMPTY,
   inItsOrder,
+  kindsInItsOrder,
   kindsInOrder,
   makeItem,
   REASON,
@@ -1136,16 +1137,19 @@ class CoreAnswers implements Answers {
    * literal's own kinds, a typed call's expected type at every depth); else the domains the consumers' finishing read
    * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`); where none
    * of them retains anything after a stop where admission had settled, the type admission gives the read's place there,
-   * as `place` answers it (`#lazilyDecided`). Each source gives its list in its own order: an answer, a decision or a
-   * composition in its one order where it is made (`inItsOrder`, #1398).
+   * as `place` answers it (`#lazilyDecided`). Every list passes the one rule where it is composed (`inItsOrder`, #1398)
+   * and once more here, where it is published: idempotent on items that carry their spelling, so no source publishes
+   * out of the rule even where its producer missed it (TABLE r4.277).
    */
   #items(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
     const answered = this.#run(this.#pass.values.valueItems(value, node, path));
-    if (!this.#stopped || !answered.some(isStopped)) return answered;
+    if (!this.#stopped || !answered.some(isStopped)) return inItsOrder(answered);
     const own = this.#stoppedShape(value, path).items;
-    if (own !== STOPPED) return own;
+    if (own !== STOPPED) return inItsOrder(own);
     const finished = this.#consumers.finishedItems(value, node, path);
-    return finished.every(isStopped) ? (this.#lazilyDecided(value, path) ?? finished) : finished;
+    return inItsOrder(
+      finished.every(isStopped) ? (this.#lazilyDecided(value, path) ?? finished) : finished,
+    );
   }
 
   /**
@@ -1216,14 +1220,13 @@ class CoreAnswers implements Answers {
       const written = contract.landsIn(at, []);
       if (written !== null) {
         const term = termAt(written, path);
-        const tags = term === null ? [] : typeTags(term).filter((tag) => tag !== "unknown");
-        // (its kinds with the written type's spelling, #1398)
-        const spelled = spelledBy(tags);
+        // (one item per kind the written type spells, with its spelling, #1398)
+        const { spelling } = spelledBy(term === null ? [] : typeTags(term));
         found = {
           items:
-            tags.length === 0
+            spelling.length === 0
               ? STOPPED
-              : tags.map((tag) => makeItem(tag, null, { cert: "def", ...spelled })),
+              : spelling.map((tag) => makeItem(tag, null, { cert: "def", spelling })),
           names: term === null ? NO_NAMES : new Set(termProperties(term)),
         };
       } else if (call.fallback === undefined) found = { items: STOPPED, names: NO_NAMES };
@@ -1397,9 +1400,10 @@ class CoreAnswers implements Answers {
     let defined: PlaceAnswer["definitions"] | null = null;
     return {
       admitted: this.#admitted(id, path, term),
+      // (published in their one order once more, as `#items` publishes, #1398)
       contract: {
-        kinds: withoutEmpty(kinds),
-        elements: withoutEmpty(elements),
+        kinds: inItsOrder(withoutEmpty(kinds)),
+        elements: inItsOrder(withoutEmpty(elements)),
         emptiness: elements.some((item) => item.tag === "empty") ? "open" : "held",
       },
       // (the key in its identity, as admission holds its boundaries: G3 stage 1)
@@ -1435,7 +1439,8 @@ class CoreAnswers implements Answers {
       if (decided !== null)
         return {
           by: "decided",
-          kinds: decided.kinds,
+          // (in their one order once more, by the spelling the decision kept, #1398)
+          kinds: kindsInItsOrder(decided.kinds, decided.spelling),
           decider: decided.decider.site,
           inherited: decided.inherited,
         };

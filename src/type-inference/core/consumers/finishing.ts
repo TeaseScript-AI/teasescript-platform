@@ -151,13 +151,12 @@ function typedRead(
     const written = contract.landsIn(at, []);
     if (written !== null) {
       const term = termAt(written, path);
-      const tags = term === null ? [] : typeTags(term).filter((tag) => tag !== "unknown");
-      // (its kinds with the written type's spelling, #1398)
-      const spelled = spelledBy(tags);
+      // (one item per kind the written type spells, with its spelling, #1398)
+      const { spelling } = spelledBy(term === null ? [] : typeTags(term));
       found =
-        tags.length === 0
+        spelling.length === 0
           ? null
-          : tags.map((tag) => makeItem(tag, null, { cert: "def", ...spelled }));
+          : spelling.map((tag) => makeItem(tag, null, { cert: "def", spelling }));
     } else if (call?.fallback === undefined) found = null;
     else {
       at = call.fallback;
@@ -307,8 +306,12 @@ function laterSources(
       ? heldIngress(walk, value, rest)
       : [];
   if (tags.length === 0 || tags.includes("unknown")) return [...STOPPED, ...host];
+  // (one item per kind, with the domain's spelling)
   const spelled = spelling === undefined ? {} : { spelling };
-  const items = [...tags.map((tag) => makeItem(tag, null, { cert: "pos", ...spelled })), ...host];
+  const items = [
+    ...[...new Set(tags)].map((tag) => makeItem(tag, null, { cert: "pos", ...spelled })),
+    ...host,
+  ];
   // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)
   const step = rest.at(-1) ?? walk.pass.program.projOf.get(value)?.step;
   return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
@@ -1278,7 +1281,7 @@ function laterKeySources(walk: Consumers, key: Key, node: FlowNode): readonly It
   const spelled = term !== null || retained?.inherited === true ? spelledBy(tags) : {};
   return tags.length === 0 || tags.includes("unknown")
     ? STOPPED
-    : tags.map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
+    : [...new Set(tags)].map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
 }
 
 /**

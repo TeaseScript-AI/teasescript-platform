@@ -2,7 +2,7 @@ import type { CorePass } from "../answers.js";
 import { joinSteps } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { belowSelected, withoutEmpty } from "../exact-path.js";
-import { EMPTY, makeItem, mergeItems, REASON, weaken, type Item } from "../items.js";
+import { EMPTY, inItsOrder, makeItem, mergeItems, REASON, weaken, type Item } from "../items.js";
 import {
   builtinResult,
   clockResult,
@@ -156,7 +156,8 @@ export function* contractOfOp(
     if (rest.length === 0) return [carried(makeItem(copy.into), receiver)];
     const kinds = withoutEmpty(receiver);
     const declared = kinds.some((item) => kindElement(item.tag) !== undefined);
-    return [
+    // (the elements of each kind together, in their one order, #1398)
+    return inItsOrder([
       // a kind's declared elements may be none (a range's bounds decide): the copy's element step keeps that mark
       ...(declared && rest.length === 1 ? [EMPTY] : []),
       ...(rest.length === 1
@@ -169,7 +170,7 @@ export function* contractOfOp(
         ? yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest.slice(1)))
         : []),
       ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
-    ];
+    ]);
   }
   if (family === "operator" && name === "+" && rest.length > 0) {
     // #1384: an indexed run's terms holding the property, and those between them

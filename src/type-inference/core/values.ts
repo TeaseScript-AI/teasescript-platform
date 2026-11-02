@@ -90,17 +90,6 @@ import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";
 import { Position, positions, UNPOSITIONED } from "./positions.js";
 import type { Proof, ProofDemand, Proven, Work } from "./solver.js";
 
-/**
- * A type test's spelling (`NarrowingForm`'s `test`): its kinds in their written order, which the kinds it narrows to
- * keep (#1398, TABLE r4.277 (3)); none for any other form. Read where the narrowing is answered, outside the narrowing
- * modules' charged walks: a walk of the written type, no longer than the form's kinds `narrowedItems` walks charged.
- */
-function testSpelling(form: NarrowingForm): Spelling | undefined {
-  return form.kind === "is" && form.test !== undefined
-    ? spelledBy(annotationTags(form.test)).spelling
-    : undefined;
-}
-
 /*
  * The value side of the coarse core (checkpoint 9, TABLE §3): a read of a key at a node takes, in this order, the host
  * or reference answer (§3 step 1), the exact path's value at D (§3.1), or the contract (§3.2), and under a guard of
@@ -152,8 +141,24 @@ export class Values {
   readonly #routes = new Map<string, ReadRoute>();
   /** Per read, the narrowing it takes (`#narrowingOf`). */
   readonly #narrowings = new Map<PlaceId, NarrowedRead | null>();
+  /** Per type test's form, its spelling (`#testSpelling`). */
+  readonly #testSpellings = new Map<NarrowingForm, Spelling>();
 
   public constructor(readonly pass: CorePass) {}
+
+  /**
+   * A type test's spelling (`NarrowingForm`'s `test`): its kinds in their written order, which the kinds it narrows to
+   * keep (#1398, TABLE r4.277 (3)); none for any other form. Read where the narrowing is answered, outside the narrowing
+   * modules' charged walks: one walk of the written type per form and pass, shared by every read the form narrows, so
+   * the walks grow with the tests' sizes alone (Codex r6 on #1558).
+   */
+  #testSpelling(form: NarrowingForm): Spelling | undefined {
+    if (form.kind !== "is" || form.test === undefined) return undefined;
+    let spelling = this.#testSpellings.get(form);
+    if (spelling === undefined)
+      this.#testSpellings.set(form, (spelling = spelledBy(annotationTags(form.test)).spelling));
+    return spelling;
+  }
 
   /** A read of `key` at `node` (§3); `before`: a definition at `node` itself does not count. */
   public *keyItems(asked: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
@@ -350,7 +355,7 @@ export class Values {
         root,
         program.dom.dominates(g.node, read.def.node)
           ? read.items
-          : narrowedItems(g.form, read.items, program.scope, testSpelling(g.form)),
+          : narrowedItems(g.form, read.items, program.scope, this.#testSpelling(g.form)),
       );
     return contract.entered(root, items);
   }
@@ -384,7 +389,7 @@ export class Values {
     const input = loopDefinition
       ? yield* contract.contractOf(g.key)
       : (yield* this.#keyRead(contract.canonicalKey(g.key), g.input, false)).items;
-    return narrowedItems(g.form, input, program.scope, testSpelling(g.form));
+    return narrowedItems(g.form, input, program.scope, this.#testSpelling(g.form));
   }
 
   /**

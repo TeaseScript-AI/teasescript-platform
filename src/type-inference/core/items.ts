@@ -513,7 +513,9 @@ export function weaken(items: readonly Item[], context: ContextWord | null = nul
 
 /**
  * The items as one comparable text, independent of their order, for a fixpoint's test whether a value changed. The
- * ingress stores are left out: a fixpoint member's stores grow in its cell, which every value holding it shares.
+ * ingress stores are left out: a fixpoint member's stores grow in its cell, which every value holding it shares. An
+ * item's spelling is part of it (none, one spelling by its kinds, or `MIXED`, `*`): differently marked items order a
+ * later list differently, so they are different values (TABLE r4.277 (2), #1398).
  */
 export function itemsSignature(items: readonly Item[], scope: ItemScope): string {
   scope.work.charge("sigItems", items.length + 1);
@@ -528,6 +530,11 @@ export function itemsSignature(items: readonly Item[], scope: ItemScope): string
         item.word ?? "",
         `${item.guarded === true ? "g" : ""}${item.called === true ? "c" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}`,
         item.fan ?? "",
+        item.spelling === undefined
+          ? ""
+          : item.spelling.length === 0
+            ? "*"
+            : item.spelling.join("+"),
       ].join("|"),
     )
     .sort()
