@@ -1184,7 +1184,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     const alias = tree("alias", "2");
     const rebuilt = tree("rebuilt", "1", "compiled otherwise\n");
     const sha = "1".repeat(40);
-    const { identityOf, comparedOf } = await import(pathToFileURL(baselines).href);
+    const { identityOf, comparedOf, planOf } = await import(pathToFileURL(baselines).href);
     const src: string = identityOf(built).src;
     const script = resolve("tools", "corpus", "baseline.sh");
     const scratch = join(directory, "scratch");
@@ -1303,6 +1303,25 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       [status().status, status().stdout],
       [0, `baseline ${src}: ${join(central, src)}: complete: area\n`],
     );
+    // the complete central baseline serves its consumer: the built tree compared against it, every run compared and
+    // agreeing, the one stall its own (`ends`, stored stalled)
+    const served = spawnSync(
+      process.execPath,
+      [
+        runner,
+        join(built, "tests", "families", "area"),
+        built,
+        "--baseline",
+        join(central, src, "area"),
+      ],
+      { encoding: "utf8" },
+    );
+    const { sources, differences, exceptions, uncompared, unanswered, stalled } = said(served);
+    assert.deepEqual(
+      [served.status, sources, differences, exceptions, uncompared, unanswered, stalled],
+      [1, 18, 0, 0, 0, 0, 1],
+      served.stderr,
+    );
 
     // refused (exit 2) and nothing written: another build of the compiler (computed from `rebuilt`), another MANIFEST
     // line (a commit and tree), another PLAN, another Node, a stall stalls.json does not show alone, no baseline
@@ -1392,14 +1411,14 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
           edit(at("twice-listed", "stalls.json"), /\[(.*)\]/, "[$1,$1]"),
         ),
         1,
-        /stalls\.json lists 2 stalled sources of .*, which has 1/,
+        /stalls\.json lists 2 stalled sources, the shard has 1/,
       ],
       [
         copied("one", "forged", (dir) =>
           edit(join(dir, "area", "1of16.runs.jsonl"), '"stalled":1,', '"stalled":0,'),
         ),
         1,
-        /total counts 0 stalled sources, its lines 1/,
+        /total counts 2 sources and 0 stalled, its lines 2 and 1/,
       ],
       [
         // (a stall certificate is bound to its source: `mixed` stalled, its run alone `ends`'s)
@@ -1434,6 +1453,36 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         1,
         /lists a stall of another shard than area 1\/16: stored\.mjs ends/,
       ],
+      // (each source line one a store writes, as the comparison reads it: Codex r2's `runs: null`, and a result whose
+      // `unparsed` is no boolean; each with its digest repaired, so that it counts)
+      ...(
+        [
+          [
+            "no-runs",
+            (line: string) => line.replace(/"runs":\{.*\}\}$/, '"runs":null}'),
+            /its runs are no object/,
+          ],
+          [
+            "unparsed-text",
+            (line: string) => line.replace('"unparsed":false', '"unparsed":"no"'),
+            /its run "src-on publication" is not one a store writes/,
+          ],
+        ] as const
+      ).map(
+        ([name, change, refusal]) =>
+          [
+            copied("zero", name, (dir) => {
+              const file = join(dir, "area", "0of16.runs.jsonl");
+              const [line, ...rest] = readFileSync(file, "utf8").trim().split("\n");
+              const ended = JSON.parse(rest.pop()!);
+              const body = [change(line!), ...rest].map((one) => `${one}\n`).join("");
+              ended.total.lines = createHash("sha256").update(body).digest("hex");
+              writeFileSync(file, `${body}${JSON.stringify(ended)}\n`);
+            }),
+            0,
+            refusal,
+          ] as const,
+      ),
       ["empty", 0, /holds no baseline of this tool/],
     ] as const) {
       const refused = imported(root, index);
@@ -1468,11 +1517,39 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     });
     assert.match(
       said(tool("import", at("shardless-central"), at("shardless"))).refused,
-      /area's PLAN is not one this tool writes: its count of shards, 0, is not positive/,
+      /MANIFEST is not one this tool writes: its line 7 is no line this tool writes: "area area 0 /,
     );
     const shardless = tool("status", at("shardless"), src);
     assert.equal(shardless.status, 2);
     assert.match(shardless.stdout, /is not one this tool writes/);
+    // (a MANIFEST record by record, refused before anything is written: Codex r2's `..` area with its PLAN beside the
+    // baseline, and an area record of a negative count; `status` refuses such a record too)
+    const dotdot = planOf("..", [], 1);
+    copied("seed", "dotdot", (dir) => {
+      edit(
+        join(dir, "MANIFEST"),
+        /$/,
+        `area .. 1 ${createHash("sha256").update(dotdot).digest("hex")}\n`,
+      );
+      writeFileSync(join(dir, "..", "PLAN"), dotdot);
+    });
+    copied("seed", "negative", (dir) =>
+      edit(join(dir, "MANIFEST"), /$/, `area missing -1 ${"0".repeat(64)}\n`),
+    );
+    for (const [root, line] of [
+      ["dotdot", /its line 9 is no line this tool writes: "area \.\. 1 /],
+      ["negative", /its line 9 is no line this tool writes: "area missing -1 /],
+    ] as const) {
+      const refused = tool("import", at(`${root}-central`), at(root));
+      assert.deepEqual([root, refused.status], [root, 2]);
+      assert.match(said(refused).refused, line);
+      assert.equal(existsSync(at(`${root}-central`)), false);
+    }
+    cpSync(central, at("misrecorded"), { recursive: true });
+    edit(at("misrecorded", src, "MANIFEST"), /$/, `area missing -1 ${"0".repeat(64)}\n`);
+    const misrecorded = tool("status", at("misrecorded"), src);
+    assert.equal(misrecorded.status, 2);
+    assert.match(misrecorded.stdout, /its line 9 is no line this tool writes: "area missing -1 /);
     copied("seed", "arealess", (dir) => {
       rmSync(join(dir, "area"), { recursive: true });
       edit(join(dir, "MANIFEST"), /^area area .*\n/m, "");
