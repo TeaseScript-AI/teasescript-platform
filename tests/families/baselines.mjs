@@ -1063,6 +1063,9 @@ function planFault(text, area, shards) {
   return line === lines.length ? undefined : "it has lines after its last shard's entry";
 }
 
+/** Whether `value` is a sha256 in hex, a string proved before the pattern applies (`test` would coerce an array). */
+const hash64 = (value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+
 /**
  * Why `line` (a stored source line, read) is not one `run.mjs --store` writes, else undefined: its place (a generator, a
  * name, a key), its stall (a text) and its exception outside its runs (the runner's text) where it has them, and its
@@ -1073,11 +1076,7 @@ function planFault(text, area, shards) {
 function sourceFault(line) {
   if (!shaped(line, ["generator", "source", "key", "runs"], ["stalled", "thrown"]))
     return "it is no stored source's record";
-  if (
-    typeof line.generator !== "string" ||
-    typeof line.source !== "string" ||
-    !/^[0-9a-f]{64}$/.test(line.key)
-  )
+  if (typeof line.generator !== "string" || typeof line.source !== "string" || !hash64(line.key))
     return "its generator, name or key is none";
   if (line.stalled !== undefined && typeof line.stalled !== "string") return "its stall is no text";
   if (
@@ -1092,7 +1091,7 @@ function sourceFault(line) {
       ? typeof result.thrown === "string"
       : shaped(result, ["value"]) &&
         shaped(value, ["hash", "parts", "unanswered", "unparsed"]) &&
-        /^[0-9a-f]{64}$/.test(value.hash) &&
+        hash64(value.hash) &&
         (value.parts === null ||
           (Array.isArray(value.parts) && value.parts.every((part) => typeof part === "string"))) &&
         Number.isInteger(value.unanswered) &&

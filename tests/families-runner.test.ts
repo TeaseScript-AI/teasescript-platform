@@ -1467,6 +1467,17 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
             (line: string) => line.replace('"unparsed":false', '"unparsed":"no"'),
             /its run "src-on publication" is not one a store writes/,
           ],
+          // (Codex r3: a hash proved a string before its pattern, which an array or object would pass by coercion)
+          [
+            "array-hash",
+            (line: string) => line.replace(/"hash":("[0-9a-f]{64}")/, '"hash":[$1]'),
+            /stored\.mjs same: its run "src-on publication" is not one a store writes/,
+          ],
+          [
+            "object-hash",
+            (line: string) => line.replace(/"hash":"[0-9a-f]{64}"/, '"hash":{"toString":false}'),
+            /stored\.mjs same: its run "src-on publication" is not one a store writes/,
+          ],
         ] as const
       ).map(
         ([name, change, refusal]) =>
