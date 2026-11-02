@@ -63,19 +63,18 @@ test("equal contracts are one descriptor, whatever place receives them", () => {
   assert.equal(first.ref, second.ref);
 });
 
-test("a level a copy decides lazily is lost at every settled stop, and its check is the result's part (#1556)", () => {
+test("a copy's lazily decided level is complete with its whole contract or lost, never open, at every settled stop (#1556)", () => {
   const source =
     'let a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nb.f = hostValue\nsay "AFTER"\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
   const site = `0:${source.indexOf("b.f")}:${source.indexOf("\nsay", source.indexOf("b.f"))}`;
-  const element = [propertyStep("f"), "element"];
+  // (what `b.f` receives: a copy of `a.f`, a list of lists of whole numbers, ADR 0021 1.3)
+  const whole = { kind: "list", element: { kind: "list", element: { kind: "integer" } } };
+  const element = [propertyStep("f"), "element"].join(".");
   for (const mode of HELD_MODES) {
     const natural = mode.run(() => storeContracts(analyseCore(request), request)).get(site);
     assert.ok(natural?.state === "complete", `${mode.name}: unstopped, the contract is complete`);
-    assert.deepEqual(natural.ref, {
-      kind: "list",
-      element: { kind: "list", element: { kind: "integer" } },
-    });
+    assert.deepEqual(natural.ref, whole);
     const stops = heldStops({ name: "copy-nested", source, slice: true, values: [] }, mode, 8);
     assert.ok(stops.some((stop) => stop.phase === "walk"));
     for (const { allowance, phase } of stops) {
@@ -83,18 +82,28 @@ test("a level a copy decides lazily is lost at every settled stop, and its check
       const answers = mode.run(() => withTestAllowance(allowance, () => analyseCore(request)));
       assert.ok(answers.budget.settled, at);
       const result = storeContracts(answers, request).get(site);
-      assert.ok(result?.state === "lost", `${at}: lost, not ${result?.state}`);
-      assert.equal(result.cause, "stop");
-      assert.ok(
-        result.required.some((level) => level.path.join(".") === element.join(".")),
-        `${at}: the element level is the one whose proof is unfinished`,
-      );
       const { plan } = mode.run(() =>
         withTestAllowance(allowance, () =>
           compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
         ),
       );
-      assert.deepEqual(checks(plan)[0]?.type, result.partial, `${at}: the plan carries the part`);
+      const checked = checks(plan)[0]?.type;
+      // complete only with the whole contract, checked at the store; else lost at the unfinished level, the plan
+      // carrying the part it holds
+      if (result?.state === "complete") {
+        assert.deepEqual(result.ref, whole, at);
+        assert.deepEqual(checked, whole, `${at}: the plan checks the whole contract`);
+        continue;
+      }
+      assert.ok(result?.state === "lost", `${at}: lost, not ${result?.state}`);
+      assert.equal(result.cause, "stop", at);
+      assert.ok(
+        result.required.some((level) => level.path.join(".") === element),
+        `${at}: the element level is the one whose proof is unfinished`,
+      );
+      // (a lost contract with no part leaves the store to the check its warning names, `storedKinds`)
+      if (result.partial !== null)
+        assert.deepEqual(checked, result.partial, `${at}: the plan carries the part`);
     }
   }
 });
@@ -124,6 +133,34 @@ test("a contract deeper than the native stack is assembled on the task stack", (
     assert.equal(at.properties.length, 1);
     assert.equal(at.properties[0]!.name, "p");
     at = at.properties[0]!.type;
+  }
+  assert.equal(levels, depth);
+  assert.deepEqual(at, { kind: "integer" });
+});
+
+test("a written contract deeper than the native stack is one node, made on an explicit stack", () => {
+  // (a list of lists `depth` deep with a whole number at the bottom, built and read without recursion)
+  const depth = 12_000;
+  const build = (): TypePlan => {
+    let plan: TypePlan = { kind: "integer" };
+    for (let level = 0; level < depth; level += 1) plan = { kind: "list", element: plan };
+    return plan;
+  };
+  const descriptors = new ContractDescriptors<null>(
+    { level: () => assert.fail("a written term reads no level"), properties: () => new Set() },
+    () => ({ elements: null, field: () => null, order: (names) => [...names] }),
+    1,
+    false,
+  );
+  const first = descriptors.written(build(), 0, []);
+  const second = descriptors.written(build(), 1, []);
+  assert.ok(first.state === "complete" && second.state === "complete");
+  assert.equal(first.ref, second.ref, "an equal written contract is the same node");
+  let levels = 0;
+  let at: TypePlan | null = first.ref;
+  for (; at?.kind === "list"; levels += 1) {
+    assert.ok(Object.isFrozen(at));
+    at = at.element;
   }
   assert.equal(levels, depth);
   assert.deepEqual(at, { kind: "integer" });
