@@ -170,7 +170,11 @@ function steepCounters(
     for (const reversed of [false, true]) {
       const small = measure(at64, reversed);
       const large = measure(at128, reversed);
-      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+      // (an output-bound family per its output's growth, TABLE r4.245, r4.294; any other per its source's)
+      const scale =
+        family.output === undefined
+          ? (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1)
+          : family.output(sizes[1]) / family.output(sizes[0]);
       const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}${sizes[0] === 64 ? "" : ` ${sizes[0]} → ${sizes[1]}`}`;
       const doubling = (before: number, after: number): number =>
         (2 * (after / Math.max(1, before))) / scale;

@@ -1470,8 +1470,10 @@ class CoreAnswers implements Answers {
   }
 
   public placeProperties(id: PlaceId, path: readonly string[] = []): ReadonlySet<string> {
-    // (the key in its identity, as the property search names its tasks: G3 stage 1)
-    return this.#propertyNames({ key: this.#pass.contract.keyAt(id, path) });
+    // (the key in its identity, as the property search names its tasks: G3 stage 1; the capture's search, where it made
+    // one in this pass, is the answer, #1526)
+    const key = this.#pass.contract.keyAt(id, path);
+    return this.#consumers.propertySets.get(key) ?? this.#propertyNames({ key });
   }
 
   public targetName(node: FlowNode): string | null {

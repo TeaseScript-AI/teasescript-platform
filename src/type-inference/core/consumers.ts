@@ -592,9 +592,14 @@ export class Consumers {
       // (as `Answers.placeProperties` finds them: a key whose decision stopped names nothing)
       properties: (place, path) => {
         const key = contract.keyAt(place, path);
-        return contract.anyStopped && contract.keyStopped(key)
-          ? new Set()
-          : propertyNames(this.pass, (asked) => this.solve(asked), { key });
+        const known = this.propertySets.get(key);
+        if (known !== undefined) return known;
+        const names: ReadonlySet<string> =
+          contract.anyStopped && contract.keyStopped(key)
+            ? new Set()
+            : propertyNames(this.pass, (asked) => this.solve(asked), { key });
+        this.propertySets.set(key, names);
+        return names;
       },
     };
     // (its work is the capture's, no consumer read's)
@@ -608,6 +613,12 @@ export class Consumers {
       () => program.work.charge("checks", definitions.storeDefs.length + sites.size),
     );
   }
+
+  /**
+   * The property names the capture found for each decided object it filled, by the object's key in its identity: the
+   * answers read them from here (`Answers.placeProperties`), so the search the capture made is not made again.
+   */
+  readonly propertySets = new Map<CanonicalKey, ReadonlySet<string>>();
 
   /** The stores' required contracts as the capture found them (`#capture`), in the order captured. */
   readonly captured: CapturedContract[] = [];

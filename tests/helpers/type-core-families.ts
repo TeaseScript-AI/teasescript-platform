@@ -17,6 +17,12 @@ export interface WorkFamily {
    * this family's shape, measured once.
    */
   readonly main?: { readonly total: number; readonly invSteps: number };
+  /**
+   * An output-bound family's output at `k` (TABLE r4.245, r4.294): the descriptor nodes its stores' checks hold, counted
+   * from the program's holders. Its work and counters grow per output unit, not per syntax node, where the stores'
+   * contracts are captured inside the analysis (#1526 phase B) that `main` built uncounted after it.
+   */
+  readonly output?: (k: number) => number;
 }
 
 const rows = (k: number, row: (index: number) => string): string =>
@@ -2055,6 +2061,9 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
     name: "A4-inherited-changed-root",
     measures:
       "r4.80's control: A4-inherited-fan-out with host data stored into one field of the root between its copies",
+    // (each copy made after the host store owes a check of the whole root, an object node and its k typed fields, and the
+    // host store one of its field: output-bound, TABLE r4.294)
+    output: (k) => (k - (k >> 1)) * (k + 1) + 1,
     program: (k) =>
       main(
         lines(
