@@ -290,8 +290,8 @@ function othersLeaves(
       if (differsIn(item, group.mixed) && !heldLeaves(contract, item.ingress, own)) return null;
   }
   if (contract.othersLeavesOf.has(group)) return contract.othersLeavesOf.get(group)!;
-  // (#1573: each other member's leaves as one node (`rolesNode`), and those nodes, each once, as one node per set of
-  // them (`setNode`), so the lists of one set name one node in whatever order they hold its members)
+  // (#1573: each other member's leaves as one node (`rolesNode`), and those nodes, each once, as one node per sequence
+  // of them (`setNode`))
   const nodes = new Set<IngressNode>();
   let complete = true;
   for (const entry of group.rest) {
@@ -342,25 +342,17 @@ function rolesNode(contract: Contract, roles: readonly IngressNode[]): IngressNo
 }
 
 /**
- * #1573: one node per set of members' nodes (`othersLeaves`): a set is found by a sum over its members' ids, which no
- * order changes, and kept with the members it unions, which a later set of that sum must equal member for member; the
- * first list that names the set unions its members in its order, and every later one shares that node.
+ * #1573: one node per sequence of the other members' nodes as a list holds them (`othersLeaves`): their fold in that
+ * order, each step found by the ingress graph's own pair of the nodes so far and the next, so the lists of one sequence
+ * share one node and no list makes more than the unshared route's merge of its members makes (Codex r2 on #1628: a
+ * set found by a sum of its members' ids scanned other sets' members). Each step charged to the analysis as a shared
+ * build, never to the demand that asks (`WorkLedger.shared`), which charged no such step before.
  */
 function setNode(contract: Contract, members: ReadonlySet<IngressNode>): IngressNode {
-  const { ingress } = contract.pass.program.scope;
-  if (members.size === 1) return members.values().next().value!;
-  let key = members.size;
-  for (const member of members) key = (key + Math.imul(member.id + 1, 0x9e3779b1)) | 0;
-  const known = contract.memberSets.get(key) ?? [];
-  for (const set of known) {
-    let same = set.members.size === members.size;
-    for (const member of members) same &&= set.members.has(member);
-    if (same) return set.node;
-  }
+  const { scope, work } = contract.pass.program;
+  work.shared(() => work.charge("invSteps", members.size));
   let node: IngressNode | undefined;
-  for (const member of members) node = ingress.union(node, member);
-  known.push({ members, node: node! });
-  contract.memberSets.set(key, known);
+  for (const member of members) node = scope.ingress.union(node, member);
   return node!;
 }
 

@@ -382,16 +382,12 @@ export class Contract {
   ];
   /**
    * Per member's leaves by role (`leafRoles`), their union (`rolesNode`); per node, whether it holds them, and the units
-   * the check charged; per sum of the members' ids, the sets of members' nodes unioned (`setNode`).
+   * the check charged.
    */
   readonly rolesNodes = new WeakMap<readonly IngressNode[], IngressNode>();
   readonly heldLeaves = new WeakMap<
     IngressNode,
     WeakMap<readonly IngressNode[], { readonly held: boolean; readonly units: number }>
-  >();
-  readonly memberSets = new Map<
-    number,
-    { readonly members: ReadonlySet<IngressNode>; readonly node: IngressNode }[]
   >();
   /**
    * #1203: per literal path's computed values on either side that hold classes of computed-key loads (`othersAt`),

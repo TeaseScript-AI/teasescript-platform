@@ -1162,17 +1162,18 @@ function choicesInLists(n: number, k: number, lists: readonly (readonly number[]
 
 /**
  * #1573: the choices of four bindings are one class mixed by their leaves, so a list's contract reads one member (the
- * first binding) and names the others' leaves (`othersLeaves`) through one node per set of other members, whatever
- * order the list holds them in, each member's leaves its own: lists of all four with the other three in three orders,
- * and of three, whose other members are distinct sets of two (one of them with another read member). In both orders
- * with the sharing on, the elements' external data of the three lists of one set names one node, of every other list
- * its own, and each list's leaves are its members', as with the sharing off.
+ * first binding) and names the others' leaves (`othersLeaves`) through one node per sequence of other members as the
+ * list holds them, each member's leaves its own: lists of all four with the other three in three orders, one of them
+ * twice, and of three, whose other members are distinct sets of two (one of them with another read member). In both
+ * orders with the sharing on, the two lists of one order name one node, the lists name no more nodes than with the
+ * sharing off, and each list's leaves are its members', as with the sharing off.
  */
-test("a list's other members of one mixed class name one node per set, each its own leaves, in both orders (#1573)", () => {
+test("a list's other members of one mixed class name one node per order, each its own leaves, in both orders (#1573)", () => {
   const lists = [
     [0, 1, 2, 3],
     [0, 3, 2, 1],
     [3, 1, 0, 2],
+    [0, 1, 2, 3],
     [0, 1, 2],
     [0, 2, 3],
     [0, 3, 1],
@@ -1219,11 +1220,11 @@ test("a list's other members of one mixed class name one node per set, each its 
     assert.deepEqual(leaves(shared), expected, `reversed: ${reversed}`);
     assert.deepEqual(leaves(unshared), expected, `reversed: ${reversed}, unshared`);
     const nodes = shared.map((item) => item.ingress!);
+    assert.ok(nodes[3] === nodes[0], `reversed: ${reversed}: one order's node`);
     assert.ok(
-      nodes[1] === nodes[0] && nodes[2] === nodes[0],
-      `reversed: ${reversed}: one set's node`,
+      new Set(nodes).size <= new Set(unshared.map((item) => item.ingress!)).size,
+      `reversed: ${reversed}: no more nodes than with the sharing off`,
     );
-    assert.equal(new Set(nodes).size, 5, `reversed: ${reversed}: a node per set`);
   }
 });
 
