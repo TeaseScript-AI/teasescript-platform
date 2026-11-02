@@ -105,9 +105,24 @@ and store an area that is not from the base tree's own runner and areas
 (`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/16`, one job per shard,
 the fixture area as `<base tree>/tools/corpus/fixture`), so that it serves every later run on that tree. The script,
 installed as the desktop's `~/work/trees/hooks/baseline`, fills each new `main`'s tree at low priority where nobody
-stores it. Once `main` has another `src/` tree, the remaining jobs of an older tree's fill end without running, also
-after the fill began: its stored shards stay and count, and what it left unstored waits for a builder's store or for
+stores it. A fill that began runs to its end (#1590, reversing #1567, whose fills cut short were never read); one none
+of whose jobs began ends without running once `main` has another `src/` tree, and waits for a builder's store or for
 that tree to be `main`'s again.
+
+A fill can also run on any worker into a central store (#1590). `bash tools/corpus/baseline.sh seed <tree> <SHA> <out>`
+makes `<out>/<src tree>/` (its `MANIFEST` also naming the tree's build of the compiler, `compiled <dist/src/ tree>`,
+and every area's `PLAN`) and `<out>/shards.tsv`, one line per shard to store. `baseline.sh compute <tree> <seed
+baseline> <area> <i>/<N> <out>` stores one shard into a copy of the seed. It stores the sources that stalled again
+alone, at the `PLAN`'s limits: where one ends alone, its stall was the machine's load and the whole shard is stored once
+more (exit 1 where a source stalls again that did not stall alone); a stall alone is the source's own and stays, listed
+with its run alone in `<out>/stalls.json`. `baseline.sh submit <SHA> <src tree> [<seed job id> <shards.tsv>] [--dry]`
+prints or submits these steps as central-queue jobs. Every write into the central store is `node
+tests/families/baselines.mjs import <central folder> <computed folder> [<area> <i>/<N>]`: a seed's `MANIFEST` and
+`PLAN`s are adopted where its baseline is absent, else checked equal; a shard is accepted only where its `MANIFEST` and
+`PLAN` are the central ones, it counts, and each source that stalled in it is listed in stalls.json as stalling alone,
+and one already there is compared by its lines, which hold no time, and never replaced. It exits 0 imported or equal,
+2 refused (naming why), 3 differs. `node tests/families/baselines.mjs status <central folder> <src tree>` says in one
+line what a central baseline holds, without a tree, and exits 0 only when it is complete.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never

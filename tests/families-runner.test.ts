@@ -954,25 +954,26 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     await killedAt("^copyFileSync ", baselines, "queue", top, hook);
     assert.equal(last(run(baselines, "queue", top, hook)).queued, top);
     assert.deepEqual(readdirSync(top).sort(), ["MANIFEST", "STARTED", "baseline.sh"]);
-    // (#1567) a fill that STARTED and stored a shard is SUPERSEDED once another src/ tree is current, so that its other
-    // jobs end; its stored shard is still read, the area partial; `queue` undoes SUPERSEDED when the tree is current again;
-    // STARTED keeps the time the fill began throughout
+    // (#1590, reversing #1567) a fill that STARTED and stored a shard runs to its end once another src/ tree is current:
+    // its jobs decide `started` and write nothing, its stored shard read as before, STARTED keeping the time it began;
+    // a fill none of whose jobs started is SUPERSEDED (#1513), which `queue` undoes when its tree is current again
     assert.equal(store(alias, second, "0/2").status, 0);
     const began = readFileSync(join(top, "STARTED"), "utf8");
     const newer = "f".repeat(40);
-    assert.deepEqual(last(run(baselines, "start", top, newer)), {
+    assert.deepEqual(last(run(baselines, "start", top, newer)), { decision: "started" });
+    assert.deepEqual(readdirSync(top).sort(), ["MANIFEST", "STARTED", "area", "baseline.sh"]);
+    assert.equal(readFileSync(join(top, "STARTED"), "utf8"), began);
+    const started = run(baselines, "state", base, second, "--read-only");
+    assert.equal(started.status, 1, started.stdout);
+    const partial = JSON.parse(started.stdout.split("\n")[0]!);
+    assert.deepEqual([partial.state, partial.verified, partial.store], ["partial", 1, [1]]);
+    assert.deepEqual(last(run(baselines, "start", made, newer)), {
       decision: "superseded",
       by: newer,
     });
-    assert.equal(readFileSync(join(top, "SUPERSEDED"), "utf8"), `${newer}\n`);
-    assert.equal(readFileSync(join(top, "STARTED"), "utf8"), began);
-    const superseded = run(baselines, "state", base, second, "--read-only");
-    assert.equal(superseded.status, 1, superseded.stdout);
-    const partial = JSON.parse(superseded.stdout.split("\n")[0]!);
-    assert.deepEqual([partial.state, partial.verified, partial.store], ["partial", 1, [1]]);
-    assert.equal(last(run(baselines, "queue", top, hook)).queued, top);
-    assert.deepEqual(readdirSync(top).sort(), ["MANIFEST", "STARTED", "area", "baseline.sh"]);
-    assert.equal(readFileSync(join(top, "STARTED"), "utf8"), began);
+    assert.equal(readFileSync(join(made, "SUPERSEDED"), "utf8"), `${newer}\n`);
+    assert.equal(last(run(baselines, "queue", made, hook)).queued, made);
+    assert.deepEqual(readdirSync(made).sort(), ["MANIFEST", "area", "baseline.sh"]);
     // (#1542 r3: queued-job-foreign-contents) a job's decision in a baseline that holds a foreign path is refused,
     // nothing written
     writeFileSync(join(top, "foreign-late"), "x\n");
@@ -1117,6 +1118,246 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     renameSync(held, `${held}-moved`);
     cpSync(`${held}-moved`, held, { recursive: true });
     assert.match((await state.planned(joined.baseline, "area", planText)).refused, /was replaced/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A built tree's library where `ends` ends the process on every run, a stall of its own, and `flaky` ends it on the runs
+ * FLAKY's characters say (`x`, one each, counted in TMPDIR, which a fill's stores share), a stall of the machine's load.
+ */
+const FILLABLE = `import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+export function publicationHashes(files) {
+  const source = files[0].source;
+  if (source === "ends") process.exit(3);
+  if (source === "flaky" && process.env.FLAKY !== undefined) {
+    const count = join(process.env.TMPDIR, "flaky");
+    const left = existsSync(count) ? readFileSync(count, "utf8") : process.env.FLAKY;
+    writeFileSync(count, left.slice(1));
+    if (left[0] === "x") process.exit(4);
+  }
+  return { parts: [createHash("sha256").update(source).digest("hex")], unanswered: 0 };
+}
+`;
+
+test("a fill on any worker: a seed, its shards computed and imported into a central store, which refuses or compares what differs, and its status without a tree (#1590)", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    // built trees with the tools: `alias` the same build at another path and commit, `rebuilt` another build of the
+    // compiler (its dist/src/) from the same src/
+    const tree = (name: string, sha: string, compiled = "compiled\n") => {
+      const folder = join(directory, name);
+      for (const part of ["dist/src", "dist/tests/helpers", "src", "tests/families/area"])
+        mkdirSync(join(folder, part), { recursive: true });
+      writeFileSync(join(folder, "src", "a.ts"), "a\n");
+      writeFileSync(join(folder, "dist", "src", "a.js"), compiled);
+      writeFileSync(join(folder, "dist", "tests", "helpers", "type-core-oracles.js"), FILLABLE);
+      writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(folder, "package-lock.json"), "{}\n");
+      writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
+      for (const tool of ["baselines.mjs", "run.mjs", "sources.mjs"])
+        cpSync(join("tests", "families", tool), join(folder, "tests", "families", tool));
+      writeFileSync(
+        join(folder, "tests", "families", "area", "stored.mjs"),
+        'export const cases = [["same", "same"], ["ends", "ends"], ["flaky", "flaky"]];\n',
+      );
+      return folder;
+    };
+    const built = tree("built", "1");
+    const alias = tree("alias", "2");
+    const rebuilt = tree("rebuilt", "1", "compiled otherwise\n");
+    const sha = "1".repeat(40);
+    const { identityOf, comparedOf } = await import(pathToFileURL(baselines).href);
+    const src: string = identityOf(built).src;
+    const script = resolve("tools", "corpus", "baseline.sh");
+    const scratch = join(directory, "scratch");
+    mkdirSync(scratch);
+    const env = { ...process.env, TMPDIR: scratch, SX_SCRATCH: "" };
+    const sh = (more: Record<string, string>, ...args: string[]) =>
+      spawnSync("bash", [script, ...args], { encoding: "utf8", env: { ...env, ...more } });
+    const tool = (...args: string[]) =>
+      spawnSync(process.execPath, [baselines, ...args], { encoding: "utf8" });
+    const said = (result: { stdout: string }) =>
+      JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+    const at = (...parts: string[]) => join(directory, ...parts);
+    const shard = (root: string, index: number) => at(root, src, "area", `${index}of16.runs.jsonl`);
+    const listed = (root: string) =>
+      JSON.parse(readFileSync(at(root, "stalls.json"), "utf8")).stalls;
+
+    // the seed: a baseline with what its runs depend on, the commit, the build and the area's PLAN, no shard, and the
+    // shards to store as the hook queues them; the fill's jobs as #1590 submits them (each command inside `bash -c`,
+    // which sx-job runs without a shell)
+    assert.equal(sh({}, "seed", built, sha, at("seed")).status, 0);
+    const manifest = readFileSync(at("seed", src, "MANIFEST"), "utf8").split("\n");
+    assert.deepEqual(manifest.slice(5, 7), [
+      `commit ${sha} ${built}`,
+      `compiled ${comparedOf(built).compiled}`,
+    ]);
+    assert.match(manifest[7]!, /^area area 16 [0-9a-f]{64}$/);
+    assert.deepEqual(readdirSync(at("seed", src, "area")), ["PLAN"]);
+    const shards = [...Array(16).keys()].map((index) => `area\t${index}\t16\n`).join("");
+    assert.equal(readFileSync(at("seed", "shards.tsv"), "utf8"), shards);
+    const fill = `fill-${src.slice(0, 9)}`;
+    assert.equal(
+      sh({}, "submit", sha, src, "--dry").stdout,
+      `sx-job submit --owner baseline --name ${fill}-seed --priority background --commit ${sha} -- bash -c 'bash "$SX_TREE/tools/corpus/baseline.sh" seed "$SX_TREE" ${sha} "$SX_OUT"'\n`,
+    );
+    const lines = sh({}, "submit", sha, src, "11020125", at("seed", "shards.tsv"), "--dry").stdout;
+    assert.deepEqual(lines.split("\n").slice(1, 2), [
+      `sx-job submit --owner baseline --name ${fill}-area-1 --priority background --campaign ${fill} --commit ${sha} --in-result seed=11020125 -- bash -c 'bash "$SX_TREE/tools/corpus/baseline.sh" compute "$SX_TREE" "$SX_IN/seed/out/${src}" area 1/16 "$SX_OUT"'`,
+    ]);
+    assert.equal(lines.split("\n").length, 17);
+
+    // shards computed from the seed: a stall of its own (`ends`, on every run alone too) stays, listed with its run
+    // alone in stalls.json; a stall under the machine's load (`flaky`, which ends alone) makes the shard be stored once
+    // more, and fails where the source stalls again
+    const compute = (out: string, index: number, more = {}, from = built) =>
+      sh(more, "compute", from, at("seed", src), "area", `${index}/16`, at(out));
+    for (const [out, index, flaky] of [
+      ["zero", 0, ""],
+      ["one", 1, ""],
+      ["two", 2, "x...."],
+    ] as const)
+      assert.equal(compute(out, index, { FLAKY: flaky }).status, 0, out);
+    assert.deepEqual(listed("zero"), []);
+    assert.deepEqual(
+      listed("one").map(
+        (entry: { source: string; stalled: string; alone: { stalled: string } }) => [
+          entry.source,
+          entry.stalled,
+          entry.alone.stalled,
+        ],
+      ),
+      [["ends", "exit 3", "exit 3"]],
+    );
+    assert.deepEqual(listed("two"), []);
+    assert.doesNotMatch(readFileSync(shard("two", 2), "utf8"), /"stalled"/);
+    const twice = compute("twice", 2, { FLAKY: "x....x" });
+    assert.equal(twice.status, 1);
+    assert.match(twice.stderr, /"source":"flaky".*"alone":"ended"/);
+    assert.equal(existsSync(at("twice", src)), false);
+
+    // the central store: the seed adopted, then equal; status reads the tree's own folder without a tree, another
+    // tree's absent
+    const central = at("central");
+    assert.deepEqual(said(tool("import", central, at("seed"))).seed, "adopted");
+    assert.deepEqual(said(tool("import", central, at("seed"))).seed, "equal");
+    const status = (of = src) => tool("status", central, of);
+    assert.deepEqual(
+      [status().status, status().stdout],
+      [1, `baseline ${src}: ${join(central, src)}: incomplete: area partial 0/16\n`],
+    );
+    const other = "e".repeat(40);
+    assert.deepEqual(
+      [status(other).status, status(other).stdout],
+      [1, `baseline ${other}: ${join(central, other)}: absent\n`],
+    );
+    // each shard imported, the empty ones from one copy of the seed; then complete
+    const imported = (root: string, index: number) =>
+      tool("import", central, at(root), "area", `${index}/16`);
+    for (const [root, index] of [
+      ["zero", 0],
+      ["one", 1],
+      ["two", 2],
+    ] as const)
+      assert.equal(said(imported(root, index)).verified, true);
+    assert.equal(tool("import", at("rest"), at("seed")).status, 0);
+    for (let index = 3; index < 16; index += 1) {
+      const run = spawnSync(process.execPath, [
+        runner,
+        join(built, "tests", "families", "area"),
+        built,
+        "--store",
+        at("rest"),
+        "--shard",
+        `${index}/16`,
+      ]);
+      assert.equal(run.status, 0);
+      assert.equal(imported("rest", index).status, 0);
+    }
+    assert.deepEqual(
+      [status().status, status().stdout],
+      [0, `baseline ${src}: ${join(central, src)}: complete: area\n`],
+    );
+
+    // refused (exit 2) and nothing written: another build of the compiler (computed from `rebuilt`), another MANIFEST
+    // line (a commit and tree), another PLAN, another Node, a stall stalls.json does not show alone, no baseline
+    const contents = () =>
+      readdirSync(join(central, src, "area"))
+        .sort()
+        .map((name) => [name, readFileSync(join(central, src, "area", name), "utf8")]);
+    const before = contents();
+    assert.equal(compute("rebuilt", 0, {}, rebuilt).status, 0);
+    const copied = (from: string, name: string, change: (dir: string) => void) => {
+      cpSync(at(from), at(name), { recursive: true });
+      change(at(name, src));
+      return name;
+    };
+    const edit = (file: string, from: RegExp | string, to: string) =>
+      writeFileSync(file, readFileSync(file, "utf8").replace(from, to));
+    const plan = (dir: string) => {
+      const text = `${readFileSync(join(dir, "area", "PLAN"), "utf8")}checks other.mjs publication\n`;
+      writeFileSync(join(dir, "area", "PLAN"), text);
+      edit(
+        join(dir, "MANIFEST"),
+        /^area area 16 \w+$/m,
+        `area area 16 ${createHash("sha256").update(text).digest("hex")}`,
+      );
+    };
+    for (const [root, index, refusal] of [
+      ["rebuilt", 0, /names "compiled \w+" \(a build of the compiler, dist\/src\/\)/],
+      [
+        copied("zero", "commit", (dir) =>
+          edit(join(dir, "MANIFEST"), /$/, `commit ${"2".repeat(40)} ${alias}\n`),
+        ),
+        0,
+        /names "commit 2{40} .*alias" \(a commit and tree/,
+      ],
+      [copied("zero", "plan", plan), 0, /names "area area 16 \w+" \(an area's PLAN\)/],
+      [
+        copied("zero", "node", (dir) => edit(join(dir, "MANIFEST"), /^node v.*$/m, "node v0.0.0")),
+        0,
+        /names "node v0\.0\.0" \(what its runs depend on\)/,
+      ],
+      [
+        copied("one", "unlisted", () => rmSync(at("unlisted", "stalls.json"))),
+        1,
+        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
+      ],
+      ["empty", 0, /holds no baseline of this tool/],
+    ] as const) {
+      const refused = imported(root, index);
+      assert.deepEqual([root, refused.status], [root, 2]);
+      assert.match(said(refused).refused, refusal);
+    }
+    // compared, never replaced: a shard computed again says the same (exit 0), one that says otherwise differs (exit 3)
+    assert.equal(compute("again", 0).status, 0);
+    assert.deepEqual(Object.keys(said(imported("again", 0))), ["equal"]);
+    const differs = copied("zero", "differs", (dir) => {
+      const file = join(dir, "area", "0of16.runs.jsonl");
+      const [line, total] = readFileSync(file, "utf8").trim().split("\n");
+      const changed = `${line!.replace(/"hash":"\w/, '"hash":"_')}\n`;
+      const ended = JSON.parse(total!);
+      ended.total.lines = createHash("sha256").update(changed).digest("hex");
+      writeFileSync(file, `${changed}${JSON.stringify(ended)}\n`);
+    });
+    const compared = imported(differs, 0);
+    assert.equal(compared.status, 3);
+    assert.match(said(compared).differs, /says otherwise than .* of stored\.mjs same/);
+    // a seed into the complete baseline: equal, nothing written; one from another commit's tree differs (exit 3)
+    assert.equal(sh({}, "seed", alias, "2".repeat(40), at("alias-seed")).status, 0);
+    const reseeded = tool("import", central, at("alias-seed"));
+    assert.equal(reseeded.status, 3);
+    assert.match(said(reseeded).differs, /names "commit 2{40} .*alias"/);
+    assert.equal(said(tool("import", central, at("seed"))).seed, "equal");
+    assert.deepEqual(contents(), before);
+    assert.deepEqual(readdirSync(central), [src]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
