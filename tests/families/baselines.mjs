@@ -1,6 +1,11 @@
 // node tests/families/baselines.mjs state <tree> <folder> [--read-only]
 // node tests/families/baselines.mjs start <baseline> <current src tree>
 // node tests/families/baselines.mjs queue <baseline> <script>
+// node tests/families/baselines.mjs seed|compiled <tree> <folder>
+// node tests/families/baselines.mjs import <central folder> <computed folder> [<area> <i>/<N> [<stalls.json>]]
+// node tests/families/baselines.mjs status <central folder> <src tree>
+// node tests/families/baselines.mjs alone <area folder> <shard> <new area folder>
+// node tests/families/baselines.mjs stalls <shard> <alone shard or -> <area> <i>/<N> <stalls.json>
 // The corpus runner's stored baselines (#1541): every read and write of <folder>/<src tree>/ is here. A baseline holds
 // the runs of the trees of one `src/` tree (`git rev-parse <commit>:src`) whose runs depend on the same inputs beside it:
 // the oracle library as built (`dist/tests/helpers/type-core-oracles.js` and the helpers it imports), the lockfile and
@@ -37,8 +42,11 @@
 // already complete again only with `--read-only`. It exits 0 when every area is complete, 1 when one is not, 2 when the
 // folder is not this tool's, holds a foreign path or holds the runs of other inputs (than the tree's, or than its own
 // MANIFEST names). `start` is a fill job's first decision (`tools/corpus/baseline.sh`): STARTED where the baseline is
-// the current tree's, else SUPERSEDED (the current tree), also once the fill began; its stored shards stay and are read
-// as any others. `queue` copies the hook's script into the baseline for its jobs and undoes SUPERSEDED. Nothing here
+// the current tree's or the fill began, else SUPERSEDED (the current tree). `queue` copies the hook's script into the
+// baseline for its jobs and undoes SUPERSEDED. A fill on any worker into a central store (#1590): `seed` makes a
+// baseline of a tree with every area planned and no shard, `compiled` names a tree's build in a baseline, `import`
+// writes into a central store (a seed's MANIFEST and PLANs, or a shard computed from it, compared where one is there),
+// `status` reads a central baseline without a tree, `alone` and `stalls` judge a computed shard's stalls. Nothing here
 // removes a baseline.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -484,22 +492,25 @@ export function readFrom(folder) {
  * The baseline of a tree's identity in `root`, made where it does not exist (unless `line` is null): its MANIFEST
  * written into its folder, made if absent, while the folder holds nothing else (a folder holding anything stays as it
  * is), by a temporary file linked into place so that one writer's MANIFEST wins. Then joined through the gate, `line`
- * appended to its MANIFEST once. `refused` says why it is not this tool's, holds foreign paths or holds the runs of
- * other inputs.
+ * appended to its MANIFEST once. `whole`, where given, is the text it is made with instead (a seed's MANIFEST, which
+ * `import` adopts, #1590), and nothing is appended. `refused` says why it is not this tool's, holds foreign paths or
+ * holds the runs of other inputs (`another`).
  */
-export async function owned(root, identity, line) {
+export async function owned(root, identity, line, whole) {
   const dir = pathOf(baselineIn(root, identity.src), "baseline");
   const header = headerOf(identity);
   const why = stale(root);
   if (why !== undefined) return { dir, refused: why };
-  if (line !== null && !existsSync(path.join(dir, "MANIFEST"))) {
+  if (whole !== undefined && !whole.startsWith(header))
+    throw new Error(`a MANIFEST made for ${identity.src} begins with its header`);
+  if ((line !== null || whole !== undefined) && !existsSync(path.join(dir, "MANIFEST"))) {
     const made = baselineIn(root, identity.src);
     mkdirSync(pathOf(made, "baseline"), { recursive: true });
     if (
       readdirSync(pathOf(made, "baseline")).every((name) => temporaryOf(name)?.name === "MANIFEST")
     ) {
       const tmp = path.join(pathOf(made, "baseline"), temporaryName("MANIFEST", WRITER));
-      writeFileSync(tmp, header);
+      writeFileSync(tmp, whole ?? header);
       try {
         linkSync(tmp, path.join(pathOf(made, "baseline"), "MANIFEST"));
       } catch (error) {
@@ -518,9 +529,12 @@ export async function owned(root, identity, line) {
       const differs = ours
         .filter((field, index) => field !== theirs[index])
         .map((field) => field.split(" ")[0]);
-      return { refused: `${dir} holds runs of another ${differs.join(", ")} than this tree's` };
+      return {
+        refused: `${dir} holds runs of another ${differs.join(", ")} than this tree's`,
+        another: true,
+      };
     }
-    if (line !== null && !text.split("\n").includes(line))
+    if (line !== null && whole === undefined && !text.split("\n").includes(line))
       appendFileSync(path.join(dir, "MANIFEST"), `${line}\n`);
     return {};
   });
@@ -804,24 +818,28 @@ function areasOf(tree) {
 
 /** Each area's state in the baseline of `tree` (see above), one JSON line each, then the baseline's; the exit status. */
 async function state(tree, root, readOnly) {
+  const { lines, status } = await stateOf(tree, root, readOnly);
+  for (const line of lines) console.log(JSON.stringify(line));
+  return status;
+}
+
+/** What `state` prints (`lines`, without a tree's `src/` an error printed and none) and its exit status. */
+async function stateOf(tree, root, readOnly) {
   const identity = identityOf(tree);
   if (identity.src === null) {
     console.error(`${tree}/src holds no file`);
-    return 2;
+    return { lines: [], status: 2 };
   }
   const sha = readFileSync(path.join(tree, ".sha"), "utf8").trim();
   const own = await owned(root, identity, readOnly ? null : `commit ${sha} ${tree}`);
-  const refusal = (refused, foreign) =>
-    console.log(JSON.stringify({ src: identity.src, baseline: own.dir, refused, foreign }));
-  if (own.refused !== undefined) {
-    refusal(own.refused, own.foreign);
-    return 2;
-  }
+  const lines = [];
+  const refusal = (refused, foreign) => {
+    lines.push({ src: identity.src, baseline: own.dir, refused, foreign });
+    return { lines, status: 2 };
+  };
+  if (own.refused !== undefined) return refusal(own.refused, own.foreign);
   const areas = areasOf(tree);
-  if (areas.length === 0) {
-    refusal(`${tree} has no area of the runner`);
-    return 2;
-  }
+  if (areas.length === 0) return refusal(`${tree} has no area of the runner`);
   const manifest = own.absent ? "" : readFileSync(path.join(own.dir, "MANIFEST"), "utf8");
   const records = recorded(manifest);
   let complete = true;
@@ -844,10 +862,8 @@ async function state(tree, root, readOnly) {
         shardIn(bytesOf(shardFile(dir, shard, shards)), record.plan, place, identityIn(manifest)),
       );
       const other = read.findIndex((shard) => shard.other !== undefined);
-      if (other >= 0) {
-        refusal(otherInputs(own.dir, shardFile(dir, other, shards), read[other].other));
-        return 2;
-      }
+      if (other >= 0)
+        return refusal(otherInputs(own.dir, shardFile(dir, other, shards), read[other].other));
       const good = read.map((shard) => shard.lines !== undefined);
       const count = good.filter(Boolean).length;
       if (
@@ -883,16 +899,16 @@ async function state(tree, root, readOnly) {
     }
     if (line.state !== "complete") complete = false;
     if (line.state === "storing") storing = true;
-    console.log(JSON.stringify(line));
+    lines.push(line);
   }
-  console.log(JSON.stringify({ src: identity.src, baseline: own.dir, complete, storing }));
-  return complete ? 0 : 1;
+  lines.push({ src: identity.src, baseline: own.dir, complete, storing });
+  return { lines, status: complete ? 0 : 1 };
 }
 
 /**
  * A fill job's first decision for the baseline `dir` (through the gate): STARTED where the baseline is the current
- * tree's (SUPERSEDED undone; STARTED written once, when the fill began), else SUPERSEDED, naming the current tree, also
- * once the fill began (#1567). The decision printed.
+ * tree's (SUPERSEDED undone; STARTED written once, when the fill began) or the fill already began, else SUPERSEDED,
+ * naming the current tree (#1513; a started fill is completed, #1590 reversing #1567). The decision printed.
  */
 async function start(baseline, current) {
   const dir = pathOf(baseline, "baseline");
@@ -904,6 +920,7 @@ async function start(baseline, current) {
         replaced(marker("STARTED"), `${new Date().toISOString()}\n`);
       return { decision: "started" };
     }
+    if (existsSync(marker("STARTED"))) return { decision: "started" };
     replaced(marker("SUPERSEDED"), `${current}\n`);
     return { decision: "superseded", by: current };
   });
@@ -924,26 +941,486 @@ async function queue(baseline, script) {
   return outcome === RETIRED || outcome.refused !== undefined ? 2 : 0;
 }
 
+/** The builds of the compiler a MANIFEST names (`compiled <id>`, #1590), in its order. */
+const compiledIn = (text) => [...text.matchAll(/^compiled ([0-9a-f]{40})$/gm)].map(([, id]) => id);
+
+/**
+ * The tree's baseline in `root` (made already) named by the tree's build of the compiler (`comparedOf`'s `compiled`, its
+ * `dist/src/` tree, #1590): `compiled <id>` appended to its MANIFEST through the gate where no line names that id, so
+ * that a baseline stored from two builds names both. The baseline's folder, or why it is refused.
+ */
+async function compiledInto(root, tree) {
+  const identity = identityOf(tree);
+  const { compiled } = comparedOf(tree);
+  if (identity.src === null || compiled === null)
+    return { refused: `${tree} has no ${identity.src === null ? "src/" : "dist/src/"}` };
+  const own = await owned(root, identity, null);
+  if (own.refused !== undefined || own.absent)
+    return { refused: own.refused ?? `${own.dir} holds no baseline yet` };
+  const outcome = await gate(own.baseline, (text) => {
+    if (!compiledIn(text).includes(compiled))
+      appendFileSync(path.join(own.dir, "MANIFEST"), `compiled ${compiled}\n`);
+    return { compiled, baseline: own.dir };
+  });
+  return outcome === RETIRED
+    ? { refused: `${own.dir} was replaced while this writer joined it` }
+    : outcome;
+}
+
+/**
+ * A seed (#1590): the tree's baseline in `root` made or joined as `state` makes it (its commit appended), named by the
+ * tree's build (`compiledInto`), and every area of the tree planned (in the count its MANIFEST records, else 16 shards),
+ * no shard stored; then `state`'s lines printed and `<root>/shards.tsv` written (a new file), one line per shard to store
+ * (`<area>\t<i>\t<N>`), as the hook queues them. Its exit status as `state`'s, but 0 where the baseline is incomplete.
+ */
+async function seed(tree, root, refuse) {
+  const identity = identityOf(tree);
+  if (identity.src === null) refuse(`${tree}/src holds no file`);
+  const sha = readFileSync(path.join(tree, ".sha"), "utf8").trim();
+  const own = await owned(root, identity, `commit ${sha} ${tree}`);
+  if (own.refused !== undefined) refuse(own.refused);
+  const named = await compiledInto(root, tree);
+  if (named.refused !== undefined) refuse(named.refused);
+  const records = recorded(readFileSync(path.join(own.dir, "MANIFEST"), "utf8"));
+  for (const folder of areasOf(tree)) {
+    const area = path.basename(folder);
+    const plan = planOf(area, await generatorsOf(folder), records.get(area)?.shards ?? 16);
+    const made = await planned(own.baseline, area, plan);
+    if (made.refused !== undefined) refuse(made.refused);
+  }
+  const { lines, status } = await stateOf(tree, root, false);
+  for (const line of lines) console.log(JSON.stringify(line));
+  if (status === 2) return 2;
+  const stored = lines
+    .filter((line) => line.area !== undefined && line.store !== undefined)
+    .flatMap(({ area, shards = 16, store }) =>
+      (store === "all" ? [...Array(shards).keys()] : store).map(
+        (shard) => `${area}\t${shard}\t${shards}\n`,
+      ),
+    );
+  const list = outside(path.join(pathOf(root, "outside"), "shards.tsv"), [], refuse);
+  rmSync(pathOf(list, "outside"), { force: true });
+  writeFileSync(pathOf(list, "outside"), stored.join(""), { flag: "wx" });
+  return 0;
+}
+
+/**
+ * The one baseline of this tool that the folder `root` holds (a seed's or a computed shard's `<out>`, #1590), read whole:
+ * its folder, MANIFEST (`text`), identity and each recorded area's PLAN, which must be the recorded one; or why not.
+ */
+function heldIn(root) {
+  const real = realOf(root);
+  const names =
+    existsSync(real) && statSync(real).isDirectory()
+      ? readdirSync(real).filter((name) => isBaselineName(name) && isOwned(path.join(real, name)))
+      : [];
+  if (names.length !== 1)
+    return {
+      refused: `${root} holds ${names.length === 0 ? "no" : "more than one"} baseline of this tool`,
+    };
+  const dir = path.join(real, names[0]);
+  const text = readFileSync(path.join(dir, "MANIFEST"), "utf8");
+  const identity = identityIn(text);
+  if (identity === undefined)
+    return { refused: `${dir}'s MANIFEST has a header this tool does not write` };
+  if (identity.src !== names[0])
+    return { refused: `${dir}'s MANIFEST names another src tree than its folder` };
+  const foreign = foreignIn(dir, text);
+  if (foreign.length > 0)
+    return {
+      refused: `${dir} holds foreign contents, which this tool did not write: ${foreign.join(", ")}`,
+    };
+  const plans = new Map();
+  for (const [area, record] of recorded(text)) {
+    const plan = bytesOf(path.join(dir, area, "PLAN"))?.toString();
+    if (plan === undefined || hash(plan) !== record.plan)
+      return { refused: `${dir}/${area}'s PLAN is not the one its MANIFEST records` };
+    plans.set(area, plan);
+  }
+  return { dir, text, identity, plans };
+}
+
+/** Where a computed baseline's MANIFEST (`given`) and the central one (`held`) differ, each line named by what it records. */
+function differenceOf(held, given) {
+  const lines = (text) => text.split("\n").filter((line) => line !== "");
+  const meaning = (line) =>
+    ({
+      compiled: "a build of the compiler, dist/src/",
+      area: "an area's PLAN",
+      commit: "a commit and tree stored there",
+    })[line.split(" ")[0]] ?? "what its runs depend on";
+  const only = (one, other) =>
+    lines(one)
+      .filter((line) => !lines(other).includes(line))
+      .map((line) => `"${line}" (${meaning(line)})`);
+  const [adds, lacks] = [only(given, held), only(held, given)];
+  return (
+    [
+      ...(adds.length > 0 ? [`it names ${adds.join(", ")}`] : []),
+      ...(lacks.length > 0 ? [`the central one names ${lacks.join(", ")}`] : []),
+    ].join("; ") || "its lines are in another order"
+  );
+}
+
+/**
+ * A seed's MANIFEST and PLANs (`held`, `heldIn`) adopted into the folder of baselines `central` (#1590): its baseline
+ * made with that MANIFEST where it is absent or empty, else checked equal and never written over (`differs`); then each
+ * area's PLAN made where the baseline lacks it (`planned`). `seed` says whether anything was written.
+ */
+async function adopt(central, held) {
+  const builds = compiledIn(held.text);
+  if (builds.length !== 1)
+    return {
+      refused: `${held.dir}'s MANIFEST names ${builds.length} builds of the compiler (dist/src/), where a seed names one`,
+    };
+  const dir = pathOf(baselineIn(central, held.identity.src), "baseline");
+  let wrote = !isOwned(dir);
+  const own = await owned(central, held.identity, null, held.text);
+  if (own.refused !== undefined)
+    return own.another ? { differs: own.refused } : { refused: own.refused };
+  const outcome = await gate(own.baseline, (text) =>
+    text === held.text
+      ? {}
+      : {
+          differs: `${held.dir}'s MANIFEST is not the central one: ${differenceOf(text, held.text)}`,
+        },
+  );
+  if (outcome === RETIRED) return { refused: `${dir} was replaced while this writer adopted it` };
+  if (outcome.differs !== undefined || outcome.refused !== undefined) return outcome;
+  for (const [area, plan] of held.plans) {
+    if (bytesOf(path.join(dir, area, "PLAN"))?.toString() !== plan) wrote = true;
+    const made = await planned(own.baseline, area, plan);
+    if (made.refused !== undefined) return made;
+  }
+  return { baseline: dir, seed: wrote ? "adopted" : "equal" };
+}
+
+/**
+ * The stored shard `file` of `area` that a computed baseline holds (its PLAN's hash `plan` and planned `places`, its
+ * MANIFEST's `identity`), read where it counts under `shardIn` and each source that stalled in it is one that `listing`
+ * (stalls.json, `stallsOf`) shows stalling alone, as many as its total counts (#1590): its `body` and `lines`; else why
+ * it is refused.
+ */
+function shardOf(file, plan, places, identity, listing) {
+  const body = bytesOf(file);
+  const read = shardIn(body, plan, places, identity);
+  if (read.other !== undefined)
+    return { refused: otherInputs(path.dirname(file), file, read.other) };
+  if (read.lines === undefined)
+    return { refused: `${file} is no shard that counts: absent or damaged` };
+  const { total } = JSON.parse(body.subarray(body.lastIndexOf(10, body.length - 2) + 1).toString());
+  const stalled = read.lines
+    .map((line) => JSON.parse(line))
+    .filter((line) => line.stalled !== undefined);
+  if (total.stalled !== stalled.length)
+    return {
+      refused: `${file}'s total counts ${total.stalled} stalled sources, its lines ${stalled.length}`,
+    };
+  for (const source of stalled) {
+    const entry = listing.find((one) => placeIn(one) === placeIn(source));
+    if (entry?.stalled !== source.stalled || entry.alone?.stalled === undefined)
+      return {
+        refused: `${file}: ${source.generator} ${source.source} stalled (${source.stalled}), and stalls.json does not show it stalling alone`,
+      };
+  }
+  if (listing.length !== stalled.length)
+    return {
+      refused: `stalls.json lists ${listing.length} stalled sources of ${file}, which has ${stalled.length}`,
+    };
+  return { body, lines: read.lines };
+}
+
+/**
+ * The stored shard `<shard>of<shards>` of `area` that `held` (`heldIn`) holds, imported into the folder of baselines
+ * `central` (#1590), accepted only where its MANIFEST and the area's PLAN are the central ones (its build of the
+ * compiler, src tree, oracle library, lockfile and Node among them) and it reads under `shardOf`, its stalls those
+ * `listing` lists for it; else `refused`. It is published through the gate as `endShard` publishes one; a shard the
+ * central baseline already holds is compared instead, by its lines (no time is stored in them), and one that differs
+ * replaces nothing (`differs`).
+ */
+async function importShard(central, held, area, shard, shards, listing) {
+  const record = recorded(held.text).get(area);
+  if (record === undefined) return { refused: `${held.dir} records no area ${area}` };
+  if (record.shards !== shards)
+    return { refused: `${held.dir} plans ${area} in ${record.shards} shards, not ${shards}` };
+  const plan = held.plans.get(area);
+  const { places } = parsePlan(plan);
+  const baseline = baselineIn(central, held.identity.src);
+  const dir = pathOf(baseline, "baseline");
+  if (!isOwned(dir))
+    return { refused: `${dir} is no baseline of this tool: import its seed first` };
+  const outcome = await gate(baseline, (text) => {
+    if (text !== held.text)
+      return {
+        refused: `${held.dir}'s MANIFEST is not the central one: ${differenceOf(text, held.text)}`,
+      };
+    if (bytesOf(path.join(dir, area, "PLAN"))?.toString() !== plan)
+      return { refused: `${dir}/${area} holds no PLAN or another one: import its seed first` };
+    const file = shardFile(path.join(held.dir, area), shard, shards);
+    const listed = listing.filter(
+      (entry) => entry.area === area && entry.shard === `${shard}/${shards}`,
+    );
+    const read = shardOf(file, record.plan, places[shard], held.identity, listed);
+    if (read.refused !== undefined) return read;
+    const target = shardFile(path.join(dir, area), shard, shards);
+    const there = shardIn(bytesOf(target), record.plan, places[shard], identityIn(text));
+    if (there.other !== undefined) return { refused: otherInputs(dir, target, there.other) };
+    if (there.lines !== undefined) {
+      const at = there.lines.findIndex((line, index) => line !== read.lines[index]);
+      if (at < 0) return { equal: target };
+      const { generator, source } = JSON.parse(there.lines[at]);
+      return { differs: `${file} says otherwise than ${target} of ${generator} ${source}` };
+    }
+    const tmp = temporaryName(target, WRITER);
+    writeFileSync(tmp, read.body);
+    try {
+      linkSync(tmp, target);
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      renameSync(tmp, target);
+    }
+    rmSync(tmp, { force: true });
+    return {
+      imported: target,
+      verified: verified(target, record.plan, places[shard], identityIn(text)),
+    };
+  });
+  return outcome === RETIRED
+    ? { refused: `${dir} was replaced while this writer imported into it` }
+    : outcome;
+}
+
+/**
+ * `import <central root> <computed root> [<area> <i>/<N> [<stalls.json>]]` (#1590): the baseline `computed` holds
+ * (`heldIn`), a seed adopted (`adopt`) or, with an area, one shard (`importShard`, its stalls listed in `stalls.json`
+ * beside it unless named), into the folder of baselines `central`. One JSON line; exit 0 imported or equal, 2 refused,
+ * 3 differs.
+ */
+async function importing(central, computed, area, shard, listed, refuse) {
+  const held = heldIn(computed);
+  let outcome;
+  if (held.refused !== undefined) outcome = held;
+  else if (held.dir === path.join(pathOf(central, "outside"), held.identity.src))
+    outcome = { refused: `${held.dir} is the central baseline itself` };
+  else if (area === undefined) outcome = await adopt(central, held);
+  else {
+    const [index, count] = /^\d+\/\d+$/.test(shard) ? shard.split("/").map(Number) : [];
+    if (!/^[^/]+$/.test(area) || [".", ".."].includes(area) || !(index < count))
+      refuse(`${area} ${shard} is no area's shard i/N with 0 <= i < N`);
+    const file = listed ?? path.join(realOf(computed), "stalls.json");
+    let listing = [];
+    try {
+      if (existsSync(file)) listing = JSON.parse(readFileSync(file, "utf8")).stalls;
+      if (!Array.isArray(listing)) throw new Error("it lists no stalls");
+    } catch (error) {
+      refuse(`${file}: ${error.message}`);
+    }
+    outcome = await importShard(central, held, area, index, count, listing);
+  }
+  console.log(JSON.stringify(outcome));
+  if (outcome.refused !== undefined || outcome.verified === false) return 2;
+  return outcome.differs !== undefined ? 3 : 0;
+}
+
+/**
+ * The baseline `src` of the folder of baselines `root` without a tree (#1590), as one line: absent, incomplete (each
+ * recorded area with its shards that count under `shardIn`, of its PLAN's count) or complete. Read only, as `storedRuns`
+ * reads. Exit 0 only where every area its MANIFEST records (one at least) is complete, 1 where one is not or it is
+ * absent, 2 where the folder is not this tool's, holds a foreign path or the runs of other inputs.
+ */
+function statusOf(root, src) {
+  const say = (text, status) => {
+    console.log(`baseline ${src}: ${text}`);
+    return status;
+  };
+  if (!isBaselineName(src)) return say("this is no src/ tree's id", 2);
+  const dir = path.join(pathOf(root, "outside"), src);
+  if (!isOwned(dir))
+    return existsSync(dir) && (!statSync(dir).isDirectory() || readdirSync(dir).length > 0)
+      ? say(`${dir} is not this tool's: it has no MANIFEST of this tool`, 2)
+      : say(`${dir}: absent`, 1);
+  const text = readFileSync(path.join(dir, "MANIFEST"), "utf8");
+  const foreign = foreignIn(dir, text);
+  if (foreign.length > 0)
+    return say(
+      `${dir} holds foreign contents, which this tool did not write: ${foreign.join(", ")}`,
+      2,
+    );
+  const identity = identityIn(text);
+  if (identity === undefined)
+    return say(`${dir}'s MANIFEST has a header this tool does not write`, 2);
+  if (identity.src !== src)
+    return say(`${dir}'s MANIFEST names another src tree than its folder`, 2);
+  const areas = [];
+  for (const [area, record] of recorded(text)) {
+    const plan = bytesOf(path.join(dir, area, "PLAN"))?.toString();
+    if (plan === undefined || hash(plan) !== record.plan) {
+      areas.push({ area, state: "absent", count: 0, shards: record.shards });
+      continue;
+    }
+    const { shards, places } = parsePlan(plan);
+    let count = 0;
+    let damaged = false;
+    for (let shard = 0; shard < shards; shard += 1) {
+      const file = shardFile(path.join(dir, area), shard, shards);
+      const read = shardIn(bytesOf(file), record.plan, places[shard], identity);
+      if (read.other !== undefined) return say(otherInputs(dir, file, read.other), 2);
+      if (read.lines !== undefined) count += 1;
+      else if (existsSync(file)) damaged = true;
+    }
+    const state = count === shards ? "complete" : damaged ? "damaged" : "partial";
+    areas.push({ area, state, count, shards });
+  }
+  const done = areas.filter(({ state }) => state === "complete").map(({ area }) => area);
+  if (areas.length > 0 && done.length === areas.length)
+    return say(`${dir}: complete: ${done.join(" ")}`, 0);
+  const parts = [
+    ...(done.length > 0 ? [`${done.join(" ")} complete`] : []),
+    ...areas
+      .filter(({ state }) => state !== "complete")
+      .map(({ area, state, count, shards }) => `${area} ${state} ${count}/${shards}`),
+  ];
+  return say(`${dir}: incomplete: ${parts.length > 0 ? parts.join("; ") : "no area planned"}`, 1);
+}
+
+/** A stored shard's sources, each line read, its total left out; `refuse(why)` where it does not read as one. */
+function linesOf(file, refuse) {
+  try {
+    const lines = readFileSync(file, "utf8")
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line) => JSON.parse(line));
+    if (lines.at(-1)?.total === undefined) throw new Error("it has no total");
+    return lines.slice(0, -1);
+  } catch (error) {
+    return refuse(`${file}: ${error.message}`);
+  }
+}
+
+/** A source's place in a stored shard: its generator, its name and its key (`placeOf`). */
+const placeIn = ({ generator, source, key }) => JSON.stringify([generator, source, key]);
+
+/**
+ * The sources that stalled in the stored shard `file` of the area `folder`, each once, as the new area `into` (an
+ * outside path, a new folder named as the area): one module per generator, named as it, with its checks and those
+ * sources as fixed cases, so that `run.mjs --store` runs them alone at the PLAN's limits and stores each under its own
+ * place (#1590). Prints their count.
+ */
+async function alone(folder, file, into, refuse) {
+  const stalled = new Set(
+    linesOf(file, refuse)
+      .filter((line) => line.stalled !== undefined)
+      .map(placeIn),
+  );
+  if (stalled.size > 0) {
+    const target = pathOf(into, "outside");
+    if (existsSync(target)) refuse(`${target} exists: name a new folder`);
+    mkdirSync(target, { recursive: true });
+    const found = new Set();
+    for (const { name, checks, sources } of await generatorsOf(folder)) {
+      const cases = [];
+      for (const source of sources) {
+        const place = placeOf(name, source);
+        if (stalled.has(place) && !found.has(place)) {
+          found.add(place);
+          cases.push([source.name, source.files, source.globals]);
+        }
+      }
+      if (cases.length === 0) continue;
+      const module = outside(path.join(target, name), [], refuse);
+      writeFileSync(
+        pathOf(module, "outside"),
+        `// ${name}'s sources that stalled in a stored shard, run alone (tests/families/baselines.mjs alone)\n` +
+          `export const checks = ${JSON.stringify(checks)};\nexport const cases = ${JSON.stringify(cases)};\n`,
+      );
+    }
+    const missing = [...stalled].filter((place) => !found.has(place));
+    if (missing.length > 0) refuse(`${folder} holds no source ${missing.join(", ")}`);
+  }
+  console.log(JSON.stringify({ stalled: stalled.size }));
+}
+
+/**
+ * Whether each source that stalled in the stored shard `file` (`<shard>` of `area`) stalled alone too, in `ran` (the
+ * shard `alone`'s sources stored at the PLAN's limits; `-` where none stalled), a stall of its own (#1590): then `out`
+ * (an outside path, a new file, stalls.json) lists each with its reason and its run alone, `import`'s evidence, exit 0;
+ * else the sources that ended alone or did not run alone, a stall of the machine's load, exit 1, nothing written.
+ */
+function stallsOf(file, ran, area, shard, out, refuse) {
+  if (!/^[^/]+$/.test(area) || !/^\d+\/\d+$/.test(shard))
+    refuse(`${area} ${shard} is no area's shard i/N`);
+  const runs = new Map(
+    (ran === "-" ? [] : linesOf(ran, refuse)).map((line) => [placeIn(line), line]),
+  );
+  const stalls = [];
+  const load = [];
+  for (const line of linesOf(file, refuse).filter((source) => source.stalled !== undefined)) {
+    const { generator, source, key, stalled } = line;
+    const run = runs.get(placeIn(line));
+    if (run?.stalled !== undefined)
+      stalls.push({ area, shard, generator, source, key, stalled, alone: run });
+    else
+      load.push({
+        generator,
+        source,
+        key,
+        stalled,
+        alone: run === undefined ? "not run" : "ended",
+      });
+  }
+  if (load.length > 0) {
+    console.log(JSON.stringify({ load }));
+    return 1;
+  }
+  const target = pathOf(out, "outside");
+  rmSync(target, { force: true });
+  writeFileSync(target, `${JSON.stringify({ area, shard, stalls })}\n`, { flag: "wx" });
+  console.log(JSON.stringify({ stalls: stalls.length }));
+  return 0;
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [command, ...args] = process.argv.slice(2);
   const readOnly = args.includes("--read-only");
-  const [first, second] = args.filter((arg) => !arg.startsWith("--"));
+  const named = args.filter((arg) => !arg.startsWith("--"));
+  const [first, second] = named;
   /** A folder that lies in a baseline, or no baseline where one is named, refused (exit 2). */
   const refused = (why) => {
     console.error(why);
     process.exit(2);
   };
+  const out = (file) => outside(file, [], refused);
   if (command === "state" && second !== undefined)
-    process.exitCode = await state(path.resolve(first), outside(second, [], refused), readOnly);
+    process.exitCode = await state(path.resolve(first), out(second), readOnly);
   else if (command === "start" && second !== undefined)
     process.exitCode = await start(baselineAt(first, refused), second);
   else if (command === "queue" && second !== undefined)
     process.exitCode = await queue(baselineAt(first, refused), path.resolve(second));
+  else if (command === "seed" && named.length === 2)
+    process.exitCode = await seed(path.resolve(first), out(second), refused);
+  else if (command === "compiled" && named.length === 2) {
+    const outcome = await compiledInto(out(second), path.resolve(first));
+    console.log(JSON.stringify(outcome));
+    process.exitCode = outcome.refused === undefined ? 0 : 2;
+  } else if (command === "import" && [2, 4, 5].includes(named.length))
+    process.exitCode = await importing(out(first), second, named[2], named[3], named[4], refused);
+  else if (command === "status" && named.length === 2)
+    process.exitCode = statusOf(out(first), second);
+  else if (command === "alone" && named.length === 3)
+    await alone(path.resolve(first), second, out(named[2]), refused);
+  else if (command === "stalls" && named.length === 5)
+    process.exitCode = stallsOf(first, second, named[2], named[3], out(named[4]), refused);
   else {
     console.error(
       "usage: node tests/families/baselines.mjs state <tree> <folder> [--read-only]\n" +
         "       node tests/families/baselines.mjs start <baseline> <current src tree>\n" +
-        "       node tests/families/baselines.mjs queue <baseline> <script>",
+        "       node tests/families/baselines.mjs queue <baseline> <script>\n" +
+        "       node tests/families/baselines.mjs seed <tree> <folder>\n" +
+        "       node tests/families/baselines.mjs compiled <tree> <folder>\n" +
+        "       node tests/families/baselines.mjs import <central folder> <computed folder> [<area> <i>/<N> [<stalls.json>]]\n" +
+        "       node tests/families/baselines.mjs status <central folder> <src tree>\n" +
+        "       node tests/families/baselines.mjs alone <area folder> <shard> <new area folder>\n" +
+        "       node tests/families/baselines.mjs stalls <shard> <alone shard or -> <area> <i>/<N> <stalls.json>",
     );
     process.exitCode = 2;
   }
