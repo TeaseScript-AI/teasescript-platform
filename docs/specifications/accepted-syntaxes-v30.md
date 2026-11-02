@@ -2424,9 +2424,10 @@ Those examples require an explicit element or `.random` where the receiving API 
 
 Runtime behavior:
 
-- An invalid index raises a runtime error rather than returning `null`; `get(index, default: value)` gives a default
-  instead ([§16](#reading-an-element-with-a-default)). The compiler reports an index that it can see is negative, and
-  one of type `number` ([§12](#12-variable-declarations)), such as `items[-1]` or `items.removeAt(0.5)`.
+- An invalid index raises a runtime error rather than returning `null`; for a position the list lacks,
+  `get(index, default: value)` gives a default instead ([§16](#reading-an-element-with-a-default)). The compiler
+  reports an index that it can see is negative, and one of type `number` ([§12](#12-variable-declarations)), such as
+  `items[-1]` or `items.removeAt(0.5)`.
 - Interpolating an empty list raises a runtime error because no element can be selected.
 - The empty-list error identifies the interpolated expression and explains that interpolation needs at least one
   element to select from.
@@ -2538,19 +2539,22 @@ Sets have none of the three: a set has no indexes, and it holds each member once
 
 ### Reading an element with a default
 
-**Status:** Accepted (Owner decision, 2026-10-12; the `default:`: owner decisions, 2026-10-19)
+**Status:** Accepted (Owner decision, 2026-10-12; the `default:`: owner decisions, 2026-10-19; an index that is no
+whole number: owner decision on #1075, 2026-11-02)
 
 `get(index, default: value)` returns the element at `index`, or `value` when the list has no such position: an `index`
-that is negative, past the end, or, when the script runs, not a whole number, such as `1.5`, text, or `null`.
-`items[index]` still raises its runtime error there, so a mistake stays visible where no default is given. The
-`default:` is required and has the element type or is `null`, as every `default:`
-([§18](#defaults-follow-the-same-rule)): for a `string[]`, `default: "none"` gives a `string` and `default: null` a
-`string?`, and for an `integer[][]`, `default: []` gives an `integer[]`; `default: 0` is a compile error unless the
-value lands directly in a place with a written union that holds both. The default types only the result, never the list:
-after `let ys = []`, `let v = ys.get(0, default: 0)` makes `v` an `integer` and leaves the element type of `ys` open.
-The default is evaluated only when it is used, when the list has no such position (owner decision, 2026-10-16). The
-compiler checks the index as for `items[index]`, except that a negative index gives the default: an index of type
-`number` ([§12](#12-variable-declarations)), such as `0.5`, or one that may be `null`, is an error.
+that is negative or past the end. `items[index]` still raises its runtime error there, so a mistake stays visible where
+no default is given. An index that is no whole number is a type error, never a missing position: a `number` or nullable
+index is a compile error, and an index whose type is unknown is checked when the script runs and fails there (until the
+compiler switches to the new type checker, such an index still gives the default). The `default:` is required and has
+the element type or is `null`, as every `default:` ([§18](#defaults-follow-the-same-rule)): for a `string[]`,
+`default: "none"` gives a `string` and `default: null` a `string?`, and for an `integer[][]`, `default: []` gives an
+`integer[]`; `default: 0` is a compile error unless the value lands directly in a place with a written union that holds
+both. The default types only the result, never the list: after `let ys = []`, `let v = ys.get(0, default: 0)` makes `v`
+an `integer` and leaves the element type of `ys` open. The default is evaluated only when it is used, when the list has
+no such position (owner decision, 2026-10-16). The compiler checks the index as for `items[index]`, except that a
+negative index gives the default: an index of type `number` ([§12](#12-variable-declarations)), such as `0.5`, or one
+that may be `null`, is an error.
 
 ```text
 let deck = ["ace", "king"]
