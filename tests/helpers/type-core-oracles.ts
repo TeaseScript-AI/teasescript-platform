@@ -320,6 +320,36 @@ function upToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
 }
 
 /**
+ * #1610's identity, the order of property names being author-facing (an absent property's message lists them as the
+ * search finds them, `toJson` walks them so): each binding's property names two levels down in that order, the bindings
+ * in the order given, and every diagnostic's message. Its questions spend the analysis's allowance and stop there
+ * (`asked`).
+ */
+export function orderedNames(
+  answers: Answers,
+  request: CoreAnalysisRequest,
+  bindings: readonly PlaceId[],
+): string {
+  return asked(answers, (answers) => {
+    const text = messageSource(
+      request.files.map((file) => file.source),
+      answers.diagnostics,
+    );
+    return JSON.stringify({
+      places: bindings.map((place) => {
+        const first = [...answers.placeProperties(place, [])];
+        return [
+          place,
+          first,
+          first.map((name) => [...answers.placeProperties(place, [propertyStep(name)])]),
+        ];
+      }),
+      messages: answers.diagnostics.map((diagnostic) => coreMessage(diagnostic, text)),
+    });
+  });
+}
+
+/**
  * A program's outcome, diagnostics and checks, and every expression occurrence's answer (its offset, route, place,
  * obligations and items whole, each with its ingress leaves), in their order. Its questions spend the analysis's
  * allowance and stop there (`asked`).
