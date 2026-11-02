@@ -540,11 +540,14 @@ export class Consumers {
   #capture(): void {
     const { program, definitions, lists, contract } = this.pass;
     const sites = new Map<string, SourceSite>();
+    // (a stopped decision's own marks, the reason `budget`, stand for their stores' checks: the stop owes them, and a
+    // stopped key decides nothing to capture, S3 §5)
     for (const d of this.diagnostics)
       if (
         d.class === "warning-runtime-check" &&
         d.kind === "written-target" &&
-        d.rule.rule === "store"
+        d.rule.rule === "store" &&
+        d.provenance.context !== "budget"
       )
         sites.set(siteKey(d.site), d.site);
     for (const site of this.#ingressSites) sites.set(siteKey(site), site);
