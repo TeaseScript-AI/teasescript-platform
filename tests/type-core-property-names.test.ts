@@ -577,15 +577,16 @@ test("the first property `${...}` shows of a copy comes from its source's litera
 });
 
 /**
- * #1610's identity: a listing's effective sources leave every search as the flat listing leaves it (`withFlatListings`):
- * each binding's property names two levels down in their order, asked forward and backward, and every diagnostic's
- * message (`orderedNames`), on #1466's layer families and #1610's (`SEARCH_FAMILIES`) at k = 4 and on the witness of a
+ * #1610's identity: a listing's effective sources leave what the searches publish as the flat listing leaves it
+ * (`withFlatListings`): each binding's property names two levels down in their order, asked forward and backward, and
+ * every diagnostic's message, among them the property `${...}` shows of an object, the first in its literal's order
+ * (`orderedNames`), on #1466's layer families and #1610's (`SEARCH_FAMILIES`) at k = 4 and on the witness of a
  * listing's fallback where a source could pump (the feedback), in the four modes; each binding's names are one whichever
  * order asks first; the listings schedule effective sources, skip their run's prefix and fall back where they must;
  * every search's `checks` are its records'; and the searches charge no more than the flat listing's (charges move, never
  * add).
  */
-test("a listing's effective sources leave every search's names, their order and the messages as the flat listing does (#1610)", () => {
+test("a listing's effective sources leave each binding's names in their order, and every message, as the flat listing does (#1610)", () => {
   const programs = [
     ...[...LAYER_FAMILIES, ...SEARCH_FAMILIES].map((family) => ({
       name: family.name,
