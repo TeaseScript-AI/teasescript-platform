@@ -114,7 +114,7 @@ export interface Item {
 export type Spelling = readonly ItemTag[];
 
 /** The spelling of items of two different spellings merged: it never covers a list (`inItsOrder`). */
-export const MIXED: Spelling = Object.freeze([]);
+const MIXED: Spelling = Object.freeze([]);
 
 /**
  * The join of two items' spellings: none below one spelling below `MIXED` (TABLE r4.277 (1)). Commutative and
