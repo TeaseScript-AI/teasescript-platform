@@ -668,14 +668,19 @@ test("a stopped answer's items stand in the kinds' table order too, in the four 
 });
 
 /**
- * #1398 (Codex r3 on #1558, the PR's inventory): a list that joins a value's kinds with another list takes the same
- * fixed order where it is completed, the kinds' table order then `unknown`: a receiver beside its contract's reference
- * kinds, the `besides` gathered from a site's other warnings, a warning's `fits` where a domain stands in for host data,
- * a sort's families, a fallback's family beside its receiving union (its rule, its check and the check's text), what
- * two reads take together, a shown set's elements, one place's decision after a stop (Codex r4), the sort's warning the
- * stop defers at a test allowance, and a literal's sorted elements after a stop. Each row's published lists in the four modes; a written type's spelling keeps
- * its own (the store rows' `[string, integer]`, a written type a decision borrows, one a fallback's receiving type only
- * repeats), and the sort's offending kind is the one its elements' own order picks, deferred or not.
+ * #1398 (Codex r3, r4 and r5 on #1558, TABLE r4.277): a list of a value's kinds takes its one order where it is
+ * completed (`inItsOrder`): a written spelling's where exactly one spelling covers every kind but `null`, `unknown` and
+ * `empty`, else the table's then `unknown`. The rows: a receiver beside its contract's reference kinds, the `besides`
+ * gathered from a site's other warnings, a warning's `fits` (a fixed table of what fits, the one list the rule leaves
+ * to the table's order, D3), a sort's families (in its elements' order), a fallback's family beside its receiving union
+ * (its rule, its check and the check's text), what two reads take together, a shown set's elements, one place's
+ * decision after a stop (Codex r4), the sort's warning the stop defers at a test allowance, a literal's sorted elements
+ * after a stop; a written parse's or load's elements, read and sorted (Codex r5), a written value beside an inferred
+ * kind it spells (D2's coverage) or one it does not, two spellings joined and one spelling read twice, and a written
+ * value in a literal's cell; after a stop, a literal of a typed parse, a sorted literal of a written value and a typed
+ * load's written default. Each row's published lists in the four modes: a written type's spelling keeps its own (the
+ * store rows' `[string, integer]`, a written type a decision borrows, one a fallback's receiving type only repeats),
+ * and the sort's offending kind is the one its elements' order picks, deferred or not.
  */
 const COMPOSED_ORDER_ROWS: readonly {
   readonly name: string;
@@ -719,6 +724,38 @@ const COMPOSED_ORDER_ROWS: readonly {
     answers.budget.deferred.flatMap((warning) =>
       warning.rule.rule === "elements" ? [{ warning, families: warning.rule.families }] : [],
     );
+  // (the items of the last `text` after `before` in `source`, or of its `step`)
+  const readOf =
+    (source: string, before: string, text: string, step?: "element") =>
+    (answers: Answers): readonly (readonly string[])[] => {
+      const start = source.lastIndexOf(before + text) + before.length;
+      const node = answers.graph.nodes.find(
+        (found) =>
+          found.span?.start.offset === start && found.span.end.offset === start + text.length,
+      );
+      if (node === undefined) return [];
+      const items =
+        step === undefined ? (answers.at(node)?.items ?? []) : answers.project(node, step);
+      return [items.map((item) => item.tag)];
+    };
+  // (a written type's admitted kinds at a path of a binding)
+  const written =
+    (name: string, path: readonly string[]) =>
+    (answers: Answers, request: CoreAnalysisRequest): readonly (readonly string[])[] => {
+      const place = new CoreProgram(request).places.find(
+        ({ kind }) => kind.kind === "binding" && kind.name === name,
+      )!.id;
+      const { admitted } = answers.place(place, path);
+      return admitted.by === "written" ? [admitted.kinds] : [];
+    };
+  const elements = (answers: Answers) =>
+    warnings(answers).flatMap((warning) =>
+      warning.rule.rule === "elements" ? [{ warning, families: warning.rule.families }] : [],
+    );
+  const parse = "let xs: (string | integer)[] = fromJson(hostValue)\nxs.sort()\nexit\n";
+  const load = 'let xs: (string | integer)[] = load("k", default: [1])\nxs.sort()\nexit\n';
+  const w = "let w: string | integer = fromJson(hostValue)\n";
+  const typedLiteral = "let ys: (string | integer)[] = [fromJson(hostValue), 1]\nsay ys[0]\nexit\n";
   return [
     {
       name: "a receiver beside its contract's reference kinds",
@@ -753,7 +790,7 @@ const COMPOSED_ORDER_ROWS: readonly {
       expected: ["integer", "string"],
     },
     {
-      name: "a sort's families",
+      name: "a sort's families, in its elements' order",
       source: sort,
       lists: (answers) =>
         ruled(answers).flatMap((diagnostic) =>
@@ -761,7 +798,7 @@ const COMPOSED_ORDER_ROWS: readonly {
             ? [diagnostic.rule.families]
             : [],
         ),
-      expected: ["number", "string"],
+      expected: ["string", "number"],
     },
     {
       name: "a sort's offending kind, by its elements' own order",
@@ -830,7 +867,7 @@ const COMPOSED_ORDER_ROWS: readonly {
             ? [diagnostic.rule.elements]
             : [],
         ),
-      expected: ["integer", "string", "object"],
+      expected: ["string", "integer", "object"],
     },
     {
       name: "one place's decision after a stop",
@@ -878,7 +915,7 @@ const COMPOSED_ORDER_ROWS: readonly {
           source: sort,
           analyse,
           lists: (answers: Answers) => deferred(answers).map(({ families }) => families),
-          expected: ["number", "string"],
+          expected: ["string", "number"],
         },
       ];
     }),
@@ -891,6 +928,117 @@ const COMPOSED_ORDER_ROWS: readonly {
           diagnostic.rule.rule === "elements" ? [diagnostic.kinds] : [],
         ),
       expected: ["integer", "string"],
+    },
+    ...[
+      ["parse", parse],
+      ["load", load],
+    ].flatMap(([how, source]) => [
+      {
+        name: `a written ${how}'s elements, read`,
+        source: source!,
+        lists: readOf(source!, "\n", "xs", "element"),
+        expected: ["string", "integer", "empty"],
+      },
+      {
+        name: `a written ${how}'s admitted elements`,
+        source: source!,
+        lists: written("xs", ["element"]),
+        expected: ["string", "integer"],
+      },
+      {
+        name: `a written ${how}'s sorted elements' offending kind`,
+        source: source!,
+        lists: (answers: Answers) => elements(answers).map(({ warning }) => warning.kinds),
+        expected: ["integer"],
+      },
+      {
+        name: `a written ${how}'s sorted elements' families`,
+        source: source!,
+        lists: (answers: Answers) => elements(answers).map(({ families }) => families),
+        expected: ["string", "number"],
+      },
+      ...[40, 160].map((allowance) => ({
+        name: `a written ${how}'s deferred sort's offending kind at the allowance ${allowance}`,
+        source: source!,
+        analyse: (request: CoreAnalysisRequest) =>
+          withTestAllowance(allowance, () => analyseCore(request)),
+        lists: (answers: Answers) => deferred(answers).map(({ warning }) => warning.kinds),
+        expected: ["integer"],
+      })),
+    ]),
+    {
+      name: "a written value beside an inferred kind it spells",
+      source: `${w}let xs = [1]\nxs.add(w)\nsay xs[0]\nexit\n`,
+      lists: readOf(`${w}let xs = [1]\nxs.add(w)\nsay xs[0]\nexit\n`, "say ", "xs[0]"),
+      expected: ["string", "integer"],
+    },
+    {
+      name: "a written value beside a kind it does not spell",
+      source: `${w}let x = w otherwise true\nsay x\nexit\n`,
+      lists: readOf(`${w}let x = w otherwise true\nsay x\nexit\n`, "say ", "x"),
+      expected: ["integer", "string", "boolean"],
+    },
+    {
+      name: "two spellings of one union joined",
+      source: `${w}let v: integer | string = fromJson(hostOther)\nlet xs = [w]\nxs.add(v)\nsay xs[0]\nexit\n`,
+      lists: readOf(
+        `${w}let v: integer | string = fromJson(hostOther)\nlet xs = [w]\nxs.add(v)\nsay xs[0]\nexit\n`,
+        "say ",
+        "xs[0]",
+      ),
+      expected: ["integer", "string"],
+    },
+    {
+      name: "one spelling read from two written places",
+      source: `${w}let u: string | integer = fromJson(hostOther)\nlet xs = [w]\nxs.add(u)\nsay xs[0]\nexit\n`,
+      lists: readOf(
+        `${w}let u: string | integer = fromJson(hostOther)\nlet xs = [w]\nxs.add(u)\nsay xs[0]\nexit\n`,
+        "say ",
+        "xs[0]",
+      ),
+      expected: ["string", "integer"],
+    },
+    {
+      name: "a written value in a literal's cell",
+      source: `${w}let xs = [w]\nsay xs[0]\nexit\n`,
+      lists: readOf(`${w}let xs = [w]\nsay xs[0]\nexit\n`, "say ", "xs[0]"),
+      expected: ["string", "integer"],
+    },
+    // (after a stop at the test allowance 16: a typed parse's written destination beside a whole number in a literal,
+    // the literal's children's kinds, each once; a sorted literal of a written value and a whole number, its deferred
+    // families; a typed load's default a written value, the stores' syntax decision)
+    {
+      name: "a stopped literal of a typed parse and a whole number",
+      source: typedLiteral,
+      analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
+      lists: (answers) =>
+        readOf(
+          typedLiteral,
+          " = ",
+          "[fromJson(hostValue), 1]",
+          "element",
+        )(answers).map((list) => [...new Set(list)]),
+      expected: ["string", "integer"],
+    },
+    {
+      name: "a stopped sort of a literal of a written value and a whole number",
+      source: `${w}[w, 1].sort()\nexit\n`,
+      analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
+      lists: (answers) => deferred(answers).map(({ families }) => families),
+      expected: ["string", "number"],
+    },
+    {
+      name: "a stopped syntax decision of a typed load's written default",
+      source: `${w}let x = load(hostOther, default: w)\nlet ys = [x, 1]\nys.sort()\nexit\n`,
+      analyse: stopped,
+      lists: (answers, request) => {
+        const x = new CoreProgram(request).places.find(
+          ({ kind }) => kind.kind === "binding" && kind.name === "x",
+        )!.id;
+        const { admitted } = answers.place(x, []);
+        return admitted.by === "decided" ? [admitted.kinds] : [];
+      },
+      expected: ["string", "integer"],
     },
   ];
 })();
