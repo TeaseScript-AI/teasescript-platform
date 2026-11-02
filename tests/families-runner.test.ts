@@ -1321,7 +1321,11 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     const edit = (file: string, from: RegExp | string, to: string) =>
       writeFileSync(file, readFileSync(file, "utf8").replace(from, to));
     const plan = (dir: string) => {
-      const text = `${readFileSync(join(dir, "area", "PLAN"), "utf8")}checks other.mjs publication\n`;
+      // (a PLAN this tool writes, of other checks)
+      const text = readFileSync(join(dir, "area", "PLAN"), "utf8").replace(
+        /^(allowances .*)$/m,
+        "$1\nchecks other.mjs publication",
+      );
       writeFileSync(join(dir, "area", "PLAN"), text);
       edit(
         join(dir, "MANIFEST"),
