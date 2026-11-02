@@ -2546,16 +2546,16 @@ whole number: owner decision on #1075, 2026-11-02)
 that is negative or past the end. `items[index]` still raises its runtime error there, so a mistake stays visible where
 no default is given. An index that is no whole number is a type error, never a missing position: a `number` or nullable
 index is a compile error. An index whose type is unknown gives a warning and is checked to be whole when the script
-runs: a value that is no whole number, such as `1.5`, text, or `null`, fails there with `TSR024` (until the compiler
-switches to the new type checker, such a value still gives the default). The `default:` is required and has the element
-type or is `null`, as every `default:` ([§18](#defaults-follow-the-same-rule)): for a `string[]`, `default: "none"`
-gives a `string` and `default: null` a `string?`, and for an `integer[][]`, `default: []` gives an `integer[]`;
-`default: 0` is a compile error unless the value lands directly in a place with a written union that holds both. The
-default types only the result, never the list: after `let ys = []`, `let v = ys.get(0, default: 0)` makes `v` an
-`integer` and leaves the element type of `ys` open. The default is evaluated only when it is used, when the list has no
-such position (owner decision, 2026-10-16). The compiler checks the index as for `items[index]`, except that a negative
-index gives the default: an index of type `number` ([§12](#12-variable-declarations)), such as `0.5`, or one that may be
-`null`, is an error.
+runs; a non-whole value fails with `TSR024` (until the compiler switches to the new type checker, a non-whole index of
+unknown type still gives the default). The `default:` is required and has the element type or is `null`, as every
+`default:` ([§18](#defaults-follow-the-same-rule)): for a `string[]`, `default: "none"` gives a `string` and
+`default: null` a `string?`, and for an `integer[][]`, `default: []` gives an `integer[]`; `default: 0` is a compile
+error unless the value lands directly in a place with a written union that holds both. The default types only the
+result, never the list: after `let ys = []`, `let v = ys.get(0, default: 0)` makes `v` an `integer` and leaves the
+element type of `ys` open. The default is evaluated only when it is used, when the list has no such position (owner
+decision, 2026-10-16). The compiler checks the index as for `items[index]`, except that a negative index gives the
+default: an index of type `number` ([§12](#12-variable-declarations)), such as `0.5`, or one that may be `null`, is an
+error.
 
 ```text
 let deck = ["ace", "king"]
