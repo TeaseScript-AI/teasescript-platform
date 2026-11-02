@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
@@ -1768,11 +1768,12 @@ const LEDGER = `export class WorkLedger {
  * `performance.now`) moves 3,000 ms on through each of `twin`'s runs in its first repeat or its second
  * (`FIXTURE_SKEW`), no time passing; `busy` waits 200 ms on the base; `lagging` waits 600 ms on the head's first run; `slow` charges a billion units more on the head and
  * waits 150 ms there; `burst` charges 10,000 times 65,536 units at once on the head, then waits; `changed` publishes its
- * second part otherwise on the head. Its stop sets differ on the head at demand allowance 1 and wait there at 2.
+ * second part otherwise on the head. Its stop sets differ on the head at demand allowance 1 and wait there at 2. Where
+ * `FIXTURE_TRACE` names a file, the head appends a source's name to it in the source's first mode: once each time the
+ * source runs.
  */
-const charging = (
-  head: boolean,
-): string => `import { WorkLedger } from "../../src/type-inference/core/budget.js";
+const charging = (head: boolean): string => `import { appendFileSync } from "node:fs";
+import { WorkLedger } from "../../src/type-inference/core/budget.js";
 export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
 );
@@ -1788,6 +1789,8 @@ export function publicationHashes(files, mode) {
   if (source === "throws") throw new Error("independent exception witness");
   if (source === "ends" || ((source === "twin" || source.startsWith("once")) && process.env.FIXTURE_ENDS))
     process.exit(3);
+  if (${head} && mode === MODES[0] && process.env.FIXTURE_TRACE)
+    appendFileSync(process.env.FIXTURE_TRACE, source + "\\n");
   if (${head} && source === "twin" && (twins++ < 4) === (process.env.FIXTURE_SKEW === "first"))
     skew += 3000;
   if (!${head} && source === "busy") wait(200);
@@ -2106,24 +2109,68 @@ test("the corpus runner records each source's work and time, a stalled run's to 
     );
     assert.deepEqual(counted(after.at(-1)), [4, 4, 0, 0, 1, 0, 3, false]);
 
-    // `rerun --shard i/N` (#1598): an index over two areas, its entry k rerun by shard k mod N alone, each shard's records
-    // beside its part of the index and none for an area that part does not hold; the shards' records merge as the whole
-    // rerun's do
-    const parted = [area("sharded", ["once-a", "once-b", "once-c"]), area("beside", ["once-d"])];
-    const partedWork = parted.map((folder) => {
-      withEnv({ FIXTURE_ENDS: "1" }, runner, folder, base, head, "--work", `${folder}.work.jsonl`);
-      return `${folder}.work.jsonl`;
-    });
+    // `rerun --shard i/N` (#1598): an index over two areas, one of them replayed at two paths in two shards (a replay
+    // sharded across workers), its entry k rerun by shard k mod N alone, one runner per area whatever paths its entries
+    // name, each shard's records beside its part of the index and none for an area that part does not hold; the
+    // shards' records merge as the whole rerun's do
+    const replayed = (folder: string, shard: string, name: string) => {
+      const file = join(directory, `${name}.work.jsonl`);
+      withEnv({ FIXTURE_ENDS: "1" }, runner, folder, base, head, "--shard", shard, "--work", file);
+      return file;
+    };
+    const aliased = (at: number) => {
+      mkdirSync(join(directory, `alias-${at}`));
+      return area(join(`alias-${at}`, "sharded"), ["once-a", "once-b", "once-c"]);
+    };
+    const partedWork = [
+      replayed(aliased(0), "0/2", "alias-0"),
+      replayed(aliased(1), "1/2", "alias-1"),
+      replayed(area("beside", ["once-d"]), "0/1", "beside"),
+    ];
     const partedIndex = join(directory, "parted.json");
     assert.equal(run(stalls, ...partedWork, "--index", partedIndex).status, 1);
-    const whole = join(directory, "whole");
-    assert.equal(run(stalls, "rerun", partedIndex, base, head, whole).status, 0);
-    const parts = [0, 1].map((shard) => {
-      const folder = join(directory, `part-${shard}`);
-      const ran = run(stalls, "rerun", partedIndex, base, head, folder, "--shard", `${shard}/2`);
+    const { entries } = JSON.parse(readFileSync(partedIndex, "utf8"));
+    const named = entries.map(({ area: of, source }: { area: string; source: string }) => [
+      basename(of),
+      source,
+    ]);
+    assert.deepEqual(named, [
+      ["sharded", "once-a"],
+      ["sharded", "once-c"],
+      ["sharded", "once-b"],
+      ["beside", "once-d"],
+    ]);
+    assert.equal(new Set(entries.map(({ area: of }: { area: string }) => of)).size, 3);
+    // each entry runs once, counted as it runs: an entry run twice, by two shards or by two runners of one area, is
+    // caught here, not by the files left (a second runner of an area replaces the first's) nor by the merged summary,
+    // which takes two ended records that say the same as one source by design (#1587)
+    const traced = (folder: string, ...shard: string[]) => {
+      const trace = `${folder}.trace`;
+      const ran = withEnv(
+        { FIXTURE_TRACE: trace },
+        stalls,
+        "rerun",
+        partedIndex,
+        base,
+        head,
+        folder,
+        ...shard,
+      );
       assert.equal(ran.status, 0, ran.stderr);
-      return folder;
-    });
+      return readFileSync(trace, "utf8").trim().split("\n").sort();
+    };
+    const whole = join(directory, "whole");
+    assert.deepEqual(traced(whole), ["once-a", "once-b", "once-c", "once-d"]);
+    const parts = [0, 1].map((shard) => join(directory, `part-${shard}`));
+    parts.forEach((folder, shard) =>
+      assert.deepEqual(
+        traced(folder, "--shard", `${shard}/2`),
+        named
+          .filter((_: unknown, entry: number) => entry % 2 === shard)
+          .map(([, source]: string[]) => source)
+          .sort(),
+      ),
+    );
     assert.deepEqual(
       parts.map((folder) => readdirSync(folder).sort()),
       [
@@ -2141,26 +2188,6 @@ test("the corpus runner records each source's work and time, a stalled run's to 
       readdirSync(folder)
         .filter((file) => file.endsWith(".work.jsonl"))
         .map((file) => join(folder, file));
-    const placed = (files: string[]) =>
-      files
-        .flatMap((file) => {
-          const [ran, ...sources] = lines(readFileSync(file, "utf8"));
-          return sources.slice(0, -1).map(({ source }) => [ran.work.area, source]);
-        })
-        .sort();
-    const { entries } = JSON.parse(readFileSync(partedIndex, "utf8"));
-    assert.equal(entries.length, 4);
-    // each part holds exactly its entries, the parts together the index once: an entry rerun by two shards is caught
-    // here, not by the merged summary, which takes two ended records that say the same as one source by design (#1587)
-    parts.forEach((folder, shard) =>
-      assert.deepEqual(
-        placed(records(folder)),
-        entries
-          .filter((_: unknown, entry: number) => entry % 2 === shard)
-          .map(({ area: of, source }: { area: string; source: string }) => [of, source])
-          .sort(),
-      ),
-    );
     const judged = (files: string[]) => {
       const { status, stdout, stderr } = run(stalls, ...partedWork, "--rerun", ...files);
       return { status, stdout, stderr };

@@ -19,11 +19,11 @@
 // an unavailable one (stalled) never counting as agreement, and no candidate stall is left, 1 otherwise, 2 on a record
 // it cannot read or merge. `--index` writes the sources still unavailable, with their verdicts and records, and each
 // area's configuration: the stall index, which `rerun` runs on both trees in one process, one source at a time, an area
-// after another, with that configuration (`run.mjs <area> <base> <head> --only <index>`), into a new folder of records,
-// `<area>.work.jsonl` and `<area>.jsonl` (`--out`), to be read with `--rerun`; with `--shard i/N` (#1598) only its
-// entries k with k mod N = i, into `<area>.<i>of<N>.work.jsonl` and `<area>.<i>of<N>.jsonl` beside that part of the
-// index (`index.<i>of<N>.json`), so that N shards rerun it once; the index names the sources unanswered alike apart
-// (`unansweredAlike`), which `rerun` does not run.
+// after another (by its name, once whatever paths its entries name), with that configuration (`run.mjs <area> <base>
+// <head> --only <index>`), into a new folder of records, `<area>.work.jsonl` and `<area>.jsonl` (`--out`), to be read
+// with `--rerun`; with `--shard i/N` (#1598) only its entries k with k mod N = i, into `<area>.<i>of<N>.work.jsonl` and
+// `<area>.<i>of<N>.jsonl` beside that part of the index (`index.<i>of<N>.json`), so that N shards rerun it once; the
+// index names the sources unanswered alike apart (`unansweredAlike`), which `rerun` does not run.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -311,19 +311,23 @@ if (process.argv[2] === "rerun") {
     refused(`--shard ${sharding} is no shard i/N with 0 <= i < N`);
   const index = JSON.parse(readFileSync(indexFile, "utf8"));
   const { configurations = {}, entries } = index;
-  const areas = [...new Set(entries.map((entry) => entry.area))];
+  // the index's areas by name, which keys their configurations, `run.mjs --only`'s choice and the records, each at the
+  // first path its entries give: an area whose entries name several paths (a replay sharded across workers) is rerun by
+  // one runner, so that each entry runs once
+  const areas = new Map();
+  for (const { area } of entries) if (!areas.has(nameOf(area))) areas.set(nameOf(area), area);
   // each area's configuration, whose trees must be these (a stored base's is its baseline's)
-  for (const area of areas) {
-    const configuration = configurations[nameOf(area)];
+  for (const name of areas.keys()) {
+    const configuration = configurations[name];
     if (configuration === undefined)
       refused(
-        `${indexFile} holds no configuration of ${nameOf(area)}: rerun its replay's sources with run.mjs --only`,
+        `${indexFile} holds no configuration of ${name}: rerun its replay's sources with run.mjs --only`,
       );
     const trees = [base, head].map((tree) => comparedOf(path.resolve(tree)));
     const other = [0, 1].filter((tree) => !sameTree(configuration.trees.at(tree - 2), trees[tree]));
     if (other.length > 0)
       refused(
-        `${other.map((tree) => [base, head][tree])} is not the tree ${nameOf(area)}'s replay compared`,
+        `${other.map((tree) => [base, head][tree])} is not the tree ${name}'s replay compared`,
       );
   }
   try {
@@ -345,8 +349,8 @@ if (process.argv[2] === "rerun") {
   let status = 0;
   // one area after another, each source alone in the runner's child, both trees in one process; nothing for an area
   // the shard has no entry of
-  for (const area of new Set(mine.map((entry) => entry.area))) {
-    const name = nameOf(area);
+  for (const name of new Set(mine.map((entry) => nameOf(entry.area)))) {
+    const area = areas.get(name);
     const { sizes, allowances } = configurations[name];
     const { status: ended } = spawnSync(
       process.execPath,
