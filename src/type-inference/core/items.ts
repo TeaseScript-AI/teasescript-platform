@@ -406,7 +406,8 @@ const TAG_RANK: ReadonlyMap<ItemTag, number> = new Map(
  * stopped answer, a finishing read) and reaches its publication through steps that keep it, and a list composed with
  * another passes here again where it is completed. A fixed table's order and a tuple by position keep their own. One
  * pass over the entries and one over the ranks, so it costs no more than the entries it is given, each already charged
- * where it was made, and it charges nothing of its own (TABLE r4.261).
+ * where it was made, and it charges nothing of its own (TABLE r4.261). The result is made at its length: a flattened
+ * one keeps spare capacity, which the many answers kept multiply (#1625).
  */
 function inOrderOf<T>(
   entries: Iterable<T>,
@@ -425,9 +426,13 @@ function inOrderOf<T>(
           const at = order.indexOf(tag);
           return at >= 0 ? at : order.length + TAG_RANK.get(tag)!;
         };
-  const byRank: T[][] = [];
+  const byRank: (T[] | undefined)[] = [];
   for (const entry of list) (byRank[rankOf(kindOf(entry))] ??= []).push(entry);
-  return byRank.flat();
+  const ordered = new Array<T>(list.length);
+  let at = 0;
+  for (const bucket of byRank)
+    if (bucket !== undefined) for (const entry of bucket) ordered[at++] = entry;
+  return ordered;
 }
 
 /** `spelling` where it covers every one of `kinds` but `null`, `unknown` and `empty` (`inOrderOf`), else none. */
