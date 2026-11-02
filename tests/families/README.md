@@ -128,15 +128,19 @@ makes `<out>/<src tree>/` (its `MANIFEST` also naming the tree's build of the co
 and every area's `PLAN`) and `<out>/shards.tsv`, one line per shard to store. `baseline.sh compute <tree> <seed
 baseline> <area> <i>/<N> <out>` stores one shard into a copy of the seed at the `PLAN`'s time limit, and the sources
 that stalled again alone, with the `PLAN`'s memory and twice its time limit: one that ends alone within that margin
-stalled under the machine's load and is stored with its result (`baselines.mjs merge`), one that stalls alone within it
+stalled under the machine's load and is stored with its result (`baselines.mjs merge`, which refuses a run alone of
+other inputs before it writes: another identity, a commit and tree the shard's `MANIFEST` does not name, other checks
+or allowances, or limits other than the `PLAN`'s memory and twice its time limit), one that stalls alone within it
 is a stall of its own and stays, listed with its run alone and the limit it ran at in `<out>/stalls.json` (#1612). `baseline.sh submit <SHA> <src tree> [<seed job id> <shards.tsv>] [--dry]`
 prints or submits these steps as central-queue jobs. Every write into the central store is `node
 tests/families/baselines.mjs import <central folder> <computed folder> [<area> <i>/<N>]`: a seed's `MANIFEST` and
 `PLAN`s are adopted where its baseline is absent, else checked equal; a shard is accepted only where its `MANIFEST` and
 `PLAN` are the central ones, it counts, and each source that stalled in it is listed in stalls.json as stalling alone,
-and one already there is compared by its lines, which hold no time: where they differ only in that one of a source
-stalled and the other holds its complete result, that is no value difference, the complete result stands (kept, or put
-in the stalled line's place) and the source is named (`stallOnly`); any other difference replaces nothing. It exits 0
+and one already there is compared by its lines, which hold no time, and never replaced, with one exception: where they
+differ only in that one of a source stalled and the other holds its complete result (every run the stalled line ended
+the same in it), that is no value difference, and the complete result stands, kept or put in the stalled line's place,
+since a stalled line holds no result; the source is named (`stallOnly`; `sx-fill`, the platform's wrapper, does not yet
+reconcile its stall report with it or pass it on: #1636). Any other difference replaces nothing. It exits 0
 imported or equal, a stall-only difference among them, 2 refused (naming why), 3 differs. `node tests/families/baselines.mjs status <central folder> <src tree>` says in one
 line what a central baseline holds, without a tree, and exits 0 only when it is complete.
 

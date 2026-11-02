@@ -1534,25 +1534,72 @@ function mergedBody(body, lines, replacing) {
 }
 
 /**
- * `merge <folder of baselines> <area> <i>/<N> <alone shard>` (#1612): the shard `<i>of<N>` of `area` that the one
- * baseline in the folder holds, each of its stalled sources that ended in the alone shard (`alone`'s sources stored at
- * twice the PLAN's time limit, `baseline.sh compute`) replaced by that complete result where the two differ only in the
- * stall (`completeOf`). One JSON line: the sources merged and whether the shard then counts; exit 0, 2 refused.
+ * The stalled sources' run alone that the folder of baselines `root` holds (`baseline.sh compute`'s, of `area` of the
+ * baseline `identity` names, planned by `plan`), read as every stored shard is (`heldIn`, `shardRead`) and accepted
+ * only as a run of the same inputs within the margin: its MANIFEST's identity `identity`, its area planned in one shard
+ * with `plan`'s allowances and each of its generators' checks in `plan`, at `plan`'s memory and twice its time limit
+ * (which a store runs at, `planned`); its lines by place, its total and its file; else why it is refused (#1612).
  */
-async function merging(root, area, shard, file, refuse) {
+function aloneIn(root, area, identity, plan) {
+  const held = heldIn(root);
+  if (held.refused !== undefined) return held;
+  const other = ["src", "oracles", "lock", "node"].filter(
+    (key) => held.identity?.[key] !== identity[key],
+  );
+  if (other.length > 0)
+    return {
+      refused: `${held.dir} holds runs of other inputs than the shard's: ${other.join(", ")}`,
+    };
+  const record = recorded(held.text).get(area);
+  if (record?.shards !== 1) return { refused: `${held.dir} plans no area ${area} in one shard` };
+  const own = held.plans.get(area);
+  const lines = (text, word) => text.split("\n").filter((line) => line.startsWith(`${word} `));
+  const [seconds, memory] = /^limits (\d+) s, (\d+) MB$/m.exec(plan).slice(1).map(Number);
+  const margin = `limits ${2 * seconds} s, ${memory} MB`;
+  if (lines(own, "limits")[0] !== margin)
+    return { refused: `${held.dir}/${area} ran at "${lines(own, "limits")[0]}", not "${margin}"` };
+  if (lines(own, "allowances")[0] !== lines(plan, "allowances")[0])
+    return { refused: `${held.dir}/${area} ran at other allowances than the shard's PLAN` };
+  const checks = lines(own, "checks").filter((line) => !lines(plan, "checks").includes(line));
+  if (checks.length > 0)
+    return {
+      refused: `${held.dir}/${area} ran with checks its shard's PLAN does not: ${checks.join(", ")}`,
+    };
+  const file = shardFile(path.join(held.dir, area), 0, 1);
+  const read = shardRead(file, record.plan, parsePlan(own).places[0], held.identity);
+  if (read.lines === undefined)
+    return { refused: read.refused ?? `${file} is no shard that counts: absent or damaged` };
+  const { total } = JSON.parse(
+    read.body.subarray(read.body.lastIndexOf(10, read.body.length - 2) + 1).toString(),
+  );
+  return {
+    lines: new Map(read.lines.map((line) => [placeIn(JSON.parse(line)), line])),
+    total,
+    file,
+  };
+}
+
+/**
+ * `merge <folder of baselines> <area> <i>/<N> <alone folder of baselines>` (#1612): the shard `<i>of<N>` of `area` that
+ * the one baseline in the folder holds, each of its stalled sources that ended in the run alone (`aloneIn`, run from
+ * a commit and tree the baseline's MANIFEST names) replaced by that complete result where the two differ only in the
+ * stall (`completeOf`); a run alone that is not one is refused before anything is written. One JSON line: the sources
+ * merged and whether the shard then counts; exit 0, 2 refused.
+ */
+async function merging(root, area, shard, aloneRoot, refuse) {
   const held = heldIn(root);
   if (held.refused !== undefined) refuse(held.refused);
   const record = recorded(held.text).get(area);
   const [index, count] = /^\d+\/\d+$/.test(shard) ? shard.split("/").map(Number) : [];
   if (record === undefined || !(index < count) || record.shards !== count)
     refuse(`${area} ${shard} is no shard of ${held.dir}`);
-  const { places } = parsePlan(held.plans.get(area));
-  const alone = new Map();
-  for (const line of readFileSync(file, "utf8")
-    .split("\n")
-    .filter((one) => one !== "")
-    .slice(0, -1))
-    alone.set(placeIn(JSON.parse(line)), line);
+  const plan = held.plans.get(area);
+  const { places } = parsePlan(plan);
+  const alone = aloneIn(aloneRoot, area, held.identity, plan);
+  if (alone.refused !== undefined) refuse(alone.refused);
+  const from = `commit ${alone.total.commit} ${alone.total.tree}`;
+  if (!held.text.split("\n").includes(from))
+    refuse(`${alone.file} ran from a commit and tree ${held.dir} does not name: "${from}"`);
   const baseline = baselineIn(outside(root, [], refuse), held.identity.src);
   const outcome = await gate(baseline, (text) => {
     const target = shardFile(path.join(pathOf(baseline, "baseline"), area), index, count);
@@ -1561,7 +1608,7 @@ async function merging(root, area, shard, file, refuse) {
       return { refused: read.refused ?? `${target} is no shard that counts` };
     const replacing = new Map();
     read.lines.forEach((line, at) => {
-      const other = alone.get(placeIn(JSON.parse(line)));
+      const other = alone.lines.get(placeIn(JSON.parse(line)));
       if (
         JSON.parse(line).stalled !== undefined &&
         other !== undefined &&
@@ -1709,7 +1756,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         "       node tests/families/baselines.mjs status <central folder> <src tree>\n" +
         "       node tests/families/baselines.mjs alone <area folder> <shard> <new area folder>\n" +
         "       node tests/families/baselines.mjs stalls <shard> <alone shard or -> <area> <i>/<N> <stalls.json>\n" +
-        "       node tests/families/baselines.mjs merge <folder> <area> <i>/<N> <alone shard>",
+        "       node tests/families/baselines.mjs merge <folder> <area> <i>/<N> <alone folder>",
     );
     process.exitCode = 2;
   }

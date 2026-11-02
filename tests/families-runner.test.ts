@@ -1285,6 +1285,8 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     const shard = (root: string, index: number) => at(root, src, "area", `${index}of16.runs.jsonl`);
     const listed = (root: string) =>
       JSON.parse(readFileSync(at(root, "stalls.json"), "utf8")).stalls;
+    const runsIn = (lines: string[]) =>
+      lines.slice(0, -1).reduce((sum, line) => sum + Object.keys(JSON.parse(line).runs).length, 0);
 
     // the seed: a baseline with what its runs depend on, the commit, the build and the area's PLAN, no shard, and the
     // shards to store as the hook queues them; the fill's jobs as #1590 submits them (each command inside `bash -c`,
@@ -1350,6 +1352,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     assert.deepEqual(JSON.parse(twiceShard.at(-1)!).total.merged, [
       ["stored.mjs", "flaky", JSON.parse(twiceShard[0]!).key],
     ]);
+    assert.equal(JSON.parse(twiceShard.at(-1)!).total.runs, runsIn(twiceShard));
     assert.equal(twiceShard[0], readFileSync(shard("two", 2), "utf8").split("\n")[0]);
     // the margin (#1612): a source that takes longer than the PLAN's time limit but less than twice it (`flaky`, which
     // waits 2.6 s once, in a seed whose limit is 2 s) stalls in the store and ends alone, stored with its result; a stall
@@ -1370,6 +1373,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     assert.deepEqual(JSON.parse(slowShard.at(-1)!).total.merged, [
       ["stored.mjs", "flaky", JSON.parse(slowShard[0]!).key],
     ]);
+    assert.equal(JSON.parse(slowShard.at(-1)!).total.runs, runsIn(slowShard));
     const own = short("own", 1);
     assert.equal(own.status, 0, own.stderr);
     assert.deepEqual(
@@ -1797,6 +1801,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         const stalled = { generator, source, key, stalled: "timeout", runs: { [first!]: kept } };
         const body = [JSON.stringify(stalled), ...rest].map((one) => `${one}\n`).join("");
         ended.total.stalled += 1;
+        ended.total.runs -= Object.keys(runs).length - 1;
         ended.total.lines = createHash("sha256").update(body).digest("hex");
         writeFileSync(file, `${body}${JSON.stringify(ended)}\n`);
         const entry = {
@@ -1852,9 +1857,87 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       readFileSync(shard("zero", 0), "utf8").trim().split("\n").slice(0, -1),
     );
     assert.equal(JSON.parse(merged.at(-1)!).total.stalled, 0);
+    const zeroLines = readFileSync(shard("zero", 0), "utf8").trim().split("\n");
+    assert.equal(JSON.parse(merged.at(-1)!).total.runs, JSON.parse(zeroLines.at(-1)!).total.runs);
+    assert.equal(JSON.parse(merged.at(-1)!).total.runs, runsIn(merged));
     const otherwise = imported(stalledCopy("stall-otherwise", true), 0);
     assert.equal(otherwise.status, 3, otherwise.stdout);
     assert.match(said(otherwise).differs, /says otherwise than .* of stored\.mjs same/);
+    // (#1612) `merge` takes a run alone only as one of the shard's inputs within the margin, read as a stored shard is,
+    // and refuses any other before it writes (exit 2): one of another src/ tree and oracle library whose line of the
+    // stalled source is complete (job 1102190416b170's pair), one of a tree the shard's MANIFEST does not name
+    // (`alias`), one at the PLAN's own time limit; then the run alone of its own tree at twice it merges
+    const limit = Number(
+      /^limits (\d+) s/m.exec(readFileSync(at("seed", src, "area", "PLAN"), "utf8"))![1],
+    );
+    const foreign = tree("foreign", "3");
+    writeFileSync(join(foreign, "src", "a.ts"), "foreign\n");
+    writeFileSync(
+      join(foreign, "dist", "tests", "helpers", "type-core-oracles.js"),
+      `${FILLABLE}// another oracle library\n`,
+    );
+    const into = stalledCopy("merge-into");
+    const aloneOf = (name: string, from: string, seconds: number) => {
+      const area = at(name, "area");
+      const made = tool("alone", join(from, "tests", "families", "area"), shard(into, 0), area);
+      assert.equal(made.status, 0, made.stderr);
+      const runner = join(from, "tests", "families", "run.mjs");
+      const ran = spawnSync(
+        process.execPath,
+        [runner, area, from, "--store", at(name, "root"), "--shard", "0/1"],
+        { encoding: "utf8", env: { ...env, FAMILIES_TIMEOUT: String(seconds) } },
+      );
+      assert.equal(ran.status, 0, ran.stderr);
+      return at(name, "root");
+    };
+    const intoArea = () =>
+      readdirSync(at(into, src, "area"))
+        .sort()
+        .map((name) => [name, readFileSync(at(into, src, "area", name), "utf8")]);
+    const unmerged = intoArea();
+    for (const [name, from, seconds, refusal] of [
+      ["foreign", foreign, 2 * limit, /holds runs of other inputs than the shard's: src, oracles$/],
+      [
+        "alias",
+        alias,
+        2 * limit,
+        /ran from a commit and tree .* does not name: "commit 2{40} .*alias"$/,
+      ],
+      [
+        "at-limit",
+        built,
+        limit,
+        new RegExp(`ran at "limits ${limit} s, 2048 MB", not "limits ${2 * limit} s, 2048 MB"$`),
+      ],
+    ] as const) {
+      const refused = tool(
+        "merge",
+        at(into),
+        "area",
+        "0/16",
+        aloneOf(`alone-${name}`, from, seconds),
+      );
+      assert.equal(refused.status, 2, refused.stdout);
+      assert.match(refused.stderr.trim(), refusal);
+      assert.deepEqual(intoArea(), unmerged);
+    }
+    const mergedInto = tool(
+      "merge",
+      at(into),
+      "area",
+      "0/16",
+      aloneOf("alone-own", built, 2 * limit),
+    );
+    assert.equal(mergedInto.status, 0, mergedInto.stderr);
+    assert.deepEqual(said(mergedInto), {
+      merged: [["stored.mjs", "same", sameKey]],
+      verified: true,
+    });
+    // (byte for byte the shard the stall-only import completed: its lines, its runs and its merged sources)
+    assert.equal(
+      readFileSync(shard(into, 0), "utf8"),
+      readFileSync(join(second, src, "area", "0of16.runs.jsonl"), "utf8"),
+    );
     // a seed into the complete baseline: equal, nothing written; one from another commit's tree differs (exit 3)
     assert.equal(sh({}, "seed", alias, "2".repeat(40), at("alias-seed")).status, 0);
     const reseeded = tool("import", central, at("alias-seed"));

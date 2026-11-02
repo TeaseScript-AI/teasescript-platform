@@ -175,7 +175,8 @@ if [ "${1:-}" = compute ]; then
     stored "$work/alone/$area" "$work/alone-root" 0/1 "$((2 * limit))" ||
       fail "its stalled sources could not be stored alone"
     # a source that ended alone within the margin: its result in its stalled line's place (#1612)
-    node "$state" merge "$take" "$area" "$i/$n" "$ran" >&2 || fail "its sources that ended alone could not be merged"
+    node "$state" merge "$take" "$area" "$i/$n" "$work/alone-root" >&2 ||
+      fail "its sources that ended alone could not be merged"
   fi
   # each stall left a stall of its own (it stalled alone too), decided in the scratch before <out> is written
   node "$state" stalls "$take/$src/$area/${i}of${n}.runs.jsonl" "$ran" "$area" "$i/$n" "$work/stalls.json" >&2 ||
