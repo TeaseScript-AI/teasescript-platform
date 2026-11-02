@@ -1468,9 +1468,9 @@ test("a pasted form counts as run only where its run ends through it, answered w
   // (a prompt's code, which runs before the answer and counts once the run has ended, Codex r1 on #1589)
   const prompt = 'let t = "hello"\nlet answer = askInteger("${t.length}")\nexit\n';
   assert.equal(pasteFailure(pasted(prompt, "t.length")), null);
-  // (a button's label, whose statement ends where it waits, in a run before the last)
-  const button = 'let t = "hello"\nshowButton "${t.length}"\nexit\n';
-  assert.equal(pasteFailure(pasted(button, "t.length")), null);
+  // (code whose statement ends before a later answer, in a run before the last)
+  const earlier = 'let t = "hello"\nsay t.length\nlet answer = askInteger("Number?")\nexit\n';
+  assert.equal(pasteFailure(pasted(earlier, "t.length")), null);
   // (a list's addition that receives the answer, as the family's duration stores do)
   const added =
     'let ps: duration[] = [1 s]\nps.add((askInteger("How many?")) s)\nsay ps.length\nexit\n';
