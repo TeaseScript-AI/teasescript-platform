@@ -137,9 +137,9 @@ export function withNativeInline<T>(callback: () => T): T {
  * `work` read as part of the running computation (`yield* inline(work)` in place of `yield* work`, #1572): it runs on
  * its frame's explicit stack, not the native one, with the frame's identity (its reads are the frame's demand's or
  * member's); it is never memoised, never a component member, never a demand. Its read chain starts at none
- * (`enterRead`). Pushing and popping it is not charged and checks no allowance, so the frame's steps, work and stops
- * are those the same generators run by `yield*` have; an exception it throws is thrown into its parents, as
- * `runCompileTask` does.
+ * (`enterRead`), and between two steps the solver's is its frame's whole one, as `yield*` leaves it. Pushing and popping
+ * it is not charged and checks no allowance, so the frame's steps, work and stops are those the same generators run by
+ * `yield*` have; an exception it throws is thrown into its parents, as `runCompileTask` does.
  */
 export function* inline(work: Work<readonly Item[]>): Work<readonly Item[]> {
   return nativeInline ? yield* work : yield { inline: work };
@@ -492,6 +492,9 @@ export class Solver {
         input = step.value as readonly Item[];
         continue;
       }
+      // (between two steps the read chain is the run's whole one, its root's and each suspended child's, as `yield*`
+      // leaves it: a stop between steps abandons the run there, and a run after the stop starts from that depth)
+      this.#readDepth = children.reduce((depth, child) => depth + child.readDepth, root.readDepth);
       // EVIDENCE: invariant: an inline child's step is taken above, so this one is a demand or the root's result.
       return step as IteratorResult<Demand | ProofDemand<Proof>, unknown>;
     }
