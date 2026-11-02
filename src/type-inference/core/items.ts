@@ -142,12 +142,16 @@ export function spellingIdentity(spelling: Spelling | undefined): string {
 
 /**
  * The field of the items made from a written type of these kinds in their written order (`makeItem`'s `fields`): each
- * kind once, `unknown` left out, so every maker of one written type gives one spelling. Made once per written type read.
+ * kind once, `unknown` left out, so every maker of one written type gives one spelling. Made once per written type read,
+ * at its length, since the items keep it (as `inOrderOf`'s result, #1625).
  */
 export function spelledBy(kinds: readonly ItemTag[]): { readonly spelling: Spelling } {
+  // (a set keeps its first insertion's order: `unknown`, then each kind where it is first written)
   const seen = new Set<ItemTag>(["unknown"]);
-  const spelling: ItemTag[] = [];
-  for (const tag of kinds) if (!seen.has(tag)) spelling.push((seen.add(tag), tag));
+  for (const tag of kinds) seen.add(tag);
+  const spelling = new Array<ItemTag>(seen.size - 1);
+  let at = 0;
+  for (const tag of seen) if (tag !== "unknown") spelling[at++] = tag;
   return { spelling };
 }
 
