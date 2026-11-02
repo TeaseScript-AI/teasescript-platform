@@ -14,6 +14,10 @@ import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { coreRequest } from "./type-core-analysis.js";
 import { runGlobals } from "./type-core-route.js";
+import { VALUE_KINDS } from "../../src/value-kinds.js";
+import type { Expression } from "../../src/ast.js";
+import { expressionChildren } from "../../src/expression-children.js";
+import { REASON, type Item } from "../../src/type-inference/core/items.js";
 import type { SourceSite } from "../../src/type-inference/graph.js";
 import type { Obligation } from "../../src/type-inference/core/result.js";
 import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
@@ -660,18 +664,130 @@ export interface CombinedStop {
   readonly owing: ReadonlySet<string>;
 }
 
+/** Every value kind (`VALUE_KINDS`), `null` among them. */
+const ALL_KINDS: readonly string[] = Object.keys(VALUE_KINDS);
+
+/**
+ * The kinds a check lets through, by its `against` alone (never its words): `unknown` every kind, `non-null` every kind
+ * but `null`, else the kinds it names, a `number` with its whole numbers.
+ */
+function acceptedKinds(against: Obligation["against"]): ReadonlySet<string> {
+  const kinds = new Set<string>();
+  for (const kind of against)
+    if (kind === "unknown") ALL_KINDS.forEach((each) => kinds.add(each));
+    else if (kind === "non-null")
+      ALL_KINDS.filter((each) => each !== "null").forEach((each) => kinds.add(each));
+    else {
+      kinds.add(kind);
+      if (kind === "number") kinds.add("integer");
+    }
+  return kinds;
+}
+
+/** The kinds two sets share. */
+const intersect = (a: ReadonlySet<string>, b: ReadonlySet<string>): ReadonlySet<string> =>
+  new Set([...a].filter((kind) => b.has(kind)));
+
+/** Whether two sets of kinds are one. */
+const sameKinds = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
+  a.size === b.size && [...a].every((kind) => b.has(kind));
+
+/** A site's identity: its file and offsets. */
+const siteKey = (site: { file: number; start: number; end: number }): string =>
+  `${site.file}:${site.start}:${site.end}`;
+
+/** An expression's site in a file. */
+const siteOf = (file: number, expression: Expression) => ({
+  file,
+  start: expression.span.start.offset,
+  end: expression.span.end.offset,
+});
+
+/** Each expression of an analysis's flow graph, by its site's identity, with its parent expression (`expressionChildren`). */
+function parentsOf(
+  answers: Answers,
+): Map<string, { readonly parent: Expression; readonly file: number }> {
+  const parents = new Map<string, { readonly parent: Expression; readonly file: number }>();
+  const seen = new Set<Expression>();
+  for (const node of answers.graph.nodes) {
+    const pending = node.expression === undefined ? [] : [node.expression];
+    for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
+      if (seen.has(at)) continue;
+      seen.add(at);
+      for (const child of expressionChildren(at)) {
+        parents.set(siteKey(siteOf(node.file, child)), { parent: at, file: node.file });
+        pending.push(child);
+      }
+    }
+  }
+  return parents;
+}
+
+/**
+ * The read a consumer's check is about, as its site and the step below it: a member's or a selection's receiver; a
+ * fallback's left, or a `get` default's receiver at its element; else the value at the check's site. `null` where no
+ * read gives it (a conversion's default, which its result decides).
+ */
+function readOf(
+  answers: Answers,
+  parents: ReturnType<typeof parentsOf>,
+  check: Obligation,
+  rule: string | null,
+): { readonly site: SourceSite; readonly step: "element" | null } | null {
+  const expression = answers.graph.expressionAt(check.site)?.expression;
+  if (rule === "member" || rule === "selection") {
+    const receiver =
+      expression?.kind === "propertyAccessExpression" || expression?.kind === "indexExpression"
+        ? expression.object
+        : expression?.kind === "callExpression" &&
+            expression.callee.kind === "propertyAccessExpression"
+          ? expression.callee.object
+          : null;
+    return receiver === null ? null : { site: siteOf(check.site.file, receiver), step: null };
+  }
+  if (rule === "fallback") {
+    const parent = parents.get(siteKey(check.site))?.parent;
+    if (parent?.kind === "binaryExpression" && parent.operator === "otherwise")
+      return { site: siteOf(check.site.file, parent.left), step: null };
+    if (parent?.kind === "callExpression" && parent.callee.kind === "propertyAccessExpression")
+      return { site: siteOf(check.site.file, parent.callee.object), step: "element" };
+    return null;
+  }
+  return { site: check.site, step: null };
+}
+
+/** An analysis's answer at a read (`readOf`), or `null` where its graph has no node there. */
+function answerAt(
+  answers: Answers,
+  read: { readonly site: SourceSite; readonly step: "element" | null },
+): readonly Item[] | null {
+  const node = answers.graph.expressionAt(read.site);
+  if (node === undefined) return null;
+  return read.step === null ? (answers.at(node)?.items ?? null) : answers.project(node, read.step);
+}
+
+/** Whether an answer holds a value a stop left undecided: `unknown` with the reason `budget`. */
+const unsettled = (items: readonly Item[]): boolean =>
+  items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
+
+/** The collection and record literals, whose values a store holding them holds. */
+const LITERAL_KINDS = new Set(["listLiteral", "setLiteral", "dictLiteral", "objectLiteral"]);
+
 /** A check's `on` words with every dotted or indexed path left out (#1595: a label alone differs). */
 const withoutLabels = (on: string): string =>
   on.replace(/[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[^\]\s]*\])+/g, "·");
 
 /**
- * A combined stop's rule (S8, TABLE r4.285): the demand-only run is the reference, but where the finishing walk answers a
- * read the demand stop left `unknown`, the stopped analysis owes, at a check's kind, target and site, what the natural
- * analysis owes there (a), or marks whose checks the finishing read made from the written type there, the read's kinds
- * exactly the written type's (w); and a boundary against `unknown`, which has no plan content (S3 §4), is owned by the
- * undecided store mark at the store whose value holds it (z). Each unowned reference check and record is accepted only
- * by one of these, or named #1595's where the stop owes the same check by another label alone (its kind, site,
- * `against` and boundary, and its words but for their labels).
+ * A combined stop's rule (S8, TABLE r4.285, r4.290): the demand-only run is the reference, but where the finishing walk
+ * answers a read the demand stop left `unknown`, the stopped analysis owes at a check's kind, target and site what the
+ * natural analysis owes there (a: a consumer's check, never a store's, whose reference warning a value the budget left
+ * undecided explains, its read, `readOf`, answered otherwise in the stopped analysis); or marks at its target and site whose checks together let through exactly the
+ * kinds the reference's check lets through, by their `against` (w: the reference satisfied in other words, whatever the
+ * finishing read answered from; a mark letting through more is no clause's); and a boundary against `unknown`, which has
+ * no plan content (S3 §4), is owned by the undecided store mark at the site of the store whose value holds it (z: the
+ * outermost literal around the boundary's value). Each unowned reference check and record is accepted only by one of
+ * these, or named #1595's where the stop owes the same check by another label alone (its kind, site, `against` and
+ * boundary, and its words but for their labels).
  */
 export function combinedStop(reference: Answers, natural: Answers, stopped: Answers): CombinedStop {
   const marks = stopped.budget.deferred;
@@ -687,30 +803,6 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
         ),
       ].sort(),
     );
-  // (w) the read a mark's check is about: a member's or a selection's receiver, else the value at its site; its finishing
-  // answer (the stopped analysis's at its node, one derivation with the consumers', TABLE r4.138) is the written type's
-  // kinds there exactly, never wider, never a narrower current value
-  const written = (mark: (typeof marks)[number]): boolean => {
-    let site: SourceSite = mark.site;
-    const expression = natural.graph.expressionAt(site)?.expression;
-    if (mark.rule.rule === "member" || mark.rule.rule === "selection") {
-      const receiver =
-        expression?.kind === "propertyAccessExpression" || expression?.kind === "indexExpression"
-          ? expression.object
-          : null;
-      if (receiver === null) return false;
-      site = { file: site.file, start: receiver.span.start.offset, end: receiver.span.end.offset };
-    }
-    const [mine, theirs] = [natural.graph.expressionAt(site), stopped.graph.expressionAt(site)];
-    const place = mine === undefined ? null : (natural.at(mine)?.place ?? null);
-    const read = theirs === undefined ? null : stopped.at(theirs);
-    if (place === null || read === null) return false;
-    const admitted = natural.place(place.id, place.path).admitted;
-    if (admitted.by !== "written") return false;
-    const kinds = new Set(read.items.map((item) => item.tag).filter((tag) => tag !== "empty"));
-    const type = new Set(admitted.kinds.filter((kind) => kind !== "empty"));
-    return kinds.size === type.size && [...kinds].every((kind) => type.has(kind));
-  };
   const relabelledTo = (u: Obligation): boolean =>
     owed.some(
       (x) =>
@@ -724,14 +816,31 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
     );
   const checks = new Map<string, "a" | "w" | "z">();
   const relabelled = { checks: new Set<string>(), records: new Set<string>() };
+  let parentMap: ReturnType<typeof parentsOf> | undefined;
+  const parents = (): ReturnType<typeof parentsOf> => (parentMap ??= parentsOf(reference));
   const owing = new Set<string>();
   const classOf = (u: Obligation): "a" | "w" | "z" | "relabelled" | null => {
     const text = JSON.stringify(u);
     if (owedTexts.has(text)) return null;
     const slot = slotOf(u);
-    if (!naturalTexts.has(text) && againsts(natural.checks, slot) === againsts(owed, slot))
-      return "a";
-    // (marks at the read's target and site, of any kind, each made from the written type there)
+    // (a) only at a consumer's read the demand stop left `unknown` (the reference's warning explained by a value the budget
+    // left undecided, never a store's: the stopped decision's own) and the finishing walk answered (its answer there)
+    if (!naturalTexts.has(text) && againsts(natural.checks, slot) === againsts(owed, slot)) {
+      const owner = reference.diagnostics.find(
+        (d) => "obligation" in d && JSON.stringify(d.obligation) === text,
+      );
+      if (
+        owner !== undefined &&
+        "provenance" in owner &&
+        owner.provenance.context === "budget" &&
+        owner.rule.rule !== "store"
+      ) {
+        const read = readOf(reference, parents(), u, owner.rule.rule);
+        const after = read === null ? null : answerAt(stopped, read);
+        if (after !== null && !unsettled(after)) return "a";
+      }
+    }
+    // (marks at the read's target and site, of any kind, letting through together what the reference's check does)
     const here = marks.filter(
       (mark) =>
         mark.obligation.target === u.target &&
@@ -749,26 +858,39 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
     if (
       here.length > 0 &&
       others.every((x) => markChecks.has(JSON.stringify(x))) &&
-      here.every(written)
+      sameKinds(
+        here.map((mark) => acceptedKinds(mark.obligation.against)).reduce(intersect),
+        acceptedKinds(u.against),
+      )
     )
       return "w";
     if (
       u.boundary &&
       u.against.length === 1 &&
       u.against[0] === "unknown" &&
-      againsts(owed, slot) === "[]" &&
-      [...stopped.diagnostics, ...marks].some(
-        (d) =>
-          "rule" in d &&
-          d.rule.rule === "store" &&
-          "obligation" in d &&
-          d.obligation.against.length === 1 &&
-          d.obligation.against[0] === "unknown" &&
-          d.site.start <= u.site.start &&
-          u.site.end <= d.site.end,
+      againsts(owed, slot) === "[]"
+    ) {
+      // (the holding store's value: the outermost literal around the boundary's value, or that value itself)
+      let held = u.site;
+      for (
+        let up = parents().get(siteKey(held));
+        up !== undefined && LITERAL_KINDS.has(up.parent.kind);
+        up = parents().get(siteKey(held))
       )
-    )
-      return "z";
+        held = siteOf(up.file, up.parent);
+      if (
+        [...stopped.diagnostics, ...marks].some(
+          (d) =>
+            "rule" in d &&
+            d.rule.rule === "store" &&
+            "obligation" in d &&
+            d.obligation.against.length === 1 &&
+            d.obligation.against[0] === "unknown" &&
+            siteKey(d.site) === siteKey(held),
+        )
+      )
+        return "z";
+    }
     return relabelledTo(u) ? "relabelled" : null;
   };
   for (const u of reference.checks) {
