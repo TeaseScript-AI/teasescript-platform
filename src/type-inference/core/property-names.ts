@@ -66,9 +66,10 @@ interface Visit {
  * the prefixes they visited, the earlier tasks their pump checks walked and the longest such walk, the head steps those
  * checks compared, the longest path a task held, their path index's entries and longest chain, the tasks that pumped,
  * the keys below a key whose step they read, and the units of `checks` and of all counters the ledger counted
- * meanwhile; of the listings (`listed`): the sources classified for their effective ones (their steps charged as the
- * search's), the jumps taken to find a stores object's single top, the effective sources scheduled, the listings that scheduled nothing, those that scheduled every source, and of these the ones where a
- * source could pump or an effective one was on the chain.
+ * meanwhile, and of these the ones outside shared builds (`own`, what a demand's allowance measures); of the listings
+ * (`listed`): the sources classified for their effective ones (their steps charged as the search's), the jumps taken to
+ * find a stores object's single top, the effective sources scheduled, the listings that scheduled nothing, those that
+ * scheduled every source, and of these the ones where a source could pump or an effective one was on the chain.
  */
 export interface NameRecords {
   tasks: number;
@@ -83,6 +84,7 @@ export interface NameRecords {
   below: number;
   checks: number;
   units: number;
+  own: number;
   classified: number;
   jumps: number;
   replayed: number;
@@ -113,6 +115,7 @@ export function withNameRecords<T>(run: () => T): {
     below: 0,
     checks: 0,
     units: 0,
+    own: 0,
     classified: 0,
     jumps: 0,
     replayed: 0,
@@ -307,7 +310,8 @@ function listingMemo(pass: CorePass): ListingMemo {
     stops: contract.stoppedCount,
     stopped: work.stopped,
     listings: new Map(),
-    tops: new Map(),
+    // (a stores object's single top reads the prefix index alone, which no stop changes: found once per pass)
+    tops: known?.tops ?? new Map(),
     contributions: new Map(),
   };
   listingMemos.set(contract, memo);
@@ -401,7 +405,9 @@ function onParentChain(work: WorkLedger, layer: SubLayer, other: SubLayer): bool
 
 /**
  * The layer a stores object's sources come from as one, once per pass: its first top, every other top on that one's
- * parent chain (so `subSources` lists them within it); `undefined` where none is, `null` where it lists none.
+ * parent chain (so `subSources` lists them within it); `undefined` where none is, `null` where it lists none. A shared
+ * build (`WorkLedger.shared`): its jumps count to the analysis, to no demand's allowance, as the search that asked first
+ * did not make them its own work.
  */
 function singleTop(
   work: WorkLedger,
@@ -410,12 +416,13 @@ function singleTop(
 ): SubLayer | null | undefined {
   if (memo.tops.has(stores)) return memo.tops.get(stores);
   const tops = topsOf(stores);
-  const top =
+  const top = work.shared(() =>
     tops.length === 0
       ? null
       : tops.every((each) => onParentChain(work, tops[0]!, each))
         ? tops[0]
-        : undefined;
+        : undefined,
+  );
   memo.tops.set(stores, top);
   return top;
 }
@@ -697,11 +704,12 @@ function listingOf(
  * (`layerListing`), each source as the flat search takes it up below the listing visit (`classify`): one this search
  * took up already, or whose take-up there pumps, is kept as effective with its followers unmade, so the names the
  * listings give are one whichever question makes them; they are forgotten once a decision or the work stopped
- * (`listingMemo`). Charges move, never add: a classification charges each source as the flat search charges its
- * take-up at that listing (its key and identity, its walk, its pump check and names, and its listings and tasks only
- * where it follows), and the visit that takes it up there, or the first later, takes those parts in place of making them
- * again (`Contribution`); an effective source is charged as a scheduled task; the single top of a stores object is
- * found once per pass, a charge per jump. A decided object's names then cost its own prefixes' stores and its effective
+ * (`listingMemo`). In a demand's work, charges move, never add: a classification charges each source as the flat search
+ * charges its take-up at that listing (its key and identity, its walk, its pump check and names, and its listings and
+ * tasks only where it follows), and the visit that takes it up there, or the first later, takes those parts in place of
+ * making them again (`Contribution`); an effective source is charged as a scheduled task. The analysis alone carries
+ * one charge more: a stores object's single top, found once per pass at a charge per jump, a shared build no demand's
+ * allowance counts (`singleTop`). A decided object's names then cost its own prefixes' stores and its effective
  * sources: for a stack of diamonds, one.
  */
 export function propertyNames(
@@ -730,6 +738,7 @@ export function propertyNames(
   const onChain = new Set<string>();
   const checksBefore = recording === null ? 0 : (work.counts().get("checks") ?? 0);
   const unitsBefore = recording === null ? 0 : work.total + work.finishing;
+  const ownBefore = recording === null ? 0 : work.own;
   // (the pass's listings, none where every listing schedules all its sources)
   const listings = (): ListingMemo | null => (flatListings ? null : listingMemo(pass));
   /**
@@ -1056,6 +1065,7 @@ export function propertyNames(
   if (recording !== null) {
     recording.checks += (work.counts().get("checks") ?? 0) - checksBefore;
     recording.units += work.total + work.finishing - unitsBefore;
+    recording.own += work.own - ownBefore;
   }
   return names;
 }

@@ -580,11 +580,12 @@ test("the first property `${...}` shows of a copy comes from its source's litera
  * #1610's identity: a listing's effective sources leave what the searches publish as the flat listing leaves it
  * (`withFlatListings`): each binding's property names two levels down in their order, asked forward and backward, and
  * every diagnostic's message (`orderedNames`), on #1466's layer families and #1610's (`SEARCH_FAMILIES`) at k = 4, on
- * the witness of a listing's fallback where a source could pump (the feedback) and on a stack of copies of two literals
- * shown with `${...}`, whose messages name the first property of the earliest literal the searches report, in the four
- * modes; each binding's names are one whichever order asks first; the listings schedule effective sources, skip their
- * run's prefix and fall back where they must; every search's `checks` are its records'; and the searches charge no more
- * than the flat listing's (charges move, never add).
+ * the witness of a listing's fallback where a source could pump (the feedback), on a stack of copies of two literals
+ * shown with `${...}`, whose messages name the first property of the earliest literal the searches report, and on Astra
+ * r1's witness of a stores object with two tops, in the four modes; each binding's names are one whichever order asks
+ * first; the listings schedule effective sources, skip their run's prefix, fall back and find a single top where they
+ * must; every search's `checks` are its records'; and the searches' demand work (`own`) is no more than the flat
+ * listing's (charges move, never add), their total no more than it and the single tops' jumps, a shared build.
  */
 test("a listing's effective sources leave each binding's names in their order, and every message, as the flat listing does (#1610)", () => {
   const shown = [
@@ -601,6 +602,21 @@ test("a listing's effective sources leave each binding's names in their order, a
     ),
     "exit",
   ].join("\n");
+  // (Astra r1's B1: a stores object whose second top lies on its first's parent chain, one jump)
+  const tops = [
+    "let root={p:{q:{left:1,p:{inside:1}}},q:{p:{right:1,q:{deep:1}}}}",
+    "let a=root.p",
+    "let b=root",
+    "let c=a",
+    "root.p.q=b.q.p",
+    "root.q.p=c.q",
+    "c.p=b.p.q",
+    "b=c",
+    "let merged=b",
+    "merged=c",
+    "merged=root",
+    "exit",
+  ].join("\n");
   const programs = [
     ...[...LAYER_FAMILIES, ...SEARCH_FAMILIES].map((family) => ({
       name: family.name,
@@ -608,8 +624,9 @@ test("a listing's effective sources leave each binding's names in their order, a
     })),
     { name: "feedback", files: [{ path: "main.tease", source: feedback(4) }] },
     { name: "shown", files: [{ path: "main.tease", source: shown }] },
+    { name: "tops", files: [{ path: "main.tease", source: tops }] },
   ];
-  const totals = { replayed: 0, skipped: 0, pumpable: 0 };
+  const totals = { replayed: 0, skipped: 0, pumpable: 0, jumps: 0 };
   for (const { name, files } of programs) {
     const request = coreRequest(files, ["hostValue", "hostOther"]);
     assert.ok(request !== null, name);
@@ -628,8 +645,12 @@ test("a listing's effective sources leave each binding's names in their order, a
         // (the earliest literal's first property, not the later literal's)
         if (name === "shown") assert.match(result, /as in '\$\{d4\.f\}'/, label);
         assert.ok(
-          records.units <= flat.records.units,
-          `${label}: ${records.units} > ${flat.records.units}`,
+          records.own <= flat.records.own,
+          `${label}: ${records.own} > ${flat.records.own}`,
+        );
+        assert.ok(
+          records.units <= flat.records.units + records.jumps,
+          `${label}: ${records.units} > ${flat.records.units} + ${records.jumps}`,
         );
         assert.equal(
           records.checks,
@@ -645,6 +666,7 @@ test("a listing's effective sources leave each binding's names in their order, a
         totals.replayed += records.replayed;
         totals.skipped += records.skipped;
         totals.pumpable += records.pumpable;
+        totals.jumps += records.jumps;
         // EVIDENCE: `orderedNames` writes each binding as its place, its names and each name's names below.
         const { places } = JSON.parse(result) as { places: [number, string[], string[][]][] };
         byPlace.push(new Map(places.map(([place, ...names]) => [place, JSON.stringify(names)])));
@@ -653,7 +675,7 @@ test("a listing's effective sources leave each binding's names in their order, a
     }
   }
   assert.ok(
-    totals.replayed > 0 && totals.skipped > 0 && totals.pumpable > 0,
+    totals.replayed > 0 && totals.skipped > 0 && totals.pumpable > 0 && totals.jumps > 0,
     JSON.stringify(totals),
   );
 });
