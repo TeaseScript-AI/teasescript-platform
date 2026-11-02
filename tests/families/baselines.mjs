@@ -1006,8 +1006,32 @@ async function seed(tree, root, refuse) {
 }
 
 /**
- * The one baseline of this tool that the folder `root` holds (a seed's or a computed shard's `<out>`, #1590), read whole:
- * its folder, MANIFEST (`text`), identity and each recorded area's PLAN, which must be the recorded one; or why not.
+ * Why `text` is no PLAN that `planOf` writes for `area` in `shards` shards, a positive count (its version, area and
+ * count, its limits, allowances and checks, then each shard's entry in order and nothing after), else undefined (#1590:
+ * a PLAN received from elsewhere is external data, and zero shards would read complete with no run in them).
+ */
+function planFault(text, area, shards) {
+  if (!Number.isInteger(shards) || shards < 1)
+    return `its count of shards, ${shards}, is not positive`;
+  const lines = text.split("\n");
+  if (lines.pop() !== "") return "its last line does not end";
+  const head = ["plan 1", `area ${area}`, `shards ${shards}`];
+  const at = head.findIndex((line, index) => lines[index] !== line);
+  if (at >= 0) return `its line ${at + 1} is not "${head[at]}"`;
+  let line = 3;
+  if (!/^limits \d+ s, \d+ MB$/.test(lines[line++] ?? "")) return "it has no limits line";
+  if (!/^allowances \S+$/.test(lines[line++] ?? "")) return "it has no allowances line";
+  while (/^checks \S/.test(lines[line] ?? "")) line += 1;
+  for (let shard = 0; shard < shards; shard += 1)
+    if (!new RegExp(`^shard ${shard} \\d+ [0-9a-f]{64}$`).test(lines[line++] ?? ""))
+      return `its entry of shard ${shard} is missing or out of order`;
+  return line === lines.length ? undefined : "it has lines after its last shard's entry";
+}
+
+/**
+ * The one baseline of this tool that the folder `root` holds (a seed's or a computed shard's `<out>`, #1590), read whole
+ * and checked as data received from elsewhere: its folder, MANIFEST (`text`), identity and each recorded area's PLAN,
+ * which must be the recorded one and one this tool writes (`planFault`); or why not.
  */
 function heldIn(root) {
   const real = realOf(root);
@@ -1036,6 +1060,9 @@ function heldIn(root) {
     const plan = bytesOf(path.join(dir, area, "PLAN"))?.toString();
     if (plan === undefined || hash(plan) !== record.plan)
       return { refused: `${dir}/${area}'s PLAN is not the one its MANIFEST records` };
+    const fault = planFault(plan, area, record.shards);
+    if (fault !== undefined)
+      return { refused: `${dir}/${area}'s PLAN is not one this tool writes: ${fault}` };
     plans.set(area, plan);
   }
   return { dir, text, identity, plans };
@@ -1069,6 +1096,7 @@ function differenceOf(held, given) {
  * area's PLAN made where the baseline lacks it (`planned`). `seed` says whether anything was written.
  */
 async function adopt(central, held) {
+  if (held.plans.size === 0) return { refused: `${held.dir}'s MANIFEST records no area` };
   if (compiledIn(held.text).length === 0)
     return {
       refused: `${held.dir}'s MANIFEST names no build of the compiler (dist/src/) its shards are stored from`,
@@ -1116,9 +1144,18 @@ function shardOf(file, plan, places, identity, listing) {
     return {
       refused: `${file}'s total counts ${total.stalled} stalled sources, its lines ${stalled.length}`,
     };
+  // (each certificate bound to the source it certifies: the listing's place and reason are the stalled line's, and so is
+  // the place of the run alone it carries, which stalled)
   for (const source of stalled) {
     const entry = listing.find((one) => placeIn(one) === placeIn(source));
-    if (entry?.stalled !== source.stalled || entry.alone?.stalled === undefined)
+    const alone = entry?.alone;
+    if (
+      entry?.stalled !== source.stalled ||
+      alone === null ||
+      typeof alone !== "object" ||
+      placeIn(alone) !== placeIn(source) ||
+      typeof alone.stalled !== "string"
+    )
       return {
         refused: `${file}: ${source.generator} ${source.source} stalled (${source.stalled}), and stalls.json does not show it stalling alone`,
       };
@@ -1157,10 +1194,14 @@ async function importShard(central, held, area, shard, shards, listing) {
     if (bytesOf(path.join(dir, area, "PLAN"))?.toString() !== plan)
       return { refused: `${dir}/${area} holds no PLAN or another one: import its seed first` };
     const file = shardFile(path.join(held.dir, area), shard, shards);
-    const listed = listing.filter(
-      (entry) => entry.area === area && entry.shard === `${shard}/${shards}`,
+    const other = listing.find(
+      (entry) => entry.area !== area || entry.shard !== `${shard}/${shards}`,
     );
-    const read = shardOf(file, record.plan, places[shard], held.identity, listed);
+    if (other !== undefined)
+      return {
+        refused: `stalls.json lists a stall of another shard than ${area} ${shard}/${shards}: ${other.generator} ${other.source}`,
+      };
+    const read = shardOf(file, record.plan, places[shard], held.identity, listing);
     if (read.refused !== undefined) return read;
     const target = shardFile(path.join(dir, area), shard, shards);
     const there = shardIn(bytesOf(target), record.plan, places[shard], identityIn(text));
@@ -1212,6 +1253,10 @@ async function importing(central, computed, area, shard, listed, refuse) {
     try {
       if (existsSync(file)) listing = JSON.parse(readFileSync(file, "utf8")).stalls;
       if (!Array.isArray(listing)) throw new Error("it lists no stalls");
+      if (
+        listing.some((entry) => entry === null || typeof entry !== "object" || Array.isArray(entry))
+      )
+        throw new Error("it lists a stall that is no object");
     } catch (error) {
       refuse(`${file}: ${error.message}`);
     }
@@ -1260,6 +1305,9 @@ function statusOf(root, src) {
       areas.push({ area, state: "absent", count: 0, shards: record.shards });
       continue;
     }
+    const fault = planFault(plan, area, record.shards);
+    if (fault !== undefined)
+      return say(`${dir}/${area}'s PLAN is not one this tool writes: ${fault}`, 2);
     const { shards, places } = parsePlan(plan);
     let count = 0;
     let damaged = false;

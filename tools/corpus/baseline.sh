@@ -168,13 +168,14 @@ if [ "${1:-}" = compute ]; then
   if [ "$(jq -r .stalled <<< "$stalled")" != 0 ]; then
     ran=$work/alone-root/$src/$area/0of1.runs.jsonl
     stored "$work/alone/$area" "$work/alone-root" 0/1 || fail "its stalled sources could not be stored alone"
-    if ! node "$state" stalls "$take/$src/$area/${i}of${n}.runs.jsonl" "$ran" "$area" "$i/$n" "$work/stalls.json" >&2; then
-      # a source that ended alone stalled under the machine's load: the whole shard once more
-      take=$work/second
-      copy "$take" || fail "the shard could not be stored again"
-      node "$state" stalls "$take/$src/$area/${i}of${n}.runs.jsonl" "$ran" "$area" "$i/$n" "$work/stalls.json" >&2 ||
-        fail "sources stalled in two stores that did not stall alone, under the load of the machine"
-    fi
+  fi
+  # each stall of the shard a stall of its own (it stalled alone too), decided in the scratch before <out> is written
+  if ! node "$state" stalls "$take/$src/$area/${i}of${n}.runs.jsonl" "$ran" "$area" "$i/$n" "$work/stalls.json" >&2; then
+    # a source that ended alone stalled under the machine's load: the whole shard once more
+    take=$work/second
+    copy "$take" || fail "the shard could not be stored again"
+    node "$state" stalls "$take/$src/$area/${i}of${n}.runs.jsonl" "$ran" "$area" "$i/$n" "$work/stalls.json" >&2 ||
+      fail "sources stalled in two stores that did not stall alone, under the load of the machine"
   fi
   node "$state" import "$out" "$take" >&2 &&
     node "$state" stalls "$take/$src/$area/${i}of${n}.runs.jsonl" "$ran" "$area" "$i/$n" "$out/stalls.json" >&2 &&

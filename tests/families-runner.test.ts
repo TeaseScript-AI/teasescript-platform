@@ -1125,8 +1125,9 @@ test("the stored baselines finish or clear what a writer killed at a write left,
 });
 
 /**
- * A built tree's library where `ends` ends the process on every run, a stall of its own, and `flaky` ends it on the runs
- * FLAKY's characters say (`x`, one each, counted in TMPDIR, which a fill's stores share), a stall of the machine's load.
+ * A built tree's library where `ends` ends the process on every run, a stall of its own, and `flaky` and `mixed` end it on
+ * the runs FLAKY's characters say (`x`, one each, counted in TMPDIR, which a fill's stores share), a stall of the
+ * machine's load.
  */
 const FILLABLE = `import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -1137,7 +1138,7 @@ export const MODES = [false, true].flatMap((reversed) =>
 export function publicationHashes(files) {
   const source = files[0].source;
   if (source === "ends") process.exit(3);
-  if (source === "flaky" && process.env.FLAKY !== undefined) {
+  if ((source === "flaky" || source === "mixed") && process.env.FLAKY !== undefined) {
     const count = join(process.env.TMPDIR, "flaky");
     const left = existsSync(count) ? readFileSync(count, "utf8") : process.env.FLAKY;
     writeFileSync(count, left.slice(1));
@@ -1166,7 +1167,16 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         cpSync(join("tests", "families", tool), join(folder, "tests", "families", tool));
       writeFileSync(
         join(folder, "tests", "families", "area", "stored.mjs"),
-        'export const cases = [["same", "same"], ["ends", "ends"], ["flaky", "flaky"]];\n',
+        // (shard i of 16 holds the sources i and i + 16: shard 1 `ends` and `mixed`, a stall of its own and one of the load)
+        `export const cases = ${JSON.stringify(
+          [
+            "same",
+            "ends",
+            "flaky",
+            ...[...Array(14).keys()].map((index) => `s${index + 3}`),
+            "mixed",
+          ].map((name) => [name, name]),
+        )};\n`,
       );
       return folder;
     };
@@ -1220,7 +1230,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       sh(more, "compute", from, at("seed", src), "area", `${index}/16`, at(out));
     for (const [out, index, flaky] of [
       ["zero", 0, ""],
-      ["one", 1, ""],
+      ["one", 1, "x...."],
       ["two", 2, "x...."],
     ] as const) {
       const computed = compute(out, index, { FLAKY: flaky });
@@ -1236,6 +1246,10 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         ],
       ),
       [["ends", "exit 3", "exit 3"]],
+    );
+    assert.equal(
+      JSON.parse(readFileSync(shard("one", 1), "utf8").split("\n")[1]!).stalled,
+      undefined,
     );
     assert.deepEqual(listed("two"), []);
     assert.equal(
@@ -1363,6 +1377,39 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         1,
         /total counts 0 stalled sources, its lines 1/,
       ],
+      [
+        // (a stall certificate is bound to its source: `mixed` stalled, its run alone `ends`'s)
+        copied("one", "borrowed", (dir) => {
+          const file = join(dir, "area", "1of16.runs.jsonl");
+          const lines = readFileSync(file, "utf8")
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line));
+          const ended = lines.pop();
+          Object.assign(lines[1], { stalled: "exit 4", runs: {} });
+          const body = lines.map((line) => `${JSON.stringify(line)}\n`).join("");
+          ended.total.lines = createHash("sha256").update(body).digest("hex");
+          ended.total.stalled = 2;
+          writeFileSync(file, `${body}${JSON.stringify(ended)}\n`);
+          const listing = JSON.parse(readFileSync(at("borrowed", "stalls.json"), "utf8"));
+          const [own] = listing.stalls;
+          listing.stalls.push({ ...own, source: "mixed", key: lines[1].key, stalled: "exit 4" });
+          writeFileSync(at("borrowed", "stalls.json"), JSON.stringify(listing));
+        }),
+        1,
+        /stored\.mjs mixed stalled \(exit 4\), and stalls\.json does not show it stalling alone/,
+      ],
+      [
+        copied("one", "elsewhere", () =>
+          edit(
+            at("elsewhere", "stalls.json"),
+            '"shard":"1/16","generator"',
+            '"shard":"2/16","generator"',
+          ),
+        ),
+        1,
+        /lists a stall of another shard than area 1\/16: stored\.mjs ends/,
+      ],
       ["empty", 0, /holds no baseline of this tool/],
     ] as const) {
       const refused = imported(root, index);
@@ -1380,6 +1427,36 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     const unseeded = tool("status", at("unnamed"), src);
     assert.equal(unseeded.status, 1);
     assert.match(unseeded.stdout, /incomplete: no seed recorded its areas/);
+    // a seed is checked as data received from elsewhere: a PLAN of no shard (which would read complete with no run in
+    // it), refused by `import` and by `status`, and a seed that records no area
+    copied("seed", "shardless", (dir) => {
+      const text = `${readFileSync(join(dir, "area", "PLAN"), "utf8")
+        .split("\n")
+        .filter((line) => !line.startsWith("shard "))
+        .join("\n")
+        .replace(/^shards 16$/m, "shards 0")}`;
+      writeFileSync(join(dir, "area", "PLAN"), text);
+      edit(
+        join(dir, "MANIFEST"),
+        /^area area 16 \w+$/m,
+        `area area 0 ${createHash("sha256").update(text).digest("hex")}`,
+      );
+    });
+    assert.match(
+      said(tool("import", at("shardless-central"), at("shardless"))).refused,
+      /area's PLAN is not one this tool writes: its count of shards, 0, is not positive/,
+    );
+    const shardless = tool("status", at("shardless"), src);
+    assert.equal(shardless.status, 2);
+    assert.match(shardless.stdout, /is not one this tool writes/);
+    copied("seed", "arealess", (dir) => {
+      rmSync(join(dir, "area"), { recursive: true });
+      edit(join(dir, "MANIFEST"), /^area area .*\n/m, "");
+    });
+    assert.match(
+      said(tool("import", at("arealess-central"), at("arealess"))).refused,
+      /MANIFEST records no area/,
+    );
     cpSync(central, at("unplanned"), { recursive: true });
     rmSync(at("unplanned", src, "area", "PLAN"));
     assert.match(
