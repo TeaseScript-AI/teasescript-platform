@@ -1417,9 +1417,12 @@ function gateShapes(): Record<string, (k: number) => string> {
   };
 }
 
+/** The phases a first settled stop may be in: the walk, or the stores' extraction before it (#1556's phase B). */
+const FIRST_SETTLED: readonly string[] = ["extraction", "walk"];
+
 /**
  * The finishing growth gate (#1445, TABLE r4.208): each shape at its two sizes (`sizes`, one doubling), in both orders,
- * measured at its first settled walk stop. Per doubling of the syntax nodes, the frontier's own counter (`checks`) grows
+ * measured at its first settled stop (in the walk, or the extraction before it). Per doubling of the syntax nodes, the frontier's own counter (`checks`) grows
  * within 2.35; the ring and the chain whose links store their own property are also gated whole, finishing within 2.15
  * and every finishing counter within 2.35. The other shapes' admission and contract work and decision-stop bookkeeping
  * (`readerRecords`, `stopAsks`) grow faster on `main` already (#1456, #1464). Each problem as a line.
@@ -1453,8 +1456,11 @@ export function frontierGrowthProblems(
           else first = middle + 1;
         }
         const { budget } = analysed(first);
-        if (budget.stoppedIn !== "walk")
-          problems.push(`${shape} ${k}: the first settled stop is not in the walk`);
+        // (the first settled phase: the walk, or the extraction before it, #1556's phase B)
+        if (!FIRST_SETTLED.includes(budget.stoppedIn ?? ""))
+          problems.push(
+            `${shape} ${k}: the first settled stop is not in the walk or the extraction`,
+          );
         return {
           units: budget.finishing,
           nodes: budget.counts.get("syntaxNodes")!,
