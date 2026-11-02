@@ -1380,8 +1380,20 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         `${index}/16`,
       ]);
       assert.equal(run.status, 0);
+      // (shard 3's total as a runner before #1592 wrote it, without `unansweredAlike`: imported, and read by status and
+      // the comparison, beside shards whose total has it)
+      if (index === 3) {
+        const stored = join(at("rest"), src, "area", "3of16.runs.jsonl");
+        const text = readFileSync(stored, "utf8");
+        assert.match(text, /,"unansweredAlike":0,[^\n]*\n$/);
+        writeFileSync(stored, text.replace(/,"unansweredAlike":0(,[^\n]*\n)$/, "$1"));
+      }
       assert.equal(imported("rest", index).status, 0);
     }
+    assert.doesNotMatch(
+      readFileSync(join(central, src, "area", "3of16.runs.jsonl"), "utf8"),
+      /unansweredAlike/,
+    );
     assert.deepEqual(
       [status().status, status().stdout],
       [0, `baseline ${src}: ${join(central, src)}: complete: area\n`],
