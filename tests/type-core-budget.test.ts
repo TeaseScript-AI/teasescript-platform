@@ -202,6 +202,28 @@ test("work counted apart never stops the analysis, inside another apart callback
 });
 
 /**
+ * #1573: work a reader repeats (`WorkLedger.repeat`, a shared class's walk made once for every reader) counts to a
+ * demand's allowance (`own`) and to its spender as a charge would, never to the total or a counter, so the allowance
+ * never stops on it; inside a `shared` build to the spender alone, as that build's charges leave `own`; nothing apart
+ * or after the stop.
+ */
+test("repeated work counts to the demand and its spender, never to the total, a counter or a shared build", () => {
+  const work = new WorkLedger(10);
+  work.spender = 1;
+  work.charge("checks", 4);
+  work.repeat(20);
+  work.shared(() => work.repeat(5));
+  work.apart(() => work.repeat(3));
+  assert.deepEqual(
+    { total: work.total, own: work.own, spent: work.spent(), counts: [...work.counts()] },
+    { total: 4, own: 24, spent: [0, 29], counts: [["checks", 4]] },
+  );
+  work.stop("work");
+  work.repeat(7);
+  assert.deepEqual({ own: work.own, spent: work.spent() }, { own: 24, spent: [0, 29] });
+});
+
+/**
  * TABLE r4.55, S3 §5: the pipeline handles depth 10,000; the consumers of statements nested past the core's 256 are
  * checked when the script runs, every other statement proved as ever (admission still decides every place from every
  * store), an `else if` one level more: a check inside them is moved, an error outside stands, and one warning names the

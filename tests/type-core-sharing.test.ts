@@ -1259,3 +1259,53 @@ test("a further list of choices of one class adds class work independent of the 
     Contract.prototype.classMixed = original;
   }
 });
+
+/**
+ * #1573 (Codex r1's B1 on #1628): two classes of choices, of `hostValue`'s and of `hostOther`'s properties, read in
+ * four lists of all four bindings. A reader of a choice walked once counts to its demand what the walk charged
+ * (`WorkLedger.repeat`), as when each list walked its own, so no list's decision stops elsewhere than it did: at the
+ * test demand allowance 256, in the four modes, the stops, passes and exhaustion are those of each list walking its own
+ * members (where the reversed shared and the source-order unshared analyses stop a second decision in their second
+ * pass, which ends them, TABLE r4.183), a regression oracle of this source.
+ */
+test("a choice's walk shared by four lists moves no decision's stop at 256, in the four modes (#1573)", () => {
+  const choice = (host: string): string =>
+    `askChoice {text: "0", value: ${host}.p0}, {text: "1", value: ${host}.p1}`;
+  const source = [
+    ...["hostValue", "hostOther", "hostValue", "hostOther"].map(
+      (host, j) => `let p${j} = ${choice(host)}`,
+    ),
+    ...[0, 1, 2, 3].map(
+      (i) => `let xs${i} = [p0, p1, p2, p3]\nlet n${i}: integer = xs${i}[hostValue.i]`,
+    ),
+    "exit\n",
+  ].join("\n");
+  const element = (pass: number, list: number, ordinal: number) =>
+    [pass, `xs${list}`, "element", ordinal] as const;
+  const expected = [
+    {
+      mode: { reversed: false, unshared: false },
+      stops: [element(1, 0, 6), element(1, 1, 9), element(1, 2, 12), element(1, 3, 15)],
+      exhausted: null,
+    },
+    {
+      mode: { reversed: false, unshared: true },
+      stops: [element(1, 0, 6), element(2, 1, 8)],
+      exhausted: "work",
+    },
+    {
+      mode: { reversed: true, unshared: false },
+      stops: [element(1, 3, 9), element(2, 2, 11)],
+      exhausted: "work",
+    },
+    { mode: { reversed: true, unshared: true }, stops: [], exhausted: null },
+  ];
+  for (const { mode, stops, exhausted } of expected) {
+    const found = stopSet([{ path: "main.tease", source }], mode, ["hostValue", "hostOther"], 256);
+    assert.deepEqual(
+      { stops: found?.stops, exhausted: found?.exhausted },
+      { stops, exhausted },
+      JSON.stringify(mode),
+    );
+  }
+});

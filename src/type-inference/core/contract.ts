@@ -368,18 +368,31 @@ export class Contract {
   readonly loadsBelowOf = new WeakMap<readonly OtherGroup[], readonly Item[]>();
   /** Per group of a mixed class (`othersAt`), the leaves its other members name by role (`othersLeaves`), or `null`. */
   readonly othersLeavesOf = new WeakMap<ClassGroup<ValueEntry>, IngressNode | null>();
-  /** Per value and side, the leaves it names by role in its class (`leafRoles`); per value its walk starts from, too. */
+  /**
+   * Per value and side, the leaves it names by role in its class (`leafRoles`); per value its walk starts from, those and
+   * the units the walk charged.
+   */
   readonly leafRolesOf = [
     new Map<PlaceId, readonly IngressNode[] | null>(),
     new Map<PlaceId, readonly IngressNode[] | null>(),
   ];
   readonly leafRolesFrom = [
-    new Map<PlaceId, readonly IngressNode[] | null>(),
-    new Map<PlaceId, readonly IngressNode[] | null>(),
+    new Map<PlaceId, { readonly roles: readonly IngressNode[] | null; readonly units: number }>(),
+    new Map<PlaceId, { readonly roles: readonly IngressNode[] | null; readonly units: number }>(),
   ];
-  /** Per member's leaves by role (`leafRoles`), their union (`rolesNode`); per node, whether it holds them. */
+  /**
+   * Per member's leaves by role (`leafRoles`), their union (`rolesNode`); per node, whether it holds them, and the units
+   * the check charged; per sum of the members' ids, the sets of members' nodes unioned (`setNode`).
+   */
   readonly rolesNodes = new WeakMap<readonly IngressNode[], IngressNode>();
-  readonly heldLeaves = new WeakMap<IngressNode, WeakMap<readonly IngressNode[], boolean>>();
+  readonly heldLeaves = new WeakMap<
+    IngressNode,
+    WeakMap<readonly IngressNode[], { readonly held: boolean; readonly units: number }>
+  >();
+  readonly memberSets = new Map<
+    number,
+    { readonly members: ReadonlySet<IngressNode>; readonly node: IngressNode }[]
+  >();
   /**
    * #1203: per literal path's computed values on either side that hold classes of computed-key loads (`othersAt`),
    * the classes a read below their root takes: in order, those of computed-key loads as one `null` where the first of

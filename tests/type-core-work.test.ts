@@ -234,6 +234,46 @@ test("two choices read in k lists grow with the program in either order, each co
 });
 
 /**
+ * #1573 (Codex r1's B2 on #1628): a list of m loads of one class holding the members of an earlier list in another order
+ * names their leaves through the node that list made (`setNode`), found by the members' ids in any order, never by
+ * sorting them: what such a list adds to the contract's steps (`invSteps`) beyond a list of the first order grows with
+ * its members, at most 2.15 from 8 to 16 of them in either order (a sort per list measured 2.85).
+ */
+test("a list of a set's members in another order adds contract steps linear in its members (#1573)", () => {
+  const steps = (m: number, turned: boolean, reversed: boolean): number => {
+    const order = Array.from({ length: m }, (_, j) => j);
+    const lists = [order, order, turned ? order.map((j) => (j * (m - 1) + 1) % m) : order];
+    const source = [
+      many(
+        m,
+        (j) => `let p${j} = load("same", default: ${j % 2 === 1 ? "hostOther" : "hostValue"})`,
+      ),
+      ...lists.map(
+        (list, i) =>
+          `let xs${i} = [${list.map((j) => `p${j}`).join(", ")}]\nlet n${i}: integer = xs${i}[hostValue.i].p`,
+      ),
+      "exit",
+    ].join("\n");
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null, source);
+    const run = (): Answers => analyseCore(request);
+    const answers = reversed
+      ? withConsumerOrder(
+          (list) => [...list].reverse(),
+          () => withSolverSeam({ reverseWorklist: true }, run),
+        )
+      : run();
+    return answers.budget.counts.get("invSteps") ?? 0;
+  };
+  for (const reversed of [false, true]) {
+    const [eight, sixteen] = [8, 16].map(
+      (m) => steps(m, true, reversed) - steps(m, false, reversed),
+    );
+    assert.ok(sixteen! <= DOUBLING * eight!, `reversed: ${reversed}: ${eight} → ${sixteen}`);
+  }
+});
+
+/**
  * #1466: a stack of k diamonds of copies, its siblings, wide and nested joins and chains of listing layers read at
  * sparse paths (`LAYER_FAMILIES`), each read answered once per layer and path from the layers below it that hold its
  * property, at one small doubling, in either order and with the sharing off too: the total and the contract's own
