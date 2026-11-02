@@ -1465,6 +1465,9 @@ test("a pasted form counts as run only where its run ends through it, answered w
   // (a failure after a valid answer)
   const canary = 'let answer = askInteger("Number?")\nsay 1 / (answer - answer)\nexit\n';
   assert.match(pasteFailure(pasted(canary, "1 / (answer - answer)")) ?? "", /"code":"TSR036"/);
+  // (a prompt's code, which runs before the answer and counts once the run has ended, Codex r1 on #1589)
+  const prompt = 'let t = "hello"\nlet answer = askInteger("${t.length}")\nexit\n';
+  assert.equal(pasteFailure(pasted(prompt, "t.length")), null);
   // (a list's addition that receives the answer, as the family's duration stores do)
   const added =
     'let ps: duration[] = [1 s]\nps.add((askInteger("How many?")) s)\nsay ps.length\nexit\n';
@@ -1480,6 +1483,55 @@ test("a pasted form counts as run only where its run ends through it, answered w
   assert.equal(
     pasteFailure(pasted(asking, 'askInteger("Again?")')),
     "incomplete execution: waiting for number after 4 completions",
+  );
+});
+
+/**
+ * Codex r1 on #1589: an instruction around a pasted form may run while the form's own position is skipped. At each
+ * position a run may skip (`lazyPosition` in `type-core-paste.ts`) a form counts as run only where an instruction inside
+ * the position ran, as an answer's prompt there; skipped, or with no instruction inside, it is unproved.
+ */
+test("a pasted form at a position a run may skip counts as run only where an instruction inside it ran (Codex r1 on #1589)", () => {
+  const ask = 'askInteger("${t.length}")';
+  const at = (source: string, code: string, from = 0): Pasted => {
+    const start = source.indexOf(code, from);
+    return { code, source, at: { start, end: start + code.length } };
+  };
+  const unproved = (position: string): string => `unproved evaluation: ${position}`;
+  for (const [lines, outcome] of [
+    [`say true and ${ask} > 0`, null],
+    ["say false and t.length > 0", unproved("the right side of 'and'")],
+    [`say false or ${ask} > 0`, null],
+    ["say true or t.length > 0", unproved("the right side of 'or'")],
+    [`let n: integer? = null\nsay n otherwise ${ask}`, null],
+    ["let n: integer? = 2\nsay n otherwise t.length", unproved("the right side of 'otherwise'")],
+    [`let ys = [1]\nsay ys.get(9, default: ${ask})`, null],
+    ["let ys = [1]\nsay ys.get(0, default: t.length)", unproved("the default of 'get'")],
+    [`let v = load "k", default: ${ask}\nsay v`, null],
+    [
+      'save 1 as "k"\nlet v = load "k", default: t.length\nsay v',
+      unproved("the default of 'load'"),
+    ],
+    // (no answer can stand in a parameter's default, TSV032)
+    ["function f(p = t.length) {\n  say p\n}\nf()", unproved("a parameter's default")],
+    ["function f(p = t.length) {\n  say p\n}\nf(3)", unproved("a parameter's default")],
+  ] as const)
+    assert.equal(pasteFailure(at(`let t = "hello"\n${lines}\nexit\n`, "t.length")), outcome, lines);
+  // (a case's later value, which only a literal can be, TSV047: tested, and not)
+  for (const subject of ["5", "1"]) {
+    const source = `switch ${subject} {\n  case 1, 5 {\n    say "case"\n  }\n}\nexit\n`;
+    assert.equal(
+      pasteFailure(at(source, "5", source.indexOf("case"))),
+      unproved("a case's value after its first"),
+    );
+  }
+  // (the review's witness, through the fix the core offers)
+  const witness = 'let t = "hello"\nsay false and t.size > 0\nexit\n';
+  const start = witness.indexOf("t.size");
+  const { forms } = pastedForms(witness, start, start + "t.size".length);
+  assert.deepEqual(
+    forms.map((form) => [form.code, pasteFailure(form)]),
+    [["t.length", unproved("the right side of 'and'")]],
   );
 });
 

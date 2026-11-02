@@ -1,4 +1,4 @@
-import type { Expression, Statement } from "../../src/ast.js";
+import type { Expression, FunctionParameter, Statement, SwitchCase } from "../../src/ast.js";
 import { compileProject, compileProjectWithBackend } from "../../src/compiler.js";
 import { handlerBlocks, nestedStatements, unwrap } from "../../src/expression-children.js";
 import {
@@ -6,6 +6,7 @@ import {
   type InstructionPlan,
   type RuntimeSessionView,
 } from "../../src/index.js";
+import { lazyDefaultArgument } from "../../src/lazy-defaults.js";
 import { parse } from "../../src/parser.js";
 import type { SourceSpan } from "../../src/source.js";
 import type { TypeAnalysisBackend } from "../../src/type-inference/backend.js";
@@ -699,11 +700,89 @@ function reached(plan: InstructionPlan, executed: ReadonlySet<number>, at: Paste
   return ran;
 }
 
+/** A node of a source's syntax tree: anything with a span. */
+interface Node {
+  readonly kind?: string;
+  readonly span: SourceSpan;
+}
+
+/** The nodes directly inside a node: each property that holds one, or a list of them. */
+function inside(node: Node): readonly Node[] {
+  return Object.entries(node).flatMap(([key, value]: [string, unknown]) =>
+    key === "span"
+      ? []
+      : (Array.isArray(value) ? value : [value]).filter(
+          (child): child is Node => typeof child === "object" && child !== null && "span" in child,
+        ),
+  );
+}
+
+/**
+ * The positions a run may skip while it evaluates their parent, by the runtime's rules: the right side of `and`, `or`
+ * and `otherwise` (`src/runtime/evaluator.ts`, its `binary`), the `default:` of a call that runs it only when needed
+ * (`lazyDefaultArgument`, the evaluator's `call`), a `load`'s default (its `storageLoad`), a case's values after its
+ * first, which a switch tests as an `or` (`caseCondition`), and a parameter's default, bound only for an omitted argument
+ * (`bindDefaultParameter`). The name of `child`'s position in `parent`, or `null` where it runs whenever `parent` does.
+ */
+function lazyPosition(parent: Node, child: Node): string | null {
+  // EVIDENCE: invariant: the parser builds each node as the AST interface its `kind` names; other kinds fall through.
+  const node = parent as Expression | SwitchCase | FunctionParameter;
+  switch (node.kind) {
+    case "binaryExpression":
+      return child === node.right &&
+        (node.operator === "and" || node.operator === "or" || node.operator === "otherwise")
+        ? `the right side of '${node.operator}'`
+        : null;
+    case "callExpression": {
+      const lazy = lazyDefaultArgument(node);
+      return lazy !== null && child === lazy.argument ? `the default of '${lazy.operation}'` : null;
+    }
+    case "loadExpression":
+      return child === node.defaultValue ? "the default of 'load'" : null;
+    case "switchCase":
+      return node.values.some((value, index) => index > 0 && value === child)
+        ? "a case's value after its first"
+        : null;
+    case "functionParameter":
+      return child === node.defaultValue ? "a parameter's default" : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * The first lazy position (`lazyPosition`) around the pasted code at `at` that the run does not show it entered, or
+ * `null`: an instruction inside a position, as a pausing operand's own, runs only once its evaluation was entered, but an
+ * instruction around it runs also where it is skipped (Codex r1 on #1589).
+ */
+function unproved(
+  source: string,
+  plan: InstructionPlan,
+  executed: ReadonlySet<number>,
+  at: Pasted["at"],
+): string | null {
+  const ran = [...executed].map((index) => plan.instructions[index]!.span);
+  const visit = (node: Node): string | null => {
+    for (const child of inside(node)) {
+      const { start, end } = child.span;
+      if (start.offset > at.start || end.offset < at.end) continue;
+      const position = lazyPosition(node, child);
+      if (position !== null && !ran.some(({ so, eo }) => start.offset <= so && eo <= end.offset))
+        return position;
+      const found = visit(child);
+      if (found !== null) return found;
+    }
+    return null;
+  };
+  return visit(parse(source).program);
+}
+
 /**
  * Why a pasted form fails: its compile errors, the new core's among them (Codex r9), its run's failure, or a run that
  * does not show it runs (#1586): one still waiting after `COMPLETIONS` scripted answers (`answer`) or for what none
- * answers, or one that ended without executing the pasted code (`reached`). `null` where it compiles, runs to its end
- * and executed the code. A pasted declaration's (`declared`) compile errors leave out the current checker's recorded
+ * answers, one that ended without executing the instruction around the pasted code (`reached`), or one where the code
+ * stands at a position the run may have skipped (`unproved`). `null` where it compiles, runs to its end and evaluated
+ * the code. A pasted declaration's (`declared`) compile errors leave out the current checker's recorded
  * difference at its own join (#1412), which the new core decides.
  */
 export function pasteFailure({ source, at, declared }: Omit<Pasted, "code">): string | null {
@@ -736,10 +815,12 @@ export function pasteFailure({ source, at, declared }: Omit<Pasted, "code">): st
     const failure = events.find((event) => event.kind === "runtimeFailure");
     if (failure !== undefined) return JSON.stringify(failure);
     const view = session.view();
-    if (view.status === "halted")
-      return reached(compiled.plan, executed, at)
-        ? null
-        : `unreached: the run ended without executing '${source.slice(at.start, at.end)}'`;
+    if (view.status === "halted") {
+      if (!reached(compiled.plan, executed, at))
+        return `unreached: the run ended without executing '${source.slice(at.start, at.end)}'`;
+      const position = unproved(source, compiled.plan, executed, at);
+      return position === null ? null : `unproved evaluation: ${position}`;
+    }
     const request = answer(view);
     const action = view.foregroundAction;
     const awaited = action?.kind === "interaction" ? action.interactionKind : action?.kind;
