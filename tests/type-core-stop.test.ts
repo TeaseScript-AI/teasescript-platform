@@ -1518,14 +1518,30 @@ test("a host read keeps its boundary check at a stop whatever the script stores 
 /**
  * Before admission settled, a store into a written type checks each part of a collection literal the type reaches at the
  * part's own site, as A8 does (TABLE r4.117, Codex r12's final-check B2): a host read as a written list's element, a
- * host property the script stored, a nested list's element. At a stop in the setup and at the last before admission
- * settled, the oracle finds nothing.
+ * host property the script stored, a nested list's element. A part that reads a place the stop left undecided, a
+ * variable or a property of one, marks the store at its literal whatever host read beside it (TABLE r4.152 (1), #1611).
+ * At a stop in the setup and at the last before admission settled, the oracle finds nothing.
  */
 test("a stop before admission settled checks a written store's literal parts at their own sites", () => {
   for (const [source, fitting, violating] of [
     ["let xs: integer[] = [hostValue]\nexit\n", [host(2)], [host("bad")]],
     ["hostValue.n = 2\nlet xs: integer[] = [hostValue.n]\nexit\n", [host(object({ n: 1 }))], []],
     ["let xs: integer[][] = [[hostValue]]\nexit\n", [host(2)], [host("bad")]],
+    [
+      "let p = hostValue otherwise hostOther\nlet xs: integer[] = [p, hostOther]\nexit\n",
+      [host(2)],
+      [host("bad")],
+    ],
+    [
+      "let p = hostValue otherwise hostOther\nlet xs: integer[] = [hostOther, p]\nexit\n",
+      [host(2)],
+      [host("bad")],
+    ],
+    [
+      "let named = {v: hostValue}\nlet xs: integer[] = [named.v, hostOther]\nexit\n",
+      [host(2)],
+      [host("bad")],
+    ],
   ] as const) {
     const unstopped = stopRun(source);
     for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
