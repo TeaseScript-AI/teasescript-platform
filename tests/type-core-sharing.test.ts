@@ -1147,11 +1147,11 @@ test("a list composed of a value's kinds stands in their fixed order where it is
   assert.deepEqual(wrong, []);
 });
 
-/** #1573's programs: three bindings of choices of `k` reads of one host global's properties, read in `lists`. */
-function choicesInLists(k: number, lists: readonly (readonly number[])[]): string {
+/** #1573's programs: `n` bindings of choices of `k` reads of one host global's properties, read in `lists`. */
+function choicesInLists(n: number, k: number, lists: readonly (readonly number[])[]): string {
   const options = Array.from({ length: k }, (_, r) => `{text: "${r}", value: hostValue.p${r}}`);
   return [
-    ...[0, 1, 2].map((j) => `let p${j} = askChoice ${options.join(", ")}`),
+    ...Array.from({ length: n }, (_, j) => `let p${j} = askChoice ${options.join(", ")}`),
     ...lists.map(
       (list, i) =>
         `let xs${i} = [${list.map((j) => `p${j}`).join(", ")}]\nlet n${i}: integer = xs${i}[hostValue.i]`,
@@ -1161,22 +1161,22 @@ function choicesInLists(k: number, lists: readonly (readonly number[])[]): strin
 }
 
 /**
- * #1573: the choices of three bindings are one class mixed by their leaves, so a list's contract reads one member and
- * names the others' leaves (`othersLeaves`) through one node per set of other members, whatever order the list holds
- * them in, each member's leaves its own: lists of all three in three orders, and of each two. In both orders with the
- * sharing on, the elements' external data of the three lists of one set names one node, of every other set its own, and
- * each list's leaves are its members', as with the sharing off.
+ * #1573: the choices of four bindings are one class mixed by their leaves, so a list's contract reads one member (the
+ * first binding) and names the others' leaves (`othersLeaves`) through one node per set of other members, whatever
+ * order the list holds them in, each member's leaves its own: lists of all four with the other three in three orders,
+ * and of two and of three. In both orders with the sharing on, the elements' external data of the three lists of one
+ * set names one node, of every other set its own, and each list's leaves are its members', as with the sharing off.
  */
 test("a list's other members of one mixed class name one node per set, each its own leaves, in both orders (#1573)", () => {
   const lists = [
-    [0, 1, 2],
-    [0, 2, 1],
-    [2, 1, 0],
+    [0, 1, 2, 3],
+    [0, 3, 2, 1],
+    [3, 1, 0, 2],
     [0, 1],
     [0, 2],
-    [1, 2],
+    [1, 2, 3],
   ];
-  const source = choicesInLists(2, lists);
+  const source = choicesInLists(4, 2, lists);
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
   assert.ok(request !== null, "the program parses and resolves");
   const places = new CoreProgram(request).places;
@@ -1199,7 +1199,7 @@ test("a list's other members of one mixed class name one node per set, each its 
     );
   // (each member's options read `hostValue` at these offsets, on its own line)
   const lines = source.split("\n");
-  const members = [0, 1, 2].map((j) => {
+  const members = [0, 1, 2, 3].map((j) => {
     const at = lines.slice(0, j).reduce((sum, line) => sum + line.length + 1, 0);
     return [...lines[j]!.matchAll(/hostValue/g)].map((match) => at + match.index);
   });
@@ -1242,6 +1242,7 @@ test("a further list of choices of one class adds class work independent of the 
     const added = (k: number): readonly [number, number] => {
       const [two, three] = [2, 3].map((n) => {
         const source = choicesInLists(
+          2,
           k,
           Array.from({ length: n }, () => [0, 1]),
         );
