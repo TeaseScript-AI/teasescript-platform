@@ -2572,11 +2572,13 @@ test("a long copied key's store check grows with its copy chain in every mode (#
 
 /**
  * #1605: what a long copied key's store check charges at k = 16 in each mode (source order shared and not, then
- * reversed), with its analysis's charged total: a regression oracle of this construction only (on `main` `fd3f9d472`,
- * whose #1601 keeps less apart work once no decision can stop), so a level's work charged nowhere shows. On
- * `3d052bf43` the store at the long key's analysis charged the same (7,843 shared, 7,003 not) and its check 3,266 and
- * 2,197 units; the store at its element's analysis asked its element levels through every wrapper (10,329 and 8,632),
- * its check 1,101 and 889; the store at a property of its element's 12,448 and 10,225, its check 2,353 and 1,880.
+ * reversed), with its analysis's charged total: a regression oracle of this construction only, so a level's work
+ * charged nowhere shows. Since #1526 phase B the analysis captures the store's contract before its walk, so most of the
+ * check's work is charged there: on `c0ab92ced`, before the capture, the analyses charged 7,843 / 7,003, 8,971 / 8,098
+ * and 10,226 / 9,225 (10,228 reversed) and the checks after them 451 / 380, 274 / 236 and 518 / 429. On `3d052bf43`
+ * the store at the long key's check charged 3,266 and 2,197 units; the store at its element's analysis asked its
+ * element levels through every wrapper (10,329 and 8,632), its check 1,101 and 889; the store at a property of its
+ * element's 12,448 and 10,225, its check 2,353 and 1,880.
  */
 test("a long copied key's store check charges its positions' work, in every mode (#1605)", () => {
   const measured = COPY_CHAIN_FAMILIES.map((family) => {
@@ -2590,22 +2592,22 @@ test("a long copied key's store check charges its positions' work, in every mode
   });
   assert.deepEqual(measured, [
     [
-      [7843, 451],
-      [7003, 380],
-      [7843, 451],
-      [7003, 380],
+      [8257, 60],
+      [7346, 60],
+      [8257, 60],
+      [7346, 60],
     ],
     [
-      [8971, 274],
-      [8098, 236],
-      [8971, 274],
-      [8098, 236],
+      [9214, 51],
+      [8303, 51],
+      [9214, 51],
+      [8303, 51],
     ],
     [
-      [10226, 518],
-      [9225, 429],
-      [10228, 518],
-      [9225, 429],
+      [10707, 64],
+      [9617, 64],
+      [10709, 64],
+      [9617, 64],
     ],
   ]);
 });
