@@ -89,6 +89,14 @@ export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStore
     if (member === null) others.push(entry);
     else base.push(member);
   }
+  // (its holders mark nothing: asked only where every entry is otherwise a closed object, so a prefix the cheap checks
+  // refuse never walks its holders)
+  if (closed)
+    for (const entry of stores.list)
+      if (!marksNothing(contract, entry.holder)) {
+        closed = false;
+        break;
+      }
   const levels = { others, base, closed, read: false };
   contract.levelBases.set(prefix, levels);
   return levels;
@@ -99,9 +107,9 @@ const LACKED: Rest = ["element"];
 
 /**
  * #1456: whether a prefix entry is a closed object literal stored whole, whose properties are its object's alone: one
- * object term, no projection, copied key, element or cell, unguarded, without ingress, its holder marking no path
- * (`marksNothing`). Its property's answer is then the literal's own there, and a property it lacks F11's `missing`
- * with the literal's writer; any other entry is unproved.
+ * object term, no projection, copied key, element or cell, unguarded, without ingress; its holder marking no path
+ * (`marksNothing`) is asked after, of a prefix every entry of which is this. Its property's answer is then the
+ * literal's own there, and a property it lacks F11's `missing` with the literal's writer; any other entry is unproved.
  */
 function closedObject(contract: Contract, entry: PrefixEntry): boolean {
   const { program } = contract.pass;
@@ -117,9 +125,7 @@ function closedObject(contract: Contract, entry: PrefixEntry): boolean {
   )
     return false;
   const terms = program.hasOf.get(value);
-  return (
-    terms?.length === 1 && terms[0]!.type.kind === "object" && marksNothing(contract, entry.holder)
-  );
+  return terms?.length === 1 && terms[0]!.type.kind === "object";
 }
 
 /**

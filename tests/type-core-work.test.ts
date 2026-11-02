@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileProject, createFreshRuntimeSession } from "../src/index.js";
 import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
-import type { WorkCounter } from "../src/type-inference/core/budget.js";
+import { withTestDemandAllowance, type WorkCounter } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { writtenTypeSteps } from "../src/type-inference/core/contract.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
@@ -2198,4 +2198,27 @@ test("a prefix of closed objects read once has main's counters, in either order,
         );
       }
   }
+});
+
+/**
+ * #1456: a prefix the cheap checks refuse walks no holder's marks: whether its holders mark nothing is asked only of a
+ * prefix every entry of which is otherwise a closed object. A place given one object, 16 property stores and then a
+ * host value charges `main`'s total at `007a90112` under a demand allowance of 16 in either order, shared or not (a
+ * regression oracle of that order only; asking each object's holder first moved 285 units into the decisions that stop,
+ * reversed).
+ */
+test("a prefix the cheap checks refuse walks no holder's marks, main's total under a demand allowance of 16 (#1456)", () => {
+  const source = `let b = {f0: 1}\n${many(16, (i) => `b.f${i} = ${i}`)}\nb = hostValue\nsay "AFTER"\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const at = { name: "an object, 16 property stores and a host value", request };
+  assert.deepEqual(
+    [false, true].flatMap((reversed) =>
+      [false, true].map(
+        (unshared) =>
+          withTestDemandAllowance(16, () => analysed(at, reversed, unshared)).budget.total,
+      ),
+    ),
+    [3988, 3988, 4844, 4862],
+  );
 });
