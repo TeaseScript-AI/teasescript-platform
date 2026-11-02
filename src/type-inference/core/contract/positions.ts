@@ -87,9 +87,11 @@ export function positioned(
 }
 
 /**
- * Whether a key's contract stands at a position (`positioned`): a binding's key whose steps are all steps a position
- * advances by (`positionStep`: a property's, or an element's, #1605), the first passing a wrapper (`wrapperHop`, a
- * property's), outside `withoutPositions`. `path`: a text key's steps; a cursor's depth, first step and steps are the
+ * Whether a key's contract stands at a position (`positioned`): a binding's key whose steps are all property steps, or
+ * a cursor's (a wrapper family's key, whose lane decision found the wrapper) whose steps are all steps a position
+ * advances by (`positionStep`: a property's or an element's, #1605), the first passing a wrapper (`wrapperHop`),
+ * outside `withoutPositions`. A text key's element levels keep their own computation, so no wrapper shape is asked for
+ * them that its family's lane did not ask. `path`: a text key's steps; a cursor's depth, first step and steps are the
  * arena's (`Contract.pathPositions`).
  */
 export function positionable(
@@ -113,7 +115,7 @@ export function positionable(
     positions() &&
     path.length > 0 &&
     contract.pass.program.places[place]?.kind.kind === "binding" &&
-    path.every(positionStep) &&
+    path.every(propertyOnly) &&
     contract.wrapperHop(place, path[0]!) !== null
   );
 }
@@ -124,9 +126,9 @@ export function positionable(
  * a structure and no reference (F19a, `receiverWalk`'s walk, the owner's checked here), a read past a wrapper is its
  * frontier's read at its path below with the outermost wrapper's writer (the wrapper's lemma: `wrapperHop`, whatever
  * the path below), and its frontier passes the next wrapper where it stands at one (a property step's alone); before
- * the first wrapper, at a step no position advances by (`positionStep`), and wherever a receiver fails, the read's own
- * computation (`own`), which every read answers outside positions. So a key's element level is one step below its
- * parent's position, never its root and whole path again at each wrapper (#1605).
+ * the first wrapper, at a step no position advances by (`positionStep`, a key's; a value's property steps alone), and
+ * wherever a receiver fails, the read's own computation (`own`), which every read answers outside positions. So a key's
+ * element level is one step below its parent's position, never its root and whole path again at each wrapper (#1605).
  */
 function* advance(
   contract: Contract,
@@ -134,7 +136,10 @@ function* advance(
   step: string,
   own: () => Work<readonly Item[]>,
 ): Work<Proven<Proof>> {
-  const from = positionStep(step) ? yield* positionOf(contract, owner) : null;
+  // (a key's element step below its parent's position, a cursor's alone (`positionable`); a value read at an index
+  // keeps its own computation)
+  const advances = propertyOnly(step) || ("key" in owner && positionStep(step));
+  const from = advances ? yield* positionOf(contract, owner) : null;
   // (a read whose frontier passes no wrapper now, and passed none above, is its own read: no position below it; a
   // wrapper is passed at a property step alone, an element step stays below the frontier)
   const hop =
