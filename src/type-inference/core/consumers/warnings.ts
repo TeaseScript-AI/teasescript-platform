@@ -6,7 +6,7 @@ import { REFERENCE, termAt, typeTags } from "../contract.js";
 import { keptKey, keyOf, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import type { ContextWord, Item, ItemTag } from "../items.js";
+import { kindsInOrder, type ContextWord, type Item, type ItemTag } from "../items.js";
 import { codeOf, pathPhrase } from "../messages.js";
 import { measuresLength } from "../method-categories.js";
 import { propertyName, propertyStep, siteKey, stepName } from "../program.js";
@@ -60,7 +60,9 @@ export function warning(
     kinds: [item.tag],
     provenance: provenanceOf(item, detail(walk, item, site, rule, receiver, read)),
     obligation,
-    fits: [...new Set(fits.filter(concrete).map((found) => found.tag))],
+    // (a fixed table of what fits, not a value's kinds: the table's order, the one list `inItsOrder` does not order,
+    // TABLE r4.277 D3, #1398)
+    fits: kindsInOrder(new Set(fits.filter(concrete).map((found) => found.tag))),
     // (the published answers give it, from the site's other diagnostics, `withBesides`)
     besides: [],
   };

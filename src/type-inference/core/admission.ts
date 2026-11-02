@@ -727,7 +727,10 @@ export class Admission {
     return admitted(this, place, path);
   }
 
-  public retained(place: PlaceId, path: readonly string[]): ItemTag[] | null {
+  public retained(
+    place: PlaceId,
+    path: readonly string[],
+  ): { readonly tags: ItemTag[]; readonly inherited: boolean } | null {
     return retained(this, place, path);
   }
 

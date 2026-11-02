@@ -1,3 +1,4 @@
+import type { TypeAnnotation } from "../../../ast.js";
 import { VALUE_KIND_NAMES } from "../../../value-kinds.js";
 import type { PlaceId, PlaceKind, TypeTerm } from "../../graph.js";
 import type { ItemTag } from "../items.js";
@@ -21,6 +22,44 @@ export function typeTags(term: TypeTerm): ItemTag[] {
     default:
       return ["unknown"];
   }
+}
+
+/**
+ * A written type annotation's kinds in their written order: those `typeTags` gives the term made of it (`T?` is
+ * `T | null`), as a type test's narrowed kinds keep them (#1398, TABLE r4.277 (3)). One ordered worklist: each node of
+ * the annotation and each kind it gives handled once, however deeply its unions and optionals nest (Codex r7 on #1558).
+ */
+export function annotationTags(annotation: TypeAnnotation): ItemTag[] {
+  const tags: ItemTag[] = [];
+  // (taken from the end: a union's members pushed last first, an optional's `null` below its type, so after it)
+  const pending: (TypeAnnotation | "null")[] = [annotation];
+  for (let type = pending.pop(); type !== undefined; type = pending.pop()) {
+    if (type === "null") {
+      tags.push("null");
+      continue;
+    }
+    switch (type.kind) {
+      case "namedType":
+        tags.push(type.name);
+        break;
+      case "listType":
+        tags.push("list");
+        break;
+      case "setType":
+        tags.push("set");
+        break;
+      case "dictType":
+        tags.push("dict");
+        break;
+      case "optionalType":
+        pending.push("null", type.value);
+        break;
+      case "unionType":
+        for (let at = type.members.length - 1; at >= 0; at -= 1) pending.push(type.members[at]!);
+        break;
+    }
+  }
+  return tags;
 }
 
 /**

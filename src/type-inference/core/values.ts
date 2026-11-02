@@ -4,6 +4,7 @@ import {
   carried,
   choiceItems,
   conversionKind,
+  annotationTags,
   defaultOf,
   emptyAt,
   heldReference,
@@ -74,13 +75,16 @@ import {
   makeItem,
   mergeItems,
   REASON,
+  spelledBy,
+  spellingIdentity,
   STOPPED,
   weaken,
   type Item,
   type ItemTag,
+  type Spelling,
   type Writer,
 } from "./items.js";
-import { Laminar, narrowedItems, type Narrowing } from "./narrowing.js";
+import { Laminar, narrowedItems, type Narrowing, type NarrowingForm } from "./narrowing.js";
 import { operationItems } from "./operator-table.js";
 import { indexedPlus } from "./plus-index.js";
 import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";
@@ -138,8 +142,24 @@ export class Values {
   readonly #routes = new Map<string, ReadRoute>();
   /** Per read, the narrowing it takes (`#narrowingOf`). */
   readonly #narrowings = new Map<PlaceId, NarrowedRead | null>();
+  /** Per type test's form, its spelling (`#testSpelling`). */
+  readonly #testSpellings = new Map<NarrowingForm, Spelling>();
 
   public constructor(readonly pass: CorePass) {}
+
+  /**
+   * A type test's spelling (`NarrowingForm`'s `test`): its kinds in their written order, which the kinds it narrows to
+   * keep (#1398, TABLE r4.277 (3)); none for any other form. Read where the narrowing is answered, outside the narrowing
+   * modules' charged walks: one walk of the written type per form and pass, shared by every read the form narrows, so
+   * the walks grow with the tests' sizes alone (Codex r6 on #1558).
+   */
+  #testSpelling(form: NarrowingForm): Spelling | undefined {
+    if (form.kind !== "is" || form.test === undefined) return undefined;
+    let spelling = this.#testSpellings.get(form);
+    if (spelling === undefined)
+      this.#testSpellings.set(form, (spelling = spelledBy(annotationTags(form.test)).spelling));
+    return spelling;
+  }
 
   /** A read of `key` at `node` (§3); `before`: a definition at `node` itself does not count. */
   public *keyItems(asked: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
@@ -336,7 +356,7 @@ export class Values {
         root,
         program.dom.dominates(g.node, read.def.node)
           ? read.items
-          : narrowedItems(g.form, read.items, program.scope),
+          : narrowedItems(g.form, read.items, program.scope, this.#testSpelling(g.form)),
       );
     return contract.entered(root, items);
   }
@@ -370,18 +390,24 @@ export class Values {
     const input = loopDefinition
       ? yield* contract.contractOf(g.key)
       : (yield* this.#keyRead(contract.canonicalKey(g.key), g.input, false)).items;
-    return narrowedItems(g.form, input, program.scope);
+    return narrowedItems(g.form, input, program.scope, this.#testSpelling(g.form));
   }
 
   /**
    * What a read's answer takes from its narrowing, for the value classes that share answers (S10 part 2b): nothing for
    * a read that takes none; else its G's environment (`NarrowingEvents.environment`: two reads with one answer it
-   * alike).
+   * alike) and its type test's spelling (`spellingIdentity`, read once per form: two tests of one kinds in two written
+   * orders give two answers, TABLE r4.277 (2), Codex r7 on #1558). The value classes' `readSnapshot` and
+   * `readClass(…, true)` take it from here.
    */
   public narrowingMark(value: PlaceId): string {
     const narrowed = this.#narrowingOf(value);
     if (narrowed === null) return "";
-    return `n${this.pass.guards.narrowings(this.pass).events.environment(narrowed.g, narrowed.read)}`;
+    const environment = this.pass.guards
+      .narrowings(this.pass)
+      .events.environment(narrowed.g, narrowed.read);
+    const spelling = spellingIdentity(this.#testSpelling(narrowed.g.form));
+    return spelling === "" ? `n${environment}` : `n${environment}~${spelling}`;
   }
 
   /**

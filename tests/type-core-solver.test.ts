@@ -17,6 +17,7 @@ import {
   makeItem,
   mergeItems,
   REASON,
+  spelledBy,
   STOPPED,
   writerKey,
   type Item,
@@ -36,6 +37,7 @@ import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { itemScope } from "./helpers/type-core-items.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
+import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 /**
  * The determinism of the coarse core (ADR 0021 1.6; the port plan's S3 note §1): the answers depend on the program,
@@ -248,6 +250,56 @@ test("every finished layer summary is asked again in a fresh pass by its name an
 });
 
 /**
+ * #1398 (TABLE r4.277 (2)): a written value read through a layer's summary keeps its spelling: the summary's items carry
+ * it, a fresh pass asked by the summary's name and packet alone gives them again with it, and the summary that merges
+ * both layers' leaves stands in the direct read's order, in the four modes. Of a written value in both copies' stores,
+ * and beside a whole number it spells.
+ */
+test("a layer's summary of a written value keeps its spelling, asked again from its packet, in the four modes (#1398)", () => {
+  const written = "let w: string | integer = fromJson(hostValue)\n";
+  const copies = (first: string): string =>
+    `${written}let d0 = {f: hostValue, g: w}\nlet l0 = d0\nlet r0 = d0\nl0.g = ${first}\nlet d1 = l0\nd1 = r0\n` +
+    "let l1 = d1\nlet r1 = d1\nl1.g = w\nlet d2 = l1\nd2 = r1\nrepeat d2.g {}\nexit";
+  const shown = (items: readonly Item[]): string =>
+    items
+      .map(
+        (item) => `${item.tag}${item.spelling === undefined ? "" : `(${item.spelling.join("|")})`}`,
+      )
+      .join(",");
+  for (const source of [copies("w"), copies("1")]) {
+    const request = layerRequest(source);
+    const read = source.lastIndexOf("d2.g");
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const pass = narrowingPass(request);
+        pass.contract.pathIdOf(["shifted", "first"]);
+        for (const place of pass.program.places)
+          if (place.kind.kind === "binding")
+            pass.solver.run(pass.contract.contractOf(keyOf(place.id, ["g"])));
+        const summaries: string[] = [];
+        for (const { key } of pass.solver.demandWork()) {
+          if (!key.startsWith("protoLayer|")) continue;
+          const exported = exportNames(pass.contract, [key])!;
+          const packet: unknown = JSON.parse(JSON.stringify(exported.packet));
+          const again = solveDemands(request, exported.names, packet)[0]!;
+          summaries.push(shown(pass.solver.answer(key)!));
+          assert.equal(shown(again), summaries.at(-1), `${JSON.stringify(mode)} ${key}`);
+        }
+        const answers = analyseCore(request);
+        const node = answers.graph.nodes.find(
+          (found) => found.span?.start.offset === read && found.span.end.offset === read + 4,
+        )!;
+        const direct = answers.at(node)!.items.map((item) => item.tag);
+        assert.deepEqual(direct, ["string", "integer"], JSON.stringify(mode));
+        assert.ok(
+          summaries.includes("string(string|integer),integer(string|integer)"),
+          `${JSON.stringify(mode)}: ${summaries.join(" ; ")}`,
+        );
+      });
+  }
+});
+
+/**
  * F18/F19's kinds of a default are a choice that is not monotone in the default's kinds (none give `unknown`): in a
  * cycle through the default the choice is made on the completed kinds, so neither the order nor the entry changes it
  * (review r1: the forms through one and two functions reached two answers, and a budget stop in one order).
@@ -387,6 +439,78 @@ test("a method chain round its own component answers alike from every entry, its
     differing.push(...found.differing);
   }
   assert.deepEqual(differing, []);
+});
+
+/**
+ * #1398 (TABLE r4.277 (2), Codex r6 on #1558): an item's spelling is part of its value, so a component member whose
+ * answer gains a spelling changes, and the members reading it run again: A merges unmarked kinds with C, B is A, C
+ * merges B with a written type's. From each member as the entry, all three end with the written spelling, in its order.
+ */
+test("a spelling a component's answers gain reaches every member, from each entry (#1398)", () => {
+  const solved = (entry: "a" | "b" | "c"): readonly string[] => {
+    const scope = itemScope();
+    const solver = new Solver(scope);
+    const inferred = (["integer", "string"] as const).map((tag) => makeItem(tag));
+    const written = (["string", "integer"] as const).map((tag) =>
+      makeItem(tag, null, spelledBy(["string", "integer"])),
+    );
+    const demand = (key: string, offset: number, make: () => Work<readonly Item[]>): Demand => ({
+      key,
+      kind: "value",
+      file: 0,
+      offset,
+      make,
+    });
+    const demands: Record<"a" | "b" | "c", Demand> = {
+      a: demand("a", 0, function* () {
+        return mergeItems([...inferred, ...(yield demands.c)], scope);
+      }),
+      b: demand("b", 1, function* () {
+        return yield demands.a;
+      }),
+      c: demand("c", 2, function* () {
+        return mergeItems([...(yield demands.b), ...written], scope);
+      }),
+    };
+    solver.run(
+      (function* (): Work<readonly Item[]> {
+        return yield demands[entry];
+      })(),
+    );
+    return (["a", "b", "c"] as const).map((key) =>
+      solver
+        .answer(key)!
+        .map((item) => `${item.tag}(${item.spelling?.join("|") ?? ""})`)
+        .join(","),
+    );
+  };
+  const spelled = "string(string|integer),integer(string|integer)";
+  for (const entry of ["a", "b", "c"] as const)
+    assert.deepEqual(solved(entry), [spelled, spelled, spelled], entry);
+});
+
+/**
+ * #1398 (Codex r6 on #1558): F10's copy of a range's elements composes its kind's declared elements beside the mark that
+ * it may hold none in their one order where it is composed (`contractOfOp`), before any publication orders it again:
+ * `[integer, empty]`, in the four modes.
+ */
+test("a range conversion's contract composes its elements in their one order (#1398)", () => {
+  const request = layerRequest("let a = (1..5).toList()\nsay a[0]\nexit");
+  for (const mode of MODES)
+    inMode(mode, () => {
+      const pass = narrowingPass(request);
+      const conversion = [...pass.program.opOf.values()].find(
+        (c) => c.kind === "operation" && c.contract.name === "toList",
+      )!;
+      const items = pass.solver.run(
+        pass.contract.contractOfValueAt(conversion.result, ["element"]),
+      );
+      assert.deepEqual(
+        items.map((item) => item.tag),
+        ["integer", "empty"],
+        JSON.stringify(mode),
+      );
+    });
 });
 
 test("a component found while another is solved is solved on the explicit stack", () => {

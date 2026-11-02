@@ -5,7 +5,7 @@ import { fits } from "../admission.js";
 import { joinSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { operatorOf } from "../contract.js";
-import type { ItemTag } from "../items.js";
+import { kindsInOrder, type ItemTag } from "../items.js";
 import { COMPARISONS, DIVISIONS, OPERATOR_ROWS } from "../operator-table.js";
 import { siteKey, type Consumption } from "../program.js";
 import type { SiteExpectation } from "../result.js";
@@ -88,10 +88,12 @@ function* readsTakeTask(walk: Consumers, place: PlaceId): CompileTask<SiteExpect
   // (a read that leads back to the place, as a recursive call's argument does, proves nothing)
   walk.placeExpectations.set(place, UNPROVED);
   const { program } = walk.pass;
-  const both = (a: readonly ItemTag[], b: readonly ItemTag[]): ItemTag[] => [
-    ...a.filter((tag) => b.some((other) => fits(tag, other, true))),
-    ...b.filter((tag) => !a.includes(tag) && a.some((other) => fits(tag, other, true))),
-  ];
+  // (what two reads take together, from requirements, which carry no spelling: the table's order, #1398)
+  const both = (a: readonly ItemTag[], b: readonly ItemTag[]): ItemTag[] =>
+    kindsInOrder([
+      ...a.filter((tag) => b.some((other) => fits(tag, other, true))),
+      ...b.filter((tag) => !a.includes(tag) && a.some((other) => fits(tag, other, true))),
+    ]);
   let takes: readonly ItemTag[] | null = null;
   let elements: SiteExpectation["elements"] = null;
   for (const consumer of program.consumersOf.get(place) ?? []) {
