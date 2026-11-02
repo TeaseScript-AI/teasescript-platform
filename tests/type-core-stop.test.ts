@@ -2659,9 +2659,8 @@ test("a combined stop's finishing read reaches through a copy whose decision sto
  * finishing read answered from (a written `list?` receiver's null check, an `integer?` element's count by a null check,
  * an `object`'s property read; two places copying each other, answered without a written type; a set's empty check,
  * its domain non-emptiness whatever family it names); (a) from the finishing walk's own reads (a fallback's left in
- * requirement mode), at an index's check whose receiver the finishing walk answers (a `get`'s literal index) and at a
- * member's presence check by its receiver's read at its unlisted property (a ring's), each from the reads of the consumer
- * invocation that emitted the check; and a boundary against
+ * requirement mode) and at a member's presence check by its receiver's read at its unlisted property (a ring's), every
+ * open read of the check's unit answered; and a boundary against
  * `unknown`, which has no plan content, dropped where the undecided store mark stands at the site of the store holding it
  * (a dictionary's value read through its `values`, forward, also parenthesized or in a parenthesized literal). Each case at every eighth settled stop under the largest
  * demand allowance that stops a decision (the copying places under each), in the modes where the clause arises, nothing
@@ -2705,7 +2704,8 @@ test("a combined stop owes the reference's check in other words, or a boundary's
       c: heldFamily(false).find((c) => c.name === "twoWay-1-arithmetic-laterStore")!,
       each: true,
     },
-    // ((w) on an empty check: the set's non-emptiness, whatever family the demand-only check named, `list` for a set)
+    // ((w) on an empty check: the set's non-emptiness, whatever family the demand-only check named, `list` for a set; its
+    // member's kind check the coarse (a) reading's counted class, the selection's element read left open in its unit)
     {
       clause: "w",
       modes: [HELD_MODES[0]!],
@@ -2716,6 +2716,7 @@ test("a combined stop owes the reference's check in other words, or a boundary's
         repeated,
         false,
       ),
+      coarse: "element",
     },
     // ((a) from the finishing walk's own read: a fallback's left in requirement mode, which the stores' syntax decides
     // where the open written element alone would not, forward under demand 11)
@@ -2723,16 +2724,6 @@ test("a combined stop owes the reference's check in other words, or a boundary's
       clause: "a",
       modes: [HELD_MODES[0]!],
       c: heldFamily(false).find((c) => c.name === "writtenList-2-fallback-plain")!,
-      each: true,
-    },
-    // ((a) at an index's check by its receiver's read: a `get`'s literal index, its receiver a written union's list)
-    {
-      clause: "a",
-      modes: [HELD_MODES[0]!],
-      c: storedGet("written union", ["let xs: (integer|string)[] = [4]"], "xs", [
-        [2, true],
-        ["bad", false],
-      ]),
       each: true,
     },
     // ((a) at a member's presence check by every read its consumer makes: the receiver at the unlisted step `#`, which
@@ -2759,22 +2750,111 @@ test("a combined stop owes the reference's check in other words, or a boundary's
       ),
     })),
   ];
-  for (const { clause, modes, c, each = false } of cases)
+  for (const { clause, modes, c, each = false, coarse } of cases)
     for (const mode of modes) {
       let taken = 0;
+      let counted = 0;
       // (under the largest demand allowance that stops a decision; the copying places under each)
       for (const which of each ? heldDemands(c, mode).keys() : [0])
         combinedStops(
           c,
           mode,
           (where, problems, clauses) => {
-            assert.deepEqual(problems, [], where);
+            const { entries, others } = coarseClass(problems);
+            assert.deepEqual(others, [], where);
+            // (a case's counted entries only where it names them, each read left open at the step it names)
+            assert.ok(coarse !== undefined || entries.length === 0, where);
+            assert.ok(
+              entries.every((open) => open.every((key) => key.endsWith(`|${coarse}`))),
+              where,
+            );
+            counted += entries.length;
             taken += clauses.filter((each) => each === clause).length;
           },
           which,
         );
       assert.ok(taken > 0, `${c.name}, ${mode.name}: no stop takes ${clause}`);
+      assert.ok(coarse === undefined || counted > 0, `${c.name}, ${mode.name}: none counted`);
     }
+});
+
+/**
+ * A stop's problems split into the coarse (a) reading's counted class (TABLE r4.299) and the others: each counted check's
+ * open reads' keys (its record beside it).
+ */
+function coarseClass(problems: readonly string[]): {
+  readonly entries: readonly (readonly string[])[];
+  readonly others: readonly string[];
+} {
+  const entries = problems
+    .filter((problem) => problem.startsWith("exception coarse(a) rejection check "))
+    .map((problem) => problem.slice(problem.lastIndexOf(" open ") + 6).split(" "));
+  const others = problems.filter(
+    (problem) => !problem.startsWith("exception coarse(a) rejection "),
+  );
+  return { entries, others };
+}
+
+/**
+ * TABLE r4.299: the coarse (a) reading's counted class, never a pass. Where a read of the check's reference unit that the
+ * demand stop left `unknown` is not answered at its key by the stopped analysis's run of that unit, (a) takes nothing
+ * and the check is counted with that read's key:
+ * - a member's kind check beside its own selection's element read (the clauses' written set);
+ * - an operand's check beside the next operand's read in one operation (`say a and xs.first`, Codex r4's B2, forward
+ *   with the sharing under demand 3);
+ * - a member's presence check whose own value the finishing walk leaves to the member's contract, its quiet path
+ *   skipping the receiver (`writtenObjectBelow-1-say-plain`, forward without the sharing under demand 32);
+ * - a `get`'s receiver check beside its default's read of the receiver's element, with the literal index's checks of
+ *   that unit (a written union's list, forward with the sharing under demand 3).
+ * The finer reading, by the consumer invocation that emitted the check, has no entry to hook: the consumers are module
+ * functions no test can replace, and a call stack names no call. Every settled stop of each.
+ */
+test("a combined stop counts the coarse (a) reading's rejections with the read each leaves open (TABLE r4.299)", () => {
+  const below = heldFamily(false).find((c) => c.name === "writtenObjectBelow-1-say-plain")!;
+  const members = [
+    {
+      source:
+        "let a: boolean = hostValue\nlet xs: list = [hostOther, 4]\nsay a and xs.first\nexit\n",
+      demand: 3,
+      mode: HELD_MODES[0]!,
+      target: "a",
+      open: "xs.first",
+    },
+    { source: below.source, demand: 32, mode: HELD_MODES[2]!, target: "root", open: "root.f0" },
+    // (a `get`'s receiver beside its default's read of the receiver's element)
+    {
+      source: storedGet("written union", ["let xs: (integer|string)[] = [4]"], "xs", []).source,
+      demand: 3,
+      mode: HELD_MODES[0]!,
+      target: "xs",
+      open: "xs",
+      where: "xs.get",
+      steps: "element",
+    },
+  ];
+  for (const { source, demand, mode, target, open, where = open, steps = "" } of members) {
+    const at = source.indexOf(where);
+    assert.ok(
+      controlStops(
+        mainFile(source),
+        (rule) =>
+          [...rule.coarse.checks.keys()].find((check) => JSON.parse(check).target === target),
+        (reference, natural, stopped, check) => {
+          const rule = combinedStop(reference, natural, stopped);
+          assert.equal(rule.checks.get(check), undefined, open);
+          assert.deepEqual(
+            rule.coarse.checks.get(check),
+            [`0:${at}:${at + open.length}|${steps}`],
+            open,
+          );
+        },
+        [demand],
+        mode,
+        1,
+      ) > 0,
+      open,
+    );
+  }
 });
 
 /** `answers` with `fields` in place of its own, its questions its own (a stopped analysis changed for an oracle's control). */
@@ -2818,7 +2898,7 @@ function withMark(
 
 /**
  * Each settled stop of a program's files under each demand allowance that stops a decision of its main file (or under
- * `demands`), in `mode` (forward with the sharing), at every eighth allowance of each settled phase: where `select` names a reference
+ * `demands`), in `mode` (forward with the sharing), at every `step`th (eighth) allowance of each settled phase: where `select` names a reference
  * check there, `each` judges it. The number of stops judged.
  */
 function controlStops(
@@ -2827,6 +2907,7 @@ function controlStops(
   each: (reference: Answers, natural: Answers, stopped: Answers, check: string) => void,
   demands?: readonly number[],
   mode = HELD_MODES[0]!,
+  step = 8,
 ): number {
   let count = 0;
   for (const demand of demands ?? heldDemands({ source: files[0]!.source }, mode)) {
@@ -2835,7 +2916,7 @@ function controlStops(
       const { settled, stoppedIn } = stoppedAt(allowance).budget;
       return settled ? stoppedIn : null;
     }).values())
-      for (let allowance = low; allowance <= high; allowance += 8) {
+      for (let allowance = low; allowance <= high; allowance += step) {
         const stopped = stoppedAt(allowance);
         const check = select(combinedStop(reference, natural, stopped), reference, stopped);
         if (check === undefined) continue;
@@ -2861,9 +2942,8 @@ const mainFile = (source: string): SourceFile[] => [{ path: "main.tease", source
  * - (a)'s reference read: a recovered contract tagged `budget` (`list|null`, never `unknown`) is no read the demand stop
  *   left `unknown`, so the receiver's mark left out is rejected; the issues' witnesses (the first test) are accepted.
  * - (a)'s finishing read: the receiver's mark left out with its read answered `STOPPED` is rejected.
- * - (a)'s deciding reads, the consumer invocation's: an element selection's empty check and an index's integer check,
- *   their marks left out where only the receiver is answered, are rejected (Codex r3's B1); and so is the ring's presence
- *   check (accepted in the third test) where its receiver's read at `#` is answered by another consumer.
+ * - (a)'s reads, its unit's: an element selection's empty check and an index's integer check, their marks left out
+ *   where only the receiver is answered, are rejected (Codex r3's B1).
  * - (w)'s domain: the null check against `integer` replaced by a copy check against `unknown` is rejected, and so is
  *   #1580's comparison form, whose mark lets every kind through; a redundant mark against `unknown` beside the
  *   restrictive one is accepted, the intersection unchanged.
@@ -2980,9 +3060,9 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
       assert.equal(combinedStop(reference, natural, beside).checks.get(check), "w");
     }) > 0,
   );
-  // (a)'s deciding reads, the consumer invocation's: an element selection's empty check and an index's integer check, each
-  // mark left out where the receiver is answered but the read that decides the check, the element or the index, is still
-  // `unknown` in the finishing walk (Codex r3's B1, at demands 3 and 2)
+  // (a)'s reads, its unit's: an element selection's empty check and an index's integer check, each mark left out where
+  // the receiver is answered but the read that decides the check, the element or the index, is still `unknown` in the
+  // finishing walk (Codex r3's B1, at demands 3 and 2)
   for (const [source, demand, kind, target] of [
     ['let xs: list = [hostValue, 4]\nrepeat xs.first {say "ok"}\nexit\n', 3, "empty-check", "xs"],
     ["let xs: list = [hostValue, 4]\nlet i = 0\nsay xs[i]\nexit\n", 2, "integer-check", "i"],
@@ -3009,32 +3089,6 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
       ) > 0,
       source,
     );
-  // (a)'s answer from the same invocation: the ring's presence check (the clauses' test) is rejected where the finishing
-  // walk's read of its receiver at `#` is another consumer's
-  const ring = heldFamily(false).find((c) => c.name === "ring-1-written-plain")!;
-  const ringReceiver = ring.source.indexOf("c0.f");
-  assert.ok(
-    controlStops(
-      mainFile(ring.source),
-      takes("a", (check) => check.kind === "null-check" && check.target === "c0"),
-      (reference, natural, stopped, check) => {
-        const elsewhere = withReadsChanged(
-          stopped,
-          Object.create(stopped),
-          { file: 0, start: ringReceiver, end: ringReceiver + 2 },
-          ["#"],
-          (reads) =>
-            reads.map((read) => ({
-              ...read,
-              path: ["another.js:consumer@1:1", "another.js:helper@1:1", "another.js:read@1:1"],
-            })),
-        );
-        assert.equal(combinedStop(reference, natural, elsewhere).checks.get(check), undefined);
-      },
-      [42],
-      HELD_MODES[1]!,
-    ) > 0,
-  );
   // site identity: the mark moved to another file at the same offsets (Codex r2's B2); taken in its own file
   const twoFiles = [
     ...mainFile(elementsOf),
