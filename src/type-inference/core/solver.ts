@@ -201,10 +201,7 @@ interface DemandNode {
   choice: string | null;
   /** The component being solved that it is a member of. */
   component: Component | null;
-  /**
-   * Whether a stop may forget it (#1599): it asked a key a decision can still stop, it is an occurrence (`Contract.stop`),
-   * or it read a demand that a stop may forget or that had not finished.
-   */
+  /** Whether it is forgettable (`Solver.#forgettable` states the rule); made so from its key's earlier runs. */
   forgettable: boolean;
 }
 
@@ -388,7 +385,14 @@ export class Solver {
    * can reach it keeps none, and none is kept once no decision of the pass can stop (`closeForgetting`, #1599).
    */
   readonly #readers = new Map<string, string | string[] | Set<string>>();
-  /** The finished demands a stop may forget (`DemandNode.forgettable`). */
+  /**
+   * The keys of the forgettable demands (#1599), the one statement of the rule. Forgettable: a demand some
+   * still-possible stop may reach, by an ask of an open place, by being an occurrence, or by a reader edge from such a
+   * demand, now or in any earlier incarnation of its key until forgetting closes. A key gains it when its demand finishes
+   * forgettable (`#finished`) or is marked once finished (`mayForget`); `forget` keeps it, a demand made again for the
+   * key starts forgettable (`#read`), and only `closeForgetting` clears it, so it is never lost before the close: an
+   * ask or a reader edge kept in an earlier incarnation still reaches the key after it is forgotten and made again.
+   */
   readonly #forgettable = new Set<string>();
   /** Whether a decision of the pass can still stop, so `forget` may still be asked (#1599). */
   #forgetting = true;
@@ -634,9 +638,9 @@ export class Solver {
     const todo = [...keys];
     const seen = new Set(todo);
     for (let key = todo.pop(); key !== undefined; key = todo.pop()) {
+      // (its key stays forgettable: what reached it before reaches it made again, `#forgettable`)
       this.#memo.delete(key);
       this.#proofs.delete(key);
-      this.#forgettable.delete(key);
       const readers = this.#readers.get(key);
       for (const reader of typeof readers === "string" ? [readers] : (readers ?? []))
         if (!seen.has(reader)) {
@@ -747,7 +751,7 @@ export class Solver {
         inputProof: null,
         choice: null,
         component: null,
-        forgettable: false,
+        forgettable: this.#forgettable.has(demand.key),
       };
       this.#active.set(demand.key, created);
       const pushed = this.#frame(created, demand.make(), created.index, null);

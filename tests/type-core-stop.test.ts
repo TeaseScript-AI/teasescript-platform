@@ -17,7 +17,11 @@ import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
-import { withConsumerOrder, withoutRecords } from "../src/type-inference/core/consumers.js";
+import {
+  Consumers,
+  withConsumerOrder,
+  withoutRecords,
+} from "../src/type-inference/core/consumers.js";
 import {
   FRONTIER_COPIES,
   FRONTIER_DEPTH,
@@ -50,7 +54,14 @@ import {
   type HeldCase,
 } from "./helpers/type-core-held-host.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
-import { inMode, keptErrors, MODES, stopIdentity, stopSet } from "./helpers/type-core-oracles.js";
+import {
+  inMode,
+  itemText,
+  keptErrors,
+  MODES,
+  stopIdentity,
+  stopSet,
+} from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 import { stopProblems, type Globals, type StopRun } from "./helpers/type-core-stop-oracle.js";
 
@@ -3771,6 +3782,104 @@ test("what a stop forgets by stands for a place until its last decision ends (#1
             fresh.contract.stop(stop.place, stop.path);
             for (const value of values)
               assert.deepEqual(after.get(value), read(fresh, value), where);
+          });
+  }
+});
+
+/**
+ * #1601's Astra r1 (R1): a demand a stop forgets and that is made again stays forgettable (`Solver.#forgettable`), since
+ * what reached it before (an ask kept at a place still open, a reader edge kept from another demand) reaches it again.
+ * Each value is read; one binding stops and its decisions end; every value is read again, the forgotten demands made
+ * again; a second binding stops. What the second stop forgets, the answers and every charged counter equal those with
+ * every record kept (`withEveryRecord`), in the four modes and both read orders: Astra's witness (`c`, then `a`, through
+ * admission's groups) and her family of three sources, every ordered pair of their bindings.
+ */
+test("a demand made again after a forget stays forgettable until forgetting closes (#1599)", () => {
+  const sources = [
+    "let a: integer? = null\nlet b = 1\nlet c = a otherwise b\nlet d = [c]\nsay d.first\nexit\n",
+    "let a = [{n: 1}]\nlet b = a\nlet c = [b.first, a.last]\nlet d = c.first.n\nsay d\nexit\n",
+    "let a = [1]\nlet b = [2]\nlet c = a + b\nlet d = c.first\nsay d\nexit\n",
+  ];
+  const apart = new Set(["readerRecords", "stopAsks"]);
+  interface Witnessed {
+    readonly before: readonly string[][];
+    readonly between: readonly string[][];
+    readonly forgotten: readonly string[];
+    readonly after: readonly string[][];
+    readonly work: {
+      readonly total: number;
+      readonly counts: readonly (readonly [string, number])[];
+      readonly apart: readonly (readonly [string, number])[];
+    };
+  }
+  // (two stops with every value read before, between and after them; `groups`: the places opened by admission's own
+  // groups, else one decision per binding)
+  const run = (
+    source: string,
+    first: number,
+    second: number,
+    reversed: boolean,
+    groups: boolean,
+  ): Witnessed => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const pass = narrowingPass(request);
+    const { program, contract, solver } = pass;
+    const roots = program.places
+      .filter((place) => place.kind.kind === "binding")
+      .map((place) => place.id);
+    const values = program.places
+      .filter((place) => place.kind.kind === "value" || place.kind.kind === "target")
+      .map((place) => place.id);
+    if (reversed) values.reverse();
+    const decisions = groups
+      ? new Consumers(pass).admission.groups()
+      : roots.map((root) => ({ root }));
+    contract.openDecisions(decisions);
+    const ask = () =>
+      values.map((value) => solver.run(contract.contractOfValue(value)).map(itemText));
+    const kept = () =>
+      [...new Set(solver.demandWork().map(({ key }) => key))]
+        .filter((key) => solver.answer(key) !== undefined)
+        .sort();
+    const work = () => ({
+      total: program.work.total,
+      counts: [...program.work.counts()],
+      apart: [...program.work.apartCounts()].filter(([counter]) => !apart.has(counter)),
+    });
+    const before = ask();
+    contract.stop(roots[first]!, []);
+    for (const decision of decisions)
+      if (decision.root === roots[first]) contract.decided(decision.root);
+    const between = ask();
+    const memo = kept();
+    contract.stop(roots[second]!, []);
+    const forgotten = memo.filter((key) => solver.answer(key) === undefined);
+    const after = ask();
+    return { before, between, forgotten, after, work: work() };
+  };
+  for (const [index, source] of sources.entries()) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const labels = narrowingPass(request)
+      .program.places.filter((place) => place.kind.kind === "binding")
+      .map((place) => place.label);
+    const pairs: (readonly [number, number, boolean])[] = [];
+    // (Astra's witness: `c`, then `a`, through admission's groups)
+    if (index === 0) pairs.push([labels.indexOf("c"), labels.indexOf("a"), true]);
+    for (let first = 0; first < labels.length; first += 1)
+      for (let second = 0; second < labels.length; second += 1)
+        if (first !== second) pairs.push([first, second, false]);
+    for (const [first, second, groups] of pairs)
+      for (const mode of MODES)
+        for (const reversed of [false, true])
+          inMode(mode, () => {
+            const where = `${source.split("\n")[2]} ${labels[first]} then ${labels[second]}${groups ? " (groups)" : ""} ${JSON.stringify(mode)}${reversed ? " reversed" : ""}`;
+            assert.deepEqual(
+              run(source, first, second, reversed, groups),
+              withEveryRecord(() => run(source, first, second, reversed, groups)),
+              where,
+            );
           });
   }
 });
