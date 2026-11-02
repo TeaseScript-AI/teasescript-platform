@@ -16,7 +16,7 @@ node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dis
 node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base src tree>/<area> [the same options]
 node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/16]
 node tests/families/stalls.mjs <shards' --work records>... [--rerun <rerun's records>...] [--index <new file>]
-node tests/families/stalls.mjs rerun <stall index> <base> <head> <new folder> [--timeout 600]
+node tests/families/stalls.mjs rerun <stall index> <base> <head> <new folder> [--timeout 600] [--shard i/N]
 ```
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
@@ -76,12 +76,15 @@ agreed or unanswered alike and no candidate left. `--index` writes the sources s
 and records and each area's configuration, and names those unanswered alike apart. Against a stored baseline the base's
 work is not recorded, so a head's timeout is unknown: `stalls.mjs rerun` runs the index's sources alone, one at a time
 with both trees in one process and the replay's configuration (`run.mjs <area> <base> <head> --only <index>`, an area
-after another; only `--timeout` and `--memory` may differ), and `--rerun <folder>/*.work.jsonl` reads its records in
-place of the replay's, so the replay closes without another campaign; a record of another configuration is refused, and
-a rerun that ends does not clear a candidate. Rerun records are read in the order given, an earlier round's first: where
-a source's earlier rerun stalled, or its later one stalls, the later stands (a round at a longer `--timeout` or
-`--memory` may run what an earlier one could not), and two that ended must say the same, else refused (#1587); a
-replay's records are never replaced.
+after another, each once by its name, whatever paths its entries name; only `--timeout` and `--memory` may differ),
+and `--rerun <folder>/*.work.jsonl` reads its records in place of the replay's, so the replay closes without another
+campaign; a record of another configuration is refused, and a rerun that ends does not clear a candidate. Rerun records
+are read in the order given, an earlier round's first: where a source's earlier rerun stalled, or its later one stalls,
+the later stands (a round at a longer `--timeout` or `--memory` may run what an earlier one could not), and two that
+ended must say the same, else refused (#1587); a replay's records are never replaced. `rerun --shard i/N` (#1598) reruns
+only the index's entries `k` with `k mod N = i`, in its order, into `<area>.<i>of<N>.work.jsonl` and
+`<area>.<i>of<N>.jsonl` beside that part of the index (`index.<i>of<N>.json`) and nothing for an area that part does not
+hold, so N jobs rerun the index once and `--rerun` reads their records as one round.
 
 `--store` runs one tree of a commit (an `sx-tree` tree: `src/`, `dist/`, `.sha`) at the runner's defaults and stores one
 shard of an area, each source's results as one line, in the baseline of its `src/` tree,
