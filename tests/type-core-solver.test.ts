@@ -606,6 +606,61 @@ test("a forget reaches the reader of a component abandoned into a larger one (#1
 });
 
 /**
+ * #1626: a forget reaches the reader of a member read while it was active (`#read`'s active case), where no later read
+ * keeps that reader. `A` reads `M`, `L` and `P`, which a stop may forget; `M` reads `A` before `A` may be forgotten, and
+ * its answer is always empty; `L` reads `M` alone and, canonically before it, reruns in the component's solve before
+ * `M`'s rerun makes `M` forgettable, which changes no answer. Forgetting `P` forgets all five, as with every record kept
+ * (`withEveryRecord`), so reading `G` again charges what reading it the first time did. #1626 records why no admitted
+ * source reaches this handoff.
+ */
+test("a forget reaches the reader of a member read while it was active (#1626)", () => {
+  const forgotten = (every: boolean) =>
+    (every ? withEveryRecord : <T>(run: () => T): T => run())(() => {
+      const scope = itemScope();
+      const solver = new Solver(scope);
+      const demand = (key: string, offset: number, make: () => Work<readonly Item[]>): Demand => ({
+        key,
+        kind: "contract",
+        file: 0,
+        offset,
+        make,
+      });
+      const p: Demand = demand("P", 0, function* () {
+        solver.mayForget("P");
+        return [makeItem("integer")];
+      });
+      const g: Demand = demand("G", 1, function* () {
+        return yield a;
+      });
+      const a: Demand = demand("A", 2, function* () {
+        return mergeItems([...(yield m), ...(yield l), ...(yield p)], scope);
+      });
+      const l: Demand = demand("L", 3, function* () {
+        return mergeItems([...(yield m), makeItem("string")], scope);
+      });
+      const m: Demand = demand("M", 4, function* () {
+        yield a;
+        return [];
+      });
+      const query = function* (): Work<readonly Item[]> {
+        return yield g;
+      };
+      solver.run(query());
+      const first = scope.work.total;
+      solver.forget(["P"]);
+      const kept = [p, g, a, l, m]
+        .filter((one) => solver.answer(one.key) !== undefined)
+        .map((one) => one.key);
+      solver.run(query());
+      return { kept, first, again: scope.work.total - first };
+    });
+  const run = forgotten(false);
+  assert.deepEqual(run.kept, []);
+  assert.equal(run.again, run.first);
+  assert.deepEqual(run, forgotten(true));
+});
+
+/**
  * #1601's Codex r4: the analysis's budget can stop a run at any charge, as between a component's members leaving
  * Tarjan's stack and its solving starting, where a read waits on a return no structure holds. Such a stop ends the
  * pass's decisions (`analyseCore` stops the analysis, `Consumers.finish` closes them), so the run's cleanup closes
