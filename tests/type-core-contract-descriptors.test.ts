@@ -71,6 +71,7 @@ test("a copy's lazily decided level is complete with its whole contract or lost,
   // (what `b.f` receives: a copy of `a.f`, a list of lists of whole numbers, ADR 0021 1.3)
   const whole = { kind: "list", element: { kind: "list", element: { kind: "integer" } } };
   const element = [propertyStep("f"), "element"].join(".");
+  // (the levels the capture leaves unfinished where a stop cuts it: at or below `b.f`'s element)
   for (const mode of HELD_MODES) {
     const natural = mode.run(() => storeContracts(analyseCore(request), request)).get(site);
     assert.ok(natural?.state === "complete", `${mode.name}: unstopped, the contract is complete`);
@@ -98,8 +99,9 @@ test("a copy's lazily decided level is complete with its whole contract or lost,
       assert.ok(result?.state === "lost", `${at}: lost, not ${result?.state}`);
       assert.equal(result.cause, "stop", at);
       assert.ok(
-        result.required.some((level) => level.path.join(".") === element),
-        `${at}: the element level is the one whose proof is unfinished`,
+        result.required.length > 0 &&
+          result.required.every((level) => level.path.join(".").startsWith(element)),
+        `${at}: a level at or below \`b.f\`'s element is the one whose proof is unfinished`,
       );
       // (a lost contract with no part leaves the store to the check its warning names, `storedKinds`)
       if (result.partial !== null)

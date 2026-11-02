@@ -1,7 +1,6 @@
 import type { Expression } from "../../ast.js";
 import type { KnownValue } from "../../static-evaluation.js";
-import { NULL_TYPE, UNKNOWN_TYPE, isScalarKind, type StaticType } from "../../static-types.js";
-import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
+import type { StaticType } from "../../static-types.js";
 import type { OperandView } from "../adapters/relation.js";
 import type { DynamicWhy, PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import {
@@ -80,6 +79,10 @@ import {
 import { Solver, type DemandWork, type Work } from "./solver.js";
 import { narrowingKey, Values } from "./values.js";
 import { writtenTypeErrors } from "./written.js";
+import { closedType, epochOf, newEpoch, type CapturedContract } from "./contract-descriptors.js";
+
+// (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
+export { closedType };
 
 /*
  * The answer contract of the coarse core (checkpoint 9; the port plan's S3 note §1): `analyseCore` runs once per
@@ -107,10 +110,6 @@ export interface CorePass {
 
 /** Stores' targets by their places (`DefinitionIndex`'s `storeTargets`). */
 type StoreTargets = ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]>>;
-
-/** Each program's passes so far, and each pass's number among them (`Answers.epoch`). */
-const PASSES = new WeakMap<CoreProgram, number>();
-const EPOCHS = new WeakMap<CorePass, number>();
 
 /**
  * One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6), the keys of
@@ -165,9 +164,7 @@ function createPass(
   parts.solver.names = (a, b) => compareDemandNames(contract, a, b);
   parts.solver.replayOf = (names) => exportNames(contract, names);
   for (const key of stopped) contract.stop(key.place, key.path);
-  const epoch = (PASSES.get(program) ?? 0) + 1;
-  PASSES.set(program, epoch);
-  EPOCHS.set(pass, epoch);
+  newEpoch(program, pass);
   return pass;
 }
 
@@ -326,7 +323,8 @@ export interface BudgetAnswer {
   readonly apart: ReadonlyMap<WorkCounter, number>;
   /**
    * The phase the stop came in (TABLE r4.90's lifecycle): the setup (a pass's own included), admission's walk, the
-   * consumers' walk, the publication of boundaries, or the questions after a finished analysis; `null` without a stop.
+   * capture of the stores' contracts after admission settled (`extraction`, #1526), the consumers' walk, the publication
+   * of boundaries, or the questions after a finished analysis; `null` without a stop.
    */
   readonly stoppedIn: StopPhase | null;
   /**
@@ -344,7 +342,7 @@ export interface BudgetAnswer {
   readonly facts: ContractFacts;
 }
 
-export type StopPhase = "setup" | "admission" | "walk" | "publication" | "questions";
+export type StopPhase = "setup" | "admission" | "extraction" | "walk" | "publication" | "questions";
 
 export interface ReadWork {
   readonly node: number;
@@ -392,6 +390,11 @@ export interface Answers {
   readonly initializers: ReadonlyMap<string, SourceSite>;
   /** The admission pass these answers read, by its number among the analysis's passes (a contract's epoch). */
   readonly epoch: number;
+  /**
+   * The contracts the stores owing a check require, captured once admission settled and before the consumers' walk
+   * (#1526 phase B): each store's destination with its result, in the order captured; none where admission did not settle.
+   */
+  readonly contracts: readonly CapturedContract[];
   at(node: FlowNode): OccurrenceAnswer | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
   /**
@@ -886,22 +889,6 @@ function definitionByUid(pass: CorePass, uid: number): Definition {
 
 const COLLECTION_TAGS: ReadonlySet<ItemTag> = new Set(["list", "set", "dict"]);
 
-function isPlain(kind: ValueKind): kind is PlainKind {
-  return VALUE_KINDS[kind].type === "kind";
-}
-
-/** An item's kind as a closed type of the adapters (the structure below it is asked through `project`). */
-export function closedType(tag: ItemTag): StaticType | null {
-  if (tag === "unknown" || tag === "empty") return null;
-  if (tag === "null") return NULL_TYPE;
-  if (isScalarKind(tag)) return { kind: "scalar", name: tag };
-  if (tag === "list" || tag === "set" || tag === "dict")
-    return { kind: tag, element: UNKNOWN_TYPE };
-  if (tag === "object") return { kind: "object", properties: null };
-  if (isPlain(tag)) return { kind: tag };
-  return UNKNOWN_TYPE;
-}
-
 /** Why an unknown is one, as the adapters name it (ADR 0021 rule 1.7). */
 function dynamicWhy(reasons: number): DynamicWhy {
   return (reasons & REASON.external) !== 0 ? "host" : "unknown member";
@@ -1018,6 +1005,7 @@ class CoreAnswers implements Answers {
   };
   readonly initializers: ReadonlyMap<string, SourceSite>;
   readonly epoch: number;
+  readonly contracts: readonly CapturedContract[];
   readonly #pass: CorePass;
   readonly #consumers: Consumers;
   readonly #written: readonly WrittenTypeError[];
@@ -1037,7 +1025,8 @@ class CoreAnswers implements Answers {
     this.#pass = pass;
     this.#consumers = consumers;
     this.#written = written;
-    this.epoch = EPOCHS.get(pass) ?? 0;
+    this.epoch = epochOf(pass);
+    this.contracts = consumers.captured;
     // (a stop, not statements nested too deep after an analysis that ran to its end: its answers stand)
     this.#stopped = pass.program.work.stopped !== null;
     const program = pass.program;

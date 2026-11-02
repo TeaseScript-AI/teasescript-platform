@@ -1,12 +1,20 @@
 import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
 import type { TypePlan, TypePlanName, TypePropertyPlan } from "../../plan/model.js";
-import { openType, union, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
+import {
+  isScalarKind,
+  NULL_TYPE,
+  openType,
+  union,
+  UNKNOWN_TYPE,
+  type StaticType,
+} from "../../static-types.js";
 import { typePlan } from "../../type-plans.js";
-import type { PlaceId } from "../graph.js";
+import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
+import type { PlaceId, SourceSite } from "../graph.js";
 import { concrete } from "./admission/kinds.js";
-import { closedType, type PlaceAnswer } from "./answers.js";
-import { REASON, type ItemTag } from "./items.js";
-import { propertyStep } from "./program.js";
+import type { AdmittedType, CorePass } from "./answers.js";
+import { REASON, type Item, type ItemTag } from "./items.js";
+import { propertyStep, type CoreProgram } from "./program.js";
 
 // The contract proof/descriptor service (#1526 phase A, TABLE r4.278): a store's required contract, assembled level by
 // level from the stable admission pass's proofs, as an immutable descriptor one per distinct contract, with whether its
@@ -25,6 +33,23 @@ export const SLICE_DEPTH = 256;
  * check (`TypeCheckPlan.place`), never to the contract.
  */
 export type ContractRef = TypePlan;
+
+/** Each analysis's passes so far, and each pass's number among them: the admission epoch its contracts belong to. */
+const PASSES = new WeakMap<CoreProgram, number>();
+const EPOCHS = new WeakMap<CorePass, number>();
+
+/** Numbers a new admission pass of `program` (`createPass`), its contracts' epoch. */
+export function newEpoch(program: CoreProgram, pass: CorePass): number {
+  const epoch = (PASSES.get(program) ?? 0) + 1;
+  PASSES.set(program, epoch);
+  EPOCHS.set(pass, epoch);
+  return epoch;
+}
+
+/** A pass's epoch (`newEpoch`); 0 for one no analysis numbered. */
+export function epochOf(pass: CorePass): number {
+  return EPOCHS.get(pass) ?? 0;
+}
 
 /** A level of a place: its root and the path below it. */
 export interface ContractLevel {
@@ -52,7 +77,8 @@ export type ContractResult =
   | {
       readonly state: "lost";
       readonly required: readonly ContractLevel[];
-      readonly cause: "stop" | "decision";
+      /** What cut it: the analysis's stop, a decision's stop at its allowance, or a stop while it was captured. */
+      readonly cause: "stop" | "decision" | "extraction";
       readonly partial: ContractRef | null;
     };
 
@@ -75,9 +101,10 @@ export interface LevelProof {
   readonly unfinished: boolean;
 }
 
-/** A level's proof from the place's answer at it. */
-export function levelProof(answer: PlaceAnswer): LevelProof {
-  const { admitted, contract } = answer;
+/**
+ * A level's proof from its admitted type and, where admission decided nothing, its contract's kinds (asked only then).
+ */
+export function levelProof(admitted: AdmittedType, contract: () => readonly Item[]): LevelProof {
   if (admitted.by !== "undecided")
     return {
       by: admitted.by,
@@ -85,11 +112,12 @@ export function levelProof(answer: PlaceAnswer): LevelProof {
       inherited: admitted.by === "decided" && admitted.inherited,
       unfinished: false,
     };
+  const kinds = contract();
   return {
     by: "undecided",
-    tags: contract.kinds.map((item) => item.tag),
+    tags: kinds.map((item) => item.tag),
     inherited: false,
-    unfinished: contract.kinds.some(
+    unfinished: kinds.some(
       (item) => concrete(item) || (item.tag === "unknown" && (item.reasons & REASON.budget) !== 0),
     ),
   };
@@ -123,10 +151,16 @@ export function levelWalk(
     const tags = kindsAt(at);
     levels.push(tags);
     if (!tags.some((tag) => COLLECTIONS.has(tag))) break;
-    if (at.length + 1 >= limit)
-      throw new Error("A place of the slice holds collections deeper than its facts follow.");
+    if (at.length + 1 >= limit) throw new SliceDepth();
   }
   return levels;
+}
+
+/** A place's collections nested deeper than the slice's facts follow (`levelWalk`). */
+export class SliceDepth extends Error {
+  public constructor() {
+    super("A place of the slice holds collections deeper than its facts follow.");
+  }
 }
 
 /** The type of a level walk, built from the deepest level up. */
@@ -151,6 +185,22 @@ export function typeOfKinds(tags: readonly ItemTag[], element: StaticType): Stat
         : (closedType(tag) ?? UNKNOWN_TYPE),
     ),
   );
+}
+
+function isPlain(kind: ValueKind): kind is PlainKind {
+  return VALUE_KINDS[kind].type === "kind";
+}
+
+/** An item's kind as a closed type of the adapters (the structure below it is asked through `project`). */
+export function closedType(tag: ItemTag): StaticType | null {
+  if (tag === "unknown" || tag === "empty") return null;
+  if (tag === "null") return NULL_TYPE;
+  if (isScalarKind(tag)) return { kind: "scalar", name: tag };
+  if (tag === "list" || tag === "set" || tag === "dict")
+    return { kind: tag, element: UNKNOWN_TYPE };
+  if (tag === "object") return { kind: "object", properties: null };
+  if (isPlain(tag)) return { kind: tag };
+  return UNKNOWN_TYPE;
 }
 
 /** The kinds that hold elements. */
@@ -428,4 +478,73 @@ function parts(plan: TypePlan): readonly TypePlan[] {
     return plan.element === null ? [] : [plan.element];
   if (plan.kind === "object") return plan.properties.map((property) => property.type);
   return plan.kind === "union" ? plan.members : [];
+}
+
+/** A check's required contract: the store's site and the destination it stores into, the place and the path below it. */
+export interface ContractRequest {
+  readonly site: SourceSite;
+  readonly place: PlaceId;
+  readonly path: readonly string[];
+}
+
+/** A request's contract as captured (`captureContracts`). */
+export interface CapturedContract extends ContractRequest {
+  readonly result: ContractResult;
+}
+
+/** No literal records below a level: a captured contract's properties take the order their names are found in. */
+const NO_RECORDS: RecordsBelow<null> = {
+  elements: null,
+  field: () => null,
+  order: (names) => [...names],
+};
+
+/**
+ * The capture of the contracts the stores owing a check require (#1526 phase B, TABLE r4.278): each request's contract
+ * from `reader` over the settled admission pass, in order, kept in `into`, its levels decided and their contracts
+ * solved while nothing stops the solver, so a later stop finds them retained. A request deeper than the slice follows
+ * is left to the check, where the program leaves the slice. A stop while it runs (`isStop`; `charge` the work of
+ * finding the requests, charged first) leaves the request it cut and every later one lost with the cause `extraction`,
+ * and is thrown on: nothing is reclassified.
+ */
+export function captureContracts(
+  requests: readonly ContractRequest[],
+  reader: ContractReader,
+  epoch: number,
+  into: CapturedContract[],
+  isStop: (error: unknown) => boolean,
+  charge: () => void,
+): void {
+  const descriptors = new ContractDescriptors<null>(reader, () => NO_RECORDS, epoch, false);
+  let next = 0;
+  try {
+    // (finding the requests is the capture's work too: a stop there cuts every one of them)
+    charge();
+    for (; next < requests.length; next += 1) {
+      const request = requests[next]!;
+      try {
+        const result = descriptors.result(request.place, request.path, null, () => {
+          throw new SliceDepth();
+        });
+        into.push({ ...request, result });
+      } catch (error) {
+        if (!(error instanceof SliceDepth)) throw error;
+      }
+    }
+  } catch (error) {
+    if (isStop(error))
+      for (; next < requests.length; next += 1) {
+        const { place, path } = requests[next]!;
+        into.push({
+          ...requests[next]!,
+          result: {
+            state: "lost",
+            required: [{ place, path }],
+            cause: "extraction",
+            partial: null,
+          },
+        });
+      }
+    throw error;
+  }
 }

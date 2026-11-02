@@ -97,6 +97,10 @@ export const READS = new Map([
     "kindsAt",
     "the kinds a key's decision decided or settled it by: a decision's answer, recorded by `decide`",
   ],
+  [
+    "admittedLevel",
+    "the admitted type at a path as every answer reads a level: a decision's answer, recorded by `decide`",
+  ],
   ["literalChildren", "a literal's children at a step: syntax"],
   ["namedExternalSite", "where a store's named external data enters: a site, read"],
   ["offendingAt", "the innermost offending expression of a contribution: a site, read"],
@@ -184,6 +188,12 @@ const LISTED_READS = [
     "a count of rejections, summed into a unit's emitted count",
   ],
   ["diagnostics", "length", "consumers.ts", "how many diagnostics a unit recorded: a count"],
+  [
+    "diagnostics",
+    "for-of",
+    "consumers.ts",
+    "the store warnings admission made before the walk, whose stores' contracts the capture takes: their sites, read",
+  ],
   ["diagnostics", "length", "stores.ts", "how many diagnostics a unit recorded: a count"],
   ["diagnostics", "spread", "answers.ts", "the recorded diagnostics, read after the walk"],
   ["deferred", "length", "answers.ts", "whether checks were deferred: a count"],

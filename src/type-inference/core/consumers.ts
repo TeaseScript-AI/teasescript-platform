@@ -1,6 +1,7 @@
 import type { Expression } from "../../ast.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { Admission } from "./admission.js";
+import { admittedLevel } from "./admission/admitted.js";
 import type { CorePass } from "./answers.js";
 import type { DecisionWork, ReadWork } from "./answers.js";
 import {
@@ -13,6 +14,15 @@ import {
 } from "./budget.js";
 import { restSteps, stepsArray, type CanonicalKey, type Rest } from "./contract/key-ids.js";
 import type { Label } from "./contract/labels.js";
+import { termAt, writtenOf } from "./contract.js";
+import {
+  captureContracts,
+  epochOf,
+  levelProof,
+  type CapturedContract,
+  type ContractReader,
+  type ContractRequest,
+} from "./contract-descriptors.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
@@ -33,9 +43,12 @@ import { admittedStores, decide } from "./consumers/stores.js";
 import { cheapDecided } from "./consumers/syntax.js";
 import { speakers, uses } from "./consumers/uses.js";
 import { keptKey, keyOf, type Definition, type Key } from "./definitions.js";
+import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, STOPPED, type Item, type Writer } from "./items.js";
 import { Laminar } from "./narrowing.js";
+import { siteKey } from "./program.js";
+import { propertyNames } from "./property-names.js";
 import type { CoreDiagnostic, Obligation, SiteExpectation } from "./result.js";
 import type { Work } from "./solver.js";
 export { typedCall } from "./consumers/finishing.js";
@@ -82,6 +95,10 @@ function withBudget(items: readonly Item[]): readonly Item[] {
 /** The walk's stages after admission's, in order (D4: a stop keeps every unit before it). */
 const STAGES = 4;
 
+/** The stages before the walk's: admission's, and the capture of the stores' contracts once it settled (#1526). */
+const ADMISSION = -2;
+const EXTRACTION = -1;
+
 /** The rank of a stop's own warning and marks among a site's diagnostics: after every consumer's (`Consumers.rules`). */
 export const STOP_RULE = 5 + STAGES;
 
@@ -112,8 +129,8 @@ export class Consumers {
   settled = false;
   /** Whether admission's boundary checks were published (`Admission.publish`), the walk's last step. */
   published = false;
-  /** The walk's place: its stage (-1 admission, `STAGES` publication) and the next unit in it. */
-  #stage = -1;
+  /** The walk's place: its stage (`ADMISSION`, `EXTRACTION`, the walk's, `STAGES` publication) and its next unit. */
+  #stage = ADMISSION;
   #unit = 0;
   /** Where the walk stopped, the stage and the unit it was in; `null` before a stop, or to finish every unit. */
   #stoppedAt: { readonly stage: number; readonly unit: number } | null = null;
@@ -441,10 +458,16 @@ export class Consumers {
   }
 
   /** The phase of this pass the stop came in: admission's walk, the consumers' walk or the publication; else `null`. */
-  public stopPhase(): "admission" | "walk" | "publication" | null {
+  public stopPhase(): "admission" | "extraction" | "walk" | "publication" | null {
     if (this.stopped === null || this.#stoppedAt === null) return null;
     const { stage } = this.#stoppedAt;
-    return stage < 0 ? "admission" : stage === STAGES ? "publication" : "walk";
+    return stage === ADMISSION
+      ? "admission"
+      : stage === EXTRACTION
+        ? "extraction"
+        : stage === STAGES
+          ? "publication"
+          : "walk";
   }
 
   /**
@@ -459,7 +482,10 @@ export class Consumers {
       this.pass.contract.openDecisions(this.admission.groups());
       admittedStores(this);
       this.rule = 2;
-      for (const { site, label } of this.admission.ingressStores()) ingressMark(this, site, label);
+      for (const { site, label } of this.admission.ingressStores()) {
+        ingressMark(this, site, label);
+        this.#ingressSites.push(site);
+      }
       this.rule = 3;
       this.admission.literalElements(this.order, (site, found) => mixed(this, site, found));
       this.admission.joinElements(this.order, (found) => mixedJoin(this, found));
@@ -479,6 +505,11 @@ export class Consumers {
         diagnostics: this.diagnostics.length,
         readChecks: this.admission.readChecks.length,
       };
+      // (the contracts the stores' checks require, while the solver still runs: a later stop finds them retained)
+      if (this.settled) {
+        this.#stage = EXTRACTION;
+        this.#capture();
+      }
       this.#walk();
       // (the walk's findings stand whole before the publication: a stop in it takes none of them back)
       this.#stage = STAGES;
@@ -498,6 +529,88 @@ export class Consumers {
       this.admission.takeBackReadChecks(this.#mark.readChecks);
     }
   }
+
+  /**
+   * The capture (#1526 phase B, TABLE r4.278): once admission settled, before the walk, the contract of each destination
+   * whose store admission owes a check so far (its store warnings, C1, and its ingress stores, C9), read level by level
+   * through the answers' own level reader (`admittedLevel`), so each level's decision and contract are made and kept while
+   * the solver still runs. Each request is a store's site and the place and path its statement stores into (its first
+   * live store, else its first, as `Answers.at` reads one), in the consumers' order; its result is kept (`captured`).
+   */
+  #capture(): void {
+    const { program, definitions, lists, contract } = this.pass;
+    const sites = new Map<string, SourceSite>();
+    for (const d of this.diagnostics)
+      if (
+        d.class === "warning-runtime-check" &&
+        d.kind === "written-target" &&
+        d.rule.rule === "store"
+      )
+        sites.set(siteKey(d.site), d.site);
+    for (const site of this.#ingressSites) sites.set(siteKey(site), site);
+    if (sites.size === 0) return;
+    const destinations = new Map<FlowNode, Definition>();
+    const bySite = new Map<string, Definition[]>();
+    for (const d of definitions.storeDefs) {
+      if (!destinations.has(d.node) && lists.live(d)) destinations.set(d.node, d);
+      const at = siteKey(d.site);
+      if (!sites.has(at)) continue;
+      const list = bySite.get(at);
+      if (list === undefined) bySite.set(at, [d]);
+      else list.push(d);
+    }
+    for (const d of definitions.storeDefs)
+      if (!destinations.has(d.node)) destinations.set(d.node, d);
+    const requests: ContractRequest[] = [];
+    for (const [at, site] of sites) {
+      // (each destination once a site, by its store: no key text made)
+      const made = new Set<Definition>();
+      for (const d of bySite.get(at) ?? []) {
+        const destination = destinations.get(d.node)!;
+        if (made.has(destination)) continue;
+        made.add(destination);
+        requests.push({ site, place: destination.place, path: destination.path });
+      }
+    }
+    const reader: ContractReader = {
+      level: (place, path) => {
+        const written = writtenOf(program.place(place).kind);
+        const admitted = admittedLevel(
+          this.admission,
+          place,
+          path,
+          written === null ? null : termAt(written, path),
+          { stopped: false, settled: true, cheap: () => null },
+        );
+        return levelProof(admitted, () =>
+          withoutEmpty(this.solve(contract.contractOf(keyOf(place, path)))),
+        );
+      },
+      // (as `Answers.placeProperties` finds them: a key whose decision stopped names nothing)
+      properties: (place, path) => {
+        const key = contract.keyAt(place, path);
+        return contract.anyStopped && contract.keyStopped(key)
+          ? new Set()
+          : propertyNames(this.pass, (asked) => this.solve(asked), { key });
+      },
+    };
+    // (its work is the capture's, no consumer read's)
+    this.reading = null;
+    captureContracts(
+      this.order(requests),
+      reader,
+      epochOf(this.pass),
+      this.captured,
+      (error) => error instanceof BudgetExhausted,
+      () => program.work.charge("checks", definitions.storeDefs.length + sites.size),
+    );
+  }
+
+  /** The stores' required contracts as the capture found them (`#capture`), in the order captured. */
+  readonly captured: CapturedContract[] = [];
+
+  /** The ingress stores' sites admission's walk marked (C9), which the capture takes (`#capture`). */
+  readonly #ingressSites: SourceSite[] = [];
 
   /** The consumers that operations, uses, receivers and speakers are, in that order (the walk's stages). */
   #walk(): void {
