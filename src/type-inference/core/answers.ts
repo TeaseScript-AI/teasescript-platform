@@ -47,7 +47,6 @@ import { HandlerIndex } from "./handlers.js";
 import {
   EMPTY,
   inItsOrder,
-  kindsInItsOrder,
   kindsInOrder,
   makeItem,
   REASON,
@@ -80,6 +79,7 @@ import { Solver, type DemandWork, type Work } from "./solver.js";
 import { narrowingKey, Values } from "./values.js";
 import { writtenTypeErrors } from "./written.js";
 import { closedType, epochOf, newEpoch, type CapturedContract } from "./contract-descriptors.js";
+import { admittedLevel } from "./admission/admitted.js";
 
 // (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
 export { closedType };
@@ -1417,36 +1417,11 @@ class CoreAnswers implements Answers {
   }
 
   #admitted(id: PlaceId, path: readonly string[], term: TypeTerm | null): AdmittedType {
-    // (each kind once: `(null | string)?` admits `null` and `string`)
-    if (term !== null) return { by: "written", kinds: [...new Set(typeTags(term))] };
-    // (after a stop nothing is decided but what is written, unless admission had settled: its decisions stand)
-    if (this.#stopped && !this.#consumers.settled) return { by: "undecided" };
-    const { admission } = this.#consumers;
-    const kinds = admission.admitted(id, path);
-    // (after a stop admission decides nothing more: where what it retained leaves the path undecided, what every
-    // store's syntax decides answers, as the finishing read's source 4, TABLE r4.122)
-    if (kinds.length === 0 && this.#stopped) {
-      const decided = this.#consumers.cheapDecided(id, path);
-      if (decided !== null)
-        return {
-          by: "decided",
-          // (in their one order once more, by the spelling the decision kept, #1398)
-          kinds: kindsInItsOrder(decided.kinds, decided.spelling),
-          decider: decided.decider.site,
-          inherited: decided.inherited,
-        };
-    }
-    // (the decider's site is found where it is read: A3's settled paths have no scan to keep it from)
-    return kinds.length === 0
-      ? { by: "undecided" }
-      : {
-          by: "decided",
-          kinds,
-          get decider(): SourceSite | null {
-            return admission.deciderAt(id, path);
-          },
-          inherited: admission.inheritsWritten(id, path),
-        };
+    return admittedLevel(this.#consumers.admission, id, path, term, {
+      stopped: this.#stopped,
+      settled: this.#consumers.settled,
+      cheap: (root, at) => this.#consumers.cheapDecided(root, at),
+    });
   }
 
   public project(

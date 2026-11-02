@@ -207,12 +207,11 @@ const LISTED_READS = [
     "whether a store is in a rejection cycle (A6): the constructor's input, read",
   ],
   [
-    "deciderAt",
+    "admittedLevel",
     "call",
     "answers.ts",
-    "the site that decided an answer, read where the answer asks it",
+    "the admitted type at a path, the answers' level reader: a decision's answer, read where the answer asks it",
   ],
-  ["inheritsWritten", "call", "answers.ts", "whether a copy decides an answer, read with it"],
   [
     "stored",
     ".along",
