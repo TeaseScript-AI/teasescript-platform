@@ -968,9 +968,9 @@ async function compiledInto(root, tree) {
 }
 
 /**
- * A seed (#1590): the tree's baseline in `root` made or joined as `state` makes it (its commit appended), named by the
- * tree's build (`compiledInto`), and every area of the tree planned (in the count its MANIFEST records, else 16 shards),
- * no shard stored; then `state`'s lines printed and `<root>/shards.tsv` written (a new file), one line per shard to store
+ * A seed (#1590): the tree's baseline in `root` made or joined as `state` makes it (its commit appended), every area of
+ * the tree planned (in the count its MANIFEST records, else 16 shards), no shard stored, and then named by the tree's
+ * build (`compiledInto`); then `state`'s lines printed and `<root>/shards.tsv` written (a new file), one line per shard to store
  * (`<area>\t<i>\t<N>`), as the hook queues them. Its exit status as `state`'s, but 0 where the baseline is incomplete.
  */
 async function seed(tree, root, refuse) {
@@ -979,8 +979,6 @@ async function seed(tree, root, refuse) {
   const sha = readFileSync(path.join(tree, ".sha"), "utf8").trim();
   const own = await owned(root, identity, `commit ${sha} ${tree}`);
   if (own.refused !== undefined) refuse(own.refused);
-  const named = await compiledInto(root, tree);
-  if (named.refused !== undefined) refuse(named.refused);
   const records = recorded(readFileSync(path.join(own.dir, "MANIFEST"), "utf8"));
   for (const folder of areasOf(tree)) {
     const area = path.basename(folder);
@@ -988,6 +986,9 @@ async function seed(tree, root, refuse) {
     const made = await planned(own.baseline, area, plan);
     if (made.refused !== undefined) refuse(made.refused);
   }
+  // (its last write: a MANIFEST that names a build records every area of its tree, which `status` reads without one)
+  const named = await compiledInto(root, tree);
+  if (named.refused !== undefined) refuse(named.refused);
   const { lines, status } = await stateOf(tree, root, false);
   for (const line of lines) console.log(JSON.stringify(line));
   if (status === 2) return 2;
@@ -1224,8 +1225,8 @@ async function importing(central, computed, area, shard, listed, refuse) {
 /**
  * The baseline `src` of the folder of baselines `root` without a tree (#1590), as one line: absent, incomplete (each
  * recorded area with its shards that count under `shardIn`, of its PLAN's count) or complete. Read only, as `storedRuns`
- * reads. Exit 0 only where every area its MANIFEST records (one at least) is complete, 1 where one is not or it is
- * absent, 2 where the folder is not this tool's, holds a foreign path or the runs of other inputs.
+ * reads. Exit 0 only where its MANIFEST names a build (a seed's, written once every area of its tree was recorded) and
+ * every area it records is complete, 1 where one is not, it names no build or it is absent, 2 where the folder is not this tool's, holds a foreign path or the runs of other inputs.
  */
 function statusOf(root, src) {
   const say = (text, status) => {
@@ -1251,6 +1252,8 @@ function statusOf(root, src) {
   if (identity.src !== src)
     return say(`${dir}'s MANIFEST names another src tree than its folder`, 2);
   const areas = [];
+  // (a MANIFEST names a build only once a seed recorded every area of its tree; else its areas are known only with it)
+  const seeded = compiledIn(text).length > 0;
   for (const [area, record] of recorded(text)) {
     const plan = bytesOf(path.join(dir, area, "PLAN"))?.toString();
     if (plan === undefined || hash(plan) !== record.plan) {
@@ -1271,7 +1274,7 @@ function statusOf(root, src) {
     areas.push({ area, state, count, shards });
   }
   const done = areas.filter(({ state }) => state === "complete").map(({ area }) => area);
-  if (areas.length > 0 && done.length === areas.length)
+  if (seeded && areas.length > 0 && done.length === areas.length)
     return say(`${dir}: complete: ${done.join(" ")}`, 0);
   const parts = [
     ...(done.length > 0 ? [`${done.join(" ")} complete`] : []),
@@ -1279,7 +1282,15 @@ function statusOf(root, src) {
       .filter(({ state }) => state !== "complete")
       .map(({ area, state, count, shards }) => `${area} ${state} ${count}/${shards}`),
   ];
-  return say(`${dir}: incomplete: ${parts.length > 0 ? parts.join("; ") : "no area planned"}`, 1);
+  const unseeded = seeded
+    ? []
+    : [
+        "no seed recorded its areas (a baseline stored before #1590: ask `baseline.sh status` with its tree)",
+      ];
+  return say(
+    `${dir}: incomplete: ${[...unseeded, ...(parts.length > 0 ? [parts.join("; ")] : ["no area planned"])].join(": ")}`,
+    1,
+  );
 }
 
 /** A stored shard's sources, each line read, its total left out; `refuse(why)` where it does not read as one. */
