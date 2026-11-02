@@ -9,17 +9,29 @@ import {
   withTestAllowance,
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
-import { withConsumerOrder, withoutRecords } from "../../src/type-inference/core/consumers.js";
+import {
+  Consumers,
+  withConsumerOrder,
+  withoutRecords,
+} from "../../src/type-inference/core/consumers.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
-import { coreRequest } from "./type-core-analysis.js";
+import { coreRequest, type SourceFile } from "./type-core-analysis.js";
 import { runGlobals } from "./type-core-route.js";
+import { VALUE_KINDS } from "../../src/value-kinds.js";
+import type { Expression } from "../../src/ast.js";
+import { expressionChildren, unwrap } from "../../src/expression-children.js";
+import { REASON, type Item } from "../../src/type-inference/core/items.js";
+import type { SourceSite } from "../../src/type-inference/graph.js";
+import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
 
 /*
  * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3 §5, TABLE
  * r4.113, the mark-ownership rule of S8: a stop changes nothing of the unstopped analysis but what its deferred marks
- * stand for, each carrying its obligation). A generated family over the holder: a list's element, an object's property,
+ * stand for, each carrying its obligation; at a combined stop the unstopped analysis is the run at the same demand
+ * allowance, except where the finishing walk answers a read the demand stop left `unknown`, TABLE r4.285,
+ * `combinedStop`). A generated family over the holder: a list's element, an object's property,
  * a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's store, a
  * parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll` (and the owner reviewer's
  * seven `addAll` texts), a dictionary's values list through a copy and an object's own `values` property (#1452), the
@@ -584,11 +596,17 @@ export function phaseEnds(
   return ends;
 }
 
-/** The cases the candidate route declined at some compile: judged at the analysis from then on. */
-const declined = new WeakSet<HeldCase>();
+/** The compiles the candidate route declined (outside the slice): no plan, each judged alone (Astra r1's B1 on #1597). */
+const declined = new WeakSet<object>();
 
-/** A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode. */
-function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?: number): StopRun {
+/** Whether a run's compile was declined by the candidate route. */
+const declinedRun = (run: StopRun): boolean => declined.has(run.result);
+
+/**
+ * A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode. A compile the candidate
+ * route declines has no plan; it decides nothing of another (a declined reference leaves a stopped plan to run).
+ */
+export function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?: number): StopRun {
   const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS);
   if (request === null) throw new Error(`The case does not resolve: ${c.name}`);
   const capped = <T>(make: () => T): T =>
@@ -597,19 +615,29 @@ function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?: numbe
     mode.run(() =>
       allowance === undefined ? capped(make) : withTestAllowance(allowance, () => capped(make)),
     );
-  // (outside the slice the analysis alone is judged: a case the candidate route declines in some mode or stop too)
+  // (outside the slice the analysis alone is judged; a compile the candidate route declines is marked, as no other's)
   const compiled = () => {
-    if (!c.slice || declined.has(c)) return { diagnostics: [], plan: null };
+    if (!c.slice) return { diagnostics: [], plan: null };
     try {
       return compileSourceWithBackend(c.source, { globals: GLOBALS }, CORE_BACKEND);
     } catch (error) {
       if (!(error instanceof CandidateOutsideSlice)) throw error;
-      declined.add(c);
-      return { diagnostics: [], plan: null };
+      const none = { diagnostics: [], plan: null };
+      declined.add(none);
+      return none;
     }
   };
   const both = () => ({ result: compiled(), answers: analyseCore(request) });
-  return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
+  // (a run under a demand allowance, a combined stop's reference or the stopped run, with its consumers' reads recorded:
+  // its analysis alone, after the compile)
+  const recorded = () => {
+    const result = compiled();
+    return { result, ...recordingReads(() => ({ answers: analyseCore(request) })) };
+  };
+  return {
+    ...allowed(demand === undefined ? both : recorded),
+    without: (omit) => allowed(() => withoutRecords(omit, both)),
+  };
 }
 
 /** A case's settled stops in a mode: every `step`th allowance of each settled phase from its lowest, and its highest. */
@@ -635,33 +663,632 @@ export function heldStops(
   return stops;
 }
 
+/** A diagnostic's record: its code at its site (`code start:end`, as the problems name it). */
+const recordOf = (d: { readonly code: string; readonly site: { start: number; end: number } }) =>
+  `${d.code} ${d.site.start}:${d.site.end}`;
+
+/** A site's identity: its file and offsets, never offsets alone (TABLE r4.290's inventory, (i)). */
+const siteKey = (site: {
+  readonly file: number;
+  readonly start: number;
+  readonly end: number;
+}): string => `${site.file}:${site.start}:${site.end}`;
+
+/** A diagnostic's record by its code at its whole site. */
+const recordKey = (d: { readonly code: string; readonly site: SourceSite }): string =>
+  `${d.code} ${siteKey(d.site)}`;
+
+/** Every value kind (`VALUE_KINDS`), `null` among them. */
+const ALL_KINDS: readonly string[] = Object.keys(VALUE_KINDS);
+
+/**
+ * A check's accepted domain, the kinds it lets through, by its `against` alone (never its words): `unknown` every kind,
+ * `non-null` every kind but `null`, else the kinds it names, a `number` with its whole numbers; as a sorted text.
+ */
+function domainOf(against: Obligation["against"]): ReadonlySet<string> {
+  const kinds = new Set<string>();
+  for (const kind of against)
+    if (kind === "unknown") ALL_KINDS.forEach((each) => kinds.add(each));
+    else if (kind === "non-null")
+      ALL_KINDS.filter((each) => each !== "null").forEach((each) => kinds.add(each));
+    else {
+      kinds.add(kind);
+      if (kind === "number") kinds.add("integer");
+    }
+  return kinds;
+}
+
+/** An empty check's accepted domain: non-emptiness, whatever family it names (the plan reads no `against` of it). */
+const NON_EMPTY: ReadonlySet<string> = new Set(["non-empty"]);
+
+/**
+ * A check's accepted domain (TABLE r4.290's inventory, amended): an empty check's non-emptiness, the family it names its
+ * label alone (its plan content, a member read's store requirement, reads no `against`: `runtimeChecks` in
+ * `core/consumer.ts`);
+ * any other check's kinds by its `against` (`domainOf`).
+ */
+const domainOfCheck = (check: Obligation): ReadonlySet<string> =>
+  check.kind === "empty-check" ? NON_EMPTY : domainOf(check.against);
+
+/** What a check's domain is of: a value's emptiness, or its kinds; checks of one value compare within one. */
+const dimensionOf = (check: Obligation): "emptiness" | "kinds" =>
+  check.kind === "empty-check" ? "emptiness" : "kinds";
+
+/** A domain as a text, for a comparison of sets. */
+const domainText = (kinds: ReadonlySet<string>): string => [...kinds].sort().join("|");
+
+/** The kinds two domains share: what two checks on one value let through together. */
+const intersect = (a: ReadonlySet<string>, b: ReadonlySet<string>): ReadonlySet<string> =>
+  new Set([...a].filter((kind) => b.has(kind)));
+
+/** A check's place: its whole site, its target and its boundary flag (every filter's, kind apart). */
+const placeOf = (check: Obligation): string =>
+  JSON.stringify([siteKey(check.site), check.target, check.boundary]);
+
+/** A check's slot (TABLE r4.290's inventory, (i)): its place and its kind; its accepted domain is compared apart. */
+const slotOf = (check: Obligation): string => JSON.stringify([placeOf(check), check.kind]);
+
+/** The domains of the checks at a slot, as one text (a set of sets). */
+const domainsAt = (list: readonly Obligation[], slot: string): string =>
+  JSON.stringify(
+    [
+      ...new Set(list.filter((x) => slotOf(x) === slot).map((x) => domainText(domainOfCheck(x)))),
+    ].sort(),
+  );
+
+/** What a combined stop's rule accepts of the demand-only reference, each check and record with its clause. */
+export interface CombinedStop {
+  readonly checks: ReadonlyMap<string, "a" | "w" | "z">;
+  /** Each accepted record by its code at its whole site (`code file:start:end`). */
+  readonly records: ReadonlyMap<string, "a" | "w" | "z">;
+  /** #1595's named exception: the reference's checks and records the stop names by another label alone. */
+  readonly relabelled: {
+    readonly checks: ReadonlySet<string>;
+    readonly records: ReadonlySet<string>;
+  };
+  /** The stopped analysis's checks at the accepted slots, which the reference does not have. */
+  readonly owing: ReadonlySet<string>;
+  /**
+   * The coarse (a) reading's counted class, never a pass (TABLE r4.299): the reference's consumer checks (a) would take
+   * but for open reads of their unit the stopped analysis did not answer, each with those reads' keys; and their records.
+   */
+  readonly coarse: {
+    readonly checks: ReadonlyMap<string, readonly string[]>;
+    readonly records: ReadonlySet<string>;
+  };
+}
+
+/** Every expression of an analysis's program by its whole site, parentheses among them, with its parent expression. */
+function syntaxOf(answers: Answers): {
+  readonly at: ReadonlyMap<string, Expression>;
+  readonly parent: ReadonlyMap<string, Expression>;
+} {
+  const at = new Map<string, Expression>();
+  const parent = new Map<string, Expression>();
+  for (const node of answers.graph.nodes) {
+    const pending = node.expression === undefined ? [] : [node.expression];
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      const key = siteKey(siteOf(node.file, next));
+      if (at.has(key)) continue;
+      at.set(key, next);
+      for (const child of expressionChildren(next)) {
+        parent.set(siteKey(siteOf(node.file, child)), next);
+        pending.push(child);
+      }
+    }
+  }
+  return { at, parent };
+}
+
+/** An expression's whole site. */
+const siteOf = (file: number, expression: Expression): SourceSite => ({
+  file,
+  start: expression.span.start.offset,
+  end: expression.span.end.offset,
+});
+
+/** A read's identity: its value's whole site and its steps. */
+const readKey = (site: SourceSite, steps: readonly string[]): string =>
+  `${siteKey(site)}|${steps.join("\u0000")}`;
+
+/** Whether an answer holds a value a stop left undecided: an `unknown` item with the reason `budget`. */
+const unsettled = (items: readonly Item[]): boolean =>
+  items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
+
+/** The collection and record literals, whose values a store holding them holds. */
+const LITERAL_KINDS = new Set(["listLiteral", "setLiteral", "dictLiteral", "objectLiteral"]);
+
+/**
+ * Whether the store whose value stands at `store` holds the value at `value` (TABLE r4.290's inventory, (iii)): that
+ * value itself, or one its literals hold, through any parentheses (`unwrap`, which the lowering does not materialize),
+ * each compared by its whole site.
+ */
+function holds(syntax: ReturnType<typeof syntaxOf>, store: SourceSite, value: SourceSite): boolean {
+  const root = syntax.at.get(siteKey(store));
+  const pending = root === undefined ? [] : [root];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const inner = unwrap(next);
+    if (siteKey(siteOf(store.file, inner)) === siteKey(value)) return true;
+    if (LITERAL_KINDS.has(inner.kind)) pending.push(...expressionChildren(inner));
+  }
+  return false;
+}
+
+/**
+ * A consumer's read as `recordingReads` records it: its answer, whether the finishing walk made it, whether the consumer
+ * left the value to its contract instead (`Consumers.skip`), and the walk's unit it was made in (`Consumers.runs`, by its
+ * count, and by its stage and site, which name the unit in another analysis of the program).
+ */
+interface RecordedRead {
+  readonly key: string;
+  readonly items: readonly Item[];
+  readonly finishing: boolean;
+  /** A value the consumer left to its contract: its quiet path, which needs every contract it reads settled. */
+  readonly skipped: boolean;
+  readonly unit: number;
+  readonly unitSite: string;
+}
+
+/** A warning a consumer emitted (`Consumers.rules`, which `warning` fills): its obligation and its walk's unit. */
+interface Emission {
+  readonly obligation: string;
+  readonly unit: number;
+}
+
+/** A walk's recorded reads by read (`readKey`) and the warnings it emitted, in order. */
+interface Recorded {
+  readonly reads: ReadonlyMap<string, readonly RecordedRead[]>;
+  readonly emissions: readonly Emission[];
+}
+
+/**
+ * The reads an analysis's consumers made (`Consumers.valueItems`, their one read, unstopped or finishing), the values
+ * they left to their contracts and the warnings they emitted: the last walk's, as it published the analysis's checks
+ * (TABLE r4.290's inventory, (ii), the coarse reading of r4.299).
+ */
+const consumerReads = new WeakMap<object, Recorded>();
+
+/** An analysis's recorded reads; a stopped analysis changed for a control (`Object.create`) has its original's. */
+function readsOf(answers: Answers): Recorded | undefined {
+  // (`Object.getPrototypeOf` gives an object or `null`)
+  for (let at: object | null = answers; at !== null; at = Object.getPrototypeOf(at)) {
+    const found = consumerReads.get(at);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Test-only, for a control: `shadow` (made from `answers` by `Object.create`) records `answers`' reads but those `change`
+ * gives at the read of `site` with `steps`.
+ */
+export function withReadsChanged(
+  answers: Answers,
+  shadow: Answers,
+  site: SourceSite,
+  steps: readonly string[],
+  change: (reads: readonly RecordedRead[]) => readonly RecordedRead[],
+): Answers {
+  const recorded = readsOf(answers);
+  const reads = new Map(recorded?.reads ?? []);
+  const key = readKey(site, steps);
+  reads.set(key, change(reads.get(key) ?? []));
+  consumerReads.set(shadow, { reads, emissions: recorded?.emissions ?? [] });
+  return shadow;
+}
+
+/** `Consumers.rules` recording each warning its consumers emit. */
+class EmissionsOf extends Map<CoreDiagnostic, number> {
+  // (a plain field: `Map`'s constructor sets the entries before a subclass's fields exist)
+  into: ((diagnostic: CoreDiagnostic) => void) | undefined;
+  constructor(
+    entries: Iterable<readonly [CoreDiagnostic, number]>,
+    into: (d: CoreDiagnostic) => void,
+  ) {
+    super(entries);
+    this.into = into;
+  }
+  override set(diagnostic: CoreDiagnostic, rule: number): this {
+    this.into?.(diagnostic);
+    return super.set(diagnostic, rule);
+  }
+}
+
+/**
+ * Runs `make`, an analysis under a demand allowance, recording each read its consumers make through
+ * `Consumers.valueItems`, each value they leave to its contract (`Consumers.skip`) and each warning they emit
+ * (`Consumers.rules`), each in its walk's unit (`Consumers.runs`, `Consumers.enter`). Each wrap is for the run alone,
+ * restored in any case, and fails loudly where its method is not the one it expects.
+ */
+function recordingReads<T extends { readonly answers: Answers }>(make: () => T): T {
+  const prototype = Consumers.prototype;
+  const { valueItems, runs, enter, check, finish, skip } = prototype;
+  if (
+    typeof valueItems !== "function" ||
+    valueItems.length !== 3 ||
+    typeof runs !== "function" ||
+    runs.length !== 1 ||
+    typeof enter !== "function" ||
+    enter.length !== 1 ||
+    typeof check !== "function" ||
+    typeof finish !== "function" ||
+    typeof skip !== "function"
+  )
+    throw new Error(
+      "Consumers.prototype is not the walk the recorder wraps (valueItems, runs, enter, check, finish, skip)",
+    );
+  interface Walk {
+    readonly reads: Map<string, RecordedRead[]>;
+    readonly emissions: Emission[];
+    unit: number;
+    stage: string;
+    unitSite: string;
+  }
+  const walks = new Map<Consumers, Walk>();
+  const walkOf = (consumers: Consumers): Walk => {
+    let walk = walks.get(consumers);
+    if (walk === undefined)
+      walks.set(
+        consumers,
+        (walk = { reads: new Map(), emissions: [], unit: 0, stage: "", unitSite: "" }),
+      );
+    return walk;
+  };
+  // (each walk's warnings as `warning` and `error` record them, whatever map the walk began with, for the run alone)
+  const maps: EmissionsOf[] = [];
+  const recording = (consumers: Consumers): void => {
+    if (consumers.rules instanceof EmissionsOf) return;
+    const walk = walkOf(consumers);
+    const map = new EmissionsOf(consumers.rules, (diagnostic) => {
+      if ("obligation" in diagnostic)
+        walk.emissions.push({ obligation: JSON.stringify(diagnostic.obligation), unit: walk.unit });
+    });
+    maps.push(map);
+    Object.defineProperty(consumers, "rules", {
+      value: map,
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+  };
+  prototype.check = function (this: Consumers) {
+    recording(this);
+    return check.call(this);
+  };
+  prototype.finish = function (this: Consumers, ...args: Parameters<Consumers["finish"]>) {
+    recording(this);
+    return finish.apply(this, args);
+  };
+  prototype.enter = function (this: Consumers, ...args: Parameters<Consumers["enter"]>) {
+    const walk = walkOf(this);
+    walk.unit += 1;
+    walk.stage = String(args[0]);
+    walk.unitSite = `stage ${walk.stage}`;
+    return enter.apply(this, args);
+  };
+  prototype.runs = function (this: Consumers, ...args: Parameters<Consumers["runs"]>) {
+    const walk = walkOf(this);
+    walk.unit += 1;
+    walk.unitSite = `stage ${walk.stage} ${siteKey(args[0])}`;
+    return runs.apply(this, args);
+  };
+  const record = (
+    consumers: Consumers,
+    value: Parameters<Consumers["valueItems"]>[0],
+    rest: readonly string[],
+    items: readonly Item[],
+    skipped: boolean,
+  ): void => {
+    const site = consumers.pass.program.places[value]?.site;
+    if (site === null || site === undefined) return;
+    const walk = walkOf(consumers);
+    const key = readKey(site, rest);
+    const read = {
+      key,
+      items,
+      finishing: consumers.finishing,
+      skipped,
+      unit: walk.unit,
+      unitSite: walk.unitSite,
+    };
+    const reads = walk.reads.get(key);
+    if (reads === undefined) walk.reads.set(key, [read]);
+    else reads.push(read);
+  };
+  prototype.valueItems = function (this: Consumers, ...args: Parameters<Consumers["valueItems"]>) {
+    const items = valueItems.apply(this, args);
+    const [value, , rest] = args;
+    if (Array.isArray(rest)) record(this, value, rest, items, false);
+    return items;
+  };
+  // (a value a consumer leaves to its contract, the quiet path; `skip`'s own rest parameter, as `Parameters` gives
+  // `never` for a readonly rest array)
+  prototype.skip = function (
+    this: Consumers,
+    ...values: readonly (Parameters<Consumers["valueItems"]>[0] | undefined)[]
+  ) {
+    for (const value of values) if (value !== undefined) record(this, value, [], [], true);
+    skip.call(this, ...values);
+  };
+  try {
+    const made = make();
+    consumerReads.set(
+      made.answers,
+      [...walks.values()].at(-1) ?? { reads: new Map(), emissions: [] },
+    );
+    return made;
+  } finally {
+    Object.assign(prototype, { valueItems, runs, enter, check, finish, skip });
+    for (const map of maps) map.into = undefined;
+  }
+}
+
+/**
+ * A combined stop's analyses of a program's files in a mode under a demand allowance, for an oracle's control: the
+ * natural one (no demand, no stop), the demand-only reference with its consumers' reads recorded, and the stopped one at
+ * a program allowance.
+ */
+export function combinedAnalyses(
+  files: readonly SourceFile[],
+  mode: HeldMode,
+  demand: number,
+): {
+  readonly natural: Answers;
+  readonly reference: Answers;
+  readonly stoppedAt: (allowance: number) => Answers;
+} {
+  const request = coreRequest([...files], GLOBALS);
+  if (request === null) throw new Error("The files do not resolve.");
+  return {
+    natural: mode.run(() => analyseCore(request)),
+    reference: mode.run(() =>
+      withTestDemandAllowance(demand, () =>
+        recordingReads(() => ({ answers: analyseCore(request) })),
+      ),
+    ).answers,
+    stoppedAt: (allowance) =>
+      mode.run(() =>
+        withTestAllowance(allowance, () =>
+          withTestDemandAllowance(demand, () =>
+            recordingReads(() => ({ answers: analyseCore(request) })),
+          ),
+        ),
+      ).answers,
+  };
+}
+
+/** A check's `on` words with every dotted or indexed path left out (#1595: a label alone differs). */
+const withoutLabels = (on: string): string =>
+  on.replace(/[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[^\]\s]*\])+/g, "·");
+
+/**
+ * A combined stop's rule (S8, TABLE r4.285, r4.290 and its inventory). The demand-only run is the reference, recorded with
+ * its consumers' reads (`recordingReads`); each of its checks the stopped analysis neither keeps nor marks is accepted only
+ * by one clause, every site whole (file and offsets), a slot a site, target, boundary and kind, a domain the kinds a check
+ * lets through (`domainOf`):
+ * - (a) a consumer's check, never a store's, whose reference unit (the walk's unit that emitted it) read something
+ *   `unknown` with the reason `budget` (a recovered contract tagged `budget` is no such read), each such read answered at
+ *   its key by the stopped analysis's last run of that unit (its finishing walk's where that ran it again): read there
+ *   again, every such read settled, or left to its contract (`Consumers.skip`, the quiet path, which needs every contract
+ *   it reads settled); and at whose slot the natural analysis (no demand, no stop) and the stopped one owe the same
+ *   domains, the natural one not the check itself. The coarse reading (TABLE r4.299): a finer one, by the consumer
+ *   invocation that emitted the check, has no entry to hook, as the consumers are module functions no test can replace
+ *   and a call stack names no call; where (a) is denied only by such a read, the check is the counted class (`coarse`);
+ * - (w) marks at its place (site, target, boundary), of any kind, the only checks owed there, together letting through
+ *   exactly its domain (their domains' intersection: checks on one value): the reference satisfied in other words;
+ * - (z) a boundary against `unknown`, no plan content (S3 §4), nothing owed at its slot, where an undecided store record
+ *   stands at the site of a store whose value holds the boundary's value (`holds`).
+ * A record goes with its obligations, never one the natural analysis reports itself. A check the stop owes by another
+ * label alone (its kind, whole site, domain and boundary, and its words but for their labels) is #1595's named exception.
+ */
+export function combinedStop(reference: Answers, natural: Answers, stopped: Answers): CombinedStop {
+  const [reads, finished] = [readsOf(reference), readsOf(stopped)];
+  if (reads === undefined || finished === undefined)
+    throw new Error(
+      "A combined stop's reference and stopped analysis must be made with their reads recorded (`recordingReads`).",
+    );
+  const marks = stopped.budget.deferred;
+  const markChecks = new Set(marks.map((mark) => JSON.stringify(mark.obligation)));
+  const owed = [...stopped.checks, ...marks.map((mark) => mark.obligation)];
+  const owedTexts = new Set(owed.map((check) => JSON.stringify(check)));
+  const naturalTexts = new Set(natural.checks.map((check) => JSON.stringify(check)));
+  let parsed: ReturnType<typeof syntaxOf> | undefined;
+  const syntax = (): ReturnType<typeof syntaxOf> => (parsed ??= syntaxOf(reference));
+  const relabelledTo = (u: Obligation): boolean =>
+    owed.some(
+      (x) =>
+        x.kind === u.kind &&
+        siteKey(x.site) === siteKey(u.site) &&
+        x.boundary === u.boundary &&
+        domainText(domainOfCheck(x)) === domainText(domainOfCheck(u)) &&
+        (x.target !== u.target || x.on !== u.on) &&
+        withoutLabels(x.on) === withoutLabels(u.on),
+    );
+  const classOf = (u: Obligation): "a" | "w" | "z" | "relabelled" | readonly string[] | null => {
+    const text = JSON.stringify(u);
+    if (owedTexts.has(text)) return null;
+    // (the open reads of its unit that leave it to the coarse class, where no clause takes it)
+    let unanswered: readonly string[] | null = null;
+    const slot = slotOf(u);
+    if (!naturalTexts.has(text) && domainsAt(natural.checks, slot) === domainsAt(owed, slot)) {
+      const owner = reference.diagnostics.find(
+        (d) => "obligation" in d && JSON.stringify(d.obligation) === text,
+      );
+      if (owner !== undefined && "rule" in owner && owner.rule.rule !== "store") {
+        // (every read of the reference's unit that emitted the check got `unknown` with the reason `budget` open; the
+        // stopped analysis's last run of a unit of that stage and site, its finishing walk's where that ran it again,
+        // answering each at its key: read again, every such read settled, or left to its contract)
+        const units = new Set(
+          reads.emissions.filter((emission) => emission.obligation === text).map((e) => e.unit),
+        );
+        const open = [...reads.reads.values()]
+          .flat()
+          .filter((read) => units.has(read.unit) && unsettled(read.items));
+        const answered = (read: RecordedRead): boolean => {
+          const run = [...finished.reads.values()]
+            .flat()
+            .filter((each) => each.unitSite === read.unitSite);
+          const finishing = run.some((each) => each.finishing);
+          const there = run.filter((each) => each.finishing === finishing && each.key === read.key);
+          return (
+            there.length > 0 &&
+            there.filter((each) => !each.skipped).every((each) => !unsettled(each.items))
+          );
+        };
+        const left = [...new Set(open.filter((read) => !answered(read)).map((read) => read.key))];
+        if (open.length > 0 && left.length === 0) return "a";
+        if (left.length > 0) unanswered = left;
+      }
+    }
+    // ((w): every check owed at the place a mark; those of the check's dimension letting through its domain together)
+    const there = owed.filter((x) => placeOf(x) === placeOf(u));
+    const here = there.filter((x) => dimensionOf(x) === dimensionOf(u));
+    if (
+      here.length > 0 &&
+      there.every((x) => markChecks.has(JSON.stringify(x))) &&
+      domainText(here.map(domainOfCheck).reduce(intersect)) === domainText(domainOfCheck(u))
+    )
+      return "w";
+    if (
+      u.boundary &&
+      u.against.length === 1 &&
+      u.against[0] === "unknown" &&
+      domainsAt(owed, slot) === "[]" &&
+      [...stopped.diagnostics, ...marks].some(
+        (d) =>
+          "rule" in d &&
+          d.rule.rule === "store" &&
+          "obligation" in d &&
+          d.obligation.against.length === 1 &&
+          d.obligation.against[0] === "unknown" &&
+          d.site.file === u.site.file &&
+          holds(syntax(), d.site, u.site),
+      )
+    )
+      return "z";
+    return relabelledTo(u) ? "relabelled" : unanswered;
+  };
+  const checks = new Map<string, "a" | "w" | "z">();
+  const coarse = { checks: new Map<string, readonly string[]>(), records: new Set<string>() };
+  const relabelled = { checks: new Set<string>(), records: new Set<string>() };
+  const owing = new Set<string>();
+  for (const u of reference.checks) {
+    const found = classOf(u);
+    if (found === null) continue;
+    const text = JSON.stringify(u);
+    if (found === "relabelled") relabelled.checks.add(text);
+    else if (typeof found !== "string") coarse.checks.set(text, found);
+    else {
+      checks.set(text, found);
+      for (const x of owed) if (slotOf(x) === slotOf(u)) owing.add(JSON.stringify(x));
+    }
+  }
+  const records = new Map<string, "a" | "w" | "z">();
+  const kept = new Set([...stopped.diagnostics, ...marks].map(recordKey));
+  const naturalRecords = new Set(natural.diagnostics.map(recordKey));
+  for (const d of reference.diagnostics) {
+    const record = recordKey(d);
+    if (d.kind === "budget" || kept.has(record) || naturalRecords.has(record)) continue;
+    const each = reference.diagnostics
+      .filter((x) => x.kind !== "budget" && recordKey(x) === record)
+      .map((x) => ("obligation" in x ? JSON.stringify(x.obligation) : null));
+    if (each.some((text) => text === null)) continue;
+    if (
+      each.every((text) => checks.has(text!) || owedTexts.has(text!)) &&
+      each.some((text) => checks.has(text!))
+    )
+      records.set(record, checks.get(each.find((text) => checks.has(text!))!)!);
+    else if (
+      each.every(
+        (text) => relabelled.checks.has(text!) || checks.has(text!) || owedTexts.has(text!),
+      )
+    )
+      relabelled.records.add(record);
+    else if (
+      each.every(
+        (text) =>
+          coarse.checks.has(text!) ||
+          relabelled.checks.has(text!) ||
+          checks.has(text!) ||
+          owedTexts.has(text!),
+      )
+    )
+      coarse.records.add(record);
+  }
+  return { checks, records, relabelled, owing, coarse };
+}
+
 /**
  * The mark-ownership rule at the analysis (S8): every check of the unstopped analysis the stop removed is a deferred
- * mark's obligation, and every warning or error it removed is a mark's record (its code at its site).
+ * mark's obligation, and every warning or error it removed is a mark's record (its code at its site). At a combined stop
+ * (`rule`), what the combined stop's rule accepts is owned too, and #1595's relabelled checks and records and the coarse
+ * (a) reading's counted class (`CombinedStop.coarse`, with its open reads' keys) are named.
  */
-function ownership(unstopped: Answers, stopped: Answers): string[] {
+function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): string[] {
   const marks = stopped.budget.deferred;
   const owned = new Set(marks.map((mark) => JSON.stringify(mark.obligation)));
   const kept = new Set(stopped.checks.map((check) => JSON.stringify(check)));
-  const record = (d: { readonly code: string; readonly site: { start: number; end: number } }) =>
-    `${d.code} ${d.site.start}:${d.site.end}`;
-  const records = new Set([...stopped.diagnostics, ...marks].map(record));
-  return [
-    ...unstopped.checks
-      .map((check) => JSON.stringify(check))
-      .filter((check) => !kept.has(check) && !owned.has(check))
-      .map((check) => `unowned check ${check}`),
-    ...unstopped.diagnostics
-      .filter((d) => d.kind !== "budget" && !records.has(record(d)))
-      .map((d) => `unowned record ${record(d)}`),
-  ];
+  const records = new Set([...stopped.diagnostics, ...marks].map(recordKey));
+  const problems: string[] = [];
+  for (const check of unstopped.checks.map((each) => JSON.stringify(each)))
+    if (kept.has(check) || owned.has(check) || rule?.checks.has(check)) continue;
+    else if (rule?.relabelled.checks.has(check))
+      problems.push(`exception #1595 relabelled check ${check}`);
+    else if (rule?.coarse.checks.has(check))
+      problems.push(
+        `exception coarse(a) rejection check ${check} open ${rule.coarse.checks.get(check)!.join(" ")}`,
+      );
+    else problems.push(`unowned check ${check}`);
+  for (const d of unstopped.diagnostics) {
+    const record = recordKey(d);
+    if (d.kind === "budget" || records.has(record) || rule?.records.has(record)) continue;
+    if (rule?.relabelled.records.has(record))
+      problems.push(`exception #1595 relabelled record ${recordOf(d)}`);
+    else if (rule?.coarse.records.has(record))
+      problems.push(`exception coarse(a) rejection record ${recordOf(d)}`);
+    else problems.push(`unowned record ${recordOf(d)}`);
+  }
+  return problems;
+}
+
+/**
+ * Whether a problem `heldProblems` reports is a named exception (counted, never a pass): an issue's, or the coarse (a)
+ * reading's class (TABLE r4.299).
+ *
+ * @public (the whole family's driver outside CI reads it)
+ */
+export function isNamedException(problem: string): boolean {
+  return problem.startsWith("exception #") || problem.startsWith("exception coarse(a) ");
+}
+
+/** The natural analysis (no demand allowance, no stop) beside each demand-only reference run, made once per run. */
+const naturals = new WeakMap<StopRun, Answers>();
+
+/**
+ * At a combined stop (a demand allowance that stops a decision, with a settled program stop), the combined stop's rule
+ * against the demand-only run `unstopped` (`combinedStop`).
+ */
+export function combinedStopRule(
+  c: HeldCase,
+  mode: HeldMode,
+  unstopped: StopRun,
+  stopped: Answers,
+): CombinedStop {
+  let natural = naturals.get(unstopped);
+  if (natural === undefined) {
+    const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS)!;
+    natural = mode.run(() => analyseCore(request));
+    naturals.set(unstopped, natural);
+  }
+  return combinedStop(unstopped.answers, natural, stopped);
 }
 
 /**
  * What a settled stop changed of a case that its marks do not stand for, in a mode (`unstopped`: the case's unstopped
- * run there, made once): the mark-ownership rule at the analysis; in the slice the stop oracle (`stopProblems`) and the
- * runs: a fitting value says what its predicate does, and a value that does not fit is rejected before the consumer's
- * effect, having said at most `BEFORE`.
+ * run there, made once; with `demand`, the run at that demand allowance, a combined stop's reference under its rule): the
+ * mark-ownership rule at the analysis; in the slice the stop oracle (`stopProblems`) and the runs: a fitting value says
+ * what its predicate does, and a value that does not fit is rejected before the consumer's effect, having said at most
+ * `BEFORE`. A named exception is reported as one (`isNamedException`).
  */
 export function heldProblems(
   c: HeldCase,
@@ -671,21 +1298,43 @@ export function heldProblems(
   demand?: number,
 ): string[] {
   const stopped = heldRun(c, mode, allowance, demand);
-  const problems = ownership(unstopped.answers, stopped.answers);
-  if (!c.slice || declined.has(c)) return problems;
+  const rule =
+    demand === undefined ? undefined : combinedStopRule(c, mode, unstopped, stopped.answers);
+  const problems = ownership(unstopped.answers, stopped.answers, rule);
+  if (!c.slice || declinedRun(stopped)) return problems;
+  // (a stopped plan runs its fitting and forbidden values whatever the reference's compile did; the two compiles are
+  // compared where both are had)
+  if (declinedRun(unstopped)) return [...problems, ...runProblems(c, stopped)];
   problems.push(
     ...stopProblems({
       unstopped,
       stopped,
       fitting: c.values.filter((each) => each.says !== null).map((each) => each.globals),
       violating: c.values.filter((each) => each.says === null).map((each) => each.globals),
+      ...(rule === undefined
+        ? {}
+        : {
+            excused: {
+              records: new Set([
+                ...rule.records.keys(),
+                ...rule.relabelled.records,
+                ...rule.coarse.records,
+              ]),
+              checks: new Set([
+                ...rule.checks.keys(),
+                ...rule.owing,
+                ...rule.relabelled.checks,
+                ...rule.coarse.checks.keys(),
+              ]),
+            },
+          }),
     }),
   );
   return [...problems, ...runProblems(c, stopped)];
 }
 
 /** A compile's runs against the case's predicate: what each fitting value says, and each other value rejected in time. */
-function runProblems(c: HeldCase, run: StopRun): string[] {
+export function runProblems(c: HeldCase, run: Pick<StopRun, "result">): string[] {
   const plan = run.result.plan;
   if (plan === null) return ["no plan"];
   const problems: string[] = [];
@@ -711,13 +1360,13 @@ export function heldUnstopped(
   demand?: number,
 ): { run: StopRun; problems: string[] } {
   const run = heldRun(c, mode, undefined, demand);
-  return { run, problems: c.slice && !declined.has(c) ? runProblems(c, run) : [] };
+  return { run, problems: c.slice && !declinedRun(run) ? runProblems(c, run) : [] };
 }
 
 /**
  * The stop kinds beside a settled program stop (S3 §5): demand allowances that stop a decision of a case, alone (a
  * decision stop) and with a program stop (a combined one), each judged against the unstopped run at the same demand
- * allowance. Tried one unit below each decision's work in the case's unstopped analysis, largest first, then halving
+ * allowance, a combined one under its rule (`combinedStop`). Tried one unit below each decision's work in the case's unstopped analysis, largest first, then halving
  * below the smallest; kept only where a decision then stops, up to three. A case with none has no such rows.
  *
  * @public (the whole family's driver outside CI reads it, with the family)
@@ -977,9 +1626,12 @@ function gateShapes(): Record<string, (k: number) => string> {
   };
 }
 
+/** The phases a first settled stop may be in: the walk, or the stores' extraction before it (#1556's phase B). */
+const FIRST_SETTLED: readonly string[] = ["extraction", "walk"];
+
 /**
  * The finishing growth gate (#1445, TABLE r4.208): each shape at its two sizes (`sizes`, one doubling), in both orders,
- * measured at its first settled walk stop. Per doubling of the syntax nodes, the frontier's own counter (`checks`) grows
+ * measured at its first settled stop (in the walk, or the extraction before it). Per doubling of the syntax nodes, the frontier's own counter (`checks`) grows
  * within 2.35; the ring and the chain whose links store their own property are also gated whole, finishing within 2.15
  * and every finishing counter within 2.35. The other shapes' admission and contract work and decision-stop bookkeeping
  * (`readerRecords`, `stopAsks`) grow faster on `main` already (#1456, #1464). Each problem as a line.
@@ -1013,8 +1665,11 @@ export function frontierGrowthProblems(
           else first = middle + 1;
         }
         const { budget } = analysed(first);
-        if (budget.stoppedIn !== "walk")
-          problems.push(`${shape} ${k}: the first settled stop is not in the walk`);
+        // (the first settled phase: the walk, or the extraction before it, #1556's phase B)
+        if (!FIRST_SETTLED.includes(budget.stoppedIn ?? ""))
+          problems.push(
+            `${shape} ${k}: the first settled stop is not in the walk or the extraction`,
+          );
         return {
           units: budget.finishing,
           nodes: budget.counts.get("syntaxNodes")!,

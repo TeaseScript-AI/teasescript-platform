@@ -360,14 +360,13 @@ type Standing = CopyTask | { readonly values: HostFrontier };
  * syntax decision's frontier is, `cheapFrontier`): the literal cells of the values there by the step that enters them
  * (admission's store walk, `expand`), the node of the place's stored paths there, the copies standing there, and the
  * host data standing there or above it. What its copies hold is reached by a read's bounded walk (`explore`): the copies
- * standing at a frontier's path are its own and its owner path's, one step below. Where its place has a decision that
- * stopped, its place and path are kept, so a step below that decision reads the stop alone (r4.186).
+ * standing at a frontier's path are its own and its owner path's, one step below. A copy's frontier holds what its stores
+ * hold whatever decision of its place stopped, as the copy's value does (#1560): the stop alone (r4.186) is the read's own
+ * key's (`heldIngress`).
  */
 interface HostFrontier {
   readonly cells: Map<string, Part[]>;
   readonly node: StoreNode | null;
-  /** Its place and path where the place has a decision that stopped, else `null`. */
-  readonly at: { readonly place: PlaceId; readonly path: readonly string[] } | null;
   readonly copies: Standing[];
   host: IngressNode | undefined;
   /** Its owner path's frontier and the step below it, whose copies stand here one step below; `null` at a root. */
@@ -470,23 +469,14 @@ export function withFrontierBound<T>(
   }
 }
 
-/**
- * Whether a frontier holds nothing of its own beside its copies' frontiers: no value a step enters, no store below, no
- * decision of its place that stopped.
- */
+/** Whether a frontier holds nothing of its own beside its copies' frontiers: no value a step enters, no store below. */
 function holdsOnlyCopies(at: HostFrontier): boolean {
-  return (
-    at.cells.size === 0 &&
-    at.host === undefined &&
-    (at.node?.children.size ?? 0) === 0 &&
-    at.at === null
-  );
+  return at.cells.size === 0 && at.host === undefined && (at.node?.children.size ?? 0) === 0;
 }
 
 const NOTHING: HostFrontier = {
   cells: new Map(),
   node: null,
-  at: null,
   copies: [],
   host: undefined,
   owner: null,
@@ -500,7 +490,6 @@ const NOTHING: HostFrontier = {
 function frontier(
   node: StoreNode | null,
   host: IngressNode | undefined,
-  at: HostFrontier["at"],
   owner: HostFrontier["owner"],
   own = false,
 ): HostFrontier {
@@ -509,7 +498,6 @@ function frontier(
   return {
     cells: new Map(),
     node,
-    at,
     copies: [],
     host,
     owner,
@@ -650,7 +638,7 @@ function enterStores(walk: Consumers, at: HostFrontier): void {
     else {
       // (each element whole: what the list's value holds at its element step, the copies standing there, and the copies
       // of the lists it copies at their element, so an element enters with its stored descendants)
-      const list = frontier(null, undefined, null, null);
+      const list = frontier(null, undefined, null);
       enterValues(walk, list, value);
       const element = stepOwn(walk, list, "element");
       for (const [step, parts] of element.cells) addCells(walk, at, step, parts);
@@ -672,21 +660,16 @@ function enterStores(walk: Consumers, at: HostFrontier): void {
   }
 }
 
-/** A place's frontier at a path, from its root's by its steps; nothing at a path whose decision stopped (r4.186). */
+/**
+ * A place's frontier at a path, from its root's by its steps: what its stores hold there, whatever decision of the place
+ * stopped (a read of a stopped key answers the stop alone before its walk, `heldIngress`; a copy of one holds what its
+ * stores hold, #1560).
+ */
 function locate(walk: Consumers, place: PlaceId, path: readonly string[]): HostFrontier {
-  const { contract } = walk.pass;
-  if (contract.anyStopped && walk.admission.decisionStopped(place, path)) return NOTHING;
   const frontiers = frontiersOf(walk);
   let at = frontiers.roots.get(place);
   if (at === undefined) {
-    const stopped =
-      contract.anyStopped && contract.stoppedKeys().some((key) => key.place === place);
-    at = frontier(
-      frontiers.places.get(place) ?? null,
-      undefined,
-      stopped ? { place, path: [] } : null,
-      null,
-    );
+    at = frontier(frontiers.places.get(place) ?? null, undefined, null);
     frontiers.roots.set(place, at);
     enterStores(walk, at);
   }
@@ -696,7 +679,7 @@ function locate(walk: Consumers, place: PlaceId, path: readonly string[]): HostF
 
 /**
  * A frontier's own content one step below, made once: its cells and its stored paths there, the copies standing there
- * and the host data standing at it; the stop alone below a decision of its place that stopped (r4.186). At a `values`
+ * and the host data standing at it, whatever decision of its place stopped (`locate`). At a `values`
  * step, which reads a dictionary's values list where its receiver is one and an object's own property where it is an
  * object, both: its own content and the frontier above it, standing there as a copy whose element is the
  * dictionary's (#1452). A dictionary's `keys` list holds text no store's host data reaches (TABLE r4.47).
@@ -707,18 +690,7 @@ function stepOwn(walk: Consumers, from: HostFrontier, step: string): HostFrontie
   if (from === NOTHING) return NOTHING;
   const known = from.steps.get(step);
   if (known !== undefined) return known;
-  const stop =
-    from.at === null
-      ? null
-      : { place: from.at.place, path: keptSteps(program.work, from.at.path, [step]) };
-  if (stop !== null && walk.admission.decisionStopped(stop.place, stop.path)) {
-    from.steps.set(step, NOTHING);
-    return NOTHING;
-  }
-  const at = frontier(from.node?.children.get(step) ?? null, from.host, stop, {
-    frontier: from,
-    step,
-  });
+  const at = frontier(from.node?.children.get(step) ?? null, from.host, { frontier: from, step });
   from.steps.set(step, at);
   if (dictList(step) === "values") {
     program.work.charge("checks");
@@ -831,7 +803,7 @@ function ownFrontier(
 ): HostFrontier {
   const node = ownNode(walk, value);
   if (node === null) return NOTHING;
-  const at = frontier(null, undefined, null, null, true);
+  const at = frontier(null, undefined, null, true);
   reads.set(value, at);
   enterValues(walk, at, [expand(walk.admission, value, node, [])]);
   return at;
