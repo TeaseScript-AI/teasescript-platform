@@ -99,10 +99,10 @@ test("a copied store's whole contract is checked at every settled stop past its 
           assert.deepEqual(storeRunProblems(plan!, store, FITTING, FORBIDDEN), [], at);
           continue;
         }
-        // (a stop while the capture runs: lost where it cut, never complete or open, the plan as before; or not yet
-        // requested where the stop came before the capture found its stores)
-        assert.ok(result === undefined || result.state === "lost", `${at}: ${result?.state}`);
-        if (result?.state === "lost") assert.equal(result.cause, "extraction", at);
+        // (a stop while the capture runs: reported lost where it cut, with its cause, never complete or open and never
+        // silently; the plan's check is what it was before the capture, decision 2 pending)
+        assert.ok(result?.state === "lost", `${at}: ${result?.state}`);
+        assert.equal(result.cause, "extraction", at);
       }
     }
   }
