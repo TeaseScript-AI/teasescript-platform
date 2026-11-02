@@ -3,7 +3,14 @@ import { joinSteps, keptSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { defaultOf, termAt, typeTags, writtenOf } from "../contract.js";
 import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
-import type { ItemTag } from "../items.js";
+import {
+  covering,
+  joinSpelling,
+  kindsInItsOrder,
+  spelledBy,
+  type ItemTag,
+  type Spelling,
+} from "../items.js";
 import { conversionCategory } from "../method-categories.js";
 import { propertyName, propertyStep, stepName } from "../program.js";
 import { LITERALS } from "./kinds.js";
@@ -64,19 +71,17 @@ function cheapGive(shape: CheapShape, tag: ItemTag, by: Definition): void {
 }
 
 /**
- * What the stores' syntax decides at a read's key path and `rest` (`cheapDecided`), else `null`; the key made only
- * where syntax may decide (`syntaxDecides`).
+ * What the stores' syntax decides at a read's key path and `rest` (`cheapDecided`): its kinds and the spelling that
+ * orders them, if any; else `null`; the key made only where syntax may decide (`syntaxDecides`).
  */
 export function syntaxRead(
   walk: Consumers,
   value: PlaceId,
   rest: readonly string[],
-): readonly ItemTag[] | null {
+): Pick<CheapDecision, "kinds" | "spelling"> | null {
   if (!syntaxDecides(walk)) return null;
   const key = readKey(walk, value);
-  return key === null
-    ? null
-    : (walk.cheapDecided(keyPlace(key), joinSteps(keyPath(key), rest))?.kinds ?? null);
+  return key === null ? null : walk.cheapDecided(keyPlace(key), joinSteps(keyPath(key), rest));
 }
 
 /**
@@ -117,19 +122,30 @@ export function cheapDecided(
     if (shape.tags.has("null")) tags.add("null");
     for (const name of shape.names) names.add(name);
   }
+  let spelling: Spelling | undefined;
   for (const { term, by } of told ? frontier.written : []) {
     const written = typeTags(term);
     if (written.length === 0 || written.includes("unknown")) told = false;
+    spelling = joinSpelling(spelling, spelledBy(written).spelling);
     for (const tag of written) take(tag, by, true);
     for (const name of termNames(term)) names.add(name);
   }
-  let kinds = [...tags].filter((tag) => tag !== "null");
+  // (the stores' kinds together in their one order, #1398: a written spelling's where it alone covers them)
+  const all = [...tags].filter((tag) => tag !== "null");
+  const spelled = covering(all, spelling);
+  let kinds = kindsInItsOrder(all, spelled);
   if (kinds.includes("integer") && kinds.includes("number"))
     kinds = kinds.filter((tag) => tag !== "integer");
   const decision: CheapDecision | null =
     !told || decider === null || kinds.length === 0
       ? null
-      : { kinds: tags.has("null") ? [...kinds, "null"] : kinds, names, decider, inherited };
+      : {
+          kinds: tags.has("null") ? [...kinds, "null"] : kinds,
+          ...(spelled === undefined ? {} : { spelling: spelled }),
+          names,
+          decider,
+          inherited,
+        };
   walk.cheapDecisions.set(memo, decision);
   return decision;
 }

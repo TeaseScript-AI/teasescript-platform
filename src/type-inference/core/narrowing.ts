@@ -9,7 +9,14 @@ import { conditionShape } from "../narrowing-shapes.js";
 import { joinParts, keepText, keptArray, keptParts, type WorkLedger } from "./budget.js";
 import { keyBelow, keyOf, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
-import { mergeItems, REASON, type Item, type ItemScope, type ItemTag } from "./items.js";
+import {
+  mergeItems,
+  REASON,
+  type Item,
+  type ItemScope,
+  type ItemTag,
+  type Spelling,
+} from "./items.js";
 import { selectsElement } from "./method-categories.js";
 import { propertyStep, siteKey, type CoreProgram } from "./program.js";
 import {
@@ -217,7 +224,13 @@ function bindingOf(program: CoreProgram, file: number, identifier: Expression): 
 export type NarrowingForm =
   | { readonly kind: "non-null" }
   | { readonly kind: "null" }
-  | { readonly kind: "is"; readonly kinds: readonly ValueKind[]; readonly fractional?: true }
+  | {
+      readonly kind: "is";
+      readonly kinds: readonly ValueKind[];
+      readonly fractional?: true;
+      /** A type test's type as written (`TestedType.test`), whose spelling the kinds it narrows to carry (#1398). */
+      readonly test?: TypeAnnotation;
+    }
   | { readonly kind: "is-not"; readonly kinds: readonly ValueKind[] };
 
 const NON_NULL: NarrowingForm = { kind: "non-null" };
@@ -252,7 +265,8 @@ function overlap(
 }
 
 /**
- * G's value (N1): the input items filtered by the form. Emptiness (`empty`) is untouched; after a positive test,
+ * G's value (N1): the input items filtered by the form, a kind a type test narrows to with the type's `spelling` as
+ * written (#1398). Emptiness (`empty`) is untouched; after a positive test,
  * `!= null` or `is not null`, a single remaining kind without `unknown` is definite; after `is not T` certainties stay.
  * An empty result is the unreachable branch's value.
  */
@@ -260,6 +274,7 @@ export function narrowedItems(
   form: NarrowingForm,
   items: readonly Item[],
   scope: ItemScope,
+  spelling: Spelling | undefined,
 ): Item[] {
   scope.work.charge("mergeItems");
   const work = scope.work;
@@ -286,7 +301,12 @@ export function narrowedItems(
       case "is":
         for (const kind of each(work, "mergeItems", form.kinds)) {
           const tag = overlap(item.tag, kind, form.fractional === true, work);
-          if (tag !== null) kept.push(tag === item.tag ? item : { ...item, ...proof, tag });
+          if (tag !== null)
+            kept.push(
+              tag === item.tag
+                ? item
+                : { ...item, ...proof, tag, ...(spelling === undefined ? {} : { spelling }) },
+            );
         }
         break;
       case "is-not":
@@ -333,6 +353,8 @@ export function removes(form: NarrowingForm, tag: ItemTag, work: WorkLedger): bo
  */
 interface TestedType {
   readonly kinds: readonly ValueKind[];
+  /** The type as written, whose written order the kinds it narrows to keep (`Values`, #1398, TABLE r4.277 (3)). */
+  readonly test: TypeAnnotation;
   readonly constrained: ReadonlySet<ValueKind>;
   readonly element: TypeAnnotation | null;
 }
@@ -372,6 +394,7 @@ function testedType(annotation: TypeAnnotation, work: WorkLedger): TestedType {
   }
   return {
     kinds: copied(work, "indexSteps", kinds),
+    test: annotation,
     constrained,
     element: elements.length === 1 && others === 0 ? elements[0]! : null,
   };
@@ -408,7 +431,7 @@ function formOf(
   const type = fact.type;
   if (type === null) return { form: fact.holds ? ONLY_NULL : NON_NULL, element: null };
   return fact.holds
-    ? { form: { kind: "is", kinds: type.kinds }, element: type.element }
+    ? { form: { kind: "is", kinds: type.kinds, test: type.test }, element: type.element }
     : {
         form: {
           kind: "is-not",
@@ -743,7 +766,7 @@ export class NarrowingIndex {
         }
         if (element === null) break;
         const inner = testedType(element, work);
-        form = { kind: "is", kinds: inner.kinds };
+        form = { kind: "is", kinds: inner.kinds, test: inner.test };
         element = inner.element;
         const below = copied(work, "indexSteps", collections);
         below.push(key);

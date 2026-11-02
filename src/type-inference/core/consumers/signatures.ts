@@ -200,6 +200,7 @@ export function methodElements(
     rule: "elements",
     callee: name,
     receiver: text,
+    // (in the elements' one order, #1398, which the earliest family below is read from too)
     families: mixed.length > 1 ? mixed : [],
   };
   if (

@@ -2589,7 +2589,7 @@ test("admission decides from the start value, keeps written copies, rejects ever
         `written-target warning-runtime-check @${at("toBoolean")}`,
         `written-target warning-runtime-check @${at("alternate(true)")}`,
         `copy-type r [boolean, string] @${at("toBoolean")}`,
-        `copy-type alternate.result [boolean, string] @${at("alternate(true)")}`,
+        `copy-type alternate.result [string, boolean] @${at("alternate(true)")}`,
       ],
     ],
     [

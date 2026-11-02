@@ -5,7 +5,7 @@ import type { Contract } from "../contract.js";
 import { keyOf } from "../definitions.js";
 import { belowSelected, withoutEmpty } from "../exact-path.js";
 import { marked } from "../guards.js";
-import { EMPTY, makeItem, mergeItems, REASON, STOPPED, type Item } from "../items.js";
+import { EMPTY, makeItem, mergeItems, REASON, spelledBy, STOPPED, type Item } from "../items.js";
 import {
   declaredProperty,
   dictList,
@@ -429,9 +429,14 @@ export function* expectedOf(
   }
   const nullDefault =
     rest.length === 0 && fallback !== undefined && (yield* contract.onlyNull(fallback)).length > 0;
+  // (the written type's kinds carry its spelling, #1398)
+  const kinds = term === null ? ["unknown" as const] : typeKinds(term);
+  const spelled = spelledBy(kinds);
   return [
-    ...(term === null ? ["unknown" as const] : typeKinds(term)).map((tag) =>
-      tag === "unknown" ? unknownItem(REASON.external) : makeItem(tag, null, { cert: "pos" }),
+    ...kinds.map((tag) =>
+      tag === "unknown"
+        ? unknownItem(REASON.external)
+        : makeItem(tag, null, { cert: "pos", ...spelled }),
     ),
     ...(nullDefault ? [makeItem("null", null, { cert: "pos" })] : []),
     ...emptyAt(rest),

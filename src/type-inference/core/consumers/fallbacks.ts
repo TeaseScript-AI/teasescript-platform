@@ -7,7 +7,7 @@ import { labelBelow } from "../contract/labels.js";
 import { keyPlace } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { STOPPED, type Item, type ItemTag } from "../items.js";
+import { kindsInItsOrder, STOPPED, type Item, type ItemTag } from "../items.js";
 import type { ValueConstraint } from "../program.js";
 import { elementStep, offendingKinds, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
@@ -134,16 +134,18 @@ function fallbackFitsAt(
       : admits(tag, directTags) || (unionHolds && admits(tag, intoTags));
   // the family the fallback is checked against: the direct value's (whole numbers with numbers), a load's or
   // `fromJson`'s written type itself (its `null` C10's exception, never listed), and the receiving union's kinds
-  const against: ItemTag[] = [
-    ...new Set([
-      ...(written
-        ? direct.filter(concrete).map((item) => item.tag)
-        : [...directFamilies].flatMap((found): ItemTag[] =>
-            found === "number" ? ["integer", "number"] : [found],
-          )),
-      ...(unionHolds ? typeTags(into!).filter((tag) => tag !== "null" && tag !== "unknown") : []),
-    ]),
-  ];
+  const own: ItemTag[] = written
+    ? direct.filter(concrete).map((item) => item.tag)
+    : [...directFamilies].flatMap((found): ItemTag[] =>
+        found === "number" ? ["integer", "number"] : [found],
+      );
+  const added = unionHolds
+    ? typeTags(into!).filter((tag) => tag !== "null" && tag !== "unknown" && !own.includes(tag))
+    : [];
+  // (in their one order, #1398: a written type's spelling where nothing beside it adds a kind, the receiving union
+  // repeating it included; a family, or a kind the union adds, the table's)
+  const joined: ItemTag[] = [...new Set([...own, ...added])];
+  const against = kindsInItsOrder(joined, written ? own : undefined);
   // §3.3: a fallback whose contract every kind of fits asks nothing more at this path
   const quiet = quietKinds(walk, value, rest);
   const fallback =

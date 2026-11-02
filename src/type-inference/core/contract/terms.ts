@@ -1,3 +1,4 @@
+import type { TypeAnnotation } from "../../../ast.js";
 import { VALUE_KIND_NAMES } from "../../../value-kinds.js";
 import type { PlaceId, PlaceKind, TypeTerm } from "../../graph.js";
 import type { ItemTag } from "../items.js";
@@ -20,6 +21,27 @@ export function typeTags(term: TypeTerm): ItemTag[] {
       return term.members.flatMap(typeTags);
     default:
       return ["unknown"];
+  }
+}
+
+/**
+ * A written type annotation's kinds in their written order: those `typeTags` gives the term made of it (`T?` is
+ * `T | null`), as a type test's narrowed kinds keep them (#1398, TABLE r4.277 (3)).
+ */
+export function annotationTags(annotation: TypeAnnotation): ItemTag[] {
+  switch (annotation.kind) {
+    case "namedType":
+      return [annotation.name];
+    case "listType":
+      return ["list"];
+    case "setType":
+      return ["set"];
+    case "dictType":
+      return ["dict"];
+    case "optionalType":
+      return [...annotationTags(annotation.value), "null"];
+    case "unionType":
+      return annotation.members.flatMap(annotationTags);
   }
 }
 

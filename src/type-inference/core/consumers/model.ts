@@ -1,6 +1,6 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { Definition, Key } from "../definitions.js";
-import type { Item, ItemTag } from "../items.js";
+import type { Item, ItemTag, Spelling } from "../items.js";
 
 // The shapes the consumers' reaches and literal landings are made of.
 
@@ -87,6 +87,8 @@ export interface CheapFrontier {
 /** A cheap decider's decision of a place at a path (`Consumers.cheapDecided`). */
 export interface CheapDecision {
   readonly kinds: readonly ItemTag[];
+  /** The written spelling that orders the kinds, where one covers them (`covering`, #1398). */
+  readonly spelling?: Spelling;
   readonly names: ReadonlySet<string>;
   readonly decider: Definition;
   readonly inherited: boolean;

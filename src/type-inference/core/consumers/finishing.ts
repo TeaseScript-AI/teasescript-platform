@@ -11,13 +11,17 @@ import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import {
   EMPTY,
+  inItsOrder,
   makeItem,
   ingressLeaves,
   REASON,
+  spelledBy,
+  spellingOf,
   STOPPED,
   type IngressNode,
   type Item,
   type ItemTag,
+  type Spelling,
 } from "../items.js";
 import { conversionCategory, dictList } from "../method-categories.js";
 import { stepName } from "../program.js";
@@ -86,7 +90,8 @@ export function finishingRead(
   requirement = false,
 ): readonly Item[] {
   // (below a literal, its children's own reads, each through every source: a child no leaf kind decides keeps what the
-  // later sources give and a host read's ingress, as unstopped each child is its own value, TABLE r4.126)
+  // later sources give and a host read's ingress, as unstopped each child is its own value, TABLE r4.126; together in
+  // their one order, #1398)
   const { program } = walk.pass;
   if (rest.length > 0 && program.places[value]?.kind.kind === "value" && program.hasOf.has(value)) {
     const items: Item[] = [];
@@ -101,7 +106,7 @@ export function finishingRead(
             requirement,
           ),
         );
-    if (items.length > 0) return items;
+    if (items.length > 0) return inItsOrder(items);
   }
   const own = leafKind(walk, value, rest);
   if (own !== null) return own;
@@ -138,7 +143,12 @@ function typedRead(
     if (written !== null) {
       const term = termAt(written, path);
       const tags = term === null ? [] : typeTags(term).filter((tag) => tag !== "unknown");
-      found = tags.length === 0 ? null : tags.map((tag) => makeItem(tag, null, { cert: "def" }));
+      // (its kinds with the written type's spelling, #1398)
+      const spelled = spelledBy(tags);
+      found =
+        tags.length === 0
+          ? null
+          : tags.map((tag) => makeItem(tag, null, { cert: "def", ...spelled }));
     } else if (call?.fallback === undefined) found = null;
     else {
       at = call.fallback;
@@ -170,7 +180,7 @@ function typedRead(
             ? null
             : own === STOPPED
               ? STOPPED
-              : decision.answer(decision.choose(own), own);
+              : inItsOrder(decision.answer(decision.choose(own), own));
       }
     }
   }
@@ -231,7 +241,11 @@ function laterSources(
   // restricted one holds its kinds, its stores' boundaries checking them): a contract by an `unknown` no reason but the
   // opaque one explains (a written open domain's carries it, #1501)
   if (held !== null) {
-    if (requirement) return required(withoutEmpty(held).map((item) => item.tag));
+    if (requirement)
+      return required(
+        withoutEmpty(held).map((item) => item.tag),
+        spellingOf(held),
+      );
     const domain = markDomain(walk, value, held);
     return held.some((item) => item.tag === "unknown" && (item.reasons & ~REASON.opaque) === 0)
       ? [...domain, ...heldIngress(walk, value, rest)]
@@ -243,16 +257,26 @@ function laterSources(
   const written = read === null ? null : termAt(read, rest);
   const retained =
     written !== null
-      ? writtenTags(program.work, written)
+      ? { kinds: writtenTags(program.work, written), written: true }
       : walk.settled
-        ? (retainedRead(walk, value, rest) ?? [])
-        : [];
+        ? (retainedRead(walk, value, rest) ?? NONE_RETAINED)
+        : NONE_RETAINED;
   // else, at a settled stop, the stores' syntax (source 4, TABLE r4.100, r4.135): every store's syntax decides the key
   // together
-  const tags =
-    typedTags ?? (retained.length > 0 ? retained : (syntaxRead(walk, value, rest) ?? []));
+  const syntax =
+    typedTags === null && retained.kinds.length === 0 ? syntaxRead(walk, value, rest) : null;
+  const tags = typedTags ?? (retained.kinds.length > 0 ? retained.kinds : (syntax?.kinds ?? []));
+  // (the domain's spelling where a written type, a copy of one or the stores' syntax by one gives it, #1398)
+  const spelling: Spelling | undefined =
+    typed !== null
+      ? spellingOf(typed)
+      : retained.kinds.length > 0
+        ? retained.written
+          ? spelledBy(retained.kinds).spelling
+          : undefined
+        : syntax?.spelling;
   // (a requirement follows from the concrete kinds alone, as unstopped, where external data decides none)
-  if (requirement) return required(tags);
+  if (requirement) return required(tags, spelling);
   // (an admitted or a syntax domain holds the host data its key's stores hold there, as the unstopped read does: its
   // consumer owes its check for that data, and its boundaries form from it, #1432, #1415; so does a written domain whose
   // nearest written prefix admits every kind, above)
@@ -262,7 +286,8 @@ function laterSources(
       ? heldIngress(walk, value, rest)
       : [];
   if (tags.length === 0 || tags.includes("unknown")) return [...STOPPED, ...host];
-  const items = [...tags.map((tag) => makeItem(tag, null, { cert: "pos" })), ...host];
+  const spelled = spelling === undefined ? {} : { spelling };
+  const items = [...tags.map((tag) => makeItem(tag, null, { cert: "pos", ...spelled })), ...host];
   // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)
   const step = rest.at(-1) ?? walk.pass.program.projOf.get(value)?.step;
   return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
@@ -1226,15 +1251,13 @@ function laterKeySources(walk: Consumers, key: Key, node: FlowNode): readonly It
   const [place, path] = [keyPlace(key), keyPath(key)];
   const written = writtenOf(program.place(place).kind);
   const term = written === null ? null : termAt(written, path);
-  const tags =
-    term !== null
-      ? typeTags(term)
-      : walk.settled
-        ? (walk.admission.retained(place, path) ?? [])
-        : [];
+  const retained = term === null && walk.settled ? walk.admission.retained(place, path) : null;
+  const tags = term !== null ? typeTags(term) : (retained?.tags ?? []);
+  // (a written type, or a copy's, keeps its spelling, #1398)
+  const spelled = term !== null || retained?.inherited === true ? spelledBy(tags) : {};
   return tags.length === 0 || tags.includes("unknown")
     ? STOPPED
-    : tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
+    : tags.map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
 }
 
 /**
@@ -1242,27 +1265,35 @@ function laterKeySources(walk: Consumers, key: Key, node: FlowNode): readonly It
  * value in it must give the same requirement. One family without `null` gives it, as possible kinds (a domain proves
  * nothing); `null` only gives none; any other domain leaves it undecided (`STOPPED`: r4.100's mark).
  */
-function required(tags: readonly ItemTag[]): readonly Item[] {
+function required(tags: readonly ItemTag[], spelling: Spelling | undefined): readonly Item[] {
   if (tags.length === 0 || tags.includes("unknown")) return STOPPED;
   const families = new Set(
     tags.filter((tag) => tag !== "null").map((tag) => (tag === "integer" ? "number" : tag)),
   );
   if (families.size === 0) return [makeItem("null", null, { cert: "pos" })];
+  // (the domain's spelling kept, #1398)
+  const spelled = spelling === undefined ? {} : { spelling };
   return families.size === 1 && !tags.includes("null")
-    ? tags.map((tag) => makeItem(tag, null, { cert: "pos" }))
+    ? tags.map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }))
     : STOPPED;
 }
 
-/** The admitted type admission retained at a read's key path and `rest` (`Admission.retained`), else `null`. */
+/** What admission retained at a read's key path and `rest`: no kinds, no written type. */
+const NONE_RETAINED = { kinds: [], written: false } as const;
+
+/**
+ * The admitted type admission retained at a read's key path and `rest`, and whether it is a written type its copies
+ * borrow, which keeps its spelling (`Admission.retained`, #1398); else `null`.
+ */
 function retainedRead(
   walk: Consumers,
   value: PlaceId,
   rest: readonly string[],
-): readonly ItemTag[] | null {
+): { readonly kinds: readonly ItemTag[]; readonly written: boolean } | null {
   const key = readKey(walk, value);
-  return key === null
-    ? null
-    : walk.admission.retained(keyPlace(key), joinSteps(keyPath(key), rest));
+  const found =
+    key === null ? null : walk.admission.retained(keyPlace(key), joinSteps(keyPath(key), rest));
+  return found === null ? null : { kinds: found.tags, written: found.inherited };
 }
 
 /**
@@ -1289,7 +1320,8 @@ function leafKind(
       if (found === null) return null;
       items.push(...found);
     }
-    return items.length === 0 ? null : items;
+    // (the children's kinds together in their one order, #1398)
+    return items.length === 0 ? null : inItsOrder(items);
   }
   // (a host read: its kinds only where the script stores at no path at or above the read's own, TABLE r4.113)
   const ingress = hostIngress(walk, value);

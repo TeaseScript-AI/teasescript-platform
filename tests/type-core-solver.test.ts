@@ -36,6 +36,7 @@ import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { itemScope } from "./helpers/type-core-items.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
+import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 /**
  * The determinism of the coarse core (ADR 0021 1.6; the port plan's S3 note §1): the answers depend on the program,
@@ -245,6 +246,56 @@ test("every finished layer summary is asked again in a fresh pass by its name an
     }
   }
   assert.deepEqual([...kinds].sort(), ["alias", "projected"]);
+});
+
+/**
+ * #1398 (TABLE r4.277 (2)): a written value read through a layer's summary keeps its spelling: the summary's items carry
+ * it, a fresh pass asked by the summary's name and packet alone gives them again with it, and the summary that merges
+ * both layers' leaves stands in the direct read's order, in the four modes. Of a written value in both copies' stores,
+ * and beside a whole number it spells.
+ */
+test("a layer's summary of a written value keeps its spelling, asked again from its packet, in the four modes (#1398)", () => {
+  const written = "let w: string | integer = fromJson(hostValue)\n";
+  const copies = (first: string): string =>
+    `${written}let d0 = {f: hostValue, g: w}\nlet l0 = d0\nlet r0 = d0\nl0.g = ${first}\nlet d1 = l0\nd1 = r0\n` +
+    "let l1 = d1\nlet r1 = d1\nl1.g = w\nlet d2 = l1\nd2 = r1\nrepeat d2.g {}\nexit";
+  const shown = (items: readonly Item[]): string =>
+    items
+      .map(
+        (item) => `${item.tag}${item.spelling === undefined ? "" : `(${item.spelling.join("|")})`}`,
+      )
+      .join(",");
+  for (const source of [copies("w"), copies("1")]) {
+    const request = layerRequest(source);
+    const read = source.lastIndexOf("d2.g");
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const pass = narrowingPass(request);
+        pass.contract.pathIdOf(["shifted", "first"]);
+        for (const place of pass.program.places)
+          if (place.kind.kind === "binding")
+            pass.solver.run(pass.contract.contractOf(keyOf(place.id, ["g"])));
+        const summaries: string[] = [];
+        for (const { key } of pass.solver.demandWork()) {
+          if (!key.startsWith("protoLayer|")) continue;
+          const exported = exportNames(pass.contract, [key])!;
+          const packet: unknown = JSON.parse(JSON.stringify(exported.packet));
+          const again = solveDemands(request, exported.names, packet)[0]!;
+          summaries.push(shown(pass.solver.answer(key)!));
+          assert.equal(shown(again), summaries.at(-1), `${JSON.stringify(mode)} ${key}`);
+        }
+        const answers = analyseCore(request);
+        const node = answers.graph.nodes.find(
+          (found) => found.span?.start.offset === read && found.span.end.offset === read + 4,
+        )!;
+        const direct = answers.at(node)!.items.map((item) => item.tag);
+        assert.deepEqual(direct, ["string", "integer"], JSON.stringify(mode));
+        assert.ok(
+          summaries.includes("string(string|integer),integer(string|integer)"),
+          `${JSON.stringify(mode)}: ${summaries.join(" ; ")}`,
+        );
+      });
+  }
 });
 
 /**

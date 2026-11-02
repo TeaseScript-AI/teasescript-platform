@@ -192,6 +192,7 @@ export type {
 } from "./contract/model.js";
 export { operatorOf, plusElements } from "./contract/operations.js";
 export {
+  annotationTags,
   conversionKind,
   defaultOf,
   termAt,
