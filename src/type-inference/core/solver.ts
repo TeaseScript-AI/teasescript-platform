@@ -145,6 +145,9 @@ export function* inline(work: Work<readonly Item[]>): Work<readonly Item[]> {
   return nativeInline ? yield* work : yield { inline: work };
 }
 
+/** The readers a demand keeps as a list before a set (#1599: most demands a stop may forget have a few). */
+const LISTED = 8;
+
 let everyRecord = false;
 
 /**
@@ -381,10 +384,10 @@ export class Solver {
   readonly #proofs = new Map<string, Proof>();
   /**
    * The readers of each demand a stop may forget, or that has not finished: the demands whose runs read it (`#read`),
-   * for `forget`; one reader as itself, several as a set. A demand that finishes where no stop can reach it keeps none,
-   * and none is kept once no decision of the pass can stop (`closeForgetting`, #1599).
+   * for `forget`; one reader as itself, up to `LISTED` as a list, more as a set. A demand that finishes where no stop
+   * can reach it keeps none, and none is kept once no decision of the pass can stop (`closeForgetting`, #1599).
    */
-  readonly #readers = new Map<string, string | Set<string>>();
+  readonly #readers = new Map<string, string | string[] | Set<string>>();
   /** The finished demands a stop may forget (`DemandNode.forgettable`). */
   readonly #forgettable = new Set<string>();
   /** Whether a decision of the pass can still stop, so `forget` may still be asked (#1599). */
@@ -592,9 +595,17 @@ export class Solver {
     node.forgettable = true;
     const reader = node.demand.key;
     const readers = this.#readers.get(key);
-    if (readers === reader || (typeof readers === "object" && readers.has(reader))) return;
+    if (
+      readers === reader ||
+      (readers instanceof Set
+        ? readers.has(reader)
+        : Array.isArray(readers) && readers.includes(reader))
+    )
+      return;
     if (readers === undefined) this.#readers.set(key, reader);
-    else if (typeof readers === "string") this.#readers.set(key, new Set([readers, reader]));
+    else if (typeof readers === "string") this.#readers.set(key, [readers, reader]);
+    else if (Array.isArray(readers) && readers.length < LISTED) readers.push(reader);
+    else if (Array.isArray(readers)) this.#readers.set(key, new Set([...readers, reader]));
     else readers.add(reader);
     countApart(this.#work, "readerRecords");
   }
