@@ -2455,9 +2455,31 @@ function wideShared(k: number): readonly SourceFile[] {
 }
 
 /**
+ * #1610's Codex r1 witness: a feedback through a projection (`c = b` after `let b = root.p`, `let c = root`), a store at
+ * each of k successive prefixes of `root.p` from the matching projection of `c`, below a chain of k `q` steps: its
+ * searches' sources pump at their take-ups, which then follow nothing, so a listing that classified them charges only
+ * what the flat search charges there.
+ */
+function projectedFeedback(k: number): readonly SourceFile[] {
+  const nested = (depth: number, inner: string): string =>
+    `${"{q:".repeat(depth)}${inner}${"}".repeat(depth)}`;
+  return main(
+    lines(
+      `let root={p:${nested(k, "{left:1}")},q:${nested(k - 1, "{p:{right:1}}")}}`,
+      "let b=root.p",
+      "let c=root",
+      rows(k, (i) => `root.p${".q".repeat(i + 1)}=c${".q".repeat(i + 1)}.p`),
+      "c=b",
+      "exit",
+    ),
+  );
+}
+
+/**
  * #1610: the property-name search's other askers in #1466's stack of diamonds of copies, inside the analysis (each next
  * place shown, `shownProperty`; written by `toJson`; read at a property no layer stores, `propertiesOf`), #1466's
- * listing chain with every copy shown, and the wide object shared below k copies (`wideShared`).
+ * listing chain with every copy shown, the wide object shared below k copies (`wideShared`), and Codex r1's projected
+ * feedback (`projectedFeedback`).
  */
 export const SEARCH_FAMILIES: readonly WorkFamily[] = [
   {
@@ -2485,6 +2507,12 @@ export const SEARCH_FAMILIES: readonly WorkFamily[] = [
     measures:
       "#1610's control: one wide object stored below k joined copies, read through a copy too",
     program: (k) => wideShared(k),
+  },
+  {
+    name: "projected-feedback",
+    measures:
+      "#1610's Codex r1 witness: a projected feedback with a store at each of k successive prefixes",
+    program: (k) => projectedFeedback(k),
   },
 ];
 

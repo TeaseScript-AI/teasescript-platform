@@ -581,8 +581,9 @@ test("the first property `${...}` shows of a copy comes from its source's litera
  * each binding's property names two levels down in their order, asked forward and backward, and every diagnostic's
  * message (`orderedNames`), on #1466's layer families and #1610's (`SEARCH_FAMILIES`) at k = 4 and on the witness of a
  * listing's fallback where a source could pump (the feedback), in the four modes; each binding's names are one whichever
- * order asks first; the listings schedule effective sources, skip their run's prefix and fall back where they must; and
- * every search's `checks` are its records'.
+ * order asks first; the listings schedule effective sources, skip their run's prefix and fall back where they must;
+ * every search's `checks` are its records'; and the searches charge no more than the flat listing's (charges move, never
+ * add).
  */
 test("a listing's effective sources leave every search's names, their order and the messages as the flat listing does (#1610)", () => {
   const programs = [
@@ -606,7 +607,12 @@ test("a listing's effective sources leave every search's names, their order and 
         const ask = (): string =>
           inMode(mode, () => orderedNames(analyseCore(request), request, order));
         const { result, records } = withNameRecords(ask);
-        assert.equal(result, withFlatListings(ask), label);
+        const flat = withNameRecords(() => withFlatListings(ask));
+        assert.equal(result, flat.result, label);
+        assert.ok(
+          records.units <= flat.records.units,
+          `${label}: ${records.units} > ${flat.records.units}`,
+        );
         assert.equal(
           records.checks,
           records.tasks +

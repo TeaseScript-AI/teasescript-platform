@@ -20,7 +20,7 @@ import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { writtenTypeSteps } from "../src/type-inference/core/contract.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
 import { isPlusValue, plusIndexVisits } from "../src/type-inference/core/plus-index.js";
-import { withNameRecords } from "../src/type-inference/core/property-names.js";
+import { withFlatListings, withNameRecords } from "../src/type-inference/core/property-names.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -228,7 +228,9 @@ test("a stack of diamonds of copies and its siblings grow with the program in ei
  * the searches grow with the program, where `main`'s grew 4.2 to 6.8 times per doubling (416,963 units at k = 128
  * against the analysis's 226,049). The listing chain shown holds i + 2 names at its i-th copy (`g`, and below it `z` and
  * one per copy before it), so its searches' output is quadratic: its units per name held do not rise (TABLE r4.245's
- * reading). The series to k = 128 is the PR's evidence, outside CI.
+ * reading). Codex r1's projected feedback, whose sources pump at their take-ups, charges no more than the flat listing
+ * (`withFlatListings`): a listing's classification charges what the flat search charges there, never its followers
+ * where it pumps. The series to k = 128 is the PR's evidence, outside CI.
  */
 test("a decided object's property search grows with the program in a stack of copies, in every mode (#1610)", () => {
   const searched = (
@@ -267,7 +269,9 @@ test("a decided object's property search grows with the program in a stack of co
   const stack = new Set(["diamonds", "diamonds-guarded", "diamonds-shared"]);
   const families = [
     ...LAYER_FAMILIES.filter((family) => stack.has(family.name)),
-    ...SEARCH_FAMILIES.filter((family) => family.name !== "listing-chain-shown"),
+    ...SEARCH_FAMILIES.filter(
+      (family) => family.name !== "listing-chain-shown" && family.name !== "projected-feedback",
+    ),
   ];
   for (const unshared of [false, true]) {
     const measure = (at: Sized, reversed: boolean): Measured => {
@@ -288,6 +292,20 @@ test("a decided object's property search grows with the program in a stack of co
         `the listing chain shown, reversed ${reversed}, unshared ${unshared}: ${small} → ${large}`,
       );
     }
+  const feedback = SEARCH_FAMILIES.find((family) => family.name === "projected-feedback")!;
+  for (const k of [8, 16])
+    for (const unshared of [false, true])
+      for (const reversed of [false, true]) {
+        const at = sized(feedback, k);
+        const [effective, flat] = [
+          searched(at, reversed, unshared).units,
+          withFlatListings(() => searched(at, reversed, unshared).units),
+        ];
+        assert.ok(
+          effective <= flat,
+          `the projected feedback at ${k}, reversed ${reversed}, unshared ${unshared}: ${effective} > ${flat}`,
+        );
+      }
 });
 
 /**

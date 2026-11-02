@@ -22,7 +22,7 @@ import {
 import { carried, type Dispatch } from "./carriers.js";
 import { heldReference, type Contract, type IndexNode } from "./contract.js";
 import type { PrefixStores, SubLayer } from "./contract/model.js";
-import { keptPath, recordPath, type Key } from "./definitions.js";
+import { keptPath, keyPlace, recordPath, type Key } from "./definitions.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
 import type { Work } from "./solver.js";
@@ -159,8 +159,8 @@ function keptStepBelow(work: WorkLedger, key: Key, below: Key): string {
 
 /**
  * A task to take up, the visit that scheduled it, how many of that visit's last steps it keeps untouched, where it was
- * scheduled among a listing's effective sources (`listed`), and its identity where a listing's classification made it
- * for this take-up (`Contribution.prepaid`).
+ * scheduled among a listing's effective sources (`listed`), and, where the listing's classification made them for this
+ * take-up, its identity and whether it pumps (`Contribution`).
  */
 interface Scheduled {
   readonly task: PropertyNamesTask;
@@ -168,6 +168,7 @@ interface Scheduled {
   readonly kept: number;
   readonly listed?: Placed;
   readonly id?: string;
+  readonly pumps?: boolean;
 }
 
 /** A task's identity in a search, as it keeps it (`seen`). */
@@ -180,11 +181,12 @@ function taskId(work: WorkLedger, task: PropertyNamesTask): string {
 }
 
 /**
- * A source a listing schedules: its key at the listing's rest and that key task's identity, made by its classification
- * for the first visit that takes it up (`prepaid`).
+ * A source a listing schedules: its key at the listing's rest, its place, and that key task's identity, made by its
+ * classification for the first visit that takes it up (`prepaid`).
  */
 interface Source {
   readonly key: CanonicalKey;
+  readonly place: PlaceId;
   readonly id: string;
   prepaid: boolean;
 }
@@ -192,13 +194,14 @@ interface Source {
 /**
  * The effective sources of listings along one chain of layers, in the order the search takes them up (`listed`), each
  * listing a prefix of them; what those sources add (`names`, and `ids`: theirs and those of the tasks they schedule) and
- * every source classified (`classified`), as the listing that may extend it in place (`owner`) left them.
+ * the sources classified (`classified`, by their keys in the layers), as the listing that may extend it in place
+ * (`owner`) left them.
  */
 interface Run {
   readonly sources: Source[];
   readonly names: Set<string>;
   readonly ids: Set<string>;
-  readonly classified: Set<string>;
+  readonly classified: Set<Key>;
   owner: Listing | null;
 }
 
@@ -228,16 +231,19 @@ interface Made {
 }
 
 /**
- * A key task's step as it follows (`keyStep`), made once per pass by a listing's classification and charged as the
- * search charges it: its place and path, its names, and its listings and tasks in the order the search makes them; the
- * first visit that takes the key task up takes this step in place of its own (`prepaid`), so the charge moves there.
+ * A key task's step as a listing's classification made it, once per pass, charged as the flat search charges the take-up
+ * at that listing: its place and path (`keptKeyWalk`) and its names (`keyNames`), and its listings and tasks in their
+ * order (`keyFollowers`) only where that take-up follows. Each part is taken once, by the first visit that takes the key
+ * task up (its followers by the first that follows), in place of making it again, so the charge moves there.
  */
 interface Contribution {
   readonly place: PlaceId;
   readonly path: readonly string[];
   readonly names: readonly string[];
-  readonly steps: readonly (Planned | Made)[];
-  prepaid: boolean;
+  steps: readonly (Planned | Made)[] | null;
+  walked: boolean;
+  named: boolean;
+  followed: boolean;
 }
 
 /** A layer's or stores object's listings by the steps of their rest. */
@@ -256,6 +262,17 @@ interface ListingMemo {
   readonly listings: Map<SubLayer | PrefixStores, ByRest>;
   readonly tops: Map<PrefixStores, SubLayer | null | undefined>;
   readonly contributions: Map<string, Contribution>;
+}
+
+/**
+ * Where a listing classifies its sources: the search's tasks taken up so far, the flat search's pump check for a source
+ * taken up below the listing visit, and the sources it classified there, by their keys in the layers, each with whether
+ * its take-up there pumps (made for that take-up).
+ */
+interface Take {
+  readonly seen: ReadonlySet<string>;
+  readonly pumps: (place: PlaceId, path: readonly string[], kept: number) => boolean;
+  readonly classified: Map<Key, { readonly source: Source; readonly pumps: boolean | null }>;
 }
 
 const listingMemos = new WeakMap<Contract, ListingMemo>();
@@ -287,31 +304,32 @@ function listingMemo(pass: CorePass): ListingMemo {
   return memo;
 }
 
-/**
- * A key task's own step (S3 §1): the names of the keys below it, each step read charged (`keptStepBelow`); and, where it
- * follows (`next`), at each stored key along its path (`definitions.stored`: any other prefix's frame holds no
- * definition and its stores are empty), the prefix's listing of its sources and its stores' tasks, in the order the
- * search schedules them. One step of the trie each, charged, the stored key's own text, and the rest of the path below
- * it kept and charged; no prefix key or path half is rebuilt.
- */
-function keyStep(
-  pass: CorePass,
-  key: CanonicalKey,
-  place: PlaceId,
-  path: readonly string[],
-  name: (name: string) => void,
-  next: {
-    readonly listing: (stores: PrefixStores, rest: readonly string[]) => void;
-    readonly task: (task: PropertyNamesTask, untouched: number) => void;
-  } | null,
-): void {
-  const { contract, definitions } = pass;
+/** A key task's names (S3 §1): the steps of the keys below it, each read charged (`keptStepBelow`). */
+function keyNames(pass: CorePass, key: CanonicalKey, name: (name: string) => void): void {
   const work = pass.program.work;
-  for (const below of isKeyId(key) ? [] : definitions.keysBelow(key)) {
+  for (const below of isKeyId(key) ? [] : pass.definitions.keysBelow(key)) {
     const step = keptStepBelow(work, key, below);
     if (step !== "element") name(propertyName(step));
   }
-  if (next === null) return;
+}
+
+/**
+ * A key task's step as it follows (S3 §1): at each stored key along its path (`definitions.stored`: any other prefix's
+ * frame holds no definition and its stores are empty), the prefix's listing of its sources and its stores' tasks, in the
+ * order the search schedules them. One step of the trie each, charged, the stored key's own text, and the rest of the
+ * path below it kept and charged; no prefix key or path half is rebuilt.
+ */
+function keyFollowers(
+  pass: CorePass,
+  place: PlaceId,
+  path: readonly string[],
+  next: {
+    readonly listing: (stores: PrefixStores, rest: readonly string[]) => void;
+    readonly task: (task: PropertyNamesTask, untouched: number) => void;
+  },
+): void {
+  const { contract, definitions } = pass;
+  const work = pass.program.work;
   for (const { key: prefix, depth } of definitions.stored.along(place, path, true)) {
     work.charge("checks");
     if (recording !== null) recording.prefixes += 1;
@@ -338,23 +356,15 @@ function keyStep(
   }
 }
 
-/** A source's contribution (`Contribution`), made once per pass. */
-function contributionOf(pass: CorePass, memo: ListingMemo, source: Source): Contribution {
-  const known = memo.contributions.get(source.id);
-  if (known !== undefined) return known;
+/** A key task's followers as a contribution keeps them, each task's identity made as the search makes it. */
+function followersOf(pass: CorePass, place: PlaceId, path: readonly string[]): (Planned | Made)[] {
   const work = pass.program.work;
-  // (a key's path and place through its walk, as the search takes them: `keptKeyWalk`)
-  const walk = keptKeyWalk(pass.contract, source.key);
-  const path = stepsArray(walk.path);
-  const names: string[] = [];
   const steps: (Planned | Made)[] = [];
-  keyStep(pass, source.key, walk.place, path, (found) => names.push(found), {
+  keyFollowers(pass, place, path, {
     listing: (stores, rest) => steps.push({ stores, rest }),
     task: (task, untouched) => steps.push({ task, untouched, id: taskId(work, task) }),
   });
-  const contribution = { place: walk.place, path, names, steps, prepaid: true };
-  memo.contributions.set(source.id, contribution);
-  return contribution;
+  return steps;
 }
 
 /** The layers a stores object lists its sources from (`subSources`' order): the one it inherits, then those it joins. */
@@ -446,16 +456,58 @@ function remember(
 }
 
 /**
- * Classifies a source as the next one taken up in a run (`listed`): effective where it adds a name or a task the
- * sources before it did not, or makes a listing that is no prefix of the run before it. Its step is charged once, as
- * the search charges it (`contributionOf`), and taken by the first visit that takes it up.
+ * Classifies a source as the next one taken up in a run (`listed`), as the flat search would take it up below the
+ * listing visit (`take`): no source where an earlier one scheduled it; an effective one, its parts not made, where this
+ * search took it up already; else its walk, its pump check and its names made, and its followers where it follows; an
+ * effective one where it pumps (what it would follow elsewhere is not made), else effective where it adds a name or a
+ * task the sources before it did not, or makes a listing that is no prefix of the run before it.
  */
-function classify(pass: CorePass, memo: ListingMemo, run: Run, source: Source): void {
+function classify(
+  pass: CorePass,
+  memo: ListingMemo,
+  run: Run,
+  sub: Key,
+  rest: readonly string[],
+  take: Take,
+): void {
   if (recording !== null) recording.classified += 1;
-  run.classified.add(source.id);
+  run.classified.add(sub);
+  const source = sourceAt(pass, sub, rest);
   // (taken up before it: a task an earlier source scheduled)
-  if (run.ids.has(source.id)) return;
-  const { names, steps } = contributionOf(pass, memo, source);
+  if (run.ids.has(source.id)) {
+    take.classified.set(sub, { source, pumps: null });
+    return;
+  }
+  if (take.seen.has(source.id)) {
+    take.classified.set(sub, { source, pumps: null });
+    run.sources.push(source);
+    run.ids.add(source.id);
+    return;
+  }
+  let contribution = memo.contributions.get(source.id);
+  if (contribution === undefined) {
+    // (a key's path and place through its walk, as the search takes them: `keptKeyWalk`)
+    const walk = keptKeyWalk(pass.contract, source.key);
+    const names: string[] = [];
+    keyNames(pass, source.key, (found) => names.push(found));
+    contribution = {
+      place: walk.place,
+      path: stepsArray(walk.path),
+      names,
+      steps: null,
+      walked: true,
+      named: true,
+      followed: false,
+    };
+    memo.contributions.set(source.id, contribution);
+  }
+  const pumps = take.pumps(contribution.place, contribution.path, rest.length);
+  take.classified.set(sub, { source, pumps });
+  if (contribution.steps === null && !pumps) {
+    contribution.steps = followersOf(pass, contribution.place, contribution.path);
+    contribution.followed = true;
+  }
+  const { names, steps } = contribution;
   const adds = (step: Planned | Made): boolean => {
     if ("id" in step) return !run.ids.has(step.id);
     const listing = knownListing(pass, memo, step.stores, step.rest);
@@ -465,17 +517,17 @@ function classify(pass: CorePass, memo: ListingMemo, run: Run, source: Source): 
       listing.length > run.sources.length
     );
   };
-  if (names.every((found) => run.names.has(found)) && !steps.some(adds)) return;
+  if (steps !== null && names.every((found) => run.names.has(found)) && !steps.some(adds)) return;
   run.sources.push(source);
   run.ids.add(source.id);
   for (const found of names) run.names.add(found);
-  for (const step of steps) if ("id" in step) run.ids.add(step.id);
+  for (const step of steps ?? []) if ("id" in step) run.ids.add(step.id);
 }
 
 /** A source of a listing at a rest: its key there and that key's identity, charged as the search charges them. */
 function sourceAt(pass: CorePass, sub: Key, rest: readonly string[]): Source {
   const key = keptKeyBelowIn(pass.contract, sub, rest);
-  return { key, id: taskId(pass.program.work, { key }), prepaid: true };
+  return { key, place: keyPlace(key), id: taskId(pass.program.work, { key }), prepaid: true };
 }
 
 /** A listing made from all of its sources in `subSources`' order: each classified, the last first. */
@@ -484,6 +536,7 @@ function wholeListing(
   memo: ListingMemo,
   subs: readonly Key[],
   rest: readonly string[],
+  take: Take,
 ): Listing {
   const run: Run = {
     sources: [],
@@ -492,8 +545,7 @@ function wholeListing(
     classified: new Set(),
     owner: null,
   };
-  for (let at = subs.length - 1; at >= 0; at -= 1)
-    classify(pass, memo, run, sourceAt(pass, subs[at]!, rest));
+  for (let at = subs.length - 1; at >= 0; at -= 1) classify(pass, memo, run, subs[at]!, rest, take);
   const listing = { run, length: run.sources.length };
   run.owner = listing;
   return listing;
@@ -505,6 +557,7 @@ function layerWhole(
   memo: ListingMemo,
   layer: SubLayer,
   rest: readonly string[],
+  take: Take,
 ): Listing {
   const alone: PrefixStores = {
     list: [],
@@ -514,7 +567,7 @@ function layerWhole(
     also: [],
     cut: false,
   };
-  return wholeListing(pass, memo, pass.contract.subSources(alone), rest);
+  return wholeListing(pass, memo, pass.contract.subSources(alone), rest, take);
 }
 
 /**
@@ -529,6 +582,7 @@ function layerListing(
   memo: ListingMemo,
   layer: SubLayer,
   rest: readonly string[],
+  take: Take,
 ): Listing {
   const chain: SubLayer[] = [];
   let below: Listing | undefined;
@@ -539,7 +593,7 @@ function layerListing(
     }
     below = byRest(memo, at, rest, false)?.listing;
     if (below === undefined && at.joins.length > 0)
-      below = remember(memo, at, rest, layerWhole(pass, memo, at, rest));
+      below = remember(memo, at, rest, layerWhole(pass, memo, at, rest, take));
     if (below === undefined) {
       chain.push(at);
       at = at.parent;
@@ -548,21 +602,21 @@ function layerListing(
   for (let index = chain.length - 1; index >= 0; index -= 1) {
     const at = chain[index]!;
     const { run } = below;
-    let sources: Source[] | null = null;
-    if (below !== NO_SOURCES && run.owner === below && run.sources.length === below.length) {
-      // (its own sources in `subSources`' order, each once)
-      const own = new Set<Key>();
-      for (const [, listed] of at.own) for (const sub of listed) own.add(sub);
-      sources = [];
-      for (const sub of own) sources.push(sourceAt(pass, sub, rest));
-      if (sources.some((source) => run.classified.has(source.id))) sources = null;
-    }
-    if (sources === null) {
-      below = remember(memo, at, rest, layerWhole(pass, memo, at, rest));
+    // (its own sources in `subSources`' order, each once)
+    const own = new Set<Key>();
+    for (const [, listed] of at.own) for (const sub of listed) own.add(sub);
+    if (
+      below === NO_SOURCES ||
+      run.owner !== below ||
+      run.sources.length !== below.length ||
+      [...own].some((sub) => run.classified.has(sub))
+    ) {
+      below = remember(memo, at, rest, layerWhole(pass, memo, at, rest, take));
       continue;
     }
-    for (let next = sources.length - 1; next >= 0; next -= 1)
-      classify(pass, memo, run, sources[next]!);
+    const subs = [...own];
+    for (let next = subs.length - 1; next >= 0; next -= 1)
+      classify(pass, memo, run, subs[next]!, rest, take);
     const listing = { run, length: run.sources.length };
     run.owner = listing;
     below = remember(memo, at, rest, listing);
@@ -576,13 +630,19 @@ function listingOf(
   memo: ListingMemo,
   stores: PrefixStores,
   rest: readonly string[],
+  take: Take,
 ): Listing {
   const top = singleTop(pass.program.work, memo, stores);
   if (top === null) return NO_SOURCES;
-  if (top !== undefined) return layerListing(pass, memo, top, rest);
+  if (top !== undefined) return layerListing(pass, memo, top, rest, take);
   return (
     byRest(memo, stores, rest, false)?.listing ??
-    remember(memo, stores, rest, wholeListing(pass, memo, pass.contract.subSources(stores), rest))
+    remember(
+      memo,
+      stores,
+      rest,
+      wholeListing(pass, memo, pass.contract.subSources(stores), rest, take),
+    )
   );
 }
 
@@ -623,13 +683,16 @@ function listingOf(
  * that run, no longer than its position there, schedules nothing: those sources were taken up before it. (ii) Where an
  * effective source could pump (a visit of its place's key on the chain has a path shorter than the rest, the pump
  * check's own entry) or is on the chain, the listing schedules every source, as before. (iii) A layer's or stores
- * object's effective sources at a rest are made from the definitions and the prefix index alone, a layer's from its
- * parent's (`layerListing`), so they are one whichever question makes them, and forgotten once a decision or the work
- * stopped (`listingMemo`). Charges: a source classified is charged its step once per pass, as the search charges it,
- * and the first visit that takes it up takes that step in place of its own (`Contribution`), so its charge moves there;
- * an effective source is charged as a scheduled task; the single top of a stores object is found once per pass, a
- * charge per jump. A decided object's names then cost its own prefixes' stores and its effective sources: for a stack of
- * diamonds, one.
+ * object's effective sources at a rest are made from the definitions and the prefix index, a layer's from its parent's
+ * (`layerListing`), each source as the flat search takes it up below the listing visit (`classify`): one this search
+ * took up already, or whose take-up there pumps, is kept as effective with its followers unmade, so the names the
+ * listings give are one whichever question makes them; they are forgotten once a decision or the work stopped
+ * (`listingMemo`). Charges move, never add: a classification charges each source as the flat search charges its
+ * take-up at that listing (its key and identity, its walk, its pump check and names, and its listings and tasks only
+ * where it follows), and the visit that takes it up there, or the first later, takes those parts in place of making them
+ * again (`Contribution`); an effective source is charged as a scheduled task; the single top of a stores object is
+ * found once per pass, a charge per jump. A decided object's names then cost its own prefixes' stores and its effective
+ * sources: for a stack of diamonds, one.
  */
 export function propertyNames(
   pass: CorePass,
@@ -662,12 +725,21 @@ export function propertyNames(
   /**
    * A stored prefix's listing of its sources at a rest, by the rule above (#1610): nothing for a source's listing that is
    * a prefix of the run it was scheduled from, no longer than its position there; else the effective sources where none
-   * can pump and none is on the chain; else every source.
+   * can pump and none is on the chain; else every source. A source the listing classified here is taken up with the
+   * identity and the pump check its classification made for that take-up.
    */
   const listed = (stores: PrefixStores, rest: readonly string[], visit: Visit): void => {
     const memo = listings();
+    const take: Take = {
+      seen,
+      pumps: (place, path, kept) => {
+        const { same, keptSince } = placeAbove(place * 3, chain.length, kept);
+        return pumps(path, same, keptSince);
+      },
+      classified: new Map(),
+    };
     if (memo !== null) {
-      const listing = listingOf(pass, memo, stores, rest);
+      const listing = listingOf(pass, memo, stores, rest, take);
       const placed = visit.listed;
       if (
         placed !== null &&
@@ -678,34 +750,33 @@ export function propertyNames(
         return;
       }
       const { sources } = listing.run;
+      const told = new Map<string, boolean | null>();
+      for (const { source, pumps: verdict } of take.classified.values())
+        told.set(source.id, verdict);
       let safe = true;
       for (let at = 0; safe && at < listing.length; at += 1) {
         const source = sources[at]!;
-        // (the pump check's own entry: its place's shortest visit on the chain shorter than its path)
-        const own = positions.get(memo.contributions.get(source.id)!.place * 3);
+        const verdict = told.get(source.id);
         if (onChain.has(source.id)) {
           safe = false;
           if (recording !== null) recording.cycled += 1;
-        } else if (
-          own !== undefined &&
-          own.length > 0 &&
-          chain[own[own.length - 1]!]!.shortestSame < rest.length
-        ) {
+        } else if (verdict === true || (verdict === undefined && mayPump(source, rest))) {
           safe = false;
           if (recording !== null) recording.pumpable += 1;
         }
       }
       if (safe) {
-        // (pushed the last first, so the search takes them up in the run's order; a source's identity, made by its
-        // classification, for the first visit that takes it up)
+        // (pushed the last first, so the search takes them up in the run's order)
         for (let at = listing.length - 1; at >= 0; at -= 1) {
           const source = sources[at]!;
+          const verdict = told.get(source.id);
           pending.push({
             task: { key: source.key },
             from: visit,
             kept: rest.length,
             listed: { run: listing.run, at },
             ...(source.prepaid ? { id: source.id } : {}),
+            ...(verdict === true || verdict === false ? { pumps: verdict } : {}),
           });
           source.prepaid = false;
         }
@@ -714,12 +785,56 @@ export function propertyNames(
       }
     }
     if (recording !== null) recording.flat += 1;
-    for (const sub of contract.subSources(stores))
-      pending.push({
-        task: { key: keptKeyBelowIn(contract, sub, rest) },
-        from: visit,
-        kept: rest.length,
-      });
+    for (const sub of contract.subSources(stores)) {
+      const made = take.classified.get(sub);
+      if (made === undefined)
+        pending.push({
+          task: { key: keptKeyBelowIn(contract, sub, rest) },
+          from: visit,
+          kept: rest.length,
+        });
+      else {
+        pending.push({
+          task: { key: made.source.key },
+          from: visit,
+          kept: rest.length,
+          ...(made.source.prepaid ? { id: made.source.id } : {}),
+          ...(made.pumps === null ? {} : { pumps: made.pumps }),
+        });
+        made.source.prepaid = false;
+      }
+    }
+  };
+  /**
+   * Whether an effective source a listing did not classify here could pump below the listing visit: the pump check's own
+   * entry, its place's shortest visit on the chain shorter than its path.
+   */
+  const mayPump = (source: Source, rest: readonly string[]): boolean => {
+    const own = positions.get(source.place * 3);
+    return (
+      own !== undefined && own.length > 0 && chain[own[own.length - 1]!]!.shortestSame < rest.length
+    );
+  };
+  /**
+   * A task's kind and place's nearest visit above a visit of it at `position` on the chain, and the least `kept` on the
+   * way down since (the pump check's view of it, `pumps`).
+   */
+  const placeAbove = (
+    slot: number,
+    position: number,
+    kept: number,
+  ): { readonly same: Visit | null; readonly keptSince: number } => {
+    const own = positions.get(slot);
+    const nearest = own === undefined || own.length === 0 ? null : own[own.length - 1]!;
+    return {
+      same: nearest === null ? null : chain[nearest]!,
+      keptSince:
+        nearest === null
+          ? Number.POSITIVE_INFINITY
+          : nearest + 1 === position
+            ? kept
+            : Math.min(kept, leastKept(nearest + 1, position - 1)),
+    };
   };
   const dispatch: Dispatch = {
     kinds: (of) => new Set(run(contract.contractOfValue(of)).map((item) => item.tag)),
@@ -727,30 +842,28 @@ export function propertyNames(
     joined: (operand) => pass.lists.joined(operand),
   };
   /**
-   * Whether a visit pumps one before it: the same kind and place, a longer path, that one's head before its untouched
-   * tail. Only its place's visits above it are walked, through `same`, until none with a shorter path is left.
+   * Whether a visit at `path` pumps one before it (its kind and place's nearest visit above it, `same`, and the least
+   * `kept` since, `placeAbove`): the same kind and place, a longer path, that one's head before its untouched tail. Only
+   * its place's visits above it are walked, through `same`, until none with a shorter path is left. The flat search's
+   * one check, at a visit and at a listing's classification of a source taken up below it.
    */
-  const pumps = (visit: Visit): boolean => {
-    let tail = visit.keptSince;
+  const pumps = (path: readonly string[], same: Visit | null, keptSince: number): boolean => {
+    let tail = keptSince;
     let depth = 0;
-    for (
-      let above = visit.same;
-      above !== null && above.shortestSame < visit.path.length;
-      above = above.same
-    ) {
+    for (let above = same; above !== null && above.shortestSame < path.length; above = above.same) {
       work.charge("checks");
       if (recording !== null) {
         recording.ancestors += 1;
         recording.depth = Math.max(recording.depth, (depth += 1));
       }
-      if (visit.path.length > above.path.length) {
+      if (path.length > above.path.length) {
         const head = above.path.length - Math.min(tail, above.path.length);
         work.charge("checks", head);
         if (recording !== null) recording.heads += head;
-        let same = true;
-        for (let index = 0; index < head && same; index += 1)
-          same = visit.path[index] === above.path[index];
-        if (same) return true;
+        let alike = true;
+        for (let index = 0; index < head && alike; index += 1)
+          alike = path[index] === above.path[index];
+        if (alike) return true;
       }
       tail = Math.min(tail, above.keptSince);
     }
@@ -768,7 +881,7 @@ export function propertyNames(
     return { path: record, kept };
   };
   while (pending.length > 0) {
-    const { task, from, kept, listed: placed, id: made } = pending.pop()!;
+    const { task, from, kept, listed: placed, id: made, pumps: told } = pending.pop()!;
     const id = made ?? taskId(work, task);
     // (each task it schedules, a seen one too, whose identity it made)
     work.charge("checks");
@@ -777,21 +890,23 @@ export function propertyNames(
     seen.add(id);
     // (a key's path and place through its walk, `keptKeyWalk`: a text's kept, a cursor's steps through the charged
     // boundary and copied out once, G3 stage 1)
-    // (or the step a listing's classification took for it, once, in place of its own: `Contribution`)
-    const known = "key" in task ? listings()?.contributions.get(id) : undefined;
-    const prepaid = known?.prepaid === true ? known : null;
-    if (prepaid !== null) prepaid.prepaid = false;
-    const walk = "key" in task && prepaid === null ? keptKeyWalk(contract, task.key) : null;
-    const taken: readonly string[] =
-      prepaid !== null ? prepaid.path : "key" in task ? stepsArray(walk!.path) : task.path;
-    const at =
-      prepaid !== null
-        ? prepaid.place
-        : "key" in task
-          ? walk!.place
-          : "literal" in task
-            ? task.literal
-            : task.value;
+    // (or the parts of its step a listing's classification made, each taken once in place of its own: `Contribution`)
+    const prepaid = "key" in task ? (listings()?.contributions.get(id) ?? null) : null;
+    const walked = prepaid?.walked === true;
+    if (walked) prepaid!.walked = false;
+    const walk = "key" in task && !walked ? keptKeyWalk(contract, task.key) : null;
+    const taken: readonly string[] = walked
+      ? prepaid!.path
+      : "key" in task
+        ? stepsArray(walk!.path)
+        : task.path;
+    const at = walked
+      ? prepaid!.place
+      : "key" in task
+        ? walk!.place
+        : "literal" in task
+          ? task.literal
+          : task.value;
     const slot = at * 3 + ("key" in task ? 0 : "literal" in task ? 2 : 1);
     // (the chain back to the scheduling visit, each visit below it removed once, charged)
     // EVIDENCE: invariant: the worklist is a stack, so the visit that scheduled a task is on the current path.
@@ -807,9 +922,7 @@ export function propertyNames(
       work.charge("checks");
       if (recording !== null) recording.entries += 1;
     }
-    let own = positions.get(slot);
-    if (own === undefined) positions.set(slot, (own = []));
-    const nearest = own.length === 0 ? null : own[own.length - 1]!;
+    const { same, keptSince } = placeAbove(slot, position, kept);
     // (the visit added, charged, with its sparse entries: the least `kept` of the last 2, 4, 8, ... visits, each charged)
     const least: number[] = [];
     for (let level = 1; 2 ** level <= position + 1; level += 1) {
@@ -823,7 +936,6 @@ export function propertyNames(
     }
     work.charge("checks", 1 + least.length);
     if (recording !== null) recording.entries += 1 + least.length;
-    const same = nearest === null ? null : chain[nearest]!;
     const visit: Visit = {
       at,
       id,
@@ -834,21 +946,19 @@ export function propertyNames(
       depth: position,
       least,
       same,
-      keptSince:
-        nearest === null
-          ? Number.POSITIVE_INFINITY
-          : nearest + 1 === position
-            ? kept
-            : Math.min(kept, leastKept(nearest + 1, position - 1)),
+      keptSince,
       shortestSame: Math.min(taken.length, same?.shortestSame ?? taken.length),
     };
     chain.push(visit);
     onChain.add(id);
+    let own = positions.get(slot);
+    if (own === undefined) positions.set(slot, (own = []));
     own.push(position);
     if (recording !== null) recording.chain = Math.max(recording.chain, chain.length);
     if (recording !== null) recording.longest = Math.max(recording.longest, visit.path.length);
-    // (a pumped task's own names are taken, its sources not followed)
-    const follows = !pumps(visit);
+    // (a pumped task's own names are taken, its sources not followed; the check made for it by a listing's classification
+    // below the same visit, where it made one)
+    const follows = !(told ?? pumps(visit.path, visit.same, visit.keptSince));
     if (!follows && recording !== null) recording.pumped += 1;
     const schedule = (next: PropertyNamesTask, untouched: number): void => {
       if (follows) pending.push({ task: next, from: visit, kept: Math.max(0, untouched) });
@@ -909,28 +1019,29 @@ export function propertyNames(
               );
       continue;
     }
-    if (prepaid !== null) {
+    // (its names, and where it follows its listings and tasks: a part a listing's classification made is taken once in
+    // place of its own)
+    if (prepaid?.named === true) {
+      prepaid.named = false;
       for (const found of prepaid.names) names.add(found);
-      if (follows)
-        for (const step of prepaid.steps)
-          if ("id" in step)
-            pending.push({
-              task: step.task,
-              from: visit,
-              kept: Math.max(0, step.untouched),
-              id: step.id,
-            });
-          else listed(step.stores, step.rest, visit);
-      continue;
-    }
-    keyStep(
-      pass,
-      task.key,
-      visit.at,
-      visit.path,
-      (found) => names.add(found),
-      follows ? { listing: (stores, rest) => listed(stores, rest, visit), task: schedule } : null,
-    );
+    } else keyNames(pass, task.key, (found) => names.add(found));
+    if (!follows) continue;
+    if (prepaid?.followed === true && prepaid.steps !== null) {
+      prepaid.followed = false;
+      for (const step of prepaid.steps)
+        if ("id" in step)
+          pending.push({
+            task: step.task,
+            from: visit,
+            kept: Math.max(0, step.untouched),
+            id: step.id,
+          });
+        else listed(step.stores, step.rest, visit);
+    } else
+      keyFollowers(pass, visit.at, visit.path, {
+        listing: (stores, rest) => listed(stores, rest, visit),
+        task: schedule,
+      });
   }
   if (recording !== null) {
     recording.checks += (work.counts().get("checks") ?? 0) - checksBefore;
