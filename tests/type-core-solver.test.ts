@@ -17,6 +17,7 @@ import {
   makeItem,
   mergeItems,
   REASON,
+  spelledBy,
   STOPPED,
   writerKey,
   type Item,
@@ -438,6 +439,78 @@ test("a method chain round its own component answers alike from every entry, its
     differing.push(...found.differing);
   }
   assert.deepEqual(differing, []);
+});
+
+/**
+ * #1398 (TABLE r4.277 (2), Codex r6 on #1558): an item's spelling is part of its value, so a component member whose
+ * answer gains a spelling changes, and the members reading it run again: A merges unmarked kinds with C, B is A, C
+ * merges B with a written type's. From each member as the entry, all three end with the written spelling, in its order.
+ */
+test("a spelling a component's answers gain reaches every member, from each entry (#1398)", () => {
+  const solved = (entry: "a" | "b" | "c"): readonly string[] => {
+    const scope = itemScope();
+    const solver = new Solver(scope);
+    const inferred = (["integer", "string"] as const).map((tag) => makeItem(tag));
+    const written = (["string", "integer"] as const).map((tag) =>
+      makeItem(tag, null, spelledBy(["string", "integer"])),
+    );
+    const demand = (key: string, offset: number, make: () => Work<readonly Item[]>): Demand => ({
+      key,
+      kind: "value",
+      file: 0,
+      offset,
+      make,
+    });
+    const demands: Record<"a" | "b" | "c", Demand> = {
+      a: demand("a", 0, function* () {
+        return mergeItems([...inferred, ...(yield demands.c)], scope);
+      }),
+      b: demand("b", 1, function* () {
+        return yield demands.a;
+      }),
+      c: demand("c", 2, function* () {
+        return mergeItems([...(yield demands.b), ...written], scope);
+      }),
+    };
+    solver.run(
+      (function* (): Work<readonly Item[]> {
+        return yield demands[entry];
+      })(),
+    );
+    return (["a", "b", "c"] as const).map((key) =>
+      solver
+        .answer(key)!
+        .map((item) => `${item.tag}(${item.spelling?.join("|") ?? ""})`)
+        .join(","),
+    );
+  };
+  const spelled = "string(string|integer),integer(string|integer)";
+  for (const entry of ["a", "b", "c"] as const)
+    assert.deepEqual(solved(entry), [spelled, spelled, spelled], entry);
+});
+
+/**
+ * #1398 (Codex r6 on #1558): F10's copy of a range's elements composes its kind's declared elements beside the mark that
+ * it may hold none in their one order where it is composed (`contractOfOp`), before any publication orders it again:
+ * `[integer, empty]`, in the four modes.
+ */
+test("a range conversion's contract composes its elements in their one order (#1398)", () => {
+  const request = layerRequest("let a = (1..5).toList()\nsay a[0]\nexit");
+  for (const mode of MODES)
+    inMode(mode, () => {
+      const pass = narrowingPass(request);
+      const conversion = [...pass.program.opOf.values()].find(
+        (c) => c.kind === "operation" && c.contract.name === "toList",
+      )!;
+      const items = pass.solver.run(
+        pass.contract.contractOfValueAt(conversion.result, ["element"]),
+      );
+      assert.deepEqual(
+        items.map((item) => item.tag),
+        ["integer", "empty"],
+        JSON.stringify(mode),
+      );
+    });
 });
 
 test("a component found while another is solved is solved on the explicit stack", () => {

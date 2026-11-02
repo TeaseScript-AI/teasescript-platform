@@ -755,6 +755,10 @@ const COMPOSED_ORDER_ROWS: readonly {
   const parse = "let xs: (string | integer)[] = fromJson(hostValue)\nxs.sort()\nexit\n";
   const load = 'let xs: (string | integer)[] = load("k", default: [1])\nxs.sort()\nexit\n';
   const w = "let w: string | integer = fromJson(hostValue)\n";
+  const union =
+    "let w: (string | integer)[] | (string | integer)[] = fromJson(hostValue)\nsay w[0]\nexit\n";
+  const narrowed =
+    "let x = hostValue\nif x is string | integer {\n  let y = x\n  let a = [y, 1]\n  a.sort()\n}\nexit\n";
   const typedLiteral = "let ys: (string | integer)[] = [fromJson(hostValue), 1]\nsay ys[0]\nexit\n";
   return [
     {
@@ -1011,14 +1015,9 @@ const COMPOSED_ORDER_ROWS: readonly {
       name: "a stopped literal of a typed parse and a whole number",
       source: typedLiteral,
       analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
-      lists: (answers) =>
-        readOf(
-          typedLiteral,
-          " = ",
-          "[fromJson(hostValue), 1]",
-          "element",
-        )(answers).map((list) => [...new Set(list)]),
-      expected: ["string", "integer"],
+      lists: readOf(typedLiteral, " = ", "[fromJson(hostValue), 1]", "element"),
+      // (each child's kinds once, beside its sibling's, as a stopped literal's shape gives them)
+      expected: ["string", "integer", "integer"],
     },
     {
       name: "a stopped sort of a literal of a written value and a whole number",
@@ -1039,6 +1038,45 @@ const COMPOSED_ORDER_ROWS: readonly {
         return admitted.by === "decided" ? [admitted.kinds] : [];
       },
       expected: ["string", "integer"],
+    },
+    // (Codex r6: after a stop, an inferred range conversion's elements; a written union of one spelling twice; a
+    // stored read a written type test narrows host data to, natural)
+    {
+      name: "a stopped range conversion's elements",
+      source: "let a = (1..5).toList()\nsay a[0]\nexit\n",
+      analyse: stopped,
+      lists: readOf(
+        "let a = (1..5).toList()\nsay a[0]\nexit\n",
+        "= ",
+        "(1..5).toList()",
+        "element",
+      ),
+      expected: ["integer", "empty"],
+    },
+    {
+      name: "a stopped parse of a written union of one spelling twice",
+      source: union,
+      analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
+      lists: readOf(union, "= ", "fromJson(hostValue)", "element"),
+      expected: ["string", "integer", "empty"],
+    },
+    {
+      name: "a stored read a written type test narrows",
+      source: narrowed,
+      lists: readOf(narrowed, "[", "y"),
+      expected: ["string", "integer"],
+    },
+    {
+      name: "a sort of a stored read a written type test narrows, its families",
+      source: narrowed,
+      lists: (answers) => elements(answers).map(({ families }) => families),
+      expected: ["string", "number"],
+    },
+    {
+      name: "a sort of a stored read a written type test narrows, its offending kind",
+      source: narrowed,
+      lists: (answers) => elements(answers).map(({ warning }) => warning.kinds),
+      expected: ["integer"],
     },
   ];
 })();

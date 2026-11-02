@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { CorePass } from "../src/type-inference/core/answers.js";
+import { analyseCore, type CorePass } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { makeItem, REASON, type Item, type ItemTag } from "../src/type-inference/core/items.js";
 import { narrowedItems, type NarrowingForm } from "../src/type-inference/core/narrowing.js";
@@ -9,6 +9,7 @@ import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingAt, narrowingPass, nodeAt, routeAt } from "./helpers/type-core-narrowing.js";
+import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import type { CompactRecord } from "./helpers/type-core-records.js";
 
 /*
@@ -1328,6 +1329,36 @@ test("a long `otherwise` chain's preserving store and a deep element read cost w
   const deep = (k: number): string =>
     `let xs = load("xs", default: [])\nif xs is integer[][] { say 1 }\nsay xs${"[0 + 0]".repeat(k)}`;
   assert.ok(queryDoubling(deep, "say xs", 4) <= 2.15);
+});
+
+/**
+ * #1398 (TABLE r4.277 (3), Codex r6 on #1558): a type test's spelling is read once per test and pass, whatever the
+ * number of reads it narrows: k stored reads of host data under a test of k alternating members carry one spelling, one
+ * array, `[string, integer]`, in the four modes, so the type's walks grow with the test alone.
+ */
+test("a type test's spelling is read once, for every read it narrows (#1398)", () => {
+  for (const k of [8, 16, 32]) {
+    const members = Array.from({ length: k }, (_, index) =>
+      index % 2 === 0 ? "string" : "integer",
+    );
+    const stores = Array.from({ length: k }, (_, index) => `  let y${index} = x`);
+    const source = `let x = hostValue\nif x is ${members.join(" | ")} {\n${stores.join("\n")}\n}\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, `${k}`);
+    const reads = stores.map((line) => source.indexOf(line) + line.length - 1);
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const answers = analyseCore(request);
+        const spellings = new Set(
+          answers.graph.nodes
+            .filter((node) => node.span !== null && reads.includes(node.span.start.offset))
+            .flatMap((node) => answers.at(node)?.items ?? [])
+            .map((item) => item.spelling),
+        );
+        assert.equal(spellings.size, 1, `${k} ${JSON.stringify(mode)}`);
+        assert.deepEqual([...spellings][0], ["string", "integer"], `${k} ${JSON.stringify(mode)}`);
+      });
+  }
 });
 
 test("G's value is its input filtered by its form (N1)", () => {
