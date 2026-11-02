@@ -23,7 +23,10 @@ type Compiled = Pick<CompilationResult, "diagnostics" | "plan">;
 export interface StopRun {
   readonly result: Compiled;
   readonly answers: Answers;
-  /** The compile and its analysis again under `withoutRecords(omit)`; `key` names the omission (for a cache). */
+  /**
+   * The compile and its analysis again under `withoutRecords(omit)`, at the run's own allowance and in its mode (a
+   * rerun stopped elsewhere is refused, #1594); `key` names the omission (for a cache).
+   */
   readonly without: (
     omit: Omission,
     key: string,
@@ -135,6 +138,26 @@ function omission(
     },
     `${[...records].sort().join("|")}#${spans.map((span) => `${span.start}:${span.end}`).join("|")}`,
   ];
+}
+
+/**
+ * `each.without(omit, key)`, refused where it ran another analysis than the run's own: one that stopped in another phase
+ * or not at all, or settled where the run did not (#1594: a driver's `without` made outside the run's allowance measured
+ * the unstopped compile's content, so every plan change of the stop's marks read as unowned, and excused every extra
+ * check as one that forms only with the marks).
+ */
+function rerun(
+  each: StopRun,
+  omit: Omission,
+  key: string,
+): { readonly result: Compiled; readonly answers: Answers } {
+  const again = each.without(omit, key);
+  const [own, other] = [each.answers.budget, again.answers.budget];
+  if (own.settled !== other.settled || own.stoppedIn !== other.stoppedIn)
+    throw new Error(
+      `A stop run's 'without' analysed another stop (${other.stoppedIn ?? "none"}, settled ${other.settled}) than the run's (${own.stoppedIn ?? "none"}, settled ${own.settled}): rerun it at the run's allowance and in its mode.`,
+    );
+  return again;
 }
 
 /** The items of `list` beyond those of `other`, each as often as `list` has it more (a multiset difference). */
@@ -257,7 +280,7 @@ export function stopProblems(c: StopCase): string[] {
   let words: readonly (string | undefined)[] | undefined;
   const wordsAt = (index: number): string | undefined => {
     words ??= shown(
-      withMessagesInWords(() => unstopped.without(omission(new Set())[0], "#words")),
+      withMessagesInWords(() => rerun(unstopped, omission(new Set())[0], "#words")),
     ).map(inWords);
     return words[index];
   };
@@ -295,7 +318,7 @@ export function stopProblems(c: StopCase): string[] {
   const extra = beyond(kept, owed);
   let formed: string[] = [];
   if (extra.length > 0 && marks.length > 0) {
-    const without = stopped.without(...omission(excused)).answers.checks;
+    const without = rerun(stopped, ...omission(excused)).answers.checks;
     formed = beyond(
       extra,
       without.map((check) => JSON.stringify(check)),
@@ -329,8 +352,8 @@ export function stopProblems(c: StopCase): string[] {
   if (differences.length > 0 && changing.size > 0) {
     const own = (each: StopRun): PlanDifference[] =>
       planDifferences(
-        each.without(...omission(new Set())).result.plan,
-        each.without(...omission(new Set([...changing, ...storeRecords]), stores)).result.plan,
+        rerun(each, ...omission(new Set())).result.plan,
+        rerun(each, ...omission(new Set([...changing, ...storeRecords]), stores)).result.plan,
       );
     content.push(...own(unstopped), ...own(stopped));
   }
@@ -345,8 +368,9 @@ export function stopProblems(c: StopCase): string[] {
   if (differences.length > 0 && boundaries.size > 0)
     content.push(
       ...planDifferences(
-        stopped.without(...omission(new Set())).result.plan,
-        stopped.without(
+        rerun(stopped, ...omission(new Set())).result.plan,
+        rerun(
+          stopped,
           {
             diagnostic: () => false,
             check: (check: Obligation) => boundaries.has(JSON.stringify(check)),

@@ -1541,6 +1541,40 @@ test("a stop before admission settled checks a written store's literal parts at 
 });
 
 /**
+ * #1594: a stopped run's `without` reruns its compile and analysis at the run's own allowance (`StopRun.without`).
+ * Before admission settles, a literal-zero `get` with a named default gains `indexCheck` as the plan content of C2's
+ * mark at its index (the receiver's shape undecided there), which the oracle excuses only where `without` measures that
+ * content: the held host's own stopped run (`heldRun`) gives no problem, and one made outside its allowance
+ * (`withTestAllowance` around `heldUnstopped`, whose `without` then runs unstopped) is refused.
+ */
+test("the stop oracle refuses a stopped run whose without leaves the run's allowance (#1594)", () => {
+  const source =
+    'let named = {v: hostValue}\nlet xs0 = [hostOther]\nlet n0: integer = xs0.get(0, default: named.v)\nsay "AFTER"\nexit\n';
+  const values = [0, 2, "bad", true, null].map((value) => ({
+    globals: { hostValue: value, hostOther: value },
+    says: typeof value === "number" ? ["AFTER"] : null,
+  }));
+  const c: HeldCase = { name: "ownDefault", source, slice: true, values };
+  const mode = HELD_MODES[0]!;
+  const allowance =
+    Math.min(...heldStops(c, mode, Number.MAX_SAFE_INTEGER).map((stop) => stop.allowance)) - 1;
+  const { run: unstopped } = heldUnstopped(c, mode);
+  const judge = (stopped: StopRun): string[] =>
+    stopProblems({
+      unstopped,
+      stopped,
+      fitting: values.filter((each) => each.says !== null).map((each) => each.globals),
+      violating: values.filter((each) => each.says === null).map((each) => each.globals),
+    });
+  const kept = heldRun(c, mode, allowance);
+  assert.equal(kept.answers.budget.settled, false);
+  assert.ok(JSON.stringify(kept.result.plan).includes('"indexCheck":true'));
+  assert.deepEqual(judge(kept), []);
+  const outside = withTestAllowance(allowance, () => heldUnstopped(c, mode)).run;
+  assert.throws(() => judge(outside), /another stop/);
+});
+
+/**
  * TABLE r4.162 at a stop (Astra r3 on #1273): a fix's code holds the author's text only where no other diagnostic lies
  * in it, nor a region the stop left unchecked, its "not checked" mark's, where the checks it moved to the runtime stand
  * unreported; and after a stop no fix fact is proved (`Consumers.withFacts`), so an error's code is words. So a stop

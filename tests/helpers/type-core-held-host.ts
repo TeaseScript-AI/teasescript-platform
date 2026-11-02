@@ -603,8 +603,9 @@ const declined = new WeakSet<object>();
 const declinedRun = (run: StopRun): boolean => declined.has(run.result);
 
 /**
- * A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode. A compile the candidate
- * route declines has no plan; it decides nothing of another (a declined reference leaves a stopped plan to run).
+ * A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode, its `without` at the same
+ * allowance and mode (`StopRun.without`; drivers outside CI build their stopped runs with it, #1594). A compile the
+ * candidate route declines has no plan; it decides nothing of another (a declined reference leaves a stopped plan to run).
  */
 export function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?: number): StopRun {
   const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS);
