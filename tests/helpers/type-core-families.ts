@@ -2982,6 +2982,25 @@ export const PROPERTY_STORE_FAMILIES: readonly WorkFamily[] = (
 }));
 
 /**
+ * #1456: k places, each replaced by the same two wide objects of k properties (one object's names, then the other's)
+ * and read at two of their properties: a place's index of 2k names would cost more than its two reads, so its levels
+ * answer them (`propertyItems`). Host globals `hostValue` and `hostOther`.
+ */
+export const WIDE_COPIES_READ_TWICE: WorkFamily = {
+  name: "wide-copies-read-twice",
+  measures: "#1456: k places of two wide objects each read twice, never indexed",
+  program: (k) =>
+    main(
+      lines(
+        `let a = {${fields(k, () => "hostValue")}}`,
+        `let b = {${fields(k, () => "hostOther", "g")}}`,
+        rows(k, (i) => `let r${i} = a\nr${i} = b\nrepeat r${i}.f${i} {}\nrepeat r${i}.g${i} {}`),
+        "exit",
+      ),
+    ),
+};
+
+/**
  * #1426: a selection nested k deep whose options are objects, read at a property; each level a literal of two whose one
  * element is the level inside. Each level's literal at the path is read once, its answer composed from the level
  * inside's, never merged again per level above (`mergeItems` 8,969 → 34,313 at k = 64, 128 on `bf9b655a9`). By index

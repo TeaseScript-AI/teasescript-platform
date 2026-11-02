@@ -39,6 +39,7 @@ import {
   W34_VARIANTS,
   W44_VARIANTS,
   W45_VARIANTS,
+  WIDE_COPIES_READ_TWICE,
   WORK_FAMILIES,
   type WorkFamily,
 } from "./helpers/type-core-families.js";
@@ -2099,8 +2100,9 @@ test("a read through wrappers decides its paths as cursors: its work and each co
  * the program in every mode: the issue's shape and each control whose objects are closed (two properties each, a
  * property every or every other object holds, open values, values of two provenances, each read before its store too,
  * reversed properties), its total and each counter of at least 200 units at 16 → 32 (2.51 to 2.77 per doubling on
- * `main`). The series to k = 128 with and without the settled stop, the controls the levels answer and the
- * uncharged-work probe are the step's evidence, outside CI.
+ * `main`); and k places of two wide objects each read twice, whose levels answer them while an index would cost each
+ * place every name (`WIDE_COPIES_READ_TWICE`). The series to k = 128 with and without the settled stop, the controls
+ * the levels answer and the uncharged-work probe are the step's evidence, outside CI.
  */
 test("a place replaced by objects of distinct properties takes work that grows with the program in every mode (#1456)", () => {
   const closed = [
@@ -2113,10 +2115,13 @@ test("a place replaced by objects of distinct properties takes work that grows w
     "before",
     "reverse",
   ];
-  const families = PROPERTY_STORE_FAMILIES.filter((family) =>
-    closed.some((kind) => family.name === `property-stores-${kind}`),
-  );
-  assert.equal(families.length, closed.length);
+  const families = [
+    ...PROPERTY_STORE_FAMILIES.filter((family) =>
+      closed.some((kind) => family.name === `property-stores-${kind}`),
+    ),
+    WIDE_COPIES_READ_TWICE,
+  ];
+  assert.equal(families.length, closed.length + 1);
   const steep: string[] = [];
   for (const family of families) {
     const [at16, at32] = [16, 32].map((k): Sized => {
@@ -2146,4 +2151,51 @@ test("a place replaced by objects of distinct properties takes work that grows w
       }
   }
   assert.deepEqual(steep, []);
+});
+
+/**
+ * #1456: a prefix of closed objects read once costs what its levels do: its first property read is theirs, nothing
+ * charged or kept for it (`propertyItems`). Every counter of a place replaced by two objects and of 8 places each
+ * replaced by two wide objects, each read at one property, in either order with the sharing on and off, is `main`'s
+ * at `465532f4a` (a regression oracle of this construction only; before it, the wide places took 2 `structureSteps` and
+ * 2 `literalUnits` each).
+ */
+test("a prefix of closed objects read once has main's counters, in either order, shared or not (#1456)", () => {
+  const wide = (k: number): string =>
+    `let a = {${many(k, (i) => `f${i}: hostValue`, ", ")}}\nlet b = {${many(k, (i) => `g${i}: hostOther`, ", ")}}\n` +
+    `${many(k, (i) => `let r${i} = a\nr${i} = b\nrepeat r${i}.f${i} {}`)}\nexit`;
+  const cases: readonly (readonly [string, string, readonly [string, string]])[] = [
+    [
+      "a place replaced by two objects",
+      'let a = {n: 1}\nlet b = {n: 2, m: "x"}\nlet c = a\nc = b\nsay c.n\nexit',
+      [
+        "checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 26 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 456 invSteps 105 literalUnits 504 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 26 syntaxNodes 28 yields 75",
+        "checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 26 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 456 invSteps 103 literalUnits 346 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 12 syntaxNodes 28 yields 75",
+      ],
+    ],
+    [
+      "8 places each replaced by two wide objects",
+      wide(8),
+      [
+        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 529 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 822 literalUnits 2533 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 124 syntaxNodes 144 yields 724",
+        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 529 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 820 literalUnits 1785 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 56 syntaxNodes 144 yields 724",
+      ],
+    ],
+  ];
+  for (const [name, source, [shared, unshared]] of cases) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null, name);
+    for (const reversed of [false, true])
+      for (const off of [false, true]) {
+        const measured: Measured = analysed({ name, request }, reversed, off).budget;
+        assert.equal(
+          [...measured.counts]
+            .sort(([a], [b]) => (a < b ? -1 : 1))
+            .map(([counter, units]) => `${counter} ${units}`)
+            .join(" "),
+          off ? unshared : shared,
+          `${name}${reversed ? " reversed" : ""}${off ? " unshared" : ""}`,
+        );
+      }
+  }
 });

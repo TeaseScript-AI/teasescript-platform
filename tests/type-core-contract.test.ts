@@ -1024,7 +1024,7 @@ function* levelsAt(contract: Contract, prefix: Key, rest: Rest): Work<readonly I
  * (each store by itself with the sharing off), the missing status, its writer (the earliest literal, or with the
  * sharing on the first stored of objects alike there) and its place among the holders' answers. The objects are
  * indexed where every store is a closed object literal and, with the sharing on, a level's member, once the levels'
- * reads of the place's properties reach the index's size (here at the first or second property read); a host value
+ * reads of the place's properties reach the index's size, from the second (here the second or third); a host value
  * among them or a test marking the reads leaves the place to its levels, and so does, with the sharing on, a tested
  * operand marking an object's structure.
  */
