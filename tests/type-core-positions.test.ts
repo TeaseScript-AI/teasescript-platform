@@ -7,6 +7,7 @@ import { withoutPositions } from "../src/type-inference/core/positions.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { COPY_CHAIN_DEPTH, COPY_CHAIN_SOURCES } from "./helpers/type-core-families.js";
 import { inMode, MODES, orderedItems, publication } from "./helpers/type-core-oracles.js";
 
 /*
@@ -137,38 +138,6 @@ test("a read through wrappers makes its states one step at a time: the wrapper c
 });
 
 /**
- * #1605: a value copied through `depth` wrappers (`let wi = {q: w(i-1)}`) into `b`, whose long key `b.q…q.f` is used
- * (`use`) with `leaf` at its end and `breaker` keeping a wrapper from being one or changing the frontier's binding.
- */
-function copied(depth: number, leaf: string, use: string, breaker: string): string {
-  const middle = Math.floor(depth / 2);
-  const path = (k: number): string => Array.from({ length: k }, () => "q").join(".");
-  const uses: Record<string, readonly string[]> = {
-    store: [`b.${path(depth)}.f = hostValue`],
-    "element-store": [`b.${path(depth)}.f[0] = hostValue`],
-    read: [`let x = b.${path(depth)}.f[0]`],
-  };
-  const breakers: Record<string, readonly string[]> = {
-    none: [],
-    "prefix-store": [`w${middle}.q = {${"q: {".repeat(middle)}f: [[3]]${"}".repeat(middle)}}`],
-    "copy-store": [`let c = w${middle}`, `c.${path(middle + 1)}.f = hostOther`],
-    "frontier-store": [`a.f[0] = hostOther`],
-    guarded: [`if w${middle}.q is object {`, `  say "here"`, `}`],
-  };
-  return [
-    `let typed: integer[][] = [[1]]`,
-    `let a = {f: ${leaf}}`,
-    ...Array.from({ length: depth }, (_, i) => `let w${i} = {q: ${i === 0 ? "a" : `w${i - 1}`}}`),
-    `let b = w${depth - 1}`,
-    ...(breakers[breaker] ?? []),
-    ...(uses[use] ?? []),
-    `say "AFTER"`,
-    "exit",
-    "",
-  ].join("\n");
-}
-
-/**
  * #1605: a key's element levels through wrappers stand one step below their parent's positions (`positionStep`), never
  * at each wrapper's root and whole path again, and that is output-neutral: each program of the family publishes the
  * same with positions and `withoutPositions` (the derivation every element level took before), in the four modes; and
@@ -177,18 +146,11 @@ function copied(depth: number, leaf: string, use: string, breaker: string): stri
  * equals the one `withoutPositions` gives. The family samples each axis against the issue's shape (a store of external
  * data at `b`'s long key): the leaf (nested lists, a list of objects, an empty list, two kinds, a written type, and a
  * scalar or external data, whose receiver holds no structure), the use (a store at the key, at its element, a read of
- * its element) and what breaks the chain (a store into a wrapper, a store through a copy of one, a store into the
- * frontier's own binding, a test of a wrapper).
+ * its element) and what breaks the chain (`COPY_CHAIN_SOURCES`).
  */
 test("a key's element levels through wrappers answer the same from their positions as from their roots, in every mode and either question order (#1605)", () => {
-  const depth = 3;
-  const sources: string[] = [];
-  for (const leaf of ["[[1]]", "[{r: [1]}]", "[]", '[1, "x"]', "typed", "5", "hostOther"])
-    for (const use of ["store", "element-store", "read"])
-      sources.push(copied(depth, leaf, use, "none"));
-  for (const breaker of ["prefix-store", "copy-store", "frontier-store", "guarded"])
-    for (const use of ["store", "element-store"])
-      sources.push(copied(depth, "[[1]]", use, breaker));
+  const depth = COPY_CHAIN_DEPTH;
+  const sources = COPY_CHAIN_SOURCES.map(({ source }) => source);
   const globals = [...GLOBALS];
   const differing: string[] = [];
   for (const source of sources) {
@@ -244,6 +206,6 @@ test("a key's element levels through wrappers answer the same from their positio
       }
     }
   }
-  assert.equal(sources.length, 29);
+  assert.equal(sources.length, 31);
   assert.deepEqual(differing, []);
 });
