@@ -954,25 +954,27 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     await killedAt("^copyFileSync ", baselines, "queue", top, hook);
     assert.equal(last(run(baselines, "queue", top, hook)).queued, top);
     assert.deepEqual(readdirSync(top).sort(), ["MANIFEST", "STARTED", "baseline.sh"]);
-    // (#1567) a fill that STARTED and stored a shard is SUPERSEDED once another src/ tree is current, so that its other
-    // jobs end; its stored shard is still read, the area partial; `queue` undoes SUPERSEDED when the tree is current again;
-    // STARTED keeps the time the fill began throughout
+    // (#1590, reversing #1567) a fill that STARTED and stored a shard runs to its end once another src/ tree is current:
+    // its jobs decide `started` and write nothing, its stored shard read as before, STARTED keeping the time it began;
+    // a fill none of whose jobs started is SUPERSEDED (#1513), which `queue` undoes when its tree is current again
     assert.equal(store(alias, second, "0/2").status, 0);
     const began = readFileSync(join(top, "STARTED"), "utf8");
     const newer = "f".repeat(40);
-    assert.deepEqual(last(run(baselines, "start", top, newer)), {
+    assert.deepEqual(last(run(baselines, "start", top, newer)), { decision: "started" });
+    assert.deepEqual(readdirSync(top).sort(), ["MANIFEST", "STARTED", "area", "baseline.sh"]);
+    assert.equal(readFileSync(join(top, "STARTED"), "utf8"), began);
+    const started = run(baselines, "state", base, second, "--read-only");
+    assert.equal(started.status, 1, started.stdout);
+    const partial = JSON.parse(started.stdout.split("\n")[0]!);
+    assert.deepEqual([partial.state, partial.verified, partial.store], ["partial", 1, [1]]);
+    assert.deepEqual(last(run(baselines, "start", made, newer)), {
       decision: "superseded",
       by: newer,
     });
-    assert.equal(readFileSync(join(top, "SUPERSEDED"), "utf8"), `${newer}\n`);
-    assert.equal(readFileSync(join(top, "STARTED"), "utf8"), began);
-    const superseded = run(baselines, "state", base, second, "--read-only");
-    assert.equal(superseded.status, 1, superseded.stdout);
-    const partial = JSON.parse(superseded.stdout.split("\n")[0]!);
-    assert.deepEqual([partial.state, partial.verified, partial.store], ["partial", 1, [1]]);
-    assert.equal(last(run(baselines, "queue", top, hook)).queued, top);
-    assert.deepEqual(readdirSync(top).sort(), ["MANIFEST", "STARTED", "area", "baseline.sh"]);
-    assert.equal(readFileSync(join(top, "STARTED"), "utf8"), began);
+    assert.equal(readFileSync(join(made, "SUPERSEDED"), "utf8"), `${newer}\n`);
+    assert.equal(run(baselines, "state", base, first, "--read-only").status, 0);
+    assert.equal(last(run(baselines, "queue", made, hook)).queued, made);
+    assert.deepEqual(readdirSync(made).sort(), ["MANIFEST", "area", "baseline.sh"]);
     // (#1542 r3: queued-job-foreign-contents) a job's decision in a baseline that holds a foreign path is refused,
     // nothing written
     writeFileSync(join(top, "foreign-late"), "x\n");
@@ -1117,6 +1119,542 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     renameSync(held, `${held}-moved`);
     cpSync(`${held}-moved`, held, { recursive: true });
     assert.match((await state.planned(joined.baseline, "area", planText)).refused, /was replaced/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A built tree's library where `ends` ends the process on every run, a stall of its own, and `flaky` and `mixed` end it on
+ * the runs FLAKY's characters say (`x`, one each, counted in TMPDIR, which a fill's stores share), a stall of the
+ * machine's load.
+ */
+const FILLABLE = `import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+export function publicationHashes(files) {
+  const source = files[0].source;
+  if (source === "ends") process.exit(3);
+  if ((source === "flaky" || source === "mixed") && process.env.FLAKY !== undefined) {
+    const count = join(process.env.TMPDIR, "flaky");
+    const left = existsSync(count) ? readFileSync(count, "utf8") : process.env.FLAKY;
+    writeFileSync(count, left.slice(1));
+    if (left[0] === "x") process.exit(4);
+  }
+  return { parts: [createHash("sha256").update(source).digest("hex")], unanswered: 0 };
+}
+`;
+
+test("a fill on any worker: a seed, its shards computed and imported into a central store, which refuses or compares what differs, and its status without a tree (#1590)", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    // built trees with the tools: `alias` the same build at another path and commit, `rebuilt` another build of the
+    // compiler (its dist/src/) from the same src/
+    const tree = (name: string, sha: string, compiled = "compiled\n") => {
+      const folder = join(directory, name);
+      for (const part of ["dist/src", "dist/tests/helpers", "src", "tests/families/area"])
+        mkdirSync(join(folder, part), { recursive: true });
+      writeFileSync(join(folder, "src", "a.ts"), "a\n");
+      writeFileSync(join(folder, "dist", "src", "a.js"), compiled);
+      writeFileSync(join(folder, "dist", "tests", "helpers", "type-core-oracles.js"), FILLABLE);
+      writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(folder, "package-lock.json"), "{}\n");
+      writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
+      for (const tool of ["baselines.mjs", "run.mjs", "sources.mjs"])
+        cpSync(join("tests", "families", tool), join(folder, "tests", "families", tool));
+      writeFileSync(
+        join(folder, "tests", "families", "area", "stored.mjs"),
+        // (shard i of 16 holds the sources i and i + 16: shard 1 `ends` and `mixed`, a stall of its own and one of the load)
+        `export const cases = ${JSON.stringify(
+          [
+            "same",
+            "ends",
+            "flaky",
+            ...[...Array(14).keys()].map((index) => `s${index + 3}`),
+            "mixed",
+          ].map((name) => [name, name]),
+        )};\n`,
+      );
+      return folder;
+    };
+    const built = tree("built", "1");
+    const alias = tree("alias", "2");
+    const rebuilt = tree("rebuilt", "1", "compiled otherwise\n");
+    const sha = "1".repeat(40);
+    const { identityOf, comparedOf, planOf } = await import(pathToFileURL(baselines).href);
+    const src: string = identityOf(built).src;
+    const script = resolve("tools", "corpus", "baseline.sh");
+    const scratch = join(directory, "scratch");
+    mkdirSync(scratch);
+    const env = { ...process.env, TMPDIR: scratch, SX_SCRATCH: "" };
+    const sh = (more: Record<string, string>, ...args: string[]) =>
+      spawnSync("bash", [script, ...args], { encoding: "utf8", env: { ...env, ...more } });
+    const tool = (...args: string[]) =>
+      spawnSync(process.execPath, [baselines, ...args], { encoding: "utf8" });
+    const said = (result: { stdout: string }) =>
+      JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+    const at = (...parts: string[]) => join(directory, ...parts);
+    const shard = (root: string, index: number) => at(root, src, "area", `${index}of16.runs.jsonl`);
+    const listed = (root: string) =>
+      JSON.parse(readFileSync(at(root, "stalls.json"), "utf8")).stalls;
+
+    // the seed: a baseline with what its runs depend on, the commit, the build and the area's PLAN, no shard, and the
+    // shards to store as the hook queues them; the fill's jobs as #1590 submits them (each command inside `bash -c`,
+    // which sx-job runs without a shell)
+    assert.equal(sh({}, "seed", built, sha, at("seed")).status, 0);
+    const manifest = readFileSync(at("seed", src, "MANIFEST"), "utf8").split("\n");
+    assert.equal(manifest[5], `commit ${sha} ${built}`);
+    assert.match(manifest[6]!, /^area area 16 [0-9a-f]{64}$/);
+    assert.deepEqual(manifest.slice(7), [`compiled ${comparedOf(built).compiled}`, ""]);
+    assert.deepEqual(readdirSync(at("seed", src, "area")), ["PLAN"]);
+    const shards = [...Array(16).keys()].map((index) => `area\t${index}\t16\n`).join("");
+    assert.equal(readFileSync(at("seed", "shards.tsv"), "utf8"), shards);
+    const fill = `fill-${src.slice(0, 9)}`;
+    assert.equal(
+      sh({}, "submit", sha, src, "--dry").stdout,
+      `sx-job submit --owner baseline --name ${fill}-seed --priority background --commit ${sha} -- bash -c 'bash "$SX_TREE/tools/corpus/baseline.sh" seed "$SX_TREE" ${sha} "$SX_OUT"'\n`,
+    );
+    const lines = sh({}, "submit", sha, src, "11020125", at("seed", "shards.tsv"), "--dry").stdout;
+    assert.deepEqual(lines.split("\n").slice(1, 2), [
+      `sx-job submit --owner baseline --name ${fill}-area-1 --priority background --campaign ${fill} --commit ${sha} --in-result seed=11020125 -- bash -c 'bash "$SX_TREE/tools/corpus/baseline.sh" compute "$SX_TREE" "$SX_IN/seed/out/${src}" area 1/16 "$SX_OUT"'`,
+    ]);
+    assert.equal(lines.split("\n").length, 17);
+
+    // shards computed from the seed: a stall of its own (`ends`, on every run alone too) stays, listed with its run
+    // alone in stalls.json; a stall under the machine's load (`flaky`, which ends alone) makes the shard be stored once
+    // more, and fails where the source stalls again
+    const compute = (out: string, index: number, more = {}, from = built) =>
+      sh(more, "compute", from, at("seed", src), "area", `${index}/16`, at(out));
+    for (const [out, index, flaky] of [
+      ["zero", 0, ""],
+      ["one", 1, "x...."],
+      ["two", 2, "x...."],
+    ] as const) {
+      const computed = compute(out, index, { FLAKY: flaky });
+      assert.equal(computed.status, 0, computed.stderr);
+    }
+    assert.deepEqual(listed("zero"), []);
+    assert.deepEqual(
+      listed("one").map(
+        (entry: { source: string; stalled: string; alone: { stalled: string } }) => [
+          entry.source,
+          entry.stalled,
+          entry.alone.stalled,
+        ],
+      ),
+      [["ends", "exit 3", "exit 3"]],
+    );
+    assert.equal(
+      JSON.parse(readFileSync(shard("one", 1), "utf8").split("\n")[1]!).stalled,
+      undefined,
+    );
+    assert.deepEqual(listed("two"), []);
+    assert.equal(
+      JSON.parse(readFileSync(shard("two", 2), "utf8").split("\n")[0]!).stalled,
+      undefined,
+    );
+    const twice = compute("twice", 2, { FLAKY: "x....x" });
+    assert.equal(twice.status, 1);
+    assert.match(twice.stderr, /"source":"flaky".*"alone":"ended"/);
+    assert.equal(existsSync(at("twice", src)), false);
+
+    // the central store: the seed adopted, then equal; status reads the tree's own folder without a tree, another
+    // tree's absent
+    const central = at("central");
+    assert.deepEqual(said(tool("import", central, at("seed"))).seed, "adopted");
+    assert.deepEqual(said(tool("import", central, at("seed"))).seed, "equal");
+    const status = (of = src) => tool("status", central, of);
+    assert.deepEqual(
+      [status().status, status().stdout],
+      [1, `baseline ${src}: ${join(central, src)}: incomplete: area partial 0/16\n`],
+    );
+    const other = "e".repeat(40);
+    assert.deepEqual(
+      [status(other).status, status(other).stdout],
+      [1, `baseline ${other}: ${join(central, other)}: absent\n`],
+    );
+    // each shard imported, the empty ones from one copy of the seed; then complete
+    const imported = (root: string, index: number) =>
+      tool("import", central, at(root), "area", `${index}/16`);
+    for (const [root, index] of [
+      ["zero", 0],
+      ["one", 1],
+      ["two", 2],
+    ] as const)
+      assert.equal(said(imported(root, index)).verified, true);
+    assert.equal(tool("import", at("rest"), at("seed")).status, 0);
+    for (let index = 3; index < 16; index += 1) {
+      const run = spawnSync(process.execPath, [
+        runner,
+        join(built, "tests", "families", "area"),
+        built,
+        "--store",
+        at("rest"),
+        "--shard",
+        `${index}/16`,
+      ]);
+      assert.equal(run.status, 0);
+      assert.equal(imported("rest", index).status, 0);
+    }
+    assert.deepEqual(
+      [status().status, status().stdout],
+      [0, `baseline ${src}: ${join(central, src)}: complete: area\n`],
+    );
+    // the complete central baseline serves its consumer: the built tree compared against it, every run compared and
+    // agreeing, the one stall its own (`ends`, stored stalled)
+    const served = spawnSync(
+      process.execPath,
+      [
+        runner,
+        join(built, "tests", "families", "area"),
+        built,
+        "--baseline",
+        join(central, src, "area"),
+      ],
+      { encoding: "utf8" },
+    );
+    const { sources, differences, exceptions, uncompared, unanswered, stalled } = said(served);
+    assert.deepEqual(
+      [served.status, sources, differences, exceptions, uncompared, unanswered, stalled],
+      [1, 18, 0, 0, 0, 0, 1],
+      served.stderr,
+    );
+
+    // refused (exit 2) and nothing written: another build of the compiler (computed from `rebuilt`), another MANIFEST
+    // line (a commit and tree), another PLAN, another Node, a stall stalls.json does not show alone, no baseline
+    const contents = () =>
+      readdirSync(join(central, src, "area"))
+        .sort()
+        .map((name) => [name, readFileSync(join(central, src, "area", name), "utf8")]);
+    const before = contents();
+    const recomputed = compute("rebuilt", 0, {}, rebuilt);
+    assert.equal(recomputed.status, 0, recomputed.stderr);
+    const copied = (from: string, name: string, change: (dir: string) => void) => {
+      cpSync(at(from), at(name), { recursive: true });
+      change(at(name, src));
+      return name;
+    };
+    const edit = (file: string, from: RegExp | string, to: string) =>
+      writeFileSync(file, readFileSync(file, "utf8").replace(from, to));
+    const plan = (dir: string) => {
+      // (a PLAN this tool writes, of other checks)
+      const text = readFileSync(join(dir, "area", "PLAN"), "utf8").replace(
+        /^(allowances .*)$/m,
+        "$1\nchecks other.mjs publication",
+      );
+      writeFileSync(join(dir, "area", "PLAN"), text);
+      edit(
+        join(dir, "MANIFEST"),
+        /^area area 16 \w+$/m,
+        `area area 16 ${createHash("sha256").update(text).digest("hex")}`,
+      );
+    };
+    for (const [root, index, refusal] of [
+      ["rebuilt", 0, /names "compiled \w+" \(a build of the compiler, dist\/src\/\)/],
+      [
+        copied("zero", "commit", (dir) =>
+          edit(join(dir, "MANIFEST"), /$/, `commit ${"2".repeat(40)} ${alias}\n`),
+        ),
+        0,
+        /names "commit 2{40} .*alias" \(a commit and tree/,
+      ],
+      [copied("zero", "plan", plan), 0, /names "area area 16 \w+" \(an area's PLAN\)/],
+      [
+        copied("zero", "node", (dir) => edit(join(dir, "MANIFEST"), /^node v.*$/m, "node v0.0.0")),
+        0,
+        /names "node v0\.0\.0" \(what its runs depend on\)/,
+      ],
+      [
+        copied("one", "unlisted", () => rmSync(at("unlisted", "stalls.json"))),
+        1,
+        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
+      ],
+      [
+        copied("zero", "damaged", (dir) =>
+          edit(join(dir, "area", "0of16.runs.jsonl"), /\{"total".*\n$/, ""),
+        ),
+        0,
+        /0of16\.runs\.jsonl is no shard that counts/,
+      ],
+      [
+        // (a run alone of the same source that ended, and no run alone)
+        copied("one", "ended-alone", () =>
+          edit(at("ended-alone", "stalls.json"), '"stalled":"exit 3","runs"', '"runs"'),
+        ),
+        1,
+        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
+      ],
+      [
+        copied("one", "alone", () =>
+          edit(at("alone", "stalls.json"), /"alone":\{.*\}\}\]\}/, '"alone":{}}]}'),
+        ),
+        1,
+        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
+      ],
+      [
+        // (a certificate of another reason than the shard's stalled line)
+        copied("one", "reason", () =>
+          edit(
+            at("reason", "stalls.json"),
+            '"stalled":"exit 3","alone"',
+            '"stalled":"timeout","alone"',
+          ),
+        ),
+        1,
+        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
+      ],
+      [
+        copied("one", "twice-listed", () =>
+          edit(at("twice-listed", "stalls.json"), /\[(.*)\]/, "[$1,$1]"),
+        ),
+        1,
+        /stalls\.json lists 2 stalled sources, the shard has 1/,
+      ],
+      [
+        copied("one", "forged", (dir) =>
+          edit(join(dir, "area", "1of16.runs.jsonl"), '"stalled":1,', '"stalled":0,'),
+        ),
+        1,
+        /total counts 2 sources and 0 stalled, its lines 2 and 1/,
+      ],
+      [
+        // (a stall certificate is bound to its source: `mixed` stalled, its run alone `ends`'s)
+        copied("one", "borrowed", (dir) => {
+          const file = join(dir, "area", "1of16.runs.jsonl");
+          const lines = readFileSync(file, "utf8")
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line));
+          const ended = lines.pop();
+          Object.assign(lines[1], { stalled: "exit 4", runs: {} });
+          const body = lines.map((line) => `${JSON.stringify(line)}\n`).join("");
+          ended.total.lines = createHash("sha256").update(body).digest("hex");
+          ended.total.stalled = 2;
+          writeFileSync(file, `${body}${JSON.stringify(ended)}\n`);
+          const listing = JSON.parse(readFileSync(at("borrowed", "stalls.json"), "utf8"));
+          const [own] = listing.stalls;
+          listing.stalls.push({ ...own, source: "mixed", key: lines[1].key, stalled: "exit 4" });
+          writeFileSync(at("borrowed", "stalls.json"), JSON.stringify(listing));
+        }),
+        1,
+        /stored\.mjs mixed stalled \(exit 4\), and stalls\.json does not show it stalling alone/,
+      ],
+      [
+        copied("one", "elsewhere", () =>
+          edit(
+            at("elsewhere", "stalls.json"),
+            '"shard":"1/16","generator"',
+            '"shard":"2/16","generator"',
+          ),
+        ),
+        1,
+        /lists a stall of another shard than area 1\/16: stored\.mjs ends/,
+      ],
+      // (each source line one a store writes, as the comparison reads it: Codex r2's `runs: null`, and a result whose
+      // `unparsed` is no boolean; each with its digest repaired, so that it counts)
+      ...(
+        [
+          [
+            "no-runs",
+            (line: string) => line.replace(/"runs":\{.*\}\}$/, '"runs":null}'),
+            /its runs are no object/,
+          ],
+          [
+            "unparsed-text",
+            (line: string) => line.replace('"unparsed":false', '"unparsed":"no"'),
+            /its run "src-on publication" is not one a store writes/,
+          ],
+          // (Codex r3: a hash proved a string before its pattern, which an array or object would pass by coercion)
+          [
+            "array-hash",
+            (line: string) => line.replace(/"hash":("[0-9a-f]{64}")/, '"hash":[$1]'),
+            /stored\.mjs same: its run "src-on publication" is not one a store writes/,
+          ],
+          [
+            "object-hash",
+            (line: string) => line.replace(/"hash":"[0-9a-f]{64}"/, '"hash":{"toString":false}'),
+            /stored\.mjs same: its run "src-on publication" is not one a store writes/,
+          ],
+        ] as const
+      ).map(
+        ([name, change, refusal]) =>
+          [
+            copied("zero", name, (dir) => {
+              const file = join(dir, "area", "0of16.runs.jsonl");
+              const [line, ...rest] = readFileSync(file, "utf8").trim().split("\n");
+              const ended = JSON.parse(rest.pop()!);
+              const body = [change(line!), ...rest].map((one) => `${one}\n`).join("");
+              ended.total.lines = createHash("sha256").update(body).digest("hex");
+              writeFileSync(file, `${body}${JSON.stringify(ended)}\n`);
+            }),
+            0,
+            refusal,
+          ] as const,
+      ),
+      ["empty", 0, /holds no baseline of this tool/],
+    ] as const) {
+      const refused = imported(root, index);
+      assert.deepEqual([root, refused.status], [root, 2]);
+      assert.match(said(refused).refused, refusal);
+    }
+    // (and a seed that names no build of the compiler, and a central baseline whose PLAN its seed's adoption did not
+    // make yet)
+    copied("seed", "unnamed", (dir) => edit(join(dir, "MANIFEST"), /^compiled \w+\n/m, ""));
+    assert.match(
+      said(tool("import", at("unnamed-central"), at("unnamed"))).refused,
+      /names no build of the compiler/,
+    );
+    // (its areas known only with its tree, such a baseline is never complete without one)
+    const unseeded = tool("status", at("unnamed"), src);
+    assert.equal(unseeded.status, 1);
+    assert.match(unseeded.stdout, /incomplete: no seed recorded its areas/);
+    // a seed is checked as data received from elsewhere: a PLAN of no shard (which would read complete with no run in
+    // it), refused by `import` and by `status`, and a seed that records no area
+    copied("seed", "shardless", (dir) => {
+      const text = `${readFileSync(join(dir, "area", "PLAN"), "utf8")
+        .split("\n")
+        .filter((line) => !line.startsWith("shard "))
+        .join("\n")
+        .replace(/^shards 16$/m, "shards 0")}`;
+      writeFileSync(join(dir, "area", "PLAN"), text);
+      edit(
+        join(dir, "MANIFEST"),
+        /^area area 16 \w+$/m,
+        `area area 0 ${createHash("sha256").update(text).digest("hex")}`,
+      );
+    });
+    assert.match(
+      said(tool("import", at("shardless-central"), at("shardless"))).refused,
+      /MANIFEST is not one this tool writes: its line 7 is no line this tool writes: "area area 0 /,
+    );
+    const shardless = tool("status", at("shardless"), src);
+    assert.equal(shardless.status, 2);
+    assert.match(shardless.stdout, /is not one this tool writes/);
+    // (a MANIFEST record by record, refused before anything is written: Codex r2's `..` area with its PLAN beside the
+    // baseline, and an area record of a negative count; `status` refuses such a record too)
+    const dotdot = planOf("..", [], 1);
+    copied("seed", "dotdot", (dir) => {
+      edit(
+        join(dir, "MANIFEST"),
+        /$/,
+        `area .. 1 ${createHash("sha256").update(dotdot).digest("hex")}\n`,
+      );
+      writeFileSync(join(dir, "..", "PLAN"), dotdot);
+    });
+    copied("seed", "negative", (dir) =>
+      edit(join(dir, "MANIFEST"), /$/, `area missing -1 ${"0".repeat(64)}\n`),
+    );
+    for (const [root, line] of [
+      ["dotdot", /its line 9 is no line this tool writes: "area \.\. 1 /],
+      ["negative", /its line 9 is no line this tool writes: "area missing -1 /],
+    ] as const) {
+      const refused = tool("import", at(`${root}-central`), at(root));
+      assert.deepEqual([root, refused.status], [root, 2]);
+      assert.match(said(refused).refused, line);
+      assert.equal(existsSync(at(`${root}-central`)), false);
+    }
+    cpSync(central, at("misrecorded"), { recursive: true });
+    edit(at("misrecorded", src, "MANIFEST"), /$/, `area missing -1 ${"0".repeat(64)}\n`);
+    const misrecorded = tool("status", at("misrecorded"), src);
+    assert.equal(misrecorded.status, 2);
+    assert.match(misrecorded.stdout, /its line 9 is no line this tool writes: "area missing -1 /);
+    // (a PLAN of its record's count without its last shard's entry, the record's hash repaired: refused by `import` and by
+    // `status`; and a stored shard of the central store whose lines are not a store's, its digest repaired, which
+    // `status` refuses)
+    copied("seed", "entryless", (dir) => {
+      const text = readFileSync(join(dir, "area", "PLAN"), "utf8").replace(/^shard 15 .*\n/m, "");
+      writeFileSync(join(dir, "area", "PLAN"), text);
+      edit(
+        join(dir, "MANIFEST"),
+        /^area area 16 \w+$/m,
+        `area area 16 ${createHash("sha256").update(text).digest("hex")}`,
+      );
+    });
+    assert.match(
+      said(tool("import", at("entryless-central"), at("entryless"))).refused,
+      /area's PLAN is not one this tool writes: its entry of shard 15 is missing or out of order/,
+    );
+    const entryless = tool("status", at("entryless"), src);
+    assert.equal(entryless.status, 2);
+    assert.match(entryless.stdout, /its entry of shard 15 is missing or out of order/);
+    cpSync(central, at("malformed-store"), { recursive: true });
+    cpSync(
+      at("no-runs", src, "area", "0of16.runs.jsonl"),
+      at("malformed-store", src, "area", "0of16.runs.jsonl"),
+    );
+    const malformed = tool("status", at("malformed-store"), src);
+    assert.equal(malformed.status, 2);
+    assert.match(malformed.stdout, /0of16\.runs\.jsonl: stored\.mjs same: its runs are no object/);
+    copied("seed", "arealess", (dir) => {
+      rmSync(join(dir, "area"), { recursive: true });
+      edit(join(dir, "MANIFEST"), /^area area .*\n/m, "");
+    });
+    assert.match(
+      said(tool("import", at("arealess-central"), at("arealess"))).refused,
+      /MANIFEST records no area/,
+    );
+    cpSync(central, at("unplanned"), { recursive: true });
+    rmSync(at("unplanned", src, "area", "PLAN"));
+    assert.match(
+      said(tool("import", at("unplanned"), at("zero"), "area", "0/16")).refused,
+      /holds no PLAN or another one: import its seed first/,
+    );
+    // an import killed after it wrote its shard's temporary file: the next one clears it and publishes
+    assert.equal(tool("import", at("crashed"), at("seed")).status, 0);
+    const crash = at("crash.mjs");
+    writeFileSync(crash, CRASH);
+    const ready = at("ready");
+    const killed = spawn(
+      process.execPath,
+      ["--import", crash, baselines, "import", at("crashed"), at("zero"), "area", "0/16"],
+      {
+        env: {
+          ...process.env,
+          CRASH_ROOT: at("crashed"),
+          CRASH_AT: "^writeFileSync .*runs\\.jsonl\\.\\d+-\\d+\\.tmp ",
+          CRASH_READY: ready,
+        },
+        stdio: "ignore",
+      },
+    );
+    const closed = new Promise((done) => killed.on("close", done));
+    while (!existsSync(ready) && killed.exitCode === null)
+      await new Promise((done) => setTimeout(done, 5));
+    assert.ok(existsSync(ready), "the import ended before its temporary file");
+    killed.kill("SIGKILL");
+    await closed;
+    assert.equal(readdirSync(at("crashed", src, "area")).length, 2);
+    assert.equal(said(tool("import", at("crashed"), at("zero"), "area", "0/16")).verified, true);
+    assert.deepEqual(readdirSync(at("crashed", src, "area")).sort(), ["0of16.runs.jsonl", "PLAN"]);
+    // compared, never replaced: a shard imported again says the same (exit 0), one that says otherwise differs (exit 3)
+    assert.deepEqual(Object.keys(said(imported("zero", 0))), ["equal"]);
+    const differs = copied("zero", "differs", (dir) => {
+      const file = join(dir, "area", "0of16.runs.jsonl");
+      const [line, ...rest] = readFileSync(file, "utf8").trim().split("\n");
+      const ended = JSON.parse(rest.pop()!);
+      const changed = [
+        line!.replace(/"hash":"(\w)/, (_, digit) => `"hash":"${digit === "0" ? "1" : "0"}`),
+        ...rest,
+      ]
+        .map((one) => `${one}\n`)
+        .join("");
+      ended.total.lines = createHash("sha256").update(changed).digest("hex");
+      writeFileSync(file, `${changed}${JSON.stringify(ended)}\n`);
+    });
+    const compared = imported(differs, 0);
+    assert.equal(compared.status, 3);
+    assert.match(said(compared).differs, /says otherwise than .* of stored\.mjs same/);
+    // a seed into the complete baseline: equal, nothing written; one from another commit's tree differs (exit 3)
+    assert.equal(sh({}, "seed", alias, "2".repeat(40), at("alias-seed")).status, 0);
+    const reseeded = tool("import", central, at("alias-seed"));
+    assert.equal(reseeded.status, 3);
+    assert.match(said(reseeded).differs, /names "commit 2{40} .*alias"/);
+    assert.equal(said(tool("import", central, at("seed"))).seed, "equal");
+    assert.deepEqual(contents(), before);
+    assert.deepEqual(readdirSync(central), [src]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
