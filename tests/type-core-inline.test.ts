@@ -2,15 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
-import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import {
+  BudgetExhausted,
+  DemandExhausted,
+  READ_DEPTH_LIMIT,
+  withTestAllowance,
+} from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import type { Item } from "../src/type-inference/core/items.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import {
+  inline,
+  Solver,
   withNativeInline,
   withSolverSeam,
   type SolvedMember,
+  type Work,
 } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { itemScope } from "./helpers/type-core-items.js";
 import { inMode, MODES, publication, stopSet, type Mode } from "./helpers/type-core-oracles.js";
 
 /*
@@ -145,4 +155,69 @@ test("a self-store of a join of k lists grows with k in the four modes (#1572)",
         ),
       );
   }
+});
+
+/**
+ * Codex r1 on #1584: a stop between two steps abandons a run whose inline child is suspended, its `finally` blocks never
+ * run. A parent 1,010 read levels deep on the native stack reads a child 5 levels deep inline, which yields a demand;
+ * the run stops there (the work allowance in `run`, the demand allowance in `demand`). The read chain it leaves is the
+ * whole run's, 1,015 levels, as `yield*` leaves it, so a computation after the stop admits `READ_DEPTH_LIMIT` − 1,015
+ * reads (`enterRead`), the child read inline as read by `yield*` (`withNativeInline`).
+ */
+test("a stop that abandons a suspended inline child leaves the run's whole read chain (#1572)", () => {
+  for (const stop of ["work", "demand"] as const)
+    for (const native of [false, true]) {
+      const scope = itemScope(stop === "work" ? 1 : Number.MAX_SAFE_INTEGER);
+      const solver = new Solver(scope);
+      function* child(): Work<readonly Item[]> {
+        for (let level = 0; level < 5; level += 1) solver.enterRead();
+        try {
+          yield {
+            key: "f",
+            kind: "value",
+            file: 0,
+            offset: 0,
+            *make() {
+              return [];
+            },
+          };
+          return [];
+        } finally {
+          for (let level = 0; level < 5; level += 1) solver.leaveRead();
+        }
+      }
+      function* parent(levels: number): Work<readonly Item[]> {
+        solver.enterRead();
+        try {
+          return levels > 1 ? yield* parent(levels - 1) : yield* inline(child());
+        } finally {
+          solver.leaveRead();
+        }
+      }
+      const run = (): void => {
+        if (stop === "work") solver.run(parent(1_010));
+        else solver.demand(parent(1_010), 1);
+      };
+      assert.throws(
+        () => (native ? withNativeInline(run) : run()),
+        stop === "work" ? BudgetExhausted : DemandExhausted,
+      );
+      scope.work.stop("work");
+      const admitted = solver.run(
+        (function* (): Work<number> {
+          let reads = 0;
+          try {
+            while (reads < 64 && solver.enterRead()) reads += 1;
+            return reads;
+          } finally {
+            for (let level = 0; level < reads; level += 1) solver.leaveRead();
+          }
+        })(),
+      );
+      assert.equal(
+        admitted,
+        READ_DEPTH_LIMIT - 1_015,
+        `${stop} stop, ${native ? "native" : "inline"}`,
+      );
+    }
 });
