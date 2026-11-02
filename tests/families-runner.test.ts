@@ -1196,11 +1196,9 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     // which sx-job runs without a shell)
     assert.equal(sh({}, "seed", built, sha, at("seed")).status, 0);
     const manifest = readFileSync(at("seed", src, "MANIFEST"), "utf8").split("\n");
-    assert.deepEqual(manifest.slice(5, 7), [
-      `commit ${sha} ${built}`,
-      `compiled ${comparedOf(built).compiled}`,
-    ]);
-    assert.match(manifest[7]!, /^area area 16 [0-9a-f]{64}$/);
+    assert.equal(manifest[5], `commit ${sha} ${built}`);
+    assert.match(manifest[6]!, /^area area 16 [0-9a-f]{64}$/);
+    assert.deepEqual(manifest.slice(7), [`compiled ${comparedOf(built).compiled}`, ""]);
     assert.deepEqual(readdirSync(at("seed", src, "area")), ["PLAN"]);
     const shards = [...Array(16).keys()].map((index) => `area\t${index}\t16\n`).join("");
     assert.equal(readFileSync(at("seed", "shards.tsv"), "utf8"), shards);
@@ -1378,6 +1376,10 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       said(tool("import", at("unnamed-central"), at("unnamed"))).refused,
       /names no build of the compiler/,
     );
+    // (its areas known only with its tree, such a baseline is never complete without one)
+    const unseeded = tool("status", at("unnamed"), src);
+    assert.equal(unseeded.status, 1);
+    assert.match(unseeded.stdout, /incomplete: no seed recorded its areas/);
     cpSync(central, at("unplanned"), { recursive: true });
     rmSync(at("unplanned", src, "area", "PLAN"));
     assert.match(
