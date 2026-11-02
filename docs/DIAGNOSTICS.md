@@ -4,8 +4,8 @@ Every code that a compiler diagnostic, runtime failure, developer warning, or ch
 once in `src/diagnostic-codes.ts`: the pass or component that reports it (its owner), its severity, a short title, and
 the section that explains it. A rule that is an error where the compiler proves the problem and a warning where the
 script checks it when it runs keeps one code with both severities, shown as `error or warning`. The new checker's stop
-(`TSV076`) warns once and marks each function it did not check completely with an information (`info`), which the
-editor shows at its information level and which never stops a compile. Code that reports a
+(`TSV076`) warns once and marks each function or file top level it did not check completely with an information
+(`info`), which the editor shows at its information level and which never stops a compile. Code that reports a
 diagnostic takes the registry's code types, so an unregistered code does not compile. `tests/diagnostic-codes.test.ts`
 checks that every code in `src/` is registered and reported only by its owners, and that every registered code is still
 reported or marked as retired. A retired code stays registered, so that it is never given to another problem.
@@ -16,10 +16,12 @@ This document lists the compiler's codes. The other runtime errors (`TSR`) are l
 feature.
 
 One problem gets one code, whichever pass finds it
-([One home for each language rule](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#one-home-for-each-language-rule)),
-also when the runtime finds it in a value the compiler did not know: then the runtime fails with the compiler's code
-and text. The codes that more than one owner reports are listed in
-[Codes with more than one owner](#codes-with-more-than-one-owner).
+([One home for each language rule](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#one-home-for-each-language-rule)).
+The codes that more than one owner reports are listed in
+[Codes with more than one owner](#codes-with-more-than-one-owner). A runtime failure uses the compile-time error's code
+and text in the cases listed there for the runtime; the other runtime checks use the `TSR` codes of
+[Runtime errors](RUNTIME.md#runtime-errors), also where the compiler checks the same rule, such as `TSR058` for a value
+that does not fit its receiving place and `TSR024` for a list index that is not a whole number.
 
 ## Messages
 

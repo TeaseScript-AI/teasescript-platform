@@ -1846,9 +1846,11 @@ value only as a bounded preview. It uses only names and values the engine has al
 the exact text, and a failure that a checkpoint or debug export already recorded keeps its message. A code marked
 _defect_ means that the plan, the engine's state, or the host is wrong rather than the script: continue from an earlier
 checkpoint or restart, and report the failure with its debug export. Every code is registered in
-`src/diagnostic-codes.ts`, and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) lists the codes of compiler diagnostics. A rule
-that the compiler also checks fails with the compiler's code and text, also for a value the compiler did not know
-([Codes with more than one owner](DIAGNOSTICS.md#codes-with-more-than-one-owner)); this table lists the others.
+`src/diagnostic-codes.ts`, and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) lists the codes of compiler diagnostics. A
+runtime failure uses the compile-time error's code and text in the cases that
+[Codes with more than one owner](DIAGNOSTICS.md#codes-with-more-than-one-owner) lists for the runtime; this table lists
+the other runtime checks, also where the compiler checks the same rule, such as `TSR058` for a value that does not fit
+its receiving place and `TSR024` for a list index that is not a whole number.
 
 | Code | What failed | What to do |
 | --- | --- | --- |
