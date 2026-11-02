@@ -31,8 +31,9 @@ Labels, described on GitHub:
   waits), plus `owner: parked` when the owner has said not now. An issue without one can be finished without asking
   the owner; a task that only waits on a decision issue says "Depends on #N" instead;
 - `in progress` while an agent works on it;
-- `spare capacity` for work that must be done but can wait: ready, no owner input, and no more expensive later because
-  nothing upcoming builds on it; a small fix (a sentence or a few lines of code) gets no label and is done directly;
+- `spare capacity` for work that must be done but can wait: ready, no owner input, and doing it later costs at most
+  negligibly more than now (nothing upcoming builds on it, or what does would barely change); a small fix (a sentence
+  or a few lines of code) gets no label and is done directly;
 - `needs triage` until an orchestrator is assigned.
 
 With `gh`, set the type and labels (`--type`, `--label`); triage fills any gap. GitHub shows a single newline in issue
