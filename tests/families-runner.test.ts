@@ -1720,6 +1720,57 @@ test("the stall index decides each stalled source from its record by one rule: t
       run(stalledTwice, "--rerun", rerunTwice).stderr,
       /holds a source another record holds otherwise: \["rerunning","g.mjs","dup","k"\]/,
     );
+    // rerun records are judgement attempts, in the order given (#1587): a later round's end replaces an earlier stall
+    // (and a later stall an earlier end); two ends that differ are refused, naming the place; a replay's records are
+    // never replaced, so a replay that records a source otherwise is refused whatever its order
+    const late = (file: string, ended: boolean, counts: Record<string, number> = { runs: 1 }) =>
+      shard(
+        "late",
+        2,
+        [
+          ended
+            ? { source: "slow", runs: [publication([100, 100], [10, 10])], counts }
+            : stalled("slow", "timeout", [publication([100, 50], [10, 180000], 1)]),
+        ],
+        { file },
+      );
+    const [lateReplay, lateStall, lateEnd] = [
+      late("late", false),
+      late("late-stall", false),
+      late("late-end", true),
+    ];
+    const latest = run(lateReplay, "--rerun", lateStall, lateEnd);
+    assert.equal(latest.status, 0, latest.stderr);
+    assert.deepEqual(
+      [lines(latest.stdout).at(-1).agreed, lines(latest.stdout).at(-1).closed],
+      [1, true],
+    );
+    assert.equal(
+      lines(run(lateReplay, "--rerun", lateEnd, lateStall).stdout).at(-1).unavailable,
+      1,
+    );
+    const differing = run(
+      lateReplay,
+      "--rerun",
+      lateEnd,
+      late("late-other", true, { differences: 1 }),
+    );
+    assert.equal(differing.status, 2);
+    assert.match(
+      differing.stderr,
+      /holds a source another record holds otherwise: \["late","g.mjs","slow","k"\]/,
+    );
+    const halves = (at: string, ended: boolean) => {
+      const file = late(`kept-${at[0]}`, ended);
+      writeFileSync(file, readFileSync(file, "utf8").replace('"shard":"0/1"', `"shard":"${at}"`));
+      return file;
+    };
+    const kept = run(halves("0/2", false), halves("1/2", true));
+    assert.equal(kept.status, 2);
+    assert.match(
+      kept.stderr,
+      /holds a source another record holds otherwise: \["late","g.mjs","slow","k"\]/,
+    );
     // repeats whose times differ (#1583 r1): the one the time clause judges a candidate stands for them, in either
     // order, in one record or across shards, in a replay, its index and its rerun
     const timed = (ms: number, stall = true) => ({

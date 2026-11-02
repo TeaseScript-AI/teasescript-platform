@@ -11,7 +11,9 @@
 // plan may list one source more than once: its repeats (one place, each run and counted by the runner, and each shard's
 // lines checked against its total) are one source where they record the same counts, stall and runs, milliseconds apart
 // (`repeats` counts the others), and are refused (exit 2, naming the place) where they differ, in a replay and in a
-// rerun alike (#1582). Prints the rule, one line per stalled source of the replay (with what its rerun did), one per
+// rerun record alike (#1582). Rerun records are judgement attempts, read in the order given: a source's latest stands
+// where it or an earlier one stalled, and two that ended must say the same (#1587); the replay's are never replaced.
+// Prints the rule, one line per stalled source of the replay (with what its rerun did), one per
 // area and a total; exits 0 only where every area is complete, every source of it was compared and agrees, an
 // unavailable one (stalled) never counting as agreement, and no candidate stall is left, 1 otherwise, 2 on a record it
 // cannot read or merge. `--index` writes the sources still unavailable, with their verdicts and records, and each
@@ -253,6 +255,20 @@ function merge(into, entry, file) {
   }
 }
 
+/**
+ * A rerun record's sources (`within`, a plan's repeats merged in it) into `into` (#1587): the rerun records are judgement
+ * attempts, taken in the order given, and a source's latest stands where it or the one it follows stalled (a longer limit
+ * may run what an earlier round could not); two that ended merge as repeats, refused where they say otherwise.
+ */
+function mergeRerun(into, within, file) {
+  for (const [place, entry] of within) {
+    const held = into.get(place);
+    if (held === undefined || held.stalled !== undefined || entry.stalled !== undefined)
+      into.set(place, entry);
+    else merge(into, entry, file);
+  }
+}
+
 /** What a source did, in one word. */
 function outcomeOf({ counts, stalled }) {
   if (stalled !== undefined) return "stalled";
@@ -371,11 +387,13 @@ for (const shard of rerunFiles.map(shardOf)) {
   const other = differing(configuration, shard.ran.configuration, true);
   if (other.length > 0)
     refused(`${shard.file} compares otherwise than its replay (${other}): it is not merged`);
+  const within = new Map();
   for (const entry of shard.entries) {
     const place = placeOf(entry);
     if (!replay.has(place)) refused(`${shard.file} holds a source the replay does not: ${place}`);
-    merge(rerun, entry, shard.file);
+    merge(within, entry, shard.file);
   }
+  mergeRerun(rerun, within, shard.file);
 }
 
 console.log(JSON.stringify({ rule: RULE }));
