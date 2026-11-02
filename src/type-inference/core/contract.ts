@@ -368,11 +368,18 @@ export class Contract {
   readonly loadsBelowOf = new WeakMap<readonly OtherGroup[], readonly Item[]>();
   /** Per group of a mixed class (`othersAt`), the leaves its other members name by role (`othersLeaves`), or `null`. */
   readonly othersLeavesOf = new WeakMap<ClassGroup<ValueEntry>, IngressNode | null>();
-  /** Per value and side, the leaves it names by role in its class (`leafRoles`). */
+  /** Per value and side, the leaves it names by role in its class (`leafRoles`); per value its walk starts from, too. */
   readonly leafRolesOf = [
     new Map<PlaceId, readonly IngressNode[] | null>(),
     new Map<PlaceId, readonly IngressNode[] | null>(),
   ];
+  readonly leafRolesFrom = [
+    new Map<PlaceId, readonly IngressNode[] | null>(),
+    new Map<PlaceId, readonly IngressNode[] | null>(),
+  ];
+  /** Per member's leaves by role (`leafRoles`), their union (`rolesNode`); per node, whether it holds them. */
+  readonly rolesNodes = new WeakMap<readonly IngressNode[], IngressNode>();
+  readonly heldLeaves = new WeakMap<IngressNode, WeakMap<readonly IngressNode[], boolean>>();
   /**
    * #1203: per literal path's computed values on either side that hold classes of computed-key loads (`othersAt`),
    * the classes a read below their root takes: in order, those of computed-key loads as one `null` where the first of

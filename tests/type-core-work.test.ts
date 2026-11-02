@@ -774,10 +774,11 @@ const named = (k: number, value: (index: number) => string): readonly SourceFile
  * object, directly or each in an object, each member read again at each property (#1304); k named bindings of
  * loads, of host reads or of alike objects beside one, each binding read again at each (#1313); and a run of k joined
  * lists ending in a list of another type, the class of each join naming the joins below it in full, also with each
- * prefix the property of an object of its own, each prefix's roles' writers listed though no peer compares them; and
+ * prefix the property of an object of its own, each prefix's roles' writers listed though no peer compares them;
  * two peers of one short class around a wide operand without writers or a deep one with a single writer, read in k
- * lists, each list's writer walk entering the operand again (#1357). A read of host data compiles with its runtime
- * check.
+ * lists, each list's writer walk entering the operand again (#1357); and two choices of k host reads read in k lists,
+ * each list's reads walking their choices' options again for the leaves they name (#1573). A read of host data
+ * compiles with its runtime check.
  */
 const PRODUCTS: readonly (WorkFamily & {
   readonly counter: WorkCounter;
@@ -1210,6 +1211,31 @@ const PRODUCTS: readonly (WorkFamily & {
       ];
     },
   },
+  {
+    name: "choices-read-in-lists",
+    measures:
+      "#1573: each choice's leaves walked once and its answer's checked once, whichever list reads it",
+    counter: "invSteps",
+    outcome: "warning-runtime-check",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          many(
+            2,
+            (j) =>
+              `let p${j} = askChoice ${many(k, (r) => `{text: "${r}", value: hostValue.p${r}}`, ", ")}`,
+          ),
+          many(
+            k,
+            (i) =>
+              `let xs${i} = [${i % 2 === 0 ? "p0, p1" : "p1, p0"}]\nlet n${i}: integer = xs${i}[hostValue.i]`,
+          ),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
 ];
 
 /**
@@ -1218,7 +1244,7 @@ const PRODUCTS: readonly (WorkFamily & {
  * as they do with a written parameter, and the ring's changed elements each re-run the depth of the list's tree of
  * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256).
  */
-test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1278, #1291, #1304, #1307, #1313, #1357)", () => {
+test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1278, #1291, #1304, #1307, #1313, #1357, #1573)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];

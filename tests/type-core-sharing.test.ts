@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
+import { Contract } from "../src/type-inference/core/contract.js";
 import { ingressLeaves, type Item } from "../src/type-inference/core/items.js";
 import {
   type CoreAnalysisRequest,
@@ -1144,4 +1145,116 @@ test("a list composed of a value's kinds stands in their fixed order where it is
     }
   }
   assert.deepEqual(wrong, []);
+});
+
+/** #1573's programs: three bindings of choices of `k` reads of one host global's properties, read in `lists`. */
+function choicesInLists(k: number, lists: readonly (readonly number[])[]): string {
+  const options = Array.from({ length: k }, (_, r) => `{text: "${r}", value: hostValue.p${r}}`);
+  return [
+    ...[0, 1, 2].map((j) => `let p${j} = askChoice ${options.join(", ")}`),
+    ...lists.map(
+      (list, i) =>
+        `let xs${i} = [${list.map((j) => `p${j}`).join(", ")}]\nlet n${i}: integer = xs${i}[hostValue.i]`,
+    ),
+    "exit\n",
+  ].join("\n");
+}
+
+/**
+ * #1573: the choices of three bindings are one class mixed by their leaves, so a list's contract reads one member and
+ * names the others' leaves (`othersLeaves`) through one node per set of other members, whatever order the list holds
+ * them in, each member's leaves its own: lists of all three in three orders, and of each two. In both orders with the
+ * sharing on, the elements' external data of the three lists of one set names one node, of every other set its own, and
+ * each list's leaves are its members', as with the sharing off.
+ */
+test("a list's other members of one mixed class name one node per set, each its own leaves, in both orders (#1573)", () => {
+  const lists = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [2, 1, 0],
+    [0, 1],
+    [0, 2],
+    [1, 2],
+  ];
+  const source = choicesInLists(2, lists);
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+  assert.ok(request !== null, "the program parses and resolves");
+  const places = new CoreProgram(request).places;
+  const external = (answers: Answers): Item[] =>
+    lists.map((_, i) => {
+      const id = places.find(({ kind }) => kind.kind === "binding" && kind.name === `xs${i}`)!.id;
+      const items = answers.place(id, ["element"]).contract.kinds;
+      assert.deepEqual(
+        items.map((item) => item.tag),
+        ["unknown"],
+        `xs${i}`,
+      );
+      return items[0]!;
+    });
+  const leaves = (items: readonly Item[]): string[] =>
+    items.map((item) =>
+      ingressLeaves(item.ingress!)
+        .map(({ start }) => start)
+        .join(","),
+    );
+  // (each member's options read `hostValue` at these offsets, on its own line)
+  const lines = source.split("\n");
+  const members = [0, 1, 2].map((j) => {
+    const at = lines.slice(0, j).reduce((sum, line) => sum + line.length + 1, 0);
+    return [...lines[j]!.matchAll(/hostValue/g)].map((match) => at + match.index);
+  });
+  const expected = lists.map((list) =>
+    list
+      .flatMap((j) => members[j]!)
+      .sort((a, b) => a - b)
+      .join(","),
+  );
+  for (const reversed of [false, true]) {
+    const shared: Item[] = inOrder(reversed, () => external(analyseCore(request)));
+    const unshared: Item[] = inOrder(reversed, () =>
+      withoutSharing(() => external(analyseCore(request))),
+    );
+    assert.deepEqual(leaves(shared), expected, `reversed: ${reversed}`);
+    assert.deepEqual(leaves(unshared), expected, `reversed: ${reversed}, unshared`);
+    const nodes = shared.map((item) => item.ingress!);
+    assert.ok(
+      nodes[1] === nodes[0] && nodes[2] === nodes[0],
+      `reversed: ${reversed}: one set's node`,
+    );
+    assert.equal(new Set(nodes).size, 4, `reversed: ${reversed}: a node per set`);
+  }
+});
+
+/**
+ * #1573: a further list of the same bindings reads their choices' leaves from one walk of each choice's options, never
+ * walking them again (`leafRoles`), so the class work a list adds is the same whatever the choices' size: the steps of
+ * every class walk (`classMixed`'s calls) and the contract's steps (`invSteps`) that one more list of two of them adds,
+ * at 2 and at 8 options.
+ */
+test("a further list of choices of one class adds class work independent of the choices' size (#1573)", () => {
+  let calls = 0;
+  const original = Contract.prototype.classMixed;
+  Contract.prototype.classMixed = function (this: Contract, value: PlaceId, exact: boolean) {
+    calls += 1;
+    return original.call(this, value, exact);
+  };
+  try {
+    const added = (k: number): readonly [number, number] => {
+      const [two, three] = [2, 3].map((n) => {
+        const source = choicesInLists(
+          k,
+          Array.from({ length: n }, () => [0, 1]),
+        );
+        const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+        assert.ok(request !== null, source);
+        calls = 0;
+        const steps = analyseCore(request).budget.counts.get("invSteps") ?? 0;
+        return [calls, steps] as const;
+      });
+      return [three![0] - two![0], three![1] - two![1]];
+    };
+    assert.deepEqual(added(8), added(2));
+  } finally {
+    Contract.prototype.classMixed = original;
+  }
 });
