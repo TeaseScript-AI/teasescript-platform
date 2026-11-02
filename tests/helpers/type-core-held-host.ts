@@ -14,6 +14,7 @@ import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { coreRequest } from "./type-core-analysis.js";
 import { runGlobals } from "./type-core-route.js";
+import type { SourceSite } from "../../src/type-inference/graph.js";
 import type { Obligation } from "../../src/type-inference/core/result.js";
 import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
 
@@ -686,35 +687,29 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
         ),
       ].sort(),
     );
-  // (w) the read a mark's check is about: a member's or a selection's receiver, else the value at its site
+  // (w) the read a mark's check is about: a member's or a selection's receiver, else the value at its site; its finishing
+  // answer (the stopped analysis's at its node, one derivation with the consumers', TABLE r4.138) is the written type's
+  // kinds there exactly, never wider, never a narrower current value
   const written = (mark: (typeof marks)[number]): boolean => {
-    const graph = natural.graph;
-    let node = graph.expressionAt(mark.site);
-    if (
-      (mark.rule.rule === "member" || mark.rule.rule === "selection") &&
-      node?.expression !== undefined
-    ) {
-      const expression = node.expression;
+    let site: SourceSite = mark.site;
+    const expression = natural.graph.expressionAt(site)?.expression;
+    if (mark.rule.rule === "member" || mark.rule.rule === "selection") {
       const receiver =
-        expression.kind === "propertyAccessExpression" || expression.kind === "indexExpression"
+        expression?.kind === "propertyAccessExpression" || expression?.kind === "indexExpression"
           ? expression.object
           : null;
-      node =
-        receiver === null
-          ? undefined
-          : graph.expressionAt({
-              file: mark.site.file,
-              start: receiver.span.start.offset,
-              end: receiver.span.end.offset,
-            });
+      if (receiver === null) return false;
+      site = { file: site.file, start: receiver.span.start.offset, end: receiver.span.end.offset };
     }
-    const place = node === undefined ? null : (natural.at(node)?.place ?? null);
-    if (place === null) return false;
+    const [mine, theirs] = [natural.graph.expressionAt(site), stopped.graph.expressionAt(site)];
+    const place = mine === undefined ? null : (natural.at(mine)?.place ?? null);
+    const read = theirs === undefined ? null : stopped.at(theirs);
+    if (place === null || read === null) return false;
     const admitted = natural.place(place.id, place.path).admitted;
     if (admitted.by !== "written") return false;
-    const read = new Set([...mark.kinds, ...mark.fits].filter((kind) => kind !== "empty"));
+    const kinds = new Set(read.items.map((item) => item.tag).filter((tag) => tag !== "empty"));
     const type = new Set(admitted.kinds.filter((kind) => kind !== "empty"));
-    return read.size === type.size && [...read].every((kind) => type.has(kind));
+    return kinds.size === type.size && [...kinds].every((kind) => type.has(kind));
   };
   const relabelledTo = (u: Obligation): boolean =>
     owed.some(

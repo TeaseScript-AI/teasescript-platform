@@ -2660,7 +2660,7 @@ test("a combined stop's finishing read reaches through a copy whose decision sto
 /**
  * TABLE r4.285's other clauses at a combined stop: a mark whose check the finishing read made from the written type
  * there, its read's kinds exactly the written type's (a `list?` receiver's null check, an `integer?` element's count by a
- * null check), is accepted; so is a boundary against `unknown`, which has no plan content, dropped inside the store the
+ * null check, an `object`'s property read), is accepted; so is a boundary against `unknown`, which has no plan content, dropped inside the store the
  * stop marks undecided (a dictionary's value read through its `values`, forward). Each case at every eighth settled stop,
  * forward with the sharing and reversed without it where the clause arises, nothing left over and the clause taken.
  */
@@ -2683,6 +2683,16 @@ test("a combined stop owes a mark made from the written type, or a boundary's un
         "nullable integer elements",
         ["let xs: integer?[] = [hostValue, 4]"],
         'repeat xs[0] {say "ok"}',
+        repeated,
+      ),
+    },
+    {
+      clause: "w",
+      modes: [HELD_MODES[0]!, HELD_MODES[3]!],
+      c: keptCase(
+        "written object",
+        ["let xs: object = {f: hostValue}"],
+        'repeat xs.f {say "ok"}',
         repeated,
       ),
     },
@@ -2712,24 +2722,25 @@ test("a combined stop owes a mark made from the written type, or a boundary's un
 /**
  * TABLE r4.285's limits at a combined stop, each a stop the oracle fails: a check the natural analysis owes that the
  * finishing read cannot give (a comparison's element, #1580's form, where the decision stop leaves the used `get`'s
- * read to the walk); a mark whose read is wider than the written type (an unrestricted `object`'s property read, under
- * the second largest demand allowance that stops a decision); a
- * dropped boundary with plan content inside an undecided store (the copies' `root against object`, left out of the
- * stopped analysis); and a value the demand-only run itself lets through (`bad` at a stored property's default, #1526),
+ * read to the walk); a mark whose read no written type gives (two places copying each other), or one wider than the
+ * written type (a `list?` receiver's read given a text too); a dropped boundary with plan content inside an undecided
+ * store (the copies' `root against object`, left out of the stopped analysis); and a value the demand-only run itself lets through (`bad` at a stored property's default, #1526),
  * which the runs report where the combined stop keeps that run's check (reversed). Forward with the sharing otherwise.
  */
 test("a combined stop's rule takes nothing the natural analysis owes, nothing wider, and no boundary with plan content", () => {
   const mode = HELD_MODES[0]!;
-  const reported = (c: HeldCase, found: (problem: string) => boolean, which = 0): void => {
+  // (under each demand allowance that stops a decision)
+  const reported = (c: HeldCase, found: (problem: string) => boolean): void => {
     let count = 0;
-    combinedStops(
-      c,
-      mode,
-      (_, problems) => {
-        count += problems.filter(found).length;
-      },
-      which,
-    );
+    for (const which of heldDemands(c, mode).keys())
+      combinedStops(
+        c,
+        mode,
+        (_, problems) => {
+          count += problems.filter(found).length;
+        },
+        which,
+      );
     assert.ok(count > 0, c.name);
   };
   reported(
@@ -2740,12 +2751,54 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
     (problem) => problem.startsWith("unowned check") && problem.includes('"against":["boolean"]'),
   );
   reported(
-    heldFamily(false).find((c) => c.name === "writtenObjectBelow-1-arithmetic-plain")!,
+    heldFamily(false).find((c) => c.name === "twoWay-1-arithmetic-laterStore")!,
     (problem) =>
-      problem.startsWith("unowned check") &&
-      problem.includes('"kind":"null-check","target":"root"'),
-    1,
+      problem.startsWith("unowned check") && problem.includes('"kind":"null-check","target":"a"'),
   );
+  // (a `list?` receiver's read, which the rule takes, given a text beside the written type's kinds: no clause takes it)
+  const nullable = keptCase(
+    "nullable list",
+    ["let xs: list? = [hostValue, 4]"],
+    'repeat xs[0] {say "ok"}',
+    repeated,
+  );
+  const nullableRequest = coreRequest(
+    [{ path: "main.tease", source: nullable.source }],
+    ["hostValue", "hostOther"],
+  )!;
+  const nullableDemand = heldDemands(nullable, mode)[0]!;
+  const reference = heldUnstopped(nullable, mode, nullableDemand).run;
+  const unstoppedNullable = mode.run(() => analyseCore(nullableRequest));
+  const receiver = nullable.source.indexOf("xs[0]");
+  let widened = 0;
+  for (const { allowance } of heldStops(nullable, mode, 8, nullableDemand)) {
+    const stopped = mode.run(() =>
+      withTestAllowance(allowance, () =>
+        withTestDemandAllowance(nullableDemand, () => analyseCore(nullableRequest)),
+      ),
+    );
+    const taken = [...combinedStop(reference.answers, unstoppedNullable, stopped).checks].find(
+      ([, clause]) => clause === "w",
+    );
+    if (taken === undefined) continue;
+    widened += 1;
+    const node = stopped.graph.expressionAt({ file: 0, start: receiver, end: receiver + 2 })!;
+    // (the stopped answers with the receiver's read given a text too: every other member theirs)
+    const wider: Answers = Object.assign(Object.create(stopped), {
+      at: (at: FlowNode) => {
+        const found = stopped.at(at);
+        return at !== node || found === null
+          ? found
+          : { ...found, items: [...found.items, { ...found.items[0]!, tag: "string" as const }] };
+      },
+    });
+    assert.notEqual(
+      combinedStop(reference.answers, unstoppedNullable, wider).checks.get(taken[0]),
+      "w",
+      `@${allowance}`,
+    );
+  }
+  assert.ok(widened > 0);
   // (the decision stop alone lets `bad` through, its default checked against `unknown`; a combined stop that keeps that
   // check runs it alike, reversed with the sharing)
   const stored = storedGet("stored property", ["let xs = [({f: 4, g: hostValue}).f]"], "xs", [
