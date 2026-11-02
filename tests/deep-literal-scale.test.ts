@@ -226,9 +226,9 @@ test("a read 3,000 and 4,097 index steps deep stops cleanly, never overflowing t
 
 /**
  * #1572: a list join of 1,100 terms (`o + [{p0: 1}] + o + …`) and a list `otherwise` chain of 1,100
- * (`hostValue.l0 otherwise … otherwise o`), each read below its elements. Each operation's answer at a path is a demand
- * of its own, so the chain deepens neither the native stack per term (read inline, a fresh process overflowed at about
- * 900 terms) nor the read chain (1,024 levels, `READ_DEPTH_LIMIT`). In a child, in the four modes, each is answered
+ * (`hostValue.l0 otherwise … otherwise o`), each read below its elements. Each operation's answer at a path runs inline
+ * on its frame's explicit stack, so the chain deepens neither the native stack per term (read by `yield*`, a fresh
+ * process overflowed at about 900 terms) nor the read chain (1,024 levels, `READ_DEPTH_LIMIT`). In a child, in the four modes, each is answered
  * without a stop, as the same chain of 8 terms is; the deep chain runs first, before anything warms the code.
  */
 test("a join and an otherwise chain of 1,100 lists read below their elements are answered in the four modes (#1572)", () => {
