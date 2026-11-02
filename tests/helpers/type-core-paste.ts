@@ -679,27 +679,6 @@ function answer(view: RuntimeSessionView): object | undefined {
       };
 }
 
-/**
- * Whether a run executed the pasted code at `at`: of the plan's instructions whose span holds all of it, the innermost
- * (the prompt that shows it, the store, call or statement that receives its value) include one the run executed. An
- * instruction inside the code, as an ask it wraps, does not hold it: a store receiving an answer counts only once it ran
- * (#1586).
- */
-function reached(plan: InstructionPlan, executed: ReadonlySet<number>, at: Pasted["at"]): boolean {
-  let innermost = Infinity;
-  let ran = false;
-  plan.instructions.forEach(({ span }, index) => {
-    if (span.so > at.start || span.eo < at.end) return;
-    const width = span.eo - span.so;
-    if (width < innermost) {
-      innermost = width;
-      ran = false;
-    }
-    if (width === innermost && executed.has(index)) ran = true;
-  });
-  return ran;
-}
-
 /** A node of a source's syntax tree: anything with a span. */
 interface Node {
   readonly kind?: string;
@@ -722,67 +701,101 @@ function inside(node: Node): readonly Node[] {
  * and `otherwise` (`src/runtime/evaluator.ts`, its `binary`), the `default:` of a call that runs it only when needed
  * (`lazyDefaultArgument`, the evaluator's `call`), a `load`'s default (its `storageLoad`), a case's values after its
  * first, which a switch tests as an `or` (`caseCondition`), and a parameter's default, bound only for an omitted argument
- * (`bindDefaultParameter`). The name of `child`'s position in `parent`, or `null` where it runs whenever `parent` does.
+ * (`bindDefaultParameter`). `child`'s position in `parent` and the expression the lowering evaluates there, or `null`
+ * where it runs whenever `parent` does.
  */
-function lazyPosition(parent: Node, child: Node): string | null {
+function lazyPosition(
+  parent: Node,
+  child: Node,
+): { readonly position: string; readonly evaluated: Node } | null {
   // EVIDENCE: invariant: the parser builds each node as the AST interface its `kind` names; other kinds fall through.
   const node = parent as Expression | SwitchCase | FunctionParameter;
   switch (node.kind) {
     case "binaryExpression":
       return child === node.right &&
         (node.operator === "and" || node.operator === "or" || node.operator === "otherwise")
-        ? `the right side of '${node.operator}'`
+        ? { position: `the right side of '${node.operator}'`, evaluated: child }
         : null;
     case "callExpression": {
       const lazy = lazyDefaultArgument(node);
-      return lazy !== null && child === lazy.argument ? `the default of '${lazy.operation}'` : null;
+      return lazy !== null && child === lazy.argument
+        ? { position: `the default of '${lazy.operation}'`, evaluated: lazy.argument.value }
+        : null;
     }
     case "loadExpression":
-      return child === node.defaultValue ? "the default of 'load'" : null;
+      return child === node.defaultValue
+        ? { position: "the default of 'load'", evaluated: child }
+        : null;
     case "switchCase":
       return node.values.some((value, index) => index > 0 && value === child)
-        ? "a case's value after its first"
+        ? { position: "a case's value after its first", evaluated: child }
         : null;
     case "functionParameter":
-      return child === node.defaultValue ? "a parameter's default" : null;
+      return child === node.defaultValue
+        ? { position: "a parameter's default", evaluated: child }
+        : null;
     default:
       return null;
   }
 }
 
+/** A statement's kind, as the parser names the `Statement` kinds (`src/ast.ts`). */
+const STATEMENT = /(?:Statement|Declaration)$/;
+
 /**
- * The first lazy position (`lazyPosition`) around the pasted code at `at` that the run does not show it entered, or
- * `null`: an instruction inside a position, as a pausing operand's own, runs only once its evaluation was entered, but an
- * instruction around it runs also where it is skipped (Codex r1 on #1589).
+ * The statement kinds whose last instruction of their own span the lowering emits before their operands' evaluation:
+ * a function's `beginFunctionDefaults`, before each parameter's `prepareParameterDefault` and default
+ * (`src/compiler/lowering/compiler.ts`, its function lowering). Nothing of theirs shows their code was evaluated.
  */
-function unproved(
+const OWN_FIRST: ReadonlySet<string> = new Set(["functionDeclaration"]);
+
+/**
+ * Why a run does not show it evaluated the pasted code at `at`, or `null` (#1586; Codex r1 and r2 on #1589). Only the
+ * instruction that consumes the evaluated operands shows it, which the lowering emits after their evaluation: of the
+ * instructions with the span of the innermost statement around the code, the one emitted last; and for each position on
+ * the way down that a run may skip (`lazyPosition`), the last one with that position's span. A setup instruction that
+ * shares a span runs before the operands, and a pure position has no instruction of its own, so neither shows anything.
+ */
+function unevaluated(
   source: string,
   plan: InstructionPlan,
   executed: ReadonlySet<number>,
   at: Pasted["at"],
 ): string | null {
-  const ran = [...executed].map((index) => plan.instructions[index]!.span);
-  const visit = (node: Node): string | null => {
-    for (const child of inside(node)) {
-      const { start, end } = child.span;
-      if (start.offset > at.start || end.offset < at.end) continue;
-      const position = lazyPosition(node, child);
-      if (position !== null && !ran.some(({ so, eo }) => start.offset <= so && eo <= end.offset))
-        return position;
-      const found = visit(child);
-      if (found !== null) return found;
-    }
-    return null;
-  };
-  return visit(parse(source).program);
+  const last = ({ start, end }: SourceSpan): number =>
+    plan.instructions.findLastIndex(
+      ({ span }) => span.so === start.offset && span.eo === end.offset,
+    );
+  const path: Node[] = [];
+  for (let node: Node | undefined = parse(source).program; node !== undefined;) {
+    path.push(node);
+    node = inside(node).find(
+      ({ span }) => span.start.offset <= at.start && at.end <= span.end.offset,
+    );
+  }
+  const code = source.slice(at.start, at.end);
+  const depth = path.findLastIndex((node) => STATEMENT.test(node.kind ?? ""));
+  if (depth === -1) return `unproved evaluation: no statement holds '${code}'`;
+  const own = last(path[depth]!.span);
+  if (own === -1)
+    return `unproved evaluation: no instruction has the span of its '${path[depth]!.kind}'`;
+  if (OWN_FIRST.has(path[depth]!.kind!))
+    return `unproved evaluation: its '${path[depth]!.kind}' emits its own instruction before its operands`;
+  if (!executed.has(own)) return `unreached: the run ended without executing '${code}'`;
+  for (let below = depth + 1; below < path.length; below += 1) {
+    const lazy = lazyPosition(path[below - 1]!, path[below]!);
+    if (lazy === null) continue;
+    const entered = last(lazy.evaluated.span);
+    if (entered === -1 || !executed.has(entered)) return `unproved evaluation: ${lazy.position}`;
+  }
+  return null;
 }
 
 /**
  * Why a pasted form fails: its compile errors, the new core's among them (Codex r9), its run's failure, or a run that
  * does not show it runs (#1586): one still waiting after `COMPLETIONS` scripted answers (`answer`) or for what none
- * answers, one that ended without executing the instruction around the pasted code (`reached`), or one where the code
- * stands at a position the run may have skipped (`unproved`). `null` where it compiles, runs to its end and evaluated
- * the code. A pasted declaration's (`declared`) compile errors leave out the current checker's recorded
+ * answers, or one that ended without showing it evaluated the pasted code (`unevaluated`). `null` where it compiles,
+ * runs to its end and evaluated the code. A pasted declaration's (`declared`) compile errors leave out the current checker's recorded
  * difference at its own join (#1412), which the new core decides.
  */
 export function pasteFailure({ source, at, declared }: Omit<Pasted, "code">): string | null {
@@ -815,12 +828,7 @@ export function pasteFailure({ source, at, declared }: Omit<Pasted, "code">): st
     const failure = events.find((event) => event.kind === "runtimeFailure");
     if (failure !== undefined) return JSON.stringify(failure);
     const view = session.view();
-    if (view.status === "halted") {
-      if (!reached(compiled.plan, executed, at))
-        return `unreached: the run ended without executing '${source.slice(at.start, at.end)}'`;
-      const position = unproved(source, compiled.plan, executed, at);
-      return position === null ? null : `unproved evaluation: ${position}`;
-    }
+    if (view.status === "halted") return unevaluated(source, compiled.plan, executed, at);
     const request = answer(view);
     const action = view.foregroundAction;
     const awaited = action?.kind === "interaction" ? action.interactionKind : action?.kind;

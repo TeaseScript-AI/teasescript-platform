@@ -1468,6 +1468,9 @@ test("a pasted form counts as run only where its run ends through it, answered w
   // (a prompt's code, which runs before the answer and counts once the run has ended, Codex r1 on #1589)
   const prompt = 'let t = "hello"\nlet answer = askInteger("${t.length}")\nexit\n';
   assert.equal(pasteFailure(pasted(prompt, "t.length")), null);
+  // (a button's label, whose statement ends where it waits, in a run before the last)
+  const button = 'let t = "hello"\nshowButton "${t.length}"\nexit\n';
+  assert.equal(pasteFailure(pasted(button, "t.length")), null);
   // (a list's addition that receives the answer, as the family's duration stores do)
   const added =
     'let ps: duration[] = [1 s]\nps.add((askInteger("How many?")) s)\nsay ps.length\nexit\n';
@@ -1487,11 +1490,12 @@ test("a pasted form counts as run only where its run ends through it, answered w
 });
 
 /**
- * Codex r1 on #1589: an instruction around a pasted form may run while the form's own position is skipped. At each
- * position a run may skip (`lazyPosition` in `type-core-paste.ts`) a form counts as run only where an instruction inside
- * the position ran, as an answer's prompt there; skipped, or with no instruction inside, it is unproved.
+ * Codex r1 and r2 on #1589: only the instruction that consumes a pasted form's evaluated operands shows the form ran,
+ * the last the lowering emits for its statement and for each position on the way down that a run may skip
+ * (`unevaluated` in `type-core-paste.ts`). A setup instruction with the same span runs before the operands, and one
+ * around a skipped position runs too: at each position, taken through an answer's prompt, skipped, or pure, unproved.
  */
-test("a pasted form at a position a run may skip counts as run only where an instruction inside it ran (Codex r1 on #1589)", () => {
+test("a pasted form counts as evaluated only where the instruction that consumes it ran (Codex r1 and r2 on #1589)", () => {
   const ask = 'askInteger("${t.length}")';
   const at = (source: string, code: string, from = 0): Pasted => {
     const start = source.indexOf(code, from);
@@ -1512,27 +1516,57 @@ test("a pasted form at a position a run may skip counts as run only where an ins
       'save 1 as "k"\nlet v = load "k", default: t.length\nsay v',
       unproved("the default of 'load'"),
     ],
-    // (no answer can stand in a parameter's default, TSV032)
-    ["function f(p = t.length) {\n  say p\n}\nf()", unproved("a parameter's default")],
-    ["function f(p = t.length) {\n  say p\n}\nf(3)", unproved("a parameter's default")],
+    // (a parameter's default, which no answer can stand in, TSV032, in a function, whose own instruction comes before
+    // its parameters)
+    ...["f()", "f(3)"].map(
+      (call) =>
+        [
+          `function f(p = t.length) {\n  say p\n}\n${call}`,
+          unproved("its 'functionDeclaration' emits its own instruction before its operands"),
+        ] as const,
+    ),
   ] as const)
     assert.equal(pasteFailure(at(`let t = "hello"\n${lines}\nexit\n`, "t.length")), outcome, lines);
-  // (a case's later value, which only a literal can be, TSV047: tested, and not)
+  // (a statement with no instruction of its own span, whose condition, subject or cases nothing shows evaluated: an
+  // `if`; a switch, also at a case's later value, which only a literal can be, TSV047, tested and not)
+  assert.equal(
+    pasteFailure(at('let t = "hello"\nif t.length > 2 {\n  say "yes"\n}\nexit\n', "t.length")),
+    unproved("no instruction has the span of its 'ifStatement'"),
+  );
   for (const subject of ["5", "1"]) {
     const source = `switch ${subject} {\n  case 1, 5 {\n    say "case"\n  }\n}\nexit\n`;
     assert.equal(
       pasteFailure(at(source, "5", source.indexOf("case"))),
-      unproved("a case's value after its first"),
+      unproved("no instruction has the span of its 'switchStatement'"),
     );
   }
-  // (the review's witness, through the fix the core offers)
-  const witness = 'let t = "hello"\nsay false and t.size > 0\nexit\n';
-  const start = witness.indexOf("t.size");
-  const { forms } = pastedForms(witness, start, start + "t.size".length);
-  assert.deepEqual(
-    forms.map((form) => [form.code, pasteFailure(form)]),
-    [["t.length", unproved("the right side of 'and'")]],
-  );
+  // (the reviews' witnesses, through the fix the core offers: a skipped right side, Codex r1; an exit in an earlier
+  // operand, plain and at each position a run may skip, and the call returning, Codex r2)
+  const offered = (source: string): readonly (readonly [string, string | null])[] => {
+    const start = source.indexOf("t.size");
+    return pastedForms(source, start, start + "t.size".length).forms.map(
+      (form) => [form.code, pasteFailure(form)] as const,
+    );
+  };
+  assert.deepEqual(offered('let t = "hello"\nsay false and t.size > 0\nexit\n'), [
+    ["t.length", unproved("the right side of 'and'")],
+  ]);
+  const stop =
+    "function stop(p: integer): integer {\n  if p == 0 {\n    exit\n  }\n  return 1\n}\n";
+  for (const body of [
+    'say "${stop(@)}${t.size}"',
+    'let h: messageHandle? = null\nlet chosen = h otherwise (say "${stop(@)}${t.size}")',
+    'let chosen = true and ((say "${stop(@)}${t.size}") is messageHandle)',
+    'let chosen = false or ((say "${stop(@)}${t.size}") is messageHandle)',
+    'let ys: messageHandle[] = []\nlet chosen = ys.get(0, default: (say "${stop(@)}${t.size}"))',
+  ])
+    for (const [argument, outcome] of [
+      ["0", "unreached: the run ended without executing 't.length'"],
+      ["1", null],
+    ] as const) {
+      const source = `let t = "hello"\n${stop}${body.replace("@", argument)}\nexit\n`;
+      assert.deepEqual(offered(source), [["t.length", outcome]], source);
+    }
 });
 
 test("a join's pasted declaration is checked under the core alone at the joins its type receives, and the current checker's other join errors stand (#1412, Codex r12 and r13 on #1310)", () => {
