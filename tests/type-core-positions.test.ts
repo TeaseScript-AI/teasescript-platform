@@ -142,11 +142,10 @@ test("a read through wrappers makes its states one step at a time: the wrapper c
  * at each wrapper's root and whole path again, and that is output-neutral: each program of the family publishes the
  * same with positions and `withoutPositions` (the derivation every element level took before), in the four modes; and
  * the contract (kinds, elements, emptiness, each item with its writer, marks and ingress) of every binding of the chain
- * at its key `…q.f` and that key's element and element's element, asked shallow-first and base-first or deepest-first,
- * equals the one `withoutPositions` gives. The family samples each axis against the issue's shape (a store of external
- * data at `b`'s long key): the leaf (nested lists, a list of objects, an empty list, two kinds, a written type, and a
- * scalar or external data, whose receiver holds no structure), the use (a store at the key, at its element, a read of
- * its element) and what breaks the chain (`COPY_CHAIN_SOURCES`).
+ * at its key `…q.f`, that key's element, its element's element, a property `r` of its element and that property's
+ * element (a property step after an element step), asked shallow-first and base-first or deepest-first, equals the one
+ * `withoutPositions` gives. The family samples each axis against the issue's shape (a store of external data at `b`'s
+ * long key): the leaf, the use and what breaks the chain (`COPY_CHAIN_SOURCES`).
  */
 test("a key's element levels through wrappers answer the same from their positions as from their roots, in every mode and either question order (#1605)", () => {
   const depth = COPY_CHAIN_DEPTH;
@@ -168,11 +167,13 @@ test("a key's element levels through wrappers answer the same from their positio
       ["b", depth],
     ] as const;
     const questions = chain.flatMap(([name, below]) =>
-      [[], ["element"], ["element", "element"]].map((tail) => ({
-        name: `${name}.${[...Array.from({ length: below }, () => "q"), "f", ...tail].join(".")}`,
-        id: idOf(name),
-        path: [...Array.from({ length: below }, () => "q"), "f", ...tail],
-      })),
+      [[], ["element"], ["element", "element"], ["element", "r"], ["element", "r", "element"]].map(
+        (tail) => ({
+          name: `${name}.${[...Array.from({ length: below }, () => "q"), "f", ...tail].join(".")}`,
+          id: idOf(name),
+          path: [...Array.from({ length: below }, () => "q"), "f", ...tail],
+        }),
+      ),
     );
     // shallow-first and base-first, or deepest-first: each a fresh analysis
     const orders = [questions, [...questions].reverse()];
@@ -206,6 +207,6 @@ test("a key's element levels through wrappers answer the same from their positio
       }
     }
   }
-  assert.equal(sources.length, 31);
+  assert.equal(sources.length, 32);
   assert.deepEqual(differing, []);
 });

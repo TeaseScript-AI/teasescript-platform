@@ -2338,7 +2338,8 @@ test("a long copied key's store check grows with its copy chain in every mode (#
  * reversed), with its analysis's charged total: a regression oracle of this construction only, so a level's work
  * charged nowhere shows. On `3d052bf43` the store at the long key's analysis charged the same (7,843 shared, 7,003 not)
  * and its check 3,266 and 2,197 units; the store at its element's analysis asked its element levels through every
- * wrapper (10,329 and 8,632), its check 1,101 and 889.
+ * wrapper (10,329 and 8,632), its check 1,101 and 889; the store at a property of its element's 12,448 and 10,225, its
+ * check 2,353 and 1,880.
  */
 test("a long copied key's store check charges its positions' work, in every mode (#1605)", () => {
   const measured = COPY_CHAIN_FAMILIES.map((family) => {
@@ -2362,6 +2363,12 @@ test("a long copied key's store check charges its positions' work, in every mode
       [8098, 267],
       [8971, 305],
       [8098, 267],
+    ],
+    [
+      [10226, 586],
+      [9225, 497],
+      [10228, 586],
+      [9225, 497],
     ],
   ]);
 });

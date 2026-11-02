@@ -6701,17 +6701,23 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
 
 /**
  * #1605: a value copied through a chain of k/2 wrappers (`let wi = {q: w(i-1)}`) into a binding that stores external
- * data at its long key below them: the stored key `b.q^d.f` itself (the issue's shape), or its element. The store's
- * check reads the key's contract at every level of the stored value (its element, its element's element), each level
- * one step below its parent's position, never every wrapper's whole path again (`positions.ts`). Host global
- * `hostValue`.
+ * data at its long key below them: the stored key `b.q^d.f` itself (the issue's shape), its element, or a property of
+ * its element (a property step after an element step). The store's check reads the key's contract at every level of
+ * the stored value (its element, its element's element), each level one step below its parent's position, never every
+ * wrapper's whole path again (`positions.ts`). Host global `hostValue`.
  */
 export const COPY_CHAIN_FAMILIES: readonly WorkFamily[] = (
   [
-    ["copy-chain-store", "the issue's shape: a store at the long key", ""],
-    ["copy-chain-element-store", "a store at the long key's element", "[0]"],
+    ["copy-chain-store", "the issue's shape: a store at the long key", "[[1]]", ""],
+    ["copy-chain-element-store", "a store at the long key's element", "[[1]]", "[0]"],
+    [
+      "copy-chain-element-property-store",
+      "a store at a property of its element",
+      "[{r: [[1]]}]",
+      "[0].r",
+    ],
   ] as const
-).map(([name, measures, below]) => ({
+).map(([name, measures, leaf, below]) => ({
   name,
   measures: `#1605: ${measures}`,
   program: (k: number) => {
@@ -6719,7 +6725,7 @@ export const COPY_CHAIN_FAMILIES: readonly WorkFamily[] = (
     const path = Array.from({ length: depth }, () => "q").join(".");
     return main(
       lines(
-        "let a = {f: [[1]]}",
+        `let a = {f: ${leaf}}`,
         rows(depth, (i) => `let w${i} = {q: ${i === 0 ? "a" : `w${i - 1}`}}`),
         `let b = w${depth - 1}`,
         `b.${path}.f${below} = hostValue`,
@@ -6745,6 +6751,7 @@ function copiedChain(depth: number, leaf: string, use: string, breaker: string):
   const uses: Record<string, readonly string[]> = {
     store: [`b.${path(depth)}.f = hostValue`],
     "element-store": [`b.${path(depth)}.f[0] = hostValue`],
+    "element-property-store": [`b.${path(depth)}.f[0].r = hostValue`],
     read: [`let x = b.${path(depth)}.f[0]`],
   };
   const breakers: Record<string, readonly string[]> = {
@@ -6772,7 +6779,8 @@ function copiedChain(depth: number, leaf: string, use: string, breaker: string):
  * #1605: the element levels' family through wrappers (`copiedChain`, depth `COPY_CHAIN_DEPTH`), each axis against the
  * issue's shape: the leaf (nested lists, a list of objects, an empty list, two kinds, a written type, a scalar and
  * external data, whose receivers hold no structure) under each use (a store of external data at `b`'s long key, at its
- * element, a read of its element), and what breaks the chain (a store into a wrapper, of a literal or of external
+ * element, a read of its element), a store at a property of the element (a property step after an element step), and
+ * what breaks the chain (a store into a wrapper, of a literal or of external
  * data, a store through a copy of one, a store into the frontier's own binding, a test of a wrapper) under the two
  * stores. Host globals `hostValue` and `hostOther`.
  */
@@ -6783,6 +6791,10 @@ export const COPY_CHAIN_SOURCES: readonly { readonly name: string; readonly sour
       source: copiedChain(COPY_CHAIN_DEPTH, leaf, use, "none"),
     })),
   ),
+  {
+    name: "leaf [{r: [[1]]}], element-property-store",
+    source: copiedChain(COPY_CHAIN_DEPTH, "[{r: [[1]]}]", "element-property-store", "none"),
+  },
   ...["prefix-store", "prefix-store-host", "copy-store", "frontier-store", "guarded"].flatMap(
     (breaker) =>
       ["store", "element-store"].map((use) => ({
