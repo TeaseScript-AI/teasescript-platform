@@ -1358,13 +1358,26 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         1,
         /stalls\.json lists 2 stalled sources of .*, which has 1/,
       ],
+      [
+        copied("one", "forged", (dir) =>
+          edit(join(dir, "area", "1of16.runs.jsonl"), '"stalled":1,', '"stalled":0,'),
+        ),
+        1,
+        /total counts 0 stalled sources, its lines 1/,
+      ],
       ["empty", 0, /holds no baseline of this tool/],
     ] as const) {
       const refused = imported(root, index);
       assert.deepEqual([root, refused.status], [root, 2]);
       assert.match(said(refused).refused, refusal);
     }
-    // (and a central baseline whose PLAN its seed's adoption did not make yet)
+    // (and a seed that names no build of the compiler, and a central baseline whose PLAN its seed's adoption did not
+    // make yet)
+    copied("seed", "unnamed", (dir) => edit(join(dir, "MANIFEST"), /^compiled \w+\n/m, ""));
+    assert.match(
+      said(tool("import", at("unnamed-central"), at("unnamed"))).refused,
+      /names no build of the compiler/,
+    );
     cpSync(central, at("unplanned"), { recursive: true });
     rmSync(at("unplanned", src, "area", "PLAN"));
     assert.match(
