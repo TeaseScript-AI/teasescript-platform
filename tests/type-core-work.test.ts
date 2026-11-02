@@ -1601,6 +1601,59 @@ test("a cycle of whole copies read at every member grows with the program in eit
 });
 
 /**
+ * #1397: k/8 choices of k host reads each, read in k lists, each list the choices in a shuffled order of its own
+ * (#1359's B1 family, `leaf-permuted` in `tests/families/joins/1359-peer-set-orders.mjs`). Each list's item unites its
+ * elements in its own order, a node of its own, and C1's site walked each such node's leaves though no list's store
+ * lands any or brings an ingress at a siting: k orders × k²/8 leaves. With the sharing off the total and each counter
+ * grow with the program in either order; with it on only `checks` is gated, since the sharing's union nodes and the
+ * contract's class parts grow faster than the program in the fixed order too (#1573). At 20 → 40, the smallest pair
+ * that shows the walk (18 → 36 does not), the walk grew `checks` ×2.97 per doubling in every mode. The series to
+ * k = 128, the four modes, the subsets and the other orders are the step's evidence, outside CI; a store that reads
+ * the leaves it walks is #1579.
+ */
+test("lists of one set of choices in many orders site their host data without walking each order (#1397)", () => {
+  const shuffled = (m: number, seed: number): number[] => {
+    const order = Array.from({ length: m }, (_, j) => j);
+    let state = (seed * 2654435761 + 12345) >>> 0;
+    for (let j = m - 1; j > 0; j -= 1) {
+      state = (state * 1103515245 + 12345) >>> 0;
+      const at = state % (j + 1);
+      [order[j], order[at]] = [order[at]!, order[j]!];
+    }
+    return order;
+  };
+  const family: WorkFamily = {
+    name: "choice lists in shuffled orders",
+    measures:
+      "k lists of k/8 choices of k host reads, each list in its own order: C1's site per list",
+    program: (k) => {
+      const m = Math.max(2, Math.floor(k / 8));
+      const rows = (n: number, row: (i: number) => string, separator = "\n") =>
+        Array.from({ length: n }, (_, i) => row(i)).join(separator);
+      const choice = `askChoice ${rows(k, (r) => `{text: "${r}", value: hostValue.p${r}}`, ", ")}`;
+      const source = [
+        rows(m, (j) => `let p${j} = ${choice}`),
+        rows(k, (i) => {
+          const list = shuffled(m, i).map((j) => `p${j}`);
+          return `let xs${i} = [${list.join(", ")}]\nlet n${i}: integer = xs${i}[hostValue.i]`;
+        }),
+        "exit",
+      ].join("\n");
+      return [{ path: "main.tease", source }];
+    },
+  };
+  const steep = steepCounters([family], true, undefined, [20, 40]);
+  for (const reversed of [false, true]) {
+    const [small, large] = [20, 40].map((k) => analysed(sized(family, k), reversed).budget.counts);
+    const scale = large!.get("syntaxNodes")! / small!.get("syntaxNodes")!;
+    const doubling = (2 * (large!.get("checks")! / small!.get("checks")!)) / scale;
+    if (doubling > COUNTER_DOUBLING)
+      steep.push(`${family.name}${reversed ? " reversed" : ""} checks: ${doubling.toFixed(3)}`);
+  }
+  assert.deepEqual(steep, []);
+});
+
+/**
  * #1426: in a selection nested k deep whose options are objects, read at a property, each level's literal is read at the
  * path once, its answer composed from the level inside's: the contract's merges and steps grow with the program in
  * either order (a level merged again from every literal inside measured 3.75 to 3.93 here). #1444: admission lists
