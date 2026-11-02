@@ -46,6 +46,7 @@ import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
+  combinedAnalyses,
   combinedStop,
   combinedStopRule,
   heldDemands,
@@ -57,6 +58,7 @@ import {
   randomCopyGraph,
   topologySources,
   phaseEnds,
+  type CombinedStop,
   type HeldCase,
 } from "./helpers/type-core-held-host.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
@@ -2663,7 +2665,7 @@ test("a combined stop's finishing read reaches through a copy whose decision sto
  * finishing read answered from (a written `list?` receiver's null check, an `integer?` element's count by a null check,
  * an `object`'s property read; two places copying each other, answered without a written type); and a boundary against
  * `unknown`, which has no plan content, dropped where the undecided store mark stands at the site of the store holding it
- * (a dictionary's value read through its `values`, forward). Each case at every eighth settled stop under the largest
+ * (a dictionary's value read through its `values`, forward, also parenthesized or in a parenthesized literal). Each case at every eighth settled stop under the largest
  * demand allowance that stops a decision (the copying places under each), in the modes where the clause arises, nothing
  * left over and the clause taken.
  */
@@ -2705,17 +2707,22 @@ test("a combined stop owes the reference's check in other words, or a boundary's
       c: heldFamily(false).find((c) => c.name === "twoWay-1-arithmetic-laterStore")!,
       each: true,
     },
-    {
+    ...[
+      "function build {return dict {a: hostValue, b: 4}}",
+      // (a parenthesized value and a parenthesized literal, which the lowering does not materialize: Codex r2's B3)
+      "function build {return dict {a: (hostValue), b: 4}}",
+      "function build {return (dict {a: hostValue, b: 4})}",
+    ].map((line) => ({
       clause: "z",
       modes: [HELD_MODES[0]!],
       c: keptCase(
-        "dictionary values of a result",
-        ["function build {return dict {a: hostValue, b: 4}}"],
+        `dictionary values of a result: ${line}`,
+        [line],
         'repeat build().values[0] {say "ok"}',
         repeated,
         false,
       ),
-    },
+    })),
   ];
   for (const { clause, modes, c, each = false } of cases)
     for (const mode of modes) {
@@ -2749,77 +2756,88 @@ function shadowed(answers: Answers, fields: Partial<Answers>): Answers {
   );
 }
 
-/** `answers` with the mark carrying `obligation` replaced by `by` (its obligation published in its place), or left out. */
+/** A mark of `answers` changed by `by` (or left out), its published obligation with it, its diagnostic too. */
 function withMark(
   answers: Answers,
   obligation: string,
-  by: (typeof answers.budget.deferred)[number] | null,
+  by:
+    | ((mark: (typeof answers.budget.deferred)[number]) => (typeof answers.budget.deferred)[number])
+    | null,
 ): Answers {
   const is = (check: Answers["checks"][number]): boolean => JSON.stringify(check) === obligation;
+  const mark = answers.budget.deferred.find((each) => is(each.obligation));
+  assert.ok(mark !== undefined, obligation);
+  const changed = by === null ? null : by(mark);
   return shadowed(answers, {
     checks: answers.checks.flatMap((check) =>
-      !is(check) ? [check] : by === null ? [] : [by.obligation],
+      !is(check) ? [check] : changed === null ? [] : [changed.obligation],
     ),
     budget: {
       ...answers.budget,
-      deferred: answers.budget.deferred.flatMap((mark) =>
-        !is(mark.obligation) ? [mark] : by === null ? [] : [by],
+      deferred: answers.budget.deferred.flatMap((each) =>
+        each !== mark ? [each] : changed === null ? [] : [changed],
       ),
     },
   });
 }
 
 /**
- * Each settled stop at every eighth allowance under the largest demand allowance that stops a decision, forward with the
- * sharing, where the combined stop's rule takes `clause` for a reference check `pick` names: the reference, the natural
- * analysis, the stopped analysis and that check, for a control.
+ * Each settled stop of a program's files under each demand allowance that stops a decision of its main file (or under
+ * `demands`), forward with the sharing, at every eighth allowance of each settled phase: where `select` names a reference
+ * check there, `each` judges it. The number of stops judged.
  */
-function takenAt(
-  c: HeldCase,
-  clause: "a" | "w" | "z",
-  pick: (check: Answers["checks"][number]) => boolean,
+function controlStops(
+  files: readonly SourceFile[],
+  select: (rule: CombinedStop, reference: Answers, stopped: Answers) => string | undefined,
   each: (reference: Answers, natural: Answers, stopped: Answers, check: string) => void,
+  demands?: readonly number[],
 ): number {
   const mode = HELD_MODES[0]!;
-  const request = coreRequest(
-    [{ path: "main.tease", source: c.source }],
-    ["hostValue", "hostOther"],
-  )!;
-  const demand = heldDemands(c, mode)[0]!;
-  const reference = heldUnstopped(c, mode, demand).run.answers;
-  const natural = mode.run(() => analyseCore(request));
   let count = 0;
-  for (const { allowance } of heldStops(c, mode, 8, demand)) {
-    const stopped = mode.run(() =>
-      withTestAllowance(allowance, () =>
-        withTestDemandAllowance(demand, () => analyseCore(request)),
-      ),
-    );
-    const taken = [...combinedStop(reference, natural, stopped).checks].find(
-      ([check, found]) => found === clause && pick(JSON.parse(check)),
-    );
-    if (taken === undefined) continue;
-    count += 1;
-    each(reference, natural, stopped, taken[0]);
+  for (const demand of demands ?? heldDemands({ source: files[0]!.source }, mode)) {
+    const { natural, reference, stoppedAt } = combinedAnalyses(files, mode, demand);
+    for (const [low, high] of phaseEnds(reference.budget.total, (allowance) => {
+      const { settled, stoppedIn } = stoppedAt(allowance).budget;
+      return settled ? stoppedIn : null;
+    }).values())
+      for (let allowance = low; allowance <= high; allowance += 8) {
+        const stopped = stoppedAt(allowance);
+        const check = select(combinedStop(reference, natural, stopped), reference, stopped);
+        if (check === undefined) continue;
+        count += 1;
+        each(reference, natural, stopped, check);
+      }
   }
   return count;
 }
 
+/** The reference check the rule takes by `clause` that `pick` names, or none. */
+const takes =
+  (clause: "a" | "w" | "z", pick: (check: Answers["checks"][number]) => boolean) =>
+  (rule: CombinedStop): string | undefined =>
+    [...rule.checks].find(([check, found]) => found === clause && pick(JSON.parse(check)))?.[0];
+
+/** A program of one file. */
+const mainFile = (source: string): SourceFile[] => [{ path: "main.tease", source }];
+
 /**
- * TABLE r4.285's and r4.290's limits at a combined stop, each a stop the oracle fails. A check the natural analysis owes
- * that the finishing read cannot give (a comparison's element, #1580's form, where the decision stop leaves the used
- * `get`'s read to the walk): the stopped analysis's mark lets through every kind. And three controls on real stops,
- * changed (Codex r1's B1–B3 on #1597): (a) where the finishing read is still `unknown` at the budget (a `list?` receiver's
- * mark left out, its read answered `STOPPED`); (w) where the mark lets through more than the reference's check (the
- * `integer?` element's null check against `integer` replaced by a copy check against `unknown`); (z) where no undecided
- * store mark stands at the holding store's site (the dictionary's store mark moved to the whole source); and a dropped
- * boundary with plan content inside an undecided store (the copies' `root against object`, left out). Also a value the
- * demand-only run itself lets through (`bad` at a stored property's default, #1526), which the runs report where the
- * combined stop keeps that run's check (reversed). Forward with the sharing otherwise.
+ * TABLE r4.290's inventory at a combined stop: each predicate's controls on real stops, changed (Codex r1's and r2's on
+ * #1597), each dimension with what it must reject and what it must accept.
+ * - (a)'s reference read: a recovered contract tagged `budget` (`list|null`, never `unknown`) is no read the demand stop
+ *   left `unknown`, so the receiver's mark left out is rejected; the issues' witnesses (the first test) are accepted.
+ * - (a)'s finishing read: the receiver's mark left out with its read answered `STOPPED` is rejected.
+ * - (w)'s domain: the null check against `integer` replaced by a copy check against `unknown` is rejected, and so is
+ *   #1580's comparison form, whose mark lets every kind through; a redundant mark against `unknown` beside the
+ *   restrictive one is accepted, the intersection unchanged.
+ * - Site identity: the same mark moved to another file at the same offsets is rejected; in its own file it is taken.
+ * - (z)'s holding store: the store mark moved to the whole source is rejected, and so is the copies' boundary with plan
+ *   content left out; a parenthesized value and a parenthesized literal (the third test) are accepted.
+ * And `bad` run by the demand-only run itself (#1526), reported by the runs where the combined stop keeps that run's
+ * check (reversed with the sharing).
  */
 test("a combined stop's rule takes nothing the natural analysis owes, nothing wider, and no boundary with plan content", () => {
   const mode = HELD_MODES[0]!;
-  // (under each demand allowance that stops a decision)
+  // (#1580's comparison form, under each demand allowance that stops a decision: its mark lets every kind through)
   let compared = 0;
   const elements = storedGet("compared element", [], "[hostValue == 2]", [
     [true, true],
@@ -2838,26 +2856,20 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
       which,
     );
   assert.ok(compared > 0);
-  // (a): the receiver's mark left out, its read answered `STOPPED` (`unknown`, the reason `budget`)
-  const nullable = keptCase(
-    "nullable list",
-    ["let xs: list? = [hostValue, 4]"],
-    'repeat xs[0] {say "ok"}',
-    repeated,
-  );
-  const receiver = nullable.source.indexOf("xs[0]");
+  const nullable =
+    'let xs: list? = [hostValue, 4]\nsay "BEFORE"\nrepeat xs[0] {say "ok"}\nsay "AFTER"\nexit\n';
+  const receiver = nullable.indexOf("xs[0]");
+  const nullCheck = (check: Answers["checks"][number]): boolean =>
+    check.kind === "null-check" && check.target === "xs";
+  // (a)'s finishing read: the receiver's mark left out, its read answered `STOPPED`
   assert.ok(
-    takenAt(
-      nullable,
-      "w",
-      (check) => check.kind === "null-check" && check.target === "xs",
+    controlStops(
+      mainFile(nullable),
+      takes("w", nullCheck),
       (reference, natural, stopped, check) => {
-        const mark = stopped.budget.deferred.find(
-          (each) => each.obligation.kind === "null-check" && each.obligation.target === "xs",
-        )!;
+        const mark = stopped.budget.deferred.find((each) => nullCheck(each.obligation))!;
         const node = stopped.graph.expressionAt({ file: 0, start: receiver, end: receiver + 2 })!;
-        const left = withMark(stopped, JSON.stringify(mark.obligation), null);
-        const unanswered = shadowed(left, {
+        const unanswered = shadowed(withMark(stopped, JSON.stringify(mark.obligation), null), {
           at: (at: FlowNode) => {
             const found = stopped.at(at);
             return at !== node || found === null ? found : { ...found, items: STOPPED };
@@ -2867,55 +2879,99 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
       },
     ) > 0,
   );
-  // (w): the null check against `integer` replaced by a copy check against `unknown`, which lets every kind through
-  const elementsOf = keptCase(
-    "nullable integer elements",
-    ["let xs: integer?[] = [hostValue, 4]"],
-    'repeat xs[0] {say "ok"}',
-    repeated,
-  );
+  // (a)'s reference read: a recovered contract tagged `budget`, the receiver's mark left out (Codex r2's B1, at demand 5,
+  // where the reference warns of the receiver's `null` alone)
+  const known =
+    'let pad = {q: {q: {q: {q: hostOther}}}}\nlet xs: list? = [hostValue, 4]\nrepeat xs[0] {say "ok"}\nsay pad.q.q.q.q\nexit\n';
+  const knownAt = known.indexOf("xs[0]");
   assert.ok(
-    takenAt(
-      elementsOf,
-      "w",
-      (check) => check.target === "xs.element" && check.kind === "integer-check",
-      (reference, natural, stopped, check) => {
-        const mark = stopped.budget.deferred.find(
-          (each) =>
-            each.obligation.target === "xs.element" && each.obligation.kind === "null-check",
-        )!;
-        const wider = withMark(stopped, JSON.stringify(mark.obligation), {
-          ...mark,
-          obligation: {
-            ...mark.obligation,
-            kind: "copy-type",
-            against: ["unknown"],
-            on: "validate the stored value of xs.element against unknown",
-          },
-        });
-        assert.notEqual(combinedStop(reference, natural, wider).checks.get(check), "w");
+    controlStops(
+      mainFile(known),
+      (_, reference, stopped) => {
+        const owner = reference.diagnostics.find(
+          (d) =>
+            "obligation" in d &&
+            nullCheck(d.obligation) &&
+            d.site.start === knownAt &&
+            isDeepStrictEqual(d.kinds, ["null"]),
+        );
+        const text =
+          owner !== undefined && "obligation" in owner ? JSON.stringify(owner.obligation) : "";
+        return stopped.budget.deferred.some((mark) => JSON.stringify(mark.obligation) === text)
+          ? text
+          : undefined;
       },
+      (reference, natural, stopped, check) =>
+        assert.equal(
+          combinedStop(reference, natural, withMark(stopped, check, null)).checks.get(check),
+          undefined,
+        ),
+      // (where the receiver's read recovers its contract, `list|null` tagged `budget`: Codex r2's witness)
+      [5],
     ) > 0,
   );
-  // (z): the undecided store mark moved from the holding store's site to the whole source
-  const values = keptCase(
-    "dictionary values of a result",
-    ["function build {return dict {a: hostValue, b: 4}}"],
-    'repeat build().values[0] {say "ok"}',
-    repeated,
-    false,
-  );
-  const holding = values.source.indexOf("dict {");
+  // (w)'s domain: the null check against `integer` replaced by a copy check against `unknown` (Codex r1's B2); a
+  // redundant mark against `unknown` beside it, the intersection unchanged
+  const elementsOf =
+    'let xs: integer?[] = [hostValue, 4]\nsay "BEFORE"\nrepeat xs[0] {say "ok"}\nsay "AFTER"\nexit\n';
+  const count = (check: Answers["checks"][number]): boolean =>
+    check.target === "xs.element" && check.kind === "integer-check";
+  const elementMark = (stopped: Answers) =>
+    stopped.budget.deferred.find(
+      (each) => each.obligation.target === "xs.element" && each.obligation.kind === "null-check",
+    )!;
+  const unknownCopy = (mark: typeof elementMark extends (a: Answers) => infer M ? M : never) => ({
+    ...mark,
+    obligation: {
+      ...mark.obligation,
+      kind: "copy-type" as const,
+      against: ["unknown" as const],
+      on: "validate the stored value of xs.element against unknown",
+    },
+  });
   assert.ok(
-    takenAt(
-      values,
-      "z",
-      (check) => check.boundary,
+    controlStops(mainFile(elementsOf), takes("w", count), (reference, natural, stopped, check) => {
+      const mark = elementMark(stopped);
+      const wider = withMark(stopped, JSON.stringify(mark.obligation), unknownCopy);
+      assert.notEqual(combinedStop(reference, natural, wider).checks.get(check), "w");
+      const beside = shadowed(stopped, {
+        checks: [...stopped.checks, unknownCopy(mark).obligation],
+        budget: { ...stopped.budget, deferred: [...stopped.budget.deferred, unknownCopy(mark)] },
+      });
+      assert.equal(combinedStop(reference, natural, beside).checks.get(check), "w");
+    }) > 0,
+  );
+  // site identity: the mark moved to another file at the same offsets (Codex r2's B2); taken in its own file
+  const twoFiles = [
+    ...mainFile(elementsOf),
+    { path: "other.tease", source: elementsOf.replaceAll("xs", "ys") },
+  ];
+  const inMain = (check: Answers["checks"][number]): boolean =>
+    count(check) && check.site.file === 0;
+  assert.ok(
+    controlStops(twoFiles, takes("w", inMain), (reference, natural, stopped, check) => {
+      const mark = elementMark(stopped);
+      const moved = withMark(stopped, JSON.stringify(mark.obligation), (each) => ({
+        ...each,
+        site: { ...each.site, file: 1 },
+        obligation: { ...each.obligation, site: { ...each.obligation.site, file: 1 } },
+      }));
+      assert.equal(combinedStop(reference, natural, moved).checks.get(check), undefined);
+    }) > 0,
+  );
+  // (z)'s holding store: the store mark moved from the holding store's site to the whole source (Codex r1's B3)
+  const values =
+    'function build {return dict {a: hostValue, b: 4}}\nsay "BEFORE"\nrepeat build().values[0] {say "ok"}\nsay "AFTER"\nexit\n';
+  const holding = values.indexOf("dict {");
+  assert.ok(
+    controlStops(
+      mainFile(values),
+      takes("z", (check) => check.boundary),
       (reference, natural, stopped, check) => {
         const owns = (d: Answers["diagnostics"][number]): boolean =>
           "rule" in d && d.rule.rule === "store" && d.site.start === holding;
         assert.ok(stopped.diagnostics.some(owns) || stopped.budget.deferred.some(owns));
-        const whole = { file: 0, start: 0, end: values.source.length };
+        const whole = { file: 0, start: 0, end: values.length };
         const move = <D extends Answers["diagnostics"][number]>(d: D): D =>
           !owns(d) || !("obligation" in d)
             ? d

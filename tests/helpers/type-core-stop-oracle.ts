@@ -36,8 +36,9 @@ export interface StopCase {
   readonly fitting: readonly Globals[];
   readonly violating: readonly Globals[];
   /**
-   * What a combined stop's rule accepts of its demand-only reference (`combinedStop`, TABLE r4.285): records, each
-   * `code start:end`, excused as a mark's are, and checks (as `JSON.stringify` gives them) owed on neither side.
+   * What a combined stop's rule accepts of its demand-only reference (`combinedStop`, TABLE r4.285, r4.290): records, each
+   * by its code at its whole site (`code file:start:end`), excused as a mark's are, and checks (as `JSON.stringify` gives
+   * them, their sites whole) owed on neither side.
    */
   readonly excused?: {
     readonly records: ReadonlySet<string>;
@@ -201,9 +202,14 @@ export function stopProblems(c: StopCase): string[] {
       ];
       if (a !== b) problems.push(`fitting ${b} against ${a}`);
     });
+  // (a compile's diagnostics name no file, the entry file's: a record the rule accepts excuses them there alone, its own
+  // whole site kept apart, so a record of another file at the same offsets excuses nothing)
   const excused = new Set([
     ...marks.map((mark) => recordOf(mark.code, mark.site)),
-    ...(c.excused?.records ?? []),
+    ...[...(c.excused?.records ?? [])].flatMap((record) => {
+      const found = /^(\S+) 0:(\d+):(\d+)$/.exec(record);
+      return found === null ? [] : [`${found[1]} ${found[2]}:${found[3]}`];
+    }),
   ]);
   const accepted = c.excused?.checks ?? new Set<string>();
   // before admission settled no decision is read (r4.110 (3)): each store marked with its type undecided stands for its
