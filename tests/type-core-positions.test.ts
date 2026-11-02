@@ -150,7 +150,7 @@ function copied(depth: number, leaf: string, use: string, breaker: string): stri
   };
   const breakers: Record<string, readonly string[]> = {
     none: [],
-    "prefix-store": [`w${middle}.q = w${middle - 1}`],
+    "prefix-store": [`w${middle}.q = {${"q: {".repeat(middle)}f: [[3]]${"}".repeat(middle)}}`],
     "copy-store": [`let c = w${middle}`, `c.${path(middle + 1)}.f = hostOther`],
     "frontier-store": [`a.f[0] = hostOther`],
     guarded: [`if w${middle}.q is object {`, `  say "here"`, `}`],
