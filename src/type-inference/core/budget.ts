@@ -383,9 +383,10 @@ export function countApart(work: WorkLedger, counter: WorkCounter, units = 1): v
 }
 
 /**
- * The levels of a read chain the analysis follows in one run of native calls: a read's projections and operations
- * (`value[0][0]…`, `value.x.y…`, `value.first.first…`), each read by a generator inside the one before (`Contract`'s
- * `contractOfValue` and `valueAt`, `Values`' `#valueAt`), so a deeper chain needs a deeper native stack. Past it the
+ * The levels of a read chain the analysis follows in one run of native calls: a read's projections (`value[0][0]…`,
+ * `value.x.y…`, `value.first.first…`), each read by a generator inside the one before (`Contract`'s `contractOfValue` and
+ * `valueAt`, `Values`' `#valueAt`), so a deeper chain needs a deeper native stack; an operation's answer at a path runs
+ * on its frame's own stack, its read chain new (`inline`, #1572). Past it the
  * analysis stops proving (`read-depth`) instead of overflowing that stack. A technical bound, not a language limit: on Node
  * 26.13.0's default stack (984 KiB) such a chain overflowed at 2,448 levels for index, property and `.first` reads, as
  * on 24.18.0 with the same build; 1,024 is about 40 % of that, leaving the stack a compile is called from and a heavier

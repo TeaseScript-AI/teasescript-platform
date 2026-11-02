@@ -25,6 +25,7 @@ import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } 
  * closes is solved above that. So an answer depends on the final member set, never on the order the demands were
  * discovered in; the tests check that property (the component test re-solves every component from each member and in
  * the reverse order).
+ * What a demand reads as part of itself (`inline`) runs on its frame's stack too, never the native one.
  *
  * That needs answers monotone in what they read. A choice that is not (a `Decision`: F18/F19's default without kinds
  * gives `unknown`; F19a's receiver that holds a reference kind has opaque members) is made on a completed input: at
@@ -114,8 +115,52 @@ export interface ProofDemand<P extends Proof> {
   readonly decision?: ProofDecision<P>;
 }
 
-/** A computation that yields the demands it reads and receives their items. */
-export type Work<T> = Generator<Demand | ProofDemand<Proof>, T, readonly Item[]>;
+/** A computation a run reads as part of itself (`inline`), as its run yields it to the solver. */
+export interface Inline {
+  readonly inline: Work<readonly Item[]>;
+}
+
+let nativeInline = false;
+
+/** Test-only: runs `callback` with every inline child read by `yield*` on the native stack, as before #1572. */
+export function withNativeInline<T>(callback: () => T): T {
+  if (nativeInline) throw new Error("Native inline reading is already active.");
+  nativeInline = true;
+  try {
+    return callback();
+  } finally {
+    nativeInline = false;
+  }
+}
+
+/**
+ * `work` read as part of the running computation (`yield* inline(work)` in place of `yield* work`, #1572): it runs on
+ * its frame's explicit stack, not the native one, with the frame's identity (its reads are the frame's demand's or
+ * member's); it is never memoised, never a component member, never a demand. Its read chain starts at none
+ * (`enterRead`), and between two steps the solver's is its frame's whole one, as `yield*` leaves it. Pushing and popping
+ * it is not charged and checks no allowance, so the frame's steps, work and stops are those the same generators run by
+ * `yield*` have; an exception it throws is thrown into its parents, as `runCompileTask` does.
+ */
+export function* inline(work: Work<readonly Item[]>): Work<readonly Item[]> {
+  return nativeInline ? yield* work : yield { inline: work };
+}
+
+/** A computation that yields the demands it reads (and those it reads inline) and receives their items. */
+export type Work<T> = Generator<Demand | ProofDemand<Proof> | Inline, T, readonly Item[]>;
+
+/** A run's generator, or an inline child on it (`inline`), with the read chain it is inside (`enterRead`). */
+interface Level {
+  readonly work: Work<unknown>;
+  readDepth: number;
+}
+
+/**
+ * An inline child on a run (`inline`), with the read chain of the levels below it, which stand suspended, their own
+ * chains unchanged, as long as it is on their stack: made once as it is pushed.
+ */
+interface Child extends Level {
+  readonly below: number;
+}
 
 /** An unfinished demand. */
 interface DemandNode {
@@ -152,6 +197,8 @@ interface Frame {
   readonly rerun: Rerun | null;
   /** The read chain its generators are inside (`enterRead`): its native depth when it runs again. */
   readDepth: number;
+  /** The inline children on its run (`inline`), the innermost last. */
+  readonly inline: Child[];
 }
 
 interface Rerun {
@@ -403,10 +450,67 @@ export class Solver {
    * (through its decision's open answer); none is run.
    */
   #stoppedRun<T>(work: Work<T>): T {
-    for (let step = work.next(); ;) {
-      if (step.done === true) return step.value;
+    const root: Level = { work, readDepth: this.#readDepth };
+    const children: Child[] = [];
+    for (let step = this.#advance(root, children, []); ;) {
+      if (step.done === true) {
+        // EVIDENCE: invariant: the root is `work`, so its result is a `T`.
+        return step.value as T;
+      }
       const demand = step.value;
-      step = work.next(this.#memo.get(demand.key) ?? this.#stopped(demand));
+      step = this.#advance(root, children, this.#memo.get(demand.key) ?? this.#stopped(demand));
+    }
+  }
+
+  /**
+   * A run's next step: a demand its generator or an inline child on it yields, or its generator's result. A child is
+   * pushed as it is yielded and popped as it returns, its result given to its parent, with nothing charged and no
+   * allowance checked between them (`inline`), so a step ends where the same generators run by `yield*` end one.
+   */
+  #advance(
+    root: Level,
+    children: Child[],
+    given: readonly Item[],
+  ): IteratorResult<Demand | ProofDemand<Proof>, unknown> {
+    let input = given;
+    let thrown: { readonly error: unknown } | null = null;
+    for (;;) {
+      const child = children.at(-1);
+      const level = child ?? root;
+      this.#readDepth = level.readDepth;
+      let step: IteratorResult<Demand | ProofDemand<Proof> | Inline, unknown>;
+      try {
+        step = thrown === null ? level.work.next(input) : level.work.throw(thrown.error);
+      } catch (error) {
+        // (into its parent, whose `finally` and `catch` run as `yield*` runs them)
+        if (level === root) throw error;
+        children.pop();
+        thrown = { error };
+        continue;
+      }
+      thrown = null;
+      level.readDepth = this.#readDepth;
+      if (step.done !== true && "inline" in step.value) {
+        children.push({
+          work: step.value.inline,
+          readDepth: 0,
+          below: (child?.below ?? 0) + level.readDepth,
+        });
+        input = [];
+        continue;
+      }
+      if (step.done === true && level !== root) {
+        children.pop();
+        // EVIDENCE: invariant: an inline child is a `Work<readonly Item[]>` (`Inline`).
+        input = step.value as readonly Item[];
+        continue;
+      }
+      // (between two steps the read chain is the run's whole one, its root's and each suspended child's, as `yield*`
+      // leaves it, the levels below the innermost one's by its `below`: a stop between steps abandons the run there,
+      // and a run after the stop starts from that depth)
+      if (child !== undefined) this.#readDepth += child.below;
+      // EVIDENCE: invariant: an inline child's step is taken above, so this one is a demand or the root's result.
+      return step as IteratorResult<Demand | ProofDemand<Proof>, unknown>;
     }
   }
 
@@ -487,6 +591,7 @@ export class Solver {
       started: this.#work.total,
       rerun,
       readDepth: 0,
+      inline: [],
     };
   }
 
@@ -503,9 +608,7 @@ export class Solver {
         continue;
       }
       const frame = frames.at(-1)!;
-      this.#readDepth = frame.readDepth;
-      const step = frame.work.next(frame.pending ?? []);
-      frame.readDepth = this.#readDepth;
+      const step = this.#advance(frame, frame.inline, frame.pending ?? []);
       frame.pending = undefined;
       this.#work.charge("yields");
       if (!step.done) {
@@ -518,8 +621,10 @@ export class Solver {
           throw new Error("The solver's frames are out of order.");
         return;
       }
-      if (frame.rerun !== null) this.#rerunDone(frame, step.value);
-      else this.#finish(frame, step.value, frames.at(-1)!);
+      // EVIDENCE: invariant: a frame's root is its `work`, so its result is a run's (`Frame.work`).
+      const result = step.value as readonly Item[] | Proven<Proof>;
+      if (frame.rerun !== null) this.#rerunDone(frame, result);
+      else this.#finish(frame, result, frames.at(-1)!);
     }
   }
 
