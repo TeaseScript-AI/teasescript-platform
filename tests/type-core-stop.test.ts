@@ -53,9 +53,11 @@ import {
   heldDemands,
   heldFamily,
   heldProblems,
+  heldRun,
   heldStops,
   heldUnstopped,
   HELD_MODES,
+  runProblems,
   randomCopyGraph,
   topologySources,
   phaseEnds,
@@ -2955,25 +2957,38 @@ const mainFile = (source: string): SourceFile[] => [{ path: "main.tease", source
  */
 test("a combined stop's rule takes nothing the natural analysis owes, nothing wider, and no boundary with plan content", () => {
   const mode = HELD_MODES[0]!;
-  // (#1580's comparison form, under each demand allowance that stops a decision: its mark lets every kind through)
-  let compared = 0;
+  // (#1580's comparison form under each demand allowance that stops a decision: whatever the stopped analysis owes at the
+  // comparison's place left out, its boolean check is no clause's)
   const elements = storedGet("compared element", [], "[hostValue == 2]", [
     [true, true],
     ["bad", false],
   ]);
-  for (const which of heldDemands(elements, mode).keys())
-    combinedStops(
-      elements,
-      mode,
-      (_, problems) => {
-        compared += problems.filter(
-          (problem) =>
-            problem.startsWith("unowned check") && problem.includes('"against":["boolean"]'),
-        ).length;
+  const samePlace = (x: Answers["checks"][number], u: Answers["checks"][number]): boolean =>
+    isDeepStrictEqual(x.site, u.site) && x.target === u.target && x.boundary === u.boundary;
+  assert.ok(
+    controlStops(
+      mainFile(elements.source),
+      (_, reference, stopped) => {
+        const owed = [...stopped.checks, ...stopped.budget.deferred.map((mark) => mark.obligation)];
+        const check = reference.checks.find(
+          (u) => isDeepStrictEqual(u.against, ["boolean"]) && owed.some((x) => samePlace(x, u)),
+        );
+        return check === undefined ? undefined : JSON.stringify(check);
       },
-      which,
-    );
-  assert.ok(compared > 0);
+      (reference, natural, stopped, check) => {
+        const u: Answers["checks"][number] = JSON.parse(check);
+        const left = shadowed(stopped, {
+          checks: stopped.checks.filter((x) => !samePlace(x, u)),
+          budget: {
+            ...stopped.budget,
+            deferred: stopped.budget.deferred.filter((mark) => !samePlace(mark.obligation, u)),
+          },
+        });
+        assert.equal(combinedStop(reference, natural, left).checks.get(check), undefined);
+      },
+      heldDemands(elements, mode),
+    ) > 0,
+  );
   const nullable =
     'let xs: list? = [hostValue, 4]\nsay "BEFORE"\nrepeat xs[0] {say "ok"}\nsay "AFTER"\nexit\n';
   const receiver = nullable.indexOf("xs[0]");
@@ -3129,43 +3144,50 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
           budget: { ...stopped.budget, deferred: stopped.budget.deferred.map(move) },
         });
         assert.notEqual(combinedStop(reference, natural, moved).checks.get(check), "z");
+        // ((z)'s owner state: the holding store's obligation settled, against a type in place of `unknown`)
+        const settle = <D extends Answers["diagnostics"][number]>(d: D): D =>
+          !owns(d) || !("obligation" in d)
+            ? d
+            : { ...d, obligation: { ...d.obligation, against: ["integer" as const] } };
+        const settled = shadowed(stopped, {
+          diagnostics: stopped.diagnostics.map(settle),
+          budget: { ...stopped.budget, deferred: stopped.budget.deferred.map(settle) },
+        });
+        assert.notEqual(combinedStop(reference, natural, settled).checks.get(check), "z");
       },
     ) > 0,
   );
-  // (the decision stop alone lets `bad` through, its default checked against `unknown`; a combined stop that keeps that
-  // check runs it alike, reversed with the sharing)
-  const stored = storedGet("stored property", ["let xs = [({f: 4, g: hostValue}).f]"], "xs", [
+  // (the runtime predicate on a real stopped plan: a written list's `get` default, its check's mark left out of the
+  // compile, lets `bad` through to `AFTER`, which the predicate reports; with its check the plan rejects it)
+  const written = storedGet("written list", ["let xs: integer[] = [4]"], "xs", [
     [2, true],
     ["bad", false],
   ]);
-  const reversed = HELD_MODES[1]!;
-  const storedRequest = coreRequest(
-    [{ path: "main.tease", source: stored.source }],
-    ["hostValue", "hostOther"],
-  )!;
-  const demand = heldDemands(stored, reversed)[0]!;
+  const writtenDemand = heldDemands(written, mode)[0]!;
   const bad = 'forbidden {"hostValue":2,"hostOther":"bad"} said ["BEFORE","AFTER"]';
-  const alone = heldUnstopped(stored, reversed, demand);
-  assert.ok(alone.problems.includes(bad));
-  const theirs = JSON.stringify(
-    alone.run.answers.checks.find((check) => check.target === "hostOther" && !check.boundary),
-  );
-  let kept = 0;
-  for (const { allowance } of heldStops(stored, reversed, 1, demand)) {
-    const stopped = reversed.run(() =>
-      withTestAllowance(allowance, () =>
-        withTestDemandAllowance(demand, () => analyseCore(storedRequest)),
-      ),
+  const defaultAt = written.source.indexOf("hostOther");
+  let removed = 0;
+  for (const { allowance } of heldStops(written, mode, 8, writtenDemand)) {
+    const stopped = heldRun(written, mode, allowance, writtenDemand);
+    if (stopped.result.plan === null || runProblems(written, stopped).length > 0) continue;
+    const owner = [...stopped.answers.diagnostics, ...stopped.answers.budget.deferred].find(
+      (d) => "obligation" in d && !d.obligation.boundary && d.site.start === defaultAt,
     );
-    const owed = [...stopped.checks, ...stopped.budget.deferred.map((mark) => mark.obligation)];
-    if (!owed.some((check) => JSON.stringify(check) === theirs)) continue;
-    assert.ok(
-      heldProblems(stored, reversed, allowance, alone.run, demand).includes(bad),
-      `@${allowance}`,
+    if (owner === undefined) continue;
+    const omitted = stopped.without(
+      {
+        diagnostic: (d) =>
+          d.code === owner.code &&
+          d.site.start === owner.site.start &&
+          d.site.end === owner.site.end,
+        check: () => false,
+      },
+      `default ${owner.code}`,
     );
-    if (++kept === 2) break;
+    assert.ok(runProblems(written, omitted).includes(bad), `@${allowance}`);
+    removed += 1;
   }
-  assert.ok(kept > 0);
+  assert.ok(removed > 0);
   // (the copies' boundary left out of a stopped analysis that owes it: no clause takes it)
   const copies = heldFamily(false).find((c) => c.name === "copies-2-interpolation-plain")!;
   const boundary = (check: Answers["checks"][number]): boolean =>

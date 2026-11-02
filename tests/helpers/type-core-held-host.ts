@@ -596,11 +596,17 @@ export function phaseEnds(
   return ends;
 }
 
-/** The cases the candidate route declined at some compile: judged at the analysis from then on. */
-const declined = new WeakSet<HeldCase>();
+/** The compiles the candidate route declined (outside the slice): no plan, each judged alone (Astra r1's B1 on #1597). */
+const declined = new WeakSet<object>();
 
-/** A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode. */
-function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?: number): StopRun {
+/** Whether a run's compile was declined by the candidate route. */
+const declinedRun = (run: StopRun): boolean => declined.has(run.result);
+
+/**
+ * A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode. A compile the candidate
+ * route declines has no plan; it decides nothing of another (a declined reference leaves a stopped plan to run).
+ */
+export function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?: number): StopRun {
   const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS);
   if (request === null) throw new Error(`The case does not resolve: ${c.name}`);
   const capped = <T>(make: () => T): T =>
@@ -609,15 +615,16 @@ function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?: numbe
     mode.run(() =>
       allowance === undefined ? capped(make) : withTestAllowance(allowance, () => capped(make)),
     );
-  // (outside the slice the analysis alone is judged: a case the candidate route declines in some mode or stop too)
+  // (outside the slice the analysis alone is judged; a compile the candidate route declines is marked, as no other's)
   const compiled = () => {
-    if (!c.slice || declined.has(c)) return { diagnostics: [], plan: null };
+    if (!c.slice) return { diagnostics: [], plan: null };
     try {
       return compileSourceWithBackend(c.source, { globals: GLOBALS }, CORE_BACKEND);
     } catch (error) {
       if (!(error instanceof CandidateOutsideSlice)) throw error;
-      declined.add(c);
-      return { diagnostics: [], plan: null };
+      const none = { diagnostics: [], plan: null };
+      declined.add(none);
+      return none;
     }
   };
   const both = () => ({ result: compiled(), answers: analyseCore(request) });
@@ -1294,7 +1301,10 @@ export function heldProblems(
   const rule =
     demand === undefined ? undefined : combinedStopRule(c, mode, unstopped, stopped.answers);
   const problems = ownership(unstopped.answers, stopped.answers, rule);
-  if (!c.slice || declined.has(c)) return problems;
+  if (!c.slice || declinedRun(stopped)) return problems;
+  // (a stopped plan runs its fitting and forbidden values whatever the reference's compile did; the two compiles are
+  // compared where both are had)
+  if (declinedRun(unstopped)) return [...problems, ...runProblems(c, stopped)];
   problems.push(
     ...stopProblems({
       unstopped,
@@ -1324,7 +1334,7 @@ export function heldProblems(
 }
 
 /** A compile's runs against the case's predicate: what each fitting value says, and each other value rejected in time. */
-function runProblems(c: HeldCase, run: StopRun): string[] {
+export function runProblems(c: HeldCase, run: Pick<StopRun, "result">): string[] {
   const plan = run.result.plan;
   if (plan === null) return ["no plan"];
   const problems: string[] = [];
@@ -1350,7 +1360,7 @@ export function heldUnstopped(
   demand?: number,
 ): { run: StopRun; problems: string[] } {
   const run = heldRun(c, mode, undefined, demand);
-  return { run, problems: c.slice && !declined.has(c) ? runProblems(c, run) : [] };
+  return { run, problems: c.slice && !declinedRun(run) ? runProblems(c, run) : [] };
 }
 
 /**
