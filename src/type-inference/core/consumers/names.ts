@@ -8,7 +8,7 @@ import { labelBelow, labelRoot, labelText, type Label } from "../contract/labels
 import { keptKey, keptKeyBelow, keyPath, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { inKindOrder, makeItem, REASON, type Item, type ItemTag } from "../items.js";
+import { inItsOrder, makeItem, REASON, type Item, type ItemTag } from "../items.js";
 import { dictList } from "../method-categories.js";
 import { propertyName, siteKey, stepName } from "../program.js";
 import { elementStep } from "../result.js";
@@ -273,14 +273,14 @@ export function kindsOf(walk: Consumers, value: PlaceId, node: FlowNode | null):
 /**
  * A member's or a method's receiver: its kinds at the node, and F19a before them (r4.44): where the shared decision
  * on the receiver's contract holds a reference the exact value lacks, its reference kinds too, whose members the
- * consumer's member obligations cover, the two in their kinds' fixed order (`inKindOrder`, #1398).
+ * consumer's member obligations cover, the two in their one order (`inItsOrder`, #1398).
  */
 export function receiverKinds(walk: Consumers, value: PlaceId, node: FlowNode | null): Item[] {
   const kinds = kindsOf(walk, value, node);
   if (kinds.some((item) => REFERENCE.has(item.tag))) return kinds;
   const contract = walk.run(walk.pass.contract.valueReceiver(value));
   return heldReference(contract)
-    ? inKindOrder([...kinds, ...contract.filter((item) => REFERENCE.has(item.tag))])
+    ? inItsOrder([...kinds, ...contract.filter((item) => REFERENCE.has(item.tag))])
     : kinds;
 }
 

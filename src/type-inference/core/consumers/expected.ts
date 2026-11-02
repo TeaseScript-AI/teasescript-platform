@@ -88,7 +88,7 @@ function* readsTakeTask(walk: Consumers, place: PlaceId): CompileTask<SiteExpect
   // (a read that leads back to the place, as a recursive call's argument does, proves nothing)
   walk.placeExpectations.set(place, UNPROVED);
   const { program } = walk.pass;
-  // (what two reads take together, a composition: the kinds' fixed order, #1398)
+  // (what two reads take together, from requirements, which carry no spelling: the table's order, #1398)
   const both = (a: readonly ItemTag[], b: readonly ItemTag[]): ItemTag[] =>
     kindsInOrder([
       ...a.filter((tag) => b.some((other) => fits(tag, other, true))),

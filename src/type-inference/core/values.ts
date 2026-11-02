@@ -4,6 +4,7 @@ import {
   carried,
   choiceItems,
   conversionKind,
+  annotationTags,
   defaultOf,
   emptyAt,
   heldReference,
@@ -74,18 +75,31 @@ import {
   makeItem,
   mergeItems,
   REASON,
+  spelledBy,
   STOPPED,
   weaken,
   type Item,
   type ItemTag,
+  type Spelling,
   type Writer,
 } from "./items.js";
-import { Laminar, narrowedItems, type Narrowing } from "./narrowing.js";
+import { Laminar, narrowedItems, type Narrowing, type NarrowingForm } from "./narrowing.js";
 import { operationItems } from "./operator-table.js";
 import { indexedPlus } from "./plus-index.js";
 import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";
 import { Position, positions, UNPOSITIONED } from "./positions.js";
 import type { Proof, ProofDemand, Proven, Work } from "./solver.js";
+
+/**
+ * A type test's spelling (`NarrowingForm`'s `test`): its kinds in their written order, which the kinds it narrows to
+ * keep (#1398, TABLE r4.277 (3)); none for any other form. Read where the narrowing is answered, outside the narrowing
+ * modules' charged walks: a walk of the written type, no longer than the form's kinds `narrowedItems` walks charged.
+ */
+function testSpelling(form: NarrowingForm): Spelling | undefined {
+  return form.kind === "is" && form.test !== undefined
+    ? spelledBy(annotationTags(form.test)).spelling
+    : undefined;
+}
 
 /*
  * The value side of the coarse core (checkpoint 9, TABLE §3): a read of a key at a node takes, in this order, the host
@@ -336,7 +350,7 @@ export class Values {
         root,
         program.dom.dominates(g.node, read.def.node)
           ? read.items
-          : narrowedItems(g.form, read.items, program.scope),
+          : narrowedItems(g.form, read.items, program.scope, testSpelling(g.form)),
       );
     return contract.entered(root, items);
   }
@@ -370,7 +384,7 @@ export class Values {
     const input = loopDefinition
       ? yield* contract.contractOf(g.key)
       : (yield* this.#keyRead(contract.canonicalKey(g.key), g.input, false)).items;
-    return narrowedItems(g.form, input, program.scope);
+    return narrowedItems(g.form, input, program.scope, testSpelling(g.form));
   }
 
   /**

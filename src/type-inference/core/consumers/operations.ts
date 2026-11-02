@@ -9,7 +9,7 @@ import { defaultOf, termAt, typeTags } from "../contract.js";
 import { operatorOf } from "../contract.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { kindsInOrder, makeItem, type Item, type ItemTag } from "../items.js";
+import { inItsOrder, makeItem, spelledBy, type Item, type ItemTag } from "../items.js";
 import { builtinResult, conversionCategory } from "../method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "../operator-table.js";
 import type { ValueConstraint } from "../program.js";
@@ -95,11 +95,11 @@ export function operations(walk: Consumers): void {
           node,
           (rest) => {
             const term = termAt(written, rest);
-            return term === null
-              ? []
-              : typeTags(term)
-                  .filter((tag) => tag !== "unknown")
-                  .map((tag) => makeItem(tag));
+            if (term === null) return [];
+            // (its kinds with the written type's spelling, #1398)
+            const tags = typeTags(term).filter((tag) => tag !== "unknown");
+            const spelled = spelledBy(tags);
+            return tags.map((tag) => makeItem(tag, null, spelled));
           },
           fallback,
           true,
@@ -231,18 +231,18 @@ function operation(
       : null;
     // (a set's elements' and a dict's values' kinds, which a fix may join only where `${...}` shows each, #1268; an
     // empty one joins to empty text)
-    // (two reads joined, a composition: the kinds' fixed order, #1398)
+    // (two reads joined, a composition in its one order, #1398)
     const elements = kinds.some((item) => item.tag === "set" || item.tag === "dict")
-      ? kindsInOrder(
-          new Set(
-            [
+      ? [
+          ...new Set(
+            inItsOrder([
               ...walk.run(walk.pass.values.valueItems(value, node, ["element"])),
               ...walk.run(walk.pass.values.valueItems(value, node, ["entry"])),
-            ]
+            ])
               .map((item) => item.tag)
               .filter((tag) => tag !== "empty"),
           ),
-        )
+        ]
       : [];
     consume(
       walk,
