@@ -2947,13 +2947,14 @@ const mainFile = (source: string): SourceFile[] => [{ path: "main.tease", source
  * - (a)'s reads, its unit's: an element selection's empty check and an index's integer check, their marks left out
  *   where only the receiver is answered, are rejected (Codex r3's B1).
  * - (w)'s domain: the null check against `integer` replaced by a copy check against `unknown` is rejected, and so is
- *   #1580's comparison form, whose mark lets every kind through; a redundant mark against `unknown` beside the
- *   restrictive one is accepted, the intersection unchanged.
+ *   #1580's comparison form's boolean check with every obligation at its place removed; a redundant mark against
+ *   `unknown` beside the restrictive one is accepted, the intersection unchanged.
  * - Site identity: the same mark moved to another file at the same offsets is rejected; in its own file it is taken.
- * - (z)'s holding store: the store mark moved to the whole source is rejected, and so is the copies' boundary with plan
- *   content left out; a parenthesized value and a parenthesized literal (the third test) are accepted.
- * And `bad` run by the demand-only run itself (#1526), reported by the runs where the combined stop keeps that run's
- * check (reversed with the sharing).
+ * - (z)'s holding store: the store mark moved to the whole source is rejected, and so are the holding store's obligation
+ *   settled against a type and the copies' boundary with plan content left out; a parenthesized value and a
+ *   parenthesized literal (the third test) are accepted.
+ * And the runtime predicate: a written list's default obligation deliberately omitted from a real stopped compile lets
+ * `bad` through, which it reports (forward with the sharing).
  */
 test("a combined stop's rule takes nothing the natural analysis owes, nothing wider, and no boundary with plan content", () => {
   const mode = HELD_MODES[0]!;
