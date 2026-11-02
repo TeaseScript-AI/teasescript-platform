@@ -78,16 +78,16 @@ work is not recorded, so a head's timeout is unknown: `stalls.mjs rerun` runs th
 with both trees in one process and the replay's configuration (`run.mjs <area> <base> <head> --only <index>`, an area
 after another, each once by its name, whatever paths its entries name; only `--timeout` and `--memory` may differ),
 and `--rerun <folder>/*.work.jsonl` reads its records in place of the replay's, so the replay closes without another
-campaign; a record of another configuration is refused, and a rerun that ends does not clear a candidate. Only records
-that `run.mjs` wrote at or after #1592 count runs unanswered alike: an earlier runner's records count them `unanswered`,
-which `stalls.mjs` cannot rejudge (no record holds the answered parts that decide) and `rerun` does not run (it reruns
-only the index's stalled sources). Rerun records are read in the order given, an earlier round's first: where a source's
-earlier rerun stalled, or its later one stalls, the later stands (a round at a longer `--timeout` or `--memory` may run
-what an earlier one could not), and two that ended must say the same, else refused (#1587); a replay's records are never
-replaced. `rerun --shard i/N` (#1598) reruns only the index's entries `k` with `k mod N = i`, in its order, into
-`<area>.<i>of<N>.work.jsonl` and `<area>.<i>of<N>.jsonl` beside that part of the index (`index.<i>of<N>.json`) and
-nothing for an area that part does not hold, so N jobs rerun the index once and `--rerun` reads their records as one
-round.
+campaign; a record of another configuration is refused, and a rerun that ends does not clear a candidate. Older
+`--work`/`--out` comparison records omit the answered parts, so `stalls.mjs` cannot reclassify their `unanswered` runs.
+A runner implementing #1592 must compare them again; `rerun` does this for indexed stalled sources, including their
+earlier unanswered runs. Completed sources' unanswered runs need a fresh comparison. Rerun records are read in the order
+given, an earlier round's first: where a source's earlier rerun stalled, or its later one stalls, the later stands (a
+round at a longer `--timeout` or `--memory` may run what an earlier one could not), and two that ended must say the
+same, else refused (#1587); a replay's records are never replaced. `rerun --shard i/N` (#1598) reruns only the index's
+entries `k` with `k mod N = i`, in its order, into `<area>.<i>of<N>.work.jsonl` and `<area>.<i>of<N>.jsonl` beside that
+part of the index (`index.<i>of<N>.json`) and nothing for an area that part does not hold, so N jobs rerun the index
+once and `--rerun` reads their records as one round.
 
 `--store` runs one tree of a commit (an `sx-tree` tree: `src/`, `dist/`, `.sha`) at the runner's defaults and stores one
 shard of an area, each source's results as one line, in the baseline of its `src/` tree,

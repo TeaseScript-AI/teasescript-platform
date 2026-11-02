@@ -23,10 +23,10 @@
 // <head> --only <index>`), into a new folder of records, `<area>.work.jsonl` and `<area>.jsonl` (`--out`), to be read
 // with `--rerun`; with `--shard i/N` (#1598) only its entries k with k mod N = i, into `<area>.<i>of<N>.work.jsonl` and
 // `<area>.<i>of<N>.jsonl` beside that part of the index (`index.<i>of<N>.json`), so that N shards rerun it once; the
-// index names the sources unanswered alike apart (`unansweredAlike`), which `rerun` does not run. Only records that
-// `run.mjs` wrote at or after #1592 count runs unanswered alike: an earlier runner's records count them `unanswered`,
-// which this tool cannot rejudge (no record holds the answered parts that decide) and `rerun` does not run (it reruns
-// only the index's stalled sources).
+// index names the sources unanswered alike apart (`unansweredAlike`), which `rerun` does not run. Older
+// `--work`/`--out` comparison records omit the answered parts, so this tool cannot reclassify their `unanswered` runs.
+// A runner implementing #1592 must compare them again; `rerun` does this for indexed stalled sources, including their
+// earlier unanswered runs. Completed sources' unanswered runs need a fresh comparison.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
