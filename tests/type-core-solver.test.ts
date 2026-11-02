@@ -513,6 +513,47 @@ test("a range conversion's contract composes its elements in their one order (#1
     });
 });
 
+/**
+ * #1599: a demand a stop may forget (`mayForget`: it asked a key a decision can still stop) keeps every reader, one as
+ * itself, a few as a list, more as a set, so `forget` reaches each of them; a demand no stop can reach keeps none.
+ */
+test("a forget reaches every reader of a demand a stop may forget, and none of one it cannot (#1599)", () => {
+  for (const readers of [1, 2, 8, 9, 12]) {
+    for (const reachable of [true, false]) {
+      const scope = itemScope();
+      const solver = new Solver(scope);
+      const leaf: Demand = {
+        key: "leaf",
+        kind: "contract",
+        file: 0,
+        offset: 0,
+        *make() {
+          if (reachable) solver.mayForget("leaf");
+          return [makeItem("integer")];
+        },
+      };
+      const read: Demand[] = Array.from({ length: readers }, (_, at) => ({
+        key: `r${at}`,
+        kind: "contract",
+        file: 0,
+        offset: at + 1,
+        *make() {
+          return yield leaf;
+        },
+      }));
+      solver.run(
+        (function* (): Work<readonly Item[]> {
+          for (const demand of read) yield demand;
+          return [];
+        })(),
+      );
+      solver.forget(["leaf"]);
+      const kept = read.filter((demand) => solver.answer(demand.key) !== undefined).length;
+      assert.equal(kept, reachable ? 0 : readers, `${readers} readers, reachable ${reachable}`);
+    }
+  }
+});
+
 test("a component found while another is solved is solved on the explicit stack", () => {
   // each demand reads itself, and the next one once its own answer holds an item: each component is found by a run
   // again of a member of the one before it, 4,096 deep (review r1's solver-only control)
