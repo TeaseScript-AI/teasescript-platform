@@ -1,0 +1,142 @@
+// MIGRATION INCOMPLETE: 3 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args) {
+  if action == "showMenu" {
+    showMenu(args[0], args[1])
+    return
+  }
+}
+// A closure value that reads or sets locals of its function, or its parameters, converts with them as script
+// variables under new names: the function sets each where it declared it, and copies a parameter in as it starts
+// (ShockQuiz's settings, whose closures set its `txt`).
+let configureTxt = ""
+let configureCount = 0
+function askCallback1(it = null) {
+  configureTxt = "Rounds ${configureCount}"
+  configureCount += 1
+  say prose configureTxt, instant
+}
+function configure(start) {
+  configureTxt = ""
+  configureCount = toInteger(start)
+  askCallback1()
+  askCallback1()
+  say prose "${configureTxt} ${configureCount}", instant
+}
+configure(2)
+function shoutCallback2(labelValue, suffix) {
+  // NOTE SX_PLUS_OPERAND_TYPE line 23: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+  say prose labelValue + suffix, instant
+}
+function optionsCallback2(labelValue2) {
+  let suffix = "!"
+  return shoutCallback2(labelValue2, suffix)
+}
+// A closure value inside a closure value gets the locals of the closures around it the same way, here as parameters,
+// since it only reads them.
+function menu {
+  let labelValue3 = "Pick"
+  optionsCallback2(labelValue3)
+}
+menu()
+function tellCallback4(it, seen) {
+  say prose "Seen ${seen}", instant
+}
+// A closure that only reads a local declared anew on each pass of a loop gets it as a parameter, as each pass's closure
+// saw its own.
+function perPass {
+  for i in 0..2 {
+    let seen = i
+    tellCallback4(null, seen)
+  }
+}
+perPass()
+// A closure value that something keeps may run while another call of its function runs, which one script variable
+// cannot keep apart, and so may a function that calls itself: their locals stay.
+let saved = null
+function create(start) {
+  let count = toInteger(start)
+  // TODO SX_CAPTURING_CLOSURE line 44: This closure value captures local count of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // | def bump = { -> count++ }
+  let bump = null
+  saved = bump
+  say prose "Count ${count}", instant
+}
+create(1)
+// A closure value that only reads the locals it captures, and that its function only calls, gets them as parameters,
+// also in a function that runs again while it runs (fight_arena's menu, whose `args` reads the player's choice).
+let nested = null
+function labelCallback5(prefix, items, pick, depth) {
+  return "${prefix} ${items[pick]} at ${depth}"
+}
+function showMenu(items, depth) {
+  let pick = 0
+  while pick < items.length {
+    say prose labelCallback5("Item", items, pick, depth), instant
+    if depth > 0 {
+      sexscriptLegacyCall(nested, [["inner"], depth - 1])
+    }
+    pick += 1
+  }
+}
+nested = "showMenu"
+showMenu(["a", "b"], 1)
+// A text without a value that the function compares, here with a variable that holds null, stays a local, and its
+// setter a TODO: the script variable would start as the empty text.
+function chooseValue {
+  let pick = null
+  // TODO SX_CAPTURING_CLOSURE line 67: This closure value captures local pick of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // | def set = { -> pick = "x" }
+  let setValue = null
+  let none = null
+  if pick == none {
+    say prose "Unset", instant
+  } else {
+    say prose "Set", instant
+  }
+  sexscriptLegacyCall(setValue, [])
+}
+chooseValue()
+chooseValue()
+// A local that another block of its function declares again, such as another `case`, lifts where the declarations
+// agree on its type: each sets the one script variable where it stands (Farkel's Roxana challenge).
+let challengeMistakes = 5
+let challengeStep = 0
+function mistakeCallback6(it = null) {
+  challengeMistakes += 1
+  challengeStep = challengeMistakes
+  return challengeStep
+}
+function challenge(who) {
+  switch who {
+    case "a" {
+      challengeMistakes = 0
+      challengeStep = 0
+      mistakeCallback6()
+      mistakeCallback6()
+      say prose "Mistakes ${challengeMistakes} ${challengeStep}", instant
+    }
+    case "b" {
+      challengeMistakes = 5
+      challengeMistakes += 1
+      say prose "Other ${challengeMistakes}", instant
+    }
+  }
+}
+challenge("a")
+challenge("b")
+challenge("a")
+// A closure whose converted body has an error stays as it was, unconverted, so that the script keeps compiling.
+let tuneNote = "low"
+function tune {
+  tuneNote = "low"
+  // TODO SX_CAPTURING_CLOSURE line 102: This closure value captures local note of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // | def raise = { -> note = note.unknownMethod() }
+  let raise = null
+  sexscriptLegacyCall(raise, [])
+  say prose "Tuned", instant
+}
+tune()
+exit

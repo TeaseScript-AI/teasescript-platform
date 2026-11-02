@@ -1,0 +1,48 @@
+{
+  "reason": "The unnamed virtual Domme (\"I'm your new Domme for strict domestic discipline\") speaks in every Domme3 script. Her friend, an unnamed personal trainer with her own pictures (Domme3/exercise/dom (N).jpg), speaks the whole exercise script (\"I'll be your personal trainer\"). Banjo's implements setup and the break countdown timer have no character.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress"
+    },
+    "trainer": {
+      "displayName": "Trainer"
+    }
+  },
+  "default": "mistress",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/Domme3.groovy",
+      "speaker": "mistress"
+    },
+    {
+      "entry": "scripts/Domme3/popup.groovy",
+      "speaker": "mistress"
+    },
+    {
+      "entry": "scripts/Domme3/exercise.groovy",
+      "speaker": "trainer"
+    },
+    {
+      "entry": "scripts/Domme3/implements.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Domme3/Domme3Class.groovy:waitWithCountDown",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Domme3/introfirst.groovy:62",
+      "speaker": "mistress"
+    },
+    {
+      "after": "scripts/Domme3/ask.groovy:194",
+      "speaker": "mistress"
+    },
+    {
+      "after": "scripts/Domme3/ask.groovy:286",
+      "speaker": "mistress"
+    }
+  ],
+  "names": []
+}

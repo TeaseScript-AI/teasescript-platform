@@ -1,0 +1,18 @@
+--- a/scripts/trick_or_treat_poker.groovy
++++ b/scripts/trick_or_treat_poker.groovy
+@@ -128,11 +128,13 @@
+     }
+ 
+     // Check for conditions in the tease wheel and remove the action if condition is not met
+-    for (def field: mistress['wheel'] ) {
++    // The stacks are changed where the wheel holds them, by position (patch wheel-conditions).
++    for (def w = 0; w < mistress['wheel'].size(); w++ ) {
++        def field = mistress['wheel'][w]
+         for ( def i = field['stack'].size() - 1; i >= 0; i-- ) {
+             if ( field['stack'][i].containsKey( 'condition') ) {
+                 if (! loadBoolean(field['stack'][i]['condition']) ) {
+-                    field['stack'].remove(i)
++                    mistress['wheel'][w]['stack'].remove(i)
+                 }
+             }
+         }

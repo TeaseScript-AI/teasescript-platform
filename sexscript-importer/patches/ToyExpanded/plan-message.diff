@@ -1,0 +1,11 @@
+--- a/scripts/toy/social.groovy
++++ b/scripts/toy/social.groovy
+@@ -79,7 +79,7 @@
+ 				def hadtoys = backgroundRemoveAllToys();
+ 				def naked = stateIs(NAKED);
+ 				if (hadtoys || naked) {
+-					def msg = ((hadtoys?["remove all the toys"]:[]) + naked?["put your clothes back on"]:[]).join(" and ") + ".";
++					def msg = ((hadtoys?["remove all the toys"]:[]) + (naked?["put your clothes back on"]:[])).join(" and ") + ".";
+ 					present([DRESSED,nTEASE], [
+ 							["I need to", "I have to"],
+ 							["rush!", "hurry!"],

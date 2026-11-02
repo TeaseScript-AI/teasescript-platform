@@ -1,0 +1,31 @@
+--- a/scripts/jewell/cumPermission.groovy
++++ b/scripts/jewell/cumPermission.groovy
+@@ -103,7 +103,7 @@
+ 		block="toyspick"
+ 		break
+ 	}
+-	if(loadBoolean("toys.ringgag")!=true) {
++	if(loadBoolean("toys.ring_gag")!=true) {
+ 		block="toyspick"
+ 		break
+ 	}
+@@ -488,7 +488,7 @@
+ 	break
+ 
+ case "buttgasm":
+-	if(true!=loadBoolean("buttplug_On")) {
++	if(true!=loadBoolean("cumpermission.buttplug_On")) {
+ 		block="edgegasm"
+ 		break
+ 	}
+--- a/scripts/jewell/ritualNight.groovy
++++ b/scripts/jewell/ritualNight.groovy
+@@ -211,7 +211,7 @@
+ 	break	
+ 	
+ case "spreader":
+-	if(loadBoolean("clothes.spreader_bar")!=true) {
++	if(loadBoolean("toys.spreader_bar")!=true) {
+ 		block="picktoy"
+ 		break
+ 	}

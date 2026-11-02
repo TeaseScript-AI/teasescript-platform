@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Cindy Starfall (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "firstName": "Cindy",
+      "lastName": "Starfall"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

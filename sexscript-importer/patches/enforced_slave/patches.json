@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "optional-end-message",
+      "layer": "source",
+      "category": "e",
+      "reason": "The training-completed screen inserts optionalendmessage, which nothing in the package (or the archive) ever assigns, so Groovy failed at the moment the player passed. Declare it empty with the other state, so the screen shows its fixed text, in both versions that use it.",
+      "diff": "optional-end-message.diff"
+    }
+  ]
+}

@@ -1,0 +1,164 @@
+{
+  "reason": "The player's coach (default name Tara, renamable; shown as GLOBAL.coach.name once the game is loaded, reset or the coach renamed) speaks in the first person under the coach picture: the main game menu, practice sessions, the general info pages, tournament entry and the coach's punishments. The fighter who beat the player (perform_favor) or whom the player beat (request_favor) speaks the favor scenes under the fighter-level picture. Fight displays, attributes tables, settings, saving and loading screens are system text.",
+  "speakers": {
+    "coach": {
+      "firstName": "Tara"
+    },
+    "opponent": {
+      "displayName": "Opponent"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/fight_arena.groovy:load_saved_globals",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:actionList",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:soundTest",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:getNewCoachName",
+      "speaker": "coach"
+    },
+    {
+      "at": "scripts/fight_arena.groovy:1494",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:changePictures",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:changePunishmentsPermitted",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:resetGameSettings",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:get_actions",
+      "speaker": "coach"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:tournament_info",
+      "speaker": "coach"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:bonus_info",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:view_fighter_attributes",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:enter_tournament",
+      "speaker": "coach"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:enter_tournament_confirmation",
+      "speaker": "coach"
+    },
+    {
+      "at": "scripts/fight_arena.groovy:1855",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/fight_arena.groovy:1875",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:practice_a_skill",
+      "speaker": "coach"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:practice_recuperating",
+      "speaker": "coach"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:practice_attacking",
+      "speaker": "coach"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:practice_going_for_target",
+      "speaker": "coach"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:practice_defending",
+      "speaker": "coach"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:practice_defending_target",
+      "speaker": "coach"
+    },
+    {
+      "at": "scripts/fight_arena.groovy:1382",
+      "speaker": "coach"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:fight",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:showByLine",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:showStatus",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:showOutcome",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:attack",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:fight_ring",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:perform_favor",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/fight_arena.groovy:2105",
+      "speaker": "coach"
+    },
+    {
+      "at": "scripts/fight_arena.groovy:2142",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/fight_arena.groovy:2173",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:request_favor",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/fight_arena.groovy:get_sexual_favors",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/fight_arena.groovy:2354",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/fight_arena.groovy:2395",
+      "speaker": "opponent"
+    }
+  ],
+  "names": []
+}

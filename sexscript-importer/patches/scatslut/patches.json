@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "enema-tool-fallback",
+      "layer": "source",
+      "category": "b",
+      "reason": "The enema tool is picked with loadFirstTrue, which can return null, and its text is used right away; TeaseScript needs a value that cannot be null there. The script already ended when the player has neither enema toy, so the fallback toys.enema_kit never changes what is shown.",
+      "diff": "enema-tool-fallback.diff"
+    }
+  ]
+}

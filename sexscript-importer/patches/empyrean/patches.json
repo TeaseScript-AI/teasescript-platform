@@ -1,0 +1,17 @@
+{
+  "patches": [
+    {
+      "id": "profile-id-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "getProfile tests map.uuid but then shows the existing profile with a bare uuid, which is never assigned, so Groovy failed for a player who already had a profile. Show map.uuid.",
+      "diff": "profile-id-typo.diff"
+    }
+  ],
+  "heldStandAlone": {
+    "empyrean/games.groovy": "A one-line note of game ideas in the unfinished script (setInfos: \"*unstable* In development\").",
+    "empyrean/settings.groovy": "An empty stub of the unfinished script (setInfos: \"*unstable* In development\").",
+    "empyrean/status.groovy": "A draft of a lock status check in the unfinished script (setInfos: \"*unstable* In development\"), which only asks \"Want your Status?\".",
+    "empyrean/user.groovy": "A draft of a profile helper in the unfinished script (setInfos: \"*unstable* In development\"), which shows nothing."
+  }
+}

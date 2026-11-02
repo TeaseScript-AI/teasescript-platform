@@ -1,0 +1,108 @@
+--- a/scripts/firstcuckold.groovy
++++ b/scripts/firstcuckold.groovy
+@@ -60,6 +60,8 @@
+ 
+ 
+ def GF = "GF";
++// The hotwife's name, kept in a variable that names her speaker (it was read from storage only).
++def hotwife = loadString("cuckold.hotwife");
+ def endReached = false
+ def block = "cuckold"
+ 
+@@ -93,6 +95,7 @@
+ 				wait(2)
+ 				GF = "wife";
+ 				save("cuckold.hotwife",""+getString("Whats your wifes first name.","")+"")
++				hotwife = loadString("cuckold.hotwife");
+ 			} else {
+ 				show("Not married?...");
+ 				wait(2)
+@@ -100,6 +103,7 @@
+ 				showButton("Yes");
+ 				GF = "girlfriend";
+ 				save("cuckold.hotwife",""+getString("Whats your girlfriends first name.","")+"")
++				hotwife = loadString("cuckold.hotwife");
+ 			}
+ 
+ 			save("cuckold.hotwife_friend",""+getString("Whats the first name of your "+GF+"s best friend?","")+"")
+--- a/scripts/firstcuckold_de.groovy
++++ b/scripts/firstcuckold_de.groovy
+@@ -60,6 +60,8 @@
+ 
+ 
+ def GF = "GF";
++// The hotwife's name, kept in a variable that names her speaker (it was read from storage only).
++def hotwife = loadString("cuckold.hotwife");
+ def endReached = false
+ def block = "cuckold"
+ 
+@@ -93,6 +95,7 @@
+ 				wait(2)
+ 				GF = "Ehefrau";
+ 				save("cuckold.hotwife",""+getString("Wie lautet der Vorname deiner Frau?","")+"")
++				hotwife = loadString("cuckold.hotwife");
+ 			} else {
+ 				show("Nicht verheiratet?...");
+ 				wait(2)
+@@ -100,6 +103,7 @@
+ 				showButton("Ja");
+ 				GF = "Freundin";
+ 				save("cuckold.hotwife",""+getString("Wie heißt deine Freundin?","")+"")
++				hotwife = loadString("cuckold.hotwife");
+ 			}
+ 
+ 			save("cuckold.hotwife_friend",""+getString("Wie heißt der beste Freund deiner "+GF+"?","")+"")
+--- a/scripts/first_cuckold_episode_2.groovy
++++ b/scripts/first_cuckold_episode_2.groovy
+@@ -60,6 +60,8 @@
+ 
+ 
+ def GF = "GF";
++// The hotwife's name, kept in a variable that names her speaker (it was read from storage only).
++def hotwife = loadString("cuckold.hotwife");
+ def endReached = false
+ //def block = "cuckold"
+ //def block = "theend"
+@@ -102,6 +104,7 @@
+ 		show("Ohh, I'm sorry. My mistake");
+ 		wait(3);
+ 		save("cuckold.hotwife",""+getString("Please tell me your wife's first name.","")+"");
++		hotwife = loadString("cuckold.hotwife");
+ 	}
+ } else {
+ 	show("Not married?...");
+@@ -117,6 +120,7 @@
+ 		show("I see.. A new girl in your life then.");
+ 		wait(3);
+ 		save("cuckold.hotwife",""+getString("Please tell me the first name of that girl","")+"");
++		hotwife = loadString("cuckold.hotwife");
+ 	}
+ }
+ 
+--- a/scripts/first_cuckold_episode_2_de.groovy
++++ b/scripts/first_cuckold_episode_2_de.groovy
+@@ -60,6 +60,8 @@
+ 
+ 
+ def GF = "GF";
++// The hotwife's name, kept in a variable that names her speaker (it was read from storage only).
++def hotwife = loadString("cuckold.hotwife");
+ def endReached = false
+ //def block = "cuckold"
+ //def block = "theend"
+@@ -102,6 +104,7 @@
+ 		show("Oh es tut mir leid. Mein Fehler");
+ 		wait(3);
+ 		save("cuckold.hotwife",""+getString("Bitte sage mir den Vornamen deiner Frau.","")+"");
++		hotwife = loadString("cuckold.hotwife");
+ 	}
+ } else {
+ 	show("Nicht verheiratet?...");
+@@ -117,6 +120,7 @@
+ 		show("Ich verstehe... es gibt ein neues Mädchen in deinem Leben.");
+ 		wait(3);
+ 		save("cuckold.hotwife",""+getString("Bitte sag mir den Vornamen dieses Mädchens","")+"");
++		hotwife = loadString("cuckold.hotwife");
+ 	}
+ }
+ 

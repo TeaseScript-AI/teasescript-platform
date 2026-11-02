@@ -1,0 +1,22 @@
+--- a/scripts/first_cuckold_episode_2.groovy
++++ b/scripts/first_cuckold_episode_2.groovy
+@@ -559,7 +559,7 @@
+ 		show("<i>What the fuck!</i> "+loadString("cuckold.hotwife")+" lashes out at you. <i>I have been working hard all day and rushed home to talk to you about.\n\nand this is how you greet me?</i>");
+ 		showButton("Continue");
+ 		
+-		setImage("firstcuckold/disappointed.jpg");
++		setImage("firstcuckold2/disappointed.jpg");
+ 		show("Your "+GF+" looks at you with a disappointed expression and says.\n\n<i>Now you have really ruined my mood. I don't feel like talking any more. Let's talk another day.</i>");
+ 		showButton("Disappointed");
+ 		
+--- a/scripts/first_cuckold_episode_2_de.groovy
++++ b/scripts/first_cuckold_episode_2_de.groovy
+@@ -559,7 +559,7 @@
+ 		show("<i>Was zum Teufel!</i> "+loadString("cuckold.hotwife")+" schlägt auf dich ein. <i>Ich habe den ganzen Tag hart gearbeitet und bin nach Hause geeilt, um mit dir darüber zu sprechen.\n\nUnd so begrüßt du mich?</i>");
+ 		showButton("Fortsetzen");
+ 		
+-		setImage("firstcuckold/disappointed.jpg");
++		setImage("firstcuckold2/disappointed.jpg");
+ 		show("Deine "+GF+" sieht dich enttäuscht an und sagt:\n\n<i>Jetzt hast du meine Stimmung wirklich ruiniert. Ich habe keine Lust mehr zu reden. Lass uns an einem anderen Tag reden.</i>");
+ 		showButton("Enttäuscht");
+ 		

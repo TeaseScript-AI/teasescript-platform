@@ -1,0 +1,43 @@
+{
+  "reason": "One AI mistress, Tina (the shipped personality 'Mistress Tina' and the built-in system prompt 'Your name is Tina'), speaks every block the language model returns, the script's own 'Do you have something to say?' prompt, the opening order and the idle dirty talk. The welcome screen, configuration menus, picture check question and error messages are system text.",
+  "speakers": {
+    "tina": {
+      "title": "Mistress",
+      "firstName": "Tina",
+      "displayName": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/LLM_Mistress.groovy:doTasks",
+      "speaker": "tina"
+    },
+    {
+      "at": "scripts/LLM_Mistress.groovy:214",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/LLM_Mistress.groovy:300",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/LLM_Mistress.groovy:549",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/LLM_Mistress.groovy:561",
+      "speaker": "tina"
+    },
+    {
+      "at": "scripts/LLM_Mistress.groovy:580",
+      "speaker": "tina"
+    },
+    {
+      "at": "scripts/LLM_Mistress.groovy:591",
+      "speaker": "tina"
+    }
+  ],
+  "names": []
+}

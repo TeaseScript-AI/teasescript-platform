@@ -1,0 +1,193 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:152",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:217",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:403",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:406",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:420",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:444",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:451",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:461",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:516",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:539",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:542",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:550",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:570",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1246",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1365",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1395",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1573",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1597",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1616",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1624",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1632",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1697",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1973",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:1981",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2001",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2038",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2046",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2304",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2341",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2420",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2455",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2512",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2522",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2560",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2597",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2608",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2640",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2657",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2659",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2664",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2732",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2734",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2770",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2774",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/MatchDares.groovy:2789",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

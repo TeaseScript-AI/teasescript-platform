@@ -1,0 +1,14 @@
+--- a/scripts/Banjo/penaltybox.groovy
++++ b/scripts/Banjo/penaltybox.groovy
+@@ -882,6 +882,11 @@
+ 		} else if(player_spanks==opponent1_spanks && player_spanks==opponent2_spanks) {
+ 			winner = "draw"
+ 			loser = "none"
++		} else if(opponent1_spanks==opponent2_spanks && opponent1_spanks>player_spanks) {
++			winner = "draw"
++			winner_spanks = opponent1_spanks
++			loser = player
++			loser_spanks = player_spanks
+ 		}
+ 	} else if(opponents>0) {
+ 		if(player_spanks>opponent1_spanks) {

@@ -1,0 +1,20 @@
+--- a/scripts/jewell/punishments.groovy
++++ b/scripts/jewell/punishments.groovy
+@@ -643,7 +643,7 @@
+ 	break
+ 
+ case "section81":
+-	save("punishments.mood(",101-2)
++	save("punishments.mood",101-2)
+ 	save("cybermistress.points", 6+startPoints)
+ 	setImage("jewell/punishments.jpg")
+ 	show("Strip down to your bra and panties. Lay down spread eagle on your bed, with your wrists and ankles tied to the bedposts. Lay there with a dildo vibrating in your ass for "+loadString("punishments.mood")+" minutes.")
+@@ -870,7 +870,7 @@
+ 	break
+ 
+ case "section112":
+-	save("punishments.random(",getRandom(3)+2)
++	save("punishments.random",getRandom(3)+2)
+ 	save("punishments.mood",101-2)
+ 	save("cybermistress.points", 6+startPoints)
+ 	setImage("jewell/punishments.jpg")

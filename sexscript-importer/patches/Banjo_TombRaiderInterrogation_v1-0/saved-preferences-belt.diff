@@ -1,0 +1,53 @@
+--- a/scripts/Banjo/tomb_raider_interrogation.groovy
++++ b/scripts/Banjo/tomb_raider_interrogation.groovy
+@@ -81,25 +81,25 @@
+ def chainedtowall = false;
+ def spankedthrice = false;
+ 
+-if(loadBoolean("tomb_raider_interrogation.punish_cock")) {
++if(loadBoolean("tomb_raider_interrogation.punish_cock")!=null) {
+ 	punish_cock = (loadBoolean("tomb_raider_interrogation.punish_cock"));
+ }
+-if(loadBoolean("tomb_raider_interrogation.punish_balls")) {
++if(loadBoolean("tomb_raider_interrogation.punish_balls")!=null) {
+ 	punish_balls = (loadBoolean("tomb_raider_interrogation.punish_balls"));
+ }
+-if(loadBoolean("tomb_raider_interrogation.punish_faceslap")) {
++if(loadBoolean("tomb_raider_interrogation.punish_faceslap")!=null) {
+ 	punish_faceslap = (loadBoolean("tomb_raider_interrogation.punish_faceslap"));
+ }
+-if(loadBoolean("tomb_raider_interrogation.punish_anal")) {
++if(loadBoolean("tomb_raider_interrogation.punish_anal")!=null) {
+ 	punish_anal = (loadBoolean("tomb_raider_interrogation.punish_anal"));
+ }
+-if(loadBoolean("tomb_raider_interrogation.punish_assworship")) {
++if(loadBoolean("tomb_raider_interrogation.punish_assworship")!=null) {
+ 	punish_assworship = (loadBoolean("tomb_raider_interrogation.punish_assworship"));
+ }
+-if(loadBoolean("tomb_raider_interrogation.punish_pegs")) {
++if(loadBoolean("tomb_raider_interrogation.punish_pegs")!=null) {
+ 	punish_pegs = (loadBoolean("tomb_raider_interrogation.punish_pegs"));
+ }
+-if(loadBoolean("tomb_raider_interrogation.punish_sex")) {
++if(loadBoolean("tomb_raider_interrogation.punish_sex")!=null) {
+ 	punish_sex = (loadBoolean("tomb_raider_interrogation.punish_sex"));
+ }
+ 
+@@ -2320,7 +2320,7 @@
+ //SESSION PART 11A - WHIPPING
+ if(thirdtorture==0) {
+ 	setImage("lara_croft/"+lara_version+"/23.jpg")
+-	if(!spanktoy4=="belt") {
++	if(spanktoy4!="belt") {
+ 		show("I'm going to give you "+howmanyspankings+" lashes, "+user_name+"!\n\nYou're already in the perfect position for it, after "+
+ 			"all.")
+ 	}
+@@ -2329,7 +2329,7 @@
+ 	}
+ 	wait(15)
+ 	setImage("lara_croft/"+lara_version+"/15.jpg")
+-	if(!spanktoy4=="belt") {
++	if(spanktoy4!="belt") {
+ 		show("<em>Lara goes over to the basket in the corner of the room and produces a "+spanktoy4+" from it. She smiles as she holds it "+
+ 			"up for you to see.</em>\n\nLet's see if THIS can't loosen your tongue, shall we?")
+ 	}

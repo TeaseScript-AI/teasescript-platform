@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "collage-slideshow",
+      "layer": "source",
+      "category": "b",
+      "reason": "The sissy collage was composed in memory with Java2D (ImageIO, BufferedImage, drawImage), written to a file and sent as the profile's collage; TeaseScript cannot compose or write images. The player's exposed images are shown one by one instead, the 50 points are still charged and the profile is sent without a collage, which the gallery already skips.",
+      "diff": "collage-slideshow.diff"
+    },
+    {
+      "id": "collage-images",
+      "layer": "source",
+      "category": "b",
+      "reason": "The collage checked that the profile has at least 4 exposed images, each with a code, through imageList = myProfile.images.collect { getImage(it) }, then shuffled that list through a Java array. The conversion dropped the collect and the array cast, so imageList stayed empty and every player was told they need at least 4 exposed images: the collage, whose slideshow the collage-slideshow patch shows from the profile's images, was never offered. getImage() only turned a set code into a file path, so the patch fills imageList with the codes in a plain loop and drops the shuffle, which only reordered that check's list.",
+      "diff": "collage-images.diff"
+    }
+  ]
+}

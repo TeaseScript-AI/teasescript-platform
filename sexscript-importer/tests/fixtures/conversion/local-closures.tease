@@ -1,0 +1,106 @@
+// MIGRATION INCOMPLETE: 4 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args) {
+  if action == "again" {
+    again(args[0], args[1])
+    return
+  }
+  if action == "echo" {
+    echo(args[0])
+    return
+  }
+  if action == "scriptCallback4" {
+    scriptCallback4()
+    return
+  }
+}
+function announceCallback1(t) {
+  say prose "Count ${t}", instant
+}
+// A closure kept in a local of a function becomes a function, which its calls call directly while nothing assigns
+// the local again; one that captures another closure of the function cannot convert
+// and stays declared without an action, so the code that calls it still compiles.
+function countdown(n) {
+  // TODO SX_CAPTURING_CLOSURE line 6: This closure value captures local announce, n of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // | final twice = { t -> announce(t); announce(t + n) }
+  let twice = null
+  announceCallback1(n)
+  sexscriptLegacyCall(twice, [1])
+}
+countdown(2)
+function scriptCallback2 {
+  return { low: 1, high: 3 }
+}
+// A closure called where it is written calls its function directly.
+let limits = scriptCallback2()
+say prose "Up to ${limits.high}", instant
+// A closure declared in a block of the script becomes a script function at the top, where TeaseScript declares
+// functions; one that reads a variable of such a block stays unconverted, and so does one whose name the script uses
+// outside the block, where it meant something else.
+let punish = null
+say prose "Estim connected?", instant
+function shock(message, shocks) {
+  say prose message, instant
+  // NOTE SX_IMPLICIT_RETURN_VALUE line 21: Groovy returned the value of this last statement to callers that use the result; the converted function returns nothing here. Add an explicit return if the value matters.
+  for it in 1..=floor(shocks) {
+    wait 1 s
+  }
+}
+function scriptCallback4 {
+  return shock("Ouch", 2)
+}
+if askBoolean {
+  let note = "Careful"
+  // TODO SX_CLOSURE_DISCOVERY line 24: Closure warn is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.
+  // | def warn = { -> show(note) }
+  punish = "scriptCallback4"
+}
+if punish != null and punish != "" {
+  sexscriptLegacyCall(punish, [])
+}
+if askBoolean prose "Hurry?" {
+  // TODO SX_CLOSURE_DISCOVERY line 29: Closure wait is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.
+  // | def wait = { seconds -> show("Skipping ${seconds} seconds") }
+}
+wait 1 s
+// A closure that gets itself as its parameter, and calls it, calls itself directly, as every call passes it.
+function again(againValue, times) {
+  while true {
+    if times > 0 {
+      say prose "Again ${times}", instant
+      times -= 1
+      continue
+    }
+    return
+  }
+}
+again("again", 2)
+// A function that took the legacy script object as `main` called its methods as SexScript's; a call passes null in its
+// place, and a whole default that a call passes a fraction takes fractions (jeuxdemain_femme's animations).
+function pulse(main, speed: number = 1) {
+  say prose "Pulse ${speed}", instant
+}
+pulse(null, 0.5)
+pulse(null)
+// A call by the name of a closure's parameter calls the value it gets, so its fraction is not the script function's of
+// that name; and a whole default that the function uses as a list position keeps whole, where a call with the script
+// object that passes it a fraction stays a TODO.
+function apply(action) {
+  echo(0.5)
+}
+function pick(n = 1) {
+  say prose ["zero", "one"][n], instant
+}
+function echo(n) {
+  say prose n, instant
+}
+pick()
+apply("echo")
+function card(main, n = 1) {
+  say prose ["zero", "one"][n], instant
+}
+card(null)
+// TODO SX_OBJECT_THIS line 57: The legacy script object (this) cannot become a TeaseScript value.
+exit

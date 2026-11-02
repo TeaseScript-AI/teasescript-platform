@@ -1,0 +1,20 @@
+--- a/scripts/DCAfterDark/Harmony.groovy
++++ b/scripts/DCAfterDark/Harmony.groovy
+@@ -2744,7 +2744,7 @@
+ 	fullThroats(100, 8, false)
+ 	shortPumps(100, 5, false)
+ 	fullHold(6, false)
+-	fullHold(5, "Grind it in there, really push it deep")
++	fullHold(5, true, "Grind it in there, really push it deep")
+ 	fullHold(6, true)
+ 	throatRest(3, " ")
+ 	halfThroats(60, 5, false)
+@@ -5050,7 +5050,7 @@
+ 	fullThroats(100, 8, false)
+ 	shortPumps(100, 5, false)
+ 	fullHold(6, false)
+-	fullHold(5, "Grind it in there, really push it deep")
++	fullHold(5, true, "Grind it in there, really push it deep")
+ 	fullHold(6, true)
+ 	throatRest(3, " ")
+ 	halfThroats(60, 5, false)

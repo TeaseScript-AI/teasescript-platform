@@ -1,0 +1,141 @@
+{
+  "reason": "Two characters, each in her own closures: the unnamed sign-up receptionist (SignUpGirl pictures, she speaks of \"Lady Croft\") in signup/signupAgain, and the dig boss Lara Croft in the site intro, daily intro, digging, whipping, punishment, carry, break and evaluation closures. Italic travel/weather/day-end/discovery texts are narration; the title menu, rules screen, debug prompts and save/continue questions are system text.",
+  "speakers": {
+    "receptionist": {
+      "displayName": "Receptionist"
+    },
+    "lara": {
+      "firstName": "Lara",
+      "lastName": "Croft"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/Banjo/larasdig.groovy:menuMain",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:digRules",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:signupCheck",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:setSite",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:signup",
+      "speaker": "receptionist"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:signupAgain",
+      "speaker": "receptionist"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:busride",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:arrive",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:wakeup",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:sleep",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:dayOver",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:weatherCheck",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:digDiscovery",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:digOver",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:siteIntro",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/larasdig.groovy:472",
+      "speaker": "lara"
+    },
+    {
+      "at": "scripts/Banjo/larasdig.groovy:501",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/larasdig.groovy:512",
+      "speaker": "lara"
+    },
+    {
+      "at": "scripts/Banjo/larasdig.groovy:518",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:gettowork",
+      "speaker": "lara"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:dayIntro",
+      "speaker": "lara"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:dayWork",
+      "speaker": "lara"
+    },
+    {
+      "at": "scripts/Banjo/larasdig.groovy:712",
+      "speaker": "lara"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:digCarry",
+      "speaker": "lara"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:digWhip",
+      "speaker": "lara"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:digPunish",
+      "speaker": "lara"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:digBreak",
+      "speaker": "lara"
+    },
+    {
+      "function": "scripts/Banjo/larasdig.groovy:digEvaluation",
+      "speaker": "lara"
+    },
+    {
+      "at": "scripts/Banjo/larasdig.groovy:776",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/larasdig.groovy:799",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/larasdig.groovy:811",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

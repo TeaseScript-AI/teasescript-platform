@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "end-session",
+      "layer": "source",
+      "category": "b",
+      "reason": "The macro maker loops forever and the legacy player ended it by closing the script; a TeaseScript session needs an end. The button after each macro also offers End session, which leaves the loop and ends the script. The try/catch around the loop body, which only showed an unexpected error, goes, since TeaseScript has no exceptions.",
+      "diff": "end-session.diff"
+    }
+  ]
+}

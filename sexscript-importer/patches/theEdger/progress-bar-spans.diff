@@ -1,0 +1,88 @@
+--- a/scripts/theEdger/theEdger-cum.groovy
++++ b/scripts/theEdger/theEdger-cum.groovy
+@@ -113,14 +113,14 @@
+ 				t3 = false
+ 			}
+ 		}
+-		def m = "<font color='blue'>"
+-		if(!g) {m = m+"I'm not telling you how long! <b>Just wait!</b></font>"}
+-		else {
++		def m = "<font color='blue'>I'm not telling you how long! <b>Just wait!</b></font>"
++		if(g) {
++			def done = ""
++			def rest = ""
+ 			for(def j=0; j<30; j++) {
+-				if(j==i+1) {m = m+"</font><font color='white'>"}
+-				m = m+"█"
++				if(j<=i) {done = done+"█"} else {rest = rest+"█"}
+ 			}
+-			m = m+"</font>"
++			m = "<font color='blue'>"+done+"</font><font color='white'>"+rest+"</font>"
+ 		}
+ 		show(c+"<p style='font-size:80%;text-align:center;'>"+m+"</p>")
+ 		wait(t1)
+--- a/scripts/theEdger/theEdger-end.groovy
++++ b/scripts/theEdger/theEdger-end.groovy
+@@ -27,12 +27,12 @@
+ 	if(getRandom(2)==0) {t3 = true}
+ 	for(def i=0; i<30; i++) {
+ 		t2 = t2+t1
+-		def m = "<font color='blue'>"
++		def done = ""
++		def rest = ""
+ 		for(def j=0; j<30; j++) {
+-			if(j==i+1) {m = m+"</font><font color='white'>"}
+-			m = m+"█"
++			if(j<=i) {done = done+"█"} else {rest = rest+"█"}
+ 		}
+-		m = m+"</font>"
++		def m = "<font color='blue'>"+done+"</font><font color='white'>"+rest+"</font>"
+ 		show(c+"<p style='font-size:80%;text-align:center;'>"+m+"</p>")
+ 		wait(t1)
+ 	}
+--- a/scripts/theEdger/theEdger-go.groovy
++++ b/scripts/theEdger/theEdger-go.groovy
+@@ -96,14 +96,14 @@
+ 				t3 = false
+ 			}
+ 		}
+-		def m = "<font color='blue'>"
+-		if(!g) {m = m+"I'm not telling you how long! <b>Keep going!</b></font>"}
+-		else {
++		def m = "<font color='blue'>I'm not telling you how long! <b>Keep going!</b></font>"
++		if(g) {
++			def done = ""
++			def rest = ""
+ 			for(def j=0; j<30; j++) {
+-				if(j==i+1) {m = m+"</font><font color='white'>"}
+-				m = m+"█"
++				if(j<=i) {done = done+"█"} else {rest = rest+"█"}
+ 			}
+-			m = m+"</font>"
++			m = "<font color='blue'>"+done+"</font><font color='white'>"+rest+"</font>"
+ 		}
+ 		show(c+"<p style='font-size:80%;text-align:center;'>"+m+"</p>")
+ 		wait(t1)
+--- a/scripts/theEdger/theEdger-stop.groovy
++++ b/scripts/theEdger/theEdger-stop.groovy
+@@ -96,14 +96,14 @@
+ 				t3 = false
+ 			}
+ 		}
+-		def m = "<font color='blue'>"
+-		if(!g) {m = m+"I'm not telling you how long! <b>Just wait!</b></font>"}
+-		else {
++		def m = "<font color='blue'>I'm not telling you how long! <b>Just wait!</b></font>"
++		if(g) {
++			def done = ""
++			def rest = ""
+ 			for(def j=0; j<30; j++) {
+-				if(j==i+1) {m = m+"</font><font color='white'>"}
+-				m = m+"█"
++				if(j<=i) {done = done+"█"} else {rest = rest+"█"}
+ 			}
+-			m = m+"</font>"
++			m = "<font color='blue'>"+done+"</font><font color='white'>"+rest+"</font>"
+ 		}
+ 		show(c+"<p style='font-size:80%;text-align:center;'>"+m+"</p>")
+ 		wait(t1)

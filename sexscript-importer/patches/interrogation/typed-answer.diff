@@ -1,0 +1,18 @@
+--- a/scripts/interrogation.groovy
++++ b/scripts/interrogation.groovy
+@@ -901,10 +901,12 @@
+ 			answer = snapfile
+ 		} else {
+ 			setImage("interrogation/office.jpg")
+-			answer = ""
+-			while (answer.size() < 1) {
+-				answer = getString(questions[i],answers[i])
++			// typed only ever holds text, so the conversion reads it as text in the loop's test.
++			def typed = ""
++			while (typed.size() < 1) {
++				typed = getString(questions[i],answers[i])
+ 			}
++			answer = typed
+ 		}
+ 		save("interrogation.truth."+i,answer)
+ 		answers[i] = answer

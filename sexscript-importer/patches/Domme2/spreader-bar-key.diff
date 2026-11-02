@@ -1,0 +1,11 @@
+--- a/scripts/Domme2/sleep.groovy
++++ b/scripts/Domme2/sleep.groovy
+@@ -403,7 +403,7 @@
+ 								break	
+ 								
+ 							case "spreader":
+-								if(loadBoolean("clothes.spreader_bar")!=true) {
++								if(loadBoolean("toys.spreader_bar")!=true) {
+ 									block="picktoy"
+ 									break
+ 								}

@@ -1,0 +1,260 @@
+{
+  "reason": "TheSnowyOwl's game collection. The Snowy Owl is the game master who issues the in-game orders (Owl Says rounds, Slides & Ladders & Dares squares; in Stay the Snowy Owl or, in the Dom Edition, the Red Owl); female spankers under the lap pictures speak the first-person taunts and whines (Mistress); Match Dares has a card-playing Opponent; Owl Says has gallery members who introduce themselves by name, each shown as galleryname[loop] in its pass of galleryintro. Menus, instructions, configuration, guess prompts and name cards are system text.",
+  "speakers": {
+    "owl": {
+      "displayName": "The Snowy Owl"
+    },
+    "stayowl": {
+      "displayName": "The Snowy Owl"
+    },
+    "mistress": {
+      "title": "Mistress"
+    },
+    "opponent": {
+      "displayName": "Opponent"
+    },
+    "gallery": {
+      "displayName": "Gallery Member"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/TheSnowyOwl/OwlGames.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/TheSnowyOwl/OwlSays.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/OwlSays.groovy:welcome",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/OwlSays.groovy:1042",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/OwlSays.groovy:streakcheck",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/OwlSays.groovy:978",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/OwlSays.groovy:galleryintro",
+      "speaker": "gallery"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/OwlSays.groovy:round",
+      "speaker": "owl"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/OwlSays.groovy:flash",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/OwlSays.groovy:phase2",
+      "speaker": "mistress"
+    },
+    {
+      "after": "scripts/TheSnowyOwl/OwlSays.groovy:604",
+      "speaker": "mistress"
+    },
+    {
+      "after": "scripts/TheSnowyOwl/OwlSays.groovy:630",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/OwlSays.groovy:659",
+      "speaker": "owl"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/OwlSays.groovy:708",
+      "speaker": "owl"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/OwlSays.groovy:1073",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/TheSnowyOwl/Escape.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/Escape.groovy:welcome",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/Escape.groovy:1360",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/Escape.groovy:streakcheck",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/Escape.groovy:1295",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/Escape.groovy:1302",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/Escape.groovy:bigloop",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/Escape.groovy:wrongans",
+      "speaker": "mistress"
+    },
+    {
+      "after": "scripts/TheSnowyOwl/Escape.groovy:960",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/Escape.groovy:928",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/Escape.groovy:962",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/Escape.groovy:1396",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/TheSnowyOwl/Stay.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/Stay.groovy:welcome",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/Stay.groovy:2478",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/Stay.groovy:streakcheck",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/Stay.groovy:startdom",
+      "speaker": "stayowl"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/Stay.groovy:testalarm",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/Stay.groovy:thecorner",
+      "speaker": "stayowl"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/Stay.groovy:dom2std",
+      "speaker": "stayowl"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/Stay.groovy:2513",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/TheSnowyOwl/MatchDares.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/MatchDares.groovy:welcome",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/MatchDares.groovy:2726",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/MatchDares.groovy:streakcheck",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/MatchDares.groovy:askbuiltin",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/MatchDares.groovy:bigloop",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/MatchDares.groovy:1991",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/MatchDares.groovy:2767",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/TheSnowyOwl/SlideLadderDare.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/SlideLadderDare.groovy:welcome",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/SlideLadderDare.groovy:4132",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/SlideLadderDare.groovy:askbuiltin",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/SlideLadderDare.groovy:mainline",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/SlideLadderDare.groovy:4051",
+      "speaker": "owl"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/SlideLadderDare.groovy:getstartclothes",
+      "speaker": "owl"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/SlideLadderDare.groovy:mainsquare",
+      "speaker": "owl"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/SlideLadderDare.groovy:4173",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "optdom",
+      "files": [
+        "scripts/TheSnowyOwl/Stay.groovy"
+      ],
+      "speaker": "stayowl",
+      "values": {
+        "true": "The Red Owl",
+        "false": "The Snowy Owl"
+      },
+      "otherwise": "The Snowy Owl"
+    },
+    {
+      "after": [
+        "scripts/TheSnowyOwl/OwlSays.groovy:451"
+      ],
+      "files": [
+        "scripts/TheSnowyOwl/OwlSays.groovy"
+      ],
+      "speaker": "gallery",
+      "template": "{galleryname[loop]}"
+    }
+  ]
+}

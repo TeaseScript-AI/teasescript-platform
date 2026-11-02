@@ -1,0 +1,29 @@
+--- a/scripts/TheSnowyOwl/Stay.groovy
++++ b/scripts/TheSnowyOwl/Stay.groovy
+@@ -1404,7 +1404,7 @@
+ 		cornerlist=joindeck(cornerlist, ncornerlist, [1046,1050], 2)
+ 		ncornerlist+=2
+ 	}
+-	cornerlist[ncornerlist]=cornerlist[3]
++	cornerlist << cornerlist[3]
+ 	cornerlist[3]=980035
+ 	ncornerlist+=1
+ 	if (!debugtext)
+@@ -1419,7 +1419,7 @@
+ 			repeat0=repeat0%10000
+ 		if (repeat0 > 0)
+ 		{
+-			cornerlist[ncornerlist]=cornerlist[0]
++			cornerlist << cornerlist[0]
+ 			cornerlist[0]=repeat0
+ 			ncornerlist+=1
+ 		}
+@@ -2058,7 +2058,7 @@
+ 		if (morestay[i] != firstcorner[0] & morestay[i] != firstcorner[1] &
+ 			morestay[i] != firstcorner[2])
+ 		{
+-			stay[nstay]=morestay[i]
++			stay << morestay[i]
+ 			nstay++
+ 		}
+ 	}

@@ -1,0 +1,34 @@
+let value = "old"
+function change {
+  value = "new"
+  return true
+}
+let earlier = value
+let conditional = "no"
+if change() {
+  conditional = "yes"
+}
+say prose "${earlier}${conditional}", instant
+function yesText {
+  say prose "Before", instant
+  return "Yes"
+}
+let option = yesText()
+let result = askBoolean prose "Question", yesText: option
+function getRandom(maxValue) {
+  return maxValue - 1
+}
+let xs = [1, 2, 3]
+say prose "Pick ${xs[getRandom(xs.length)]}", instant
+let count = 0
+let ready = false
+let question = null
+let answer = askText().replace("\n", " ")
+let ignoredAnswer1 = askBoolean prose "Ready?"
+let match = 1
+if count == match {
+  say prose "matched", instant
+} else if [1, 2].contains(count) {
+  say prose "small", instant
+}
+exit
