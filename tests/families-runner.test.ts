@@ -2150,6 +2150,8 @@ test("the corpus runner records each source's work and time, a stalled run's to 
         .sort();
     const { entries } = JSON.parse(readFileSync(partedIndex, "utf8"));
     assert.equal(entries.length, 4);
+    // each part holds exactly its entries, the parts together the index once: an entry rerun by two shards is caught
+    // here, not by the merged summary, which takes two ended records that say the same as one source by design (#1587)
     parts.forEach((folder, shard) =>
       assert.deepEqual(
         placed(records(folder)),
