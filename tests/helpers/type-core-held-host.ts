@@ -1081,9 +1081,13 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     return items;
   };
   // (a value a consumer leaves to its contract, the quiet path: answered, nothing read)
-  prototype.skip = function (this: Consumers, ...values: Parameters<Consumers["skip"]>) {
+  // (`skip`'s own rest parameter: `Parameters` gives `never` for a readonly rest array)
+  prototype.skip = function (
+    this: Consumers,
+    ...values: readonly (Parameters<Consumers["valueItems"]>[0] | undefined)[]
+  ) {
     for (const value of values) if (value !== undefined) record(this, value, [], [], false, true);
-    return skip.apply(this, values);
+    Reflect.apply(skip, this, values);
   };
   try {
     const made = make();
