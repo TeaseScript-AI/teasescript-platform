@@ -1,6 +1,7 @@
-// #1572: chains of list operations n terms deep read below their elements, each operation's contract at a path a
-// demand of its own, never a native call per term (the verify's forms, agents.home.arpa:~/work/evidence/i1572/
-// 9349674e857695084bbfe5584b130ad89196f52e/scripts/forms.mjs); before it a fresh process overflowed at about 900 terms.
+// #1572: chains of list operations n terms deep read below their elements, each operation's contract at a path read
+// inline on its frame's explicit stack, never a native call per term (the verify's forms,
+// agents.home.arpa:~/work/evidence/i1572/9349674e857695084bbfe5584b130ad89196f52e/scripts/forms.mjs); before it a fresh
+// process overflowed at about 900 terms.
 const many = (n, term) => Array.from({ length: n }, (_, i) => term(i)).join("");
 const eight = "{a: 1, b: 1, c: 1, d: 1, e: 1, f: 1, g: 1, h: 1}";
 const read = (n, o, terms, last = "o", say = "say xs.length") =>
