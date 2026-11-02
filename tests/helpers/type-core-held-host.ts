@@ -743,7 +743,7 @@ export interface CombinedStop {
   readonly owing: ReadonlySet<string>;
   /**
    * Evidence alone, never accepted: the reference's consumer checks with open deciding reads none of which the stopped
-   * analysis's last run of their invocations made again (#1613's: the finishing walk takes the quiet path instead).
+   * analysis's last run of their invocations answered (a consumer the stop cut that no walk ran again).
    */
   readonly cut: ReadonlySet<string>;
 }
@@ -814,6 +814,8 @@ interface RecordedRead {
   readonly items: readonly Item[];
   readonly finishing: boolean;
   readonly requirement: boolean;
+  /** A value the consumer left to its contract (`Consumers.skip`): its quiet path, which needs every contract settled. */
+  readonly skipped: boolean;
   readonly unit: number;
   readonly unitSite: string;
   readonly path: readonly string[];
@@ -1052,6 +1054,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     rest: readonly string[],
     items: readonly Item[],
     requirement: boolean,
+    skipped = false,
   ): void => {
     const site = consumers.pass.program.places[value]?.site;
     if (site === null || site === undefined) return;
@@ -1062,6 +1065,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
       items,
       finishing: consumers.finishing,
       requirement,
+      skipped,
       unit: walk.unit,
       unitSite: walk.unitSite,
       path: consumerPath(),
@@ -1078,7 +1082,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
   };
   // (a value a consumer leaves to its contract, the quiet path: answered, nothing read)
   prototype.skip = function (this: Consumers, ...values: Parameters<Consumers["skip"]>) {
-    for (const value of values) if (value !== undefined) record(this, value, [], [], false);
+    for (const value of values) if (value !== undefined) record(this, value, [], [], false, true);
     return skip.apply(this, values);
   };
   try {
@@ -1140,9 +1144,9 @@ const withoutLabels = (on: string): string =>
  * - (a) a consumer's check, never a store's, some of whose deciding reads (`decidingReads`: those of the consumer
  *   invocation that emitted it, attributed at record time) got an `unknown` with the reason `budget` (a recovered
  *   contract tagged `budget` is no such read), the stopped analysis's last run of that invocation (its finishing walk's
- *   where that ran it again) making at least one of them again and getting each it made again settled, and at whose
- *   slot the natural analysis (no demand, no stop) and the stopped one owe the same domains, the natural one not the
- *   check itself;
+ *   where that ran it again) answering at least one of them, by reading it again or by its quiet path (`Consumers.skip`,
+ *   which needs every contract it reads settled), every one it read again settled, and at whose slot the natural
+ *   analysis (no demand, no stop) and the stopped one owe the same domains, the natural one not the check itself;
  * - (w) marks at its place (site, target, boundary), of any kind, the only checks owed there, together letting through
  *   exactly its domain (their domains' intersection: checks on one value): the reference satisfied in other words;
  * - (z) a boundary against `unknown`, no plan content (S3 §4), nothing owed at its slot, where an undecided store record
@@ -1184,13 +1188,13 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
       if (owner !== undefined && "rule" in owner && owner.rule.rule !== "store") {
         // (the reads of the invocation that emitted the check, the deciding reads, those the reference's walk got
         // `unknown` with the reason `budget` open; the stopped analysis's last run of each one's invocation, its
-        // finishing walk's where that ran it again, else its walk's, made at least one of them again, reading it or
-        // leaving it to its contract, and got each it made again settled)
+        // finishing walk's where that ran it again, else its walk's, answered at least one of them, reading it again or
+        // taking its quiet path, which needs every contract it reads settled, and got each it read again settled)
         const open = reads.emissions
           .filter((emission) => emission.obligation === text)
           .flatMap((emission) => decidingReads(reads, emission))
           .filter(({ read }) => unsettled(read.items));
-        const madeAgain = ({ read, depth, invocation }: Deciding): readonly RecordedRead[] => {
+        const lastRun = ({ read, depth, invocation }: Deciding): readonly RecordedRead[] => {
           const run = [...finished.reads.values()]
             .flat()
             .filter(
@@ -1200,15 +1204,19 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
                 invocationAt(each.path, depth) === invocation,
             );
           const finishing = run.some((each) => each.finishing);
-          return run.filter((each) => each.key === read.key && each.finishing === finishing);
+          return run.filter((each) => each.finishing === finishing);
         };
-        const made = open.filter((each) => madeAgain(each).length > 0);
+        const readAgain = (each: Deciding): readonly RecordedRead[] =>
+          lastRun(each).filter((again) => again.key === each.read.key && !again.skipped);
+        const answered = open.filter(
+          (each) => readAgain(each).length > 0 || lastRun(each).some((again) => again.skipped),
+        );
         if (
-          made.length > 0 &&
-          made.every((each) => madeAgain(each).every((again) => !unsettled(again.items)))
+          answered.length > 0 &&
+          open.every((each) => readAgain(each).every((again) => !unsettled(again.items)))
         )
           return "a";
-        if (open.length > 0 && made.length === 0) cut.add(text);
+        if (open.length > 0 && answered.length === 0) cut.add(text);
       }
     }
     // ((w): every check owed at the place a mark; those of the check's dimension letting through its domain together)
