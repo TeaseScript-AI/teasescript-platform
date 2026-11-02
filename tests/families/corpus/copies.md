@@ -29,3 +29,7 @@ outside the repository").
   `unprintable <type>` where its conversion to text throws, through a `describeCaught.mjs` in the folder, and
   `astra-1499/summarize.py` never compares a library-spot case-mode that threw and rejects the run on one (#1532). Each
   folder's `PORTED-1532.md` lists the changed files, whose originals stay beside them as `<file>.pre-1532`.
+- `desktop:~/work/evidence/corpus/copies/{astra-1551,astra-1558}/`: their readers record any thrown value, as
+  `unprintable <type>` where its conversion to text throws, through a `describeCaught.mjs` in the folder, and
+  `astra-1551/graphs.mjs` rethrows every value but its own interruption as before (#1569). Each folder's
+  `PORTED-1569.md` lists the changed files, whose originals stay beside them as `<file>.pre-1569`.

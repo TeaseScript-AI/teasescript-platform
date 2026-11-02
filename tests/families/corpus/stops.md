@@ -57,6 +57,9 @@ outside the repository").
   other readers record any thrown value, as `unprintable <type>` where its
   conversion to text throws, through a `describeCaught.mjs` in the folder (#1532). Each folder's `PORTED-1532.md`
   lists the changed files, whose originals stay beside them as `<file>.pre-1532`.
+- `desktop:~/work/evidence/corpus/stops/2b-1559-r1/`: `scan.mjs` records any thrown value as its case's error, as
+  `unprintable <type>` where its conversion to text throws, through the folder's `describeCaught.mjs` (#1569); its
+  `PORTED-1569.md` names the change, the original beside it as `scan.mjs.pre-1569`.
 
 ## Known problems
 
