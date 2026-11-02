@@ -1764,7 +1764,7 @@ const LEDGER = `export class WorkLedger {
 
 /**
  * A built tree's library whose analyses charge its ledger 3,000 units a run: `throws` throws on both trees, `ends` ends
- * the process there, as `twin` does where `FIXTURE_ENDS` is set; else the head's clock (its process's
+ * the process there, as `twin` and each `once…` do where `FIXTURE_ENDS` is set; else the head's clock (its process's
  * `performance.now`) moves 3,000 ms on through each of `twin`'s runs in its first repeat or its second
  * (`FIXTURE_SKEW`), no time passing; `busy` waits 200 ms on the base; `lagging` waits 600 ms on the head's first run; `slow` charges a billion units more on the head and
  * waits 150 ms there; `burst` charges 10,000 times 65,536 units at once on the head, then waits; `changed` publishes its
@@ -1786,7 +1786,8 @@ export function publicationHashes(files, mode) {
   const ledger = new WorkLedger();
   for (let unit = 0; unit < 1000; unit += 1) ledger.charge("frames", 3);
   if (source === "throws") throw new Error("independent exception witness");
-  if (source === "ends" || (source === "twin" && process.env.FIXTURE_ENDS)) process.exit(3);
+  if (source === "ends" || ((source === "twin" || source.startsWith("once")) && process.env.FIXTURE_ENDS))
+    process.exit(3);
   if (${head} && source === "twin" && (twins++ < 4) === (process.env.FIXTURE_SKEW === "first"))
     skew += 3000;
   if (!${head} && source === "busy") wait(200);
@@ -1808,7 +1809,7 @@ export function stopSet(files, mode, globals, allowance) {
 }
 `;
 
-test("the corpus runner records each source's work and time, a stalled run's to the stall, and a rerun of the stall index on both trees closes a timeout but never a stall, a candidate or a difference (#1564)", () => {
+test("the corpus runner records each source's work and time, a stalled run's to the stall, and a rerun of the stall index on both trees, whole or in shards that rerun it once, closes a timeout but never a stall, a candidate or a difference (#1564, #1598)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     const built = (isHead: boolean) => {
@@ -2104,6 +2105,79 @@ test("the corpus runner records each source's work and time, a stalled run's to 
       ],
     );
     assert.deepEqual(counted(after.at(-1)), [4, 4, 0, 0, 1, 0, 3, false]);
+
+    // `rerun --shard i/N` (#1598): an index over two areas, its entry k rerun by shard k mod N alone, each shard's records
+    // beside its part of the index and none for an area that part does not hold; the shards' records merge as the whole
+    // rerun's do
+    const parted = [area("sharded", ["once-a", "once-b", "once-c"]), area("beside", ["once-d"])];
+    const partedWork = parted.map((folder) => {
+      withEnv({ FIXTURE_ENDS: "1" }, runner, folder, base, head, "--work", `${folder}.work.jsonl`);
+      return `${folder}.work.jsonl`;
+    });
+    const partedIndex = join(directory, "parted.json");
+    assert.equal(run(stalls, ...partedWork, "--index", partedIndex).status, 1);
+    const whole = join(directory, "whole");
+    assert.equal(run(stalls, "rerun", partedIndex, base, head, whole).status, 0);
+    const parts = [0, 1].map((shard) => {
+      const folder = join(directory, `part-${shard}`);
+      const ran = run(stalls, "rerun", partedIndex, base, head, folder, "--shard", `${shard}/2`);
+      assert.equal(ran.status, 0, ran.stderr);
+      return folder;
+    });
+    assert.deepEqual(
+      parts.map((folder) => readdirSync(folder).sort()),
+      [
+        ["index.0of2.json", "sharded.0of2.jsonl", "sharded.0of2.work.jsonl"],
+        [
+          "beside.1of2.jsonl",
+          "beside.1of2.work.jsonl",
+          "index.1of2.json",
+          "sharded.1of2.jsonl",
+          "sharded.1of2.work.jsonl",
+        ],
+      ],
+    );
+    const records = (folder: string) =>
+      readdirSync(folder)
+        .filter((file) => file.endsWith(".work.jsonl"))
+        .map((file) => join(folder, file));
+    const placed = (files: string[]) =>
+      files
+        .flatMap((file) => {
+          const [ran, ...sources] = lines(readFileSync(file, "utf8"));
+          return sources.slice(0, -1).map(({ source }) => [ran.work.area, source]);
+        })
+        .sort();
+    const { entries } = JSON.parse(readFileSync(partedIndex, "utf8"));
+    assert.equal(entries.length, 4);
+    parts.forEach((folder, shard) =>
+      assert.deepEqual(
+        placed(records(folder)),
+        entries
+          .filter((_: unknown, entry: number) => entry % 2 === shard)
+          .map(({ area: of, source }: { area: string; source: string }) => [of, source])
+          .sort(),
+      ),
+    );
+    const judged = (files: string[]) => {
+      const { status, stdout, stderr } = run(stalls, ...partedWork, "--rerun", ...files);
+      return { status, stdout, stderr };
+    };
+    const unsharded = judged(records(whole));
+    assert.deepEqual(
+      [unsharded.status, lines(unsharded.stdout).at(-1).rerun],
+      [0, 4],
+      unsharded.stderr,
+    );
+    assert.deepEqual(judged(parts.flatMap(records)), unsharded);
+    // a shard that is none of 0/N to N-1/N is refused before any folder is made
+    const refused = join(directory, "refused");
+    for (const sharding of ["0/0", "2/2", "1.5/2", "/2"]) {
+      const refusal = run(stalls, "rerun", partedIndex, base, head, refused, "--shard", sharding);
+      assert.equal(refusal.status, 2, sharding);
+      assert.match(refusal.stderr, /is no shard i\/N with 0 <= i < N/);
+    }
+    assert.equal(existsSync(refused), false);
 
     // a replay of other stop allowances (#1564 r1's false-closure witness): its index keeps them, so its rerun runs
     // them again, keeps the difference at allowance 1 and stalls again at 2; a rerun record of other allowances is not
