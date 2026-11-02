@@ -1,7 +1,12 @@
-import type { Expression, Statement } from "../../src/ast.js";
+import type { Expression, FunctionParameter, Statement, SwitchCase } from "../../src/ast.js";
 import { compileProject, compileProjectWithBackend } from "../../src/compiler.js";
 import { handlerBlocks, nestedStatements, unwrap } from "../../src/expression-children.js";
-import { createFreshRuntimeSession } from "../../src/index.js";
+import {
+  createFreshRuntimeSession,
+  type InstructionPlan,
+  type RuntimeSessionView,
+} from "../../src/index.js";
+import { lazyDefaultArgument } from "../../src/lazy-defaults.js";
 import { parse } from "../../src/parser.js";
 import type { SourceSpan } from "../../src/source.js";
 import type { TypeAnalysisBackend } from "../../src/type-inference/backend.js";
@@ -16,7 +21,8 @@ import { coreRequest } from "./type-core-analysis.js";
  * receiver or list needs, the element and value kinds varied) at one site (`SITES`: a declaration, typed or not, a
  * store, an operand per operator class, an argument, a condition, an interpolation, an element, a receiver, a count, a
  * loop's iterable, a range's bound, a side of `otherwise`, a default, a variable or a parameter without a type, as its
- * reads take it, also in a compound assignment). A pasted form compiles with both checkers and runs; a declaration
+ * reads take it, also in a compound assignment). A pasted form compiles with both checkers and runs to its end through
+ * the pasted code, answered where it asks (#1586); a declaration
  * form under the new core alone where the current checker's recorded difference from the accepted text is its only
  * rejection (#1412: a list join whose written destination admits every operand), as the checker whose message offers it
  * decides (the lead's ruling on #1310): the joins whose value the declaration's written type receives, and no other
@@ -296,6 +302,9 @@ const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
   ),
 ];
 
+/** A value the player answers, which its store receives only after the answer (#1586); the sample takes it too. */
+const ANSWERED = 'askInteger("How many?")';
+
 /** A store's place of one written type, its start value, and values of other kinds stored into it. */
 const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
   [
@@ -333,7 +342,7 @@ const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
       "fine.n",
       // (Codex r13: an ask's, a `say`'s and a button's operand, read by a key or there)
       'askInteger("${d["absent"]}")',
-      'askInteger("How many?")',
+      ANSWERED,
       '[say("${d["absent"]}", instant)].length',
       '[say("Strokes: 0", instant)].length',
       '[(showButton "${d["absent"]}")].length',
@@ -381,7 +390,10 @@ export interface PasteCase {
   readonly end: number;
 }
 
-/** The family's cases: every offer at every site, or with `sample`, every offer once, the sites in turn (each once). */
+/**
+ * The family's cases: every offer at every site, or with `sample`, every offer once, the sites in turn (each once), and
+ * a store's first value and `ANSWERED`.
+ */
 export function pasteCases(sample = false): PasteCase[] {
   const cases: PasteCase[] = [];
   const offers = [
@@ -423,7 +435,9 @@ export function pasteCases(sample = false): PasteCase[] {
   PLACES.forEach(([type, start, values], index) => {
     const stores = sample ? [STORES[index % STORES.length]!] : STORES;
     for (const store of stores)
-      for (const value of sample ? values.slice(0, 1) : values) {
+      for (const value of sample
+        ? values.filter((candidate, position) => position === 0 || candidate === ANSWERED)
+        : values) {
         const site = store(type, start);
         const head =
           [
@@ -454,10 +468,14 @@ export function pasteCases(sample = false): PasteCase[] {
   return cases;
 }
 
-/** A pasted form: the code a fix offered, and the source with it pasted at its position; a declaration's span there. */
+/**
+ * A pasted form: the code a fix offered, the source with it pasted at its position, and its span there (`at`; for a
+ * declaration whose own text is not there, the diagnosed expression's); a declaration's span there.
+ */
 export interface Pasted {
   readonly code: string;
   readonly source: string;
+  readonly at: { readonly start: number; readonly end: number };
   readonly declared?: { readonly start: number; readonly end: number };
 }
 
@@ -517,6 +535,7 @@ export function pastedForms(
             source.slice(0, diagnostic.site.start) +
             fallback +
             source.slice(diagnostic.site.start + subject.length),
+          at: { start: diagnostic.site.start, end: diagnostic.site.start + fallback.length },
         });
       continue;
     }
@@ -529,22 +548,28 @@ export function pastedForms(
       const typed = start === "" ? "(?:: [^=,)\\n]+)?" : "(?:: [^=\\n]+?)?";
       const own = new RegExp(`(?<![\\w.])${literally(head!)}${typed}${literally(start)}(?![\\w])`);
       const found = own.exec(source);
-      forms.push(
-        found === null
-          ? { code: code!, source }
-          : {
-              code: code!,
-              source:
-                source.slice(0, found.index) + code + source.slice(found.index + found[0].length),
-              declared: { start: found.index, end: found.index + code!.length },
-            },
-      );
+      if (found === null)
+        forms.push({
+          code: code!,
+          source,
+          at: { start: diagnostic.site.start, end: diagnostic.site.end },
+        });
+      else {
+        const span = { start: found.index, end: found.index + code!.length };
+        forms.push({
+          code: code!,
+          source: source.slice(0, found.index) + code + source.slice(found.index + found[0].length),
+          at: span,
+          declared: span,
+        });
+      }
     }
     for (const [, code, statement] of fixes.matchAll(CODE)) {
       if (statement === undefined) {
         forms.push({
           code: code!,
           source: source.slice(0, diagnostic.site.start) + code + source.slice(diagnostic.site.end),
+          at: { start: diagnostic.site.start, end: diagnostic.site.start + code!.length },
         });
         continue;
       }
@@ -559,6 +584,7 @@ export function pastedForms(
           source.slice(lineStart, start) +
           list +
           source.slice(end),
+        at: { start: lineStart, end: lineStart + code!.length },
       });
     }
   }
@@ -627,15 +653,153 @@ function recorded(landing: ReadonlySet<string>): TypeAnalysisBackend {
   };
 }
 
+/** How many answers a pasted program's run gets before it counts as incomplete; the family's runs need one (#1586). */
+const COMPLETIONS = 4;
+
 /**
- * Why a pasted source fails: its compile errors, the new core's among them (Codex r9), or its run's failure; `null`
- * where it compiles and runs. A pasted declaration's (`declared`) compile errors leave out the current checker's recorded
+ * The scripted answer to what a run waits for: a valid number to a number request, the button's activation to a button;
+ * `undefined` for anything else, whose run stays incomplete.
+ */
+function answer(view: RuntimeSessionView): object | undefined {
+  const action = view.foregroundAction;
+  if (action?.kind !== "interaction") return undefined;
+  const payload =
+    action.interactionKind === "number"
+      ? { kind: "submittedText", submittedText: "2" }
+      : action.interactionKind === "button"
+        ? { kind: "activate" }
+        : undefined;
+  return payload === undefined
+    ? undefined
+    : {
+        actionId: action.actionId,
+        actionKind: "interaction",
+        interactionKind: action.interactionKind,
+        payload,
+      };
+}
+
+/** A node of a source's syntax tree: anything with a span. */
+interface Node {
+  readonly kind?: string;
+  readonly span: SourceSpan;
+}
+
+/** The nodes directly inside a node: each property that holds one, or a list of them. */
+function inside(node: Node): readonly Node[] {
+  return Object.entries(node).flatMap(([key, value]: [string, unknown]) =>
+    key === "span"
+      ? []
+      : (Array.isArray(value) ? value : [value]).filter(
+          (child): child is Node => typeof child === "object" && child !== null && "span" in child,
+        ),
+  );
+}
+
+/**
+ * The positions a run may skip while it evaluates their parent, by the runtime's rules: the right side of `and`, `or`
+ * and `otherwise` (`src/runtime/evaluator.ts`, its `binary`), the `default:` of a call that runs it only when needed
+ * (`lazyDefaultArgument`, the evaluator's `call`), a `load`'s default (its `storageLoad`), a case's values after its
+ * first, which a switch tests as an `or` (`caseCondition`), and a parameter's default, bound only for an omitted argument
+ * (`bindDefaultParameter`). `child`'s position in `parent` and the expression the lowering evaluates there, or `null`
+ * where it runs whenever `parent` does.
+ */
+function lazyPosition(
+  parent: Node,
+  child: Node,
+): { readonly position: string; readonly evaluated: Node } | null {
+  // EVIDENCE: invariant: the parser builds each node as the AST interface its `kind` names; other kinds fall through.
+  const node = parent as Expression | SwitchCase | FunctionParameter;
+  switch (node.kind) {
+    case "binaryExpression":
+      return child === node.right &&
+        (node.operator === "and" || node.operator === "or" || node.operator === "otherwise")
+        ? { position: `the right side of '${node.operator}'`, evaluated: child }
+        : null;
+    case "callExpression": {
+      const lazy = lazyDefaultArgument(node);
+      return lazy !== null && child === lazy.argument
+        ? { position: `the default of '${lazy.operation}'`, evaluated: lazy.argument.value }
+        : null;
+    }
+    case "loadExpression":
+      return child === node.defaultValue
+        ? { position: "the default of 'load'", evaluated: child }
+        : null;
+    case "switchCase":
+      return node.values.some((value, index) => index > 0 && value === child)
+        ? { position: "a case's value after its first", evaluated: child }
+        : null;
+    case "functionParameter":
+      return child === node.defaultValue
+        ? { position: "a parameter's default", evaluated: child }
+        : null;
+    default:
+      return null;
+  }
+}
+
+/** A statement's kind, as the parser names the `Statement` kinds (`src/ast.ts`). */
+const STATEMENT = /(?:Statement|Declaration)$/;
+
+/**
+ * The statement kinds whose last instruction of their own span the lowering emits before their operands' evaluation:
+ * a function's `beginFunctionDefaults`, before each parameter's `prepareParameterDefault` and default
+ * (`src/compiler/lowering/compiler.ts`, its function lowering). Nothing of theirs shows their code was evaluated.
+ */
+const OWN_FIRST: ReadonlySet<string> = new Set(["functionDeclaration"]);
+
+/**
+ * Why a run does not show it evaluated the pasted code at `at`, or `null` (#1586; Codex r1 and r2 on #1589). Only the
+ * instruction that consumes the evaluated operands shows it, which the lowering emits after their evaluation: of the
+ * instructions with the span of the innermost statement around the code, the one emitted last; and for each position on
+ * the way down that a run may skip (`lazyPosition`), the last one with that position's span. A setup instruction that
+ * shares a span runs before the operands, so it shows nothing, and a position without an instruction of its own span
+ * supplies no evidence (Codex r3 on #1589).
+ */
+function unevaluated(
+  source: string,
+  plan: InstructionPlan,
+  executed: ReadonlySet<number>,
+  at: Pasted["at"],
+): string | null {
+  const last = ({ start, end }: SourceSpan): number =>
+    plan.instructions.findLastIndex(
+      ({ span }) => span.so === start.offset && span.eo === end.offset,
+    );
+  const path: Node[] = [];
+  for (let node: Node | undefined = parse(source).program; node !== undefined;) {
+    path.push(node);
+    node = inside(node).find(
+      ({ span }) => span.start.offset <= at.start && at.end <= span.end.offset,
+    );
+  }
+  const code = source.slice(at.start, at.end);
+  const depth = path.findLastIndex((node) => STATEMENT.test(node.kind ?? ""));
+  if (depth === -1) return `unproved evaluation: no statement holds '${code}'`;
+  const own = last(path[depth]!.span);
+  if (own === -1)
+    return `unproved evaluation: no instruction has the span of its '${path[depth]!.kind}'`;
+  if (OWN_FIRST.has(path[depth]!.kind!))
+    return `unproved evaluation: its '${path[depth]!.kind}' emits its own instruction before its operands`;
+  if (!executed.has(own)) return `unreached: the run ended without executing '${code}'`;
+  for (let below = depth + 1; below < path.length; below += 1) {
+    const lazy = lazyPosition(path[below - 1]!, path[below]!);
+    if (lazy === null) continue;
+    const entered = last(lazy.evaluated.span);
+    if (entered === -1 || !executed.has(entered)) return `unproved evaluation: ${lazy.position}`;
+  }
+  return null;
+}
+
+/**
+ * Why a pasted form fails: its compile errors, the new core's among them (Codex r9), its run's failure, or a run that
+ * does not show it runs (#1586): one still waiting after `COMPLETIONS` scripted answers (`answer`) or for what none
+ * answers, or one that ended without showing it evaluated the pasted code (`unevaluated`). `null` where it compiles,
+ * runs to its end and evaluated the code. A pasted declaration's (`declared`) compile errors leave out the current checker's recorded
  * difference at its own join (#1412), which the new core decides.
  */
-export function pasteFailure(
-  source: string,
-  declared?: { readonly start: number; readonly end: number },
-): string | null {
+export function pasteFailure({ source, at, declared }: Omit<Pasted, "code">): string | null {
   const files = [{ path: "main.tease", source }];
   const compiled =
     declared === undefined
@@ -653,12 +817,26 @@ export function pasteFailure(
       .map((diagnostic) => `core ${diagnostic.code}: ${coreMessage(diagnostic, text)}`)
       .join(" | ");
   if (compiled.plan === null) return "no plan";
-  const failure = createFreshRuntimeSession(compiled.plan, {
+  const session = createFreshRuntimeSession(compiled.plan, {
     baseDelayMs: 0,
     delayPerWordMs: 0,
     delayPerCharacterMs: 0,
-  })
-    .run()
-    .events.find((event) => event.kind === "runtimeFailure");
-  return failure === undefined ? null : JSON.stringify(failure);
+  });
+  const executed = new Set<number>();
+  for (let completions = 0; ; completions += 1) {
+    const { events, instructionTrace } = session.run({ instructionTrace: true });
+    for (const index of instructionTrace?.instructions ?? []) executed.add(index);
+    const failure = events.find((event) => event.kind === "runtimeFailure");
+    if (failure !== undefined) return JSON.stringify(failure);
+    const view = session.view();
+    if (view.status === "halted") return unevaluated(source, compiled.plan, executed, at);
+    const request = answer(view);
+    const action = view.foregroundAction;
+    const awaited = action?.kind === "interaction" ? action.interactionKind : action?.kind;
+    if (request === undefined || completions === COMPLETIONS)
+      return `incomplete execution: ${view.status} for ${awaited ?? "nothing"} after ${completions} completions`;
+    const { outcome } = session.completeAction(request);
+    if (outcome.kind !== "completed")
+      return `incomplete execution: the scripted answer to ${awaited} was not taken (${outcome.kind})`;
+  }
 }
