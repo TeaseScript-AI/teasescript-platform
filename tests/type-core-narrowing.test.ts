@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { CorePass } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import { makeItem, type Item, type ItemTag } from "../src/type-inference/core/items.js";
+import { makeItem, REASON, type Item, type ItemTag } from "../src/type-inference/core/items.js";
 import { narrowedItems, type NarrowingForm } from "../src/type-inference/core/narrowing.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
@@ -1178,9 +1178,16 @@ test("a read in a stored value takes its narrowing where it holds, and its mark 
   for (const lines of [rows, computed]) {
     const analysed = pass(...lines);
     const found = narrowingAt(analysed.pass, read(analysed, "rows[row", 0));
+    // (the form's test, its type as written, `integer`, beside its kinds: #1398)
+    const form = found?.g.form;
     assert.deepEqual(
-      [found?.g.form, found?.g.elements, found?.fails],
-      [{ kind: "is", kinds: ["integer"] }, 2, null],
+      [
+        form?.kind,
+        form?.kind === "is" ? [form.kinds, form.test?.kind] : null,
+        found?.g.elements,
+        found?.fails,
+      ],
+      ["is", [["integer"], "namedType"], 2, null],
     );
   }
   const stored = record(...rows);
@@ -1359,10 +1366,23 @@ test("G's value is its input filtered by its form (N1)", () => {
   ];
   for (const [form, tags, expected] of cases)
     assert.equal(
-      shown(narrowedItems(form, items(...tags), scope)),
+      shown(narrowedItems(form, items(...tags), scope, undefined)),
       expected,
       `${JSON.stringify(form)} on ${tags.join(", ")}`,
     );
+  // (the kinds a type test proves of a value a stop left keep the test's spelling, as written, `string | integer`; none
+  // given, the table's order: #1398, TABLE r4.277 (3))
+  const stopped = [makeItem("unknown", null, { reasons: REASON.budget })];
+  const tested: NarrowingForm = { kind: "is", kinds: ["integer", "string"] };
+  assert.deepEqual(
+    [["string", "integer"] as const, undefined].map((spelling) =>
+      narrowedItems(tested, stopped, scope, spelling).map((item) => item.tag),
+    ),
+    [
+      ["string", "integer"],
+      ["integer", "string"],
+    ],
+  );
 });
 
 /** N3 at a read: the witness's source text, or `none`. */
