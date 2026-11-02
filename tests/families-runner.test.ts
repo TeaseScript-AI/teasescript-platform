@@ -166,11 +166,12 @@ test("the corpus runner compares a publication by its parts, also against a libr
 
 /**
  * A built tree's library whose oracle stops its own questions on the source `stopped`, leaving two nodes unanswered:
- * counted apart from its parts' hashes (`counted`), in its joined publication's fifth element (`whole`), or a library
- * before that count (`before`), which hashes the same parts and has none.
+ * counted apart from its parts' hashes (`counted`), in its joined publication's fifth element (`whole`), a library
+ * before that count (`before`), which hashes the same parts and has none, counted with one node fewer unanswered
+ * (`fewer`), or counted with the part before the stop answered otherwise (`other`).
  */
 const stopping = (
-  form: "before" | "counted" | "whole",
+  form: "before" | "counted" | "fewer" | "other" | "whole",
 ): string => `import { createHash } from "node:crypto";
 export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
@@ -180,16 +181,20 @@ ${
     ? `export const publication = (files) =>
   \`["A","R",[[1,"x"]],"T"\${files[0].source === "stopped" ? ',{"unanswered":2}' : ""}]\`;`
     : `export const publicationHashes = (files) => {
-  const parts = ['"A"', '"R"', '[1,"x"]', '"T"'].map((text) => createHash("sha256").update(text).digest("hex"));
-  return ${form === "counted"} ? { parts, unanswered: files[0].source === "stopped" ? 2 : 0 } : parts;
+  const stopped = files[0].source === "stopped";
+  const answered = ${form === "other"} && stopped ? '[1,"z"]' : '[1,"x"]';
+  const parts = ['"A"', '"R"', answered, '"T"'].map((text) => createHash("sha256").update(text).digest("hex"));
+  return ${form === "before"} ? parts : { parts, unanswered: stopped ? ${form === "fewer" ? 1 : 2} : 0 };
 };`
 }
 `;
 
-test("the corpus runner counts a publication its oracle left unanswered apart, never as agreement (#1499)", () => {
+test("the corpus runner and the stall index count a run left unanswered alike on both trees as agreement named apart, any other unanswered run never as agreement (#1499, #1592)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
-    const [before, counted, whole] = (["before", "counted", "whole"] as const).map((form) => {
+    const [before, counted, fewer, other, whole] = (
+      ["before", "counted", "fewer", "other", "whole"] as const
+    ).map((form) => {
       const tree = join(directory, form);
       mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
       writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
@@ -202,30 +207,67 @@ test("the corpus runner counts a publication its oracle left unanswered apart, n
       join(area, "stops.mjs"),
       'export const cases = [["stopped", "stopped"], ["answered", "answered"]];\n',
     );
-    // the same stop on both trees, and a joined publication's against a library before the count and a counted one:
-    // `answered` agrees in each
-    for (const [base, head, counts] of [
-      [counted!, counted!, [2, 2]],
-      [before!, whole!, [0, 2]],
-      [whole!, counted!, [2, 2]],
-    ] as const) {
-      const out = join(directory, "out.jsonl");
-      const result = spawnSync(process.execPath, [runner, area, base, head, "--out", out], {
-        encoding: "utf8",
-      });
-      assert.equal(result.status, 1, result.stderr);
-      const total = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
-      assert.deepEqual(
-        [total.exceptions, total.unanswered, total.runs, total.differences],
-        [0, 4, 8, 0],
-      );
-      const kept = readFileSync(out, "utf8")
+    const lines = (text: string) =>
+      text
         .trim()
         .split("\n")
+        .filter((line) => line !== "")
         .map((line) => JSON.parse(line));
+    // the same count and answered part on both trees (a joined publication's parts are a counted one's): agreement,
+    // counted and named apart; another count, or another answered part, never agreement (`counts`, each tree's);
+    // `answered` agrees in each
+    for (const [name, base, head, counts] of [
+      ["alike", counted!, counted!, undefined],
+      ["alike-joined", whole!, counted!, undefined],
+      ["counts", before!, whole!, [0, 2]],
+      ["counts-positive", counted!, fewer!, [2, 1]],
+      ["parts", counted!, other!, [2, 2]],
+    ] as const) {
+      const file = (suffix: string) => join(directory, `${name}.${suffix}`);
+      const [out, work, index] = [file("jsonl"), file("work.jsonl"), file("index.json")];
+      const result = spawnSync(
+        process.execPath,
+        [runner, area, base, head, "--out", out, "--work", work],
+        { encoding: "utf8" },
+      );
+      const alike = counts === undefined;
+      assert.equal(result.status, alike ? 0 : 1, result.stderr);
+      const total = lines(result.stdout).at(-1);
       assert.deepEqual(
-        kept.map(({ source, unanswered }) => [source, unanswered.base, unanswered.head]),
-        Array.from({ length: 4 }, () => ["stopped", ...counts]),
+        [total.exceptions, total.unanswered, total.unansweredAlike, total.runs, total.differences],
+        [0, alike ? 0 : 4, alike ? 4 : 0, 8, 0],
+        name,
+      );
+      assert.deepEqual(
+        lines(readFileSync(out, "utf8")).map(({ source, unanswered }) => [
+          source,
+          unanswered.base,
+          unanswered.head,
+        ]),
+        alike ? [] : Array.from({ length: 4 }, () => ["stopped", ...counts!]),
+      );
+      // the stall index on its record: closed where every run agrees or is unanswered alike, the source named apart
+      // in the summary and the index, never one of the sources agreed
+      const judged = spawnSync(process.execPath, [stalls, work, "--index", index], {
+        encoding: "utf8",
+      });
+      assert.equal(judged.status, alike ? 0 : 1, judged.stderr);
+      const printed = lines(judged.stdout);
+      const { sources, agreed, unansweredAlike, unanswered, closed } = printed.at(-1);
+      assert.deepEqual(
+        [sources, agreed, unansweredAlike, unanswered, closed],
+        [2, 1, alike ? 1 : 0, alike ? 0 : 4, alike],
+        name,
+      );
+      const named = { generator: "stops.mjs", source: "stopped", unansweredAlike: 4 };
+      assert.deepEqual(
+        printed.filter((line) => line.source !== undefined && line.unansweredAlike !== undefined),
+        alike ? [{ area: "area", ...named }] : [],
+      );
+      const listed = JSON.parse(readFileSync(index, "utf8")).unansweredAlike;
+      assert.deepEqual(
+        listed.map(({ key, ...entry }: { key: string }) => [entry, /^[0-9a-f]{64}$/.test(key)]),
+        alike ? [[{ area, ...named }, true]] : [],
       );
     }
   } finally {
@@ -235,7 +277,7 @@ test("the corpus runner counts a publication its oracle left unanswered apart, n
 
 /**
  * A built tree's library where the source `changed` publishes its fourth part differently on the head, `throws` throws
- * and `stopped` leaves two nodes unanswered on the base, and `ends` ends the process on both.
+ * and `stopped` leaves two nodes unanswered on the base, `alike` two on both, and `ends` ends the process on both.
  */
 const storable = (head: boolean): string => `import { createHash } from "node:crypto";
 export const MODES = [false, true].flatMap((reversed) =>
@@ -249,7 +291,7 @@ export function publicationHashes(files) {
   const parts = ['"A"', '"R"', '[1,"x"]', changed ? '[2,"z"]' : '[2,"y"]', '"T"'].map((text) =>
     createHash("sha256").update(text).digest("hex"),
   );
-  return { parts, unanswered: !${head} && source === "stopped" ? 2 : 0 };
+  return { parts, unanswered: (!${head} && source === "stopped") || source === "alike" ? 2 : 0 };
 }
 `;
 
@@ -286,7 +328,7 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
       writeFileSync(join(folder, "tests", "families", "area", "stored.mjs"), generator(names));
       return folder;
     };
-    const names = ["same", "changed", "throws", "stopped", "ends"];
+    const names = ["same", "changed", "throws", "stopped", "ends", "alike"];
     const generator = (order: string[]) =>
       `export const cases = ${JSON.stringify(order.map((name) => [name, name]))};\n`;
     const base = tree("base", "1");
@@ -340,9 +382,16 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
       return { status: result.status, total, kept };
     };
     const counts = ({ total }: { total: Record<string, number> }) =>
-      ["sources", "stalled", "exceptions", "unanswered", "uncompared", "runs", "differences"].map(
-        (key) => total[key],
-      );
+      [
+        "sources",
+        "stalled",
+        "exceptions",
+        "unanswered",
+        "unansweredAlike",
+        "uncompared",
+        "runs",
+        "differences",
+      ].map((key) => total[key]);
 
     // one shard from one commit, the other from the other: while a running writer claims it, the second is left to
     // it; a writer that ended (another start time) claims it no longer, and its temporary file goes
@@ -435,10 +484,10 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     assert.equal(into(base, "1/2").status, 1);
     assert.deepEqual(states(state(base)), ["area complete 2"]);
 
-    // the head against the stored base and against the base tree run beside it
+    // the head against the stored base and against the base tree run beside it, `alike` unanswered alike on both
     const beside = run(base, head);
     const against = run(head, "--baseline", baseline);
-    assert.deepEqual(counts(beside), [5, 1, 4, 4, 0, 16, 4]);
+    assert.deepEqual(counts(beside), [6, 1, 4, 4, 4, 0, 20, 4]);
     assert.deepEqual(counts(against), counts(beside));
     assert.equal(against.status, 1);
     // its record (#1564): one tree, whose work these trees without a ledger record as `null`, and each stall's trees,
@@ -487,6 +536,38 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
       against.kept.filter(({ stalled }) => stalled !== undefined),
       [{ generator: "stored.mjs", source: "ends", stalled: { base: "exit 3", head: "exit 3" } }],
     );
+    // a stored base result without its parts or its count (#1592), its shard's digest repaired so that it is read:
+    // `alike` unanswered, never alike
+    for (const [witness, dropped, stored] of [
+      ["no parts", "parts", { base: 2, head: 2 }],
+      ["no count", "unanswered", { head: 2 }],
+    ] as const) {
+      const copy = join(directory, "stripped", witness.replace(" ", "-"));
+      cpSync(join(root, SRC), join(copy, SRC), { recursive: true });
+      const file = join(copy, SRC, "area", "1of2.runs.jsonl");
+      const [ended, ...sources] = readFileSync(file, "utf8").trim().split("\n").reverse();
+      const body = sources
+        .reverse()
+        .map((line) => {
+          const kept = JSON.parse(line);
+          if (kept.source === "alike")
+            for (const result of Object.values<{ value: Record<string, unknown> }>(kept.runs))
+              delete result.value[dropped];
+          return `${JSON.stringify(kept)}\n`;
+        })
+        .join("");
+      const total = JSON.parse(ended!);
+      total.total.lines = createHash("sha256").update(body).digest("hex");
+      writeFileSync(file, `${body}${JSON.stringify(total)}\n`);
+      const stripped = run(head, "--baseline", join(copy, SRC, "area"));
+      assert.deepEqual(counts(stripped).slice(3, 5), [8, 0], witness);
+      assert.deepEqual(
+        stripped.kept
+          .filter(({ source, unanswered }) => source === "alike" && unanswered !== undefined)
+          .map(({ unanswered }) => unanswered),
+        Array.from({ length: 4 }, () => stored),
+      );
+    }
 
     // a source the baseline does not hold (one more of the head's): its runs uncompared, never agreement
     const more = join(directory, "more", "area");
@@ -1297,8 +1378,20 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         `${index}/16`,
       ]);
       assert.equal(run.status, 0);
+      // (shard 3's total as a runner before #1592 wrote it, without `unansweredAlike`: imported, and read by status and
+      // the comparison, beside shards whose total has it)
+      if (index === 3) {
+        const stored = join(at("rest"), src, "area", "3of16.runs.jsonl");
+        const text = readFileSync(stored, "utf8");
+        assert.match(text, /,"unansweredAlike":0,[^\n]*\n$/);
+        writeFileSync(stored, text.replace(/,"unansweredAlike":0(,[^\n]*\n)$/, "$1"));
+      }
       assert.equal(imported("rest", index).status, 0);
     }
+    assert.doesNotMatch(
+      readFileSync(join(central, src, "area", "3of16.runs.jsonl"), "utf8"),
+      /unansweredAlike/,
+    );
     assert.deepEqual(
       [status().status, status().stdout],
       [0, `baseline ${src}: ${join(central, src)}: complete: area\n`],
@@ -2067,7 +2160,8 @@ test("the stall index decides each stalled source from its record by one rule: t
     };
     /**
      * A shard's `--work` record (shard `at` of the area `name`, in the file `file`) of `trees` trees, its total the sum of
-     * its sources' counts, cut before its total where `cut`.
+     * its sources' counts, cut before its total where `cut`; `unansweredAlike` only where a source counts one, as a runner
+     * before #1592 wrote the others.
      */
     const shard = (
       name: string,
@@ -2081,6 +2175,7 @@ test("the stall index decides each stalled source from its record by one rule: t
         area: name,
         sources: entries.length,
         ...Object.fromEntries(KEYS.map((key) => [key, sum(key)])),
+        ...(sum("unansweredAlike") > 0 ? { unansweredAlike: sum("unansweredAlike") } : {}),
       };
       const file = join(directory, `${called}.work.jsonl`);
       const roots = Array.from({ length: trees }, () => "tree");
@@ -2283,6 +2378,30 @@ test("the stall index decides each stalled source from its record by one rule: t
       [lines(latest.stdout).at(-1).agreed, lines(latest.stdout).at(-1).closed],
       [1, true],
     );
+    // (a rerun that ends with a run left unanswered alike, #1592: that outcome, counted and named apart, and listed in
+    // the index apart from the sources still unavailable)
+    const alikeIndex = join(directory, "late-alike.index.json");
+    const lateAlike = late("late-alike", true, { runs: 1, unansweredAlike: 1 });
+    const ended = run(lateReplay, "--rerun", lateStall, lateAlike, "--index", alikeIndex);
+    assert.equal(ended.status, 0, ended.stderr);
+    const endedLines = lines(ended.stdout);
+    const named = { generator: "g.mjs", source: "slow", unansweredAlike: 1 };
+    assert.deepEqual(
+      [
+        endedLines.find(({ stalled }) => stalled !== undefined).rerun.outcome,
+        ...["agreed", "unansweredAlike", "closed"].map((key) => endedLines.at(-1)[key]),
+      ],
+      ["unansweredAlike", 0, 1, true],
+    );
+    assert.deepEqual(
+      endedLines.filter(({ source, stalled }) => source !== undefined && stalled === undefined),
+      [{ area: "late", ...named }],
+    );
+    const indexed = JSON.parse(readFileSync(alikeIndex, "utf8"));
+    assert.deepEqual(
+      [indexed.entries, indexed.unansweredAlike],
+      [[], [{ area: "late", ...named, key: "k" }]],
+    );
     assert.equal(
       lines(run(lateReplay, "--rerun", lateEnd, lateStall).stdout).at(-1).unavailable,
       1,
@@ -2366,6 +2485,20 @@ test("the stall index decides each stalled source from its record by one rule: t
     const uneven = shard("uneven", 2, [{ source: "a", runs: [], counts: { runs: 2 } }]);
     writeFileSync(uneven, readFileSync(uneven, "utf8").replace('"runs":2}}', '"runs":1}}'));
     assert.equal(run(uneven).status, 2);
+    // (and its sources' runs unanswered alike against a total that counts none, #1592)
+    const unevenAlike = shard("uneven-alike", 2, [
+      { source: "a", runs: [], counts: { runs: 4, unansweredAlike: 4 } },
+    ]);
+    writeFileSync(
+      unevenAlike,
+      readFileSync(unevenAlike, "utf8").replace(
+        /"unansweredAlike":4\}\}\n$/,
+        '"unansweredAlike":0}}\n',
+      ),
+    );
+    const refusedAlike = run(unevenAlike);
+    assert.equal(refusedAlike.status, 2);
+    assert.match(refusedAlike.stderr, /do not add up to its total \(unansweredAlike\)/);
     const other = join(directory, "other.work.jsonl");
     writeFileSync(
       other,

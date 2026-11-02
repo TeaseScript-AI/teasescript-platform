@@ -34,20 +34,23 @@ either tree is an exception, never compared, because identical exceptions on bot
 runner prints it on stderr with its source, mode and check, writes it with each stack to `--out` and counts it apart
 from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in CI). A publication is had only up to
 the oracle's own stop: where its questions after a finished analysis pass the allowance, the nodes from that one on stay
-unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on either tree is neither compared nor an
-exception: the runner writes it to `--out` and counts it apart. It prints one JSON line per generator and a total
-(sources, unparsed, stalled, exceptions, unanswered, uncompared, modes, runs, differences, the limit in seconds), and
-exits 1 when any run differs, throws, leaves nodes unanswered or is uncompared, or any source stalls. Run large sizes as
-one capped job per area or shard on a worker. Some recorded large inputs exceed the default timeout on unchanged trees.
-Report stalls and publication exceptions separately; neither establishes agreement.
+unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on either tree agrees only where both trees left
+the same count unanswered and published the same parts up to them (#1592): the allowance is the same on both trees, so
+what it leaves unanswered is too. Such a run is counted apart (`unansweredAlike`); any other is neither agreement nor an
+exception: the runner writes it to `--out` and counts it apart (`unanswered`). It prints one JSON line per generator and
+a total (sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, modes, runs, differences, the
+limit in seconds), and exits 1 when any run differs, throws, leaves nodes unanswered other than alike or is uncompared,
+or any source stalls. Run large sizes as one capped job per area or shard on a worker. Some recorded large inputs exceed
+the default timeout on unchanged trees. Report stalls and publication exceptions separately; neither establishes
+agreement.
 
 With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the stored
-result of the same source (its generator, name and key, so an edited source is new), mode and check, and a run the
-baseline does not hold is `uncompared`, never agreement (`--out` names its source and runs); a source stalls or throws
-outside its runs where either the stored run or the head did. The limits then apply to each tree alone, where a run of
-both trees shares them in one process, so a source that stalls there may end here, and the head's runs after a stored
-stall are uncompared. `--baseline` reads a folder's `*.runs.jsonl` files, and stops (exit 2) at a source stored twice
-with other results.
+result of the same source (its generator, name and key, so an edited source is new), mode and check (unanswered alike
+only where that result holds the base's parts and count), and a run the baseline does not hold is `uncompared`, never
+agreement (`--out` names its source and runs); a source stalls or throws outside its runs where either the stored run or
+the head did. The limits then apply to each tree alone, where a run of both trees shares them in one process, so a
+source that stalls there may end here, and the head's runs after a stored stall are uncompared. `--baseline` reads a
+folder's `*.runs.jsonl` files, and stops (exit 2) at a source stored twice with other results.
 
 `--work` writes a record of each source and changes no other output (#1564): a first line with what ran and the
 comparison's configuration (`configuration`: the sources' sizes, the area's plan (the hash of every source's place, its
@@ -67,16 +70,18 @@ area's records must share one configuration (another is refused, exit 2), so the
 0/N to N-1/N of one N, together every source of one plan, and a source a plan lists more than once (a repeat, which the
 runner runs and counts each time) is one source where its repeats record the same counts, stall and runs, milliseconds
 apart, refused (exit 2, naming the place) where they differ; a source counts as `agreed` only where it was compared in
-every run and agrees, and `closed` (exit 0) needs every area complete, every source agreed and no candidate left.
-`--index` writes the sources still unavailable, with their verdicts and records and each area's configuration. Against a
-stored baseline the base's work is not recorded, so a head's timeout is unknown: `stalls.mjs rerun` runs the index's
-sources alone, one at a time with both trees in one process and the replay's configuration (`run.mjs <area> <base>
-<head> --only <index>`, an area after another; only `--timeout` and `--memory` may differ), and `--rerun
-<folder>/*.work.jsonl` reads its records in place of the replay's, so the replay closes without another campaign; a
-record of another configuration is refused, and a rerun that ends does not clear a candidate. Rerun records are read in
-the order given, an earlier round's first: where a source's earlier rerun stalled, or its later one stalls, the later
-stands (a round at a longer `--timeout` or `--memory` may run what an earlier one could not), and two that ended must
-say the same, else refused (#1587); a replay's records are never replaced.
+every run and agrees, and as `unansweredAlike` where its runs agree but for some unanswered alike, each such source
+named on a line of its own with its number of those runs; `closed` (exit 0) needs every area complete, every source
+agreed or unanswered alike and no candidate left. `--index` writes the sources still unavailable, with their verdicts
+and records and each area's configuration, and names those unanswered alike apart. Against a stored baseline the base's
+work is not recorded, so a head's timeout is unknown: `stalls.mjs rerun` runs the index's sources alone, one at a time
+with both trees in one process and the replay's configuration (`run.mjs <area> <base> <head> --only <index>`, an area
+after another; only `--timeout` and `--memory` may differ), and `--rerun <folder>/*.work.jsonl` reads its records in
+place of the replay's, so the replay closes without another campaign; a record of another configuration is refused, and
+a rerun that ends does not clear a candidate. Rerun records are read in the order given, an earlier round's first: where
+a source's earlier rerun stalled, or its later one stalls, the later stands (a round at a longer `--timeout` or
+`--memory` may run what an earlier one could not), and two that ended must say the same, else refused (#1587); a
+replay's records are never replaced.
 
 `--store` runs one tree of a commit (an `sx-tree` tree: `src/`, `dist/`, `.sha`) at the runner's defaults and stores one
 shard of an area, each source's results as one line, in the baseline of its `src/` tree,
