@@ -146,6 +146,8 @@ export interface AdmissionHost {
    * steps only where the finishing read answers (G3 stage 1).
    */
   read?(value: PlaceId, node: FlowNode, at: Rest): readonly Item[] | null;
+  /** After a program stop, a key's kinds as the finishing path's domains give them, else `null` (a label's step, #1595). */
+  domain?(key: Key): readonly Item[] | null;
 }
 
 /** A cursor decision's path read from its pass's packet (`decisionWork`), nothing charged: the analysis's output. */
@@ -590,7 +592,7 @@ export class Admission {
         const tags =
           term !== null
             ? typeTags(term)
-            : withoutEmpty(this.run(contract.contractOf(keyOf(place, path.slice(0, index))))).map(
+            : withoutEmpty(this.stepKinds(keyOf(place, path.slice(0, index)))).map(
                 (item) => item.tag,
               );
         label = labelBelow(label, elementStep(tags));
@@ -625,12 +627,17 @@ export class Admission {
       if (step !== "element") label = labelBelow(label, step);
       else {
         const parent = keyParentIn(contract, id)!;
-        const tags = withoutEmpty(this.run(contract.contractOf(parent))).map((item) => item.tag);
+        const tags = withoutEmpty(this.stepKinds(parent)).map((item) => item.tag);
         label = labelBelow(label, elementStep(tags));
       }
       this.keyLabels.set(id, label);
     }
     return label;
+  }
+
+  /** A label's element step's kinds: the key's contract, after a program stop its finishing domain (#1595). */
+  private stepKinds(key: Key): readonly Item[] {
+    return this.host.domain?.(key) ?? this.run(this.pass.contract.contractOf(key));
   }
 
   /** `labelOf`'s text made plain, for a check that charges the text it keeps itself (`labelPlainText`). */

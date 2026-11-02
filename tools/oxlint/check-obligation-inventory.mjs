@@ -130,6 +130,7 @@ export const READS = new Map([
 export const HOST_READS = new Map([
   ["run", "runs a solver demand: an answer"],
   ["read", "the finishing read after a stop: an answer"],
+  ["domain", "a key's domain after a stop, the finishing path's (`keyDomain`): an answer"],
 ]);
 
 /**

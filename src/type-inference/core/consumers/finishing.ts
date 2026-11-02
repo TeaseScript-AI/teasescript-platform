@@ -6,6 +6,7 @@ import type { CorePass } from "../answers.js";
 import { joinSteps, keptParts, keptSlice, keptSteps, type WorkLedger } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { defaultOf, termAt, typedDefault, typeTags, unknownItem, writtenOf } from "../contract.js";
+import { isKeyId, keyOfId } from "../contract/key-ids.js";
 import { keptPath, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
@@ -1236,16 +1237,22 @@ export function finishingKeyRead(walk: Consumers, key: Key, node: FlowNode): rea
 
 /** `finishingKeyRead`'s sources after a host global's own data: the key's finished answer, then the domains. */
 function laterKeySources(walk: Consumers, key: Key, node: FlowNode): readonly Item[] {
-  const { contract, values, program } = walk.pass;
-  const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
-    const items = walk.run(work());
-    return items.some(unsettledItem) ? null : items;
-  };
-  const found =
-    (program.work.stopped === null ? null : settled(() => values.keyItems(key, node))) ??
-    settled(() => contract.contractOf(key));
-  if (found !== null) return found;
-  const [place, path] = [keyPlace(key), keyPath(key)];
+  const { values, program } = walk.pass;
+  const items = program.work.stopped === null ? null : walk.run(values.keyItems(key, node));
+  return items === null || items.some(unsettledItem) ? keyDomain(walk, key) : items;
+}
+
+/**
+ * A key's domain in the finishing path (S3 §5 revisions 14, 16): its finished contract, else its written or retained
+ * admitted type, `STOPPED` where none decides it. One source for every reader after a stop: a receiver's read
+ * (`finishingKeyRead`) and a label's step, which spells a dict's value `entry` (#1595).
+ */
+export function keyDomain(walk: Consumers, key: Key): readonly Item[] {
+  const { contract, program } = walk.pass;
+  const found = walk.run(contract.contractOf(key));
+  if (!found.some(unsettledItem)) return found;
+  const text = isKeyId(key) ? keyOfId(contract, key) : key;
+  const [place, path] = [keyPlace(text), keyPath(text)];
   const written = writtenOf(program.place(place).kind);
   const term = written === null ? null : termAt(written, path);
   const retained = term === null && walk.settled ? walk.admission.retained(place, path) : null;
