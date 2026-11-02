@@ -2659,8 +2659,9 @@ test("a combined stop's finishing read reaches through a copy whose decision sto
  * finishing read answered from (a written `list?` receiver's null check, an `integer?` element's count by a null check,
  * an `object`'s property read; two places copying each other, answered without a written type; a set's empty check,
  * its domain non-emptiness whatever family it names); (a) from the finishing walk's own reads (a fallback's left in
- * requirement mode), at an index's check by its receiver (a `get`'s literal index) and at a member's presence check by
- * every read its consumer makes (a ring's receiver at its unlisted property); and a boundary against
+ * requirement mode), at an index's check whose receiver the finishing walk answers (a `get`'s literal index) and at a
+ * member's presence check by its receiver's read at its unlisted property (a ring's), each from the reads of the consumer
+ * invocation that emitted the check; and a boundary against
  * `unknown`, which has no plan content, dropped where the undecided store mark stands at the site of the store holding it
  * (a dictionary's value read through its `values`, forward, also parenthesized or in a parenthesized literal). Each case at every eighth settled stop under the largest
  * demand allowance that stops a decision (the copying places under each), in the modes where the clause arises, nothing
@@ -2817,7 +2818,7 @@ function withMark(
 
 /**
  * Each settled stop of a program's files under each demand allowance that stops a decision of its main file (or under
- * `demands`), forward with the sharing, at every eighth allowance of each settled phase: where `select` names a reference
+ * `demands`), in `mode` (forward with the sharing), at every eighth allowance of each settled phase: where `select` names a reference
  * check there, `each` judges it. The number of stops judged.
  */
 function controlStops(
@@ -2825,8 +2826,8 @@ function controlStops(
   select: (rule: CombinedStop, reference: Answers, stopped: Answers) => string | undefined,
   each: (reference: Answers, natural: Answers, stopped: Answers, check: string) => void,
   demands?: readonly number[],
+  mode = HELD_MODES[0]!,
 ): number {
-  const mode = HELD_MODES[0]!;
   let count = 0;
   for (const demand of demands ?? heldDemands({ source: files[0]!.source }, mode)) {
     const { natural, reference, stoppedAt } = combinedAnalyses(files, mode, demand);
@@ -2860,6 +2861,9 @@ const mainFile = (source: string): SourceFile[] => [{ path: "main.tease", source
  * - (a)'s reference read: a recovered contract tagged `budget` (`list|null`, never `unknown`) is no read the demand stop
  *   left `unknown`, so the receiver's mark left out is rejected; the issues' witnesses (the first test) are accepted.
  * - (a)'s finishing read: the receiver's mark left out with its read answered `STOPPED` is rejected.
+ * - (a)'s deciding reads, the consumer invocation's: an element selection's empty check and an index's integer check,
+ *   their marks left out where only the receiver is answered, are rejected (Codex r3's B1); and so is the ring's presence
+ *   check (accepted in the third test) where its receiver's read at `#` is answered by another consumer.
  * - (w)'s domain: the null check against `integer` replaced by a copy check against `unknown` is rejected, and so is
  *   #1580's comparison form, whose mark lets every kind through; a redundant mark against `unknown` beside the
  *   restrictive one is accepted, the intersection unchanged.
@@ -2975,6 +2979,61 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
       });
       assert.equal(combinedStop(reference, natural, beside).checks.get(check), "w");
     }) > 0,
+  );
+  // (a)'s deciding reads, the consumer invocation's: an element selection's empty check and an index's integer check, each
+  // mark left out where the receiver is answered but the read that decides the check, the element or the index, is still
+  // `unknown` in the finishing walk (Codex r3's B1, at demands 3 and 2)
+  for (const [source, demand, kind, target] of [
+    ['let xs: list = [hostValue, 4]\nrepeat xs.first {say "ok"}\nexit\n', 3, "empty-check", "xs"],
+    ["let xs: list = [hostValue, 4]\nlet i = 0\nsay xs[i]\nexit\n", 2, "integer-check", "i"],
+  ] as const)
+    assert.ok(
+      controlStops(
+        mainFile(source),
+        (_, reference, stopped) => {
+          const owed = reference.checks.find(
+            (check) => check.kind === kind && check.target === target,
+          );
+          const text = owed === undefined ? "" : JSON.stringify(owed);
+          return stopped.budget.deferred.some((mark) => JSON.stringify(mark.obligation) === text)
+            ? text
+            : undefined;
+        },
+        (reference, natural, stopped, check) =>
+          assert.equal(
+            combinedStop(reference, natural, withMark(stopped, check, null)).checks.get(check),
+            undefined,
+            source,
+          ),
+        [demand],
+      ) > 0,
+      source,
+    );
+  // (a)'s answer from the same invocation: the ring's presence check (the clauses' test) is rejected where the finishing
+  // walk's read of its receiver at `#` is another consumer's
+  const ring = heldFamily(false).find((c) => c.name === "ring-1-written-plain")!;
+  const ringReceiver = ring.source.indexOf("c0.f");
+  assert.ok(
+    controlStops(
+      mainFile(ring.source),
+      takes("a", (check) => check.kind === "null-check" && check.target === "c0"),
+      (reference, natural, stopped, check) => {
+        const elsewhere = withReadsChanged(
+          stopped,
+          Object.create(stopped),
+          { file: 0, start: ringReceiver, end: ringReceiver + 2 },
+          ["#"],
+          (reads) =>
+            reads.map((read) => ({
+              ...read,
+              path: ["another.js:consumer@1:1", "another.js:helper@1:1", "another.js:read@1:1"],
+            })),
+        );
+        assert.equal(combinedStop(reference, natural, elsewhere).checks.get(check), undefined);
+      },
+      [42],
+      HELD_MODES[1]!,
+    ) > 0,
   );
   // site identity: the mark moved to another file at the same offsets (Codex r2's B2); taken in its own file
   const twoFiles = [

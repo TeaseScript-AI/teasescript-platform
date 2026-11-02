@@ -22,9 +22,8 @@ import { VALUE_KINDS } from "../../src/value-kinds.js";
 import type { Expression } from "../../src/ast.js";
 import { expressionChildren, unwrap } from "../../src/expression-children.js";
 import { REASON, type Item } from "../../src/type-inference/core/items.js";
-import { propertyName, propertyStep } from "../../src/type-inference/core/program.js";
 import type { SourceSite } from "../../src/type-inference/graph.js";
-import type { DiagnosticRule, Obligation } from "../../src/type-inference/core/result.js";
+import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
 
 /*
@@ -742,6 +741,11 @@ export interface CombinedStop {
   };
   /** The stopped analysis's checks at the accepted slots, which the reference does not have. */
   readonly owing: ReadonlySet<string>;
+  /**
+   * Evidence alone, never accepted: the reference's consumer checks with open deciding reads none of which the stopped
+   * analysis's last run of their invocations made again (#1613's: the finishing walk takes the quiet path instead).
+   */
+  readonly cut: ReadonlySet<string>;
 }
 
 /** Every expression of an analysis's program by its whole site, parentheses among them, with its parent expression. */
@@ -773,92 +777,9 @@ const siteOf = (file: number, expression: Expression): SourceSite => ({
   end: expression.span.end.offset,
 });
 
-/**
- * A read a check may depend on: the value at `site` (inside any parentheses) at `steps`, or with `members` each at no
- * step or one property step (`propertyStep`'s: a property's own name, or `#` where it is unlisted, never `element`).
- */
-type ReadAt =
-  | { readonly site: SourceSite; readonly steps: readonly string[] }
-  | { readonly site: SourceSite; readonly members: true };
-
-/**
- * The reads a consumer's check depends on: an index's receiver (a list index's or a `get`'s); a member's or a selection's
- * receiver, each read its consumer makes of it as the recorder holds them, its kind and its member's property step (`#`
- * where the property is unlisted, `unlistedObject`; TABLE r4.290's inventory, amended); a fallback's left, or a `get`
- * default's receiver at its `element`; else the value at the check's site. Never the member's own value, which each
- * consumer of that value reads at the same key (a fallback's left, a count). None where no read gives it (a
- * conversion's default, which its result decides).
- */
-function readOf(
-  syntax: ReturnType<typeof syntaxOf>,
-  check: Obligation,
-  owner: DiagnosticRule,
-): readonly ReadAt[] {
-  const file = check.site.file;
-  const at = syntax.at.get(siteKey(check.site));
-  if (at === undefined) return [];
-  const expression = unwrap(at);
-  const rule = owner.rule;
-  // (the expression around the check's site, through any parentheses)
-  const around = (): Expression | undefined => {
-    let parent = syntax.parent.get(siteKey(check.site));
-    while (parent?.kind === "parenthesizedExpression")
-      parent = syntax.parent.get(siteKey(siteOf(file, parent)));
-    return parent;
-  };
-  // (an index's check, C2 and C12: its receiver's kind decides what the index must be, a list's whole, a dict's text)
-  if ((rule === "count" && (owner.use === "index" || owner.use === "get")) || rule === "key") {
-    const parent = around();
-    const receiver =
-      parent?.kind === "indexExpression"
-        ? parent.object
-        : parent?.kind === "callExpression" && parent.callee.kind === "propertyAccessExpression"
-          ? parent.callee.object
-          : null;
-    return receiver === null ? [] : [{ site: siteOf(file, unwrap(receiver)), steps: [] }];
-  }
-  if (rule === "member" || rule === "selection") {
-    const receiver =
-      expression.kind === "propertyAccessExpression" || expression.kind === "indexExpression"
-        ? expression.object
-        : expression.kind === "callExpression" &&
-            expression.callee.kind === "propertyAccessExpression"
-          ? expression.callee.object
-          : null;
-    return receiver === null ? [] : [{ site: siteOf(file, unwrap(receiver)), members: true }];
-  }
-  if (rule === "fallback") {
-    // (the value it stands in for)
-    const parent = around();
-    if (parent?.kind === "binaryExpression" && parent.operator === "otherwise")
-      return [{ site: siteOf(file, unwrap(parent.left)), steps: [] }];
-    if (parent?.kind === "callExpression" && parent.callee.kind === "propertyAccessExpression")
-      return [{ site: siteOf(file, unwrap(parent.callee.object)), steps: ["element"] }];
-    return [];
-  }
-  return [{ site: siteOf(file, expression), steps: [] }];
-}
-
 /** A read's identity: its value's whole site and its steps. */
 const readKey = (site: SourceSite, steps: readonly string[]): string =>
   `${siteKey(site)}|${steps.join("\u0000")}`;
-
-/** The recorded reads `read` names in `reads`: its own, or with `members` each at its site at no or one property step. */
-function readKeys(
-  reads: ReadonlyMap<string, readonly RecordedRead[]>,
-  read: ReadAt,
-): readonly string[] {
-  if ("steps" in read) return [readKey(read.site, read.steps)];
-  const at = readKey(read.site, []);
-  return [...reads.keys()].filter((key) => {
-    const step = key.slice(at.length);
-    return (
-      key.startsWith(at) &&
-      !step.includes("\u0000") &&
-      (step === "" || propertyStep(propertyName(step)) === step)
-    );
-  });
-}
 
 /** Whether an answer holds a value a stop left undecided: an `unknown` item with the reason `budget`. */
 const unsettled = (items: readonly Item[]): boolean =>
@@ -883,21 +804,42 @@ function holds(syntax: ReturnType<typeof syntaxOf>, store: SourceSite, value: So
   return false;
 }
 
-/** A consumer's read as `recordingReads` records it: its answer, whether the finishing walk made it, in requirement mode. */
+/**
+ * A consumer's read as `recordingReads` records it: its answer, whether the finishing walk made it, in requirement mode,
+ * and the consumer invocation that made it: the walk's unit (`Consumers.runs`, by its count, and its site) and the
+ * consumer modules' frames on its stack (`consumerPath`).
+ */
 interface RecordedRead {
+  readonly key: string;
   readonly items: readonly Item[];
   readonly finishing: boolean;
   readonly requirement: boolean;
+  readonly unit: number;
+  readonly unitSite: string;
+  readonly path: readonly string[];
+}
+
+/** A warning a consumer emitted (`Consumers.rules`, which `warning` fills), its obligation and its invocation as a read's. */
+interface Emission {
+  readonly obligation: string;
+  readonly unit: number;
+  readonly path: readonly string[];
+}
+
+/** A walk's recorded reads by read (`readKey`) and the warnings it emitted, in order. */
+interface Recorded {
+  readonly reads: ReadonlyMap<string, readonly RecordedRead[]>;
+  readonly emissions: readonly Emission[];
 }
 
 /**
- * The reads an analysis's consumers made (`Consumers.valueItems`, their one read, unstopped or finishing), by read
- * (`readKey`): the last walk's, as it published the analysis's checks (TABLE r4.290's inventory, (ii), amended).
+ * The reads an analysis's consumers made (`Consumers.valueItems`, their one read, unstopped or finishing) and the
+ * warnings they emitted: the last walk's, as it published the analysis's checks (TABLE r4.290's inventory, (ii), amended).
  */
-const consumerReads = new WeakMap<object, ReadonlyMap<string, readonly RecordedRead[]>>();
+const consumerReads = new WeakMap<object, Recorded>();
 
 /** An analysis's recorded reads; a stopped analysis changed for a control (`Object.create`) has its original's. */
-function readsOf(answers: Answers): ReadonlyMap<string, readonly RecordedRead[]> | undefined {
+function readsOf(answers: Answers): Recorded | undefined {
   // (`Object.getPrototypeOf` gives an object or `null`)
   for (let at: object | null = answers; at !== null; at = Object.getPrototypeOf(at)) {
     const found = consumerReads.get(at);
@@ -908,7 +850,7 @@ function readsOf(answers: Answers): ReadonlyMap<string, readonly RecordedRead[]>
 
 /**
  * Test-only, for a control: `shadow` (made from `answers` by `Object.create`) records `answers`' reads but those `change`
- * gives at the read of `site` with `steps` (as `readOf` names a check's read).
+ * gives at the read of `site` with `steps`.
  */
 export function withReadsChanged(
   answers: Answers,
@@ -917,48 +859,238 @@ export function withReadsChanged(
   steps: readonly string[],
   change: (reads: readonly RecordedRead[]) => readonly RecordedRead[],
 ): Answers {
-  const reads = new Map(readsOf(answers) ?? []);
+  const recorded = readsOf(answers);
+  const reads = new Map(recorded?.reads ?? []);
   const key = readKey(site, steps);
   reads.set(key, change(reads.get(key) ?? []));
-  consumerReads.set(shadow, reads);
+  consumerReads.set(shadow, { reads, emissions: recorded?.emissions ?? [] });
   return shadow;
+}
+
+/** Where the consumers' modules are (`src/type-inference/core/consumers/`), as their frames' files name them. */
+const CONSUMER_MODULES = "/type-inference/core/consumers/";
+
+/** Whether a stack is V8's call sites. */
+const isCallSites = (stack: unknown): stack is NodeJS.CallSite[] =>
+  Array.isArray(stack) && stack.every((site) => typeof site?.getFileName === "function");
+
+/**
+ * The consumer modules' frames on the stack, outermost first, each its module's file and function and where it then
+ * stood (`file:function@line:column`): a consumer invocation's identity, the stage's loop over its units outermost.
+ */
+function consumerPath(): readonly string[] {
+  const { stackTraceLimit, prepareStackTrace } = Error;
+  const holder: { stack?: unknown } = {};
+  let stack: unknown;
+  try {
+    Error.stackTraceLimit = 200;
+    Error.prepareStackTrace = (_, sites) => sites;
+    Error.captureStackTrace(holder);
+    stack = holder.stack;
+  } finally {
+    Error.stackTraceLimit = stackTraceLimit;
+    Error.prepareStackTrace = prepareStackTrace;
+  }
+  if (!isCallSites(stack)) throw new Error("The recorder reads its stack as V8's call sites.");
+  return stack
+    .filter((site) => (site.getFileName() ?? "").includes(CONSUMER_MODULES))
+    .reverse()
+    .map((site) => {
+      const file = site.getFileName() ?? "";
+      const name = site.getFunctionName() ?? "<anonymous>";
+      return `${file.slice(file.lastIndexOf("/") + 1)}:${name}@${site.getLineNumber()}:${site.getColumnNumber()}`;
+    });
+}
+
+/** A frame's function alone (`file:function`), where it stood left out. */
+const functionOf = (frame: string): string => frame.slice(0, frame.lastIndexOf("@"));
+
+/** The invocation a path takes at its `depth`th frame: the frames above it where they stood, and its function. */
+const invocationAt = (path: readonly string[], depth: number): string =>
+  [...path.slice(0, depth), functionOf(path[depth]!)].join(">");
+
+/** A deciding read and the consumer invocation it belongs to: where it leaves the warning's path (`invocationAt`). */
+interface Deciding {
+  readonly read: RecordedRead;
+  readonly depth: number;
+  readonly invocation: string;
+}
+
+/**
+ * The reads a warning's consumer invocation made (TABLE r4.290's inventory, `readOf` attributed at record time): those
+ * of its walk's unit made on the warning's own path, directly or through a call that emitted no warning (a helper, as
+ * `kindsOf`), never inside a call that emitted its own (a `selection` within a member's read, the next consumer of the
+ * unit); each with the invocation it belongs to, the frame where it leaves that path. Reads of different consumers at
+ * one key stay apart by their invocations.
+ */
+function decidingReads(recorded: Recorded, emission: Emission): readonly Deciding[] {
+  const emitting = new Set(
+    recorded.emissions
+      .filter((each) => each.unit === emission.unit)
+      .flatMap((each) => each.path.map((_, depth) => invocationAt(each.path, depth))),
+  );
+  const own = emission.path;
+  return [...recorded.reads.values()].flat().flatMap((read) => {
+    if (read.unit !== emission.unit) return [];
+    const path = read.path;
+    let depth = 0;
+    while (depth < path.length && depth < own.length && path[depth] === own[depth]) depth += 1;
+    // (where the read leaves the warning's path: in the frame both stand in, below which it may call another)
+    const within =
+      depth < path.length &&
+      depth < own.length &&
+      functionOf(path[depth]!) === functionOf(own[depth]!)
+        ? depth
+        : depth - 1;
+    if (within < 0) return [];
+    const branch = within + 1;
+    return branch >= path.length || !emitting.has(invocationAt(path, branch))
+      ? [{ read, depth: within, invocation: invocationAt(path, within) }]
+      : [];
+  });
+}
+
+/** `Consumers.rules` recording each warning its consumers emit with the invocation that emits it. */
+class EmissionsOf extends Map<CoreDiagnostic, number> {
+  // (a plain field: `Map`'s constructor sets the entries before a subclass's fields exist)
+  into: ((diagnostic: CoreDiagnostic) => void) | undefined;
+  constructor(
+    entries: Iterable<readonly [CoreDiagnostic, number]>,
+    into: (d: CoreDiagnostic) => void,
+  ) {
+    super(entries);
+    this.into = into;
+  }
+  override set(diagnostic: CoreDiagnostic, rule: number): this {
+    this.into?.(diagnostic);
+    return super.set(diagnostic, rule);
+  }
 }
 
 /**
  * Runs `make`, an analysis under a demand allowance, recording each read its consumers make through
- * `Consumers.valueItems` (wrapped for the run alone, restored in any case): the value's site and its steps where they are
- * an array, the answer, whether the finishing walk made it and in requirement mode. The wrap fails loudly where the method
- * is not the one it expects (three parameters before the defaulted requirement), never recording nothing.
+ * `Consumers.valueItems`, each value they leave to its contract (`Consumers.skip`, read as answered) and each warning
+ * they emit (`Consumers.rules`), with the consumer invocation of each: the walk's unit (`Consumers.runs`,
+ * `Consumers.enter`) and its consumer path (`consumerPath`). The consumers are module functions
+ * no test can replace, so an invocation is the call stack's (TABLE r4.290's inventory, the lead's ruling on `d8086f7`).
+ * Each wrap is for the run alone, restored in any case, and fails loudly where its method is not the one it expects.
  */
 function recordingReads<T extends { readonly answers: Answers }>(make: () => T): T {
   const prototype = Consumers.prototype;
-  const original = prototype.valueItems;
-  if (typeof original !== "function" || original.length !== 3)
+  const { valueItems, runs, enter, check, finish, skip } = prototype;
+  if (
+    typeof valueItems !== "function" ||
+    valueItems.length !== 3 ||
+    typeof runs !== "function" ||
+    runs.length !== 1 ||
+    typeof enter !== "function" ||
+    enter.length !== 1 ||
+    typeof check !== "function" ||
+    typeof finish !== "function" ||
+    typeof skip !== "function"
+  )
     throw new Error(
-      "Consumers.prototype.valueItems is not the read the recorder wraps (value, node, rest, requirement)",
+      "Consumers.prototype is not the walk the recorder wraps (valueItems, runs, enter, check, finish, skip)",
     );
-  const walks = new Map<Consumers, Map<string, RecordedRead[]>>();
+  interface Walk {
+    readonly reads: Map<string, RecordedRead[]>;
+    readonly emissions: Emission[];
+    unit: number;
+    unitSite: string;
+  }
+  const walks = new Map<Consumers, Walk>();
+  const walkOf = (consumers: Consumers): Walk => {
+    let walk = walks.get(consumers);
+    if (walk === undefined)
+      walks.set(consumers, (walk = { reads: new Map(), emissions: [], unit: 0, unitSite: "" }));
+    return walk;
+  };
+  // (each walk's warnings as `warning` and `error` record them, whatever map the walk began with, for the run alone)
+  const maps: EmissionsOf[] = [];
+  const recording = (consumers: Consumers): void => {
+    if (consumers.rules instanceof EmissionsOf) return;
+    const walk = walkOf(consumers);
+    const map = new EmissionsOf(consumers.rules, (diagnostic) => {
+      if ("obligation" in diagnostic)
+        walk.emissions.push({
+          obligation: JSON.stringify(diagnostic.obligation),
+          unit: walk.unit,
+          path: consumerPath(),
+        });
+    });
+    maps.push(map);
+    Object.defineProperty(consumers, "rules", {
+      value: map,
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+  };
+  prototype.check = function (this: Consumers) {
+    recording(this);
+    return check.call(this);
+  };
+  prototype.finish = function (this: Consumers, ...args: Parameters<Consumers["finish"]>) {
+    recording(this);
+    return finish.apply(this, args);
+  };
+  prototype.enter = function (this: Consumers, ...args: Parameters<Consumers["enter"]>) {
+    const walk = walkOf(this);
+    walk.unit += 1;
+    walk.unitSite = `stage ${String(args[0])}`;
+    return enter.apply(this, args);
+  };
+  prototype.runs = function (this: Consumers, ...args: Parameters<Consumers["runs"]>) {
+    const walk = walkOf(this);
+    walk.unit += 1;
+    walk.unitSite = siteKey(args[0]);
+    return runs.apply(this, args);
+  };
+  const record = (
+    consumers: Consumers,
+    value: Parameters<Consumers["valueItems"]>[0],
+    rest: readonly string[],
+    items: readonly Item[],
+    requirement: boolean,
+  ): void => {
+    const site = consumers.pass.program.places[value]?.site;
+    if (site === null || site === undefined) return;
+    const walk = walkOf(consumers);
+    const key = readKey(site, rest);
+    const read = {
+      key,
+      items,
+      finishing: consumers.finishing,
+      requirement,
+      unit: walk.unit,
+      unitSite: walk.unitSite,
+      path: consumerPath(),
+    };
+    const reads = walk.reads.get(key);
+    if (reads === undefined) walk.reads.set(key, [read]);
+    else reads.push(read);
+  };
   prototype.valueItems = function (this: Consumers, ...args: Parameters<Consumers["valueItems"]>) {
-    const items = original.apply(this, args);
+    const items = valueItems.apply(this, args);
     const [value, , rest, requirement = false] = args;
-    const site = this.pass.program.places[value]?.site;
-    if (site !== null && site !== undefined && Array.isArray(rest)) {
-      let reads = walks.get(this);
-      if (reads === undefined) walks.set(this, (reads = new Map()));
-      const key = readKey(site, rest);
-      reads.set(key, [
-        ...(reads.get(key) ?? []),
-        { items, finishing: this.finishing, requirement },
-      ]);
-    }
+    if (Array.isArray(rest)) record(this, value, rest, items, requirement);
     return items;
+  };
+  // (a value a consumer leaves to its contract, the quiet path: answered, nothing read)
+  prototype.skip = function (this: Consumers, ...values: Parameters<Consumers["skip"]>) {
+    for (const value of values) if (value !== undefined) record(this, value, [], [], false);
+    return skip.apply(this, values);
   };
   try {
     const made = make();
-    consumerReads.set(made.answers, [...walks.values()].at(-1) ?? new Map());
+    consumerReads.set(
+      made.answers,
+      [...walks.values()].at(-1) ?? { reads: new Map(), emissions: [] },
+    );
     return made;
   } finally {
-    prototype.valueItems = original;
+    Object.assign(prototype, { valueItems, runs, enter, check, finish, skip });
+    for (const map of maps) map.into = undefined;
   }
 }
 
@@ -1005,10 +1137,12 @@ const withoutLabels = (on: string): string =>
  * its consumers' reads (`recordingReads`); each of its checks the stopped analysis neither keeps nor marks is accepted only
  * by one clause, every site whole (file and offsets), a slot a site, target, boundary and kind, a domain the kinds a check
  * lets through (`domainOf`):
- * - (a) a consumer's check, never a store's, one of whose reads (`readOf`) a reference consumer made and got an
- *   `unknown` with the reason `budget` (a recovered contract tagged `budget` is no such read), each such read answered
- *   with none by the stopped analysis's finishing walk, and at whose slot the natural analysis (no demand, no stop) and
- *   the stopped one owe the same domains, the natural one not the check itself;
+ * - (a) a consumer's check, never a store's, some of whose deciding reads (`decidingReads`: those of the consumer
+ *   invocation that emitted it, attributed at record time) got an `unknown` with the reason `budget` (a recovered
+ *   contract tagged `budget` is no such read), the stopped analysis's last run of that invocation (its finishing walk's
+ *   where that ran it again) making at least one of them again and getting each it made again settled, and at whose
+ *   slot the natural analysis (no demand, no stop) and the stopped one owe the same domains, the natural one not the
+ *   check itself;
  * - (w) marks at its place (site, target, boundary), of any kind, the only checks owed there, together letting through
  *   exactly its domain (their domains' intersection: checks on one value): the reference satisfied in other words;
  * - (z) a boundary against `unknown`, no plan content (S3 §4), nothing owed at its slot, where an undecided store record
@@ -1048,19 +1182,33 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
         (d) => "obligation" in d && JSON.stringify(d.obligation) === text,
       );
       if (owner !== undefined && "rule" in owner && owner.rule.rule !== "store") {
-        const keys = new Set(
-          readOf(syntax(), u, owner.rule).flatMap((read) => readKeys(reads, read)),
-        );
-        // (each read the reference's walk got `unknown` with the reason `budget`: the stopped analysis's finishing walk
-        // read it, every such read settled)
-        const open = [...keys].filter((key) =>
-          (reads.get(key) ?? []).some((each) => !each.finishing && unsettled(each.items)),
-        );
-        const answered = (key: string): boolean => {
-          const after = (finished.get(key) ?? []).filter((each) => each.finishing);
-          return after.length > 0 && after.every((each) => !unsettled(each.items));
+        // (the reads of the invocation that emitted the check, the deciding reads, those the reference's walk got
+        // `unknown` with the reason `budget` open; the stopped analysis's last run of each one's invocation, its
+        // finishing walk's where that ran it again, else its walk's, made at least one of them again, reading it or
+        // leaving it to its contract, and got each it made again settled)
+        const open = reads.emissions
+          .filter((emission) => emission.obligation === text)
+          .flatMap((emission) => decidingReads(reads, emission))
+          .filter(({ read }) => unsettled(read.items));
+        const madeAgain = ({ read, depth, invocation }: Deciding): readonly RecordedRead[] => {
+          const run = [...finished.reads.values()]
+            .flat()
+            .filter(
+              (each) =>
+                each.unitSite === read.unitSite &&
+                each.path.length > depth &&
+                invocationAt(each.path, depth) === invocation,
+            );
+          const finishing = run.some((each) => each.finishing);
+          return run.filter((each) => each.key === read.key && each.finishing === finishing);
         };
-        if (open.length > 0 && open.every(answered)) return "a";
+        const made = open.filter((each) => madeAgain(each).length > 0);
+        if (
+          made.length > 0 &&
+          made.every((each) => madeAgain(each).every((again) => !unsettled(again.items)))
+        )
+          return "a";
+        if (open.length > 0 && made.length === 0) cut.add(text);
       }
     }
     // ((w): every check owed at the place a mark; those of the check's dimension letting through its domain together)
@@ -1092,6 +1240,7 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
     return relabelledTo(u) ? "relabelled" : null;
   };
   const checks = new Map<string, "a" | "w" | "z">();
+  const cut = new Set<string>();
   const relabelled = { checks: new Set<string>(), records: new Set<string>() };
   const owing = new Set<string>();
   for (const u of reference.checks) {
@@ -1126,7 +1275,7 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
     )
       relabelled.records.add(record);
   }
-  return { checks, records, relabelled, owing };
+  return { checks, records, relabelled, owing, cut };
 }
 
 /**
