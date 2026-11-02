@@ -535,7 +535,7 @@ export interface PublicationParts {
   readonly route: string;
   /**
    * The nodes the oracle's own questions left unanswered (`answeredOccurrences`), apart from the parts: 0 when it
-   * answered all. A publication with any is neither agreement nor an exception (#1439): a comparison rejects it.
+   * answered all. How the families runner compares a publication with any: `tests/families/README.md`.
    */
   readonly unanswered: number;
 }
@@ -596,7 +596,7 @@ const sha256 = (text: string): string => createHash("sha256").update(text).diges
 /** A publication's parts by their hashes (`publicationHashes`), with the nodes its oracle left unanswered apart. */
 export interface PublicationHashes {
   readonly parts: readonly string[];
-  /** `PublicationParts`'s `unanswered`: a publication with any is never agreement. */
+  /** `PublicationParts`'s `unanswered`. */
   readonly unanswered: number;
 }
 
