@@ -145,6 +145,27 @@ export function* inline(work: Work<readonly Item[]>): Work<readonly Item[]> {
   return nativeInline ? yield* work : yield { inline: work };
 }
 
+let everyRecord = false;
+
+/**
+ * Test-only: runs `callback` with every record a stop forgets by kept until the pass's last decision, as before #1599,
+ * whether or not a stop can reach it: the oracle that a forget sees the same answers either way.
+ */
+export function withEveryRecord<T>(callback: () => T): T {
+  if (everyRecord) throw new Error("Every record is already kept.");
+  everyRecord = true;
+  try {
+    return callback();
+  } finally {
+    everyRecord = false;
+  }
+}
+
+/** Whether `withEveryRecord` runs. */
+export function everyRecordKept(): boolean {
+  return everyRecord;
+}
+
 /** A computation that yields the demands it reads (and those it reads inline) and receives their items. */
 export type Work<T> = Generator<Demand | ProofDemand<Proof> | Inline, T, readonly Item[]>;
 
@@ -177,6 +198,11 @@ interface DemandNode {
   choice: string | null;
   /** The component being solved that it is a member of. */
   component: Component | null;
+  /**
+   * Whether a stop may forget it (#1599): it asked a key a decision can still stop, it is an occurrence (`Contract.stop`),
+   * or it read a demand that a stop may forget or that had not finished.
+   */
+  forgettable: boolean;
 }
 
 interface Frame {
@@ -354,10 +380,13 @@ export class Solver {
   /** The finished proof demands' proofs, kept with their answers in `#memo`. */
   readonly #proofs = new Map<string, Proof>();
   /**
-   * Each demand's readers: the demands whose runs read it (`#read`), for `forget`; one reader as itself, several as a
-   * set. Kept only while a decision of the pass can still stop (`closeForgetting`).
+   * The readers of each demand a stop may forget, or that has not finished: the demands whose runs read it (`#read`),
+   * for `forget`; one reader as itself, several as a set. A demand that finishes where no stop can reach it keeps none,
+   * and none is kept once no decision of the pass can stop (`closeForgetting`, #1599).
    */
   readonly #readers = new Map<string, string | Set<string>>();
+  /** The finished demands a stop may forget (`DemandNode.forgettable`). */
+  readonly #forgettable = new Set<string>();
   /** Whether a decision of the pass can still stop, so `forget` may still be asked (#1599). */
   #forgetting = true;
   readonly #active = new Map<string, DemandNode>();
@@ -539,6 +568,42 @@ export class Solver {
   public closeForgetting(): void {
     this.#forgetting = false;
     this.#readers.clear();
+    this.#forgettable.clear();
+  }
+
+  /**
+   * A stop may forget the demand `key` (`Contract`): it asked a key whose decision can still stop, or it is an
+   * occurrence, which every stop forgets.
+   */
+  public mayForget(key: string): void {
+    if (!this.#forgetting) return;
+    const node = this.#active.get(key);
+    if (node !== undefined) node.forgettable = true;
+    else if (this.#memo.has(key)) this.#forgettable.add(key);
+  }
+
+  /**
+   * The demand a frame runs read `key`, which a stop may forget or which had not finished: it is kept among `key`'s
+   * readers, each new one counted apart from the allowance, and a stop may forget it too.
+   */
+  #keepReader(frame: Frame | undefined, key: string): void {
+    const node = frame?.node ?? frame?.rerun?.member;
+    if (node === undefined || !this.#forgetting) return;
+    node.forgettable = true;
+    const reader = node.demand.key;
+    const readers = this.#readers.get(key);
+    if (readers === reader || (typeof readers === "object" && readers.has(reader))) return;
+    if (readers === undefined) this.#readers.set(key, reader);
+    else if (typeof readers === "string") this.#readers.set(key, new Set([readers, reader]));
+    else readers.add(reader);
+    countApart(this.#work, "readerRecords");
+  }
+
+  /** A demand finished: kept among those a stop may forget, else no reader of it is kept, none being needed. */
+  #finished(node: DemandNode): void {
+    if (!this.#forgetting) return;
+    if (node.forgettable || everyRecord) this.#forgettable.add(node.demand.key);
+    else this.#readers.delete(node.demand.key);
   }
 
   /** The demand whose run is reading (a first run's or a member's again), `null` outside one. */
@@ -552,6 +617,7 @@ export class Solver {
    */
   public forget(keys: readonly string[]): void {
     if (this.#running) throw new Error("The solver cannot forget an answer while it runs.");
+    // (an invariant, as the guard above and `run`'s: no decision stops after the pass's last, #1599)
     if (!this.#forgetting)
       throw new Error("The solver cannot forget an answer after the pass's last decision.");
     const todo = [...keys];
@@ -559,6 +625,7 @@ export class Solver {
     for (let key = todo.pop(); key !== undefined; key = todo.pop()) {
       this.#memo.delete(key);
       this.#proofs.delete(key);
+      this.#forgettable.delete(key);
       const readers = this.#readers.get(key);
       for (const reader of typeof readers === "string" ? [readers] : (readers ?? []))
         if (!seen.has(reader)) {
@@ -647,21 +714,13 @@ export class Solver {
 
   /** A frame yields `demand`: its answer, a provisional one, or a new frame for it. */
   #read(frame: Frame, demand: Demand | ProofDemand<Proof>): void {
-    // (its reader kept for `forget` while a decision can still stop, each new one counted apart from the allowance)
-    const reader = demandOf(frame);
-    if (reader !== null && this.#forgetting) {
-      const readers = this.#readers.get(demand.key);
-      if (readers !== reader && !(typeof readers === "object" && readers.has(reader))) {
-        if (readers === undefined) this.#readers.set(demand.key, reader);
-        else if (typeof readers === "string")
-          this.#readers.set(demand.key, new Set([readers, reader]));
-        else readers.add(reader);
-        countApart(this.#work, "readerRecords");
-      }
-    }
-    const finished = this.#memo.get(demand.key);
-    if (finished !== undefined) {
-      frame.pending = finished;
+    // (its reader kept for `forget` where a stop may forget it: a finished one a stop may forget, or one not finished;
+    // a new one's reader once it finishes, if a stop may forget it then: `#finish`, `#solved`, #1599)
+    if (everyRecord || this.#forgettable.has(demand.key) || this.#active.has(demand.key))
+      this.#keepReader(frame, demand.key);
+    const answer = this.#memo.get(demand.key);
+    if (answer !== undefined) {
+      frame.pending = answer;
       return;
     }
     const node = this.#active.get(demand.key);
@@ -677,6 +736,7 @@ export class Solver {
         inputProof: null,
         choice: null,
         component: null,
+        forgettable: false,
       };
       this.#active.set(demand.key, created);
       const pushed = this.#frame(created, demand.make(), created.index, null);
@@ -710,6 +770,8 @@ export class Solver {
     node.proof = open.proof;
     parent.low = Math.min(parent.low, frame.low);
     if (frame.low !== frame.index) {
+      // (its reader read a demand not finished)
+      this.#keepReader(parent, node.demand.key);
       parent.pending = node.value;
       return;
     }
@@ -725,6 +787,8 @@ export class Solver {
       this.#memo.set(node.demand.key, node.value);
       if (node.proof !== null) this.#proofs.set(node.demand.key, node.proof);
       this.#active.delete(node.demand.key);
+      this.#finished(node);
+      if (node.forgettable) this.#keepReader(parent, node.demand.key);
       this.#units.push({ key: node.demand.key, units: this.#work.total - frame.started });
       parent.pending = node.value;
       return;
@@ -911,10 +975,12 @@ export class Solver {
       this.#memo.set(member.demand.key, member.value);
       if (member.proof !== null) this.#proofs.set(member.demand.key, member.proof);
       this.#active.delete(member.demand.key);
+      this.#finished(member);
     }
     if (this.#seam?.onComponent !== undefined)
       this.#seam.onComponent(solved, this.replayOf?.(solved.map((member) => member.key)) ?? null);
     const closing = solving.closing.node!;
+    if (closing.forgettable) this.#keepReader(this.#frames.at(-1), closing.demand.key);
     this.#units.push({
       key: closing.demand.key,
       units: this.#work.total - solving.closing.started,

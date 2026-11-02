@@ -27,7 +27,12 @@ import {
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import { withSolverSeam, type Proof, type ProofDemand } from "../src/type-inference/core/solver.js";
+import {
+  withEveryRecord,
+  withSolverSeam,
+  type Proof,
+  type ProofDemand,
+} from "../src/type-inference/core/solver.js";
 import { REASON, type Item } from "../src/type-inference/core/items.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -3680,6 +3685,93 @@ test("every answer kept before a key's decision stops answers the stop from the 
               for (const value of values)
                 assert.deepEqual(after.get(value), read(fresh, value), `${text(value)}: ${where}`);
             });
+  }
+});
+
+/**
+ * #1599: what a stop forgets by is kept only where a decision can still stop (a place before its last decision ends,
+ * and the readers of what a stop may then forget), so a forget sees exactly the answers it would with every record
+ * kept (`withEveryRecord`). Shapes whose decisions read a place before, between and after its stores' decisions, through
+ * copies, selections and an operation, each at demand allowances from 1 to 1,024 in the four modes, where decisions
+ * stop: the stop set and what is published at it the same either way, and a decision stops at some allowance.
+ */
+test("a stop forgets what it would with every record kept: the same stop sets in the four modes (#1599)", () => {
+  const shapes = [
+    'let seed = {n: "origin", m: "other"}\nseed.n = "later"\nlet c = seed.n\nlet d = [seed.n, seed.m][0]\nsay c\nsay d\nexit\n',
+    'let seed = {n: "origin"}\nlet c0 = seed.n\nlet c1 = [seed.n][0]\nseed.n = "later"\nlet c2 = seed.n\nsay c2\nexit\n',
+    "let box = {q: {n: 1}}\nlet copy = box\nbox.q.n = 2\ncopy.q.n = 3\nlet out = copy.q.n\nsay out\nexit\n",
+    "let box = [[{n: 1}]]\nlet copy = box\nbox[0][0].n = 2\nsay copy.first.first.n\nexit\n",
+    "let v: integer? = null\nlet a = {n: {m: v}}\na.n.m = 3\nsay (a.n otherwise {m: 2}).m\nexit\n",
+  ];
+  for (const source of shapes) {
+    const files = [{ path: "main.tease", source }];
+    let stopped = 0;
+    for (const mode of MODES)
+      for (let allowance = 1; allowance <= 1024; allowance *= 2) {
+        const stops = () => stopSet(files, mode, ["hostValue"], allowance);
+        const kept = stops();
+        assert.deepEqual(
+          kept,
+          withEveryRecord(stops),
+          `${source.split("\n")[1]} ${JSON.stringify(mode)} at demand ${allowance}`,
+        );
+        if ((kept?.stops.length ?? 0) > 0) stopped += 1;
+      }
+    assert.ok(stopped > 0, `${source.split("\n")[1]}: a decision stops`);
+  }
+});
+
+/**
+ * #1599: what a stop forgets by stands for a place until its last decision ends (`Contract.openDecisions`, `decided`).
+ * Each binding is given two decisions and every other binding one; every value is read; every other binding's decision
+ * ends, and one of the two of the binding to stop; the binding's key, or one below it, stops: every value then answers
+ * as in a pass that starts with that key stopped, in both read orders and the four modes, so what was asked of the
+ * place before its first decision ended is still forgotten.
+ */
+test("what a stop forgets by stands for a place until its last decision ends (#1599)", () => {
+  const shapes = [
+    "let box = [[{n: 1}]]\nlet copy = box\nsay copy.first.first.n\nexit\n",
+    "let v: integer? = null\nlet a = {n: {m: v}}\nsay (a.n otherwise {m: 2}).m\nexit\n",
+    "let a = {n: 1}\nsay [a][0].n\nexit\n",
+  ];
+  for (const source of shapes) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { program } = narrowingPass(request);
+    const values = program.places
+      .filter((place) => place.kind.kind === "value" || place.kind.kind === "target")
+      .map((place) => place.id);
+    const bindings = program.places
+      .filter((place) => place.kind.kind === "binding")
+      .map((place) => place.id);
+    const stops: { readonly place: PlaceId; readonly path: readonly string[] }[] = [];
+    for (const place of bindings) stops.push({ place, path: [] });
+    for (const value of values) {
+      const { root, path } = program.targetRoot(value);
+      if (bindings.includes(root) && path.length > 0) stops.push({ place: root, path });
+    }
+    for (const stop of stops)
+      for (const [mode, inMode] of STOP_MODES)
+        for (const order of ["source", "reversed"])
+          inMode(() => {
+            const where = `${source.split("\n").at(-3)} @${program.places[stop.place]!.label}.${stop.path.join(".")}, ${mode}, ${order}`;
+            const read = (pass: CorePass, value: PlaceId) =>
+              tagged(pass.solver.run(pass.contract.contractOfValue(value)));
+            const own = order === "source" ? values : [...values].reverse();
+            const pass = narrowingPass(request);
+            pass.contract.openDecisions([
+              ...bindings.map((root) => ({ root })),
+              { root: stop.place },
+            ]);
+            for (const value of own) read(pass, value);
+            for (const root of bindings) pass.contract.decided(root);
+            pass.contract.stop(stop.place, stop.path);
+            const after = new Map(own.map((value) => [value, read(pass, value)]));
+            const fresh = narrowingPass(request);
+            fresh.contract.stop(stop.place, stop.path);
+            for (const value of values)
+              assert.deepEqual(after.get(value), read(fresh, value), where);
+          });
   }
 });
 

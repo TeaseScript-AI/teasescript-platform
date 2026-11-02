@@ -455,6 +455,8 @@ export class Consumers {
   public check(): void {
     try {
       this.rule = 1;
+      // (the decisions that can stop, before the first: what a stop forgets by is kept for their places alone, #1599)
+      this.pass.contract.openDecisions(this.admission.groups());
       admittedStores(this);
       this.rule = 2;
       for (const { site, label } of this.admission.ingressStores()) ingressMark(this, site, label);
@@ -466,7 +468,7 @@ export class Consumers {
       const own = this.#ownTargets(this.admission, (root, path) => {
         decide(this, { root, path }, true);
       });
-      // (no decision stops from here on: what a stop forgets by is dropped, #1599)
+      // (no decision stops from here on, the targets' included: what a stop forgets by is dropped, #1599)
       this.pass.contract.closeDecisions();
       this.settled =
         own &&

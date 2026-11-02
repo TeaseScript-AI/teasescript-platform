@@ -155,7 +155,7 @@ import type { Callable, FlowNode } from "./flow-graph.js";
 import type { ContextWord, IngressNode, Item, Writer } from "./items.js";
 import type { PlusIndex } from "./plus-index.js";
 import type { ValueConstraint } from "./program.js";
-import type { Work } from "./solver.js";
+import { everyRecordKept, type Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";
 export { choiceItems, choiceLabels, WIDE } from "./contract/choices.js";
 export {
@@ -429,11 +429,20 @@ export class Contract {
   #stoppedCount = 0;
   /**
    * The demands whose runs asked whether a key stopped, by place, with the keys they asked (`#asked`, `stop`): one key
-   * as itself, several as a set; kept only while a decision can still stop (`closeDecisions`).
+   * as itself, several as a set; kept only for a place a decision can still stop (`#open`, #1599).
    */
   readonly #askers = new Map<PlaceId, Map<string, CanonicalKey | Set<CanonicalKey>>>();
-  /** Whether a decision of the pass can still stop (`closeDecisions`). */
+  /**
+   * #1599: per place, how many of the decisions that can stop it have not ended (admission's groups by their root,
+   * `openDecisions`, `decided`); a place absent from it no decision stops, so nothing asked of it is kept. `null` while
+   * every place may still stop: before the groups are known, and in a pass whose targets decide receivers (#1275,
+   * `targetsDecide`) until those have run (`closeDecisions`).
+   */
+  #open: Map<PlaceId, number> | null = null;
+  /** Whether a decision of the pass can still stop: else nothing a stop forgets by is kept (`#close`). */
   #deciding = true;
+  /** The pass's targets decide the receivers of its selecting stores (#1275, `analyseCore`): any place may stop there. */
+  targetsDecide = false;
   /**
    * The demands of the property and index reads' occurrence answers and of the positions (`positions.ts`) made since the
    * last stop (`contractOfValue`, `stop`).
@@ -525,7 +534,10 @@ export class Contract {
   /** The running demand asked whether `key` stopped: kept for `stop`, each new ask counted apart from the allowance. */
   #asked(place: PlaceId, key: () => CanonicalKey): void {
     const demand = this.pass.solver.reading;
-    if (demand === null || !this.#deciding) return;
+    // (a place no decision can still stop: no stop forgets by what is asked of it, #1599)
+    if (demand === null || !this.#deciding || (this.#open !== null && !this.#open.has(place)))
+      return;
+    this.pass.solver.mayForget(demand);
     let byDemand = this.#askers.get(place);
     if (byDemand === undefined) this.#askers.set(place, (byDemand = new Map()));
     const keys = byDemand.get(demand);
@@ -538,17 +550,52 @@ export class Contract {
   }
 
   public remember(demand: string): void {
-    if (this.#deciding) remember(this, demand);
+    if (!this.#deciding) return;
+    remember(this, demand);
+    this.pass.solver.mayForget(demand);
   }
 
   /**
-   * #1599: the pass's last decision that can stop has run. A decision stops only in admission's walk of its groups and
-   * the receivers a pass's targets decide (`Consumers.check`, `consumers/stores.ts`'s `decide`), never in a lazily decided
-   * copy path or after a stop, so no key stops from now on: what a stop forgets by (each asker and its keys, each
-   * demand's readers, the occurrences since the last stop) is dropped and no longer kept, its records made only while a
-   * decision runs. `stop` after it throws (`Solver.forget`).
+   * #1599: the decisions admission's walk makes (its groups, `Consumers.check`), the only ones besides a pass's targets'
+   * that can stop (`consumers/stores.ts`'s `decide`; a lazily decided copy path never does): each place is kept for what
+   * a stop forgets by until its last group's decision ends (`decided`), and what was asked of any other is dropped.
+   */
+  public openDecisions(groups: readonly { readonly root: PlaceId }[]): void {
+    if (!this.#deciding || this.targetsDecide || everyRecordKept()) return;
+    const open = new Map<PlaceId, number>();
+    for (const { root } of groups) open.set(root, (open.get(root) ?? 0) + 1);
+    this.#open = open;
+    for (const place of [...this.#askers.keys()]) if (!open.has(place)) this.#askers.delete(place);
+    if (open.size === 0) this.#close();
+  }
+
+  /**
+   * A group's decision at `root` ended: once the place's last has, no stop forgets by what was asked of it; once every
+   * place's has, nothing a stop forgets by is kept (`#close`).
+   */
+  public decided(root: PlaceId): void {
+    const open = this.#open;
+    const left = open?.get(root);
+    if (open === null || left === undefined) return;
+    if (left > 1) {
+      open.set(root, left - 1);
+      return;
+    }
+    open.delete(root);
+    this.#askers.delete(root);
+    if (open.size === 0) this.#close();
+  }
+
+  /**
+   * No decision of the pass stops from now on: where its targets decide receivers once they have (`Consumers.check`),
+   * and after a stop (`Consumers.finish`); elsewhere already when its last group's decision ended (`decided`).
    */
   public closeDecisions(): void {
+    this.#close();
+  }
+
+  /** Nothing a stop forgets by is kept from now on: each asker, each demand's readers, the occurrences (#1599). */
+  #close(): void {
     if (!this.#deciding) return;
     this.#deciding = false;
     this.#askers.clear();
