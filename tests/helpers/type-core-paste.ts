@@ -754,7 +754,8 @@ const OWN_FIRST: ReadonlySet<string> = new Set(["functionDeclaration"]);
  * instruction that consumes the evaluated operands shows it, which the lowering emits after their evaluation: of the
  * instructions with the span of the innermost statement around the code, the one emitted last; and for each position on
  * the way down that a run may skip (`lazyPosition`), the last one with that position's span. A setup instruction that
- * shares a span runs before the operands, and a pure position has no instruction of its own, so neither shows anything.
+ * shares a span runs before the operands, so it shows nothing, and a position without an instruction of its own span
+ * supplies no evidence (Codex r3 on #1589).
  */
 function unevaluated(
   source: string,

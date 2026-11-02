@@ -1493,7 +1493,8 @@ test("a pasted form counts as run only where its run ends through it, answered w
  * Codex r1 and r2 on #1589: only the instruction that consumes a pasted form's evaluated operands shows the form ran,
  * the last the lowering emits for its statement and for each position on the way down that a run may skip
  * (`unevaluated` in `type-core-paste.ts`). A setup instruction with the same span runs before the operands, and one
- * around a skipped position runs too: at each position, taken through an answer's prompt, skipped, or pure, unproved.
+ * around a skipped position runs too: at each position, taken through an answer's prompt; skipped, or without an
+ * instruction of its own span, unproved.
  */
 test("a pasted form counts as evaluated only where the instruction that consumes it ran (Codex r1 and r2 on #1589)", () => {
   const ask = 'askInteger("${t.length}")';
