@@ -1700,7 +1700,8 @@ default's type. `password: askPassword(...)` written directly, also in parenthes
 arguments before it are evaluated first, then its question is said as the ask's would be, and then the arguments after
 it.
 
-The instruction's first run checks its operands, with the compiler's code `TSV043` for what it also checks: `encryptText`
+The instruction's first run checks its operands, with the compiler's code `TSV043` for what it also checks
+([Codes with more than one owner](DIAGNOSTICS.md#codes-with-more-than-one-owner)): `encryptText`
 needs text, the file calls a stored file of the session (`TSR059` for other text, as for `fileToBase64`), `password:`
 and `key:` text, an encrypt call's `password:` also `true` or `false`, `publicKey:` a public key, a list of them,
 `true`, or `false`, and `timeLock:` an `absoluteDateTime`, `true`, or `false`; an encrypt call whose openers are all
@@ -1846,9 +1847,9 @@ value only as a bounded preview. It uses only names and values the engine has al
 the exact text, and a failure that a checkpoint or debug export already recorded keeps its message. A code marked
 _defect_ means that the plan, the engine's state, or the host is wrong rather than the script: continue from an earlier
 checkpoint or restart, and report the failure with its debug export. Every code is registered in
-`src/diagnostic-codes.ts`, and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) lists the codes of compiler diagnostics. A rule
-that the compiler also checks fails with the compiler's code and text, also for a value the compiler did not know
-([Codes with more than one owner](DIAGNOSTICS.md#codes-with-more-than-one-owner)); this table lists the others.
+`src/diagnostic-codes.ts`, and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) lists the codes of compiler diagnostics.
+[Codes with more than one owner](DIAGNOSTICS.md#codes-with-more-than-one-owner) states when a runtime failure uses a
+compiler code and its text; this table lists the runtime's own codes.
 
 | Code | What failed | What to do |
 | --- | --- | --- |

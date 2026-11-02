@@ -161,10 +161,11 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    default's type, where `[]` leaves the element type open and `null` leaves the value unknown, to be tested with `is`.
    An object default, or an expected object type, reads the JSON as that object: a missing key, or one whose value has
    the wrong type, takes that property's value from the default (in debug or test mode a developer warning names the
-   key), extra keys are ignored, nested objects follow the same rules, and malformed text or JSON of another kind gives
-   the whole default. A property that is `null` in the default and gets no type elsewhere in the script stays unknown,
-   tested with `is`. A dict default gives a dict. The default declares the shape the script expects, so its uses are
-   checked at compile time and one bad field does not discard the others.
+   key), extra keys are ignored unless the destination is declared `object`, where V30 §13 keeps them all, nested
+   objects follow the same rules, and malformed text or JSON of another kind gives the whole default. A property that
+   is `null` in the default and gets no type elsewhere in the script stays unknown, tested with `is`. A dict default
+   gives a dict. The default declares the shape the script expects, so its uses are checked at compile time and one bad
+   field does not discard the others.
 
 ### 3. Type syntax and union types
 
