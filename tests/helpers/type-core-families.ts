@@ -2306,7 +2306,8 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
  * #1466's stack of k diamonds of copies (`topologySources`' `diamond`; TABLE r4.224, r4.227): each copies one object
  * into two places, stores into one of them and replaces the next place by the other, every next place read; and its
  * siblings: both places stored, the replacing order reversed, every second right place a shared ancestor, the next place
- * written `object` with a misfitting store, the reads guarded, and the branches of unequal depth (Astra's design review).
+ * written `object` with a misfitting store, the reads guarded, and the branches of unequal depth (Astra's design review);
+ * and (`read`, #1610) each next place shown, written by `toJson` or read at a property no layer stores instead.
  * A read below the shared layers is answered once per layer and path from the layers below it (`prefix-index.ts`), so
  * each grows as k log k where `main` grew as k³. Beside them, Codex r1's B1 dimension: k copies of one record, each
  * storing its own property below one step, joined into one place and read at each property, directly and through a
@@ -2314,8 +2315,32 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
  */
 function diamonds(
   k: number,
-  { both = false, reverse = false, shared = false, typed = false, guarded = false } = {},
+  {
+    both = false,
+    reverse = false,
+    shared = false,
+    typed = false,
+    guarded = false,
+    read = "repeat",
+  }: {
+    readonly both?: boolean;
+    readonly reverse?: boolean;
+    readonly shared?: boolean;
+    readonly typed?: boolean;
+    readonly guarded?: boolean;
+    readonly read?: "repeat" | "shown" | "json" | "absent";
+  } = {},
 ): readonly SourceFile[] {
+  const readOf = (place: string): string =>
+    guarded
+      ? `if ${place}.g != null { repeat ${place}.g {} }`
+      : read === "shown"
+        ? `say "\${${place}}"`
+        : read === "json"
+          ? `say toJson(${place})`
+          : read === "absent"
+            ? `repeat ${place}.h {}`
+            : `repeat ${place}.g {}`;
   return main(
     lines(
       "let d0 = {f: hostValue, g: 1}",
@@ -2331,9 +2356,7 @@ function diamonds(
           `d${i + 1} = ${second}`,
         );
       }),
-      rows(k, (i) =>
-        guarded ? `if d${i + 1}.g != null { repeat d${i + 1}.g {} }` : `repeat d${i + 1}.g {}`,
-      ),
+      rows(k, (i) => readOf(`d${i + 1}`)),
       "exit",
     ),
   );
@@ -2381,7 +2404,10 @@ function sharedJoin(k: number): readonly SourceFile[] {
  * storing a property, storing its own too, read through a copy. Every copy lists `g`, and only one holds a read's
  * property; `main` grows superlinearly on each.
  */
-function listingChain(k: number, { joined = false, stored = false } = {}): readonly SourceFile[] {
+function listingChain(
+  k: number,
+  { joined = false, stored = false, shown = false } = {},
+): readonly SourceFile[] {
   const link = (i: number): string =>
     stored
       ? `let a${i} = d${i}\na${i}.g.p${i} = hostValue\nlet d${i + 1} = d${i}\nd${i + 1} = a${i}\nd${i + 1}.g.q${i} = hostValue`
@@ -2394,12 +2420,73 @@ function listingChain(k: number, { joined = false, stored = false } = {}): reado
       ...(joined ? ["let x = d1", rows(k - 1, (i) => `x = d${i + 2}`)] : []),
       ...(stored ? [`let copy = d${k}`] : []),
       rows(k, (i) =>
-        stored ? `repeat copy.g.p${i} {}\nrepeat copy.g.q${i} {}` : `repeat ${read}.g.p${i} {}`,
+        shown
+          ? `say "\${d${i + 1}}"`
+          : stored
+            ? `repeat copy.g.p${i} {}\nrepeat copy.g.q${i} {}`
+            : `repeat ${read}.g.p${i} {}`,
       ),
       "exit",
     ),
   );
 }
+
+/**
+ * #1610's control (TABLE r4.245's output-bound shape for property names): k copies of one record, each storing one
+ * shared wide object of k properties below `g` and a property of its own, joined into one place, read through it and
+ * through a copy of it: a search lists the k copies once each and walks the wide object once, so the work grows with
+ * the program where a set of names kept per layer would copy the wide object's k names into each of the k layers.
+ */
+function wideShared(k: number): readonly SourceFile[] {
+  return main(
+    lines(
+      `let wide = {${fields(k, () => "1")}}`,
+      "let seed = {g: {z: 1}}",
+      rows(k, (i) => `let arm${i} = seed\narm${i}.g = wide\narm${i}.h${i} = hostValue`),
+      "let joined = arm0",
+      rows(k - 1, (i) => `joined = arm${i + 1}`),
+      "let copy = joined",
+      'say "${joined.g}"',
+      'say "${copy.g}"',
+      rows(k, (i) => `repeat joined.h${i} {}`),
+      "exit",
+    ),
+  );
+}
+
+/**
+ * #1610: the property-name search's other askers in #1466's stack of diamonds of copies, inside the analysis (each next
+ * place shown, `shownProperty`; written by `toJson`; read at a property no layer stores, `propertiesOf`), #1466's
+ * listing chain with every copy shown, and the wide object shared below k copies (`wideShared`).
+ */
+export const SEARCH_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "diamonds-shown",
+    measures: "#1610: each next place of the stack shown",
+    program: (k) => diamonds(k, { read: "shown" }),
+  },
+  {
+    name: "diamonds-json",
+    measures: "#1610: each next place of the stack written by toJson",
+    program: (k) => diamonds(k, { read: "json" }),
+  },
+  {
+    name: "diamonds-absent",
+    measures: "#1610: each next place of the stack read at a property no layer stores",
+    program: (k) => diamonds(k, { read: "absent" }),
+  },
+  {
+    name: "listing-chain-shown",
+    measures: "#1610: #1466's listing chain with every copy shown",
+    program: (k) => listingChain(k, { shown: true }),
+  },
+  {
+    name: "wide-shared",
+    measures:
+      "#1610's control: one wide object stored below k joined copies, read through a copy too",
+    program: (k) => wideShared(k),
+  },
+];
 
 /**
  * Codex r4's positive-hit dimension: k records each storing two properties of their own, each copied and storing its own

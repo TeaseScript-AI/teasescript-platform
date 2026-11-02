@@ -11,10 +11,11 @@ import {
   withTestDemandAllowance,
 } from "../src/type-inference/core/budget.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
-import { propertyStep } from "../src/type-inference/core/program.js";
-import { withNameRecords } from "../src/type-inference/core/property-names.js";
+import { CoreProgram, propertyStep } from "../src/type-inference/core/program.js";
+import { withFlatListings, withNameRecords } from "../src/type-inference/core/property-names.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { MODES, inMode } from "./helpers/type-core-oracles.js";
+import { LAYER_FAMILIES, SEARCH_FAMILIES } from "./helpers/type-core-families.js";
+import { MODES, inMode, orderedNames } from "./helpers/type-core-oracles.js";
 
 /*
  * #1493: a property-name search follows a value's copied sources. A copy fed back into the object it came from
@@ -219,8 +220,8 @@ test("a demand stop with a question stop after it ends the search, its names wit
 
 test("the search charges each task it takes up, each prefix it visits, each entry of its path's index and each step its pump check walks or compares (#1493)", () => {
   // (the uncharged-work probe's gate, kept here: the ledger's `checks` during a search are its tasks, a seen one too,
-  // its prefixes, its path's index entries, its pump checks' earlier tasks of their own place and their head steps, and
-  // the keys below a key whose step it reads; the
+  // its prefixes, its path's index entries, its pump checks' earlier tasks of their own place and their head steps, the
+  // keys below a key whose step it reads, and the layer jumps its listings take (#1610); the
   // entries stay within 2 + ⌈log₂ D⌉ per task on a chain of D, the earlier tasks within the longest walk per task, and
   // the head steps within the longest path per earlier task walked)
   const nested = (depth: number): string => {
@@ -272,7 +273,8 @@ test("the search charges each task it takes up, each prefix it visits, each entr
           records.entries +
           records.ancestors +
           records.heads +
-          records.below,
+          records.below +
+          records.jumps,
         label,
       );
       assert.ok(
@@ -349,7 +351,8 @@ test("the search charges each task it takes up, each prefix it visits, each entr
           records.entries +
           records.ancestors +
           records.heads +
-          records.below,
+          records.below +
+          records.jumps,
         label,
       );
       assert.ok(
@@ -571,4 +574,62 @@ test("the first property `${...}` shows of a copy comes from its source's litera
       JSON.stringify(mode),
     );
   }
+});
+
+/**
+ * #1610's identity: a listing's effective sources leave every search as the flat listing leaves it (`withFlatListings`):
+ * each binding's property names two levels down in their order, asked forward and backward, and every diagnostic's
+ * message (`orderedNames`), on #1466's layer families and #1610's (`SEARCH_FAMILIES`) at k = 4 and on the witness of a
+ * listing's fallback where a source could pump (the feedback), in the four modes; each binding's names are one whichever
+ * order asks first; the listings schedule effective sources, skip their run's prefix and fall back where they must; and
+ * every search's `checks` are its records'.
+ */
+test("a listing's effective sources leave every search's names, their order and the messages as the flat listing does (#1610)", () => {
+  const programs = [
+    ...[...LAYER_FAMILIES, ...SEARCH_FAMILIES].map((family) => ({
+      name: family.name,
+      files: family.program(4),
+    })),
+    { name: "feedback", files: [{ path: "main.tease", source: feedback(4) }] },
+  ];
+  const totals = { replayed: 0, skipped: 0, pumpable: 0 };
+  for (const { name, files } of programs) {
+    const request = coreRequest(files, ["hostValue", "hostOther"]);
+    assert.ok(request !== null, name);
+    const bindings = new CoreProgram(request).places
+      .filter(({ kind }) => kind.kind === "binding")
+      .map((place) => place.id);
+    for (const mode of MODES) {
+      const byPlace: Map<number, string>[] = [];
+      for (const order of [bindings, [...bindings].reverse()]) {
+        const label = `${name} ${JSON.stringify(mode)} ${order === bindings ? "forward" : "backward"}`;
+        const ask = (): string =>
+          inMode(mode, () => orderedNames(analyseCore(request), request, order));
+        const { result, records } = withNameRecords(ask);
+        assert.equal(result, withFlatListings(ask), label);
+        assert.equal(
+          records.checks,
+          records.tasks +
+            records.prefixes +
+            records.entries +
+            records.ancestors +
+            records.heads +
+            records.below +
+            records.jumps,
+          label,
+        );
+        totals.replayed += records.replayed;
+        totals.skipped += records.skipped;
+        totals.pumpable += records.pumpable;
+        // EVIDENCE: `orderedNames` writes each binding as its place, its names and each name's names below.
+        const { places } = JSON.parse(result) as { places: [number, string[], string[][]][] };
+        byPlace.push(new Map(places.map(([place, ...names]) => [place, JSON.stringify(names)])));
+      }
+      assert.deepEqual(byPlace[0], byPlace[1], `${name} ${JSON.stringify(mode)}: either order`);
+    }
+  }
+  assert.ok(
+    totals.replayed > 0 && totals.skipped > 0 && totals.pumpable > 0,
+    JSON.stringify(totals),
+  );
 });

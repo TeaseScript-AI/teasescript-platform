@@ -9,11 +9,18 @@ import {
   WorkLedger,
   type WorkCounter,
 } from "../src/type-inference/core/budget.js";
-import { storeContracts } from "../src/type-inference/core/consumer.js";
+import {
+  asked,
+  coreCheckResult,
+  coreFacts,
+  SliceIndex,
+  storeContracts,
+} from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { writtenTypeSteps } from "../src/type-inference/core/contract.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
 import { isPlusValue, plusIndexVisits } from "../src/type-inference/core/plus-index.js";
+import { withNameRecords } from "../src/type-inference/core/property-names.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -39,6 +46,7 @@ import {
   ORACLE_PROGRAMS,
   PROPERTY_STORE_FAMILIES,
   READ_CHAIN_PRODUCTS,
+  SEARCH_FAMILIES,
   VALUE_CLASS_SITES,
   VALUE_SHARING_PROGRAMS,
   W34_KNOWN_PRODUCTS,
@@ -210,6 +218,76 @@ test("a stack of diamonds of copies and its siblings grow with the program in ei
     };
     assert.deepEqual(steepCounters(LAYER_FAMILIES, unshared, measure, [16, 32]), []);
   }
+});
+
+/**
+ * #1610: a decided object's property search in #1466's stack of diamonds of copies, which the stores' checks after the
+ * analysis ask once per decided object (`Contracts.stored`), and the search's other askers inside the analysis
+ * (`SEARCH_FAMILIES`): the searches' own units and counters (`withNameRecords`) over the analysis and the backend's
+ * questions after it, at one small doubling in the four modes. A listing schedules a layer's effective sources only, so
+ * the searches grow with the program, where `main`'s grew 4.2 to 6.8 times per doubling (416,963 units at k = 128
+ * against the analysis's 226,049). The listing chain shown holds i + 2 names at its i-th copy (`g`, and below it `z` and
+ * one per copy before it), so its searches' output is quadratic: its units per name held do not rise (TABLE r4.245's
+ * reading). The series to k = 128 is the PR's evidence, outside CI.
+ */
+test("a decided object's property search grows with the program in a stack of copies, in every mode (#1610)", () => {
+  const searched = (
+    { name, request }: Sized,
+    reversed: boolean,
+    unshared: boolean,
+  ): { readonly units: number; readonly counts: ReadonlyMap<WorkCounter, number> } => {
+    const run = (): number => {
+      const answers = analyseCore(request);
+      assert.equal(answers.budget.exhausted, null, `${name}: within the allowance`);
+      const index = new SliceIndex(request.files.map((file) => file.program));
+      asked(answers, (asking) => {
+        coreCheckResult(asking, index, request);
+        coreFacts(asking, index, request);
+      });
+      return answers.budget.counts.get("syntaxNodes") ?? 0;
+    };
+    const ordered = (): number =>
+      reversed
+        ? withConsumerOrder(
+            (list) => [...list].reverse(),
+            () => withSolverSeam({ reverseWorklist: true }, run),
+          )
+        : run();
+    const { result: nodes, records } = withNameRecords(() =>
+      unshared ? withoutSharing(ordered) : ordered(),
+    );
+    return {
+      units: records.units,
+      counts: new Map<WorkCounter, number>([
+        ["syntaxNodes", nodes],
+        ["checks", records.checks],
+      ]),
+    };
+  };
+  const stack = new Set(["diamonds", "diamonds-guarded", "diamonds-shared"]);
+  const families = [
+    ...LAYER_FAMILIES.filter((family) => stack.has(family.name)),
+    ...SEARCH_FAMILIES.filter((family) => family.name !== "listing-chain-shown"),
+  ];
+  for (const unshared of [false, true]) {
+    const measure = (at: Sized, reversed: boolean): Measured => {
+      const { units, counts } = searched(at, reversed, unshared);
+      return { total: units, counts };
+    };
+    assert.deepEqual(steepCounters(families, unshared, measure, [16, 32]), []);
+  }
+  const chain = SEARCH_FAMILIES.find((family) => family.name === "listing-chain-shown")!;
+  const held = (k: number): number => (k * (k + 1)) / 2 + 2 * k;
+  for (const unshared of [false, true])
+    for (const reversed of [false, true]) {
+      const [small, large] = [16, 32].map(
+        (k) => searched(sized(chain, k), reversed, unshared).units / held(k),
+      );
+      assert.ok(
+        large! <= small!,
+        `the listing chain shown, reversed ${reversed}, unshared ${unshared}: ${small} → ${large}`,
+      );
+    }
 });
 
 /**
