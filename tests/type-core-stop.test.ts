@@ -61,6 +61,8 @@ import {
   randomCopyGraph,
   topologySources,
   phaseEnds,
+  testedAllowances,
+  testedStops,
   type CombinedStop,
   type HeldCase,
 } from "./helpers/type-core-held-host.js";
@@ -2250,8 +2252,8 @@ test("a settled stop keeps a boundary's type from its stored value's finished co
         const { stoppedIn, settled } = at(allowance).budget;
         return settled ? stoppedIn : null;
       };
-      for (const [low, high] of phaseEnds(unstopped.budget.total, phaseOf).values())
-        for (let allowance = low; allowance <= high; allowance += 1)
+      for (const [phase, [low, high]] of phaseEnds(unstopped.budget.total, phaseOf))
+        for (const allowance of testedAllowances(phase, low, high))
           assert.deepEqual(boundary(at(allowance)), boundary(unstopped), `${source} @${allowance}`);
     }
   }
@@ -2295,11 +2297,11 @@ test("#1216's redundant check stands at its counted stops", () => {
   const unstopped = analyseCore(request);
   assert.equal(has(unstopped), false);
   let count = 0;
-  for (const [low, high] of phaseEnds(unstopped.budget.total, (allowance) => {
+  for (const [phase, [low, high]] of phaseEnds(unstopped.budget.total, (allowance) => {
     const { stoppedIn, settled } = analyse(allowance).budget;
     return settled ? stoppedIn : null;
-  }).values())
-    for (let allowance = low; allowance <= high; allowance += 1)
+  }))
+    for (const allowance of testedAllowances(phase, low, high))
       if (has(analyse(allowance))) count += 1;
   assert.equal(count, 100);
 });
@@ -2310,14 +2312,15 @@ test("#1216's redundant check stands at its counted stops", () => {
  * check (a mark carrying the unstopped obligation) and the store's boundary forms: through a dictionary's values
  * list (#1452), and where an unrestricted written type stands, whose store owes no other boundary (#1450). The anchors
  * (`heldFamily`: each holder at depth 1, read by a repeat count and by an interpolation) at every twelfth stop of each
- * settled phase and its last, forward with the sharing and reversed without it; the whole family runs outside CI.
+ * settled phase and its last (the capture's extraction at most four, `testedStops`), forward with the sharing and reversed
+ * without it; the whole family runs outside CI.
  */
 test("a settled stop keeps the checks of the host data a place's stores hold (#1432, #1415)", () => {
   for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!])
     for (const c of heldFamily(true)) {
       const { run: unstopped, problems } = heldUnstopped(c, mode);
       assert.deepEqual(problems, [], `${c.name}, ${mode.name}`);
-      const stops = heldStops(c, mode, 12);
+      const stops = testedStops(heldStops(c, mode, 12));
       assert.ok(
         stops.some((stop) => stop.phase === "walk"),
         `${c.name}, ${mode.name}`,
@@ -2401,7 +2404,7 @@ test("a settled stop changes nothing of a read of a reference's member, a speake
   for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!])
     for (const c of cases) {
       const { run: unstopped } = heldUnstopped(c, mode);
-      const stops = heldStops(c, mode, 12);
+      const stops = testedStops(heldStops(c, mode, 12));
       assert.ok(stops.length > 0, `${c.name}, ${mode.name}`);
       for (const { allowance, phase } of stops)
         assert.deepEqual(
@@ -2467,7 +2470,7 @@ test("a settled stop keeps the family of an unused get's default that structure 
         ),
         `${c.name}, ${mode.name}`,
       );
-      const stops = heldStops(c, mode, 8);
+      const stops = testedStops(heldStops(c, mode, 8));
       assert.ok(
         stops.some((stop) => stop.phase === "walk"),
         `${c.name}, ${mode.name}`,
@@ -2500,7 +2503,7 @@ test("a settled stop keeps a projection's read obligations where one literal lac
     assert.deepEqual(problems, [], mode.name);
     const nullChecks = unstopped.answers.checks.filter((check) => check.kind === "null-check");
     assert.equal(nullChecks.length, 2, mode.name);
-    for (const { allowance, phase } of heldStops(c, mode)) {
+    for (const { allowance, phase } of testedStops(heldStops(c, mode))) {
       const stopped = mode.run(() => withTestAllowance(allowance, () => analyseCore(request)));
       const owed = new Set(
         [...stopped.checks, ...stopped.budget.deferred.map((mark) => mark.obligation)].map(
@@ -2522,7 +2525,7 @@ test("a settled stop keeps a projection's read obligations where one literal lac
       `unowned check ${obligation(lost)}`,
       'forbidden {"hostValue":2,"hostOther":"bad"} said ["BEFORE","AFTER"]',
     ];
-    for (const { allowance, phase } of heldStops(c, mode, 8))
+    for (const { allowance, phase } of testedStops(heldStops(c, mode, 8)))
       assert.deepEqual(
         heldProblems(c, mode, allowance, unstopped).filter((found) => !reported.includes(found)),
         [],
@@ -2555,7 +2558,7 @@ test("a settled stop reports an unused get's default lost where only a rule deci
     ["hostValue", "hostOther"],
   )!;
   let reported = 0;
-  for (const { allowance, phase } of heldStops(c, mode, 8)) {
+  for (const { allowance, phase } of testedStops(heldStops(c, mode, 8))) {
     const found = heldProblems(c, mode, allowance, unstopped);
     if (found.length === 0) continue;
     reported += 1;
@@ -2644,7 +2647,7 @@ function combinedStops(
   assert.ok(demand !== undefined, `${c.name}, ${mode.name}: no decision stops`);
   const { run: unstopped } = heldUnstopped(c, mode, demand);
   const { stoppedAt } = combinedAnalyses([{ path: "main.tease", source: c.source }], mode, demand);
-  for (const { allowance, phase } of heldStops(c, mode, 8, demand)) {
+  for (const { allowance, phase } of testedStops(heldStops(c, mode, 8, demand))) {
     const stopped = stoppedAt(allowance);
     each(
       `${c.name}, ${mode.name}, demand ${demand}, ${phase} @${allowance}`,
@@ -2964,11 +2967,11 @@ function controlStops(
   let count = 0;
   for (const demand of demands ?? heldDemands({ source: files[0]!.source }, mode)) {
     const { natural, reference, stoppedAt } = combinedAnalyses(files, mode, demand);
-    for (const [low, high] of phaseEnds(reference.budget.total, (allowance) => {
+    for (const [phase, [low, high]] of phaseEnds(reference.budget.total, (allowance) => {
       const { settled, stoppedIn } = stoppedAt(allowance).budget;
       return settled ? stoppedIn : null;
-    }).values())
-      for (let allowance = low; allowance <= high; allowance += step) {
+    }))
+      for (const allowance of testedAllowances(phase, low, high, step)) {
         const stopped = stoppedAt(allowance);
         const check = select(combinedStop(reference, natural, stopped), reference, stopped);
         if (check === undefined) continue;
@@ -3366,7 +3369,7 @@ test("a domain read's store boundaries are its owning mark's content (#1448)", (
     const written =
       'let root: object = {f0: hostValue}\nroot = {f0: {h: 1}}\nsay "${root.f0.g}"\nexit\n';
     const c = { name: "written", source: written, slice: false, values: [] };
-    for (const { allowance } of heldStops(c, mode, 1))
+    for (const { allowance } of testedStops(heldStops(c, mode, 1)))
       assert.deepEqual(boundaries(written, mode, "all", allowance), [], `${where} ${allowance}`);
     // a host read's own ingress beside its stores' (r4.113)
     const host =

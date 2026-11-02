@@ -664,6 +664,33 @@ export function heldStops(
   return stops;
 }
 
+/** At most four of a list: its first, its last and two evenly between. */
+function fourOf<T>(list: readonly T[]): T[] {
+  return list.length <= 4
+    ? [...list]
+    : [0, 1, 2, 3].map((i) => list[Math.round((i * (list.length - 1)) / 3)]!);
+}
+
+/**
+ * CI's sample of a case's settled stops (`heldStops`'s): the capture's extraction (#1526 phase B) at most four, its
+ * first, its last and two between, every other phase as `heldStops` gives it. The sweep of every extraction allowance in
+ * four modes is #1606's queue evidence.
+ */
+export function testedStops<T extends { readonly phase: string }>(stops: readonly T[]): T[] {
+  const kept = new Set(fourOf(stops.filter((stop) => stop.phase === "extraction")));
+  return stops.filter((stop) => stop.phase !== "extraction" || kept.has(stop));
+}
+
+/**
+ * The allowances CI visits in a settled phase from `low` to `high`, every `step`th: in the capture's extraction at most
+ * four, as `testedStops`.
+ */
+export function testedAllowances(phase: string, low: number, high: number, step = 1): number[] {
+  const all: number[] = [];
+  for (let allowance = low; allowance <= high; allowance += step) all.push(allowance);
+  return phase === "extraction" ? fourOf(all) : all;
+}
+
 /** A diagnostic's record: its code at its site (`code start:end`, as the problems name it). */
 const recordOf = (d: { readonly code: string; readonly site: { start: number; end: number } }) =>
   `${d.code} ${d.site.start}:${d.site.end}`;
