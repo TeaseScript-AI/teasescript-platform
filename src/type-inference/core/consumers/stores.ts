@@ -386,12 +386,18 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
                   : contributes(item))),
         )
         .sort((a, b) => writerRank(a.writer) - writerRank(b.writer));
+      // (before admission settled, a part of the value the stop left undecided marks the written store at its value,
+      // whatever external data beside it would site the unknown kind, as with no such data: the mark stands for the
+      // records within the value and does not move, TABLE r4.152 (1), #1611)
+      const undecided =
+        writtenOnly &&
+        offending.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
       // one copy-type diagnostic per offending kind, its earliest writer (§4, F28); against the destination's required
       // kinds, a written optional type's null among them (a decided type's admitted null is C9's)
       for (const { item } of offendingKinds(offending))
         storeWarning(
           walk,
-          !isExternal(item)
+          !isExternal(item) || (undecided && item.tag === "unknown")
             ? d.site
             : d.kind === "whole"
               ? admission.ingressSiteOf(d, at, item)
