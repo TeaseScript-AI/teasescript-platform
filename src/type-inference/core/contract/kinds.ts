@@ -167,6 +167,15 @@ export function propertyOnly(step: string): boolean {
   );
 }
 
+/**
+ * #1605: whether a position (`positions.ts`) advances by a step: a property's, or an element's below a frontier that
+ * passed a wrapper, so a key's element levels stand at its parent's position, never at its root and whole path again.
+ * Any other step (a selection's value or text, a member a built-in value answers) is the key's own computation.
+ */
+export function positionStep(step: string): boolean {
+  return step === "element" || propertyOnly(step);
+}
+
 /** A stored or parsed collection may hold none. */
 export function emptyAt(rest: {
   readonly length: number;

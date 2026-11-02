@@ -310,12 +310,13 @@ export class Contract {
   readonly pathChildren: (Map<string, number> | undefined)[] = [];
   /**
    * G3 stage 1 (`key-ids.ts`): per path, made with it from its parent's in constant work, its first step, the
-   * nearest path at or above it whose last step a built-in value answers (`memberStep`), 0 for none, and whether every
-   * step is a property's (`propertyOnly`).
+   * nearest path at or above it whose last step a built-in value answers (`memberStep`), 0 for none, whether every
+   * step is a property's (`propertyOnly`), and whether every step is one a position advances by (`positionStep`, #1605).
    */
   readonly pathFirstSteps: string[] = [""];
   readonly pathMembers: number[] = [0];
   readonly pathProperties: boolean[] = [true];
+  readonly pathPositions: boolean[] = [true];
   /**
    * G3 stage 1: per path of the arena, what the cursors derive from it, each made once and kept (`PathFacts`,
    * `factsOf`); per text of a family whose lane is cursors, its cursor (`textCursor`).

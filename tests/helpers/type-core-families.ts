@@ -6698,3 +6698,34 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
     },
   },
 ];
+
+/**
+ * #1605: a value copied through a chain of k/2 wrappers (`let wi = {q: w(i-1)}`) into a binding that stores external
+ * data at its long key below them: the stored key `b.q^d.f` itself (the issue's shape), or its element. The store's
+ * check reads the key's contract at every level of the stored value (its element, its element's element), each level
+ * one step below its parent's position, never every wrapper's whole path again (`positions.ts`). Host global
+ * `hostValue`.
+ */
+export const COPY_CHAIN_FAMILIES: readonly WorkFamily[] = (
+  [
+    ["copy-chain-store", "the issue's shape: a store at the long key", ""],
+    ["copy-chain-element-store", "a store at the long key's element", "[0]"],
+  ] as const
+).map(([name, measures, below]) => ({
+  name,
+  measures: `#1605: ${measures}`,
+  program: (k: number) => {
+    const depth = Math.max(2, k / 2);
+    const path = Array.from({ length: depth }, () => "q").join(".");
+    return main(
+      lines(
+        "let a = {f: [[1]]}",
+        rows(depth, (i) => `let w${i} = {q: ${i === 0 ? "a" : `w${i - 1}`}}`),
+        `let b = w${depth - 1}`,
+        `b.${path}.f${below} = hostValue`,
+        'say "AFTER"',
+        "exit",
+      ),
+    );
+  },
+}));

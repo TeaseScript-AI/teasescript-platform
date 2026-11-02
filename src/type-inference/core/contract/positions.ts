@@ -17,7 +17,7 @@ import {
   keyLastIn,
   keyParentIn,
 } from "./key-ids.js";
-import { heldReference, holdsBelow, propertyOnly } from "./kinds.js";
+import { heldReference, holdsBelow, positionStep, propertyOnly } from "./kinds.js";
 import { pathAt, stepsOf } from "./literal-index.js";
 import { marksNothing } from "./marks.js";
 import type { ChainRoot, LoneRead, Owner } from "./model.js";
@@ -87,9 +87,10 @@ export function positioned(
 }
 
 /**
- * Whether a key's contract stands at a position (`positioned`): a binding's key whose steps are all property steps,
- * the first passing a wrapper (`wrapperHop`), outside `withoutPositions`. `path`: a text key's steps; a cursor's depth,
- * first step and property steps are the arena's.
+ * Whether a key's contract stands at a position (`positioned`): a binding's key whose steps are all steps a position
+ * advances by (`positionStep`: a property's, or an element's, #1605), the first passing a wrapper (`wrapperHop`, a
+ * property's), outside `withoutPositions`. `path`: a text key's steps; a cursor's depth, first step and steps are the
+ * arena's (`Contract.pathPositions`).
  */
 export function positionable(
   contract: Contract,
@@ -104,7 +105,7 @@ export function positionable(
       positions() &&
       keyIdPath(id) !== 0 &&
       contract.pass.program.places[place]?.kind.kind === "binding" &&
-      contract.pathProperties[keyIdPath(id)]! &&
+      contract.pathPositions[keyIdPath(id)]! &&
       contract.wrapperHop(place, keyIdFirst(contract, id)!) !== null
     );
   }
@@ -112,7 +113,7 @@ export function positionable(
     positions() &&
     path.length > 0 &&
     contract.pass.program.places[place]?.kind.kind === "binding" &&
-    path.every(propertyOnly) &&
+    path.every(positionStep) &&
     contract.wrapperHop(place, path[0]!) !== null
   );
 }
@@ -121,9 +122,11 @@ export function positionable(
  * G3 3a: a read one `step` below a read whose position is known (`owner`: a property read's occurrence, a read, or a
  * key with `length` steps, the key's own `owner` its parent's), advanced one step: where every receiver on the way holds
  * a structure and no reference (F19a, `receiverWalk`'s walk, the owner's checked here), a read past a wrapper is its
- * frontier's read at its path below with the outermost wrapper's writer (the wrapper's lemma: `wrapperHop`), and its
- * frontier passes the next wrapper where it stands at one; before the first wrapper, and wherever a receiver fails, the
- * read's own computation (`own`), which every read answers outside positions.
+ * frontier's read at its path below with the outermost wrapper's writer (the wrapper's lemma: `wrapperHop`, whatever
+ * the path below), and its frontier passes the next wrapper where it stands at one (a property step's alone); before
+ * the first wrapper, at a step no position advances by (`positionStep`), and wherever a receiver fails, the read's own
+ * computation (`own`), which every read answers outside positions. So a key's element level is one step below its
+ * parent's position, never its root and whole path again at each wrapper (#1605).
  */
 function* advance(
   contract: Contract,
@@ -131,9 +134,13 @@ function* advance(
   step: string,
   own: () => Work<readonly Item[]>,
 ): Work<Proven<Proof>> {
-  const from = propertyOnly(step) ? yield* positionOf(contract, owner) : null;
-  // (a read whose frontier passes no wrapper now, and passed none above, is its own read: no position below it)
-  const hop = from !== null && from.rest === 0 ? contract.wrapperHop(from.read, step) : null;
+  const from = positionStep(step) ? yield* positionOf(contract, owner) : null;
+  // (a read whose frontier passes no wrapper now, and passed none above, is its own read: no position below it; a
+  // wrapper is passed at a property step alone, an element step stays below the frontier)
+  const hop =
+    from !== null && from.rest === 0 && propertyOnly(step)
+      ? contract.wrapperHop(from.read, step)
+      : null;
   if (from === null || (!from.hopped && hop === null))
     return { items: yield* own(), proof: UNPOSITIONED };
   // F19a (`receiverWalk`): the owner's receiver holds no reference, and a structure, as every one above it did
