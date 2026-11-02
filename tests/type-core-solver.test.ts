@@ -606,13 +606,12 @@ test("a forget reaches the reader of a component abandoned into a larger one (#1
 });
 
 /**
- * #1626: a read of a demand that is running or waits provisional keeps its reader though no stop may forget that demand
- * yet (`#read`'s active case), where no later read keeps it. `A` reads `M`, `L` and `P`, which a stop may forget; `M`
- * reads `A` before `A` may be forgotten, and its answer is always empty; `L` reads `M` alone and, canonically before it,
- * reruns in the component's solve before `M`'s rerun makes `M` forgettable, which changes no answer, so `L` runs no more.
- * Only `L`'s reads of the active `M` keep `L` among its readers: forgetting `P` forgets all five, as with every record kept
- * (`withEveryRecord`), so reading `G` again charges what reading it the first time did. No admitted source found reaches
- * this shape (#1626), so the solver's own API holds it.
+ * #1626: a forget reaches the reader of a member read while it was active (`#read`'s active case), where no later read
+ * keeps that reader. `A` reads `M`, `L` and `P`, which a stop may forget; `M` reads `A` before `A` may be forgotten, and
+ * its answer is always empty; `L` reads `M` alone and, canonically before it, reruns in the component's solve before
+ * `M`'s rerun makes `M` forgettable, which changes no answer. Forgetting `P` forgets all five, as with every record kept
+ * (`withEveryRecord`), so reading `G` again charges what reading it the first time did. #1626 records why no admitted
+ * source reaches this handoff.
  */
 test("a forget reaches the reader of a member read while it was active (#1626)", () => {
   const forgotten = (every: boolean) =>
