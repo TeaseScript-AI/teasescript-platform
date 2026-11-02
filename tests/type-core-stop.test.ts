@@ -2659,7 +2659,8 @@ test("a combined stop's finishing read reaches through a copy whose decision sto
  * finishing read answered from (a written `list?` receiver's null check, an `integer?` element's count by a null check,
  * an `object`'s property read; two places copying each other, answered without a written type; a set's empty check,
  * its domain non-emptiness whatever family it names); (a) from the finishing walk's own reads (a fallback's left in
- * requirement mode) and at an index's check by its receiver (a `get`'s literal index); and a boundary against
+ * requirement mode), at an index's check by its receiver (a `get`'s literal index) and at a member's presence check by
+ * every read its consumer makes (a ring's receiver at its unlisted property); and a boundary against
  * `unknown`, which has no plan content, dropped where the undecided store mark stands at the site of the store holding it
  * (a dictionary's value read through its `values`, forward, also parenthesized or in a parenthesized literal). Each case at every eighth settled stop under the largest
  * demand allowance that stops a decision (the copying places under each), in the modes where the clause arises, nothing
@@ -2732,6 +2733,13 @@ test("a combined stop owes the reference's check in other words, or a boundary's
         ["bad", false],
       ]),
       each: true,
+    },
+    // ((a) at a member's presence check by every read its consumer makes: the receiver at the unlisted step `#`, which
+    // the stop left `unknown` and the finishing walk answers from the ring's literals, reversed under demand 42)
+    {
+      clause: "a",
+      modes: [HELD_MODES[1]!],
+      c: heldFamily(false).find((c) => c.name === "ring-1-written-plain")!,
     },
     ...[
       "function build {return dict {a: hostValue, b: 4}}",

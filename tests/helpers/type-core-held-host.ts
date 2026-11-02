@@ -22,6 +22,7 @@ import { VALUE_KINDS } from "../../src/value-kinds.js";
 import type { Expression } from "../../src/ast.js";
 import { expressionChildren, unwrap } from "../../src/expression-children.js";
 import { REASON, type Item } from "../../src/type-inference/core/items.js";
+import { propertyName, propertyStep } from "../../src/type-inference/core/program.js";
 import type { SourceSite } from "../../src/type-inference/graph.js";
 import type { DiagnosticRule, Obligation } from "../../src/type-inference/core/result.js";
 import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
@@ -773,18 +774,29 @@ const siteOf = (file: number, expression: Expression): SourceSite => ({
 });
 
 /**
- * The read a consumer's check is about, as the site of its value inside any parentheses (`unwrap`) and the steps below
- * it: a member's or a selection's receiver, and an index's (a list index's or a `get`'s); a fallback's left, or a `get`
- * default's receiver at its `element`; else the value at the check's site. `null` where no read gives it (a conversion's default, which its result decides).
+ * A read a check may depend on: the value at `site` (inside any parentheses) at `steps`, or with `members` each at no
+ * step or one property step (`propertyStep`'s: a property's own name, or `#` where it is unlisted, never `element`).
+ */
+type ReadAt =
+  | { readonly site: SourceSite; readonly steps: readonly string[] }
+  | { readonly site: SourceSite; readonly members: true };
+
+/**
+ * The reads a consumer's check depends on: an index's receiver (a list index's or a `get`'s); a member's or a selection's
+ * receiver, each read its consumer makes of it as the recorder holds them, its kind and its member's property step (`#`
+ * where the property is unlisted, `unlistedObject`; TABLE r4.290's inventory, amended); a fallback's left, or a `get`
+ * default's receiver at its `element`; else the value at the check's site. Never the member's own value, which each
+ * consumer of that value reads at the same key (a fallback's left, a count). None where no read gives it (a
+ * conversion's default, which its result decides).
  */
 function readOf(
   syntax: ReturnType<typeof syntaxOf>,
   check: Obligation,
   owner: DiagnosticRule,
-): { readonly site: SourceSite; readonly steps: readonly string[] } | null {
+): readonly ReadAt[] {
   const file = check.site.file;
   const at = syntax.at.get(siteKey(check.site));
-  if (at === undefined) return null;
+  if (at === undefined) return [];
   const expression = unwrap(at);
   const rule = owner.rule;
   // (the expression around the check's site, through any parentheses)
@@ -803,7 +815,7 @@ function readOf(
         : parent?.kind === "callExpression" && parent.callee.kind === "propertyAccessExpression"
           ? parent.callee.object
           : null;
-    return receiver === null ? null : { site: siteOf(file, unwrap(receiver)), steps: [] };
+    return receiver === null ? [] : [{ site: siteOf(file, unwrap(receiver)), steps: [] }];
   }
   if (rule === "member" || rule === "selection") {
     const receiver =
@@ -813,23 +825,40 @@ function readOf(
             expression.callee.kind === "propertyAccessExpression"
           ? expression.callee.object
           : null;
-    return receiver === null ? null : { site: siteOf(file, unwrap(receiver)), steps: [] };
+    return receiver === null ? [] : [{ site: siteOf(file, unwrap(receiver)), members: true }];
   }
   if (rule === "fallback") {
     // (the value it stands in for)
     const parent = around();
     if (parent?.kind === "binaryExpression" && parent.operator === "otherwise")
-      return { site: siteOf(file, unwrap(parent.left)), steps: [] };
+      return [{ site: siteOf(file, unwrap(parent.left)), steps: [] }];
     if (parent?.kind === "callExpression" && parent.callee.kind === "propertyAccessExpression")
-      return { site: siteOf(file, unwrap(parent.callee.object)), steps: ["element"] };
-    return null;
+      return [{ site: siteOf(file, unwrap(parent.callee.object)), steps: ["element"] }];
+    return [];
   }
-  return { site: siteOf(file, expression), steps: [] };
+  return [{ site: siteOf(file, expression), steps: [] }];
 }
 
 /** A read's identity: its value's whole site and its steps. */
 const readKey = (site: SourceSite, steps: readonly string[]): string =>
   `${siteKey(site)}|${steps.join("\u0000")}`;
+
+/** The recorded reads `read` names in `reads`: its own, or with `members` each at its site at no or one property step. */
+function readKeys(
+  reads: ReadonlyMap<string, readonly RecordedRead[]>,
+  read: ReadAt,
+): readonly string[] {
+  if ("steps" in read) return [readKey(read.site, read.steps)];
+  const at = readKey(read.site, []);
+  return [...reads.keys()].filter((key) => {
+    const step = key.slice(at.length);
+    return (
+      key.startsWith(at) &&
+      !step.includes("\u0000") &&
+      (step === "" || propertyStep(propertyName(step)) === step)
+    );
+  });
+}
 
 /** Whether an answer holds a value a stop left undecided: an `unknown` item with the reason `budget`. */
 const unsettled = (items: readonly Item[]): boolean =>
@@ -976,10 +1005,10 @@ const withoutLabels = (on: string): string =>
  * its consumers' reads (`recordingReads`); each of its checks the stopped analysis neither keeps nor marks is accepted only
  * by one clause, every site whole (file and offsets), a slot a site, target, boundary and kind, a domain the kinds a check
  * lets through (`domainOf`):
- * - (a) a consumer's check, never a store's, whose read (`readOf`) a reference consumer made and got an `unknown` with
- *   the reason `budget` (a recovered contract tagged `budget` is no such read), which the stopped analysis's answer at
- *   that read holds none of, and at whose slot the natural analysis (no demand, no stop) and the stopped one owe the same
- *   domains, the natural one not the check itself;
+ * - (a) a consumer's check, never a store's, one of whose reads (`readOf`) a reference consumer made and got an
+ *   `unknown` with the reason `budget` (a recovered contract tagged `budget` is no such read), each such read answered
+ *   with none by the stopped analysis's finishing walk, and at whose slot the natural analysis (no demand, no stop) and
+ *   the stopped one owe the same domains, the natural one not the check itself;
  * - (w) marks at its place (site, target, boundary), of any kind, the only checks owed there, together letting through
  *   exactly its domain (their domains' intersection: checks on one value): the reference satisfied in other words;
  * - (z) a boundary against `unknown`, no plan content (S3 §4), nothing owed at its slot, where an undecided store record
@@ -1019,19 +1048,19 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
         (d) => "obligation" in d && JSON.stringify(d.obligation) === text,
       );
       if (owner !== undefined && "rule" in owner && owner.rule.rule !== "store") {
-        const read = readOf(syntax(), u, owner.rule);
-        // (the reference's walk read it `unknown` with the reason `budget`; the stopped analysis's finishing walk read it,
-        // every such read settled)
-        const key = read === null ? null : readKey(read.site, read.steps);
-        const before = key === null ? [] : (reads.get(key) ?? []).filter((each) => !each.finishing);
-        const after =
-          key === null ? [] : (finished.get(key) ?? []).filter((each) => each.finishing);
-        if (
-          before.some((each) => unsettled(each.items)) &&
-          after.length > 0 &&
-          after.every((each) => !unsettled(each.items))
-        )
-          return "a";
+        const keys = new Set(
+          readOf(syntax(), u, owner.rule).flatMap((read) => readKeys(reads, read)),
+        );
+        // (each read the reference's walk got `unknown` with the reason `budget`: the stopped analysis's finishing walk
+        // read it, every such read settled)
+        const open = [...keys].filter((key) =>
+          (reads.get(key) ?? []).some((each) => !each.finishing && unsettled(each.items)),
+        );
+        const answered = (key: string): boolean => {
+          const after = (finished.get(key) ?? []).filter((each) => each.finishing);
+          return after.length > 0 && after.every((each) => !unsettled(each.items));
+        };
+        if (open.length > 0 && open.every(answered)) return "a";
       }
     }
     // ((w): every check owed at the place a mark; those of the check's dimension letting through its domain together)
