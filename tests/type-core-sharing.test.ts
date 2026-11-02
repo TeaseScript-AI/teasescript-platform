@@ -42,6 +42,7 @@ import {
   inOrder,
   MODES,
   publication,
+  stopSet,
   publishedAnswers,
   publishedRoute,
 } from "./helpers/type-core-oracles.js";
@@ -1091,6 +1092,37 @@ const COMPOSED_ORDER_ROWS: readonly {
     },
   ];
 })();
+
+/**
+ * #1398 (Codex r10 on #1558): a narrowed local read's exact class takes its narrowing once, from its read class
+ * (`readClass`), which already holds it, so building it costs what it did before the mark: at the test demand allowance
+ * 256, reversed with the sharing on, a guarded list of a narrowed written value and a boolean stops its elements' `n`
+ * in the second pass and its elements in the third, as on main.
+ */
+test("a narrowed local read's class charges its narrowing once: a guarded list's stops at 256 (#1398)", () => {
+  for (const [kind, value] of [
+    ["integer", "3"],
+    ["string", '"written"'],
+  ]) {
+    const source =
+      `let written: integer | string = ${value}\nif written is ${kind} {\nlet a = {n: written}\n` +
+      "let b = {n: true}\nlet xs = [a, b]\nsay xs[0].n\n}\nexit\n";
+    const found = stopSet(
+      [{ path: "main.tease", source }],
+      { reversed: true, unshared: false },
+      ["hostValue", "hostInit", "hostOther"],
+      256,
+    );
+    assert.deepEqual(
+      found?.stops,
+      [
+        [2, "xs", "element.n", 1],
+        [3, "xs", "element", 1],
+      ],
+      kind,
+    );
+  }
+});
 
 test("a list composed of a value's kinds stands in their fixed order where it is completed, in the four modes (#1398)", () => {
   const wrong: string[] = [];

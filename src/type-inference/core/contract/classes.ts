@@ -366,11 +366,15 @@ function classed(contract: Contract, value: PlaceId, exact: boolean): KeptClass 
     stack.pop();
     const joined = joinedClass(contract, top, exact, own);
     // (on the value side, the narrowing a read takes is part of every class it is given here, whichever way it was
-    // joined, a host read's and a projection's too: its environment and its type test's spelling (`Values.narrowingMark`,
-    // TABLE r4.277 (2), Codex r8 on #1558)
+    // joined: its environment and its type test's spelling (`Values.narrowingMark`, TABLE r4.277 (2), Codex r8 on
+    // #1558), appended where its read class (`readClass`, which already holds it) gave none, a host read's and a
+    // projection of one's, so no class charges it twice (Codex r10)
     const { program } = contract.pass;
     const narrowed =
-      exact && joined.cls !== null && (program.occurrenceOf.has(top) || program.projOf.has(top))
+      exact &&
+      joined.cls !== null &&
+      (program.occurrenceOf.has(top) || program.projOf.has(top)) &&
+      contract.readClass(top, exact) === null
         ? contract.pass.values.narrowingMark(top)
         : "";
     const kept: KeptClass =
