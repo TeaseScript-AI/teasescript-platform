@@ -23,8 +23,9 @@ const forms = {
   fixed: (m) => Array.from({ length: m }, (_, j) => j),
   rotated: (m, i) => Array.from({ length: m }, (_, j) => (i + j) % m),
   permuted: (m, i) => shuffled(m, i),
-  // a window of 2 to m peers from a rotating start: up to k distinct subsets
-  subsets: (m, i) => Array.from({ length: 2 + ((i * 7) % (m - 1)) }, (_, j) => (i + j) % m),
+  // a window of 2 to m peers from a rotating start: up to m·(m-1) distinct subsets (#1578: the recorded length,
+  // 2 + (7·i mod (m-1)), gave every window 2 peers where 7 divides m - 1, as at k = 64)
+  subsets: (m, i) => Array.from({ length: 2 + (i % (m - 1)) }, (_, j) => (i + j) % m),
   // three peers, a distinct set at each of up to m·(m-1) sites, rotated
   triples: (m, i) => {
     const a = i % m;
