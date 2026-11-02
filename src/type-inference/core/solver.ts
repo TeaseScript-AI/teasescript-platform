@@ -154,6 +154,14 @@ interface Level {
   readDepth: number;
 }
 
+/**
+ * An inline child on a run (`inline`), with the read chain of the levels below it, which stand suspended, their own
+ * chains unchanged, as long as it is on their stack: made once as it is pushed.
+ */
+interface Child extends Level {
+  readonly below: number;
+}
+
 /** An unfinished demand. */
 interface DemandNode {
   readonly demand: Demand | ProofDemand<Proof>;
@@ -190,7 +198,7 @@ interface Frame {
   /** The read chain its generators are inside (`enterRead`): its native depth when it runs again. */
   readDepth: number;
   /** The inline children on its run (`inline`), the innermost last. */
-  readonly inline: Level[];
+  readonly inline: Child[];
 }
 
 interface Rerun {
@@ -443,7 +451,7 @@ export class Solver {
    */
   #stoppedRun<T>(work: Work<T>): T {
     const root: Level = { work, readDepth: this.#readDepth };
-    const children: Level[] = [];
+    const children: Child[] = [];
     for (let step = this.#advance(root, children, []); ;) {
       if (step.done === true) {
         // EVIDENCE: invariant: the root is `work`, so its result is a `T`.
@@ -461,13 +469,14 @@ export class Solver {
    */
   #advance(
     root: Level,
-    children: Level[],
+    children: Child[],
     given: readonly Item[],
   ): IteratorResult<Demand | ProofDemand<Proof>, unknown> {
     let input = given;
     let thrown: { readonly error: unknown } | null = null;
     for (;;) {
-      const level = children.at(-1) ?? root;
+      const child = children.at(-1);
+      const level = child ?? root;
       this.#readDepth = level.readDepth;
       let step: IteratorResult<Demand | ProofDemand<Proof> | Inline, unknown>;
       try {
@@ -482,7 +491,11 @@ export class Solver {
       thrown = null;
       level.readDepth = this.#readDepth;
       if (step.done !== true && "inline" in step.value) {
-        children.push({ work: step.value.inline, readDepth: 0 });
+        children.push({
+          work: step.value.inline,
+          readDepth: 0,
+          below: (child?.below ?? 0) + level.readDepth,
+        });
         input = [];
         continue;
       }
@@ -493,8 +506,9 @@ export class Solver {
         continue;
       }
       // (between two steps the read chain is the run's whole one, its root's and each suspended child's, as `yield*`
-      // leaves it: a stop between steps abandons the run there, and a run after the stop starts from that depth)
-      this.#readDepth = children.reduce((depth, child) => depth + child.readDepth, root.readDepth);
+      // leaves it, the levels below the innermost one's by its `below`: a stop between steps abandons the run there,
+      // and a run after the stop starts from that depth)
+      if (child !== undefined) this.#readDepth += child.below;
       // EVIDENCE: invariant: an inline child's step is taken above, so this one is a demand or the root's result.
       return step as IteratorResult<Demand | ProofDemand<Proof>, unknown>;
     }
