@@ -1361,8 +1361,28 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         /0of16\.runs\.jsonl is no shard that counts/,
       ],
       [
+        // (a run alone of the same source that ended, and no run alone)
+        copied("one", "ended-alone", () =>
+          edit(at("ended-alone", "stalls.json"), '"stalled":"exit 3","runs"', '"runs"'),
+        ),
+        1,
+        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
+      ],
+      [
         copied("one", "alone", () =>
           edit(at("alone", "stalls.json"), /"alone":\{.*\}\}\]\}/, '"alone":{}}]}'),
+        ),
+        1,
+        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
+      ],
+      [
+        // (a certificate of another reason than the shard's stalled line)
+        copied("one", "reason", () =>
+          edit(
+            at("reason", "stalls.json"),
+            '"stalled":"exit 3","alone"',
+            '"stalled":"timeout","alone"',
+          ),
         ),
         1,
         /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
