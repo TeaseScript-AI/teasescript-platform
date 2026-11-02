@@ -365,12 +365,23 @@ function classed(contract: Contract, value: PlaceId, exact: boolean): KeptClass 
     }
     stack.pop();
     const joined = joinedClass(contract, top, exact, own);
+    // (on the value side, the narrowing a read takes is part of every class it is given here, whichever way it was
+    // joined, a host read's and a projection's too: its environment and its type test's spelling (`Values.narrowingMark`,
+    // TABLE r4.277 (2), Codex r8 on #1558)
+    const { program } = contract.pass;
+    const narrowed =
+      exact && joined.cls !== null && (program.occurrenceOf.has(top) || program.projOf.has(top))
+        ? contract.pass.values.narrowingMark(top)
+        : "";
     const kept: KeptClass =
       joined.cls === null
         ? joined
         : {
             ...joined,
-            cls: classId(contract, joined.cls),
+            cls: classId(
+              contract,
+              narrowed === "" ? joined.cls : keptParts(contract.work, joined.cls, narrowed),
+            ),
             parts: roleParts(contract, joined.parts, exact),
           };
     contract.keep(1 + kept.own.length + kept.parts.length);

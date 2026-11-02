@@ -1405,6 +1405,46 @@ test("two type tests of one kinds in two written orders give two read classes (#
 });
 
 /**
+ * #1398 (TABLE r4.277 (2), Codex r8 on #1558): the narrowing a read takes is part of every exact value class it is
+ * given, whichever way the class is joined: two tests of one kinds in two written orders, of a host read, a host
+ * property, a host element and their local controls, give the two stored reads two value classes and two bound
+ * classes, in the four modes.
+ */
+test("two type tests of one kinds in two written orders give two value classes, a host read's too (#1398)", () => {
+  for (const tested of ["hostValue", "hostValue.x", "hostValue[0]", "x", "x.n", "x[0]"]) {
+    const local = tested.startsWith("x") ? "let x = hostValue\n" : "";
+    const source =
+      `${local}if ${tested} is string | integer | string { let first = ${tested} }\n` +
+      `if ${tested} is integer | string | integer | string { let second = ${tested} }\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, tested);
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const pass = narrowingPass(request);
+        const reads = ["first", "second"].map((name) => {
+          const node = nodeAt(pass, source.indexOf(`let ${name} = `) + `let ${name} = `.length);
+          const value = pass.program.placeBySite.get(
+            siteKey({
+              file: node.file,
+              start: node.span!.start.offset,
+              end: node.span!.end.offset,
+            }),
+          )!;
+          return {
+            tags: pass.solver.run(pass.values.valueItems(value, node, [])).map((item) => item.tag),
+            cls: pass.contract.classOf(value, true),
+            bound: pass.contract.boundClass(value, true).cls,
+          };
+        });
+        const at = `${tested} ${JSON.stringify(mode)}`;
+        assert.notDeepEqual(reads[0]!.tags, reads[1]!.tags, at);
+        assert.notEqual(reads[0]!.cls, reads[1]!.cls, at);
+        assert.notEqual(reads[0]!.bound, reads[1]!.bound, at);
+      });
+  }
+});
+
+/**
  * #1398 (TABLE r4.277 (3), Codex r7 on #1558): a type's written kinds are read by one walk, each node and each kind it
  * gives once: at depths 32, 64 and 128 of unions nested to the right and to the left, and of optionals, the walk of the
  * test's type as its narrowing holds it gives one kind per name the type writes, in their written order.

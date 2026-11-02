@@ -1039,6 +1039,17 @@ const COMPOSED_ORDER_ROWS: readonly {
       },
       expected: ["string", "integer"],
     },
+    // (Codex r8: after a stop at the test allowance 16, a sort of a placeless literal's element, #1581's cells)
+    {
+      name: "a stopped sort of a placeless literal's element",
+      source: '["s", 1][0].sort()\nexit\n',
+      analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
+      lists: (answers) =>
+        ruled(answers).flatMap((diagnostic) =>
+          diagnostic.code === "TSV043" ? [diagnostic.kinds] : [],
+        ),
+      expected: ["integer", "string"],
+    },
     // (Codex r6: after a stop, an inferred range conversion's elements; a written union of one spelling twice; a
     // stored read a written type test narrows host data to, natural)
     {
