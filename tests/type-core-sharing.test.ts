@@ -1164,16 +1164,18 @@ function choicesInLists(n: number, k: number, lists: readonly (readonly number[]
  * #1573: the choices of four bindings are one class mixed by their leaves, so a list's contract reads one member (the
  * first binding) and names the others' leaves (`othersLeaves`) through one node per set of other members, whatever
  * order the list holds them in, each member's leaves its own: lists of all four with the other three in three orders,
- * and of two and of three. In both orders with the sharing on, the elements' external data of the three lists of one
- * set names one node, of every other set its own, and each list's leaves are its members', as with the sharing off.
+ * and of three, whose other members are distinct sets of two (one of them with another read member). In both orders
+ * with the sharing on, the elements' external data of the three lists of one set names one node, of every other list
+ * its own, and each list's leaves are its members', as with the sharing off.
  */
 test("a list's other members of one mixed class name one node per set, each its own leaves, in both orders (#1573)", () => {
   const lists = [
     [0, 1, 2, 3],
     [0, 3, 2, 1],
     [3, 1, 0, 2],
-    [0, 1],
-    [0, 2],
+    [0, 1, 2],
+    [0, 2, 3],
+    [0, 3, 1],
     [1, 2, 3],
   ];
   const source = choicesInLists(4, 2, lists);
@@ -1221,7 +1223,7 @@ test("a list's other members of one mixed class name one node per set, each its 
       nodes[1] === nodes[0] && nodes[2] === nodes[0],
       `reversed: ${reversed}: one set's node`,
     );
-    assert.equal(new Set(nodes).size, 4, `reversed: ${reversed}: a node per set`);
+    assert.equal(new Set(nodes).size, 5, `reversed: ${reversed}: a node per set`);
   }
 });
 
@@ -1261,51 +1263,81 @@ test("a further list of choices of one class adds class work independent of the 
 });
 
 /**
- * #1573 (Codex r1's B1 on #1628): two classes of choices, of `hostValue`'s and of `hostOther`'s properties, read in
- * four lists of all four bindings. A reader of a choice walked once counts to its demand what the walk charged
- * (`WorkLedger.repeat`), as when each list walked its own, so no list's decision stops elsewhere than it did: at the
- * test demand allowance 256, in the four modes, the stops, passes and exhaustion are those of each list walking its own
- * members (where the reversed shared and the source-order unshared analyses stop a second decision in their second
- * pass, which ends them, TABLE r4.183), a regression oracle of this source.
+ * #1573 (Codex r1's B1 on #1628): a reader of a choice walked once (`leafRoles`) or of a read choice checked once
+ * (`heldLeaves`) counts to its demand what the walk or the check charged (`WorkLedger.repeat`), as when each list made
+ * its own, so no list's decision stops elsewhere than it did: two classes of choices (of `hostValue`'s and of
+ * `hostOther`'s properties) read in four lists of all four bindings, and two choices of 17 properties read in three
+ * lists. At the test demand allowance 256, in the four modes, the stops and exhaustion are those of each list making
+ * its own (where a second decision stopping in a second pass ends the analysis, TABLE r4.183), a regression oracle of
+ * these sources.
  */
-test("a choice's walk shared by four lists moves no decision's stop at 256, in the four modes (#1573)", () => {
-  const choice = (host: string): string =>
-    `askChoice {text: "0", value: ${host}.p0}, {text: "1", value: ${host}.p1}`;
-  const source = [
-    ...["hostValue", "hostOther", "hostValue", "hostOther"].map(
-      (host, j) => `let p${j} = ${choice(host)}`,
-    ),
-    ...[0, 1, 2, 3].map(
-      (i) => `let xs${i} = [p0, p1, p2, p3]\nlet n${i}: integer = xs${i}[hostValue.i]`,
-    ),
-    "exit\n",
-  ].join("\n");
+test("a choice's walk or check shared by its lists moves no decision's stop at 256, in the four modes (#1573)", () => {
+  const choice = (host: string, k: number): string =>
+    `askChoice ${Array.from({ length: k }, (_, r) => `{text: "${r}", value: ${host}.p${r}}`).join(", ")}`;
+  const program = (hosts: readonly string[], k: number, lists: number): string =>
+    [
+      ...hosts.map((host, j) => `let p${j} = ${choice(host, k)}`),
+      ...Array.from(
+        { length: lists },
+        (_, i) =>
+          `let xs${i} = [${hosts.map((_, j) => `p${j}`).join(", ")}]\nlet n${i}: integer = xs${i}[hostValue.i]`,
+      ),
+      "exit\n",
+    ].join("\n");
+  const at = (pass: number, label: string, path: string, ordinal: number) =>
+    [pass, label, path, ordinal] as const;
   const element = (pass: number, list: number, ordinal: number) =>
-    [pass, `xs${list}`, "element", ordinal] as const;
-  const expected = [
+    at(pass, `xs${list}`, "element", ordinal);
+  const cases = [
     {
-      mode: { reversed: false, unshared: false },
-      stops: [element(1, 0, 6), element(1, 1, 9), element(1, 2, 12), element(1, 3, 15)],
-      exhausted: null,
+      // (the walk: one other member of each class per list)
+      source: program(["hostValue", "hostOther", "hostValue", "hostOther"], 2, 4),
+      modes: [
+        [[element(1, 0, 6), element(1, 1, 9), element(1, 2, 12), element(1, 3, 15)], null],
+        [[element(1, 0, 6), element(2, 1, 8)], "work"],
+        [[element(1, 3, 9), element(2, 2, 11)], "work"],
+        [[], null],
+      ],
     },
     {
-      mode: { reversed: false, unshared: true },
-      stops: [element(1, 0, 6), element(2, 1, 8)],
-      exhausted: "work",
+      // (the check: the read choice's answer, 33 nodes, checked for each list)
+      source: program(["hostValue", "hostValue"], 17, 3),
+      modes: [
+        [
+          [
+            at(1, "p0", "", 1),
+            at(1, "p1", "", 2),
+            element(1, 0, 4),
+            element(1, 1, 7),
+            element(2, 2, 6),
+          ],
+          "work",
+        ],
+        [[at(1, "p0", "", 1), element(1, 0, 4), at(2, "p1", "", 1)], "work"],
+        [[element(1, 2, 21), element(1, 1, 24), element(1, 0, 27), at(2, "p1", "", 26)], "work"],
+        [[element(1, 2, 21), element(2, 1, 23)], "work"],
+      ],
     },
-    {
-      mode: { reversed: true, unshared: false },
-      stops: [element(1, 3, 9), element(2, 2, 11)],
-      exhausted: "work",
-    },
-    { mode: { reversed: true, unshared: true }, stops: [], exhausted: null },
+  ] as const;
+  const modes = [
+    { reversed: false, unshared: false },
+    { reversed: false, unshared: true },
+    { reversed: true, unshared: false },
+    { reversed: true, unshared: true },
   ];
-  for (const { mode, stops, exhausted } of expected) {
-    const found = stopSet([{ path: "main.tease", source }], mode, ["hostValue", "hostOther"], 256);
-    assert.deepEqual(
-      { stops: found?.stops, exhausted: found?.exhausted },
-      { stops, exhausted },
-      JSON.stringify(mode),
-    );
-  }
+  for (const { source, modes: expected } of cases)
+    for (const [index, mode] of modes.entries()) {
+      const found = stopSet(
+        [{ path: "main.tease", source }],
+        mode,
+        ["hostValue", "hostOther"],
+        256,
+      );
+      const [stops, exhausted] = expected[index]!;
+      assert.deepEqual(
+        { stops: found?.stops, exhausted: found?.exhausted },
+        { stops, exhausted },
+        `${JSON.stringify(mode)}: ${source.slice(0, 60)}`,
+      );
+    }
 });

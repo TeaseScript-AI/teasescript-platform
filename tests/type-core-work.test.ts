@@ -234,15 +234,14 @@ test("two choices read in k lists grow with the program in either order, each co
 });
 
 /**
- * #1573 (Codex r1's B2 on #1628): a list of m loads of one class holding the members of an earlier list in another order
- * names their leaves through the node that list made (`setNode`), found by the members' ids in any order, never by
- * sorting them: what such a list adds to the contract's steps (`invSteps`) beyond a list of the first order grows with
- * its members, at most 2.15 from 8 to 16 of them in either order (a sort per list measured 2.85).
+ * #1573 (Codex r1's B2 on #1628): a further list of m loads of one class, the members of an earlier list in its order or
+ * in another, names their leaves through the node that list made (`setNode`), found by the members' ids in any order,
+ * never by sorting them: the contract's steps (`invSteps`) such a list adds are linear in its members, each doubling
+ * from 16 to 32 to 64 adding at most 1.05 × twice what the doubling before added, in either order of the analysis (a
+ * sort per list adds 2.18 times as much at each).
  */
-test("a list of a set's members in another order adds contract steps linear in its members (#1573)", () => {
-  const steps = (m: number, turned: boolean, reversed: boolean): number => {
-    const order = Array.from({ length: m }, (_, j) => j);
-    const lists = [order, order, turned ? order.map((j) => (j * (m - 1) + 1) % m) : order];
+test("a further list of a set's members, in any order, adds contract steps linear in its members (#1573)", () => {
+  const steps = (m: number, lists: readonly (readonly number[])[], reversed: boolean): number => {
     const source = [
       many(
         m,
@@ -265,12 +264,19 @@ test("a list of a set's members in another order adds contract steps linear in i
       : run();
     return answers.budget.counts.get("invSteps") ?? 0;
   };
-  for (const reversed of [false, true]) {
-    const [eight, sixteen] = [8, 16].map(
-      (m) => steps(m, true, reversed) - steps(m, false, reversed),
-    );
-    assert.ok(sixteen! <= DOUBLING * eight!, `reversed: ${reversed}: ${eight} → ${sixteen}`);
-  }
+  for (const reversed of [false, true])
+    for (const turned of [false, true]) {
+      // (what the third list adds at 16, 32 and 64 members)
+      const [small, middle, large] = [16, 32, 64].map((m) => {
+        const order = Array.from({ length: m }, (_, j) => j);
+        const third = turned ? order.map((j) => (j * (m - 1) + 1) % m) : order;
+        return steps(m, [order, order, third], reversed) - steps(m, [order, order], reversed);
+      });
+      assert.ok(
+        large! - middle! <= 2.1 * (middle! - small!),
+        `reversed: ${reversed}, turned: ${turned}: ${small} → ${middle} → ${large}`,
+      );
+    }
 });
 
 /**
