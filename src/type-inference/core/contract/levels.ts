@@ -89,7 +89,7 @@ export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStore
     if (member === null) others.push(entry);
     else base.push(member);
   }
-  const levels = { others, base, closed };
+  const levels = { others, base, closed, read: false };
   contract.levelBases.set(prefix, levels);
   return levels;
 }
@@ -128,7 +128,8 @@ function closedObject(contract: Contract, entry: PrefixEntry): boolean {
  * itself, the sharing off; on, their groups at the path, folded from theirs as `groupsAt` folds, never kept as the
  * prefix's, whose complete list a deeper path folds), and F11's one `missing` for those without it, with the earliest
  * literal writer, standing where the first of them stands among the holders (`propertyLack`); `null` for any other
- * prefix or path, which its levels answer, and for the prefix's reads before its index pays.
+ * prefix or path, which its levels answer, and for the prefix's reads before its index pays: its first at the levels'
+ * own cost, so a prefix read once costs what its levels do, each later one until the reads reach the index's size.
  */
 export function* propertyItems(
   contract: Contract,
@@ -142,6 +143,11 @@ export function* propertyItems(
   const { work } = contract.pass.program;
   let index = contract.propertyIndexes.get(stores);
   if (index === undefined || !("holders" in index)) {
+    // (its first property read: the levels answer it at their own cost, nothing kept for it)
+    if (!levels.read) {
+      levels.read = true;
+      return null;
+    }
     const groups = sharing() ? groupsAt(contract, asked, levels.base, stepsRest([])) : null;
     const sources = groups ?? stores.list;
     if (index === undefined) {
@@ -154,10 +160,10 @@ export function* propertyItems(
       if (groups === null) for (const entry of stores.list) count(entry.value!);
       else for (const group of groups) count(group.literal);
       contract.keep(2);
-      contract.propertyIndexes.set(stores, (index = { asked: 0, names }));
+      contract.propertyIndexes.set(stores, (index = { asked: 1, names }));
     }
     // (its levels read it, a fold of the sources each, while what they read for the prefix's properties is less than
-    // the index's size: a prefix of a few wide objects, as each of k copies of one read once, is never indexed)
+    // the index's size: a prefix of a few wide objects, as each of k copies of one read twice, is never indexed)
     if ((index.asked + 1) * sources.length < index.names) {
       index.asked += 1;
       return null;

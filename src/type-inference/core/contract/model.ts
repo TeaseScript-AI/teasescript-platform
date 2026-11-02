@@ -91,6 +91,8 @@ export interface PrefixLevels {
    * member (`closedObject`): a property below the prefix is read from its property index (`propertyItems`).
    */
   readonly closed: boolean;
+  /** #1456: whether a property below it has been read; its first read is the levels' alone (`propertyItems`). */
+  read: boolean;
 }
 
 /**
@@ -119,8 +121,8 @@ export interface PropertyIndex {
 }
 
 /**
- * #1456: a prefix of closed objects whose properties its levels read until the index pays (`propertyItems`): the reads
- * made so far, and the index's size, its sources' property names.
+ * #1456: a prefix of closed objects whose properties its levels read until the index pays (`propertyItems`), from
+ * its second property read on: the reads made so far, and the index's size, its sources' property names.
  */
 export interface PropertyReads {
   asked: number;
