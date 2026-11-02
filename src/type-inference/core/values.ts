@@ -76,6 +76,7 @@ import {
   mergeItems,
   REASON,
   spelledBy,
+  spellingIdentity,
   STOPPED,
   weaken,
   type Item,
@@ -395,12 +396,18 @@ export class Values {
   /**
    * What a read's answer takes from its narrowing, for the value classes that share answers (S10 part 2b): nothing for
    * a read that takes none; else its G's environment (`NarrowingEvents.environment`: two reads with one answer it
-   * alike).
+   * alike) and its type test's spelling (`spellingIdentity`, read once per form: two tests of one kinds in two written
+   * orders give two answers, TABLE r4.277 (2), Codex r7 on #1558). The value classes' `readSnapshot` and
+   * `readClass(…, true)` take it from here.
    */
   public narrowingMark(value: PlaceId): string {
     const narrowed = this.#narrowingOf(value);
     if (narrowed === null) return "";
-    return `n${this.pass.guards.narrowings(this.pass).events.environment(narrowed.g, narrowed.read)}`;
+    const environment = this.pass.guards
+      .narrowings(this.pass)
+      .events.environment(narrowed.g, narrowed.read);
+    const spelling = spellingIdentity(this.#testSpelling(narrowed.g.form));
+    return spelling === "" ? `n${environment}` : `n${environment}~${spelling}`;
   }
 
   /**

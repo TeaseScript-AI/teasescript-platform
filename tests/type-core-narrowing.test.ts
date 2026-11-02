@@ -3,8 +3,16 @@ import test from "node:test";
 
 import { analyseCore, type CorePass } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import { makeItem, REASON, type Item, type ItemTag } from "../src/type-inference/core/items.js";
+import { annotationTags } from "../src/type-inference/core/contract/terms.js";
+import {
+  itemsSignature,
+  makeItem,
+  REASON,
+  type Item,
+  type ItemTag,
+} from "../src/type-inference/core/items.js";
 import { narrowedItems, type NarrowingForm } from "../src/type-inference/core/narrowing.js";
+import { siteKey } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
@@ -1359,6 +1367,71 @@ test("a type test's spelling is read once, for every read it narrows (#1398)", (
         assert.deepEqual([...spellings][0], ["string", "integer"], `${k} ${JSON.stringify(mode)}`);
       });
   }
+});
+
+/**
+ * #1398 (TABLE r4.277 (2), Codex r7 on #1558): two type tests of one kinds in two written orders narrow host data to two
+ * answers, `[string, integer]` and `[integer, string]`, and the value side tells them apart in every identity it reads:
+ * their items' signatures and their exact read classes, which take the test's spelling (`Values.narrowingMark`).
+ */
+test("two type tests of one kinds in two written orders give two read classes (#1398)", () => {
+  const source =
+    "let x = hostValue\nif x is string | integer | string { let first = x }\n" +
+    "if x is integer | string | integer | string { let second = x }\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+  assert.ok(request !== null);
+  const pass = narrowingPass(request);
+  const reads = ["first", "second"].map((name) => {
+    const node = nodeAt(pass, source.indexOf(`let ${name} = x`) + `let ${name} = `.length);
+    const value = pass.program.placeBySite.get(
+      siteKey({ file: node.file, start: node.span!.start.offset, end: node.span!.end.offset }),
+    )!;
+    const items = pass.solver.run(pass.values.valueItems(value, node, []));
+    return {
+      tags: items.map((item) => item.tag),
+      signature: itemsSignature(items, pass.program.scope),
+      read: pass.contract.readClass(value, true),
+    };
+  });
+  assert.deepEqual(
+    reads.map((read) => read.tags),
+    [
+      ["string", "integer"],
+      ["integer", "string"],
+    ],
+  );
+  assert.notEqual(reads[0]!.signature, reads[1]!.signature);
+  assert.notEqual(reads[0]!.read, reads[1]!.read);
+});
+
+/**
+ * #1398 (TABLE r4.277 (3), Codex r7 on #1558): a type's written kinds are read by one walk, each node and each kind it
+ * gives once: at depths 32, 64 and 128 of unions nested to the right and to the left, and of optionals, the walk of the
+ * test's type as its narrowing holds it gives one kind per name the type writes, in their written order.
+ */
+test("a type test's written kinds are one kind per name, in written order, however deeply it nests (#1398)", () => {
+  const alternate = (at: number): string => (at % 2 === 0 ? "integer" : "string");
+  for (const shape of ["right", "left", "optional"])
+    for (const k of [32, 64, 128]) {
+      let type = "string";
+      const kinds: string[] = ["string"];
+      for (let at = 0; at < k; at += 1)
+        if (shape === "right") {
+          type = `${alternate(at)} | (${type})`;
+          kinds.unshift(alternate(at));
+        } else if (shape === "left") {
+          type = `(${type}) | ${alternate(at)}`;
+          kinds.push(alternate(at));
+        } else {
+          type = `${type} ?`;
+          kinds.push("null");
+        }
+      const source = `let x = hostValue\nif x is ${type} {\n  let y = x\n}\nexit\n`;
+      const analysed = pass(source);
+      const form = narrowingAt(analysed.pass, read(analysed, "x\n}", 0))?.g.form;
+      assert.ok(form?.kind === "is" && form.test !== undefined, `${shape} ${k}`);
+      assert.deepEqual(annotationTags(form.test), kinds, `${shape} ${k}`);
+    }
 });
 
 test("G's value is its input filtered by its form (N1)", () => {

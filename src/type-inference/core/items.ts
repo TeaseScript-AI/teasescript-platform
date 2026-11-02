@@ -132,13 +132,23 @@ export function joinSpelling(
 }
 
 /**
+ * A spelling's part of an identity (TABLE r4.277 (2)): empty for none, `*` for `MIXED`, else its kinds by value. Every
+ * key or snapshot that identifies items or a type test's form includes it (`itemsSignature`, `Values.narrowingMark`), so
+ * differently marked lists are different values.
+ */
+export function spellingIdentity(spelling: Spelling | undefined): string {
+  return spelling === undefined ? "" : spelling.length === 0 ? "*" : spelling.join("+");
+}
+
+/**
  * The field of the items made from a written type of these kinds in their written order (`makeItem`'s `fields`): each
  * kind once, `unknown` left out, so every maker of one written type gives one spelling. Made once per written type read.
  */
 export function spelledBy(kinds: readonly ItemTag[]): { readonly spelling: Spelling } {
-  return {
-    spelling: kinds.filter((tag, index) => tag !== "unknown" && kinds.indexOf(tag) === index),
-  };
+  const seen = new Set<ItemTag>(["unknown"]);
+  const spelling: ItemTag[] = [];
+  for (const tag of kinds) if (!seen.has(tag)) spelling.push((seen.add(tag), tag));
+  return { spelling };
 }
 
 /** The fields of an item that `makeItem` lets a caller set. */
@@ -514,8 +524,8 @@ export function weaken(items: readonly Item[], context: ContextWord | null = nul
 /**
  * The items as one comparable text, independent of their order, for a fixpoint's test whether a value changed. The
  * ingress stores are left out: a fixpoint member's stores grow in its cell, which every value holding it shares. An
- * item's spelling is part of it (none, one spelling by its kinds, or `MIXED`, `*`): differently marked items order a
- * later list differently, so they are different values (TABLE r4.277 (2), #1398).
+ * item's spelling is part of it (`spellingIdentity`): differently marked items order a later list differently, so they
+ * are different values (TABLE r4.277 (2), #1398).
  */
 export function itemsSignature(items: readonly Item[], scope: ItemScope): string {
   scope.work.charge("sigItems", items.length + 1);
@@ -530,11 +540,7 @@ export function itemsSignature(items: readonly Item[], scope: ItemScope): string
         item.word ?? "",
         `${item.guarded === true ? "g" : ""}${item.called === true ? "c" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}`,
         item.fan ?? "",
-        item.spelling === undefined
-          ? ""
-          : item.spelling.length === 0
-            ? "*"
-            : item.spelling.join("+"),
+        spellingIdentity(item.spelling),
       ].join("|"),
     )
     .sort()
