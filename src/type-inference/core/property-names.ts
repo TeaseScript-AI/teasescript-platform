@@ -22,7 +22,7 @@ import {
 import { carried, type Dispatch } from "./carriers.js";
 import { heldReference, type Contract, type IndexNode } from "./contract.js";
 import type { PrefixStores, SubLayer } from "./contract/model.js";
-import { keptPath, keyPlace, recordPath, type Key } from "./definitions.js";
+import { keptPath, recordPath, type Key } from "./definitions.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
 import type { Work } from "./solver.js";
@@ -181,14 +181,24 @@ function taskId(work: WorkLedger, task: PropertyNamesTask): string {
 }
 
 /**
- * A source a listing schedules: its key at the listing's rest, its place, and that key task's identity, made by its
- * classification for the first visit that takes it up (`prepaid`).
+ * A source a listing schedules: its key at the listing's rest and that key task's identity, made by its classification
+ * for the first visit that takes it up (`prepaid`).
  */
 interface Source {
   readonly key: CanonicalKey;
-  readonly place: PlaceId;
   readonly id: string;
   prepaid: boolean;
+}
+
+/** A key's place (`keyPlace`'s), read from its leading digits without making a text. */
+function placeOfKey(key: CanonicalKey): PlaceId {
+  let place = 0;
+  for (let at = 0; at < key.length; at += 1) {
+    const digit = key.charCodeAt(at) - 48;
+    if (digit < 0 || digit > 9) break;
+    place = place * 10 + digit;
+  }
+  return place;
 }
 
 /**
@@ -527,7 +537,7 @@ function classify(
 /** A source of a listing at a rest: its key there and that key's identity, charged as the search charges them. */
 function sourceAt(pass: CorePass, sub: Key, rest: readonly string[]): Source {
   const key = keptKeyBelowIn(pass.contract, sub, rest);
-  return { key, place: keyPlace(key), id: taskId(pass.program.work, { key }), prepaid: true };
+  return { key, id: taskId(pass.program.work, { key }), prepaid: true };
 }
 
 /** A listing made from all of its sources in `subSources`' order: each classified, the last first. */
@@ -810,7 +820,7 @@ export function propertyNames(
    * entry, its place's shortest visit on the chain shorter than its path.
    */
   const mayPump = (source: Source, rest: readonly string[]): boolean => {
-    const own = positions.get(source.place * 3);
+    const own = positions.get(placeOfKey(source.key) * 3);
     return (
       own !== undefined && own.length > 0 && chain[own[own.length - 1]!]!.shortestSame < rest.length
     );
