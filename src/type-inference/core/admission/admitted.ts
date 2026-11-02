@@ -74,14 +74,14 @@ export function admitted(admission: Admission, place: PlaceId, path: readonly st
  * of another place lands at or above it (a lazily decided copy path among them), that source's at the same path below
  * the copy, through the copy forest's edges; with `null` where the decision admits one (admission's null rule, its
  * contract question answered as admitting); `null` where none of these decides the path, `["unknown"]` where every
- * kind fits it.
+ * kind fits it. With whether a written type decides it through copies (`inherited`), which keeps its spelling (#1398).
  */
 export function retained(
   admission: Admission,
   place: PlaceId,
   path: readonly string[],
-): ItemTag[] | null {
-  return retainedSource(admission, place, path)?.tags ?? null;
+): { readonly tags: ItemTag[]; readonly inherited: boolean } | null {
+  return retainedSource(admission, place, path);
 }
 
 /**

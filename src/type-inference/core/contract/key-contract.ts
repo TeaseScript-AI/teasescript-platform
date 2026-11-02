@@ -46,6 +46,7 @@ import {
   mergeItems,
   reasonContext,
   REASON,
+  spelledBy,
   STOPPED,
   type ContextWord,
   type Item,
@@ -179,10 +180,13 @@ export function* keyContract(contract: Contract, asked: Key): Work<readonly Item
     if (at !== null) {
       const stored = yield* contractAlong(contract, place, path, 0, receiver.floor, walk.prefix);
       const marks = marksOf(stored);
-      const tags = typeKinds(at).map((tag) =>
+      // (each kind with the written type's spelling, #1398)
+      const kinds = typeKinds(at);
+      const spelled = spelledBy(kinds);
+      const tags = kinds.map((tag) =>
         makeItem(tag, null, {
           ...marks,
-          ...(tag === "unknown" ? { reasons: REASON.opaque } : {}),
+          ...(tag === "unknown" ? { reasons: REASON.opaque } : spelled),
           ...(marks.guarded === true ? { cert: "pos" } : {}),
         }),
       );

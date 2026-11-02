@@ -99,6 +99,46 @@ export interface Item {
    * external data, so no internal contribution admits it (A2, A3 r4.36, r4.37).
    */
   readonly extOnly?: true;
+  /**
+   * The written type the item was made from, as its kinds in their written order (`Spelling`): a list of a value's
+   * kinds keeps that order where it alone covers the list (`inItsOrder`, #1398, TABLE r4.277).
+   */
+  readonly spelling?: Spelling;
+}
+
+/**
+ * A written type's kinds in their written order (`typeKinds`'s), which the items made from it carry; `MIXED` where
+ * items of two spellings merged. Compared by its kinds, never by identity: two reads of one written type are one
+ * spelling.
+ */
+export type Spelling = readonly ItemTag[];
+
+/** The spelling of items of two different spellings merged: it never covers a list (`inItsOrder`). */
+export const MIXED: Spelling = Object.freeze([]);
+
+/**
+ * The join of two items' spellings: none below one spelling below `MIXED` (TABLE r4.277 (1)). Commutative and
+ * associative, `MIXED` absorbing, so a merge's spelling is the same in whatever order its items come.
+ */
+export function joinSpelling(
+  a: Spelling | undefined,
+  b: Spelling | undefined,
+): Spelling | undefined {
+  if (a === undefined) return b;
+  if (b === undefined || a === b) return a;
+  return a.length > 0 && a.length === b.length && a.every((tag, index) => tag === b[index])
+    ? a
+    : MIXED;
+}
+
+/**
+ * The field of the items made from a written type of these kinds in their written order (`makeItem`'s `fields`): each
+ * kind once, `unknown` left out, so every maker of one written type gives one spelling. Made once per written type read.
+ */
+export function spelledBy(kinds: readonly ItemTag[]): { readonly spelling: Spelling } {
+  return {
+    spelling: kinds.filter((tag, index) => tag !== "unknown" && kinds.indexOf(tag) === index),
+  };
 }
 
 /** The fields of an item that `makeItem` lets a caller set. */
@@ -324,6 +364,8 @@ function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
   // Still the rows of one unknown only when both are; still possible solely through external data only when both are.
   const fan = first.fan !== undefined && first.fan === other.fan ? first.fan : undefined;
   const extOnly = first.extOnly === true && other.extOnly === true;
+  // (a kind a written type spells keeps its spelling beside an inferred one of that kind, which adds nothing to it)
+  const spelling = joinSpelling(first.spelling, other.spelling);
   return {
     tag: first.tag,
     cert: marks.guarded !== true && (first.cert === "def" || other.cert === "def") ? "def" : "pos",
@@ -336,6 +378,7 @@ function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
     ...marks,
     ...(fan === undefined ? {} : { fan }),
     ...(extOnly ? { extOnly: true } : {}),
+    ...(spelling === undefined ? {} : { spelling }),
   };
 }
 
@@ -345,32 +388,80 @@ const TAG_RANK: ReadonlyMap<ItemTag, number> = new Map(
 );
 
 /**
- * Entries in their kinds' fixed order (`TAG_RANK`), never in the order the analysis met them, which the consumers' and
- * the solver's orders and the sharing change (#1398); entries of one kind keep their order. The one order every
- * published list of a value's inferred kinds takes (`inKindOrder`, `kindsInOrder`): it is made here (a merge, a stopped
- * answer, a finishing read) and reaches its publication through steps that keep it, and a list composed with another
- * one passes here again where it is completed. A written type's spelling, a fixed table's order and a tuple by position
- * keep their own. One pass over the entries and one over the ranks, so it costs no more than the entries it is given,
- * each already charged where it was made, and it charges nothing of its own (TABLE r4.261).
+ * The one order of a list of a value's kinds (#1398, TABLE r4.277): a written spelling's where exactly one spelling
+ * covers every kind of the list but `null`, `unknown` and `empty` (an inferred kind it spells adds nothing to it, as
+ * G5 rules), then the others in the table's; else the table's (`TAG_RANK`), never the order the analysis met them,
+ * which the consumers' and the solver's orders and the sharing change. It reads the kinds and the spellings alone, so it
+ * is the same in whatever order the entries come; entries of one kind keep their order. A list is made in it (a merge, a
+ * stopped answer, a finishing read) and reaches its publication through steps that keep it, and a list composed with
+ * another passes here again where it is completed. A fixed table's order and a tuple by position keep their own. One
+ * pass over the entries and one over the ranks, so it costs no more than the entries it is given, each already charged
+ * where it was made, and it charges nothing of its own (TABLE r4.261).
  */
-function byKind<T>(entries: Iterable<T>, kindOf: (entry: T) => ItemTag): T[] {
+function inOrderOf<T>(
+  entries: Iterable<T>,
+  kindOf: (entry: T) => ItemTag,
+  spelling: Spelling | undefined,
+): T[] {
+  const list = [...entries];
+  const order = covering(
+    list.map((entry) => kindOf(entry)),
+    spelling,
+  );
+  const rankOf =
+    order === undefined
+      ? (tag: ItemTag): number => TAG_RANK.get(tag)!
+      : (tag: ItemTag): number => {
+          const at = order.indexOf(tag);
+          return at >= 0 ? at : order.length + TAG_RANK.get(tag)!;
+        };
   const byRank: T[][] = [];
-  for (const entry of entries) (byRank[TAG_RANK.get(kindOf(entry))!] ??= []).push(entry);
+  for (const entry of list) (byRank[rankOf(kindOf(entry))] ??= []).push(entry);
   return byRank.flat();
 }
 
-/** A value's items in their kinds' fixed order (`byKind`). */
-export function inKindOrder(items: Iterable<Item>): Item[] {
-  return byKind(items, (item) => item.tag);
+/** `spelling` where it covers every one of `kinds` but `null`, `unknown` and `empty` (`inOrderOf`), else none. */
+export function covering(
+  kinds: readonly ItemTag[],
+  spelling: Spelling | undefined,
+): Spelling | undefined {
+  return spelling !== undefined &&
+    spelling.length > 0 &&
+    kinds.every(
+      (tag) => tag === "null" || tag === "unknown" || tag === "empty" || spelling.includes(tag),
+    )
+    ? spelling
+    : undefined;
 }
 
-/** Kinds taken from a value's items, in their fixed order (`byKind`). */
+/** The spelling a value's items join to (`joinSpelling`), `MIXED` included; none where no item has one. */
+export function spellingOf(items: readonly Item[]): Spelling | undefined {
+  let spelling: Spelling | undefined;
+  for (const item of items) spelling = joinSpelling(spelling, item.spelling);
+  return spelling;
+}
+
+/** A value's items in their one order (`inOrderOf`), by the spelling their marks join to (`spellingOf`). */
+export function inItsOrder(items: Iterable<Item>): Item[] {
+  const list = [...items];
+  return inOrderOf(list, (item) => item.tag, spellingOf(list));
+}
+
+/** Kinds taken from a value's items, in their one order (`inOrderOf`) by the spelling that wrote them, if any. */
+export function kindsInItsOrder<Kind extends ItemTag>(
+  kinds: Iterable<Kind>,
+  spelling: Spelling | undefined,
+): Kind[] {
+  return inOrderOf(kinds, (kind) => kind, spelling);
+}
+
+/** Kinds no written type spelled, in the table's order (`kindsInItsOrder` without a spelling). */
 export function kindsInOrder<Kind extends ItemTag>(kinds: Iterable<Kind>): Kind[] {
-  return byKind(kinds, (kind) => kind);
+  return inOrderOf(kinds, (kind) => kind, undefined);
 }
 
 /**
- * The items of one value, one per kind, in their kinds' fixed order (`inKindOrder`): an item is definite when one of its
+ * The items of one value, one per kind, in their one order (`inItsOrder`): an item is definite when one of its
  * kind is (and none is guarded); the reasons and ingress stores of all are kept, so no merge drops a boundary check
  * (C9); the earliest writer and the first context word stand for the kind (F28, §3.4); a guarded one marks the kind
  * (§3.2).
@@ -382,7 +473,7 @@ export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
     const earlier = byTag.get(item.tag);
     byTag.set(item.tag, earlier === undefined ? item : mergePair(earlier, item, scope.ingress));
   }
-  return inKindOrder(byTag.values());
+  return inItsOrder(byTag.values());
 }
 
 /**

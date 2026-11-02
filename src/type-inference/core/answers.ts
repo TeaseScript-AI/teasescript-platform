@@ -47,10 +47,11 @@ import { GuardIndex } from "./guards.js";
 import { HandlerIndex } from "./handlers.js";
 import {
   EMPTY,
-  inKindOrder,
+  inItsOrder,
   kindsInOrder,
   makeItem,
   REASON,
+  spelledBy,
   STOPPED,
   type Item,
   type ItemTag,
@@ -913,7 +914,7 @@ function withBesides(diagnostics: readonly CoreDiagnostic[]): CoreDiagnostic[] {
   return diagnostics.map((diagnostic) => {
     if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget")
       return diagnostic;
-    // (gathered from diagnostics in their published order: put in the kinds' fixed order, #1398)
+    // (gathered from diagnostics, which carry no spelling: the table's order, #1398)
     const besides = kindsInOrder(
       [...reported.get(key(diagnostic.site, diagnostic.rule.rule))!].filter(
         (kind) =>
@@ -1125,7 +1126,7 @@ class CoreAnswers implements Answers {
    * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`); where none
    * of them retains anything after a stop where admission had settled, the type admission gives the read's place there,
    * as `place` answers it (`#lazilyDecided`). Each source gives its list in its own order: an answer, a decision or a
-   * composition in the kinds' fixed order where it is made (#1398), a written type in its spelling's.
+   * composition in its one order where it is made (`inItsOrder`, #1398).
    */
   #items(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
     const answered = this.#run(this.#pass.values.valueItems(value, node, path));
@@ -1153,7 +1154,12 @@ class CoreAnswers implements Answers {
     const written = writtenOf(program.place(place.root).kind);
     const admitted = this.#admitted(place.root, at, written === null ? null : termAt(written, at));
     if (admitted.by === "undecided" || admitted.kinds.includes("unknown")) return null;
-    const items = admitted.kinds.map((tag) => makeItem(tag, null, { cert: "pos" }));
+    // (a written or a borrowed written type keeps its spelling, a decision none, #1398)
+    const spelled =
+      admitted.by === "written" || (admitted.by === "decided" && admitted.inherited)
+        ? spelledBy(admitted.kinds)
+        : {};
+    const items = admitted.kinds.map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
     const step = path.at(-1) ?? program.projOf.get(value)?.step;
     return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
   }
@@ -1200,9 +1206,13 @@ class CoreAnswers implements Answers {
       if (written !== null) {
         const term = termAt(written, path);
         const tags = term === null ? [] : typeTags(term).filter((tag) => tag !== "unknown");
+        // (its kinds with the written type's spelling, #1398)
+        const spelled = spelledBy(tags);
         found = {
           items:
-            tags.length === 0 ? STOPPED : tags.map((tag) => makeItem(tag, null, { cert: "def" })),
+            tags.length === 0
+              ? STOPPED
+              : tags.map((tag) => makeItem(tag, null, { cert: "def", ...spelled })),
           names: term === null ? NO_NAMES : new Set(termProperties(term)),
         };
       } else if (call.fallback === undefined) found = { items: STOPPED, names: NO_NAMES };
@@ -1213,14 +1223,14 @@ class CoreAnswers implements Answers {
           found = this.#typedShapes.get(joinParts(at, path)) ?? null;
           chain.push(at);
         } else {
-          // the default itself: its own shape, as a typed default reads it (the answer in the kinds' fixed order, #1398)
+          // the default itself: its own shape, as a typed default reads it (the answer in its one order, #1398)
           const own = this.#literalShape(at, path);
           const decision = typedDefault(path, false);
           found = {
             items:
               own.items === STOPPED
                 ? STOPPED
-                : inKindOrder(decision.answer(decision.choose(own.items), own.items)),
+                : inItsOrder(decision.answer(decision.choose(own.items), own.items)),
             names: own.names,
           };
         }
@@ -1281,7 +1291,7 @@ class CoreAnswers implements Answers {
     }
     // each child at the path's own step (`literalChildren` keys a collection's elements and a dict's values alike): its
     // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question,
-    // TABLE r4.158), beside its known siblings, the composition in the kinds' fixed order (#1398); its names its own
+    // TABLE r4.158), beside its known siblings, the composition in its one order (#1398); its names its own
     // syntax's alone
     const items: Item[] = [];
     const names = new Set<string>();
@@ -1291,7 +1301,7 @@ class CoreAnswers implements Answers {
       for (const name of this.#stoppedShape(child.value, rest).names) names.add(name);
       for (const item of this.#items(child.value, child.node, rest)) items.push(item);
     }
-    return { items: items.length === 0 ? STOPPED : inKindOrder(items), names };
+    return { items: items.length === 0 ? STOPPED : inItsOrder(items), names };
   }
 
   /** The value place of an expression node, the place a statement stores into, or `null`. */

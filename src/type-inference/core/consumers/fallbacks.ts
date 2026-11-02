@@ -7,7 +7,7 @@ import { labelBelow } from "../contract/labels.js";
 import { keyPlace } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { kindsInOrder, STOPPED, type Item, type ItemTag } from "../items.js";
+import { kindsInItsOrder, STOPPED, type Item, type ItemTag } from "../items.js";
 import type { ValueConstraint } from "../program.js";
 import { elementStep, offendingKinds, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
@@ -142,10 +142,10 @@ function fallbackFitsAt(
   const added = unionHolds
     ? typeTags(into!).filter((tag) => tag !== "null" && tag !== "unknown" && !own.includes(tag))
     : [];
-  // (a written type keeps its spelling where nothing beside it adds a kind, the receiving union repeating it included;
-  // a family, or a kind the union adds, is a composition, in the kinds' fixed order, #1398)
+  // (in their one order, #1398: a written type's spelling where nothing beside it adds a kind, the receiving union
+  // repeating it included; a family, or a kind the union adds, the table's)
   const joined: ItemTag[] = [...new Set([...own, ...added])];
-  const against = written && added.length === 0 ? joined : kindsInOrder(joined);
+  const against = kindsInItsOrder(joined, written ? own : undefined);
   // §3.3: a fallback whose contract every kind of fits asks nothing more at this path
   const quiet = quietKinds(walk, value, rest);
   const fallback =
