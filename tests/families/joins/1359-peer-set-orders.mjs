@@ -1,4 +1,5 @@
-// #1359's B1 family, peer sets in different orders and subsets (desktop:~/work/evidence/1417/a0abf39f0/tools/shapes-order.mjs).
+// #1359's B1 family, peer sets in different orders and subsets (desktop:~/work/evidence/1417/a0abf39f0/tools/shapes-order.mjs),
+// its `subsets` windows corrected in #1578 and recorded from #1578's run of this module.
 
 // #1359's B1 family (Astra r1): m = k/8 peers of one class, each a k-long `max` chain (roles) or a k-option choice of
 // host reads (leaves), read together in k lists in different orders and subsets; fixed order is the control.
@@ -103,18 +104,10 @@ export const globals = ["hostValue", "otherHost"];
 export const recorded = {
   commands: [
     [
-      "node growth.mjs <tree> desktop:~/work/evidence/1417/a0abf39f0/tools/shapes-order.mjs all 64 src,rev,srcOff,revOff literalUnits,mergeItems,checks,invSteps",
-      "desktop:~/work/evidence/1417/a0abf39f0/tools/queue-evidence.sh:20",
-    ],
-    [
-      "node answers.mjs <tree> <out> shapes desktop:~/work/evidence/1417/a0abf39f0/tools/shapes-order.mjs 8,16,24",
-      "desktop:~/work/evidence/1417/a0abf39f0/tools/queue-evidence.sh:26",
-    ],
-    [
-      "node oracle-run.mjs <base> <head> <out> desktop:~/work/evidence/1417/a0abf39f0/tools/shapes-order.mjs",
-      "desktop:~/work/evidence/1417/a0abf39f0/tools/queue-evidence.sh:34",
+      "node <head>/tests/families/run.mjs <a folder holding 1359-peer-set-orders.mjs> <base> <head> --work joins-1578.work.jsonl --out joins-1578.differences.jsonl",
+      "agents.home.arpa:~/work/evidence/i1578/record/scripts/record.sh:10",
     ],
   ],
   sources: 141,
-  sha256: "bf76c6260d2332c1a3820ea3508e6bfbc0266e87a31d89bb144f028ed3109e4c",
+  sha256: "e2a1782e8f5c8cfa08e4a786b2844138cd0b56ecad75aebd552fe6efc9d771de",
 };
