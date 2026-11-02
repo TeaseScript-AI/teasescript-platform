@@ -58,6 +58,17 @@ import {
   type ValueAnswer,
 } from "./answers.js";
 import { BudgetExhausted, joinSteps } from "./budget.js";
+import {
+  checkedType,
+  COLLECTIONS,
+  ContractDescriptors,
+  levelProof,
+  levelWalk,
+  SLICE_DEPTH,
+  typeOfKinds,
+  typeOfLevels,
+  type ContractResult,
+} from "./contract-descriptors.js";
 import { typedDefault as defaultKinds } from "./contract.js";
 import { leftOutCheck, leftOutWarning } from "./consumers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
@@ -858,7 +869,11 @@ function runtimeChecks(
   answers: Answers,
   index: SliceIndex,
   request: CoreAnalysisRequest,
-): { checks: Map<RuntimeCheckSite, TypeCheckPlan>; core: CoreRuntimeChecks } {
+): {
+  checks: Map<RuntimeCheckSite, TypeCheckPlan>;
+  core: CoreRuntimeChecks;
+  contracts: ReadonlyMap<Store, ContractResult>;
+} {
   const textOf = (node: Expression): string => {
     const file = index.fileOf(node);
     return request.files[file]!.source.slice(node.span.start.offset, node.span.end.offset);
@@ -979,7 +994,24 @@ function runtimeChecks(
     const type = contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null);
     if (type !== null) checks.set(store, type);
   }
-  return { checks, core };
+  return { checks, core, contracts: contracts.results };
+}
+
+/**
+ * Test-only: each checked store's contract result (`ContractDescriptors`), by the store's site (`file:start:end`), as
+ * the compiler's checks read them (`asked`).
+ */
+export function storeContracts(
+  answers: Answers,
+  request: CoreAnalysisRequest,
+): ReadonlyMap<string, ContractResult> {
+  const index = new SliceIndex(request.files.map((file) => file.program));
+  return asked(answers, (answers) => {
+    const out = new Map<string, ContractResult>();
+    for (const [store, result] of runtimeChecks(answers, index, request).contracts)
+      out.set(`${index.fileOf(store)}:${store.span.start.offset}:${store.span.end.offset}`, result);
+    return out;
+  });
 }
 
 /**
@@ -1157,6 +1189,14 @@ export class OutsideContract extends Error {
   }
 }
 
+// (the backend's slice rule reads the facts' depth here, where it read it before the service had it)
+export { SLICE_DEPTH };
+
+/** A value whose contract is deeper than the slice follows (`SLICE_DEPTH`): the program leaves the slice at it. */
+function outsideStructure(at: Expression): never {
+  throw new OutsideContract(at, "a value whose structure the slice does not follow");
+}
+
 /** Where a value lands directly: the place a store brings it into, and the path below the place's root. */
 interface Landing {
   readonly id: PlaceId;
@@ -1172,17 +1212,39 @@ interface Landing {
 class Contracts {
   readonly #landings = new Map<Expression, Landing | null>();
   readonly #literals = new Map<Expression, Expression | null>();
-  readonly #contracts = new Map<string, TypePlan | null>();
+  /** The stores' contracts (`ContractDescriptors`), read through the answers' places. */
+  readonly #descriptors: ContractDescriptors<readonly Expression[]>;
+  /** Each checked store's contract result, as `stored` made it. */
+  readonly results = new Map<Store, ContractResult>();
 
   public constructor(
     private readonly answers: Answers,
     private readonly index: SliceIndex,
     private readonly lets: ReadonlyMap<PlaceId, LetStatement>,
-  ) {}
+  ) {
+    this.#descriptors = new ContractDescriptors(
+      {
+        level: (id, path) => levelProof(answers.place(id, path)),
+        properties: (id, path) => answers.placeProperties(id, path),
+      },
+      (records) => {
+        const below = recordsBelow(records, this.#literalOf);
+        return {
+          elements: below.elements,
+          field: (name) => below.fields.get(name) ?? [],
+          order: (names) => fieldOrder(names, below, index),
+        };
+      },
+      answers.epoch,
+      // (statements nested past the limit stop nothing: a decision's stop is the cause there)
+      answers.budget.exhausted !== null && answers.budget.exhausted !== "nesting",
+    );
+  }
 
   /**
    * The check of a store: the destination's written type, else the complete type a stop below its path left it to check
-   * whole (`Answers.requirement`, #1416), else its contract at the stored path (A1–A9).
+   * whole (`Answers.requirement`, #1416), else its contract at the stored path (A1–A9): a complete one's, a lost one's
+   * part (decision 2 pending, TABLE r4.269), none for an open one.
    */
   public stored(store: Store): TypeCheckPlan | null {
     const declaration = declarationOf(this.answers, this.index, this.lets, store);
@@ -1190,14 +1252,26 @@ class Contracts {
     const whole = store.kind === "letStatement" || store.target.kind === "identifier";
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
-    const type =
+    const result =
       whole && declaration.typeAnnotation !== null
-        ? typePlan(typeFromAnnotation(declaration.typeAnnotation))
+        ? this.#descriptors.written(
+            typePlan(typeFromAnnotation(declaration.typeAnnotation)),
+            place?.id ?? null,
+            place?.path ?? [],
+          )
         : required !== null
-          ? typePlan(runCompileTask(termTask(required)))
+          ? this.#descriptors.written(
+              typePlan(runCompileTask(termTask(required))),
+              place!.id,
+              place!.path,
+            )
           : place === null
             ? null
-            : runCompileTask(this.#contractTask(place.id, place.path, value, [value]));
+            : this.#descriptors.result(place.id, place.path, [value], () =>
+                outsideStructure(value),
+              );
+    if (result !== null) this.results.set(store, result);
+    const type = result === null ? null : checkedType(result);
     if (type === null) return null;
     const name = [
       declaration.name.name,
@@ -1314,7 +1388,7 @@ class Contracts {
     if (place !== null) {
       const at = joinSteps(place.path, path);
       return {
-        contract: runCompileTask(this.#contractTask(place.id, at, read, [])),
+        contract: this.#contract(place.id, at, read),
         written: (levels) =>
           writtenDomain(this.answers.place(place.id, joinSteps(at, levels)).admitted),
       };
@@ -1338,7 +1412,7 @@ class Contracts {
         if (landing === null)
           throw new OutsideContract(read, "a join of different written types that no place admits");
         return {
-          contract: runCompileTask(this.#contractTask(landing.id, landing.path, read, [])),
+          contract: this.#contract(landing.id, landing.path, read),
           written: (levels) =>
             writtenDomain(this.answers.place(landing.id, joinSteps(landing.path, levels)).admitted),
         };
@@ -1430,84 +1504,9 @@ class Contracts {
     return base;
   }
 
-  /**
-   * A place's contract at a path: its admitted type (`admittedType`) with each object the place decided given the
-   * properties the core finds for it (`Answers.placeProperties`), each by its own contract; a written `object`, own or a
-   * copy's (A4 through copies: any object, V30 §13), and an undecided one stay open, the fields in the order of the
-   * stored value's records at their level (`fieldOrder`; a place's contract is its first checked store's). A contract
-   * deeper than the slice follows makes the program, stored by `at`, leave the slice.
-   */
-  *#contractTask(
-    id: PlaceId,
-    path: readonly string[],
-    at: Expression,
-    records: readonly Expression[],
-  ): CompileTask<TypePlan | null> {
-    const key = `${id}|${path.join(".")}`;
-    const known = this.#contracts.get(key);
-    if (known !== undefined) return known;
-    const admitted = typePlan(admittedType(this.answers, id, path));
-    const plan =
-      admitted === null
-        ? null
-        : yield* compileChild(this.#fillTask(id, path, admitted, at, records));
-    this.#contracts.set(key, plan);
-    return plan;
-  }
-
-  *#fillTask(
-    id: PlaceId,
-    path: readonly string[],
-    plan: TypePlan,
-    at: Expression,
-    records: readonly Expression[],
-  ): CompileTask<TypePlan> {
-    switch (plan.kind) {
-      case "union": {
-        const members: TypePlan[] = [];
-        for (const member of plan.members)
-          members.push(yield* compileChild(this.#fillTask(id, path, member, at, records)));
-        return { kind: "union", members };
-      }
-      case "list":
-      case "set":
-      case "dict":
-        if (plan.element === null) return plan;
-        if (path.length + 1 >= SLICE_DEPTH)
-          throw new OutsideContract(at, "a value whose structure the slice does not follow");
-        return {
-          kind: plan.kind,
-          element: yield* compileChild(
-            this.#fillTask(
-              id,
-              [...path, "element"],
-              plan.element,
-              at,
-              recordsBelow(records, this.#literalOf).elements,
-            ),
-          ),
-        };
-      case "object": {
-        const admitted = this.answers.place(id, path).admitted;
-        if (plan.properties.length > 0 || admitted.by !== "decided" || admitted.inherited)
-          return plan;
-        if (path.length + 1 >= SLICE_DEPTH)
-          throw new OutsideContract(at, "a value whose structure the slice does not follow");
-        const properties: TypePropertyPlan[] = [];
-        const below = recordsBelow(records, this.#literalOf);
-        for (const name of fieldOrder(this.answers.placeProperties(id, path), below, this.index)) {
-          const step = [...path, propertyStep(name)];
-          if (this.answers.place(id, step).admitted.by === "undecided") continue;
-          const type = yield* compileChild(
-            this.#contractTask(id, step, at, below.fields.get(name) ?? []),
-          );
-          if (type !== null) properties.push({ name, type });
-        }
-        return { kind: "object", properties };
-      }
-      default:
-        return plan;
-    }
+  /** A place's contract at a path as the plan's check carries it (`ContractDescriptors`), for a value read from it. */
+  #contract(id: PlaceId, path: readonly string[], at: Expression): TypePlan | null {
+    return checkedType(this.#descriptors.result(id, path, [], () => outsideStructure(at)));
   }
 
   /**
@@ -1959,22 +1958,6 @@ function unreachable(answers: Answers, index: SliceIndex): Set<Statement> {
   );
 }
 
-/**
- * A type of these kinds for the facts: each kind's closed type (`closedType`), a collection's with `element` as its
- * element type; no kind is `?`. The slice's variables hold one kind or one numeric family, so one element type serves.
- */
-function typeOfKinds(tags: readonly ItemTag[], element: StaticType): StaticType {
-  const kinds = [...new Set(tags)].filter((tag) => tag !== "empty");
-  if (kinds.length === 0) return openType();
-  return union(
-    kinds.map((tag): StaticType =>
-      tag === "list" || tag === "set" || tag === "dict"
-        ? { kind: tag, element }
-        : (closedType(tag) ?? UNKNOWN_TYPE),
-    ),
-  );
-}
-
 /** The element type of a collection type: the union of its collection members' elements, `unknown` without one. */
 function elementOf(type: StaticType): StaticType {
   const elements = members(type).flatMap((part) =>
@@ -1982,14 +1965,6 @@ function elementOf(type: StaticType): StaticType {
   );
   return elements.length === 0 ? UNKNOWN_TYPE : union(elements);
 }
-
-const COLLECTIONS: ReadonlySet<ItemTag> = new Set(["list", "set", "dict"]);
-
-/**
- * The deepest nesting of collections whose element types the slice's facts follow: a place or a written type with a
- * collection at this depth is outside the slice (`backend.ts` rejects it), so no fact is cut short.
- */
-export const SLICE_DEPTH = 256;
 
 /**
  * A written type's term as the type a check takes (V30 §13: an unwritten part and a written `object`'s properties take
@@ -2015,43 +1990,19 @@ function* termTask(term: TypeTerm): CompileTask<StaticType> {
   }
 }
 
-/** A place's type at a path: its contract's kinds, and a collection's elements' below it, built from the deepest up. */
+/** A place's type at a path: its contract's kinds, and a collection's elements' below it (`levelWalk`). */
 function placeType(answers: Answers, id: PlaceId, path: readonly string[]): StaticType {
-  const levels: ItemTag[][] = [];
-  for (let at = [...path]; ; at = [...at, "element"]) {
-    const tags = answers.place(id, at).contract.kinds.map((item) => item.tag);
-    levels.push(tags);
-    if (!tags.some((tag) => COLLECTIONS.has(tag))) break;
-    if (at.length + 1 >= SLICE_DEPTH)
-      throw new Error("A place of the slice holds collections deeper than its facts follow.");
-  }
-  let type: StaticType = openType();
-  for (let depth = levels.length - 1; depth >= 0; depth -= 1)
-    type = typeOfKinds(levels[depth]!, type);
-  return type;
+  return typeOfLevels(
+    levelWalk((at) => answers.place(id, at).contract.kinds.map((item) => item.tag), path),
+  );
 }
 
 /**
  * A place's admitted type at a path (A1–A9): per level its written or decided kinds, a place admission never decided its
- * contract's kinds, and a collection's elements' below it, built from the deepest up.
+ * contract's kinds, and a collection's elements' below it (`levelWalk`, `levelProof`).
  */
 function admittedType(answers: Answers, id: PlaceId, path: readonly string[]): StaticType {
-  const levels: ItemTag[][] = [];
-  for (let at = [...path]; ; at = [...at, "element"]) {
-    const place = answers.place(id, at);
-    const tags =
-      place.admitted.by === "undecided"
-        ? place.contract.kinds.map((item) => item.tag)
-        : [...place.admitted.kinds];
-    levels.push(tags);
-    if (!tags.some((tag) => COLLECTIONS.has(tag))) break;
-    if (at.length + 1 >= SLICE_DEPTH)
-      throw new Error("A place of the slice holds collections deeper than its facts follow.");
-  }
-  let type: StaticType = openType();
-  for (let depth = levels.length - 1; depth >= 0; depth -= 1)
-    type = typeOfKinds(levels[depth]!, type);
-  return type;
+  return typeOfLevels(levelWalk((at) => levelProof(answers.place(id, at)).tags, path));
 }
 
 /** The facts the core settled on for a program inside the slice, by source site (see `SolvedTypeFacts`). */

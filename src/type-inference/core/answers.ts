@@ -97,6 +97,10 @@ export interface CorePass {
 /** Stores' targets by their places (`DefinitionIndex`'s `storeTargets`). */
 type StoreTargets = ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]>>;
 
+/** Each program's passes so far, and each pass's number among them (`Answers.epoch`). */
+const PASSES = new WeakMap<CoreProgram, number>();
+const EPOCHS = new WeakMap<CorePass, number>();
+
 /**
  * One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6), the keys of
  * `stopped` stopped from its start (TABLE r4.180), a store below an object's own `first`, `last` or `random` at its
@@ -150,6 +154,9 @@ function createPass(
   parts.solver.names = (a, b) => compareDemandNames(contract, a, b);
   parts.solver.replayOf = (names) => exportNames(contract, names);
   for (const key of stopped) contract.stop(key.place, key.path);
+  const epoch = (PASSES.get(program) ?? 0) + 1;
+  PASSES.set(program, epoch);
+  EPOCHS.set(pass, epoch);
   return pass;
 }
 
@@ -372,6 +379,8 @@ export interface Answers {
    * initializer, by the read's site key, with the initializer's site (the collector's links; no type answer).
    */
   readonly initializers: ReadonlyMap<string, SourceSite>;
+  /** The admission pass these answers read, by its number among the analysis's passes (a contract's epoch). */
+  readonly epoch: number;
   at(node: FlowNode): OccurrenceAnswer | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
   /**
@@ -992,6 +1001,7 @@ class CoreAnswers implements Answers {
     readonly results: readonly PlaceId[];
   };
   readonly initializers: ReadonlyMap<string, SourceSite>;
+  readonly epoch: number;
   readonly #pass: CorePass;
   readonly #consumers: Consumers;
   readonly #written: readonly WrittenTypeError[];
@@ -1011,6 +1021,7 @@ class CoreAnswers implements Answers {
     this.#pass = pass;
     this.#consumers = consumers;
     this.#written = written;
+    this.epoch = EPOCHS.get(pass) ?? 0;
     // (a stop, not statements nested too deep after an analysis that ran to its end: its answers stand)
     this.#stopped = pass.program.work.stopped !== null;
     const program = pass.program;
