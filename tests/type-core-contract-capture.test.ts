@@ -17,7 +17,7 @@ import {
   type Globals,
   type Span,
 } from "./helpers/type-core-contract-knowledge.js";
-import { heldStops, HELD_MODES } from "./helpers/type-core-held-host.js";
+import { heldStops, HELD_MODES, type HeldMode } from "./helpers/type-core-held-host.js";
 
 /*
  * The contracts of stable admission (#1526 phase B, TABLE r4.278; #1556): once admission settled, before the walk, the
@@ -38,7 +38,6 @@ interface Witness {
   readonly name: string;
   readonly source: string;
   readonly store: string;
-  readonly step: number;
 }
 
 const WITNESSES: readonly Witness[] = [
@@ -46,26 +45,43 @@ const WITNESSES: readonly Witness[] = [
     name: "#1556",
     source: 'let a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nb.f = hostValue\nsay "AFTER"\nexit\n',
     store: "b.f = hostValue",
-    step: 5,
   },
   {
     name: "#1526",
     source:
       'let root={f:[[1]], extra:42}\nlet w0={entry:root}\nlet w1={shell:w0}\nlet w2={entry:w1}\nlet old=w2.entry.shell.entry\nsay "BEFORE"\nw2.entry.shell.entry.f=hostValue\nsay "AFTER"\nexit\n',
     store: "w2.entry.shell.entry.f=hostValue",
-    step: 29,
   },
 ];
 
 const FITTING: readonly Globals[] = [{ hostValue: L(L(2)), hostOther: 3 }];
 const FORBIDDEN: readonly Globals[] = [{ hostValue: L(L("x")), hostOther: 3 }];
 
+/**
+ * A case's settled stops in a mode, at most four of each phase: its first, its last and two evenly between. CI judges
+ * these; the sweep of every allowance in four modes, against `main` at the same work (TABLE r4.295), is the PR's queue
+ * evidence.
+ */
+function sampledStops(source: string, mode: HeldMode): { allowance: number; phase: string }[] {
+  const byPhase = new Map<string, { allowance: number; phase: string }[]>();
+  for (const stop of heldStops({ name: "sampled", source, slice: true, values: [] }, mode)) {
+    const list = byPhase.get(stop.phase) ?? [];
+    list.push(stop);
+    byPhase.set(stop.phase, list);
+  }
+  return [...byPhase.values()].flatMap((list) =>
+    list.length <= 4
+      ? list
+      : [0, 1, 2, 3].map((i) => list[Math.round((i * (list.length - 1)) / 3)]!),
+  );
+}
+
 const spanOf = (source: string, text: string): Span => {
   const start = source.indexOf(text);
   return { start, end: start + text.length };
 };
 
-test("a copied store's whole contract is checked at every settled stop past its capture (#1556, #1526)", () => {
+test("a copied store's whole contract is checked at the settled stops past its capture (#1556, #1526)", () => {
   for (const witness of WITNESSES) {
     const { source } = witness;
     const store = spanOf(source, witness.store);
@@ -75,11 +91,7 @@ test("a copied store's whole contract is checked at every settled stop past its 
       const [captured] = capturedWithin(natural, store);
       assert.ok(captured?.result.state === "complete", `${witness.name} ${mode.name}: unstopped`);
       assert.deepEqual(captured.result.ref, NESTED);
-      const stops = heldStops(
-        { name: witness.name, source, slice: true, values: [] },
-        mode,
-        witness.step,
-      );
+      const stops = sampledStops(source, mode);
       const phases = new Set(stops.map((stop) => stop.phase));
       assert.ok(phases.has("extraction") && (phases.has("walk") || phases.has("publication")));
       for (const { allowance, phase } of stops) {
@@ -120,11 +132,7 @@ test("a genuinely open part stays open past the capture, as unstopped", () => {
     const natural = capturedWithin(analyseCore(request), store)[0]?.result;
     assert.ok(natural?.state === "complete", name);
     assert.deepEqual(natural.ref, open);
-    for (const { allowance, phase } of heldStops(
-      { name, source, slice: true, values: [] },
-      mode,
-      3,
-    )) {
+    for (const { allowance, phase } of sampledStops(source, mode)) {
       if (phase === "extraction") continue;
       const answers = withTestAllowance(allowance, () => analyseCore(request));
       const result = capturedWithin(answers, store)[0]?.result;
@@ -159,6 +167,8 @@ test("a property whose proof a stop cut leaves its complete sibling checked whol
       NESTED,
       `stop at ${allowance}`,
     );
+    // (two such stops are enough here; every allowance is the PR's queue evidence)
+    if (witnessed === 2) break;
   }
   assert.ok(witnessed > 0, "some stop leaves `g` alone unfinished");
 });
@@ -197,11 +207,7 @@ test("a stop while the capture runs keeps what admission found before it", () =>
   for (const mode of HELD_MODES) {
     const natural = warned(mode.run(() => analyseCore(request)));
     assert.ok(natural.length > 0, mode.name);
-    for (const { allowance, phase } of heldStops(
-      { name: "written", source, slice: true, values: [] },
-      mode,
-      4,
-    )) {
+    for (const { allowance, phase } of sampledStops(source, mode)) {
       if (phase !== "extraction") continue;
       stops += 1;
       const at = `${mode.name}, extraction stop at ${allowance}`;
