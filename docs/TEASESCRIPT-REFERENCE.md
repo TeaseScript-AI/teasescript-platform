@@ -1163,8 +1163,9 @@ tasks.sort()
 - **Gives:** `indexOf` an `integer?`, `null` when absent; `get` the element, or the default for a missing index; `take`
   a new list; `join` one text, `", "` between by default; the set operations a new list (see [Sets](#sets-seta-b)).
 - **Fails:** `join` of values that cannot be shown.
-- **Status:** Implemented. Type rule ahead: the `get` default no longer decides the type of an empty list, and a
-  default of another type needs a declared union; today it does, and the union is inferred ·
+- **Status:** Implemented. Type rule ahead: the `get` default no longer decides the type of an empty list, a default
+  of another type needs a declared union, and an index of unknown type that is no whole number fails when the script
+  runs; today the default decides that type, the union is inferred, and such an index gives the default ·
   [§16](specifications/accepted-syntaxes-v30.md#16-lists)
 
 ```tease
