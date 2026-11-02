@@ -63,31 +63,11 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     4,
     "paths below a parse's call, cut at SLICE_DEPTH; lookups of its landing below",
   ],
-  "consumer.ts #contractTask composite": [
-    1,
-    "a memo key: a store target's path (a charged definition key), cut below",
-  ],
-  "consumer.ts #contractTask join": [
-    1,
-    "a memo key: a store target's path (a charged definition key), cut below",
-  ],
-  "consumer.ts #fillTask spread": [
-    2,
-    "a store target's path one step deeper, descents cut at SLICE_DEPTH in total",
-  ],
   "consumer.ts #landing spread": [
     1,
     "a node's path in the literal it is in, one per cell, as admission keeps (charged)",
   ],
-  "consumer.ts admittedType spread": [
-    2,
-    "a lookup of a place's element levels, not kept, cut at SLICE_DEPTH in total",
-  ],
   "consumer.ts coreFacts spread": [1, "a lookup of a place's element levels, not kept"],
-  "consumer.ts placeType spread": [
-    2,
-    "a lookup of a place's element levels, not kept, cut at SLICE_DEPTH in total",
-  ],
   "consumer.ts expected spread": [1, "a lookup of a landing's level, not kept"],
   "consumer.ts fallbackSteps split": [
     1,
@@ -100,6 +80,22 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   ],
   "consumer.ts stored join": [1, "a store's target name in a message"],
   "consumer.ts takesNull spread": [2, "lookups of a landing's levels, not kept"],
+  "contract-descriptors.ts #contract composite": [
+    1,
+    "a memo key: a store target's path (a charged definition key), cut below",
+  ],
+  "contract-descriptors.ts #contract join": [
+    1,
+    "a memo key: a store target's path (a charged definition key), cut below",
+  ],
+  "contract-descriptors.ts #fill spread": [
+    2,
+    "a store target's path one step deeper, descents cut at SLICE_DEPTH in total",
+  ],
+  "contract-descriptors.ts levelWalk spread": [
+    2,
+    "a lookup of a place's element levels, not kept, cut at SLICE_DEPTH in total",
+  ],
   "contract/identity.ts carriedBy step": [1, "a method's name, two identifiers"],
   "contract/levels.ts foldGroups composite": [
     3,
@@ -307,7 +303,7 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a plain label's text in a test's record (`withLabelRecords`), never kept by an analysis",
   ],
-  "consumer.ts #contractTask key": [
+  "contract-descriptors.ts #contract key": [
     1,
     "the candidate's lowering after the analysis (no ledger): a memo key of a store target's path, cut below",
   ],
