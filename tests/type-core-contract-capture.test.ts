@@ -174,8 +174,8 @@ test("each analysis's captured contracts are its own final pass's", () => {
     const answers = analyseCore(request);
     const lowered = [...storeContracts(answers, request).values()];
     assert.equal(answers.contracts.length, 1, source);
-    const [{ result }] = answers.contracts as [(typeof answers.contracts)[number]];
-    assert.ok(result.state === "complete" && lowered[0]?.state === "complete", source);
+    const result = answers.contracts[0]?.result;
+    assert.ok(result?.state === "complete" && lowered[0]?.state === "complete", source);
     assert.equal(result.epoch, answers.epoch, source);
     assert.deepEqual(result.ref, lowered[0].ref, source);
   }
