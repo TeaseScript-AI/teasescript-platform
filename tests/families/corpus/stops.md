@@ -49,6 +49,14 @@ outside the repository").
   `CandidateOutsideSlice` as an `outside` row, as `unprintable <type>` where its conversion to text throws, through the
   folder's `describeCaught.mjs`, and rethrow every other value as before (#1523). Each folder's `canary-1523.sh` checks
   that; its changed files stay beside it as `<file>.pre-1523` (`PORTED-1523.md`).
+- `desktop:~/work/evidence/corpus/stops/` `astra-1434`, `astra-1445`, `astra-1497`, `astra-1508`, `astra-1511`,
+  `astra-1536`, `astra-1544`, `i1416`, `i1432-r2`, `i1432-r5` and `owner-s8`: `astra-1497/p3parity.mjs` and
+  `astra-1544/builder-scripts/labelparity.mjs` and `labelparity2.mjs` keep a mode that throws apart, unhashed, and exit
+  1 on it, the four comparators that read them count such a case-mode apart and exit 1, and `astra-1497/matrix.mjs`
+  never compares a tree that throws and fails its row, so modes or trees that throw alike never pass as agreeing; their
+  other readers record any thrown value, as `unprintable <type>` where its
+  conversion to text throws, through a `describeCaught.mjs` in the folder (#1532). Each folder's `PORTED-1532.md`
+  lists the changed files, whose originals stay beside them as `<file>.pre-1532`.
 
 ## Known problems
 
