@@ -3,7 +3,7 @@ import type { Contract } from "../contract.js";
 import { sortCost, type Definition } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { mergeItems, type Item, type ItemTag, type Writer } from "../items.js";
+import { firstWriter, mergeItems, type Item, type ItemTag, type Writer } from "../items.js";
 import { memberStep } from "../method-categories.js";
 import { propertyStep } from "../program.js";
 import { sharing } from "../sharing.js";
@@ -14,9 +14,14 @@ import { emptyAt, propertyOnly, REFERENCE } from "./kinds.js";
 import type {
   IdentityWork,
   IndexNode,
+  LevelGroup,
   LiteralIndex,
   NodeBelow,
   OtherGroup,
+  PrefixEntry,
+  PropertyIndex,
+  PropertyLack,
+  PropertySource,
   ReadEntry,
   Selected,
   ValueEntry,
@@ -632,4 +637,93 @@ export function* loadsBelow(
   }
   // (the one answer is every step's but for the mark of an element step there, `hostAt`)
   return [...merged, ...emptyAt(after)];
+}
+
+/**
+ * #1456: a prefix's property index over its sources (`PropertyIndex`), each a closed object literal stored whole: its
+ * entries (the sharing off) or its groups at the prefix (`shared.groups`, on). Each source keeps its literal's one
+ * object's property names and writer (`IndexObject`), each name its path below the prefix (`pathAt`) and the source a
+ * holder there, each charged as it is made; the sources F11's `missing` names (each, the sharing off; on, the groups of
+ * `shared.writers`, the first of those its levels fold alike where they lack a property) in their writers' order,
+ * charged as a sort.
+ */
+export function propertyIndex(
+  contract: Contract,
+  entries: readonly PrefixEntry[],
+  shared: { readonly groups: readonly LevelGroup[]; readonly writers: ReadonlySet<PlaceId> } | null,
+): PropertyIndex {
+  const { work } = contract.pass.program;
+  const sources: PropertySource[] = [];
+  const holders = new Map<number, PropertySource[]>();
+  const add = (literal: PlaceId, entry: PrefixEntry | null, group: LevelGroup | null): void => {
+    work.charge("structureSteps");
+    const object = contract.literalIndex(literal).root.objects!.list[0]!;
+    contract.keep(1);
+    const source = { entry, group, names: object.names, writer: object.token, at: sources.length };
+    sources.push(source);
+    for (const name of object.names) {
+      work.charge("structureSteps");
+      const path = pathAt(contract, 0, name);
+      let list = holders.get(path);
+      if (list === undefined) {
+        contract.keep(2);
+        holders.set(path, (list = []));
+      }
+      contract.keep(1);
+      list.push(source);
+    }
+  };
+  if (shared === null) for (const entry of entries) add(entry.value!, entry, null);
+  else for (const group of shared.groups) add(group.literal, null, group);
+  const writing =
+    shared === null
+      ? sources
+      : sources.filter((source) => shared.writers.has(source.group!.literal));
+  contract.keep(writing.length);
+  work.charge("structureSteps", sortCost(writing.length));
+  const byWriter = [...writing].sort((a, b) =>
+    firstWriter(a.writer, b.writer) !== a.writer
+      ? 1
+      : firstWriter(b.writer, a.writer) !== b.writer
+        ? -1
+        : 0,
+  );
+  contract.keep(4);
+  return { sources, byWriter, holders, lacking: new Map() };
+}
+
+/**
+ * F11 at a property of a prefix's index (its path `path`, `step` its name), once per property: the earliest writer of
+ * a source without it that F11 names (F28), by a walk of the writers' order that passes only its holders, and the first
+ * such source's position, by a walk of the sources' order, where its `missing` stands among the holders' answers.
+ */
+export function propertyLack(
+  contract: Contract,
+  index: PropertyIndex,
+  path: number,
+  step: string,
+): PropertyLack {
+  const known = index.lacking.get(path);
+  if (known !== undefined) return known;
+  const { work } = contract.pass.program;
+  let writer: Writer | null = null;
+  for (const source of index.byWriter) {
+    work.charge("invSteps");
+    if (!source.names.has(step)) {
+      writer = source.writer;
+      break;
+    }
+  }
+  let at = -1;
+  for (const source of index.sources) {
+    work.charge("invSteps");
+    if (!source.names.has(step)) {
+      at = source.at;
+      break;
+    }
+  }
+  contract.keep(3);
+  const lack = { writer, at };
+  index.lacking.set(path, lack);
+  return lack;
 }

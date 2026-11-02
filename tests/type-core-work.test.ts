@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileProject, createFreshRuntimeSession } from "../src/index.js";
 import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
-import type { WorkCounter } from "../src/type-inference/core/budget.js";
+import { withTestDemandAllowance, type WorkCounter } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { writtenTypeSteps } from "../src/type-inference/core/contract.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
@@ -31,6 +31,7 @@ import {
   NARROWING_FAMILIES,
   NESTED_OBJECT_SELECTIONS,
   ORACLE_PROGRAMS,
+  PROPERTY_STORE_FAMILIES,
   READ_CHAIN_PRODUCTS,
   VALUE_CLASS_SITES,
   VALUE_SHARING_PROGRAMS,
@@ -38,6 +39,7 @@ import {
   W34_VARIANTS,
   W44_VARIANTS,
   W45_VARIANTS,
+  WIDE_COPIES_READ_TWICE,
   WORK_FAMILIES,
   type WorkFamily,
 } from "./helpers/type-core-families.js";
@@ -2089,5 +2091,134 @@ test("a read through wrappers decides its paths as cursors: its work and each co
       ...steepCounters(WRAPPER_PAIRS, true, undefined, [16, 32]),
     ],
     [],
+  );
+});
+
+/**
+ * #1456: a place replaced k times by objects of distinct properties, each read after its store, reads a property from
+ * the objects holding it (one `missing` for the others), never every object at every property, so the work grows with
+ * the program in every mode: the issue's shape and each control whose objects are closed (two properties each, a
+ * property every or every other object holds, open values, values of two provenances, each read before its store too,
+ * reversed properties), its total and each counter of at least 200 units at 16 → 32 (2.51 to 2.77 per doubling on
+ * `main`); and k places of two wide objects each read twice, whose levels answer them while an index would cost each
+ * place every name (`WIDE_COPIES_READ_TWICE`). The series to k = 128 with and without the settled stop, the controls
+ * the levels answer and the uncharged-work probe are the step's evidence, outside CI.
+ */
+test("a place replaced by objects of distinct properties takes work that grows with the program in every mode (#1456)", () => {
+  const closed = [
+    "plain",
+    "two",
+    "shared",
+    "half",
+    "open-value",
+    "provenance",
+    "before",
+    "reverse",
+  ];
+  const families = [
+    ...PROPERTY_STORE_FAMILIES.filter((family) =>
+      closed.some((kind) => family.name === `property-stores-${kind}`),
+    ),
+    WIDE_COPIES_READ_TWICE,
+  ];
+  assert.equal(families.length, closed.length + 1);
+  const steep: string[] = [];
+  for (const family of families) {
+    const [at16, at32] = [16, 32].map((k): Sized => {
+      const request = coreRequest(family.program(k), ["hostValue", "hostOther"]);
+      assert.ok(request !== null, `${family.name} at ${k}: its file parses and resolves`);
+      return { name: `${family.name} at ${k}`, request };
+    });
+    for (const reversed of [false, true])
+      for (const unshared of [false, true]) {
+        const [small, large] = [at16!, at32!].map((at) => analysed(at, reversed, unshared).budget);
+        const scale =
+          (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
+        const doubling = (before: number, after: number): number =>
+          (2 * (after / Math.max(1, before))) / scale;
+        const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}`;
+        if (doubling(small!.total, large!.total) > DOUBLING)
+          steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
+        for (const [counter, after] of large!.counts)
+          if (
+            counter !== "syntaxNodes" &&
+            after >= 200 &&
+            doubling(small!.counts.get(counter) ?? 0, after) > COUNTER_DOUBLING
+          )
+            steep.push(
+              `${name} ${counter}: ${doubling(small!.counts.get(counter) ?? 0, after).toFixed(3)}`,
+            );
+      }
+  }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * #1456: a prefix of closed objects read once costs what its levels do: its first property read is theirs, nothing
+ * charged or kept for it (`propertyItems`). Every counter of a place replaced by two objects and of 8 places each
+ * replaced by two wide objects, each read at one property, in either order with the sharing on and off, is `main`'s
+ * at `465532f4a` (a regression oracle of this construction only; before it, the wide places took 2 `structureSteps` and
+ * 2 `literalUnits` each).
+ */
+test("a prefix of closed objects read once has main's counters, in either order, shared or not (#1456)", () => {
+  const wide = (k: number): string =>
+    `let a = {${many(k, (i) => `f${i}: hostValue`, ", ")}}\nlet b = {${many(k, (i) => `g${i}: hostOther`, ", ")}}\n` +
+    `${many(k, (i) => `let r${i} = a\nr${i} = b\nrepeat r${i}.f${i} {}`)}\nexit`;
+  const cases: readonly (readonly [string, string, readonly [string, string]])[] = [
+    [
+      "a place replaced by two objects",
+      'let a = {n: 1}\nlet b = {n: 2, m: "x"}\nlet c = a\nc = b\nsay c.n\nexit',
+      [
+        "checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 26 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 456 invSteps 105 literalUnits 504 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 26 syntaxNodes 28 yields 75",
+        "checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 26 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 456 invSteps 103 literalUnits 346 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 12 syntaxNodes 28 yields 75",
+      ],
+    ],
+    [
+      "8 places each replaced by two wide objects",
+      wide(8),
+      [
+        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 529 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 822 literalUnits 2533 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 124 syntaxNodes 144 yields 724",
+        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 529 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 820 literalUnits 1785 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 56 syntaxNodes 144 yields 724",
+      ],
+    ],
+  ];
+  for (const [name, source, [shared, unshared]] of cases) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null, name);
+    for (const reversed of [false, true])
+      for (const off of [false, true]) {
+        const measured: Measured = analysed({ name, request }, reversed, off).budget;
+        assert.equal(
+          [...measured.counts]
+            .sort(([a], [b]) => (a < b ? -1 : 1))
+            .map(([counter, units]) => `${counter} ${units}`)
+            .join(" "),
+          off ? unshared : shared,
+          `${name}${reversed ? " reversed" : ""}${off ? " unshared" : ""}`,
+        );
+      }
+  }
+});
+
+/**
+ * #1456: a prefix the cheap checks refuse walks no holder's marks: whether its holders mark nothing is asked only of a
+ * prefix every entry of which is otherwise a closed object. A place given one object, 16 property stores and then a
+ * host value charges `main`'s total at `007a90112` under a demand allowance of 16 in either order, shared or not (a
+ * regression oracle of that order only; asking each object's holder first moved 285 units into the decisions that stop,
+ * reversed).
+ */
+test("a prefix the cheap checks refuse walks no holder's marks, main's total under a demand allowance of 16 (#1456)", () => {
+  const source = `let b = {f0: 1}\n${many(16, (i) => `b.f${i} = ${i}`)}\nb = hostValue\nsay "AFTER"\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const at = { name: "an object, 16 property stores and a host value", request };
+  assert.deepEqual(
+    [false, true].flatMap((reversed) =>
+      [false, true].map(
+        (unshared) =>
+          withTestDemandAllowance(16, () => analysed(at, reversed, unshared)).budget.total,
+      ),
+    ),
+    [3988, 3988, 4844, 4862],
   );
 });
