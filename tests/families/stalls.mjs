@@ -1,5 +1,6 @@
 // node tests/families/stalls.mjs <replay record>... [--rerun <record>...] [--index <new file>]
-// node tests/families/stalls.mjs rerun <index> <base> <head> <new folder> [--timeout 180] [--memory 2048] [--shard i/N]
+// node tests/families/stalls.mjs rerun <index> <base> <head> <new folder> [--timeout 180] [--memory 2048]
+//   [--shard i/N | --items <file> | --items-from-env]
 // A replay's comparison from its shards' records (`run.mjs --work`: what was compared, then one line per source with
 // each run's charged work and milliseconds on each tree and what the source counted), with a verdict on each stalled
 // source (`verdictOf`, its rule `RULE`), and a rerun's records read in place of the replay's for the sources it ran
@@ -22,12 +23,17 @@
 // after another (by its name, once whatever paths its entries name), with that configuration (`run.mjs <area> <base>
 // <head> --only <index>`), into a new folder of records, `<area>.work.jsonl` and `<area>.jsonl` (`--out`), to be read
 // with `--rerun`; with `--shard i/N` (#1598) only its entries k with k mod N = i, into `<area>.<i>of<N>.work.jsonl` and
-// `<area>.<i>of<N>.jsonl` beside that part of the index (`index.<i>of<N>.json`), so that N shards rerun it once; the
+// `<area>.<i>of<N>.jsonl` beside that part of the index (`index.<i>of<N>.json`), so that N shards rerun it once; with
+// `--items <file>` (or `--items-from-env`, the central queue's `$SX_ITEMS`: an item pool's batch, #1612) only the entries
+// whose numbers (0-based, in the index's order; `jq -r '.entries | keys[]' <index>` lists them) the batch gives, one per
+// line, into `<area>.items-<hash>.work.jsonl` and `<area>.items-<hash>.jsonl` beside `index.items-<hash>.json` (`<hash>`
+// the batch's), so that the queue sizes the jobs and the pool's batches rerun the index once; the
 // index names the sources unanswered alike apart (`unansweredAlike`), which `rerun` does not run. Older
 // `--work`/`--out` comparison records omit the answered parts, so this tool cannot reclassify their `unanswered` runs.
 // A runner implementing #1592 must compare them again; `rerun` does this for indexed stalled sources, including their
 // earlier unanswered runs. Completed sources' unanswered runs need a fresh comparison.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -300,10 +306,30 @@ if (process.argv[2] === "rerun") {
       "usage: node tests/families/stalls.mjs rerun <index> <base> <head> <new folder> [options]",
     );
   // `--shard i/N` (#1598): the index's entries in their order, entry k to shard k mod N, so that shards 0/N to N-1/N
-  // together rerun it once
+  // together rerun it once; `--items <file>` or `--items-from-env` (`$SX_ITEMS`, #1612): the entries an item pool's
+  // batch names by number, one per line
   const at = options.indexOf("--shard");
   const sharding = at === -1 ? "0/1" : (options[at + 1] ?? "");
-  const rest = at === -1 ? options : options.toSpliced(at, 2);
+  let rest = at === -1 ? options : options.toSpliced(at, 2);
+  let items;
+  const from = rest.indexOf("--items");
+  if (from !== -1) {
+    const file = rest[from + 1];
+    if (file === undefined) refused("--items names a file of entry numbers, one per line");
+    try {
+      items = readFileSync(file, "utf8");
+    } catch (error) {
+      refused(`--items ${file}: ${error.message}`);
+    }
+    rest = rest.toSpliced(from, 2);
+  }
+  if (rest.includes("--items-from-env")) {
+    if (process.env.SX_ITEMS === undefined) refused("--items-from-env, and $SX_ITEMS is not set");
+    items = process.env.SX_ITEMS;
+    rest = rest.filter((arg) => arg !== "--items-from-env");
+  }
+  if (items !== undefined && at !== -1)
+    refused("--shard and --items each choose the entries: give one");
   const given = rest.filter(
     (arg) => arg.startsWith("--") && !["--timeout", "--memory"].includes(arg),
   );
@@ -314,6 +340,19 @@ if (process.argv[2] === "rerun") {
     refused(`--shard ${sharding} is no shard i/N with 0 <= i < N`);
   const index = JSON.parse(readFileSync(indexFile, "utf8"));
   const { configurations = {}, entries } = index;
+  // (`--items`: each a number of an entry of the index, once, checked before any folder is made)
+  let chosen;
+  if (items !== undefined) {
+    const numbers = items.split("\n").filter((line) => line.trim() !== "");
+    chosen = numbers.map((line) => (/^\d+$/.test(line.trim()) ? Number(line.trim()) : NaN));
+    const wrong = numbers.filter((_, at) => !(chosen[at] < entries.length));
+    if (wrong.length > 0)
+      refused(
+        `--items names no entry of ${indexFile} (${entries.length} entries): ${wrong.slice(0, 5).join(", ")}`,
+      );
+    if (new Set(chosen).size !== chosen.length) refused("--items names an entry twice");
+    if (chosen.length === 0) refused("--items names no entry");
+  }
   // the index's areas by name, which keys their configurations, `run.mjs --only`'s choice and the records, each at the
   // first path its entries give: an area whose entries name several paths (a replay sharded across workers) is rerun by
   // one runner, so that each entry runs once
@@ -343,9 +382,14 @@ if (process.argv[2] === "rerun") {
   let only = indexFile;
   let part = "";
   let mine = entries;
-  if (shards > 1) {
+  if (chosen !== undefined) {
+    mine = [...chosen].sort((a, b) => a - b).map((number) => entries[number]);
+    part = `.items-${createHash("sha256").update(chosen.join("\n")).digest("hex").slice(0, 16)}`;
+  } else if (shards > 1) {
     mine = entries.filter((_, entry) => entry % shards === shard);
     part = `.${shard}of${shards}`;
+  }
+  if (part !== "") {
     only = path.join(folder, `index${part}.json`);
     writeFileSync(only, `${JSON.stringify({ ...index, entries: mine })}\n`, { flag: "wx" });
   }

@@ -74,9 +74,14 @@ import { generatorsOf, placeOf } from "./sources.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 
-/** The runner's defaults, at which a baseline is stored: 180 s (60 s in CI), 2,048 MB, the three allowances. */
+/**
+ * The runner's defaults, at which a baseline is stored: 180 s (60 s in CI), 2,048 MB, the three allowances. Its time
+ * limit is `FAMILIES_TIMEOUT` seconds where that is set: `baseline.sh compute` stores a shard at its seed PLAN's limit
+ * and reruns its stalled sources alone at twice it (#1612); the PLAN records the limit, so a store at another limit than
+ * its baseline's is refused.
+ */
 export const DEFAULTS = {
-  timeout: process.env.CI === "true" ? 60 : 180,
+  timeout: Number(process.env.FAMILIES_TIMEOUT) || (process.env.CI === "true" ? 60 : 180),
   memory: 2048,
   allowances: "natural,16,256",
 };
@@ -1138,7 +1143,9 @@ function shardRead(file, plan, places, identity) {
 function listingFault(listing, sources, area, shard) {
   if (!Array.isArray(listing)) return "stalls.json lists no stalls";
   for (const entry of listing) {
-    if (!shaped(entry, ["area", "shard", "generator", "source", "key", "stalled", "alone"]))
+    if (
+      !shaped(entry, ["area", "shard", "generator", "source", "key", "stalled", "alone"], ["limit"])
+    )
       return "stalls.json lists a stall that is no certificate";
     if (entry.area !== area || entry.shard !== shard)
       return `stalls.json lists a stall of another shard than ${area} ${shard}: ${entry.generator} ${entry.source}`;
@@ -1259,8 +1266,9 @@ async function adopt(central, held) {
  * `central` (#1590), accepted only where its MANIFEST and the area's PLAN are the central ones (its build of the
  * compiler, src tree, oracle library, lockfile and Node among them), it reads under `shardRead` and `listing` holds the
  * certificates of its stalls (`listingFault`); else `refused`. It is published through the gate as `endShard` publishes one; a shard the
- * central baseline already holds is compared instead, by its lines (no time is stored in them), and one that differs
- * replaces nothing (`differs`).
+ * central baseline already holds is compared instead, by its lines (no time is stored in them): one that differs in
+ * a value replaces nothing (`differs`); where the lines differ only in that one of a source stalled, the complete one
+ * stands, kept or put in the stalled one's place, and the sources are named (`stallOnly`) (#1612).
  */
 async function importShard(central, held, area, shard, shards, listing) {
   const record = recorded(held.text).get(area);
@@ -1290,10 +1298,36 @@ async function importShard(central, held, area, shard, shards, listing) {
     const there = shardIn(bytesOf(target), record.plan, places[shard], identityIn(text));
     if (there.other !== undefined) return { refused: otherInputs(dir, target, there.other) };
     if (there.lines !== undefined) {
-      const at = there.lines.findIndex((line, index) => line !== read.lines[index]);
-      if (at < 0) return { equal: target };
-      const { generator, source } = JSON.parse(there.lines[at]);
-      return { differs: `${file} says otherwise than ${target} of ${generator} ${source}` };
+      // (#1612: two lines of a source that differ only in that one stalled are no value difference, the complete one
+      // standing: kept where the stored line is it, else put in its place)
+      const replacing = new Map();
+      const stallOnly = [];
+      for (const [at, line] of there.lines.entries()) {
+        if (line === read.lines[at]) continue;
+        const complete = completeOf(line, read.lines[at]);
+        const { generator, source, key } = JSON.parse(line);
+        if (complete === undefined)
+          return { differs: `${file} says otherwise than ${target} of ${generator} ${source}` };
+        const stalled = JSON.parse(complete === line ? read.lines[at] : line).stalled;
+        stallOnly.push({
+          generator,
+          source,
+          key,
+          stalled,
+          complete: complete === line ? "stored" : "computed",
+        });
+        if (complete !== line) replacing.set(at, complete);
+      }
+      if (replacing.size === 0)
+        return stallOnly.length === 0 ? { equal: target } : { equal: target, stallOnly };
+      const tmp = temporaryName(target, WRITER);
+      writeFileSync(tmp, mergedBody(bytesOf(target), there.lines, replacing));
+      renameSync(tmp, target);
+      return {
+        imported: target,
+        verified: verified(target, record.plan, places[shard], identityIn(text)),
+        stallOnly,
+      };
     }
     const tmp = temporaryName(target, WRITER);
     writeFileSync(tmp, read.body);
@@ -1317,8 +1351,8 @@ async function importShard(central, held, area, shard, shards, listing) {
 /**
  * `import <central root> <computed root> [<area> <i>/<N> [<stalls.json>]]` (#1590): the baseline `computed` holds
  * (`heldIn`), a seed adopted (`adopt`) or, with an area, one shard (`importShard`, its stalls listed in `stalls.json`
- * beside it unless named), into the folder of baselines `central`. One JSON line; exit 0 imported or equal, 2 refused,
- * 3 differs.
+ * beside it unless named), into the folder of baselines `central`. One JSON line; exit 0 imported or equal (a stall-only
+ * disagreement among them, `stallOnly`, #1612), 2 refused, 3 differs.
  */
 async function importing(central, computed, area, shard, listed, refuse) {
   const held = heldIn(computed);
@@ -1420,6 +1454,17 @@ function statusOf(root, src) {
 }
 
 /** A stored shard's sources, each line read, its total left out; `refuse(why)` where it does not read as one. */
+/** The total of a shard file, its last line. */
+function totalOf(file, refuse) {
+  try {
+    const { total } = JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1));
+    if (total === undefined) throw new Error("it has no total");
+    return total;
+  } catch (error) {
+    return refuse(`${file}: ${error.message}`);
+  }
+}
+
 function linesOf(file, refuse) {
   try {
     const lines = readFileSync(file, "utf8")
@@ -1435,6 +1480,109 @@ function linesOf(file, refuse) {
 
 /** A source's place in a stored shard: its generator, its name and its key (`placeOf`). */
 const placeIn = ({ generator, source, key }) => JSON.stringify([generator, source, key]);
+
+/**
+ * Of two stored lines of one source, the one holding its complete result where they differ only in that the other
+ * stalled (#1612): the same place, one stalled and the other neither stalled nor thrown, and every run the stalled one
+ * ended the same in the complete one. Else undefined: a value difference.
+ */
+function completeOf(first, second) {
+  const [a, b] = [JSON.parse(first), JSON.parse(second)];
+  if (placeIn(a) !== placeIn(b)) return undefined;
+  const [stalled, complete, text] =
+    a.stalled !== undefined && b.stalled === undefined ? [a, b, second] : [b, a, first];
+  if (
+    stalled.stalled === undefined ||
+    complete.stalled !== undefined ||
+    complete.thrown !== undefined
+  )
+    return undefined;
+  const ended = Object.entries(stalled.runs);
+  return ended.every(
+    ([run, result]) => JSON.stringify(complete.runs[run]) === JSON.stringify(result),
+  )
+    ? text
+    : undefined;
+}
+
+/**
+ * The stored shard `body` (its `lines`) with the lines `replacing` names by index put in their place, its total kept but
+ * for what the lines count: its sources that stalled, its runs (by each replaced line's runs) and the hash of its lines,
+ * and the places it merged (`merged`) (#1612).
+ */
+function mergedBody(body, lines, replacing) {
+  const cut = body.lastIndexOf(10, body.length - 2);
+  const { total } = JSON.parse(body.subarray(cut + 1).toString());
+  const merged = lines.map((line, index) => replacing.get(index) ?? line);
+  const text = merged.map((line) => `${line}\n`).join("");
+  const counted = (line) => Object.keys(JSON.parse(line).runs).length;
+  const runs = [...replacing].reduce(
+    (sum, [index, line]) => sum + counted(line) - counted(lines[index]),
+    0,
+  );
+  const recounted = {
+    ...total,
+    stalled: merged.filter((line) => JSON.parse(line).stalled !== undefined).length,
+    runs: (total.runs ?? 0) + runs,
+    merged: [
+      ...(total.merged ?? []),
+      ...[...replacing.values()].map((line) => JSON.parse(placeIn(JSON.parse(line)))),
+    ],
+    lines: hash(text),
+  };
+  return Buffer.from(`${text}${JSON.stringify({ total: recounted })}\n`);
+}
+
+/**
+ * `merge <folder of baselines> <area> <i>/<N> <alone shard>` (#1612): the shard `<i>of<N>` of `area` that the one
+ * baseline in the folder holds, each of its stalled sources that ended in the alone shard (`alone`'s sources stored at
+ * twice the PLAN's time limit, `baseline.sh compute`) replaced by that complete result where the two differ only in the
+ * stall (`completeOf`). One JSON line: the sources merged and whether the shard then counts; exit 0, 2 refused.
+ */
+async function merging(root, area, shard, file, refuse) {
+  const held = heldIn(root);
+  if (held.refused !== undefined) refuse(held.refused);
+  const record = recorded(held.text).get(area);
+  const [index, count] = /^\d+\/\d+$/.test(shard) ? shard.split("/").map(Number) : [];
+  if (record === undefined || !(index < count) || record.shards !== count)
+    refuse(`${area} ${shard} is no shard of ${held.dir}`);
+  const { places } = parsePlan(held.plans.get(area));
+  const alone = new Map();
+  for (const line of readFileSync(file, "utf8")
+    .split("\n")
+    .filter((one) => one !== "")
+    .slice(0, -1))
+    alone.set(placeIn(JSON.parse(line)), line);
+  const baseline = baselineIn(outside(root, [], refuse), held.identity.src);
+  const outcome = await gate(baseline, (text) => {
+    const target = shardFile(path.join(pathOf(baseline, "baseline"), area), index, count);
+    const read = shardRead(target, record.plan, places[index], identityIn(text));
+    if (read.lines === undefined)
+      return { refused: read.refused ?? `${target} is no shard that counts` };
+    const replacing = new Map();
+    read.lines.forEach((line, at) => {
+      const other = alone.get(placeIn(JSON.parse(line)));
+      if (
+        JSON.parse(line).stalled !== undefined &&
+        other !== undefined &&
+        completeOf(line, other) === other
+      )
+        replacing.set(at, other);
+    });
+    if (replacing.size > 0) {
+      const tmp = temporaryName(target, WRITER);
+      writeFileSync(tmp, mergedBody(read.body, read.lines, replacing));
+      renameSync(tmp, target);
+    }
+    return {
+      merged: [...replacing.values()].map((line) => JSON.parse(placeIn(JSON.parse(line)))),
+      verified: verified(target, record.plan, places[index], identityIn(text)),
+    };
+  });
+  if (outcome === RETIRED) refuse(`${held.dir} was replaced while this writer merged into it`);
+  console.log(JSON.stringify(outcome));
+  return outcome.refused !== undefined || outcome.verified === false ? 2 : 0;
+}
 
 /**
  * The sources that stalled in the stored shard `file` of the area `folder`, each once, as the new area `into` (an
@@ -1488,13 +1636,15 @@ function stallsOf(file, ran, area, shard, out, refuse) {
   const runs = new Map(
     (ran === "-" ? [] : linesOf(ran, refuse)).map((line) => [placeIn(line), line]),
   );
+  // (the limit the alone rerun ran at, its shard's own: twice the PLAN's, #1612)
+  const limit = ran === "-" ? undefined : totalOf(ran, refuse).timeout;
   const stalls = [];
   const load = [];
   for (const line of linesOf(file, refuse).filter((source) => source.stalled !== undefined)) {
     const { generator, source, key, stalled } = line;
     const run = runs.get(placeIn(line));
     if (run?.stalled !== undefined)
-      stalls.push({ area, shard, generator, source, key, stalled, alone: run });
+      stalls.push({ area, shard, generator, source, key, stalled, alone: run, limit });
     else
       load.push({
         generator,
@@ -1546,6 +1696,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await alone(path.resolve(first), second, out(named[2]), refused);
   else if (command === "stalls" && named.length === 5)
     process.exitCode = stallsOf(first, second, named[2], named[3], out(named[4]), refused);
+  else if (command === "merge" && named.length === 4)
+    process.exitCode = await merging(first, second, named[2], named[3], refused);
   else {
     console.error(
       "usage: node tests/families/baselines.mjs state <tree> <folder> [--read-only]\n" +
@@ -1556,7 +1708,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         "       node tests/families/baselines.mjs import <central folder> <computed folder> [<area> <i>/<N> [<stalls.json>]]\n" +
         "       node tests/families/baselines.mjs status <central folder> <src tree>\n" +
         "       node tests/families/baselines.mjs alone <area folder> <shard> <new area folder>\n" +
-        "       node tests/families/baselines.mjs stalls <shard> <alone shard or -> <area> <i>/<N> <stalls.json>",
+        "       node tests/families/baselines.mjs stalls <shard> <alone shard or -> <area> <i>/<N> <stalls.json>\n" +
+        "       node tests/families/baselines.mjs merge <folder> <area> <i>/<N> <alone shard>",
     );
     process.exitCode = 2;
   }

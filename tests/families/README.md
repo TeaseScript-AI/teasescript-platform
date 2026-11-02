@@ -16,7 +16,7 @@ node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dis
 node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base src tree>/<area> [the same options]
 node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/16]
 node tests/families/stalls.mjs <shards' --work records>... [--rerun <rerun's records>...] [--index <new file>]
-node tests/families/stalls.mjs rerun <stall index> <base> <head> <new folder> [--timeout 600] [--shard i/N]
+node tests/families/stalls.mjs rerun <stall index> <base> <head> <new folder> [--timeout 600] [--shard i/N | --items <file>]
 ```
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
@@ -87,7 +87,10 @@ round at a longer `--timeout` or `--memory` may run what an earlier one could no
 same, else refused (#1587); a replay's records are never replaced. `rerun --shard i/N` (#1598) reruns only the index's
 entries `k` with `k mod N = i`, in its order, into `<area>.<i>of<N>.work.jsonl` and `<area>.<i>of<N>.jsonl` beside that
 part of the index (`index.<i>of<N>.json`) and nothing for an area that part does not hold, so N jobs rerun the index
-once and `--rerun` reads their records as one round.
+once and `--rerun` reads their records as one round. `rerun --items <file>` (or `--items-from-env`, the central queue's `$SX_ITEMS`) reruns only the entries its lines
+name by number (0-based, in the index's order), into `<area>.items-<hash>.work.jsonl` beside `index.items-<hash>.json`,
+so that an item pool (`sx-job submit --items <file of entry numbers> --campaign T … -- bash -c '… stalls.mjs rerun …
+--items-from-env'`) sizes the jobs (5 to 15 minutes each, the owner's rule) and its batches rerun the index once (#1612).
 
 `--store` runs one tree of a commit (an `sx-tree` tree: `src/`, `dist/`, `.sha`) at the runner's defaults and stores one
 shard of an area, each source's results as one line, in the baseline of its `src/` tree,
@@ -123,16 +126,18 @@ that tree to be `main`'s again.
 A fill can also run on any worker into a central store (#1590). `bash tools/corpus/baseline.sh seed <tree> <SHA> <out>`
 makes `<out>/<src tree>/` (its `MANIFEST` also naming the tree's build of the compiler, `compiled <dist/src/ tree>`,
 and every area's `PLAN`) and `<out>/shards.tsv`, one line per shard to store. `baseline.sh compute <tree> <seed
-baseline> <area> <i>/<N> <out>` stores one shard into a copy of the seed. It stores the sources that stalled again
-alone, at the `PLAN`'s limits: where one ends alone, its stall was the machine's load and the whole shard is stored once
-more (exit 1 where a source stalls again that did not stall alone); a stall alone is the source's own and stays, listed
-with its run alone in `<out>/stalls.json`. `baseline.sh submit <SHA> <src tree> [<seed job id> <shards.tsv>] [--dry]`
+baseline> <area> <i>/<N> <out>` stores one shard into a copy of the seed at the `PLAN`'s time limit, and the sources
+that stalled again alone, with the `PLAN`'s memory and twice its time limit: one that ends alone within that margin
+stalled under the machine's load and is stored with its result (`baselines.mjs merge`), one that stalls alone within it
+is a stall of its own and stays, listed with its run alone and the limit it ran at in `<out>/stalls.json` (#1612). `baseline.sh submit <SHA> <src tree> [<seed job id> <shards.tsv>] [--dry]`
 prints or submits these steps as central-queue jobs. Every write into the central store is `node
 tests/families/baselines.mjs import <central folder> <computed folder> [<area> <i>/<N>]`: a seed's `MANIFEST` and
 `PLAN`s are adopted where its baseline is absent, else checked equal; a shard is accepted only where its `MANIFEST` and
 `PLAN` are the central ones, it counts, and each source that stalled in it is listed in stalls.json as stalling alone,
-and one already there is compared by its lines, which hold no time, and never replaced. It exits 0 imported or equal,
-2 refused (naming why), 3 differs. `node tests/families/baselines.mjs status <central folder> <src tree>` says in one
+and one already there is compared by its lines, which hold no time: where they differ only in that one of a source
+stalled and the other holds its complete result, that is no value difference, the complete result stands (kept, or put
+in the stalled line's place) and the source is named (`stallOnly`); any other difference replaces nothing. It exits 0
+imported or equal, a stall-only difference among them, 2 refused (naming why), 3 differs. `node tests/families/baselines.mjs status <central folder> <src tree>` says in one
 line what a central baseline holds, without a tree, and exits 0 only when it is complete.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
