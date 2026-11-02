@@ -58,7 +58,7 @@ import {
 } from "./contract-descriptors.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
-import { finishedItems, finishingRead } from "./consumers/finishing.js";
+import { finishedItems, finishingRead, keyDomain } from "./consumers/finishing.js";
 import { freshStores, ingressMark } from "./consumers/fresh.js";
 import { mixed, mixedChoices, mixedJoin } from "./consumers/mixed.js";
 import type {
@@ -321,6 +321,7 @@ export class Consumers {
         // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
         read: (value, node, at) =>
           this.finishing ? finishingRead(this, value, node, stepsArray(restSteps(at))) : null,
+        domain: (key) => this.stoppedDomain(key),
       },
       rejected,
       cycling,
@@ -461,6 +462,15 @@ export class Consumers {
         return STOPPED;
       }
     }
+  }
+
+  /**
+   * After a program stop, a key's kinds as the finishing path's domains give them (`keyDomain`: its finished contract,
+   * else its written or retained type), else `null`: a label's step reads it where the contract asked after the stop is
+   * unsettled, as the unstopped label spells it (#1595).
+   */
+  public stoppedDomain(key: Key): readonly Item[] | null {
+    return this.pass.program.work.stopped === null ? null : keyDomain(this, key);
   }
 
   /**
