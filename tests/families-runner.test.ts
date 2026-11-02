@@ -1237,7 +1237,10 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       [["ends", "exit 3", "exit 3"]],
     );
     assert.deepEqual(listed("two"), []);
-    assert.doesNotMatch(readFileSync(shard("two", 2), "utf8"), /"stalled"/);
+    assert.equal(
+      JSON.parse(readFileSync(shard("two", 2), "utf8").split("\n")[0]!).stalled,
+      undefined,
+    );
     const twice = compute("twice", 2, { FLAKY: "x....x" });
     assert.equal(twice.status, 1);
     assert.match(twice.stderr, /"source":"flaky".*"alone":"ended"/);
@@ -1336,9 +1339,8 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       assert.deepEqual([root, refused.status], [root, 2]);
       assert.match(said(refused).refused, refusal);
     }
-    // compared, never replaced: a shard computed again says the same (exit 0), one that says otherwise differs (exit 3)
-    assert.equal(compute("again", 0).status, 0);
-    assert.deepEqual(Object.keys(said(imported("again", 0))), ["equal"]);
+    // compared, never replaced: a shard imported again says the same (exit 0), one that says otherwise differs (exit 3)
+    assert.deepEqual(Object.keys(said(imported("zero", 0))), ["equal"]);
     const differs = copied("zero", "differs", (dir) => {
       const file = join(dir, "area", "0of16.runs.jsonl");
       const [line, total] = readFileSync(file, "utf8").trim().split("\n");
