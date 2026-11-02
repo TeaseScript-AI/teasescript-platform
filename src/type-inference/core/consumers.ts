@@ -12,7 +12,13 @@ import {
   keptSlice,
   type BudgetLimit,
 } from "./budget.js";
-import { restSteps, stepsArray, type CanonicalKey, type Rest } from "./contract/key-ids.js";
+import {
+  keptKeyAt,
+  restSteps,
+  stepsArray,
+  type CanonicalKey,
+  type Rest,
+} from "./contract/key-ids.js";
 import type { Label } from "./contract/labels.js";
 import { termAt, writtenOf } from "./contract.js";
 import {
@@ -591,7 +597,8 @@ export class Consumers {
       },
       // (as `Answers.placeProperties` finds them: a key whose decision stopped names nothing)
       properties: (place, path) => {
-        const key = contract.keyAt(place, path);
+        // (kept with the names it finds: its text charged where it is text, `keptKeyAt`)
+        const key = keptKeyAt(contract, place, path);
         const known = this.propertySets.get(key);
         if (known !== undefined) return known;
         const names: ReadonlySet<string> =
