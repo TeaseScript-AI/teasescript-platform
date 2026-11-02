@@ -2335,6 +2335,172 @@ test("a settled stop changes nothing of a read of a reference's member, a speake
     }
 });
 
+/** A `get` whose result nothing consumes, its default `hostOther`: a fitting value and `null` run on, `bad` is rejected. */
+function unusedGet(name: string, setup: readonly string[], receiver: string): HeldCase {
+  return {
+    name,
+    source: [
+      ...setup,
+      'say "BEFORE"',
+      `${receiver}.get(4, default: hostOther)`,
+      'say "AFTER"',
+      "exit",
+      "",
+    ].join("\n"),
+    slice: true,
+    values: [
+      ...[2, null].map((value) => ({
+        globals: { hostValue: 2, hostOther: value },
+        says: ["BEFORE", "AFTER"],
+      })),
+      { globals: { hostValue: 2, hostOther: "bad" }, says: null },
+    ],
+  };
+}
+
+/**
+ * #1563 (S8's mark-ownership rule; C10): a `get` whose result nothing consumes reads its receiver's element first in the
+ * walk, so a walk stop may leave that read unfinished, and the finishing read decides the default's family by structure
+ * alone: a projection of a literal no place holds by the literal's cells (`[[hostValue, 4][0]]`, the issue's; a
+ * dictionary literal's `values` list by the dictionary's), a store of one by the stores' syntax through the same cells,
+ * and a requirement one domain leaves to several families or to every kind by the next domain that gives one (a written
+ * `list` or union receiver: the stores' syntax). At every eighth settled stop of each phase and its last, forward with
+ * the sharing and reversed without it, each keeps the unstopped check against the integer family and rejects `bad`
+ * before `AFTER`.
+ */
+test("a settled stop keeps the family of an unused get's default that structure decides (#1563)", () => {
+  const cases = [
+    unusedGet("projection", [], "[[hostValue, 4][0]]"),
+    unusedGet("dictionary values", [], "[(dict {a: hostValue, b: 4}).values[0]]"),
+    unusedGet("stored projection", ["let xs = [({f: 4, g: hostValue}).f]"], "xs"),
+    unusedGet("written list", ["let xs: list = [4]"], "xs"),
+    unusedGet("written union", ["let xs: (integer|string)[] = [4]"], "xs"),
+  ];
+  for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!])
+    for (const c of cases) {
+      const { run: unstopped, problems } = heldUnstopped(c, mode);
+      assert.deepEqual(problems, [], `${c.name}, ${mode.name}`);
+      assert.ok(
+        unstopped.answers.checks.some(
+          (check) =>
+            check.target === "hostOther" &&
+            !check.boundary &&
+            isDeepStrictEqual(check.against, ["integer", "number"]),
+        ),
+        `${c.name}, ${mode.name}`,
+      );
+      const stops = heldStops(c, mode, 8);
+      assert.ok(
+        stops.some((stop) => stop.phase === "walk"),
+        `${c.name}, ${mode.name}`,
+      );
+      for (const { allowance, phase } of stops)
+        assert.deepEqual(
+          heldProblems(c, mode, allowance, unstopped),
+          [],
+          `${c.name}, ${mode.name}, ${phase} @${allowance}`,
+        );
+    }
+});
+
+/**
+ * #1563, Codex r1's B1 on #1581: structure decides a projection only where every literal it may read has a part at the
+ * step, so a selection of two objects of which one lacks `f` leaves `.f` undecided, and the read's obligations stay:
+ * the natural analysis's null-checks of the selection and of its `f` (its property and its index read) are kept or
+ * owned at every settled stop in four modes. The unused default's family, which no structure decides there, is reported
+ * lost as #1580's forms are, and nothing else: at every eighth stop, forward with the sharing and reversed without it.
+ */
+test("a settled stop keeps a projection's read obligations where one literal lacks its step (#1563)", () => {
+  const c = unusedGet("lacking step", [], "[[{f: [hostValue, 4]}, {g: 4}][0].f[0]]");
+  const request = coreRequest(
+    [{ path: "main.tease", source: c.source }],
+    ["hostValue", "hostOther"],
+  )!;
+  const obligation = (check: Answers["checks"][number]) => JSON.stringify(check);
+  for (const mode of HELD_MODES) {
+    const { run: unstopped, problems } = heldUnstopped(c, mode);
+    assert.deepEqual(problems, [], mode.name);
+    const nullChecks = unstopped.answers.checks.filter((check) => check.kind === "null-check");
+    assert.equal(nullChecks.length, 2, mode.name);
+    for (const { allowance, phase } of heldStops(c, mode)) {
+      const stopped = mode.run(() => withTestAllowance(allowance, () => analyseCore(request)));
+      const owed = new Set(
+        [...stopped.checks, ...stopped.budget.deferred.map((mark) => mark.obligation)].map(
+          obligation,
+        ),
+      );
+      for (const check of nullChecks)
+        assert.ok(
+          owed.has(obligation(check)),
+          `${mode.name}, ${phase} @${allowance}: ${check.target}`,
+        );
+    }
+    if (mode !== HELD_MODES[0] && mode !== HELD_MODES[3]) continue;
+    const lost = unstopped.answers.checks.find(
+      (check) => check.target === "hostOther" && !check.boundary,
+    );
+    assert.ok(lost !== undefined, mode.name);
+    const reported = [
+      `unowned check ${obligation(lost)}`,
+      'forbidden {"hostValue":2,"hostOther":"bad"} said ["BEFORE","AFTER"]',
+    ];
+    for (const { allowance, phase } of heldStops(c, mode, 8))
+      assert.deepEqual(
+        heldProblems(c, mode, allowance, unstopped).filter((found) => !reported.includes(found)),
+        [],
+        `${mode.name}, ${phase} @${allowance}`,
+      );
+  }
+});
+
+/**
+ * #1563's forms structure does not decide: an element whose kinds the solver derives by a rule (a conversion's here; an
+ * operation's, a fallback's, a `get`'s and a comparison's alike) is not decided after a stop, so where the walk stopped
+ * before the receiver's element was read, the default's mark stands against `unknown`, "not checked (budget)" at the
+ * default, and the oracle reports the unstopped check lost and `bad` running on (#1580, for #1526's completion).
+ * Forward with the sharing, at every eighth settled stop.
+ */
+test("a settled stop reports an unused get's default lost where only a rule decides its family (#1563)", () => {
+  const c = unusedGet("conversion", [], "[toInteger(hostValue, default: 3)]");
+  const mode = HELD_MODES[0]!;
+  const { run: unstopped, problems } = heldUnstopped(c, mode);
+  assert.deepEqual(problems, [], c.name);
+  const lost = unstopped.answers.checks.find(
+    (check) =>
+      check.target === "hostOther" &&
+      !check.boundary &&
+      isDeepStrictEqual(check.against, ["integer", "number"]),
+  );
+  assert.ok(lost !== undefined);
+  const request = coreRequest(
+    [{ path: "main.tease", source: c.source }],
+    ["hostValue", "hostOther"],
+  )!;
+  let reported = 0;
+  for (const { allowance, phase } of heldStops(c, mode, 8)) {
+    const found = heldProblems(c, mode, allowance, unstopped);
+    if (found.length === 0) continue;
+    reported += 1;
+    assert.deepEqual(
+      found,
+      [
+        `unowned check ${JSON.stringify(lost)}`,
+        'forbidden {"hostValue":2,"hostOther":"bad"} said ["BEFORE","AFTER"]',
+      ],
+      `${phase} @${allowance}`,
+    );
+    const marks = mode
+      .run(() => withTestAllowance(allowance, () => analyseCore(request)))
+      .budget.deferred.filter((mark) => mark.obligation.target === "hostOther");
+    assert.deepEqual(
+      marks.map((mark) => [mark.code, mark.obligation.against]),
+      [["TSV041", ["unknown"]]],
+      `${phase} @${allowance}`,
+    );
+  }
+  assert.ok(reported > 0);
+});
+
 /**
  * #1448 (S8's mark-ownership rule, TABLE r4.110 (a), r4.113): after a settled walk stop, the boundaries a domain read
  * brings for its key's stores are the content of the warning that owns that read there: leaving its owner out
