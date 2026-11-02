@@ -1597,7 +1597,10 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       const file = join(dir, "area", "0of16.runs.jsonl");
       const [line, ...rest] = readFileSync(file, "utf8").trim().split("\n");
       const ended = JSON.parse(rest.pop()!);
-      const changed = [line!.replace(/"hash":"\w/, '"hash":"_'), ...rest]
+      const changed = [
+        line!.replace(/"hash":"(\w)/, (_, digit) => `"hash":"${digit === "0" ? "1" : "0"}`),
+        ...rest,
+      ]
         .map((one) => `${one}\n`)
         .join("");
       ended.total.lines = createHash("sha256").update(changed).digest("hex");
