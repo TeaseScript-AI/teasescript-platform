@@ -15,7 +15,7 @@ import {
   selectsElement,
 } from "../method-categories.js";
 import { stepName, type ValueConstraint } from "../program.js";
-import type { Demand, Work } from "../solver.js";
+import { inline, type Demand, type Work } from "../solver.js";
 import {
   carried,
   emptyAt,
@@ -239,9 +239,11 @@ function* valueAt(contract: Contract, value: PlaceId, rest: Rest): Work<readonly
       };
       return contract.entered(value, yield demand);
     }
+    // any other operation's on its frame's own stack, not the native one, its read chain new (`inline`): a chain of
+    // operands (`o + o + …`, `a otherwise b otherwise …`) costs no native call per level (#1572)
     return contract.entered(
       value,
-      yield* contractOfOp(contract, operation, stepsArray(ref.steps())),
+      yield* inline(contractOfOp(contract, operation, stepsArray(ref.steps()))),
     );
   } finally {
     contract.pass.solver.leaveRead();
