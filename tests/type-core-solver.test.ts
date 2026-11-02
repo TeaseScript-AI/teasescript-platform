@@ -605,6 +605,50 @@ test("a forget reaches the reader of a component abandoned into a larger one (#1
   assert.deepEqual(run, forgotten(true));
 });
 
+/**
+ * #1601's Codex r4: the analysis's budget can stop a run at any charge, as between a component's members leaving
+ * Tarjan's stack and its solving starting, where a read waits on a return no structure holds. Such a stop ends the
+ * pass's decisions (`analyseCore` stops the analysis, `Consumers.finish` closes them), so the run's cleanup closes
+ * forgetting instead (`Solver.run`): a `forget` after it throws, as one after the pass's last decision does. Codex's
+ * witness: `G` reads `A`, which may be forgotten and reads itself; the eighth unit, `sccMembers`, crosses a seven-unit
+ * allowance.
+ */
+test("a run the analysis's budget stops closes forgetting: no forget follows it (#1599)", () => {
+  const scope = itemScope(7);
+  const solver = new Solver(scope);
+  const a: Demand = {
+    key: "A",
+    kind: "contract",
+    file: 0,
+    offset: 1,
+    *make() {
+      solver.mayForget("A");
+      yield a;
+      return [makeItem("integer")];
+    },
+  };
+  const g: Demand = {
+    key: "G",
+    kind: "contract",
+    file: 0,
+    offset: 0,
+    *make() {
+      return yield a;
+    },
+  };
+  assert.throws(
+    () =>
+      solver.run(
+        (function* (): Work<readonly Item[]> {
+          return yield g;
+        })(),
+      ),
+    BudgetExhausted,
+  );
+  assert.equal(scope.work.counts().get("sccMembers"), 1);
+  assert.throws(() => solver.forget(["A"]), /after the pass's last decision/);
+});
+
 test("a component found while another is solved is solved on the explicit stack", () => {
   // each demand reads itself, and the next one once its own answer holds an item: each component is found by a run
   // again of a member of the one before it, 4,096 deep (review r1's solver-only control)

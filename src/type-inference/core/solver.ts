@@ -1,4 +1,5 @@
 import {
+  BudgetExhausted,
   checkReadDepth,
   countApart,
   DemandExhausted,
@@ -389,7 +390,8 @@ export class Solver {
    * from such a demand, now or in any earlier incarnation of its key until forgetting closes. A key gains it the moment
    * its demand earns it, running or finished: it asks a key of an open place or is an occurrence (`mayForget`), or it
    * reads a forgettable key or one not finished (`#keepReader`). Nothing removes it but `closeForgetting`: not a finish,
-   * not `forget`, not a run cut short (`run`), so a demand made again for the key is forgettable from its start.
+   * not `forget`, not a run cut short at a demand's allowance (`run`), so a demand made again for the key is forgettable
+   * from its start; the analysis's budget stopping a run closes forgetting, no decision running after it.
    */
   readonly #forgettable = new Set<string>();
   /** Whether a decision of the pass can still stop, so `forget` may still be asked (#1599). */
@@ -453,10 +455,13 @@ export class Solver {
     try {
       this.#drive(this.#frame(null, top, this.#counter++, null));
     } catch (error) {
-      // a stop (the budget's) leaves demands unfinished: they are forgotten, the finished ones kept; each read waiting
-      // on one's return keeps its reader first, as the return would have (#1601's Codex r3), each such demand not
-      // finished: a new demand's by the frame below its own, a component's closing demand's by the frame that read it
-      this.#keepPendingReaders();
+      // a stop leaves demands unfinished: they are forgotten, the finished ones kept. A demand's (`DemandExhausted`,
+      // between two steps) first keeps each read waiting on one's return, as the return would have (#1601's Codex r3):
+      // a new demand's by the frame below its own, a component's closing demand's by the frame that read it. The
+      // analysis's (`BudgetExhausted`, at any charge) ends the pass's decisions, so nothing is forgotten after it and
+      // forgetting closes here (#1601's Codex r4: a charge may cut a return between the two structures read above)
+      if (error instanceof BudgetExhausted) this.closeForgetting();
+      else this.#keepPendingReaders();
       this.#active.clear();
       this.#stack.length = 0;
       this.#frames.length = 0;
@@ -613,9 +618,9 @@ export class Solver {
   }
 
   /**
-   * Before a run cut short drops what has not finished: each pending read of a demand not finished keeps its reader, as
-   * its return would have (`#finish`, `#solved`); the status of every demand cut short is its key's already
-   * (`#forgettable`).
+   * Before a run cut short at a demand's allowance (`DemandExhausted`, between two steps) drops what has not finished:
+   * each pending read of a demand not finished keeps its reader, as its return would have (`#finish`, `#solved`); the
+   * status of every demand cut short is its key's already (`#forgettable`).
    */
   #keepPendingReaders(): void {
     if (!this.#forgetting) return;
@@ -646,7 +651,8 @@ export class Solver {
    */
   public forget(keys: readonly string[]): void {
     if (this.#running) throw new Error("The solver cannot forget an answer while it runs.");
-    // (an invariant, as the guard above and `run`'s: no decision stops after the pass's last, #1599)
+    // (an invariant, as the guard above and `run`'s: no decision stops after the pass's last, nor after the analysis's
+    // budget stopped it, #1599)
     if (!this.#forgetting)
       throw new Error("The solver cannot forget an answer after the pass's last decision.");
     const todo = [...keys];

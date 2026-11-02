@@ -3708,7 +3708,9 @@ test("every answer kept before a key's decision stops answers the stop from the 
  * and the readers of what a stop may then forget), so a forget sees exactly the answers it would with every record
  * kept (`withEveryRecord`). Shapes whose decisions read a place before, between and after its stores' decisions, through
  * copies, selections and an operation, each at demand allowances from 1 to 1,024 in the four modes, where decisions
- * stop: the stop set and what is published at it the same either way, and a decision stops at some allowance.
+ * stop: the stop set and what is published at it the same either way, and a decision stops at some allowance. The
+ * oracle compares what production can reach: complete runs and runs cut short at a demand's allowance (a budget stop
+ * closes forgetting, `Solver.run`).
  */
 test("a stop forgets what it would with every record kept: the same stop sets in the four modes (#1599)", () => {
   const shapes = [
@@ -3894,7 +3896,9 @@ test("a demand made again after a forget stays forgettable until forgetting clos
  * is reached by the next stop as with every record kept. Codex's witness (every value read in one demand of a few
  * hundred units, which stops; `c` stops and its decision ends; every value is read again; `a` stops), at a few
  * allowances from that one up, in the four modes and both read orders: what the second stop forgets, every answer and
- * the charged counters equal those with every record kept (`withEveryRecord`).
+ * the charged counters equal those with every record kept (`withEveryRecord`). The oracle compares what production can
+ * reach: complete runs and runs cut short at a demand's allowance; a run the analysis's budget stops closes forgetting
+ * instead (`Solver.run`), so no forget follows it (`type-core-solver`).
  */
 test("a run cut short keeps the readers its returns would have kept (#1599)", () => {
   const source =
