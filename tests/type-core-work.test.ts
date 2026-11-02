@@ -4,7 +4,12 @@ import test from "node:test";
 import { compileProject, createFreshRuntimeSession } from "../src/index.js";
 import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
-import { withTestDemandAllowance, type WorkCounter } from "../src/type-inference/core/budget.js";
+import {
+  withTestDemandAllowance,
+  WorkLedger,
+  type WorkCounter,
+} from "../src/type-inference/core/budget.js";
+import { storeContracts } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { writtenTypeSteps } from "../src/type-inference/core/contract.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
@@ -20,6 +25,7 @@ import {
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  COPY_CHAIN_FAMILIES,
   COPY_RING_FAMILIES,
   DIRECT_INGRESS_PROGRAMS,
   HOT_CANDIDATE_FAMILIES,
@@ -2250,4 +2256,119 @@ test("a prefix the cheap checks refuse walks no holder's marks, main's total und
     ),
     [3988, 3988, 4844, 4862],
   );
+});
+
+/**
+ * #1605: a value copied through a chain of wrappers, a store at its long key or the key's element checked: the check's
+ * contract at each level of the stored value (its element, its element's element) stands one step below its parent's
+ * position (`positions.ts`), never every wrapper's whole path again, so the work the store checks charge after the
+ * analysis (`storeContracts`; every unit, apart work too, as the issue measured it), in total and by each counter of
+ * at least 200 units, grows with the chain at k = 16 → 32 in every mode (3.38 to 3.76 per doubling on `3d052bf43`).
+ * The series to k = 128 and the analysis beside a long key without copies are the PR's evidence, outside CI.
+ */
+/**
+ * The work the store checks charge after a family's analysis (`storeContracts`), every unit by counter (apart work
+ * too, as #1605 measured it) with the analysis's syntax nodes, in a mode; and the analysis's charged total.
+ */
+function storeWork(
+  { name, request }: Sized,
+  reversed: boolean,
+  unshared: boolean,
+): Measured & { readonly analysis: number } {
+  const counts = new Map<WorkCounter, number>();
+  let total = 0;
+  let analysis = 0;
+  const { charge } = WorkLedger.prototype;
+  const run = (): void => {
+    const answers = analyseCore(request);
+    assert.equal(answers.budget.exhausted, null, `${name}: within the allowance`);
+    analysis = answers.budget.total;
+    counts.set("syntaxNodes", answers.budget.counts.get("syntaxNodes") ?? 0);
+    WorkLedger.prototype.charge = function (this: WorkLedger, counter, units = 1) {
+      if (counter !== "syntaxNodes") counts.set(counter, (counts.get(counter) ?? 0) + units);
+      total += units;
+      charge.call(this, counter, units);
+    };
+    try {
+      assert.deepEqual(
+        [...storeContracts(answers, request).values()].map((result) => result.state),
+        ["complete"],
+        name,
+      );
+    } finally {
+      WorkLedger.prototype.charge = charge;
+    }
+  };
+  const ordered = (): void =>
+    reversed
+      ? withConsumerOrder(
+          (list) => [...list].reverse(),
+          () => withSolverSeam({ reverseWorklist: true }, run),
+        )
+      : run();
+  if (unshared) withoutSharing(ordered);
+  else ordered();
+  return { total, counts, analysis };
+}
+
+/**
+ * #1605: a value copied through a chain of wrappers, a store at its long key or the key's element checked: the check's
+ * contract at each level of the stored value (its element, its element's element) stands one step below its parent's
+ * position (`positions.ts`), never every wrapper's whole path again, so the work the store checks charge after the
+ * analysis, in total and by each counter of at least 200 units, grows with the chain at k = 16 → 32 in every mode
+ * (3.38 to 3.76 per doubling on `3d052bf43`). The series to k = 128 and the analysis beside a long key without copies
+ * are the PR's evidence, outside CI.
+ */
+test("a long copied key's store check grows with its copy chain in every mode (#1605)", () => {
+  const measure =
+    (unshared: boolean) =>
+    (at: Sized, reversed: boolean): Measured =>
+      storeWork(at, reversed, unshared);
+  assert.deepEqual(
+    [
+      ...steepCounters(COPY_CHAIN_FAMILIES, false, measure(false), [16, 32]),
+      ...steepCounters(COPY_CHAIN_FAMILIES, true, measure(true), [16, 32]),
+    ],
+    [],
+  );
+});
+
+/**
+ * #1605: what a long copied key's store check charges at k = 16 in each mode (source order shared and not, then
+ * reversed), with its analysis's charged total: a regression oracle of this construction only (on `main` `fd3f9d472`,
+ * whose #1601 keeps less apart work once no decision can stop), so a level's work charged nowhere shows. On
+ * `3d052bf43` the store at the long key's analysis charged the same (7,843 shared, 7,003 not) and its check 3,266 and
+ * 2,197 units; the store at its element's analysis asked its element levels through every wrapper (10,329 and 8,632),
+ * its check 1,101 and 889; the store at a property of its element's 12,448 and 10,225, its check 2,353 and 1,880.
+ */
+test("a long copied key's store check charges its positions' work, in every mode (#1605)", () => {
+  const measured = COPY_CHAIN_FAMILIES.map((family) => {
+    const at = sized(family, 16);
+    return [false, true].flatMap((reversed) =>
+      [false, true].map((unshared) => {
+        const { total, analysis } = storeWork(at, reversed, unshared);
+        return [analysis, total];
+      }),
+    );
+  });
+  assert.deepEqual(measured, [
+    [
+      [7843, 451],
+      [7003, 380],
+      [7843, 451],
+      [7003, 380],
+    ],
+    [
+      [8971, 274],
+      [8098, 236],
+      [8971, 274],
+      [8098, 236],
+    ],
+    [
+      [10226, 518],
+      [9225, 429],
+      [10228, 518],
+      [9225, 429],
+    ],
+  ]);
 });

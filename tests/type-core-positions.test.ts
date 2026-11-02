@@ -4,9 +4,11 @@ import test from "node:test";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withoutPositions } from "../src/type-inference/core/positions.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { publication } from "./helpers/type-core-oracles.js";
+import { COPY_CHAIN_DEPTH, COPY_CHAIN_SOURCES } from "./helpers/type-core-families.js";
+import { inMode, MODES, orderedItems, publication } from "./helpers/type-core-oracles.js";
 
 /*
  * G3 3a (TABLE r4.164, r4.178, r4.187): a read through wrappers (`a2 = {q: a1}`, `a2.q.q`) stands one step below its
@@ -133,4 +135,78 @@ test("a read through wrappers makes its states one step at a time: the wrapper c
       `total ${small.total} → ${large.total}${reversed ? " (reversed)" : ""}`,
     );
   }
+});
+
+/**
+ * #1605: a key's element levels through wrappers stand one step below their parent's positions (`positionStep`), never
+ * at each wrapper's root and whole path again, and that is output-neutral: each program of the family publishes the
+ * same with positions and `withoutPositions` (the derivation every element level took before), in the four modes; and
+ * the contract (kinds, elements, emptiness, each item with its writer, marks and ingress) of every binding of the chain
+ * at its key `…q.f`, that key's element, its element's element, a property `r` of its element and that property's
+ * element (a property step after an element step), asked shallow-first and base-first or deepest-first, equals the one
+ * `withoutPositions` gives. The family samples each axis against the issue's shape (a store of external data at `b`'s
+ * long key): the leaf, the use and what breaks the chain (`COPY_CHAIN_SOURCES`).
+ */
+test("a key's element levels through wrappers answer the same from their positions as from their roots, in every mode and either question order (#1605)", () => {
+  const depth = COPY_CHAIN_DEPTH;
+  const sources = COPY_CHAIN_SOURCES.map(({ source }) => source);
+  const globals = [...GLOBALS];
+  const differing: string[] = [];
+  for (const source of sources) {
+    const files = [{ path: "main.tease", source }];
+    const request = coreRequest(files, globals);
+    assert.ok(request !== null, `the source parses and resolves:\n${source}`);
+    const bindings = new CoreProgram(request).places.filter(
+      (place) => place.kind.kind === "binding",
+    );
+    const idOf = (name: string): number => bindings.find((place) => place.label === name)!.id;
+    // (every binding of the chain at its key `…q.f`, the frontier's own first: its depth below the binding)
+    const chain = [
+      ["a", 0],
+      ...Array.from({ length: depth }, (_, i) => [`w${i}`, i + 1] as const),
+      ["b", depth],
+    ] as const;
+    const questions = chain.flatMap(([name, below]) =>
+      [[], ["element"], ["element", "element"], ["element", "r"], ["element", "r", "element"]].map(
+        (tail) => ({
+          name: `${name}.${[...Array.from({ length: below }, () => "q"), "f", ...tail].join(".")}`,
+          id: idOf(name),
+          path: [...Array.from({ length: below }, () => "q"), "f", ...tail],
+        }),
+      ),
+    );
+    // shallow-first and base-first, or deepest-first: each a fresh analysis
+    const orders = [questions, [...questions].reverse()];
+    const levels = (order: typeof questions): Map<string, string> => {
+      const answers = analyseCore(request);
+      const out = new Map<string, string>();
+      for (const question of order) {
+        const { contract } = answers.place(question.id, question.path);
+        out.set(
+          question.name,
+          JSON.stringify([
+            orderedItems(contract.kinds),
+            orderedItems(contract.elements),
+            contract.emptiness,
+          ]),
+        );
+      }
+      return out;
+    };
+    for (const mode of MODES) {
+      const where = `${mode.reversed ? "reversed" : "forward"}${mode.unshared ? ", unshared" : ""}`;
+      const on = publication(files, mode, globals);
+      const off = withoutPositions(() => publication(files, mode, globals));
+      if (on !== off) differing.push(`${where}: the publication\n${source}`);
+      const before = withoutPositions(() => inMode(mode, () => levels(questions)));
+      for (const [index, order] of orders.entries()) {
+        const now = inMode(mode, () => levels(order));
+        for (const question of questions)
+          if (now.get(question.name) !== before.get(question.name))
+            differing.push(`${where}, order ${index}: ${question.name}\n${source}`);
+      }
+    }
+  }
+  assert.equal(sources.length, 32);
+  assert.deepEqual(differing, []);
 });

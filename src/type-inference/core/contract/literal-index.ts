@@ -10,7 +10,7 @@ import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
 import { ingressLeafOf } from "./ingress.js";
 import type { Rest } from "./key-ids.js";
-import { emptyAt, propertyOnly, REFERENCE } from "./kinds.js";
+import { emptyAt, positionStep, propertyOnly, REFERENCE } from "./kinds.js";
 import type {
   IdentityWork,
   IndexNode,
@@ -127,6 +127,7 @@ export function pathAt(contract: Contract, parent: number, step: string): number
   contract.pathFirstSteps.push(parent === 0 ? step : contract.pathFirstSteps[parent]!);
   contract.pathMembers.push(memberStep([step], 0) === 0 ? id : contract.pathMembers[parent]!);
   contract.pathProperties.push(contract.pathProperties[parent]! && propertyOnly(step));
+  contract.pathPositions.push(contract.pathPositions[parent]! && positionStep(step));
   steps.set(step, id);
   return id;
 }
