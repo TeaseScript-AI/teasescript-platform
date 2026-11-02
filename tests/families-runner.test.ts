@@ -972,6 +972,7 @@ test("the stored baselines finish or clear what a writer killed at a write left,
       by: newer,
     });
     assert.equal(readFileSync(join(made, "SUPERSEDED"), "utf8"), `${newer}\n`);
+    assert.equal(run(baselines, "state", base, first, "--read-only").status, 0);
     assert.equal(last(run(baselines, "queue", made, hook)).queued, made);
     assert.deepEqual(readdirSync(made).sort(), ["MANIFEST", "area", "baseline.sh"]);
     // (#1542 r3: queued-job-foreign-contents) a job's decision in a baseline that holds a foreign path is refused,
@@ -1223,8 +1224,10 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       ["zero", 0, ""],
       ["one", 1, ""],
       ["two", 2, "x...."],
-    ] as const)
-      assert.equal(compute(out, index, { FLAKY: flaky }).status, 0, out);
+    ] as const) {
+      const computed = compute(out, index, { FLAKY: flaky });
+      assert.equal(computed.status, 0, computed.stderr);
+    }
     assert.deepEqual(listed("zero"), []);
     assert.deepEqual(
       listed("one").map(
@@ -1296,7 +1299,8 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         .sort()
         .map((name) => [name, readFileSync(join(central, src, "area", name), "utf8")]);
     const before = contents();
-    assert.equal(compute("rebuilt", 0, {}, rebuilt).status, 0);
+    const recomputed = compute("rebuilt", 0, {}, rebuilt);
+    assert.equal(recomputed.status, 0, recomputed.stderr);
     const copied = (from: string, name: string, change: (dir: string) => void) => {
       cpSync(at(from), at(name), { recursive: true });
       change(at(name, src));
@@ -1333,12 +1337,67 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         1,
         /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
       ],
+      [
+        copied("zero", "damaged", (dir) =>
+          edit(join(dir, "area", "0of16.runs.jsonl"), /\{"total".*\n$/, ""),
+        ),
+        0,
+        /0of16\.runs\.jsonl is no shard that counts/,
+      ],
+      [
+        copied("one", "alone", () =>
+          edit(at("alone", "stalls.json"), /"alone":\{.*\}\}\]\}/, '"alone":{}}]}'),
+        ),
+        1,
+        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
+      ],
+      [
+        copied("one", "twice-listed", () =>
+          edit(at("twice-listed", "stalls.json"), /\[(.*)\]/, "[$1,$1]"),
+        ),
+        1,
+        /stalls\.json lists 2 stalled sources of .*, which has 1/,
+      ],
       ["empty", 0, /holds no baseline of this tool/],
     ] as const) {
       const refused = imported(root, index);
       assert.deepEqual([root, refused.status], [root, 2]);
       assert.match(said(refused).refused, refusal);
     }
+    // (and a central baseline whose PLAN its seed's adoption did not make yet)
+    cpSync(central, at("unplanned"), { recursive: true });
+    rmSync(at("unplanned", src, "area", "PLAN"));
+    assert.match(
+      said(tool("import", at("unplanned"), at("zero"), "area", "0/16")).refused,
+      /holds no PLAN or another one: import its seed first/,
+    );
+    // an import killed after it wrote its shard's temporary file: the next one clears it and publishes
+    assert.equal(tool("import", at("crashed"), at("seed")).status, 0);
+    const crash = at("crash.mjs");
+    writeFileSync(crash, CRASH);
+    const ready = at("ready");
+    const killed = spawn(
+      process.execPath,
+      ["--import", crash, baselines, "import", at("crashed"), at("zero"), "area", "0/16"],
+      {
+        env: {
+          ...process.env,
+          CRASH_ROOT: at("crashed"),
+          CRASH_AT: "^writeFileSync .*runs\\.jsonl\\.\\d+-\\d+\\.tmp ",
+          CRASH_READY: ready,
+        },
+        stdio: "ignore",
+      },
+    );
+    const closed = new Promise((done) => killed.on("close", done));
+    while (!existsSync(ready) && killed.exitCode === null)
+      await new Promise((done) => setTimeout(done, 5));
+    assert.ok(existsSync(ready), "the import ended before its temporary file");
+    killed.kill("SIGKILL");
+    await closed;
+    assert.equal(readdirSync(at("crashed", src, "area")).length, 2);
+    assert.equal(said(tool("import", at("crashed"), at("zero"), "area", "0/16")).verified, true);
+    assert.deepEqual(readdirSync(at("crashed", src, "area")).sort(), ["0of16.runs.jsonl", "PLAN"]);
     // compared, never replaced: a shard imported again says the same (exit 0), one that says otherwise differs (exit 3)
     assert.deepEqual(Object.keys(said(imported("zero", 0))), ["equal"]);
     const differs = copied("zero", "differs", (dir) => {
