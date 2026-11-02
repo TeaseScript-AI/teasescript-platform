@@ -173,7 +173,7 @@ if [ "${1:-}" = compute ]; then
       take=$work/second
       copy "$take" || fail "the shard could not be stored again"
       node "$state" stalls "$take/$src/$area/${i}of${n}.runs.jsonl" "$ran" "$area" "$i/$n" "$work/stalls.json" >&2 ||
-        fail "sources stalled in two stores that did not stall alone, under the machine's load"
+        fail "sources stalled in two stores that did not stall alone, under the load of the machine"
     fi
   fi
   node "$state" import "$out" "$take" >&2 &&
