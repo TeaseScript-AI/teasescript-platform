@@ -75,8 +75,9 @@ const placeless = new WeakMap<Consumers, Map<PlaceId, readonly Definition[] | nu
 /**
  * A projection of a collection or object literal no place holds, through such projections (`[hostValue, 4][0]`,
  * `[[1, 2]][0][1]`, #1563): the literal's cells it reads along its steps, each its own value, as a read of the literal
- * at that path reads them; `null` for any other value, and where a step finds no cell or meets a value that is no
- * such literal. Structure only, the finishing read's and the stores' syntax's alike; each projection made once a walk.
+ * at that path reads them; `null` for any other value, and where a step meets a value that is no such literal or a
+ * literal with no part there (its absence is the analysis's to tell, the read's obligations with it). Structure only,
+ * the finishing read's and the stores' syntax's alike; each projection made once a walk.
  */
 export function placelessCells(walk: Consumers, value: PlaceId): readonly Definition[] | null {
   let memo = placeless.get(walk);
@@ -93,8 +94,13 @@ export function placelessCells(walk: Consumers, value: PlaceId): readonly Defini
     if (literals !== null) {
       const step = stepName(projection.step);
       const cells: Definition[] = [];
-      for (const literal of literals) cells.push(...walk.admission.literalChildren(literal, step));
-      found = cells.length === 0 ? null : cells;
+      let every = true;
+      for (const literal of literals) {
+        const parts = walk.admission.literalChildren(literal, step);
+        every &&= parts.length > 0;
+        cells.push(...parts);
+      }
+      found = every && cells.length > 0 ? cells : null;
     }
   }
   memo.set(value, found);

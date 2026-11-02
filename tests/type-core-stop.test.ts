@@ -2404,6 +2404,56 @@ test("a settled stop keeps the family of an unused get's default that structure 
 });
 
 /**
+ * #1563, Codex r1's B1 on #1581: structure decides a projection only where every literal it may read has a part at the
+ * step, so a selection of two objects of which one lacks `f` leaves `.f` undecided, and the read's obligations stay:
+ * the natural analysis's null-checks of the selection and of its `f` (its property and its index read) are kept or
+ * owned at every settled stop in four modes. The unused default's family, which no structure decides there, is reported
+ * lost as #1580's forms are, and nothing else: at every eighth stop, forward with the sharing and reversed without it.
+ */
+test("a settled stop keeps a projection's read obligations where one literal lacks its step (#1563)", () => {
+  const c = unusedGet("lacking step", [], "[[{f: [hostValue, 4]}, {g: 4}][0].f[0]]");
+  const request = coreRequest(
+    [{ path: "main.tease", source: c.source }],
+    ["hostValue", "hostOther"],
+  )!;
+  const obligation = (check: Answers["checks"][number]) => JSON.stringify(check);
+  for (const mode of HELD_MODES) {
+    const { run: unstopped, problems } = heldUnstopped(c, mode);
+    assert.deepEqual(problems, [], mode.name);
+    const nullChecks = unstopped.answers.checks.filter((check) => check.kind === "null-check");
+    assert.equal(nullChecks.length, 2, mode.name);
+    for (const { allowance, phase } of heldStops(c, mode)) {
+      const stopped = mode.run(() => withTestAllowance(allowance, () => analyseCore(request)));
+      const owed = new Set(
+        [...stopped.checks, ...stopped.budget.deferred.map((mark) => mark.obligation)].map(
+          obligation,
+        ),
+      );
+      for (const check of nullChecks)
+        assert.ok(
+          owed.has(obligation(check)),
+          `${mode.name}, ${phase} @${allowance}: ${check.target}`,
+        );
+    }
+    if (mode !== HELD_MODES[0] && mode !== HELD_MODES[3]) continue;
+    const lost = unstopped.answers.checks.find(
+      (check) => check.target === "hostOther" && !check.boundary,
+    );
+    assert.ok(lost !== undefined, mode.name);
+    const reported = [
+      `unowned check ${obligation(lost)}`,
+      'forbidden {"hostValue":2,"hostOther":"bad"} said ["BEFORE","AFTER"]',
+    ];
+    for (const { allowance, phase } of heldStops(c, mode, 8))
+      assert.deepEqual(
+        heldProblems(c, mode, allowance, unstopped).filter((found) => !reported.includes(found)),
+        [],
+        `${mode.name}, ${phase} @${allowance}`,
+      );
+  }
+});
+
+/**
  * #1563's forms structure does not decide: an element whose kinds the solver derives by a rule (a conversion's here; an
  * operation's, a fallback's, a `get`'s and a comparison's alike) is not decided after a stop, so where the walk stopped
  * before the receiver's element was read, the default's mark stands against `unknown`, "not checked (budget)" at the
