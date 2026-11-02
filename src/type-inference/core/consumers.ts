@@ -466,6 +466,8 @@ export class Consumers {
       const own = this.#ownTargets(this.admission, (root, path) => {
         decide(this, { root, path }, true);
       });
+      // (no decision stops from here on: what a stop forgets by is dropped, #1599)
+      this.pass.contract.closeDecisions();
       this.settled =
         own &&
         (this.#last || sameStores(this.admission.newlyRejected, this.#rejected)) &&
@@ -514,6 +516,8 @@ export class Consumers {
    */
   public finish(all: boolean): void {
     this.finishing = true;
+    // (after a stop no decision stops: what a stop forgets by is dropped, #1599)
+    this.pass.contract.closeDecisions();
     this.#stoppedAt = all ? null : (this.#stoppedAt ?? { stage: STAGES, unit: 0 });
     this.#walk();
     // (the stores' obligations rank as admission's do)

@@ -353,8 +353,13 @@ export class Solver {
   readonly #memo = new Map<string, readonly Item[]>();
   /** The finished proof demands' proofs, kept with their answers in `#memo`. */
   readonly #proofs = new Map<string, Proof>();
-  /** Each demand's readers: the demands whose runs read it (`#read`), for `forget`. */
-  readonly #readers = new Map<string, Set<string>>();
+  /**
+   * Each demand's readers: the demands whose runs read it (`#read`), for `forget`; one reader as itself, several as a
+   * set. Kept only while a decision of the pass can still stop (`closeForgetting`).
+   */
+  readonly #readers = new Map<string, string | Set<string>>();
+  /** Whether a decision of the pass can still stop, so `forget` may still be asked (#1599). */
+  #forgetting = true;
   readonly #active = new Map<string, DemandNode>();
   /** Tarjan's stack of unfinished demands outside the components being solved. */
   readonly #stack: DemandNode[] = [];
@@ -527,6 +532,15 @@ export class Solver {
     return this.#memo.get(key);
   }
 
+  /**
+   * No decision of the pass stops from now on (`Contract.closeDecisions`): nothing is forgotten again, so no reader is
+   * kept from now on and those kept are dropped (#1599).
+   */
+  public closeForgetting(): void {
+    this.#forgetting = false;
+    this.#readers.clear();
+  }
+
   /** The demand whose run is reading (a first run's or a member's again), `null` outside one. */
   public get reading(): string | null {
     return this.#running ? demandOf(this.#frames.at(-1)) : null;
@@ -538,12 +552,15 @@ export class Solver {
    */
   public forget(keys: readonly string[]): void {
     if (this.#running) throw new Error("The solver cannot forget an answer while it runs.");
+    if (!this.#forgetting)
+      throw new Error("The solver cannot forget an answer after the pass's last decision.");
     const todo = [...keys];
     const seen = new Set(todo);
     for (let key = todo.pop(); key !== undefined; key = todo.pop()) {
       this.#memo.delete(key);
       this.#proofs.delete(key);
-      for (const reader of this.#readers.get(key) ?? [])
+      const readers = this.#readers.get(key);
+      for (const reader of typeof readers === "string" ? [readers] : (readers ?? []))
         if (!seen.has(reader)) {
           seen.add(reader);
           todo.push(reader);
@@ -630,13 +647,15 @@ export class Solver {
 
   /** A frame yields `demand`: its answer, a provisional one, or a new frame for it. */
   #read(frame: Frame, demand: Demand | ProofDemand<Proof>): void {
-    // (its reader kept for `forget`, each new one counted apart from the allowance)
+    // (its reader kept for `forget` while a decision can still stop, each new one counted apart from the allowance)
     const reader = demandOf(frame);
-    if (reader !== null) {
-      let readers = this.#readers.get(demand.key);
-      if (readers === undefined) this.#readers.set(demand.key, (readers = new Set()));
-      if (!readers.has(reader)) {
-        readers.add(reader);
+    if (reader !== null && this.#forgetting) {
+      const readers = this.#readers.get(demand.key);
+      if (readers !== reader && !(typeof readers === "object" && readers.has(reader))) {
+        if (readers === undefined) this.#readers.set(demand.key, reader);
+        else if (typeof readers === "string")
+          this.#readers.set(demand.key, new Set([readers, reader]));
+        else readers.add(reader);
         countApart(this.#work, "readerRecords");
       }
     }

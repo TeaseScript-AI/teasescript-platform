@@ -427,8 +427,13 @@ export class Contract {
   readonly #stopped = new Map<PlaceId, (readonly string[] | number)[]>();
   readonly #belowStop = new Map<PlaceId, Map<number, boolean>>();
   #stoppedCount = 0;
-  /** The demands whose runs asked whether a key stopped, by place, with the keys they asked (`#asked`, `stop`). */
-  readonly #askers = new Map<PlaceId, Map<string, Set<CanonicalKey>>>();
+  /**
+   * The demands whose runs asked whether a key stopped, by place, with the keys they asked (`#asked`, `stop`): one key
+   * as itself, several as a set; kept only while a decision can still stop (`closeDecisions`).
+   */
+  readonly #askers = new Map<PlaceId, Map<string, CanonicalKey | Set<CanonicalKey>>>();
+  /** Whether a decision of the pass can still stop (`closeDecisions`). */
+  #deciding = true;
   /**
    * The demands of the property and index reads' occurrence answers and of the positions (`positions.ts`) made since the
    * last stop (`contractOfValue`, `stop`).
@@ -509,7 +514,9 @@ export class Contract {
     };
     const askers = [...(this.#askers.get(place) ?? [])];
     this.pass.solver.forget(
-      askers.filter(([, keys]) => [...keys].some(below)).map(([demand]) => demand),
+      askers
+        .filter(([, keys]) => (typeof keys === "object" ? [...keys].some(below) : below(keys)))
+        .map(([demand]) => demand),
     );
     this.pass.solver.forget(this.occurrences);
     this.occurrences.length = 0;
@@ -518,19 +525,35 @@ export class Contract {
   /** The running demand asked whether `key` stopped: kept for `stop`, each new ask counted apart from the allowance. */
   #asked(place: PlaceId, key: () => CanonicalKey): void {
     const demand = this.pass.solver.reading;
-    if (demand === null) return;
+    if (demand === null || !this.#deciding) return;
     let byDemand = this.#askers.get(place);
     if (byDemand === undefined) this.#askers.set(place, (byDemand = new Map()));
-    let keys = byDemand.get(demand);
-    if (keys === undefined) byDemand.set(demand, (keys = new Set()));
+    const keys = byDemand.get(demand);
     const asked = key();
-    if (keys.has(asked)) return;
-    keys.add(asked);
+    if (keys === asked || (typeof keys === "object" && keys.has(asked))) return;
+    if (keys === undefined) byDemand.set(demand, asked);
+    else if (typeof keys === "object") keys.add(asked);
+    else byDemand.set(demand, new Set([keys, asked]));
     countApart(this.work, "stopAsks");
   }
 
   public remember(demand: string): void {
-    remember(this, demand);
+    if (this.#deciding) remember(this, demand);
+  }
+
+  /**
+   * #1599: the pass's last decision that can stop has run. A decision stops only in admission's walk of its groups and
+   * the receivers a pass's targets decide (`Consumers.check`, `consumers/stores.ts`'s `decide`), never in a lazily decided
+   * copy path or after a stop, so no key stops from now on: what a stop forgets by (each asker and its keys, each
+   * demand's readers, the occurrences since the last stop) is dropped and no longer kept, its records made only while a
+   * decision runs. `stop` after it throws (`Solver.forget`).
+   */
+  public closeDecisions(): void {
+    if (!this.#deciding) return;
+    this.#deciding = false;
+    this.#askers.clear();
+    this.occurrences.length = 0;
+    this.pass.solver.closeForgetting();
   }
 
   /**
