@@ -111,7 +111,7 @@ export function finishingRead(
   const own = leafKind(walk, value, rest);
   if (own !== null) return own;
   // (a projection of a literal no place holds, its own answer unfinished: the literal's cells along its steps, each its
-  // own value as above, `placelessCells`, as the stores' syntax takes them, #1563)
+  // own value as above, `placelessCells`, as the stores' syntax takes them, #1563; together in their one order, #1398)
   const cells = placelessCells(walk, value);
   const exact = cells === null ? null : finishedAnswer(walk, value, node, rest);
   const read: Item[] = [];
@@ -119,7 +119,8 @@ export function finishingRead(
     if (cell.value !== undefined && stands(walk, cell))
       read.push(...finishingRead(walk, cell.value, cell.node ?? node, rest, requirement));
   const items =
-    exact ?? (read.length > 0 ? read : laterSources(walk, value, node, rest, requirement));
+    exact ??
+    (read.length > 0 ? inItsOrder(read) : laterSources(walk, value, node, rest, requirement));
   // (a host read's ingress is structural whatever the script stores into its global: its C9 boundary forms from it,
   // beside the kinds the later sources give, TABLE r4.113)
   const ingress = requirement ? null : hostIngress(walk, value);
