@@ -151,6 +151,8 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
     writtenOnly ? writtenGroups(walk) : admission.groups(),
   )) {
     const decision = decide(walk, group);
+    // (its decision ended: what a stop forgets by is kept for its place only while another can stop it, #1599)
+    if (!writtenOnly) walk.pass.contract.decided(group.root);
     if (decision === null) continue;
     // (a cursor's group's steps made only where a diagnostic or a check names its path: G3 stage 1)
     const { root } = group;

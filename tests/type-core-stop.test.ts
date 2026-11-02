@@ -16,8 +16,16 @@ import { analyseCore, type Answers, type CorePass } from "../src/type-inference/
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { Contract } from "../src/type-inference/core/contract.js";
-import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
-import { withConsumerOrder, withoutRecords } from "../src/type-inference/core/consumers.js";
+import {
+  DemandExhausted,
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../src/type-inference/core/budget.js";
+import {
+  Consumers,
+  withConsumerOrder,
+  withoutRecords,
+} from "../src/type-inference/core/consumers.js";
 import {
   FRONTIER_COPIES,
   FRONTIER_DEPTH,
@@ -27,7 +35,12 @@ import {
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import { withSolverSeam, type Proof, type ProofDemand } from "../src/type-inference/core/solver.js";
+import {
+  withEveryRecord,
+  withSolverSeam,
+  type Proof,
+  type ProofDemand,
+} from "../src/type-inference/core/solver.js";
 import { REASON, type Item } from "../src/type-inference/core/items.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -45,7 +58,14 @@ import {
   type HeldCase,
 } from "./helpers/type-core-held-host.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
-import { inMode, keptErrors, MODES, stopIdentity, stopSet } from "./helpers/type-core-oracles.js";
+import {
+  inMode,
+  itemText,
+  keptErrors,
+  MODES,
+  stopIdentity,
+  stopSet,
+} from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 import { stopProblems, type Globals, type StopRun } from "./helpers/type-core-stop-oracle.js";
 
@@ -3681,6 +3701,274 @@ test("every answer kept before a key's decision stops answers the stop from the 
                 assert.deepEqual(after.get(value), read(fresh, value), `${text(value)}: ${where}`);
             });
   }
+});
+
+/**
+ * #1599: what a stop forgets by is kept only where a decision can still stop (a place before its last decision ends,
+ * and the readers of what a stop may then forget), so a forget sees exactly the answers it would with every record
+ * kept (`withEveryRecord`). Shapes whose decisions read a place before, between and after its stores' decisions, through
+ * copies, selections and an operation, each at demand allowances from 1 to 1,024 in the four modes, where decisions
+ * stop: the stop set and what is published at it the same either way, and a decision stops at some allowance. The
+ * oracle compares what production can reach: complete runs and runs cut short at a demand's allowance (a budget stop
+ * closes forgetting, `Solver.run`).
+ */
+test("a stop forgets what it would with every record kept: the same stop sets in the four modes (#1599)", () => {
+  const shapes = [
+    'let seed = {n: "origin", m: "other"}\nseed.n = "later"\nlet c = seed.n\nlet d = [seed.n, seed.m][0]\nsay c\nsay d\nexit\n',
+    'let seed = {n: "origin"}\nlet c0 = seed.n\nlet c1 = [seed.n][0]\nseed.n = "later"\nlet c2 = seed.n\nsay c2\nexit\n',
+    "let box = {q: {n: 1}}\nlet copy = box\nbox.q.n = 2\ncopy.q.n = 3\nlet out = copy.q.n\nsay out\nexit\n",
+    "let box = [[{n: 1}]]\nlet copy = box\nbox[0][0].n = 2\nsay copy.first.first.n\nexit\n",
+    "let v: integer? = null\nlet a = {n: {m: v}}\na.n.m = 3\nsay (a.n otherwise {m: 2}).m\nexit\n",
+  ];
+  for (const source of shapes) {
+    const files = [{ path: "main.tease", source }];
+    let stopped = 0;
+    for (const mode of MODES)
+      for (let allowance = 1; allowance <= 1024; allowance *= 2) {
+        const stops = () => stopSet(files, mode, ["hostValue"], allowance);
+        const kept = stops();
+        assert.deepEqual(
+          kept,
+          withEveryRecord(stops),
+          `${source.split("\n")[1]} ${JSON.stringify(mode)} at demand ${allowance}`,
+        );
+        if ((kept?.stops.length ?? 0) > 0) stopped += 1;
+      }
+    assert.ok(stopped > 0, `${source.split("\n")[1]}: a decision stops`);
+  }
+});
+
+/**
+ * #1599: what a stop forgets by stands for a place until its last decision ends (`Contract.openDecisions`, `decided`).
+ * Each binding is given two decisions and every other binding one; every value is read; every other binding's decision
+ * ends, and one of the two of the binding to stop; the binding's key, or one below it, stops: every value then answers
+ * as in a pass that starts with that key stopped, in both read orders and the four modes, so what was asked of the
+ * place before its first decision ended is still forgotten.
+ */
+test("what a stop forgets by stands for a place until its last decision ends (#1599)", () => {
+  const shapes = [
+    "let box = [[{n: 1}]]\nlet copy = box\nsay copy.first.first.n\nexit\n",
+    "let v: integer? = null\nlet a = {n: {m: v}}\nsay (a.n otherwise {m: 2}).m\nexit\n",
+    "let a = {n: 1}\nsay [a][0].n\nexit\n",
+  ];
+  for (const source of shapes) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { program } = narrowingPass(request);
+    const values = program.places
+      .filter((place) => place.kind.kind === "value" || place.kind.kind === "target")
+      .map((place) => place.id);
+    const bindings = program.places
+      .filter((place) => place.kind.kind === "binding")
+      .map((place) => place.id);
+    const stops: { readonly place: PlaceId; readonly path: readonly string[] }[] = [];
+    for (const place of bindings) stops.push({ place, path: [] });
+    for (const value of values) {
+      const { root, path } = program.targetRoot(value);
+      if (bindings.includes(root) && path.length > 0) stops.push({ place: root, path });
+    }
+    for (const stop of stops)
+      for (const [mode, inMode] of STOP_MODES)
+        for (const order of ["source", "reversed"])
+          inMode(() => {
+            const where = `${source.split("\n").at(-3)} @${program.places[stop.place]!.label}.${stop.path.join(".")}, ${mode}, ${order}`;
+            const read = (pass: CorePass, value: PlaceId) =>
+              tagged(pass.solver.run(pass.contract.contractOfValue(value)));
+            const own = order === "source" ? values : [...values].reverse();
+            const pass = narrowingPass(request);
+            pass.contract.openDecisions([
+              ...bindings.map((root) => ({ root })),
+              { root: stop.place },
+            ]);
+            for (const value of own) read(pass, value);
+            for (const root of bindings) pass.contract.decided(root);
+            pass.contract.stop(stop.place, stop.path);
+            const after = new Map(own.map((value) => [value, read(pass, value)]));
+            const fresh = narrowingPass(request);
+            fresh.contract.stop(stop.place, stop.path);
+            for (const value of values)
+              assert.deepEqual(after.get(value), read(fresh, value), where);
+          });
+  }
+});
+
+/**
+ * #1601's Astra r1 (R1): a demand a stop forgets and that is made again stays forgettable (`Solver.#forgettable`), since
+ * what reached it before (an ask kept at a place still open, a reader edge kept from another demand) reaches it again.
+ * Each value is read; one binding stops and its decisions end; every value is read again, the forgotten demands made
+ * again; a second binding stops. What the second stop forgets, the answers and every charged counter equal those with
+ * every record kept (`withEveryRecord`), in the four modes and both read orders: Astra's witness (`c`, then `a`, through
+ * admission's groups) and her family of three sources, every ordered pair of their bindings.
+ */
+test("a demand made again after a forget stays forgettable until forgetting closes (#1599)", () => {
+  const sources = [
+    "let a: integer? = null\nlet b = 1\nlet c = a otherwise b\nlet d = [c]\nsay d.first\nexit\n",
+    "let a = [{n: 1}]\nlet b = a\nlet c = [b.first, a.last]\nlet d = c.first.n\nsay d\nexit\n",
+    "let a = [1]\nlet b = [2]\nlet c = a + b\nlet d = c.first\nsay d\nexit\n",
+  ];
+  const apart = new Set(["readerRecords", "stopAsks"]);
+  interface Witnessed {
+    readonly before: readonly string[][];
+    readonly between: readonly string[][];
+    readonly forgotten: readonly string[];
+    readonly after: readonly string[][];
+    readonly work: {
+      readonly total: number;
+      readonly counts: readonly (readonly [string, number])[];
+      readonly apart: readonly (readonly [string, number])[];
+    };
+  }
+  // (two stops with every value read before, between and after them; `groups`: the places opened by admission's own
+  // groups, else one decision per binding)
+  const run = (
+    source: string,
+    first: number,
+    second: number,
+    reversed: boolean,
+    groups: boolean,
+  ): Witnessed => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const pass = narrowingPass(request);
+    const { program, contract, solver } = pass;
+    const roots = program.places
+      .filter((place) => place.kind.kind === "binding")
+      .map((place) => place.id);
+    const values = program.places
+      .filter((place) => place.kind.kind === "value" || place.kind.kind === "target")
+      .map((place) => place.id);
+    if (reversed) values.reverse();
+    const decisions = groups
+      ? new Consumers(pass).admission.groups()
+      : roots.map((root) => ({ root }));
+    contract.openDecisions(decisions);
+    const ask = () =>
+      values.map((value) => solver.run(contract.contractOfValue(value)).map(itemText));
+    const kept = () =>
+      [...new Set(solver.demandWork().map(({ key }) => key))]
+        .filter((key) => solver.answer(key) !== undefined)
+        .sort();
+    const work = () => ({
+      total: program.work.total,
+      counts: [...program.work.counts()],
+      apart: [...program.work.apartCounts()].filter(([counter]) => !apart.has(counter)),
+    });
+    const before = ask();
+    contract.stop(roots[first]!, []);
+    for (const decision of decisions)
+      if (decision.root === roots[first]) contract.decided(decision.root);
+    const between = ask();
+    const memo = kept();
+    contract.stop(roots[second]!, []);
+    const forgotten = memo.filter((key) => solver.answer(key) === undefined);
+    const after = ask();
+    return { before, between, forgotten, after, work: work() };
+  };
+  for (const [index, source] of sources.entries()) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const labels = narrowingPass(request)
+      .program.places.filter((place) => place.kind.kind === "binding")
+      .map((place) => place.label);
+    const pairs: (readonly [number, number, boolean])[] = [];
+    // (Astra's witness: `c`, then `a`, through admission's groups)
+    if (index === 0) pairs.push([labels.indexOf("c"), labels.indexOf("a"), true]);
+    for (let first = 0; first < labels.length; first += 1)
+      for (let second = 0; second < labels.length; second += 1)
+        if (first !== second) pairs.push([first, second, false]);
+    for (const [first, second, groups] of pairs)
+      for (const mode of MODES)
+        for (const reversed of [false, true])
+          inMode(mode, () => {
+            const where = `${source.split("\n")[2]} ${labels[first]} then ${labels[second]}${groups ? " (groups)" : ""} ${JSON.stringify(mode)}${reversed ? " reversed" : ""}`;
+            assert.deepEqual(
+              run(source, first, second, reversed, groups),
+              withEveryRecord(() => run(source, first, second, reversed, groups)),
+              where,
+            );
+          });
+  }
+});
+
+/**
+ * #1601's Codex r3 (R1): a run cut short at a demand's allowance drops what has not finished, after each pending read of
+ * it keeps its reader as the read's return would have (`Solver.run`), so a demand made again after it and after a stop
+ * is reached by the next stop as with every record kept. Codex's witness (every value read in one demand of a few
+ * hundred units, which stops; `c` stops and its decision ends; every value is read again; `a` stops), at a few
+ * allowances from that one up, in the four modes and both read orders: what the second stop forgets, every answer and
+ * the charged counters equal those with every record kept (`withEveryRecord`). The oracle compares what production can
+ * reach: complete runs and runs cut short at a demand's allowance; a run the analysis's budget stops closes forgetting
+ * instead (`Solver.run`), so no forget follows it (`type-core-solver`).
+ */
+test("a run cut short keeps the readers its returns would have kept (#1599)", () => {
+  const source =
+    "let a: integer? = null\nlet b = 1\nlet c = a otherwise b\nlet d = [c]\nsay d.first\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  interface Witnessed {
+    readonly cut: boolean;
+    readonly before: readonly string[][];
+    readonly forgotten: readonly string[];
+    readonly after: readonly string[][];
+    readonly total: number;
+    readonly counts: readonly (readonly [string, number])[];
+  }
+  const run = (allowance: number, reversed: boolean): Witnessed => {
+    const { program, contract, solver } = narrowingPass(request);
+    const bindings = program.places.filter((place) => place.kind.kind === "binding");
+    contract.openDecisions(bindings.map(({ id }) => ({ root: id })));
+    const at = (label: string): PlaceId => bindings.find((place) => place.label === label)!.id;
+    const values = program.places
+      .filter((place) => place.kind.kind === "value" || place.kind.kind === "target")
+      .map((place) => place.id);
+    if (reversed) values.reverse();
+    const ask = () =>
+      values.map((value) => solver.run(contract.contractOfValue(value)).map(itemText));
+    let cut = false;
+    try {
+      solver.demand(
+        (function* () {
+          for (const value of values) yield* contract.contractOfValue(value);
+          return [];
+        })(),
+        allowance,
+      );
+    } catch (error) {
+      if (!(error instanceof DemandExhausted)) throw error;
+      cut = true;
+    }
+    contract.stop(at("c"), []);
+    contract.decided(at("c"));
+    const before = ask();
+    const memo = [...new Set(solver.demandWork().map(({ key }) => key))]
+      .filter((key) => solver.answer(key) !== undefined)
+      .sort();
+    contract.stop(at("a"), []);
+    const forgotten = memo.filter((key) => solver.answer(key) === undefined);
+    const after = ask();
+    return {
+      cut,
+      before,
+      forgotten,
+      after,
+      total: program.work.total,
+      counts: [...program.work.counts()],
+    };
+  };
+  let cut = 0;
+  for (const allowance of [96, 192, 392, 600])
+    for (const mode of MODES)
+      for (const reversed of [false, true])
+        inMode(mode, () => {
+          const own = run(allowance, reversed);
+          if (own.cut) cut += 1;
+          assert.deepEqual(
+            own,
+            withEveryRecord(() => run(allowance, reversed)),
+            `at ${allowance}, ${JSON.stringify(mode)}${reversed ? ", reversed" : ""}`,
+          );
+        });
+  assert.ok(cut > 0, "a run is cut short");
 });
 
 /**

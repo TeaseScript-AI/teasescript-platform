@@ -1,4 +1,5 @@
 import {
+  BudgetExhausted,
   checkReadDepth,
   countApart,
   DemandExhausted,
@@ -143,6 +144,30 @@ export function withNativeInline<T>(callback: () => T): T {
  */
 export function* inline(work: Work<readonly Item[]>): Work<readonly Item[]> {
   return nativeInline ? yield* work : yield { inline: work };
+}
+
+/** The readers a demand keeps as a list before a set (#1599: most demands a stop may forget have a few). */
+const LISTED = 8;
+
+let everyRecord = false;
+
+/**
+ * Test-only: runs `callback` with every record a stop forgets by kept until the pass's last decision, as before #1599,
+ * whether or not a stop can reach it: the oracle that a forget sees the same answers either way.
+ */
+export function withEveryRecord<T>(callback: () => T): T {
+  if (everyRecord) throw new Error("Every record is already kept.");
+  everyRecord = true;
+  try {
+    return callback();
+  } finally {
+    everyRecord = false;
+  }
+}
+
+/** Whether `withEveryRecord` runs. */
+export function everyRecordKept(): boolean {
+  return everyRecord;
 }
 
 /** A computation that yields the demands it reads (and those it reads inline) and receives their items. */
@@ -353,8 +378,24 @@ export class Solver {
   readonly #memo = new Map<string, readonly Item[]>();
   /** The finished proof demands' proofs, kept with their answers in `#memo`. */
   readonly #proofs = new Map<string, Proof>();
-  /** Each demand's readers: the demands whose runs read it (`#read`), for `forget`. */
-  readonly #readers = new Map<string, Set<string>>();
+  /**
+   * The readers of each demand a stop may forget, or that has not finished: the demands whose runs read it (`#read`),
+   * for `forget`; one reader as itself, up to `LISTED` as a list, more as a set. A demand that finishes where no stop
+   * can reach it keeps none, and none is kept once no decision of the pass can stop (`closeForgetting`, #1599).
+   */
+  readonly #readers = new Map<string, string | string[] | Set<string>>();
+  /**
+   * The keys of the forgettable demands (#1599), the one statement of the rule and its only record. Forgettable: a
+   * demand some still-possible stop may reach, by an ask of an open place, by being an occurrence, or by a reader edge
+   * from such a demand, now or in any earlier incarnation of its key until forgetting closes. A key gains it the moment
+   * its demand earns it, running or finished: it asks a key of an open place or is an occurrence (`mayForget`), or it
+   * reads a forgettable key or one not finished (`#keepReader`). Nothing removes it but `closeForgetting`: not a finish,
+   * not `forget`, not a run cut short at a demand's allowance (`run`), so a demand made again for the key is forgettable
+   * from its start; the analysis's budget stopping a run closes forgetting, no decision running after it.
+   */
+  readonly #forgettable = new Set<string>();
+  /** Whether a decision of the pass can still stop, so `forget` may still be asked (#1599). */
+  #forgetting = true;
   readonly #active = new Map<string, DemandNode>();
   /** Tarjan's stack of unfinished demands outside the components being solved. */
   readonly #stack: DemandNode[] = [];
@@ -414,7 +455,13 @@ export class Solver {
     try {
       this.#drive(this.#frame(null, top, this.#counter++, null));
     } catch (error) {
-      // a stop (the budget's) leaves demands unfinished: they are forgotten, the finished ones kept
+      // a stop leaves demands unfinished: they are forgotten, the finished ones kept. A demand's (`DemandExhausted`,
+      // between two steps) first keeps each read waiting on one's return, as the return would have (#1601's Codex r3):
+      // a new demand's by the frame below its own, a component's closing demand's by the frame that read it. The
+      // analysis's (`BudgetExhausted`, at any charge) ends the pass's decisions, so nothing is forgotten after it and
+      // forgetting closes here (#1601's Codex r4: a charge may cut a return between the two structures read above)
+      if (error instanceof BudgetExhausted) this.closeForgetting();
+      else this.#keepPendingReaders();
       this.#active.clear();
       this.#stack.length = 0;
       this.#frames.length = 0;
@@ -527,6 +574,72 @@ export class Solver {
     return this.#memo.get(key);
   }
 
+  /**
+   * No decision of the pass stops from now on (`Contract.closeDecisions`): nothing is forgotten again, so no reader is
+   * kept from now on and those kept are dropped (#1599).
+   */
+  public closeForgetting(): void {
+    this.#forgetting = false;
+    this.#readers.clear();
+    this.#forgettable.clear();
+  }
+
+  /**
+   * A stop may forget the demand `key` (`Contract`): it asked a key whose decision can still stop, or it is an
+   * occurrence, which every stop forgets.
+   */
+  public mayForget(key: string): void {
+    if (this.#forgetting) this.#forgettable.add(key);
+  }
+
+  /**
+   * The demand a frame runs read `key`, which a stop may forget or which had not finished: it is kept among `key`'s
+   * readers, each new one counted apart from the allowance, and a stop may forget it too.
+   */
+  #keepReader(frame: Frame | undefined, key: string): void {
+    const node = frame?.node ?? frame?.rerun?.member;
+    if (node === undefined || !this.#forgetting) return;
+    const reader = node.demand.key;
+    this.#forgettable.add(reader);
+    const readers = this.#readers.get(key);
+    if (
+      readers === reader ||
+      (readers instanceof Set
+        ? readers.has(reader)
+        : Array.isArray(readers) && readers.includes(reader))
+    )
+      return;
+    if (readers === undefined) this.#readers.set(key, reader);
+    else if (typeof readers === "string") this.#readers.set(key, [readers, reader]);
+    else if (Array.isArray(readers) && readers.length < LISTED) readers.push(reader);
+    else if (Array.isArray(readers)) this.#readers.set(key, new Set([...readers, reader]));
+    else readers.add(reader);
+    countApart(this.#work, "readerRecords");
+  }
+
+  /**
+   * Before a run cut short at a demand's allowance (`DemandExhausted`, between two steps) drops what has not finished:
+   * each pending read of a demand not finished keeps its reader, as its return would have (`#finish`, `#solved`); the
+   * status of every demand cut short is its key's already (`#forgettable`).
+   */
+  #keepPendingReaders(): void {
+    if (!this.#forgetting) return;
+    const frames = this.#frames;
+    for (let at = 1; at < frames.length; at += 1) {
+      const node = frames[at]!.node;
+      if (node !== null) this.#keepReader(frames[at - 1], node.demand.key);
+    }
+    for (const solving of this.#solving)
+      this.#keepReader(frames[solving.depth - 1], solving.closing.node!.demand.key);
+  }
+
+  /** A demand finished: unless a stop may forget it, no reader of it is kept, none being needed. */
+  #finished(node: DemandNode): void {
+    if (!this.#forgetting) return;
+    if (everyRecord) this.#forgettable.add(node.demand.key);
+    else if (!this.#forgettable.has(node.demand.key)) this.#readers.delete(node.demand.key);
+  }
+
   /** The demand whose run is reading (a first run's or a member's again), `null` outside one. */
   public get reading(): string | null {
     return this.#running ? demandOf(this.#frames.at(-1)) : null;
@@ -538,12 +651,18 @@ export class Solver {
    */
   public forget(keys: readonly string[]): void {
     if (this.#running) throw new Error("The solver cannot forget an answer while it runs.");
+    // (an invariant, as the guard above and `run`'s: no decision stops after the pass's last, nor after the analysis's
+    // budget stopped it, #1599)
+    if (!this.#forgetting)
+      throw new Error("The solver cannot forget an answer after the pass's last decision.");
     const todo = [...keys];
     const seen = new Set(todo);
     for (let key = todo.pop(); key !== undefined; key = todo.pop()) {
+      // (its key stays forgettable: what reached it before reaches it made again, `#forgettable`)
       this.#memo.delete(key);
       this.#proofs.delete(key);
-      for (const reader of this.#readers.get(key) ?? [])
+      const readers = this.#readers.get(key);
+      for (const reader of typeof readers === "string" ? [readers] : (readers ?? []))
         if (!seen.has(reader)) {
           seen.add(reader);
           todo.push(reader);
@@ -630,19 +749,13 @@ export class Solver {
 
   /** A frame yields `demand`: its answer, a provisional one, or a new frame for it. */
   #read(frame: Frame, demand: Demand | ProofDemand<Proof>): void {
-    // (its reader kept for `forget`, each new one counted apart from the allowance)
-    const reader = demandOf(frame);
-    if (reader !== null) {
-      let readers = this.#readers.get(demand.key);
-      if (readers === undefined) this.#readers.set(demand.key, (readers = new Set()));
-      if (!readers.has(reader)) {
-        readers.add(reader);
-        countApart(this.#work, "readerRecords");
-      }
-    }
-    const finished = this.#memo.get(demand.key);
-    if (finished !== undefined) {
-      frame.pending = finished;
+    // (its reader kept for `forget` where a stop may forget it: a finished one a stop may forget, or one not finished;
+    // a new one's reader once it finishes, if a stop may forget it then: `#finish`, `#solved`, #1599)
+    if (everyRecord || this.#forgettable.has(demand.key) || this.#active.has(demand.key))
+      this.#keepReader(frame, demand.key);
+    const answer = this.#memo.get(demand.key);
+    if (answer !== undefined) {
+      frame.pending = answer;
       return;
     }
     const node = this.#active.get(demand.key);
@@ -691,6 +804,8 @@ export class Solver {
     node.proof = open.proof;
     parent.low = Math.min(parent.low, frame.low);
     if (frame.low !== frame.index) {
+      // (its reader read a demand not finished)
+      this.#keepReader(parent, node.demand.key);
       parent.pending = node.value;
       return;
     }
@@ -706,6 +821,8 @@ export class Solver {
       this.#memo.set(node.demand.key, node.value);
       if (node.proof !== null) this.#proofs.set(node.demand.key, node.proof);
       this.#active.delete(node.demand.key);
+      this.#finished(node);
+      if (this.#forgettable.has(node.demand.key)) this.#keepReader(parent, node.demand.key);
       this.#units.push({ key: node.demand.key, units: this.#work.total - frame.started });
       parent.pending = node.value;
       return;
@@ -892,10 +1009,13 @@ export class Solver {
       this.#memo.set(member.demand.key, member.value);
       if (member.proof !== null) this.#proofs.set(member.demand.key, member.proof);
       this.#active.delete(member.demand.key);
+      this.#finished(member);
     }
     if (this.#seam?.onComponent !== undefined)
       this.#seam.onComponent(solved, this.replayOf?.(solved.map((member) => member.key)) ?? null);
     const closing = solving.closing.node!;
+    if (this.#forgettable.has(closing.demand.key))
+      this.#keepReader(this.#frames.at(-1), closing.demand.key);
     this.#units.push({
       key: closing.demand.key,
       units: this.#work.total - solving.closing.started,
@@ -957,6 +1077,8 @@ export class Solver {
     for (const member of above) this.#stack.push(member);
     const parent = this.#frames.at(-1)!;
     parent.low = Math.min(parent.low, component.low);
+    // (its reader read a demand not finished: Codex r1's R1 on #1601)
+    this.#keepReader(parent, solving.closing.node!.demand.key);
     parent.pending = solving.closing.node!.value;
   }
 }

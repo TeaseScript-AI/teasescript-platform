@@ -1972,28 +1972,36 @@ test("every family's member visits are bounded by its output and its decided pat
 
 /**
  * TABLE r4.192 (#1403): what a decision's stop forgets by, each demand's reader and each key a demand asked whether it
- * stopped, is counted apart from the allowance (`countApart`), never in `total`, so no stop point moves. On nested
- * selections that count doubles at one doubling of the source; on a chain of wrappers read through every link the
- * charged reads themselves grow faster (G6's deep shapes), and the records stay below one per charged read (`yields`).
- * Both orders, the sharing on and off.
+ * stopped, is counted apart from the allowance (`countApart`), never in `total`, so no stop point moves. It is kept only
+ * where a decision can still stop (#1599): what admission's walk asks of a place before that place's last decision
+ * ends, and the readers of what a stop may then forget; nothing once every decision has run. So a program whose later
+ * reads come after every decision keeps the same records however many there are, and one whose decisions read a place a
+ * later decision can stop keeps records growing with them. On nested selections the records double at one doubling of
+ * the source; on a chain of wrappers read through every link the charged reads themselves grow faster (G6's deep
+ * shapes), and the records stay below one per charged read (`yields`). Both orders, the sharing on and off.
  */
-test("what a stop forgets by is counted apart: linear on nested selections, below the charged reads on wrappers (#1403)", () => {
+test("what a stop forgets by is counted apart and kept only where a decision can still stop (#1403, #1599)", () => {
   const nest = (k: number, leaf: string): string =>
     Array.from({ length: k }).reduce<string>((inner) => `[${inner}, "other"][0]`, leaf);
   const program = (source: string): SourceFile[] => [{ path: "main.tease", source }];
-  // (each shape: its name, its program, whether its records grow linearly, whether it reads a variable's stop)
-  const shapes: readonly (readonly [string, (k: number) => SourceFile[], boolean, boolean])[] = [
+  const lines = (k: number, line: (i: number) => string): string =>
+    Array.from({ length: k }, (_, i) => line(i)).join("\n");
+  // (each shape: its name, its program, whether its records grow linearly, and whether a decision reads a place a later
+  // one can stop (records growing with the source), none does after the first decisions (the same records at both
+  // sizes), or neither is asserted)
+  type Kept = "growing" | "constant" | null;
+  const shapes: readonly (readonly [string, (k: number) => SourceFile[], boolean, Kept])[] = [
     [
       "nested selections of a variable",
       (k) => program(`let seed = "origin"\nlet out = ${nest(k, "seed")}\nsay out\nexit\n`),
       true,
-      true,
+      null,
     ],
     [
       "nested selections of a literal",
       (k) => program(`let out = ${nest(k, '"origin"')}\nsay out\nexit\n`),
       true,
-      false,
+      null,
     ],
     [
       "a chain of wrappers read through every link",
@@ -2011,12 +2019,28 @@ test("what a stop forgets by is counted apart: linear on nested selections, belo
           ].join("\n") + "\n",
         ),
       false,
+      null,
+    ],
+    [
+      "reads after every decision",
+      (k) =>
+        program(`let seed = {n: "origin"}\n${lines(k, () => 'say [seed.n, "other"][0]')}\nexit\n`),
       true,
+      "constant",
+    ],
+    [
+      "decisions reading a place a later decision can stop",
+      (k) =>
+        program(
+          `let seed = {n: "origin"}\n${lines(k, (i) => `let c${i} = seed.n`)}\nseed.n = "later"\nexit\n`,
+        ),
+      true,
+      "growing",
     ],
   ];
   const apart: readonly WorkCounter[] = ["readerRecords", "stopAsks"];
   const over: string[] = [];
-  for (const [shape, make, linear, asks] of shapes) {
+  for (const [shape, make, linear, kept] of shapes) {
     const sizes = linear ? [32, 64] : [8, 16];
     const family: WorkFamily = { name: shape, measures: shape, program: make };
     const at = sizes.map((k) => sized(family, k));
@@ -2036,13 +2060,18 @@ test("what a stop forgets by is counted apart: linear on nested selections, belo
             where,
           );
           const records = apart.map((counter) => budget.apart.get(counter) ?? 0);
-          assert.ok(records[0]! > 0, `${where}: its readers are recorded`);
-          if (asks) assert.ok(records[1]! > 0, `${where}: its asks are recorded`);
           if (records[0]! + records[1]! > (budget.counts.get("yields") ?? 0))
             over.push(
               `${where}: ${records.join(" + ")} records, ${budget.counts.get("yields")} reads`,
             );
         }
+        const records = (budget: Answers["budget"]): number =>
+          apart.reduce((sum, counter) => sum + (budget.apart.get(counter) ?? 0), 0);
+        const [before, after] = [records(small!), records(large!)];
+        if (kept === "constant" && after !== before)
+          over.push(`${where}: ${before} → ${after} records after every decision`);
+        if (kept === "growing" && after < before + sizes[0]!)
+          over.push(`${where}: ${before} → ${after} records before a later decision`);
         if (!linear) continue;
         const scale =
           (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);

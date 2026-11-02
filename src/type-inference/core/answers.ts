@@ -460,6 +460,8 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
       const used = new Set<string>();
       for (let last = false, restarted = false; ;) {
         const pass = createPass(program, rejected, stops, targets);
+        // (its targets' receivers are decided where they can stop: every place may, until they are, #1599)
+        pass.contract.targetsDecide = selecting.length > 0 && !last;
         // (the targets the pass's admission gives, asked before its walk: new ones start the passes again, and a pass
         // that stops before them settles nothing, its finishing path keying by them)
         const asked: { next: StoreTargets | null } = { next: null };
