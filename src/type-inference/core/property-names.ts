@@ -310,7 +310,7 @@ function listingMemo(pass: CorePass): ListingMemo {
     stops: contract.stoppedCount,
     stopped: work.stopped,
     listings: new Map(),
-    // (a stores object's single top reads the prefix index alone, which no stop changes: found once per pass)
+    // (a stores object's single top reads the prefix index alone, which no stop changes: kept for the pass once found)
     tops: known?.tops ?? new Map(),
     contributions: new Map(),
   };
@@ -407,7 +407,8 @@ function onParentChain(work: WorkLedger, layer: SubLayer, other: SubLayer): bool
  * The layer a stores object's sources come from as one, once per pass: its first top, every other top on that one's
  * parent chain (so `subSources` lists them within it); `undefined` where none is, `null` where it lists none. A shared
  * build (`WorkLedger.shared`): its jumps count to the analysis, to no demand's allowance, as the search that asked first
- * did not make them its own work.
+ * did not make them its own work. Only a completed walk is kept: one the work stop interrupts is walked again, its jumps
+ * then finishing work.
  */
 function singleTop(
   work: WorkLedger,
@@ -708,9 +709,10 @@ function listingOf(
  * charges its take-up at that listing (its key and identity, its walk, its pump check and names, and its listings and
  * tasks only where it follows), and the visit that takes it up there, or the first later, takes those parts in place of
  * making them again (`Contribution`); an effective source is charged as a scheduled task. The analysis alone carries
- * one charge more: a stores object's single top, found once per pass at a charge per jump, a shared build no demand's
- * allowance counts (`singleTop`). A decided object's names then cost its own prefixes' stores and its effective
- * sources: for a stack of diamonds, one.
+ * one charge more: a stores object's single top, a charge per jump, a shared build no demand's allowance counts
+ * (`singleTop`); a completed one is kept for the pass, and a walk the work stop interrupts may be walked again as
+ * finishing work. A decided object's names then cost its own prefixes' stores and its effective sources: for a stack
+ * of diamonds, one.
  */
 export function propertyNames(
   pass: CorePass,
