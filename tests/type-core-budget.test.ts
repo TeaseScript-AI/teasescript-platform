@@ -625,32 +625,41 @@ test("a linked record list stops at the allowance with its count checked when it
 });
 
 /**
- * #1445, TABLE r4.208: after a settled program stop, the finishing read's host data (`heldIngress`) is followed by a walk
- * bounded by constants (`FRONTIER_DEPTH` copies deep, `FRONTIER_COPIES` copies met), past which the read answers its
- * place's component's host data, made once per component; so each read's work is bounded and the finishing work stays
- * linear in the program's size by construction (`frontierGrowthProblems`). The shapes: the copy graph's topologies
- * (`topologySources`: chains, rings, fans, diamonds, shared bases, nested cycles, two-way copies, chains of own stores,
- * Codex r5's readers of unrelated lineages and lineage ties, Sol's staggered pairs and branch readers, the owner
- * reviewer's overlapping ancestor and two-holder ladder), and a place's many stores (Astra r1's B1), plainly, through
- * copies and through a selection (Codex r3's B1). Here at the smaller size pair, one doubling (8 → 16; chains 16 → 32,
- * a shared base read at every field 2 → 4); the worker-side probe runs the same gate at the larger pair (16 → 32), with
- * the uncharged-work probe beside it.
+ * The stores' syntax at a settled stop looks at each source's level and each written type a bounded number of times,
+ * each look charged (Codex r5's and r6's B1 on #1653), k readers each asked at `q` on a fresh walk of the analysis's
+ * settled pass: a source given k written types and the tip of a chain of nine copies, which cuts it at
+ * `FRONTIER_COPIES` (its level made once a depth); a written union of k members beside that cut chain (no summary of an
+ * untold frontier); and that union read whole (its kinds made once a walk). Per doubling of the syntax nodes,
+ * k = 16 → 128, four modes, the walk's charged checks grow within the growth gate's 2.35.
  */
-/**
- * The stores' syntax makes a level a chain of copies cuts at `FRONTIER_COPIES` once per depth it is asked at, each shape
- * and written type it looks at charged (Codex r5's B1 on #1653): a source given k written types and the tip of a chain
- * of nine copies, copied by k wrappers, each wrapper's `q` asked on a fresh walk of the analysis's settled pass. Per
- * doubling of the syntax nodes, k = 16 → 128, four modes, the walk's charged checks grow within the growth gate's 2.35.
- */
-test("the stores' syntax makes a cut source's level once a depth, in linear charged work (#1604)", () => {
-  const measured = (k: number, mode: HeldMode) => {
-    const source = [
-      "let a0 = {f: 1}",
-      ...Array.from({ length: 9 }, (_, i) => `let a${i + 1} = a${i}`),
+test("the stores' syntax looks at a cut source or a wide written type a bounded number of times (#1604)", () => {
+  const chain = [
+    "let a0 = {f: 1}",
+    ...Array.from({ length: 9 }, (_, i) => `let a${i + 1} = a${i}`),
+  ];
+  const union = (k: number) =>
+    `let typed: ${Array.from({ length: k }, () => "object").join(" | ")} = {f: 1}`;
+  const shapes: Record<string, (k: number) => string[]> = {
+    "cut-written-source": (k) => [
+      ...chain,
       ...Array.from({ length: k }, (_, i) => `let t${i}: object = {f: 1}`),
       "let source = a9",
       ...Array.from({ length: k }, (_, i) => `source = t${i}`),
       ...Array.from({ length: k }, (_, i) => `let c${i} = {q: source}`),
+    ],
+    "cut-wide-union": (k) => [
+      ...chain,
+      union(k),
+      ...Array.from({ length: k }, (_, i) => [`let c${i} = {q: typed}`, `c${i}.q = a9`]).flat(),
+    ],
+    "wide-union": (k) => [
+      union(k),
+      ...Array.from({ length: k }, (_, i) => `let c${i} = {q: typed}`),
+    ],
+  };
+  const measured = (lines: string[], k: number, mode: HeldMode) => {
+    const source = [
+      ...lines,
       ...Array.from({ length: k }, (_, i) => `repeat c${i}.q.f {}`),
       "exit",
       "",
@@ -681,18 +690,31 @@ test("the stores' syntax makes a cut source's level once a depth, in linear char
     return { checks: (pass.program.work.apartCounts().get("checks") ?? 0) - before, nodes };
   };
   const problems: string[] = [];
-  for (const mode of HELD_MODES)
-    for (const k of [16, 32, 64]) {
-      const [small, large] = [measured(k, mode), measured(2 * k, mode)];
-      const doubling = (2 * (large.checks / small.checks)) / (large.nodes / small.nodes);
-      if (doubling > 2.35)
-        problems.push(
-          `${mode.name} ${k} -> ${2 * k}: ${small.checks} -> ${large.checks}: ${doubling.toFixed(3)}`,
-        );
-    }
+  for (const [shape, make] of Object.entries(shapes))
+    for (const mode of HELD_MODES)
+      for (const k of [16, 32, 64]) {
+        const [small, large] = [measured(make(k), k, mode), measured(make(2 * k), 2 * k, mode)];
+        const doubling = (2 * (large.checks / small.checks)) / (large.nodes / small.nodes);
+        if (doubling > 2.35)
+          problems.push(
+            `${shape} ${mode.name} ${k} -> ${2 * k}: ${small.checks} -> ${large.checks}: ${doubling.toFixed(3)}`,
+          );
+      }
   assert.deepEqual(problems, []);
 });
 
+/**
+ * #1445, TABLE r4.208: after a settled program stop, the finishing read's host data (`heldIngress`) is followed by a walk
+ * bounded by constants (`FRONTIER_DEPTH` copies deep, `FRONTIER_COPIES` copies met), past which the read answers its
+ * place's component's host data, made once per component; so each read's work is bounded and the finishing work stays
+ * linear in the program's size by construction (`frontierGrowthProblems`). The shapes: the copy graph's topologies
+ * (`topologySources`: chains, rings, fans, diamonds, shared bases, nested cycles, two-way copies, chains of own stores,
+ * Codex r5's readers of unrelated lineages and lineage ties, Sol's staggered pairs and branch readers, the owner
+ * reviewer's overlapping ancestor and two-holder ladder), and a place's many stores (Astra r1's B1), plainly, through
+ * copies and through a selection (Codex r3's B1). Here at the smaller size pair, one doubling (8 → 16; chains 16 → 32,
+ * a shared base read at every field 2 → 4); the worker-side probe runs the same gate at the larger pair (16 → 32), with
+ * the uncharged-work probe beside it.
+ */
 test("a settled stop finishes the host data of every copy-graph topology in linear work", () => {
   // (a shared base read at every field grows as k²: its sizes are smaller)
   assert.deepEqual(

@@ -179,6 +179,11 @@ export function cheapDecided(
   const known = walk.cheapDecisions.get(memo);
   if (known !== undefined) return known;
   const frontier = cheapFrontier(walk, root, path);
+  // (an untold frontier decides nothing: its summary is not made, as on `main`, Codex r6's B1 on #1653)
+  if (!frontier.told) {
+    walk.cheapDecisions.set(memo, null);
+    return null;
+  }
   const summary = summaryOf(walk, frontier);
   // (the stores' kinds together in their one order, #1398: a written spelling's where it alone covers them)
   const all = [...summary.tags].filter((tag) => tag !== "null");
@@ -187,7 +192,7 @@ export function cheapDecided(
   if (kinds.includes("integer") && kinds.includes("number"))
     kinds = kinds.filter((tag) => tag !== "integer");
   const decision: CheapDecision | null =
-    !frontier.told || !summary.told || summary.decider === null || kinds.length === 0
+    !summary.told || summary.decider === null || kinds.length === 0
       ? null
       : {
           kinds: summary.tags.has("null") ? [...kinds, "null"] : kinds,
@@ -447,6 +452,27 @@ function joinProperties(a: number | null, b: number | null): number | null {
   return a === null ? b : b === null || a === b ? a : CONFLICT;
 }
 
+/** Each walk's written types' kinds (`termKinds`). */
+const kindsByTerm = new WeakMap<Consumers, WeakMap<TypeTerm, readonly ItemTag[]>>();
+
+/**
+ * A written type's kinds, each once in the order first written (`spelledBy` reads them so): made once a type and walk,
+ * each member of its unions looked at then and charged, so a wide type read through many frontiers is looked at once
+ * (Codex r6's B1 on #1653).
+ */
+function termKinds(walk: Consumers, term: TypeTerm): readonly ItemTag[] {
+  let terms = kindsByTerm.get(walk);
+  if (terms === undefined) kindsByTerm.set(walk, (terms = new WeakMap()));
+  let kinds = terms.get(term);
+  if (kinds === undefined) {
+    const members = typeTags(term);
+    walk.pass.program.work.charge("checks", members.length);
+    kinds = [...new Set(members)];
+    terms.set(term, kinds);
+  }
+  return kinds;
+}
+
 /**
  * What a frontier's syntax decides, its linked sources' included, each source's contribution given by the store that
  * copied it (`summaryOf`): whether every written type there is told; the kinds; the written spelling; the property sets'
@@ -499,7 +525,7 @@ function summaryOf(walk: Consumers, frontier: CheapFrontier): Summary {
     properties = joinProperties(properties, token);
   }
   for (const { term, by } of frontier.written) {
-    const kinds = typeTags(term);
+    const kinds = termKinds(walk, term);
     if (kinds.length === 0 || kinds.includes("unknown")) told = false;
     spelling = joinSpelling(spelling, spelledBy(kinds).spelling);
     for (const tag of kinds) {
