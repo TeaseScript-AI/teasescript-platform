@@ -429,7 +429,8 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   assert.deepEqual(differing, []);
   assert.deepEqual(reordered, []);
   assert.deepEqual(unsited, []);
-  assert.ok(all.length > 2_500, `${all.length} programs`);
+  // (the corpus is there: 6,393 programs whole, 1,528 with the fixture and the matrices sampled, on #1638's head)
+  assert.ok(all.length > (SWEEP ? 6_000 : 1_400), `${all.length} programs`);
 });
 
 /**
