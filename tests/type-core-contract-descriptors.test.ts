@@ -181,12 +181,11 @@ function sliceExit(source: string): string | null {
 
 test("lists that hold themselves leave the slice at its depth instead of failing the compile (#1646)", () => {
   // (found on main: each nests its lists without end, and the facts' walk threw past the slice's depth and failed the
-  // compile. `l=[l]`: the backend's list-nesting rule follows the contract's kinds as the facts do, so the variable leaves
-  // the slice before the facts run. `a.f=[a.f]`, a property no rule walks: the facts' walk leaves the slice at its depth
-  // cut, at the read it types, with the sentence and the site the lowering's depth cut gives: no plan, the same exit)
+  // compile. The facts' walk now leaves the slice at its depth cut, at the read it types, with the sentence the
+  // lowering's depth cut gives and no plan: `l` read in `[l]`, `a.f` read in `[a.f]`)
   assert.equal(
     sliceExit('let l=[[1]]\nl=[l]\nl=hostValue\nsay "AFTER"\nexit\n'),
-    "The candidate type analysis does not cover the variable 'l', whose lists nest deeper than the slice follows yet (main.tease, offset 4).",
+    "The candidate type analysis does not cover a value whose structure the slice does not follow yet (main.tease, offset 15).",
   );
   assert.equal(
     sliceExit("let a={f:[[1]]}\na.f=[a.f]\na.f=hostValue\nexit\n"),

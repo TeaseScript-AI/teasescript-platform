@@ -218,19 +218,13 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       const place = answers.at(nodeOf(answers, index, statement))?.place;
       if (place === null || place === undefined) continue;
       for (let path: string[] = [...place.path]; ; path = [...path, "element"]) {
-        // (as the facts read it: `admittedType` the admitted kinds where decided, else the contract's, and `placeType`
-        // the contract's; lists nested past the slice in either take the program out of it, where the facts' walk would
-        // fail the compile: `l=[l]`, #1646)
+        // (as the facts read it, `admittedType`: the admitted kinds where decided, else the contract's)
         const answer = answers.place(place.id, path);
-        const admitted =
+        const tags =
           answer.admitted.by === "undecided"
             ? answer.contract.kinds.map((item) => item.tag)
             : answer.admitted.kinds;
-        if (
-          !admitted.includes("list") &&
-          !answer.contract.kinds.some((item) => item.tag === "list")
-        )
-          break;
+        if (!tags.includes("list")) break;
         if (path.length + 1 >= SLICE_DEPTH)
           return {
             file: index.fileOf(statement),
