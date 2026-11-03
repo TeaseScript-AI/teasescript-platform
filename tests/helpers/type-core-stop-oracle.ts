@@ -25,8 +25,8 @@ export interface StopRun {
   readonly answers: Answers;
   /**
    * The compile and its analysis again under `withoutRecords(omit)`, at the run's own allowance, under its demand
-   * allowance and in its mode (a rerun stopped elsewhere or under another allowance is refused, #1594, #1631); `key`
-   * names the omission (for a cache).
+   * allowance and in its mode (a rerun stopped elsewhere, or under another allowance where its analysis shows it, is
+   * refused: `otherScope`, #1594, #1631; its mode is not checked); `key` names the omission (for a cache).
    */
   readonly without: (
     omit: Omission,
@@ -381,7 +381,8 @@ export function stopProblems(c: StopCase): string[] {
   if (differences.length > 0 && unstopped.answers.budget.decisions.some((d) => d.stopped))
     content.push(
       ...planDifferences(
-        unstopped.without(
+        rerun(
+          unstopped,
           { diagnostic: () => false, check: () => false, completion: true },
           "#completion",
         ).result.plan,

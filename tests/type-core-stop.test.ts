@@ -1622,6 +1622,23 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
     () => judge({ ...stopped, without: uncapped.without }),
     /the demand allowance \d+ at its decision [^,]*, not the run's 27/,
   );
+  // (and the reference's rerun without its completion, Codex r1's F1 on #1662: a decision of the reference stopped)
+  const tally: HeldCase = {
+    name: "tally",
+    slice: true,
+    values: [],
+    source: `let tally = 1\n${Array.from({ length: 12 }, (_, i) => `tally = ${i + 2}\n`).join("")}tally = hostValue\nlet picked: integer = tally\nrepeat tally {}\nsay "DONE"\nexit\n`,
+  };
+  const reference = heldRun(tally, mode, undefined, 27);
+  assert.ok(reference.answers.budget.decisions.some((d) => d.stopped));
+  const early = heldRun(tally, mode, 1, 27);
+  const against = (run: StopRun): string[] =>
+    stopProblems({ unstopped: run, stopped: early, fitting: [], violating: [] });
+  assert.deepEqual(against(reference), []);
+  assert.throws(
+    () => against({ ...reference, without: heldRun(tally, mode).without }),
+    /the demand allowance \d+ at its decision [^,]*, not the run's 27/,
+  );
 });
 
 /**
