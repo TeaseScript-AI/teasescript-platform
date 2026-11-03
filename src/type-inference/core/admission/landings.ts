@@ -829,7 +829,7 @@ export function landedBelow(
   const listing = walkLandings(admission, place, prefix, true);
   let byPrefix = admission.listings.get(place);
   if (byPrefix === undefined) admission.listings.set(place, (byPrefix = new Map()));
-  byPrefix.set(pathText(prefix), listing);
+  byPrefix.set(keptText(admission.work, prefix), listing);
   if (comparison !== null) {
     const walked = admission.pass.program.work.apart(
       () => walkLandings(admission, place, prefix, false).texts,
@@ -889,7 +889,13 @@ function walkLandings(
     // (a listing's paths, each charged as its emit; with a longer prefix, every one tested. One listing, prefix and
     // writing taken again brings only paths it brought)
     const take = (from: Listing, below: boolean): void => {
-      const key = joinParts(from.id, below ? task.below : "", task.drop, task.prepend);
+      const key = keptParts(
+        admission.work,
+        from.id,
+        below ? task.below : "",
+        task.drop,
+        task.prepend,
+      );
       if (taken.has(key)) return;
       taken.add(key);
       const before = out.size;
