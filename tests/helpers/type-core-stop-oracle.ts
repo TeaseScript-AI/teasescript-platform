@@ -24,8 +24,9 @@ export interface StopRun {
   readonly result: Compiled;
   readonly answers: Answers;
   /**
-   * The compile and its analysis again under `withoutRecords(omit)`, at the run's own allowance and in its mode (a
-   * rerun stopped elsewhere is refused, #1594); `key` names the omission (for a cache).
+   * The compile and its analysis again under `withoutRecords(omit)`, at the run's own allowance, under its demand
+   * allowance and in its mode (a rerun stopped elsewhere or under another allowance is refused, #1594, #1631); `key`
+   * names the omission (for a cache).
    */
   readonly without: (
     omit: Omission,
@@ -141,10 +142,35 @@ function omission(
 }
 
 /**
- * `each.without(omit, key)`, refused where it ran another analysis than the run's own: one that stopped in another phase
- * or not at all, or settled where the run did not (#1594: a driver's `without` made outside the run's allowance measured
- * the unstopped compile's content, so every plan change of the stop's marks read as unowned, and excused every extra
- * check as one that forms only with the marks).
+ * How a rerun's analysis differs from the run's in what bounds it, or `null`: the stop's phase, whether it settled, the
+ * program allowance, or the demand allowance of a decision or a bounded read both analyses made (#1594; #1631: a rerun
+ * without the run's demand allowance stops in the same phase at the same program allowance, but none of its decisions).
+ */
+function otherScope(own: Answers["budget"], other: Answers["budget"]): string | null {
+  if (own.settled !== other.settled || own.stoppedIn !== other.stoppedIn)
+    return `another stop (${other.stoppedIn ?? "none"}, settled ${other.settled}) than the run's (${own.stoppedIn ?? "none"}, settled ${own.settled})`;
+  if (own.allowance !== other.allowance)
+    return `the program allowance ${other.allowance}, not the run's ${own.allowance}`;
+  const demands = (budget: Answers["budget"]): Map<string, number> =>
+    new Map([
+      ...budget.decisions.map(
+        (d) => [`decision ${d.place}:${d.path.join(".")}`, d.allowance] as const,
+      ),
+      ...budget.demands.flatMap((d) =>
+        d.bounded ? [[`read ${d.node}`, d.allowance] as const] : [],
+      ),
+    ]);
+  const mine = demands(own);
+  for (const [demand, allowance] of demands(other))
+    if (mine.has(demand) && mine.get(demand) !== allowance)
+      return `the demand allowance ${allowance} at its ${demand}, not the run's ${mine.get(demand)}`;
+  return null;
+}
+
+/**
+ * `each.without(omit, key)`, refused where it ran another analysis than the run's own (`otherScope`; #1594: a driver's
+ * `without` made outside the run's allowance measured the unstopped compile's content, so every plan change of the
+ * stop's marks read as unowned, and excused every extra check as one that forms only with the marks).
  */
 function rerun(
   each: StopRun,
@@ -152,10 +178,10 @@ function rerun(
   key: string,
 ): { readonly result: Compiled; readonly answers: Answers } {
   const again = each.without(omit, key);
-  const [own, other] = [each.answers.budget, again.answers.budget];
-  if (own.settled !== other.settled || own.stoppedIn !== other.stoppedIn)
+  const other = otherScope(each.answers.budget, again.answers.budget);
+  if (other !== null)
     throw new Error(
-      `A stop run's 'without' analysed another stop (${other.stoppedIn ?? "none"}, settled ${other.settled}) than the run's (${own.stoppedIn ?? "none"}, settled ${own.settled}): rerun it at the run's allowance and in its mode.`,
+      `A stop run's 'without' analysed ${other}: rerun it at the run's allowance, under its demand allowance and in its mode.`,
     );
   return again;
 }
