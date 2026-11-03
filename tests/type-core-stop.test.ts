@@ -1642,15 +1642,17 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
 });
 
 /**
- * #1642: each side's checks are owned by its own records, its marks included. The issue's `dict-path` witness reversed,
- * under demand allowance 256, stopped at program allowance 2,464 (#1642's reversed modes): the reference's TSV043 mark
- * and the stopped run's each carry the receiver's null-check that both runs publish, so neither is lost. A stopped run
- * that keeps its mark but drops the check, and the plan's guard, from its compile and its reruns loses it, and one that
- * publishes it twice has an extra (Codex r1's and r3's controls on #1663, a stop at program allowance 1); each owned
- * check takes one credit, the combined stop's rule's included (r2's), and what forms only with the marks, never for a content the
- * reference owes (r4's and r5's).
+ * #1642 and the stop oracle's ledger of each check's content (the lead's ruling on #1663): every check a record owns uses
+ * one count of its content, so a further copy is an extra check and a missing one a lost check, on either side. The
+ * issue's `dict-path` witness reversed, under demand allowance 256, stopped at program allowance 2,464: the reference's
+ * TSV043 mark and the stopped run's each carry the receiver's null-check both runs publish, so neither is lost. Codex's
+ * controls on #1663, each clean as compiled: r1's (a stop at program allowance 1) loses the check where the stopped run
+ * keeps its mark but drops it and its guard, and changes the plan where it drops the guard alone; r2's, a copy the rule
+ * accepts published twice; r3's, a further copy where a run publishes the check; r4's, a boundary that forms only with
+ * the marks, doubled; r5's, a further copy of a boundary both runs owe; r6's, the reference losing its own check; and a further copy of a
+ * check the stopped run alone owns.
  */
-test("the stop oracle takes each side's marks as the owners of its checks, and a mark keeps its check (#1642)", () => {
+test("the stop oracle counts each check's content on both sides, a further copy an extra and a missing one lost (#1642)", () => {
   const source =
     'let p = hostValue otherwise hostOther\nlet box: integer[] dict = dict{k: []}\nbox.k = [p, hostOther]\nsay "AFTER"\nexit\n';
   const c: HeldCase = { name: "dict-path", source, slice: true, values: [] };
@@ -1758,6 +1760,55 @@ test("the stop oracle takes each side's marks as the owners of its checks, and a
       ...again(stopped),
       without: (omit, key) => again(stopped.without(omit, key)),
     }).includes(`extra check ${text}`),
+  );
+  // (the reference's own check is one count of its content too: a reference that loses it has a lost check, Codex r6's
+  // control on #1663)
+  const lacking = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.filter((x) => JSON.stringify(x) !== text),
+    },
+  });
+  assert.ok(
+    stopProblems({
+      unstopped: {
+        ...lacking(reference),
+        without: (omit, key) => lacking(reference.without(omit, key)),
+      },
+      stopped,
+      fitting: [],
+      violating: [],
+    }).includes(`lost check ${text}`),
+  );
+  // (a check the stopped run alone owns, which the reference neither owns nor publishes, takes no count from what forms
+  // with the marks: a further copy of it is an extra; the natural reference, forward, a stop at program allowance 1)
+  const natural0 = heldRun(o, HELD_MODES[0]!);
+  const early0 = heldRun(o, HELD_MODES[0]!, 1);
+  const [own0] = early0.answers.budget.deferred.filter(
+    (mark) => mark.code === "TSV043" && plain.slice(mark.site.start, mark.site.end) === "box.k",
+  );
+  assert.ok(own0 !== undefined);
+  const owned0 = JSON.stringify(own0.obligation);
+  assert.ok(!natural0.answers.checks.some((x) => JSON.stringify(x) === owned0));
+  assert.ok(early0.answers.checks.some((x) => JSON.stringify(x) === owned0));
+  const once0 = (run: StopRun): string[] =>
+    stopProblems({ unstopped: natural0, stopped: run, fitting: [], violating: [] });
+  assert.deepEqual(once0(early0), []);
+  const again0 = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.some((x) => JSON.stringify(x) === owned0)
+        ? [...each.answers.checks, structuredClone(own0.obligation)]
+        : each.answers.checks,
+    },
+  });
+  assert.ok(
+    once0({
+      ...again0(early0),
+      without: (omit, key) => again0(early0.without(omit, key)),
+    }).includes(`extra check ${owned0}`),
   );
   // (and a further copy of a boundary that forms only with the marks, #1448's, is an extra: what forms takes one credit,
   // Codex r4's control on #1663, forward with the sharing, a settled walk stop at program allowance 1,218)
