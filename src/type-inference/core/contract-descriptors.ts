@@ -168,9 +168,8 @@ export class OpenLevels {
     );
   }
 
-  /** Opens `holding`'s level, or throws `SliceDepth` where it is cyclic. */
-  public enter(holding: Holding): void {
-    if (this.cyclic(holding)) throw new SliceDepth();
+  /** Opens `holding`'s level: its walk asked first whether it is cyclic (`cyclic`), or it opens a walk. */
+  public open(holding: Holding): void {
     this.#open.add(holding.own);
     if (holding.state !== null)
       this.#states.set(holding.state, (this.#states.get(holding.state) ?? 0) + 1);
@@ -210,7 +209,7 @@ export function levelWalk(
   let holding = cycle?.holding;
   try {
     if (holding !== undefined && cycle?.open === undefined) {
-      open.enter(holding);
+      open.open(holding);
       entered.push(holding);
     }
     for (let at = [...path]; ; at = [...at, "element"]) {
@@ -220,7 +219,8 @@ export function levelWalk(
       if (at.length + 1 >= limit) throw new SliceDepth();
       if (holding !== undefined) {
         holding = holding.child("element");
-        open.enter(holding);
+        if (open.cyclic(holding)) throw new SliceDepth();
+        open.open(holding);
         entered.push(holding);
       }
     }
@@ -372,8 +372,9 @@ export class ContractDescriptors<R> {
     }
     // (an extent cell of the receiving closure's where a completion pass assembles it, #1526 phase C)
     const entered = this.cells?.enter("extent", key) ?? false;
-    // (its level open while the walk is below it: a key below that reads it is a cycle of copies, #1646)
-    if (holding !== null) this.#open.enter(holding);
+    // (its level open while the walk is below it: a key below that reads it is a cycle of copies, #1646; a property's
+    // level was asked whether it is cyclic before its walk came here, a request's opens its walk)
+    if (holding !== null) this.#open.open(holding);
     try {
       const lost: ContractLevel[] = [];
       let by: LevelProof["by"] | null = null;
@@ -433,12 +434,10 @@ export class ContractDescriptors<R> {
       case "dict": {
         if (plan.element === null) return this.#table.intern(plan);
         if (path.length + 1 >= this.limit) outside();
-        // (an element whose key reads a level the walk is inside of: a cycle of copies, #1646)
+        // (its element level open while the walk is below it, #1646: `levelWalk` asked of each element level whether it
+        // is cyclic, with these same levels open, before the walk came here)
         const element = holding?.child("element") ?? null;
-        if (element !== null) {
-          if (this.#open.cyclic(element)) outside();
-          this.#open.enter(element);
-        }
+        if (element !== null) this.#open.open(element);
         try {
           return this.#table.collection(
             plan.kind,

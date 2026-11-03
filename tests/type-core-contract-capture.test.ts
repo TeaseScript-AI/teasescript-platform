@@ -478,7 +478,7 @@ test("the capture ends at the first store whose contract leaves the slice's dept
     assert.equal(budget.exhausted, null, mode.name);
     assert.equal(budget.stoppedIn, null, mode.name);
     assert.deepEqual(contracts, [], mode.name);
-    assert.equal(budget.total, mode.name.endsWith("unshared") ? 16_964 : 18_717, mode.name);
+    assert.equal(budget.total, mode.name.endsWith("unshared") ? 16_940 : 18_693, mode.name);
   }
 });
 

@@ -222,7 +222,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       // without end, #1646)
       const open = new OpenLevels();
       let holding = answers.holding(place.id, place.path);
-      open.enter(holding);
+      open.open(holding);
       for (let path: string[] = [...place.path]; ; path = [...path, "element"]) {
         // (as the facts read it, `admittedType`: the admitted kinds where decided, else the contract's)
         const answer = answers.place(place.id, path);
@@ -238,7 +238,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
             span: statement.name.span,
             what: `the variable '${statement.name.name}', whose lists nest deeper than the slice follows`,
           };
-        open.enter(holding);
+        open.open(holding);
       }
     }
   return null;

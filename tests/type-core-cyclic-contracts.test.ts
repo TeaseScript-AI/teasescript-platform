@@ -94,11 +94,19 @@ test("a cycle of copies read through a ring of whole copies leaves the slice at 
 });
 
 test("a list that holds itself leaves the slice instead of failing the compile (#1646)", () => {
-  // (`l=[l]`: its lists nest without end; before, the facts' walk threw past the slice's depth and failed the compile)
+  // (found on main: `l=[l]` makes its lists nest without end, and the facts' walk threw past the slice's depth and failed
+  // the compile. The backend's list-nesting rule takes it out of the slice; the capture's walk of `l`'s store meets the
+  // cycle at its first element level, where it walked 256 levels, 523,745 units of the compile on main)
+  const source = 'let l=[[1]]\nl=[l]\nl=hostValue\nsay "AFTER"\nexit\n';
   assert.equal(
-    outcome('let l=[[1]]\nl=[l]\nl=hostValue\nsay "AFTER"\nexit\n'),
+    outcome(source),
     "outside: The candidate type analysis does not cover the variable 'l', whose lists nest deeper than the slice follows yet (main.tease, offset 4).",
   );
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+  for (const mode of HELD_MODES) {
+    const { budget } = mode.run(() => analyseCore(request));
+    assert.ok(budget.total < 25_000, `${mode.name}: ${budget.total}`);
+  }
 });
 
 test("a contract walk without a cycle of copies is the walk without the certificate (#1646)", () => {
@@ -133,5 +141,67 @@ test("a contract walk without a cycle of copies is the walk without the certific
         JSON.stringify(mode.run(() => analyseCore(request)).contracts.map((c) => c.result));
       assert.equal(contracts(), withoutCycleCertificate(contracts), `${source}, ${mode.name}`);
     }
+  }
+});
+
+/** A small deterministic generator (mulberry32), so a seed names one program. */
+function rng(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * The generated family's program of a seed (the PR's queue evidence runs 4,000 of them): two to four places, two to six
+ * copies among them (a property copy, an object or list literal around one, a whole copy, a projection), host data
+ * stored, and half the time a place outside reading one of them.
+ */
+function generated(seed: number): string {
+  const r = rng(seed);
+  const pick = <T>(list: readonly T[]): T => list[Math.floor(r() * list.length)]!;
+  const names = Array.from({ length: 2 + Math.floor(r() * 3) }, (_, i) => `p${i}`);
+  const lines = ["let typed:object={x:1}"];
+  for (const p of names)
+    lines.push(pick([`let ${p}={f:[[1]],g:1}`, `let ${p}={f:typed,g:"s"}`, `let ${p}={g:2}`]));
+  const steps = 2 + Math.floor(r() * 5);
+  for (let i = 0; i < steps; i += 1) {
+    const [a, b] = [pick(names), pick(names)];
+    const prop = pick(["q", "q", "s"]);
+    lines.push(
+      pick([
+        `${a}.${prop}=${b}`,
+        `${a}.${prop}={r:${b}}`,
+        `${a}.${prop}=[${b}]`,
+        `${a}=${b}`,
+        `${a}.${prop}=${b}.${pick(["q", "s", "g"])}`,
+      ]),
+    );
+  }
+  lines.push(`${pick(names)}.f=hostValue`);
+  if (r() < 0.5) lines.push(`let out={p:${pick(names)}}`, "out.p.g=hostOther");
+  return `${lines.join("\n")}\nsay "AFTER"\nexit\n`;
+}
+
+test("the generated family's first seeds compile alike with and without the certificate (#1646)", () => {
+  // (seeds 1 to 30, forward; 11 and 24 hold cycles, whose walks without the certificate take 10 to 17 million units:
+  // there the program leaves the slice at linear cost, the outcome the walk to the slice's depth gives)
+  const cyclic = new Set([11, 24]);
+  for (let seed = 1; seed <= 30; seed += 1) {
+    const source = generated(seed);
+    if (!cyclic.has(seed)) {
+      assert.equal(
+        outcome(source),
+        withoutCycleCertificate(() => outcome(source)),
+        `seed ${seed}`,
+      );
+      continue;
+    }
+    assert.match(outcome(source), /^outside: .*a value whose structure the slice/, `seed ${seed}`);
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+    assert.ok(analyseCore(request).budget.total < 25_000, `seed ${seed}`);
   }
 });
