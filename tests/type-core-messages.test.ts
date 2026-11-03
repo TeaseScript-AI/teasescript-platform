@@ -1684,7 +1684,8 @@ test("a store's property below the warned value is the property its fix names, a
  * an optional list), which pasted compiles under both checkers, else buttons of one type in words; in four modes. An
  * argument is typed by its own call (V30 §11), whatever another call passes. A written union, a copy of one, an
  * unrestricted `list` or `object` at any depth, one type (numbers with whole numbers,
- * `null` beside a type, an `otherwise` that leaves one), a button the script cannot know, a list option whose own
+ * `null` beside a type, an `otherwise` that leaves one), a button the script cannot know (beside known types of more
+ * than one, the error names those alone), a list option whose own
  * elements mix (that list's error), and a place another store decides (whose store warning keeps the choice in a
  * variable declared with the union, as a choice used directly does) get no such error.
  */
@@ -1800,6 +1801,15 @@ test("an askChoice of more than one type errs where its type would be inferred, 
     compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] }).diagnostics.filter(
       (diagnostic) => diagnostic.severity === "error",
     );
+  // (the error names the known types alone, whatever a button the script cannot know adds)
+  const hosted = coreRequest(main('let v = askChoice "None", 1, hostValue\nexit\n'));
+  assert.ok(hosted !== null);
+  assert.deepEqual(
+    analyseCore(hosted)
+      .diagnostics.filter((diagnostic) => diagnostic.code === "TSV044")
+      .map((diagnostic) => ("kinds" in diagnostic ? diagnostic.kinds : null)),
+    [["integer", "string"]],
+  );
   for (const [source, sentence, fix] of cases) {
     for (const mode of MODES) {
       const mixed = inMode(mode, () => reported(main(source))).filter(
