@@ -251,13 +251,16 @@ export type DiagnosticRule =
     }
   /**
    * V30 §19: an `askChoice` whose buttons return values of more than one type (the diagnostic's kinds), stored in
-   * `into`, whose type would be inferred (#1352): its root, which a fix declares, and the steps below it.
+   * `into`, whose type would be inferred (#1352): its root, which a fix declares, the steps below it, the types `into`
+   * takes (the union to declare), and whether a collection root holds null too.
    */
   | {
       readonly rule: "mixed-choice";
       readonly into: string;
       readonly root: StoreRoot | null;
       readonly steps: readonly StoreStep[];
+      readonly type: readonly ItemTag[];
+      readonly optional?: true;
     };
 
 /**

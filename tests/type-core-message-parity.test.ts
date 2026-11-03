@@ -702,8 +702,9 @@ function namedBy(diagnostic: Compared, source: MessageSource): Named {
 }
 
 /**
- * V30 §19: the union a variable keeping a warned `askChoice` declares, of every known kind of its value (the warning's
- * and those that fit), where they are more than one type (whole numbers and numbers are one); else `null`.
+ * V30 §19: the union a variable keeping a warned `askChoice` declares, of every known kind of its value (the warning's,
+ * those that fit and those the site's other warnings report), where they are more than one type (whole numbers and
+ * numbers are one); else `null`.
  */
 function choiceUnion(diagnostic: Compared, subject: string): string | null {
   if (diagnostic.class !== "warning-runtime-check") return null;
@@ -713,7 +714,7 @@ function choiceUnion(diagnostic: Compared, subject: string): string | null {
     return null;
   const kinds = kindsInOrder(
     new Set(
-      [...diagnostic.kinds, ...diagnostic.fits].filter(
+      [...diagnostic.kinds, ...diagnostic.fits, ...diagnostic.besides].filter(
         (kind) => kind !== "unknown" && kind !== "empty",
       ),
     ),

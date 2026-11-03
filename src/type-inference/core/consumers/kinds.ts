@@ -11,6 +11,7 @@ import { family } from "../admission/kinds.js";
 import type { Consumers } from "../consumers.js";
 import { withoutEmpty } from "../exact-path.js";
 import { kindsInOrder, REASON, type Item, type ItemTag } from "../items.js";
+import type { ValueConstraint } from "../program.js";
 import { OPERATOR_ROWS } from "../operator-table.js";
 import type { RequiredKind } from "../result.js";
 
@@ -131,11 +132,24 @@ export function unsettledItem(item: Item): boolean {
   return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0;
 }
 
+/** Whether kinds are of one type at most (A3's family: whole numbers with numbers, `null` beside a type, or none). */
+export function oneType(kinds: readonly ItemTag[]): boolean {
+  return kinds.every((kind) => kind === "null") || family(kinds);
+}
+
+/** A value's kinds as its contract holds them, its own `null` included, in their one order; `null` with an unknown. */
+export function heldKinds(walk: Consumers, value: PlaceId): ItemTag[] | null {
+  const items = withoutEmpty(walk.run(walk.pass.contract.contractOfValueAt(value, [])));
+  return items.some((item) => item.tag === "unknown")
+    ? null
+    : kindsInOrder(new Set(items.map((item) => item.tag)));
+}
+
 /**
  * V30 §19: the types an `askChoice`'s buttons return where they are more than one (whole numbers with numbers are one,
- * `null` beside a type makes it optional, ADR 0021 1.2, 1.3), in their one order: the types a place keeps only where
- * it is declared with their union; `null` for any other value. The known values decide it, whatever a button the
- * script cannot know adds, as the current checker's `#reportMixedChoice` does.
+ * `null` beside a type makes it optional, ADR 0021 1.2, 1.3), its `null` among them, in their one order: the types a
+ * place keeps only where it is declared with their union; `null` for any other value. The known values decide it,
+ * whatever a button the script cannot know adds, as the current checker's `#reportMixedChoice` does.
  */
 export function mixedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
   const c = walk.pass.program.opOf.get(value);
@@ -143,9 +157,41 @@ export function mixedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag[]
   const tags = kindsInOrder(
     new Set(
       withoutEmpty(walk.run(walk.pass.contract.contractOfValueAt(value, [])))
-        .filter(concrete)
+        .filter((item) => item.tag === "null" || concrete(item))
         .map((item) => item.tag),
     ),
   );
-  return tags.length === 0 || family(tags) ? null : tags;
+  return oneType(tags) ? null : tags;
+}
+
+/**
+ * The operands whose value an operation's result is, unchanged, where it takes them (V30 §18): both sides of an
+ * `otherwise`, a `get`'s default; none for any other value. An answer reaches its destination through them.
+ */
+export function passedOperands(c: ValueConstraint | undefined): readonly PlaceId[] {
+  return c?.kind === "fallback" ? [c.left, c.right] : c?.kind === "get" ? [c.fallback] : [];
+}
+
+/**
+ * The types of a value that holds a mixed `askChoice` answer (`mixedAnswer`), the choice itself or a value it reaches
+ * through `passedOperands`, where its own types are more than one: the types a new variable keeping it declares (#1352);
+ * else `null`. Each operand once, on an explicit list.
+ */
+export function carriedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
+  const { program } = walk.pass;
+  const seen = new Set<PlaceId>([value]);
+  for (const pending = [value]; pending.length > 0;) {
+    const at = pending.pop()!;
+    program.work.charge("checks");
+    if (mixedAnswer(walk, at) !== null) {
+      const own = heldKinds(walk, value);
+      return own === null || oneType(own) ? null : own;
+    }
+    for (const operand of passedOperands(program.opOf.get(at)))
+      if (!seen.has(operand)) {
+        seen.add(operand);
+        pending.push(operand);
+      }
+  }
+  return null;
 }

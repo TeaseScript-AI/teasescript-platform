@@ -1677,16 +1677,16 @@ test("a store's property below the warned value is the property its fix names, a
 });
 
 /**
- * V30 §19 (#1352): an `askChoice` whose buttons return more than one type is a compile error where it is stored with its
- * type inferred (a variable's start value, an untyped parameter's argument at either of two calls, an inferred result, a
- * list's element, an add to an empty list, an object's property), also where one button's value is a union, with the
- * declaration that keeps both, which pasted
- * compiles under both checkers, else buttons of one type in words; in four modes. An argument is typed by its own call
- * (V30 §11), whatever another call passes. A written union, a copy of one, an unrestricted `list`, one family (numbers
- * with whole numbers, `null` beside a type), a button the script cannot know, a list option whose own elements mix
- * (that list's error), and a place another store decides (whose
- * store warning keeps the choice in a variable declared with the union, as a choice used directly does) get no such
- * error.
+ * V30 §13, §19 (#1352): an `askChoice` whose buttons return more than one type is a compile error where its answer, as
+ * it stands or through an `otherwise`, is stored with its type inferred (a variable's start value or a later store
+ * beside an unknown, an untyped parameter's argument at either of two calls, an inferred result, a list's element, an
+ * add to an empty list, an object's property), with the declaration of every type the place takes (`null` among them,
+ * an optional list), which pasted compiles under both checkers, else buttons of one type in words; in four modes. An
+ * argument is typed by its own call (V30 §11), whatever another call passes. A written union, a copy of one (a button
+ * whose value is one too, A4), an unrestricted `list` or `object` at any depth, one type (numbers with whole numbers,
+ * `null` beside a type, an `otherwise` that leaves one), a button the script cannot know, a list option whose own
+ * elements mix (that list's error), and a place another store decides (whose store warning keeps the choice in a
+ * variable declared with the union, as a choice used directly does) get no such error.
  */
 test("an askChoice of more than one type errs where its type would be inferred, and its fixes keep both (V30 §19, #1352)", () => {
   const MIXED = "This askChoice returns a whole number (integer) or text (string).";
@@ -1694,7 +1694,8 @@ test("an askChoice of more than one type errs where its type would be inferred, 
   const C = 'askChoice [{text: "A", value: 1}, {text: "B"}]';
   const S = 'askChoice "None", [5, 10]';
   const call = "function f(p) {\n  say p\n}\n";
-  // [source, the error's sentence after MIXED (none: no error), the code it replaces and the code that replaces it]
+  // [source, the error's sentence after MIXED or, from "This askChoice", its whole message (none: no error), the code
+  // it replaces and the code that replaces it]
   const cases: readonly (readonly [string, string | null, readonly [string, string] | null])[] = [
     [
       `let value = ${C}\nif value is integer {\n  say value + 1\n}\nexit\n`,
@@ -1732,9 +1733,34 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       ["let xs =", "let xs: (integer | string)[] ="],
     ],
     [
-      'let u: integer | string = 1\nlet v = askChoice [{text: "A", value: u}]\nexit\n',
-      `To keep both, declare the variable as 'let v: integer | string = askChoice [{text: "A", value: u}]', ${BUTTONS}`,
+      'let v = askChoice "None", 1, null\nexit\n',
+      `This askChoice returns a whole number (integer), text (string), or null. To keep both, declare the variable as 'let v: integer | string | null = askChoice "None", 1, null', ${BUTTONS}`,
+      ["let v =", "let v: integer | string | null ="],
+    ],
+    [
+      `let v = null\nv = ${S}\nexit\n`,
+      `To keep both, declare the variable as 'let v: integer | string | null = null', ${BUTTONS}`,
+      ["let v =", "let v: integer | string | null ="],
+    ],
+    [
+      `let v = hostValue\nv = ${S}\nexit\n`,
+      `To keep both, declare the variable as 'let v: integer | string = hostValue', ${BUTTONS}`,
       ["let v =", "let v: integer | string ="],
+    ],
+    [
+      'let v = (askChoice "None", 1, null) otherwise 1\nexit\n',
+      `This askChoice returns a whole number (integer), text (string), or null. To keep both, declare the variable as 'let v: integer | string = (askChoice "None", 1, null) otherwise 1', ${BUTTONS}`,
+      ["let v =", "let v: integer | string ="],
+    ],
+    [
+      `let xs = null\nxs = [${S}]\nexit\n`,
+      `To keep both, declare the list as 'let xs: (integer | string)[]? = null', ${BUTTONS}`,
+      ["let xs =", "let xs: (integer | string)[]? ="],
+    ],
+    [
+      `${call}f(true)\nf(${S})\nexit\n`,
+      `To keep all of them, declare the parameter as 'p: integer | string | boolean', ${BUTTONS}`,
+      ["f(p)", "f(p: integer | string | boolean)"],
     ],
     [
       // (a declaration on more than one line: the type in words, the variable named)
@@ -1755,6 +1781,10 @@ test("an askChoice of more than one type errs where its type would be inferred, 
     [`let other: integer | string = ${S}\nexit\n`, null, null],
     [`let u: integer | string = 1\nlet w = u\nw = ${S}\nexit\n`, null, null],
     [`let xs: list = [${S}]\nexit\n`, null, null],
+    [`let xs: list = [{v: ${S}}]\nexit\n`, null, null],
+    [`let o: object = {v: ${S}}\nexit\n`, null, null],
+    ['let u: integer | string = 1\nlet v = askChoice [{text: "A", value: u}]\nexit\n', null, null],
+    ["let v = (askChoice 1, null) otherwise 2\nexit\n", null, null],
     // (a list option whose elements mix is that list's error alone)
     ['let v = askChoice ["a", 1]\nexit\n', null, null],
     [`let u: integer | string = ${S}\nlet copy = u\nexit\n`, null, null],
@@ -1786,7 +1816,11 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       assert.ok(source.includes(mixed[0]!.site) && mixed[0]!.site.startsWith("askChoice"), name);
       assert.equal(
         mixed[0]!.message,
-        sentence.startsWith("but") ? `${MIXED.slice(0, -1)}, ${sentence}` : `${MIXED} ${sentence}`,
+        sentence.startsWith("This askChoice")
+          ? sentence
+          : sentence.startsWith("but")
+            ? `${MIXED.slice(0, -1)}, ${sentence}`
+            : `${MIXED} ${sentence}`,
         name,
       );
     }
@@ -1814,15 +1848,26 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       `let v = 1\nlet value: integer | string = ${S}\nif value is integer { v = value }\nexit\n`,
     ],
     [
+      'repeat (askChoice "None", 1, null) {}\nexit\n',
+      `Keep 'askChoice "None", 1, null' in a new variable, as in 'let value: integer | string | null = askChoice "None", 1, null', and check it, as in 'if value is integer { repeat (value) {} }'`,
+      'let value: integer | string | null = askChoice "None", 1, null\nif value is integer { repeat (value) {} }\nexit\n',
+    ],
+    [
+      'repeat ((askChoice "None", 1, null) otherwise 1) {}\nexit\n',
+      `Keep '(askChoice "None", 1, null) otherwise 1' in a new variable, as in 'let value: integer | string = (askChoice "None", 1, null) otherwise 1', and check it, as in 'if value is integer { repeat (value) {} }'`,
+      'let value: integer | string = (askChoice "None", 1, null) otherwise 1\nif value is integer { repeat (value) {} }\nexit\n',
+    ],
+    [
       `repeat ${C} {}\nexit\n`,
       `Keep '${C}' in a new variable, as in 'let value: integer | string = ${C}', and check it, as in 'if value is integer { repeat value {} }'.`,
       `let value: integer | string = ${C}\nif value is integer { repeat value {} }\nexit\n`,
     ],
   ];
   for (const [source, sentence, pasted] of kept) {
+    // (each warning at the site gives it, the null's and the text's alike)
     const warned = reported(main(source)).filter(({ error }) => !error);
     assert.ok(
-      warned.length === 1 && warned[0]!.message.includes(` ${sentence}`),
+      warned.length > 0 && warned.every(({ message }) => message.includes(` ${sentence}`)),
       `${source}: ${JSON.stringify(warned)}`,
     );
     if (pasted === null) continue;

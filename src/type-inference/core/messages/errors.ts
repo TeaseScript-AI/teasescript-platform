@@ -485,7 +485,7 @@ function mixedChoiceSentence(
 ): string {
   const first = `This askChoice returns ${described(kinds)}.`;
   const one = "give every button a value of one type";
-  const union = typeText(kinds);
+  const union = typeText(rule.type);
   const { root, steps } = rule;
   // (the collection whose element the choice is, `null` for a deeper or a property's place, the root itself without)
   const step = steps[0];
@@ -500,7 +500,7 @@ function mixedChoiceSentence(
       ? null
       : collection === undefined
         ? union
-        : collectionText(collection, union);
+        : `${collectionText(collection, union)}${rule.optional === true ? "?" : ""}`;
   const result = root?.kind === "result" && collection === undefined && written !== null;
   const type = result ? typeAt(written!, diagnosed) : null;
   const declared =
@@ -516,7 +516,8 @@ function mixedChoiceSentence(
           );
   if (declared === null)
     return `${first.slice(0, -1)}, but ${rule.into} holds one type. ${capitalized(one)}.`;
-  const all = named(kinds).length > 2 ? "all of them" : "both";
+  const all =
+    named(rule.type).filter((kind) => kind !== "null").length > 2 ? "all of them" : "both";
   return `${first} To ${result ? "return" : "keep"} ${all}, ${declared}, or ${one}.`;
 }
 

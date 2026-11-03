@@ -8,7 +8,7 @@ import { selectsElement } from "../method-categories.js";
 import { siteKey } from "../program.js";
 import type { CoreDiagnostic, DiagnosticKind, DiagnosticRule, Presence } from "../result.js";
 import { expected } from "./expected.js";
-import { mixedAnswer } from "./kinds.js";
+import { carriedAnswer } from "./kinds.js";
 
 // The consumers' diagnostics: an error at its site, and the facts a fix's code forms read (TABLE r4.151).
 
@@ -112,7 +112,7 @@ export function withFacts(walk: Consumers, diagnostic: CoreDiagnostic): CoreDiag
 
 /**
  * The types a new variable keeping a warning's subject declares (`keeps`): its subject, a member's receiver or the
- * value at `site`, where it is an `askChoice` whose buttons return more than one type (`mixedAnswer`, V30 §19, #1352);
+ * value at `site`, where it holds an `askChoice` answer of more than one type (`carriedAnswer`, V30 §19, #1352);
  * else `null`.
  */
 function keptChoice(
@@ -136,7 +136,7 @@ function keptChoice(
   const place = program.placeBySite.get(
     siteKey({ file: site.file, start: subject.span.start.offset, end: subject.span.end.offset }),
   );
-  return place === undefined ? null : mixedAnswer(walk, place);
+  return place === undefined ? null : carriedAnswer(walk, place);
 }
 
 /**

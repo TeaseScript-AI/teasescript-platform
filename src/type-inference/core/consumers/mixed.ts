@@ -3,11 +3,11 @@ import { Admission } from "../admission.js";
 import { joinParts, joinSteps, keepText, keptArray } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { termAt, writtenOf } from "../contract.js";
-import type { ItemTag } from "../items.js";
+import { kindsInOrder, type ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
 import type { DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
-import { mixedAnswer } from "./kinds.js";
+import { heldKinds, mixedAnswer, oneType, passedOperands } from "./kinds.js";
 import type { Landing, LandingQuestion } from "./model.js";
 import { copiesOnly, firstDirect, valueReach } from "./reach.js";
 import { placeText, storeRoot, storeSteps } from "./warnings.js";
@@ -264,7 +264,10 @@ function mixedError(
   made.sorted = false;
 }
 
-/** Whether a literal's or a join's error of mixed elements lies within `site`: a search of their sites, by start. */
+/**
+ * Whether a literal's or a join's error of mixed elements lies within `site`: a search of their sites, by start, each
+ * step charged (their sort once, by their number).
+ */
 function holdsMixed(walk: Consumers, site: SourceSite): boolean {
   const made = MIXED_SITES.get(walk);
   if (made === undefined) return false;
@@ -278,6 +281,7 @@ function holdsMixed(walk: Consumers, site: SourceSite): boolean {
   let low = 0;
   let high = sites.length;
   while (low < high) {
+    walk.pass.program.work.charge("checks");
     const middle = (low + high) >> 1;
     const at = sites[middle]!;
     if (at.file < site.file || (at.file === site.file && at.start < site.start)) low = middle + 1;
@@ -288,60 +292,88 @@ function holdsMixed(walk: Consumers, site: SourceSite): boolean {
 }
 
 /**
- * V30 §19 (#1352): an `askChoice` whose buttons return more than one type (`mixedAnswer`), stored where its type would
- * be inferred, is an error at the choice: a store, an argument, a return or an add of its answer, or a literal holding
- * it where the literal lands (`landingOf`), into a place with no written type there and none another store decides (A2,
- * a copy of a written type by A4: that store's check owns the misfit, C1); an argument's call alone types its parameter
- * (V30 §11). Once per choice, at its first such store.
+ * V30 §13, §19 (#1352): an `askChoice` whose buttons return more than one type (`mixedAnswer`) is an error at the
+ * choice where its answer, as it stands or through what passes it on unchanged (`passedOperands`: an `otherwise`, a
+ * `get`'s default), lands in a place whose type would be inferred and so would be their union: a store, an argument, a
+ * return or an add, or a literal holding it where the literal lands (`landingOf`), into a place with no written type
+ * there, none unrestricted above it and none a copy brings (A4), whose admitted type (A2: every type stored there where
+ * no store decides one) holds more than one type. A place another store decides as one type keeps that store's check
+ * (C1). An argument's call alone types its parameter (V30 §11): its own value's types decide it, whatever another call
+ * passes. Once per choice, at its first such store.
  */
 export function mixedChoice(
   walk: Consumers,
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
 ): void {
-  const kinds = mixedAnswer(walk, c.result);
+  const answer = mixedAnswer(walk, c.result);
   // (a list or set option whose elements mix is that literal's error already, as the current checker gives it)
-  if (kinds === null || holdsMixed(walk, c.site)) return;
+  if (answer === null || holdsMixed(walk, c.site)) return;
   const { program, definitions } = walk.pass;
   const { admission } = walk;
-  const stores = definitions.byValue.get(c.result) ?? [];
-  program.work.charge("checks", stores.length);
-  for (const d of stores) {
-    if (d.kind !== "whole" && d.kind !== "add") continue;
-    // (a literal's cell: where the literal lands, at the cell's step below it)
-    const owner = program.cellOwner.get(d.place);
-    let place = d.place;
-    let path = admission.destPath(d);
-    if (owner !== undefined) {
-      const landing = landingOf(walk, owner.owner);
-      if (landing === null) continue;
-      const cell = program.place(d.place).kind;
-      place = landing.place;
-      path = joinSteps(landingPath(walk, landing), [
-        cell.kind === "property" ? propertyStep(cell.name) : "element",
-      ]);
+  // (the values the answer is, unchanged: each once, in the order reached)
+  const values = [c.result];
+  const reached = new Set(values);
+  for (let at = 0; at < values.length; at += 1) {
+    const uses = program.consumersOf.get(values[at]!) ?? [];
+    program.work.charge("checks", uses.length);
+    for (const use of uses)
+      if (
+        use.kind === "part" &&
+        !reached.has(use.result) &&
+        passedOperands(program.opOf.get(use.result)).includes(values[at]!)
+      ) {
+        reached.add(use.result);
+        values.push(use.result);
+      }
+  }
+  for (const value of values) {
+    const stores = definitions.byValue.get(value) ?? [];
+    program.work.charge("checks", stores.length);
+    for (const d of stores) {
+      if (d.kind !== "whole" && d.kind !== "add") continue;
+      // (a literal's cell: where the literal lands, at the cell's step below it)
+      const owner = program.cellOwner.get(d.place);
+      let place = d.place;
+      let path = admission.destPath(d);
+      if (owner !== undefined) {
+        const landing = landingOf(walk, owner.owner);
+        if (landing === null) continue;
+        const cell = program.place(d.place).kind;
+        place = landing.place;
+        path = joinSteps(landingPath(walk, landing), [
+          cell.kind === "property" ? propertyStep(cell.name) : "element",
+        ]);
+      }
+      const written = writtenOf(program.place(place).kind);
+      if (written !== null && termAt(written, path) !== null) continue;
+      // (below an unrestricted written part, the place's own or a copy's, every type fits: `unknown`, one type)
+      const admitted = admission.admitted(place, path);
+      const own = heldKinds(walk, value);
+      const argument = d.how === "argument";
+      if (argument ? own === null || oneType(own) : admission.inheritsWritten(place, path))
+        continue;
+      // (the union to declare: every type the place takes, this value's among them)
+      const type = kindsInOrder(new Set([...admitted, ...(own ?? [])]));
+      if (!argument && oneType(admitted)) continue;
+      const steps = storeSteps(walk, place, path);
+      error(
+        walk,
+        "written-target",
+        c.site,
+        {
+          rule: "mixed-choice",
+          into: placeText(walk, place, path),
+          root: storeRoot(walk, place),
+          steps,
+          type,
+          // (a collection root that holds null beside its lists: an optional collection, V30 §13)
+          ...(steps.length === 1 && admission.admitted(place, []).includes("null")
+            ? { optional: true as const }
+            : {}),
+        },
+        answer,
+      );
+      return;
     }
-    const written = writtenOf(program.place(place).kind);
-    if (written !== null && termAt(written, path) !== null) continue;
-    // (another store deciding the place, a copy of a written type among them (A4), is outside the choice; each call
-    // types a parameter without a type from its own argument, V30 §11: another call's decides nothing there)
-    const decider = d.how === "argument" ? null : admission.deciderAt(place, path);
-    if (
-      decider !== null &&
-      (decider.file !== c.site.file || decider.start < c.site.start || decider.end > c.site.end)
-    )
-      continue;
-    error(
-      walk,
-      "written-target",
-      c.site,
-      {
-        rule: "mixed-choice",
-        into: placeText(walk, place, path),
-        root: storeRoot(walk, place),
-        steps: storeSteps(walk, place, path),
-      },
-      kinds,
-    );
-    return;
   }
 }
