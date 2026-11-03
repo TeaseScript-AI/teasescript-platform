@@ -2429,7 +2429,7 @@ test("a place replaced by objects of distinct properties takes work that grows w
  * #1456: a prefix of closed objects read once costs what its levels do: its first property read is theirs, nothing
  * charged or kept for it (`propertyItems`). Every counter of a place replaced by two objects and of 8 places each
  * replaced by two wide objects, each read at one property, in either order with the sharing on and off, is `main`'s
- * at `465532f4a` (a regression oracle of this construction only; before it, the wide places took 2 `structureSteps` and
+ * at `465532f4a`, the wide places' `eventSteps` 40 fewer since #1221 charges its event searches by comparison (a regression oracle of this construction only; before it, the wide places took 2 `structureSteps` and
  * 2 `literalUnits` each).
  */
 test("a prefix of closed objects read once has main's counters, in either order, shared or not (#1456)", () => {
@@ -2449,8 +2449,8 @@ test("a prefix of closed objects read once has main's counters, in either order,
       "8 places each replaced by two wide objects",
       wide(8),
       [
-        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 529 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 822 literalUnits 2533 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 124 syntaxNodes 144 yields 724",
-        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 529 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 820 literalUnits 1785 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 56 syntaxNodes 144 yields 724",
+        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 489 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 822 literalUnits 2533 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 124 syntaxNodes 144 yields 724",
+        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 489 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 820 literalUnits 1785 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 56 syntaxNodes 144 yields 724",
       ],
     ],
   ];
@@ -2612,4 +2612,27 @@ test("a long copied key's store check charges its positions' work, in every mode
       [9617, 64],
     ],
   ]);
+});
+
+/**
+ * #1221: a search of a sorted list of event positions charges each comparison it makes, so its charge grows with the
+ * list's logarithm (before, two flat units a pair of searches whatever the list's length: a warmed X6 query read a list
+ * of 1,025 events 22 times). X6's first event of `n` in a span after k conditional stores of it, its list built by a
+ * first query: the second query's charge is at least the comparisons a binary search over k + 1 positions makes.
+ */
+test("a search of a key's events charges each comparison it makes (#1221)", () => {
+  for (const k of [64, 1024]) {
+    const source = `let flag = askBoolean "Change it?"\nlet n = 1\n${many(k, (i) => `if flag { n = ${i + 2} }`)}\nsay n\nexit`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const { definitions, lists, program } = narrowingPass(request);
+    // (`n`'s key: the one with k + 1 definitions)
+    const key = [...definitions.byKey].find(([, list]) => list.length === k + 1)![0];
+    const span = [[0, Number.MAX_SAFE_INTEGER]] as const;
+    assert.equal(lists.eventIn(key, span), "branch");
+    const before = program.work.total;
+    lists.eventIn(key, span);
+    const charged = program.work.total - before;
+    assert.ok(charged >= Math.log2(k + 1), `k = ${k}: ${charged} units`);
+  }
 });

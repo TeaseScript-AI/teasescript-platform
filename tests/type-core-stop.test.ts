@@ -2857,7 +2857,7 @@ test("#1216's redundant check stands at its counted stops", () => {
   }))
     for (const allowance of testedAllowances(phase, low, high))
       if (has(analyse(allowance))) count += 1;
-  assert.equal(count, 100);
+  assert.equal(count, 99);
 });
 
 /**
@@ -3190,16 +3190,16 @@ const repeated = (count: SerializableRuntimeValue): readonly string[] | null =>
 
 /**
  * Every eighth settled stop of each phase and its last, under a demand allowance that stops a decision (the `which`th
- * largest), in a mode: the case's problems there (`heldProblems` under the combined stop's rule) and the clauses the rule
- * accepted.
+ * largest, or `demand`), in a mode: the case's problems there (`heldProblems` under the combined stop's rule) and the
+ * clauses the rule accepted.
  */
 function combinedStops(
   c: HeldCase,
   mode: (typeof HELD_MODES)[number],
   each: (where: string, problems: readonly string[], clauses: readonly string[]) => void,
   which = 0,
+  demand = heldDemands(c, mode)[which],
 ): void {
-  const demand = heldDemands(c, mode)[which];
   assert.ok(demand !== undefined, `${c.name}, ${mode.name}: no decision stops`);
   const { run: unstopped } = heldUnstopped(c, mode, demand);
   const { stoppedAt } = combinedAnalyses([{ path: "main.tease", source: c.source }], mode, demand);
@@ -3338,11 +3338,13 @@ test("a combined stop owes the reference's check in other words, or a boundary's
       each: true,
     },
     // ((a) at a member's presence check by every read its consumer makes: the receiver at the unlisted step `#`, which
-    // the stop left `unknown` and the finishing walk answers from the ring's literals, reversed under demand 42)
+    // the stop left `unknown` and the finishing walk answers from the ring's literals, reversed under demand 41: two
+    // units below its decision's 43 since #1221 charges the event searches by comparison, the stop at 42 past that read)
     {
       clause: "a",
       modes: [HELD_MODES[1]!],
       c: heldFamily(false).find((c) => c.name === "ring-1-written-plain")!,
+      demand: 41,
     },
     ...[
       "function build {return dict {a: hostValue, b: 4}}",
@@ -3361,7 +3363,7 @@ test("a combined stop owes the reference's check in other words, or a boundary's
       ),
     })),
   ];
-  for (const { clause, modes, c, each = false, coarse } of cases)
+  for (const { clause, modes, c, each = false, coarse, demand } of cases)
     for (const mode of modes) {
       let taken = 0;
       let counted = 0;
@@ -3383,6 +3385,7 @@ test("a combined stop owes the reference's check in other words, or a boundary's
             taken += clauses.filter((each) => each === clause).length;
           },
           which,
+          demand,
         );
       assert.ok(taken > 0, `${c.name}, ${mode.name}: no stop takes ${clause}`);
       assert.ok(coarse === undefined || counted > 0, `${c.name}, ${mode.name}: none counted`);
