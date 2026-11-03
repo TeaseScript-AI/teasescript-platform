@@ -3427,8 +3427,7 @@ function coarseClass(problems: readonly string[]): {
  * #1604: at a combined stop the finishing read answers no kind that neither a finished contract nor a store gives, and a
  * receiver keeps the structure its key's literal stores give through a copy of an inferred place, so the stop owes the
  * demand-only run's checks, at most one for one in other words with their domain (`combinedMarkProblems`): two places
- * copying each other (the issue's witness 1, whose retained decision admitted a `null` no store gives; four deep, its
- * parts read through the cycle of copies the stores' syntax unites) and a member
+ * copying each other (the issue's witness 1, whose retained decision admitted a `null` no store gives) and a member
  * below a stopped decision, read through a wrapper of a copied object (witness 2's receiver, by a repeat count). The
  * issue's witness 2 itself keeps the demand-only run's checks; what remains there is the interpolation's operand check
  * on the operation's result, owed beyond the reference's (not this mechanism). Every eighth settled stop under each
@@ -3438,15 +3437,13 @@ test("a combined stop owes the demand-only run's checks through a copied place a
   const held = heldFamily(false);
   for (const name of [
     "twoWay-1-arithmetic-plain",
-    "twoWay-4-say-plain",
     "wrappers-1-repeat-plain",
     "wrappers-1-laterOperation-plain",
   ]) {
     const c = held.find((each) => each.name === name)!;
     for (const mode of HELD_MODES) {
-      // (the four-deep cycle under its largest stopping demand alone: the cycle's reads are the same under each)
       const demands = heldDemands(c, mode);
-      for (const which of name === "twoWay-4-say-plain" ? [0] : demands.keys()) {
+      for (const which of demands.keys()) {
         const { natural, reference, stoppedAt } = combinedAnalyses(
           [{ path: "main.tease", source: c.source }],
           mode,
@@ -3550,9 +3547,9 @@ test("a retained member below its root keeps admission's null (#1604)", () => {
 
 /**
  * #1604's syntax through copies of inferred places answers each key alike whatever order its reads ask it (Codex r1's N1
- * and N2 on #1653): a level made with a cycle of copies closed above it holds the cycle's values only in part and is
- * never kept (two places copying each other, each wrapped), and a level cut past the copy bound from a deeper caller is
- * kept only where its chain started (a chain of eight copies of a literal, wrapped once). Every binding's own key and
+ * and N2, r3's B4 on #1653): a key a cycle of copies reaches is untold from wherever it is asked (two places copying each
+ * other, each wrapped; joined cycles through a projected copy), and a level cut past the copy bound from a deeper caller
+ * is kept only where its chain started (a chain of eight copies of a literal, wrapped once). Every binding's own key and
  * its `q`, `f` and `q.f` paths asked in their order and reversed, on fresh walks of the analysis's settled pass, four
  * modes: the same decisions.
  */
@@ -3563,6 +3560,16 @@ test("the stores' syntax through copies answers alike in either order of reads (
       "let a0 = {f: 1}",
       ...Array.from({ length: 8 }, (_, i) => `let a${i + 1} = a${i}`),
       "let w = {q: a8}",
+    ],
+    [
+      "let a = {f: 1}",
+      "let b = {q: a}",
+      "let c = b.q",
+      "let d = {q: c}",
+      "d = b",
+      "b = d",
+      "a = c",
+      "let w = {q: d.q}",
     ],
   ].map((lines) => [...lines, 'say "${w.q.f}"', "exit", ""].join("\n"));
   for (const source of sources)
