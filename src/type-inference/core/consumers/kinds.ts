@@ -178,7 +178,7 @@ export function passedOperands(c: ValueConstraint | undefined): readonly PlaceId
  * through `passedOperands`, where its known types are more than one: the types a new variable keeping it declares
  * (#1352); else `null`. Each operand once, on an explicit list.
  */
-export function carriedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
+function carriedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
   const { program } = walk.pass;
   const seen = new Set<PlaceId>([value]);
   for (const pending = [value]; pending.length > 0;) {
