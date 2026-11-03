@@ -3606,7 +3606,14 @@ test("the stores' syntax through copies answers alike in either order of reads (
           found.set(
             `${root}:${path.join(".")}`,
             JSON.stringify(
-              decided === null ? null : { kinds: decided.kinds, names: [...decided.names].sort() },
+              decided === null
+                ? null
+                : {
+                    kinds: decided.kinds,
+                    spelling: decided.spelling,
+                    decider: decided.decider.site,
+                    inherited: decided.inherited,
+                  },
             ),
           );
         }

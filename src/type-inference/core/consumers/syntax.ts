@@ -12,7 +12,7 @@ import {
   type Spelling,
 } from "../items.js";
 import { conversionCategory, dictList } from "../method-categories.js";
-import { propertyName, propertyStep, stepName } from "../program.js";
+import { propertyStep, stepName } from "../program.js";
 import { LITERALS } from "./kinds.js";
 import {
   FRONTIER_COPIES,
@@ -43,7 +43,6 @@ function cheapShape(): CheapShape {
     tags: new Set(),
     written: [],
     children: new Map(),
-    names: new Set(),
     properties: null,
     first: null,
     opaque: false,
@@ -193,7 +192,6 @@ export function cheapDecided(
       : {
           kinds: summary.tags.has("null") ? [...kinds, "null"] : kinds,
           ...(spelled === undefined ? {} : { spelling: spelled }),
-          names: summary.names,
           decider: summary.decider,
           inherited: !summary.byShape,
         };
@@ -422,22 +420,6 @@ function linkedBelow(
   }
 }
 
-/** No property names (`summaryOf`). */
-const NO_NAMES: ReadonlySet<string> = new Set();
-
-/** Each written type's property names as one set, made once a type (`termNameSet`). */
-const termNameSets = new WeakMap<TypeTerm, ReadonlySet<string>>();
-
-function termNameSet(term: TypeTerm): ReadonlySet<string> {
-  let names = termNameSets.get(term);
-  if (names === undefined) {
-    const found = termNames(term);
-    names = found.length === 0 ? NO_NAMES : new Set(found);
-    termNameSets.set(term, names);
-  }
-  return names;
-}
-
 /** Two object literals' property sets that differ (`joinProperties`). */
 const CONFLICT = -1;
 
@@ -448,14 +430,14 @@ function joinProperties(a: number | null, b: number | null): number | null {
 
 /**
  * What a frontier's syntax decides, its linked sources' included, each source's contribution given by the store that
- * copied it (`summaryOf`): whether every written type there is told; the kinds; the property names, one set shared by
- * reference where one is met; the written spelling; the property sets' token; the earliest store giving a kind other than
- * `null` and whether it gave a shape's (else only a written type's); whether a shape, or only a written type, gives one.
+ * copied it (`summaryOf`): whether every written type there is told; the kinds; the written spelling; the property sets'
+ * token; the earliest store giving a kind other than `null` and whether it gave a shape's (else only a written type's);
+ * whether a shape, or only a written type, gives one. No property names: no reader of a decision asks them, so none
+ * travels through a link (Codex r4's B1 on #1653).
  */
 interface Summary {
   readonly told: boolean;
   readonly tags: ReadonlySet<ItemTag>;
-  readonly names: ReadonlySet<string>;
   readonly spelling: Spelling | undefined;
   readonly properties: number | null;
   readonly decider: Definition | null;
@@ -475,8 +457,6 @@ function summaryOf(walk: Consumers, frontier: CheapFrontier): Summary {
   const known = summaries.get(frontier);
   if (known !== undefined) return known;
   const tags = new Set<ItemTag>();
-  // (the name sets met, each once by identity: a frontier's own, written types' and its links' summaries' sets)
-  const named = new Set<ReadonlySet<string>>();
   const stores = new Map<Definition, boolean>();
   let told = true;
   let spelling: Spelling | undefined;
@@ -498,7 +478,6 @@ function summaryOf(walk: Consumers, frontier: CheapFrontier): Summary {
     }
     const token = propertyToken(walk, shape);
     properties = joinProperties(properties, token);
-    if (shape.names.size > 0) named.add(shape.names);
   }
   for (const { term, by } of frontier.written) {
     const kinds = typeTags(term);
@@ -508,16 +487,13 @@ function summaryOf(walk: Consumers, frontier: CheapFrontier): Summary {
       tags.add(tag);
       if (tag !== "null") give(by, false);
     }
-    const own = termNameSet(term);
-    if (own.size > 0) named.add(own);
   }
   for (const { by, frontier: source } of frontier.links) {
     const other = summaryOf(walk, source);
-    // (its kinds, names and stores looked at once here, charged)
+    // (its kinds and stores looked at once here, charged)
     walk.pass.program.work.charge("checks", other.tags.size);
     told &&= other.told;
     for (const tag of other.tags) tags.add(tag);
-    if (other.names.size > 0) named.add(other.names);
     spelling = joinSpelling(spelling, other.spelling);
     properties = joinProperties(properties, other.properties);
     if (other.shaped) give(by, true);
@@ -525,22 +501,9 @@ function summaryOf(walk: Consumers, frontier: CheapFrontier): Summary {
   }
   let decider: Definition | null = null;
   for (const by of stores.keys()) decider = earlierStore(decider, by);
-  // (one set where one is met, shared by reference with the frontier it came from: a link carries its source's names
-  // without copying them, Codex r3's B1 on #1653; a union made, charged, only where several distinct ones meet)
-  let names: ReadonlySet<string> = NO_NAMES;
-  if (named.size === 1) names = [...named][0]!;
-  else if (named.size > 1) {
-    const union = new Set<string>();
-    for (const each of named) {
-      walk.pass.program.work.charge("checks", each.size);
-      for (const name of each) union.add(name);
-    }
-    names = union;
-  }
   const summary: Summary = {
     told,
     tags,
-    names,
     spelling,
     properties,
     decider,
@@ -671,7 +634,6 @@ function cheapShapeOf(walk: Consumers, key: Key): CheapShape {
       cheapGive(at, own, d);
       const steps = literalSteps(walk, value, own);
       if (own === "object") {
-        for (const step of steps) at.names.add(propertyName(step));
         // (objects with other properties: a read of one may find it missing, which only the analysis tells)
         if (at.properties === null) at.properties = steps;
         else if (at.properties.size !== steps.size) at.opaque = true;

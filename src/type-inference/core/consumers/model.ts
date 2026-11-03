@@ -56,7 +56,7 @@ export type Offending = readonly [Item, string];
 
 /**
  * What the stores into one key give each path below it by their syntax alone (TABLE r4.89 (2)): the types literals
- * have there (`null` among them), the written types copies bring (each from its own path on), the property names, the
+ * have there (`null` among them), the written types copies bring (each from its own path on), the
  * earliest store that gives a type there, and whether a store gives it a value its syntax does not tell (`opaque`).
  */
 export interface CheapShape {
@@ -67,7 +67,6 @@ export interface CheapShape {
     readonly by: Definition;
   }[];
   readonly children: Map<string, CheapShape>;
-  readonly names: Set<string>;
   /** The properties of the first object literal given here: an object literal with others makes it opaque. */
   properties: ReadonlySet<string> | null;
   first: Definition | null;
@@ -108,7 +107,6 @@ export interface CheapDecision {
   readonly kinds: readonly ItemTag[];
   /** The written spelling that orders the kinds, where one covers them (`covering`, #1398). */
   readonly spelling?: Spelling;
-  readonly names: ReadonlySet<string>;
   readonly decider: Definition;
   readonly inherited: boolean;
 }
