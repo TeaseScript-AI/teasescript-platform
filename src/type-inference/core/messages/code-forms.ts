@@ -44,7 +44,10 @@ export interface Diagnosed {
   readonly present: Presence;
   readonly severity: "error" | "warning";
   readonly alone: (held: SourceSite, rulesOut: ((kind: ItemTag) => boolean) | null) => boolean;
-  /** A warning's `keeps`: the types a new variable keeping the warned value declares. */
+  /**
+   * A warning's `keeps`: what a new variable keeping the warned value declares (none for a plain `let`); absent where no
+   * fact proves the `let`, whose form the fix then gives in words.
+   */
   readonly keeps?: readonly ItemTag[];
 }
 

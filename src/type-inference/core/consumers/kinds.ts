@@ -137,12 +137,18 @@ export function oneType(kinds: readonly ItemTag[]): boolean {
   return kinds.every((kind) => kind === "null") || family(kinds);
 }
 
-/** A value's kinds as its contract holds them, its own `null` included, in their one order; `null` with an unknown. */
-export function heldKinds(walk: Consumers, value: PlaceId): ItemTag[] | null {
-  const items = withoutEmpty(walk.run(walk.pass.contract.contractOfValueAt(value, [])));
-  return items.some((item) => item.tag === "unknown")
-    ? null
-    : kindsInOrder(new Set(items.map((item) => item.tag)));
+/**
+ * The known types of a value as its contract holds them, its `null` included, in their one order: the alternatives an
+ * answer brings (#1352); an unknown beside them adds none and never stands for one type.
+ */
+export function knownKinds(walk: Consumers, value: PlaceId): ItemTag[] {
+  return kindsInOrder(
+    new Set(
+      withoutEmpty(walk.run(walk.pass.contract.contractOfValueAt(value, [])))
+        .filter((item) => item.tag === "null" || concrete(item))
+        .map((item) => item.tag),
+    ),
+  );
 }
 
 /**
@@ -154,19 +160,14 @@ export function heldKinds(walk: Consumers, value: PlaceId): ItemTag[] | null {
 export function mixedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
   const c = walk.pass.program.opOf.get(value);
   if (c?.kind !== "operation" || c.evidence?.kind !== "choice") return null;
-  const tags = kindsInOrder(
-    new Set(
-      withoutEmpty(walk.run(walk.pass.contract.contractOfValueAt(value, [])))
-        .filter((item) => item.tag === "null" || concrete(item))
-        .map((item) => item.tag),
-    ),
-  );
+  const tags = knownKinds(walk, value);
   return oneType(tags) ? null : tags;
 }
 
 /**
- * The operands whose value an operation's result is, unchanged, where it takes them (V30 §18): both sides of an
- * `otherwise`, a `get`'s default; none for any other value. An answer reaches its destination through them.
+ * The rule of where a mixed answer travels (#1352): the operands whose value an operation's result is, unchanged,
+ * where it takes them (V30 §18), both sides of an `otherwise` and a `get`'s default; none for any other value. An answer
+ * reaches its destination through these alone; a literal's cell reaches it where the literal lands (`landingOf`).
  */
 export function passedOperands(c: ValueConstraint | undefined): readonly PlaceId[] {
   return c?.kind === "fallback" ? [c.left, c.right] : c?.kind === "get" ? [c.fallback] : [];
@@ -174,8 +175,8 @@ export function passedOperands(c: ValueConstraint | undefined): readonly PlaceId
 
 /**
  * The types of a value that holds a mixed `askChoice` answer (`mixedAnswer`), the choice itself or a value it reaches
- * through `passedOperands`, where its own types are more than one: the types a new variable keeping it declares (#1352);
- * else `null`. Each operand once, on an explicit list.
+ * through `passedOperands`, where its known types are more than one: the types a new variable keeping it declares
+ * (#1352); else `null`. Each operand once, on an explicit list.
  */
 export function carriedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
   const { program } = walk.pass;
@@ -184,8 +185,8 @@ export function carriedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag
     const at = pending.pop()!;
     program.work.charge("checks");
     if (mixedAnswer(walk, at) !== null) {
-      const own = heldKinds(walk, value);
-      return own === null || oneType(own) ? null : own;
+      const own = knownKinds(walk, value);
+      return oneType(own) ? null : own;
     }
     for (const operand of passedOperands(program.opOf.get(at)))
       if (!seen.has(operand)) {
@@ -194,4 +195,13 @@ export function carriedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag
       }
   }
   return null;
+}
+
+/**
+ * What a new variable keeping a warning's subject declares (#1352, the kept-value fix of every warning): the types of a
+ * mixed answer it holds (`carriedAnswer`), else none (`[]`: a `let` without a type infers no union there). Asked only
+ * where the subject's value is found: where it is not, no fact proves the plain `let`, and the fix keeps it in words.
+ */
+export function keptTypes(walk: Consumers, value: PlaceId): readonly ItemTag[] {
+  return carriedAnswer(walk, value) ?? [];
 }

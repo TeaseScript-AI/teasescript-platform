@@ -1759,6 +1759,17 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       ["let xs =", "let xs: (integer | string)[]? ="],
     ],
     [
+      // (an unknown button beside two known types: the known ones decide, Codex r2 on #1660)
+      `${call}f(askChoice "None", 1, hostValue)\nexit\n`,
+      `To keep both, declare the parameter as 'p: integer | string', ${BUTTONS}`,
+      ["f(p)", "f(p: integer | string)"],
+    ],
+    [
+      `let xs = []\nlet v = xs.get(0, default: ${S})\nexit\n`,
+      `To keep both, declare the variable as 'let v: integer | string = xs.get(0, default: ${S})', ${BUTTONS}`,
+      ["let v =", "let v: integer | string ="],
+    ],
+    [
       `${call}f(true)\nf(${S})\nexit\n`,
       `To keep all of them, declare the parameter as 'p: integer | string | boolean', ${BUTTONS}`,
       ["f(p)", "f(p: integer | string | boolean)"],
@@ -1797,6 +1808,9 @@ test("an askChoice of more than one type errs where its type would be inferred, 
     ],
     [`let v = 1\nv = ${S}\nexit\n`, null, null],
   ];
+  // (the current checker rejects a choice as a `get` default whatever written type receives it, a recorded difference
+  // from V30 §19 as #1412's: those pastes are checked under the core alone)
+  const getDefault = (source: string): boolean => source.includes(".get(0, default: askChoice");
   const v1Errors = (source: string) =>
     compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] }).diagnostics.filter(
       (diagnostic) => diagnostic.severity === "error",
@@ -1841,7 +1855,8 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       [],
       `the core: ${pasted}`,
     );
-    assert.deepEqual(v1Errors(pasted), [], `the current checker: ${pasted}`);
+    if (!getDefault(pasted))
+      assert.deepEqual(v1Errors(pasted), [], `the current checker: ${pasted}`);
   }
   // (a store warning's and a count's kept value: the variable declared with the union, which pasted compiles, or in
   // words where no form is proved)
@@ -1867,6 +1882,16 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       'let value: integer | string = (askChoice "None", 1, null) otherwise 1\nif value is integer { repeat (value) {} }\nexit\n',
     ],
     [
+      `let xs = []\nrepeat xs.get(0, default: ${S}) {}\nexit\n`,
+      `Keep 'xs.get(0, default: ${S})' in a new variable, as in 'let value: integer | string = xs.get(0, default: ${S})', and check it, as in 'if value is integer { repeat value {} }'.`,
+      `let xs = []\nlet value: integer | string = xs.get(0, default: ${S})\nif value is integer { repeat value {} }\nexit\n`,
+    ],
+    [
+      'repeat (askChoice "None", 1, hostValue) {}\nexit\n',
+      `Keep 'askChoice "None", 1, hostValue' in a new variable, as in 'let value: integer | string = askChoice "None", 1, hostValue', and check it, as in 'if value is integer { repeat (value) {} }'`,
+      'let value: integer | string = askChoice "None", 1, hostValue\nif value is integer { repeat (value) {} }\nexit\n',
+    ],
+    [
       `repeat ${C} {}\nexit\n`,
       `Keep '${C}' in a new variable, as in 'let value: integer | string = ${C}', and check it, as in 'if value is integer { repeat value {} }'.`,
       `let value: integer | string = ${C}\nif value is integer { repeat value {} }\nexit\n`,
@@ -1885,6 +1910,26 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       [],
       `the core: ${pasted}`,
     );
-    assert.deepEqual(v1Errors(pasted), [], `the current checker: ${pasted}`);
+    if (!getDefault(pasted))
+      assert.deepEqual(v1Errors(pasted), [], `the current checker: ${pasted}`);
   }
+  // (a warning no fact proves a plain `let` for keeps its value in words: Codex r2 on #1660)
+  const direct = `repeat ${C} {}\nexit\n`;
+  const request = coreRequest(main(direct));
+  assert.ok(request !== null);
+  const { diagnostics } = analyseCore(request);
+  const text = messageSource([direct], diagnostics);
+  const unproved = diagnostics.map((diagnostic) => {
+    if (!("keeps" in diagnostic)) return coreMessage(diagnostic, text);
+    const { keeps: _, ...rest } = diagnostic;
+    return coreMessage(rest, text);
+  });
+  assert.ok(
+    unproved.some((message) =>
+      message.includes(
+        `Keep '${C}' in a new variable and check that it is a whole number (integer) first.`,
+      ),
+    ),
+    JSON.stringify(unproved),
+  );
 });

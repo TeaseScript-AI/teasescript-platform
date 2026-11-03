@@ -7,7 +7,7 @@ import { kindsInOrder, type ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
 import type { DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
-import { heldKinds, mixedAnswer, oneType, passedOperands } from "./kinds.js";
+import { knownKinds, mixedAnswer, oneType, passedOperands } from "./kinds.js";
 import type { Landing, LandingQuestion } from "./model.js";
 import { copiesOnly, firstDirect, valueReach } from "./reach.js";
 import { placeText, storeRoot, storeSteps } from "./warnings.js";
@@ -291,15 +291,106 @@ function holdsMixed(walk: Consumers, site: SourceSite): boolean {
   return first !== undefined && first.file === site.file && first.end <= site.end;
 }
 
+/** What a mixed answer's first store into a place whose type would be inferred says (`mixedChoice`). */
+type Stored = Omit<Extract<DiagnosticRule, { rule: "mixed-choice" }>, "rule">;
+
+/** Per pass, each value's first such store, its own or one a value it passes on reaches (`passedOperands`), once. */
+const REACHED = new WeakMap<Consumers, Map<PlaceId, Stored | null>>();
+
+/**
+ * The first store of `value` itself (a store, an argument, a return, an add, or a literal holding it where the literal
+ * lands, `landingOf`) into a place with no written type there whose type would be a union: its admitted type (A2: the
+ * decision, else every type stored there; `unknown` below an unrestricted written part, the place's own or a copy's)
+ * holds more than one type and comes from no copy of a written type (A4); a place another store decides as one type
+ * keeps that store's check (C1). An argument's call alone types its parameter (V30 §11): its own value's known types
+ * decide it, whatever another call passes. The union to declare is every type the place takes, this value's among them.
+ */
+function storedUnion(walk: Consumers, value: PlaceId): Stored | null {
+  const { program, definitions } = walk.pass;
+  const { admission } = walk;
+  const stores = definitions.byValue.get(value) ?? [];
+  program.work.charge("checks", stores.length);
+  for (const d of stores) {
+    if (d.kind !== "whole" && d.kind !== "add") continue;
+    // (a literal's cell: where the literal lands, at the cell's step below it)
+    const owner = program.cellOwner.get(d.place);
+    let place = d.place;
+    let path = admission.destPath(d);
+    if (owner !== undefined) {
+      const landing = landingOf(walk, owner.owner);
+      if (landing === null) continue;
+      const cell = program.place(d.place).kind;
+      place = landing.place;
+      path = joinSteps(landingPath(walk, landing), [
+        cell.kind === "property" ? propertyStep(cell.name) : "element",
+      ]);
+    }
+    const written = writtenOf(program.place(place).kind);
+    if (written !== null && termAt(written, path) !== null) continue;
+    const admitted = admission.admitted(place, path);
+    const own = knownKinds(walk, value);
+    const argument = d.how === "argument";
+    if (argument ? oneType(own) : admission.inheritsWritten(place, path) || oneType(admitted))
+      continue;
+    const steps = storeSteps(walk, place, path);
+    return {
+      into: placeText(walk, place, path),
+      root: storeRoot(walk, place),
+      steps,
+      type: kindsInOrder(new Set([...admitted.filter((tag) => tag !== "unknown"), ...own])),
+      // (a collection root that holds null beside its lists: an optional collection, V30 §13)
+      ...(steps.length === 1 && admission.admitted(place, []).includes("null")
+        ? { optional: true as const }
+        : {}),
+    };
+  }
+  return null;
+}
+
+/**
+ * The first store whose place's type would be a union of `value`'s, or of what it passes on (`passedOperands`), its
+ * own stores first, then each value it reaches in order: each value once per pass (`REACHED`), however many choices
+ * reach it, in an explicit post-order, so a chain of `otherwise`s costs its length (Codex r2's B4 on #1660).
+ */
+function reachedUnion(walk: Consumers, start: PlaceId): Stored | null {
+  const { program } = walk.pass;
+  let memo = REACHED.get(walk);
+  if (memo === undefined) REACHED.set(walk, (memo = new Map()));
+  const known = memo.get(start);
+  if (known !== undefined) return known;
+  const next = new Map<PlaceId, PlaceId[]>();
+  const stack: { readonly value: PlaceId; readonly expanded: boolean }[] = [
+    { value: start, expanded: false },
+  ];
+  while (stack.length > 0) {
+    const { value, expanded } = stack.pop()!;
+    if (memo.has(value)) continue;
+    if (expanded) {
+      let found = storedUnion(walk, value);
+      for (const to of next.get(value)!) found ??= memo.get(to) ?? null;
+      memo.set(value, found);
+      continue;
+    }
+    if (next.has(value)) continue;
+    const uses = program.consumersOf.get(value) ?? [];
+    program.work.charge("checks", uses.length);
+    const to = uses.flatMap((use) =>
+      use.kind === "part" && passedOperands(program.opOf.get(use.result)).includes(value)
+        ? [use.result]
+        : [],
+    );
+    next.set(value, to);
+    stack.push({ value, expanded: true });
+    for (const each of to.toReversed())
+      if (!memo.has(each) && !next.has(each)) stack.push({ value: each, expanded: false });
+  }
+  return memo.get(start) ?? null;
+}
+
 /**
  * V30 §13, §19 (#1352): an `askChoice` whose buttons return more than one type (`mixedAnswer`) is an error at the
- * choice where its answer, as it stands or through what passes it on unchanged (`passedOperands`: an `otherwise`, a
- * `get`'s default), lands in a place whose type would be inferred and so would be their union: a store, an argument, a
- * return or an add, or a literal holding it where the literal lands (`landingOf`), into a place with no written type
- * there, none unrestricted above it and none a copy brings (A4), whose admitted type (A2: every type stored there where
- * no store decides one) holds more than one type. A place another store decides as one type keeps that store's check
- * (C1). An argument's call alone types its parameter (V30 §11): its own value's types decide it, whatever another call
- * passes. Once per choice, at its first such store.
+ * choice where its answer, as it stands or through what passes it on unchanged (`passedOperands`), lands in a place
+ * whose type would be their union (`storedUnion`), at its first such store (`reachedUnion`); once per choice.
  */
 export function mixedChoice(
   walk: Consumers,
@@ -308,72 +399,7 @@ export function mixedChoice(
   const answer = mixedAnswer(walk, c.result);
   // (a list or set option whose elements mix is that literal's error already, as the current checker gives it)
   if (answer === null || holdsMixed(walk, c.site)) return;
-  const { program, definitions } = walk.pass;
-  const { admission } = walk;
-  // (the values the answer is, unchanged: each once, in the order reached)
-  const values = [c.result];
-  const reached = new Set(values);
-  for (let at = 0; at < values.length; at += 1) {
-    const uses = program.consumersOf.get(values[at]!) ?? [];
-    program.work.charge("checks", uses.length);
-    for (const use of uses)
-      if (
-        use.kind === "part" &&
-        !reached.has(use.result) &&
-        passedOperands(program.opOf.get(use.result)).includes(values[at]!)
-      ) {
-        reached.add(use.result);
-        values.push(use.result);
-      }
-  }
-  for (const value of values) {
-    const stores = definitions.byValue.get(value) ?? [];
-    program.work.charge("checks", stores.length);
-    for (const d of stores) {
-      if (d.kind !== "whole" && d.kind !== "add") continue;
-      // (a literal's cell: where the literal lands, at the cell's step below it)
-      const owner = program.cellOwner.get(d.place);
-      let place = d.place;
-      let path = admission.destPath(d);
-      if (owner !== undefined) {
-        const landing = landingOf(walk, owner.owner);
-        if (landing === null) continue;
-        const cell = program.place(d.place).kind;
-        place = landing.place;
-        path = joinSteps(landingPath(walk, landing), [
-          cell.kind === "property" ? propertyStep(cell.name) : "element",
-        ]);
-      }
-      const written = writtenOf(program.place(place).kind);
-      if (written !== null && termAt(written, path) !== null) continue;
-      // (below an unrestricted written part, the place's own or a copy's, every type fits: `unknown`, one type)
-      const admitted = admission.admitted(place, path);
-      const own = heldKinds(walk, value);
-      const argument = d.how === "argument";
-      if (argument ? own === null || oneType(own) : admission.inheritsWritten(place, path))
-        continue;
-      // (the union to declare: every type the place takes, this value's among them)
-      const type = kindsInOrder(new Set([...admitted, ...(own ?? [])]));
-      if (!argument && oneType(admitted)) continue;
-      const steps = storeSteps(walk, place, path);
-      error(
-        walk,
-        "written-target",
-        c.site,
-        {
-          rule: "mixed-choice",
-          into: placeText(walk, place, path),
-          root: storeRoot(walk, place),
-          steps,
-          type,
-          // (a collection root that holds null beside its lists: an optional collection, V30 §13)
-          ...(steps.length === 1 && admission.admitted(place, []).includes("null")
-            ? { optional: true as const }
-            : {}),
-        },
-        answer,
-      );
-      return;
-    }
-  }
+  const stored = reachedUnion(walk, c.result);
+  if (stored !== null)
+    error(walk, "written-target", c.site, { rule: "mixed-choice", ...stored }, answer);
 }

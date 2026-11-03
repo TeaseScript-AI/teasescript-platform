@@ -245,9 +245,10 @@ function guardForms(
       "statement",
     );
   const check = form(`if ${test.code(kept ? "value" : subject)} { ${held.text} }`, held.statement);
-  // (an askChoice whose buttons return more than one type is kept only by a variable declared with their union, V30
-  // §19, #1352: with that type, else in words)
-  const keeps = use.diagnosed.keeps === undefined ? "" : typeText(use.diagnosed.keeps);
+  // (the kept value's `let` only where a fact proves it (`keeps`): a plain one, or declared with a mixed answer's union,
+  // which alone keeps it, V30 §19, #1352; else in words)
+  const { keeps: types } = use.diagnosed;
+  const keeps = types === undefined ? null : types.length === 0 ? "" : typeText(types);
   const keep =
     kept && keeps !== null
       ? form(`let value${keeps === "" ? "" : `: ${keeps}`} = ${subject}`, held.read)
@@ -276,7 +277,8 @@ function checkFix(
   const name = variable(text);
   const forms = use === null ? null : guardForms(use, text, name === null, test);
   // (a kept askChoice whose buttons return more than one type: the variable's union, V30 §19, #1352)
-  const keeps = use?.diagnosed.keeps === undefined ? null : typeText(use.diagnosed.keeps);
+  const types = use?.diagnosed.keeps ?? [];
+  const keeps = types.length === 0 ? null : typeText(types);
   const type = keeps === null ? null : typeAt(keeps, use!.diagnosed);
   const check =
     name !== null

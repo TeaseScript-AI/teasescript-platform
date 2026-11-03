@@ -448,8 +448,8 @@ export type CoreDiagnostic =
        */
       readonly besides: readonly ItemTag[];
       /**
-       * Where the warned value is an `askChoice` whose buttons return more than one type (`mixedAnswer`): those types,
-       * which a new variable keeping it declares (V30 §19, #1352).
+       * What a new variable keeping the warned value declares (`keptTypes`): a mixed `askChoice` answer's types (V30
+       * §19, #1352), none for a plain `let`; absent where the value is not found, so no kept form is proved.
        */
       readonly keeps?: readonly ItemTag[];
     };
