@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { fstatSync, globSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { costlyTestFiles } from "./costly-test-files.mjs";
+import { shardFiles, shardOption } from "./test-shards.mjs";
 
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 
@@ -18,7 +18,7 @@ async function refuse(text) {
 
 const usage =
   "test-output-filter: this tool runs the tests itself and takes no standard input, so do not pipe into it.\n" +
-  "Usage: node tools/test-output-filter.mjs [--full-output] [test file ...]\n";
+  "Usage: node tools/test-output-filter.mjs [--full-output] [--shard=i/N | test file ...]\n";
 
 // The filter runs tests and never filters its standard input, so data piped in, most likely another command's output,
 // would be ignored while the tests ran, without arguments the whole suite. Only data counts: a GitHub Actions step's
@@ -40,16 +40,21 @@ if (input === "data") await refuse(usage);
 const arguments_ = process.argv.slice(2);
 const fullOutput = arguments_[0] === "--full-output";
 if (fullOutput) arguments_.shift();
+// (`--shard=i/N`: the full suite's shard i of N, as CI's test jobs run it, `tools/test-shards.mjs`)
+let shard = null;
+try {
+  shard = arguments_.length === 1 ? shardOption(arguments_[0]) : null;
+} catch (error) {
+  await refuse(`test-output-filter: ${error.message}.\n${usage}`);
+}
+if (shard !== null) arguments_.shift();
 const fullSuite = arguments_.length === 0;
 let testFiles = arguments_;
 if (fullSuite) {
-  const files = readdirSync("dist/tests")
-    .filter((file) => file.endsWith(".test.js"))
-    .sort();
-  testFiles = [
-    ...costlyTestFiles.filter((file) => files.includes(file)),
-    ...files.filter((file) => !costlyTestFiles.includes(file)),
-  ].map((file) => join("dist/tests", file));
+  const files = readdirSync("dist/tests").filter((file) => file.endsWith(".test.js"));
+  testFiles = shardFiles(files, shard?.index ?? 1, shard?.count ?? 1).map((file) =>
+    join("dist/tests", file),
+  );
 }
 
 // Node matches its path arguments as globs and reports one that matches nothing only when none matches, so a misspelled
