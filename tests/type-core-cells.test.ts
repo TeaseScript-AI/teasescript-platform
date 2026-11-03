@@ -3676,28 +3676,44 @@ test("a split cycle's aliases, each stored into after the split, err at their li
   const setup =
     'let t:integer=7\nlet w:string="w"\nlet a={f:1,nest:{g:1}}\nlet b={f:"s",nest:{g:"s"}}\n' +
     "b=a\na=b\nlet before=a\nlet peer=b\na.f=t\nb.nest.g=w\n";
-  // (each rejected copy's error per property, where it meets its place)
-  const copies = ["TSV041 'a' b.f", "TSV041 'a' b.nest.g", "TSV041 'b' a.f", "TSV041 'b' a.nest.g"];
-  const listed = (element: string): string[] => [
-    `TSV044 '${element}' f`,
-    `TSV044 '${element}' nest.g`,
-  ];
   const differing: string[] = [];
-  for (const [list, expected] of [
-    ["[before,peer]", [...copies, ...listed("peer")]],
-    ["[peer,before]", [...copies, ...listed("before")]],
-    ["[before,before]", copies],
+  for (const [list, element] of [
+    ["[before,peer]", "peer"],
+    ["[peer,before]", "before"],
+    ["[before,before]", null],
   ] as const) {
     const source = `${setup}let final=${list}\nexit\n`;
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, list);
+    // (a site as the token's offsets in the first occurrence of the text around it)
+    const at = (around: string, token: string): string => {
+      const start = source.indexOf(around) + around.indexOf(token);
+      return `${start}:${start + token.length} '${token}'`;
+    };
+    // each rejected copy's error per property where it meets its place; with two aliases, each property's error at the
+    // list's second element
+    const expected = [
+      `TSV041 ${at("\nb=a\n", "a")} b.f`,
+      `TSV041 ${at("\nb=a\n", "a")} b.nest.g`,
+      `TSV041 ${at("\na=b\n", "b")} a.f`,
+      `TSV041 ${at("\na=b\n", "b")} a.nest.g`,
+      ...(element === null
+        ? []
+        : [
+            `TSV044 ${at(`,${element}]`, element)} f`,
+            `TSV044 ${at(`,${element}]`, element)} nest.g`,
+          ]),
+    ].sort();
     const text = (diagnostic: CheckedDiagnostic): string => {
-      const at = `${diagnostic.code} '${source.slice(diagnostic.site.start, diagnostic.site.end)}'`;
+      const { start, end } = diagnostic.site;
+      const site = `${diagnostic.code} ${start}:${end} '${source.slice(start, end)}'`;
       if (diagnostic.class !== "compile-error" || !("rule" in diagnostic))
-        return `${diagnostic.class} ${at}`;
+        return `${diagnostic.class} ${site}`;
       const { rule } = diagnostic;
-      if (rule.rule === "mixed") return `${at} ${rule.path.join(".")}`;
-      return rule.rule === "store" ? `${at} ${rule.into.replace(/'/gu, "")}` : `${at} ${rule.rule}`;
+      if (rule.rule === "mixed") return `${site} ${rule.path.join(".")}`;
+      return rule.rule === "store"
+        ? `${site} ${rule.into.replace(/'/gu, "")}`
+        : `${site} ${rule.rule}`;
     };
     for (const mode of MODES) {
       const result = inMode(mode, () => checkedResult(analyseCore(request), request));
