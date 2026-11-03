@@ -133,40 +133,6 @@ export function levelProof(admitted: AdmittedType, contract: () => readonly Item
 export interface ContractReader {
   level(place: PlaceId, path: readonly string[]): LevelProof;
   properties(place: PlaceId, path: readonly string[]): ReadonlySet<string>;
-  /** A level's holding (`Holding`), for the walk's cycle certificate; without it a walk runs to the slice's depth. */
-  holding?(place: PlaceId, path: readonly string[]): Holding;
-}
-
-/**
- * A level's holding (#1646, TABLE r4.278 (3)): its own contract position and every position its key reads whole
- * through copies (`admission/holdings.ts`), and the holding one step below. Where a level's key reads a level still being
- * walked above it, its contract holds itself below itself: a cycle of copies, which no finite plan carries, so the walk
- * leaves the slice there at once, as at the slice's depth (`SLICE_DEPTH`), where the walk would otherwise end.
- */
-export interface Holding {
-  readonly own: object;
-  /** Whether its key reads, besides its own, a position `open` holds (each read charged). */
-  readsAny(open: ReadonlySet<object>): boolean;
-  child(step: string): Holding;
-}
-
-/** The positions of the levels a walk is inside of, each until its walk below it ends (`Holding`). */
-export class OpenLevels {
-  readonly #open = new Set<object>();
-
-  /** Whether `holding`'s key reads a level already open: a cycle of copies. */
-  public cyclic(holding: Holding): boolean {
-    return holding.readsAny(this.#open);
-  }
-
-  /** Opens `holding`'s level: its walk asked first whether it is cyclic (`cyclic`), or it opens a walk. */
-  public open(holding: Holding): void {
-    this.#open.add(holding.own);
-  }
-
-  public leave(holding: Holding): void {
-    this.#open.delete(holding.own);
-  }
 }
 
 /** The literal records below a level, which give a decided object's properties their order. */
@@ -179,46 +145,25 @@ export interface RecordsBelow<R> {
 /**
  * A place's level walk, the one the store contracts and the facts share: the kinds at `path` and at each element step
  * below it, down to the first level that holds no collection. A collection at `limit` deep leaves the slice's facts
- * (`SLICE_DEPTH`), and so does an element level whose key reads a level still open (`Holding`, from `cycle`'s holding
- * of the level at `path`, opened here unless `cycle.open` is the walk that opened it).
+ * (`SLICE_DEPTH`).
  */
 export function levelWalk(
   kindsAt: (path: readonly string[]) => readonly ItemTag[],
   path: readonly string[],
   limit = SLICE_DEPTH,
-  cycle?: { readonly holding: Holding; readonly open?: OpenLevels },
 ): (readonly ItemTag[])[] {
   const levels: (readonly ItemTag[])[] = [];
-  const open = cycle?.open ?? new OpenLevels();
-  const entered: Holding[] = [];
-  let holding = cycle?.holding;
-  try {
-    if (holding !== undefined && cycle?.open === undefined) {
-      open.open(holding);
-      entered.push(holding);
-    }
-    for (let at = [...path]; ; at = [...at, "element"]) {
-      const tags = kindsAt(at);
-      levels.push(tags);
-      if (!tags.some((tag) => COLLECTIONS.has(tag))) break;
-      if (at.length + 1 >= limit) throw new SliceDepth();
-      if (holding !== undefined) {
-        holding = holding.child("element");
-        if (open.cyclic(holding)) throw new SliceDepth();
-        open.open(holding);
-        entered.push(holding);
-      }
-    }
-  } finally {
-    for (const level of entered) open.leave(level);
+  for (let at = [...path]; ; at = [...at, "element"]) {
+    const tags = kindsAt(at);
+    levels.push(tags);
+    if (!tags.some((tag) => COLLECTIONS.has(tag))) break;
+    if (at.length + 1 >= limit) throw new SliceDepth();
   }
   return levels;
 }
 
-/**
- * A place's collections nested deeper than the slice's facts follow, or a cycle of copies (`levelWalk`, `OpenLevels`).
- */
-class SliceDepth extends Error {
+/** A place's collections nested deeper than the slice's facts follow (`levelWalk`). */
+export class SliceDepth extends Error {
   public constructor() {
     super("A place of the slice holds collections deeper than its facts follow.");
   }
@@ -284,8 +229,6 @@ interface Assembled {
 export class ContractDescriptors<R> {
   readonly #table = new ContractTable();
   readonly #known = new Map<string, Assembled>();
-  /** The levels the walk of one request is inside of (`Holding`). */
-  #open = new OpenLevels();
 
   public constructor(
     private readonly reader: ContractReader,
@@ -326,11 +269,7 @@ export class ContractDescriptors<R> {
     records: R,
     outside: () => never,
   ): ContractResult {
-    this.#open = new OpenLevels();
-    const holding = this.reader.holding?.(place, path) ?? null;
-    const { plan, lost, by } = runCompileTask(
-      this.#contract(place, path, records, outside, holding),
-    );
+    const { plan, lost, by } = runCompileTask(this.#contract(place, path, records, outside));
     if (lost.length > 0)
       return {
         state: "lost",
@@ -347,7 +286,6 @@ export class ContractDescriptors<R> {
     path: readonly string[],
     records: R,
     outside: () => never,
-    holding: Holding | null,
   ): CompileTask<Assembled> {
     const key = `${place}|${path.join(".")}`;
     const known = this.#known.get(key);
@@ -357,9 +295,6 @@ export class ContractDescriptors<R> {
     }
     // (an extent cell of the receiving closure's where a completion pass assembles it, #1526 phase C)
     const entered = this.cells?.enter("extent", key) ?? false;
-    // (its level open while the walk is below it: a key below that reads it is a cycle of copies, #1646; a property's
-    // level was asked whether it is cyclic before its walk came here, a request's opens its walk)
-    if (holding !== null) this.#open.open(holding);
     try {
       const lost: ContractLevel[] = [];
       let by: LevelProof["by"] | null = null;
@@ -374,11 +309,10 @@ export class ContractDescriptors<R> {
           },
           path,
           this.limit,
-          holding === null ? undefined : { holding, open: this.#open },
         );
       } catch (error) {
-        // (collections deeper than the slice follows, or a cycle of copies through elements: the program leaves the
-        // slice there, as at an object's or a collection's depth below)
+        // (collections nested deeper than the slice follows: the program leaves the slice there, as at an object's or a
+        // collection's depth below, never with the walk's own error; `a.f=[a.f]` failed the compile so, #1646)
         if (!(error instanceof SliceDepth)) throw error;
         outside();
       }
@@ -386,12 +320,11 @@ export class ContractDescriptors<R> {
       const plan =
         admitted === null
           ? null
-          : yield* compileChild(this.#fill(place, path, admitted, records, outside, lost, holding));
+          : yield* compileChild(this.#fill(place, path, admitted, records, outside, lost));
       const assembled: Assembled = { plan, lost, by: by! };
       this.#known.set(key, assembled);
       return assembled;
     } finally {
-      if (holding !== null) this.#open.leave(holding);
       this.cells?.leave(entered);
     }
   }
@@ -403,45 +336,34 @@ export class ContractDescriptors<R> {
     records: R,
     outside: () => never,
     lost: ContractLevel[],
-    holding: Holding | null,
   ): CompileTask<ContractRef> {
     switch (plan.kind) {
       case "union": {
         const members: ContractRef[] = [];
         for (const member of plan.members)
           members.push(
-            yield* compileChild(this.#fill(place, path, member, records, outside, lost, holding)),
+            yield* compileChild(this.#fill(place, path, member, records, outside, lost)),
           );
         return this.#table.union(members);
       }
       case "list":
       case "set":
-      case "dict": {
+      case "dict":
         if (plan.element === null) return this.#table.intern(plan);
         if (path.length + 1 >= this.limit) outside();
-        // (its element level open while the walk is below it, #1646: `levelWalk` asked of each element level whether it
-        // is cyclic, with these same levels open, before the walk came here)
-        const element = holding?.child("element") ?? null;
-        if (element !== null) this.#open.open(element);
-        try {
-          return this.#table.collection(
-            plan.kind,
-            yield* compileChild(
-              this.#fill(
-                place,
-                [...path, "element"],
-                plan.element,
-                this.below(records).elements,
-                outside,
-                lost,
-                element,
-              ),
+        return this.#table.collection(
+          plan.kind,
+          yield* compileChild(
+            this.#fill(
+              place,
+              [...path, "element"],
+              plan.element,
+              this.below(records).elements,
+              outside,
+              lost,
             ),
-          );
-        } finally {
-          if (element !== null) this.#open.leave(element);
-        }
-      }
+          ),
+        );
       case "object": {
         const level = this.reader.level(place, path);
         if (plan.properties.length > 0 || level.by !== "decided" || level.inherited)
@@ -456,11 +378,8 @@ export class ContractDescriptors<R> {
             if (proof.unfinished) lost.push({ place, path: step });
             continue;
           }
-          // (a property whose key reads a level the walk is inside of: a cycle of copies, #1646)
-          const held = holding?.child(propertyStep(name)) ?? null;
-          if (held !== null && this.#open.cyclic(held)) outside();
           const child = yield* compileChild(
-            this.#contract(place, step, below.field(name), outside, held),
+            this.#contract(place, step, below.field(name), outside),
           );
           for (const level of child.lost) lost.push(level);
           if (child.plan !== null) properties.push({ name, type: child.plan });

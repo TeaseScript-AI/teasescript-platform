@@ -92,10 +92,6 @@ export const READS = new Map([
     "a stored value's recipe of the store walk (its own stop, its cells and operands): syntax, read",
   ],
   ["groups", "the places and paths `decide` decides: its inputs"],
-  [
-    "holdingAt",
-    "a level's holding, the positions its key reads whole through copies, for a contract walk's cycle certificate (#1646): read",
-  ],
   ["ingressSiteOf", "C1's site for external data a store brings: a site, read"],
   [
     "kindsAt",
@@ -239,12 +235,6 @@ const LISTED_READS = [
     "call",
     "answers.ts",
     "the admitted type at a path, the answers' level reader: a decision's answer, read where the answer asks it",
-  ],
-  [
-    "holdingAt",
-    "call",
-    "answers.ts",
-    "a level's holding for the lowering's and the facts' walks' cycle certificate (#1646): read where a walk asks it",
   ],
   [
     "stored",

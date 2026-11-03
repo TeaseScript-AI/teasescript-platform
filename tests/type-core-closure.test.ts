@@ -521,6 +521,7 @@ const WITNESSES: readonly string[] = [
 
 test("a completion past its allowance ends and keeps no result, the analysis at most three times its settled work (#1526 phase C)", () => {
   for (const [name, body] of [
+    ["a directed copy chain at 4", directed(4)],
     ["W15 at 256", w15(256)],
     ["whole stores into one place at 64", fields(64)],
   ] as const) {
@@ -553,33 +554,6 @@ test("a completion past its allowance ends and keeps no result, the analysis at 
         at,
       );
     }
-  }
-});
-
-test("a completion whose contract holds a cycle of copies leaves the slice and keeps no result (#1646)", () => {
-  // (the directed copy chain at 4: `b0.y=a0` and `a0=b0` make `b0`'s contract hold itself one level down. Its
-  // completion walked that cycle again at every re-extraction and ran past its allowance; it now meets the cycle again
-  // in its first extractions and ends where the program leaves the slice, every obligation without a result)
-  const request = coreRequest(
-    [{ path: "main.tease", source: directed(4) + ending }],
-    [...GLOBALS, "hostFlag"],
-  );
-  assert.ok(request !== null);
-  for (const mode of HELD_MODES) {
-    const answers: Answers = mode.run(() =>
-      withTestDemandAllowance(16, () => completedCore(request)),
-    );
-    const completion = answers.budget.closure;
-    assert.ok(completion !== null, mode.name);
-    assert.equal(completion.counts.leftSlice, 1, mode.name);
-    assert.equal(completion.counts.capped, 0, mode.name);
-    assert.equal(answers.budget.exhausted, null, mode.name);
-    assert.ok(answers.receiving.length > 0, mode.name);
-    assert.deepEqual(
-      answers.receiving.filter(({ result }) => result !== null),
-      [],
-      mode.name,
-    );
   }
 });
 

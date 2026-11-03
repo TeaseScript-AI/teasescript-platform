@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileSourceWithBackend } from "../src/compiler.js";
 import type { InstructionPlan, TypePlan } from "../src/plan/model.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { storeContracts } from "../src/type-inference/core/consumer.js";
 import {
@@ -166,4 +166,30 @@ test("a written contract deeper than the native stack is one node, made on an ex
   }
   assert.equal(levels, depth);
   assert.deepEqual(at, { kind: "integer" });
+});
+
+/** The compile's exit from the slice (its message), or `null` where it compiles. */
+function sliceExit(source: string): string | null {
+  try {
+    compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND);
+    return null;
+  } catch (error) {
+    if (!(error instanceof CandidateOutsideSlice)) throw error;
+    return error.message;
+  }
+}
+
+test("lists that hold themselves leave the slice at its depth instead of failing the compile (#1646)", () => {
+  // (found on main: each nests its lists without end, and the facts' walk threw past the slice's depth and failed the
+  // compile. `l=[l]`: the backend's list-nesting rule follows the contract's kinds as the facts do, so the variable leaves
+  // the slice before the facts run. `a.f=[a.f]`, a property no rule walks: the facts' walk leaves the slice at its depth
+  // cut, at the read it types, with the sentence and the site the lowering's depth cut gives: no plan, the same exit)
+  assert.equal(
+    sliceExit('let l=[[1]]\nl=[l]\nl=hostValue\nsay "AFTER"\nexit\n'),
+    "The candidate type analysis does not cover the variable 'l', whose lists nest deeper than the slice follows yet (main.tease, offset 4).",
+  );
+  assert.equal(
+    sliceExit("let a={f:[[1]]}\na.f=[a.f]\na.f=hostValue\nexit\n"),
+    "The candidate type analysis does not cover a value whose structure the slice does not follow yet (main.tease, offset 21).",
+  );
 });

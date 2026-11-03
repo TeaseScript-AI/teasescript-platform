@@ -2,7 +2,6 @@ import type { Expression } from "../../ast.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { Admission } from "./admission.js";
 import { admittedLevel } from "./admission/admitted.js";
-import { holdingAt } from "./admission/holdings.js";
 import {
   closureCounts,
   LeftSlice,
@@ -725,7 +724,6 @@ export class Consumers {
         this.propertySets.set(key, names);
         return names;
       },
-      holding: (place, path) => holdingAt(this.admission, place, path),
     };
     // (its work is the capture's, no consumer read's)
     this.reading = null;
@@ -1033,7 +1031,6 @@ export class Consumers {
         closure.took("listing", key);
         return found;
       },
-      holding: (place, path) => holdingAt(this.admission, place, path),
     };
     const descriptors = captureDescriptors(reader, epoch, closure);
     const dirty = new Set<number>();
