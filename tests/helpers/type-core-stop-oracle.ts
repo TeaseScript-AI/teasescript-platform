@@ -186,17 +186,6 @@ function rerun(
   return again;
 }
 
-/** The items of `list` beyond those of `other`, each as often as `list` has it more (a multiset difference). */
-function beyond(list: readonly string[], other: readonly string[]): string[] {
-  const left = new Map<string, number>();
-  for (const item of other) left.set(item, (left.get(item) ?? 0) + 1);
-  return list.filter((item) => {
-    const count = left.get(item) ?? 0;
-    if (count > 0) left.set(item, count - 1);
-    return count === 0;
-  });
-}
-
 /** A diagnostic's offsets. */
 function offsets(d: Compiled["diagnostics"][number]): Span {
   return { start: d.span.start.offset, end: d.span.end.offset };
@@ -316,53 +305,117 @@ export function stopProblems(c: StopCase): string[] {
     before.some((d, index) => !keeps(d, after[index]!, () => wordsAt(index)))
   )
     problems.push(`diagnostics ${text(after)} against ${text(before)}`);
-  // the checks, in their published order: an unstopped one a mark's record owns or one of a marked store's records; a
-  // stopped one a mark's record owns, one of a marked store's records the unstopped analysis has too (the record kept,
-  // on both sides alike, TABLE r4.122), or one that forms only with the marks, their content (r4.110 (a): the stopped
-  // analysis without them lacks it); any other stopped check inside a marked store's value is compared
-  const marked = new Set<Obligation>(
-    [...unstopped.answers.diagnostics, ...stopped.answers.diagnostics, ...marks].flatMap((d) =>
-      "obligation" in d && excused.has(recordOf(d.code, d.site)) ? [d.obligation] : [],
-    ),
+  // the checks, by one ledger of each check's content (#1642, the lead's ruling on #1663): every check a record owns uses
+  // one count of its content and every other check is compared, so a further copy is an extra check and a missing one a
+  // lost check, on either side. A content's count on a side is its published copies less what stands for some of them:
+  // its owning records there (that side's warnings and marks the stop excuses; a record whose check its side does not
+  // publish is a lost check), else one the combined stop's rule accepts; on the unstopped side every copy of a marked
+  // store's record (TABLE r4.122), on the stopped side as many of those as the unstopped side has; and on the stopped
+  // side one copy of a content no record, rule or unstopped copy stands for that forms only with the marks, their
+  // content (r4.110 (a): the stopped analysis without them has fewer). The two counts of each content must be equal, and
+  // the checks left compared stand in the same published order (r4.86 (1)).
+  const counted = (texts: readonly string[]): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const text of texts) counts.set(text, (counts.get(text) ?? 0) + 1);
+    return counts;
+  };
+  const owners = (list: readonly CoreDiagnostic[]): Map<string, number> => {
+    const objects = new Set<Obligation>();
+    for (const d of list)
+      if ("obligation" in d && excused.has(recordOf(d.code, d.site))) objects.add(d.obligation);
+    return counted([...objects].map((each) => JSON.stringify(each)));
+  };
+  const textsOf = (checks: readonly Obligation[]): string[] =>
+    checks.map((check) => JSON.stringify(check));
+  const [checksBefore, checksAfter] = [
+    textsOf(unstopped.answers.checks),
+    textsOf(stopped.answers.checks),
+  ];
+  const [publishedBefore, publishedAfter] = [counted(checksBefore), counted(checksAfter)];
+  const [ownedBefore, ownedAfter] = [
+    owners([...unstopped.answers.diagnostics, ...unstopped.answers.budget.deferred]),
+    owners([...stopped.answers.diagnostics, ...marks]),
+  ];
+  for (const [owned, published] of [
+    [ownedBefore, publishedBefore],
+    [ownedAfter, publishedAfter],
+  ] as const)
+    for (const [text, count] of owned)
+      for (let missing = count - (published.get(text) ?? 0); missing > 0; missing -= 1)
+        problems.push(`lost check ${text}`);
+  const standing = (owned: ReadonlyMap<string, number>, text: string): number =>
+    owned.get(text) ?? (accepted.has(text) ? 1 : 0);
+  const marked = new Set(
+    unstopped.answers.checks
+      .filter((check) => ofStore(check.site))
+      .map((check) => JSON.stringify(check)),
   );
-  const ofStores = unstopped.answers.checks
-    .filter((check) => !marked.has(check) && ofStore(check.site))
-    .map((check) => JSON.stringify(check))
-    .filter((check) => !accepted.has(check));
-  const owed = unstopped.answers.checks
-    .filter((check) => !marked.has(check) && !ofStore(check.site))
-    .map((check) => JSON.stringify(check))
-    .filter((check) => !accepted.has(check));
-  let kept = beyond(
-    stopped.answers.checks
-      .filter((check) => !marked.has(check))
-      .map((check) => JSON.stringify(check))
-      .filter((check) => !accepted.has(check)),
-    ofStores,
-  );
-  // (an extra the stopped analysis without its marks lacks is their content; a check both have stays compared)
-  const extra = beyond(kept, owed);
-  let formed: string[] = [];
-  if (extra.length > 0 && marks.length > 0) {
-    const without = rerun(stopped, ...omission(excused)).answers.checks;
-    formed = beyond(
-      extra,
-      without.map((check) => JSON.stringify(check)),
+  // (each content's count on each side, before formation)
+  const contents = new Set([...checksBefore, ...checksAfter]);
+  const left = new Map<string, readonly [number, number]>();
+  for (const text of contents) {
+    const unstoppedCount = Math.max(
+      0,
+      (publishedBefore.get(text) ?? 0) - standing(ownedBefore, text),
     );
-    kept = beyond(kept, formed);
+    const stoppedCount = Math.max(0, (publishedAfter.get(text) ?? 0) - standing(ownedAfter, text));
+    left.set(
+      text,
+      marked.has(text)
+        ? [0, Math.max(0, stoppedCount - unstoppedCount)]
+        : [unstoppedCount, stoppedCount],
+    );
   }
-  if (JSON.stringify(owed) !== JSON.stringify(kept)) {
-    const [lost, extra] = [beyond(owed, kept), beyond(kept, owed)];
-    for (const check of lost) problems.push(`lost check ${check}`);
-    for (const check of extra) problems.push(`extra check ${check}`);
-    if (lost.length + extra.length === 0) problems.push(`checks order ${kept.join(" | ")}`);
+  let formed: string[] = [];
+  const surplus = [...left].filter(([, [mine, theirs]]) => theirs > mine);
+  if (surplus.length > 0 && marks.length > 0) {
+    const without = counted(textsOf(rerun(stopped, ...omission(excused)).answers.checks));
+    formed = surplus
+      .filter(
+        ([text, [mine, theirs]]) =>
+          mine === 0 &&
+          standing(ownedBefore, text) === 0 &&
+          standing(ownedAfter, text) === 0 &&
+          !marked.has(text) &&
+          theirs > (without.get(text) ?? 0),
+      )
+      .map(([text]) => text);
+    for (const text of formed) {
+      const [mine, theirs] = left.get(text)!;
+      left.set(text, [mine, theirs - 1]);
+    }
   }
+  for (const [text, [mine, theirs]] of left) {
+    for (let count = mine - theirs; count > 0; count -= 1) problems.push(`lost check ${text}`);
+    for (let count = theirs - mine; count > 0; count -= 1) problems.push(`extra check ${text}`);
+  }
+  // (the checks left compared, in their published order: each side less, from its first copies, what stands for some)
+  const compared = (texts: readonly string[], counts: (text: string) => number): string[] => {
+    const skip = new Map<string, number>();
+    return texts.filter((text) => {
+      const done = skip.get(text) ?? 0;
+      skip.set(text, done + 1);
+      return done >= counts(text);
+    });
+  };
+  const owed = compared(checksBefore, (text) =>
+    marked.has(text) ? Infinity : (publishedBefore.get(text) ?? 0) - left.get(text)![0],
+  );
+  const kept = compared(
+    checksAfter,
+    (text) => (publishedAfter.get(text) ?? 0) - left.get(text)![1],
+  );
+  if (
+    problems.every((problem) => !/^(lost|extra) check /.test(problem)) &&
+    JSON.stringify(owed) !== JSON.stringify(kept)
+  )
+    problems.push(`checks order ${kept.join(" | ")}`);
   if (want !== null && got === null) problems.push("no plan");
   if (want === null || got === null) return problems;
   // the plans, whole: each difference inside a changing mark's content
   const differences = planDifferences(want, got);
   const obligations = new Map(
-    unstopped.answers.diagnostics.flatMap((d) =>
+    [...unstopped.answers.diagnostics, ...unstopped.answers.budget.deferred].flatMap((d) =>
       "obligation" in d ? [[recordOf(d.code, d.site), JSON.stringify(d.obligation)] as const] : [],
     ),
   );

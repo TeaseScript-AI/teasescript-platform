@@ -1642,6 +1642,281 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
 });
 
 /**
+ * #1642 and the stop oracle's ledger of each check's content (the lead's ruling on #1663): every check a record owns uses
+ * one count of its content, so a further copy is an extra check and a missing one a lost check, on either side. The
+ * issue's `dict-path` witness reversed, under demand allowance 256, stopped at program allowance 2,464: the reference's
+ * TSV043 mark and the stopped run's each carry the receiver's null-check both runs publish, so neither is lost. Codex's
+ * controls on #1663, each clean as compiled: r1's (a stop at program allowance 1) loses the check where the stopped run
+ * keeps its mark but drops it and its guard, and changes the plan where it drops the guard alone; r2's, a copy the rule
+ * accepts published twice; r3's, a further copy where a run publishes the check; r4's, a boundary that forms only with
+ * the marks, doubled; r5's, a further copy of a boundary both runs owe; r6's, the reference losing its own check; and a further copy of a
+ * check the stopped run alone owns.
+ */
+test("the stop oracle counts each check's content on both sides, a further copy an extra and a missing one lost (#1642)", () => {
+  const source =
+    'let p = hostValue otherwise hostOther\nlet box: integer[] dict = dict{k: []}\nbox.k = [p, hostOther]\nsay "AFTER"\nexit\n';
+  const c: HeldCase = { name: "dict-path", source, slice: true, values: [] };
+  const receiver = (answers: Answers) =>
+    answers.checks.filter(
+      (check) =>
+        check.kind === "null-check" &&
+        check.target === "box" &&
+        source.slice(check.site.start, check.site.end) === "box.k",
+    );
+  for (const mode of [HELD_MODES[1]!, HELD_MODES[3]!]) {
+    const reference = heldRun(c, mode, undefined, 256);
+    const stopped = heldRun(c, mode, 2464, 256);
+    const [owed, kept] = [receiver(reference.answers), receiver(stopped.answers)];
+    assert.equal(owed.length, 1, mode.name);
+    assert.deepEqual(kept, owed, mode.name);
+    assert.ok(
+      stopped.answers.budget.deferred.some(
+        (mark) =>
+          mark.code === "TSV043" && JSON.stringify(mark.obligation) === JSON.stringify(owed[0]),
+      ),
+      mode.name,
+    );
+    assert.deepEqual(
+      stopProblems({ unstopped: reference, stopped, fitting: [], violating: [] }),
+      [],
+      mode.name,
+    );
+  }
+  const plain =
+    'let p = hostValue otherwise hostOther\nlet box = {k: [1]}\nbox.k = [p, hostOther]\nsay "AFTER"\nexit\n';
+  const o: HeldCase = { name: "object", source: plain, slice: true, values: [] };
+  const mode = HELD_MODES[1]!;
+  const reference = heldRun(o, mode, undefined, 256);
+  const stopped = heldRun(o, mode, 1, 256);
+  const [check] = reference.answers.checks.filter(
+    (each) => each.kind === "null-check" && plain.slice(each.site.start, each.site.end) === "box.k",
+  );
+  assert.ok(check !== undefined);
+  const text = JSON.stringify(check);
+  assert.ok(
+    stopped.answers.budget.deferred.some((mark) => JSON.stringify(mark.obligation) === text),
+  );
+  const judge = (run: StopRun): string[] =>
+    stopProblems({ unstopped: reference, stopped: run, fitting: [], violating: [] });
+  assert.deepEqual(judge(stopped), []);
+  // (the check left out of the answers, and the guard it gives the store, `requireExisting`, out of the plan)
+  const unguarded = (plan: StopRun["result"]["plan"]): StopRun["result"]["plan"] => {
+    const copy = structuredClone(plan);
+    const pending: unknown[] = [copy];
+    while (pending.length > 0) {
+      const node = pending.pop();
+      if (node === null || typeof node !== "object") continue;
+      if (
+        "kind" in node &&
+        node.kind === "assign" &&
+        "span" in node &&
+        typeof node.span === "object" &&
+        node.span !== null &&
+        "so" in node.span &&
+        node.span.so === check.site.start
+      )
+        Reflect.deleteProperty(node, "requireExisting");
+      pending.push(...Object.values(node));
+    }
+    return copy;
+  };
+  const dropped = <T extends { readonly answers: Answers; readonly result: StopRun["result"] }>(
+    each: T,
+    checks = true,
+  ): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.filter((x) => !checks || JSON.stringify(x) !== text),
+    },
+    result: { ...each.result, plan: unguarded(each.result.plan) },
+  });
+  // (the guard alone: a plan change inside the mark's content, but the mark owes the reference's own check there)
+  assert.ok(
+    judge({
+      ...dropped(stopped, false),
+      without: (omit, key) => dropped(stopped.without(omit, key), false),
+    }).some((problem) => problem.startsWith("plan ")),
+  );
+  assert.ok(
+    judge({
+      ...dropped(stopped),
+      without: (omit, key) => dropped(stopped.without(omit, key)),
+    }).includes(`lost check ${text}`),
+  );
+  // (a further copy of the owned check where a run publishes it is an extra: what forms with the marks credits no content
+  // a record owns, Codex r3's control on #1663)
+  const again = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.some((x) => JSON.stringify(x) === text)
+        ? [...each.answers.checks, structuredClone(check)]
+        : each.answers.checks,
+    },
+  });
+  assert.ok(
+    judge({
+      ...again(stopped),
+      without: (omit, key) => again(stopped.without(omit, key)),
+    }).includes(`extra check ${text}`),
+  );
+  // (the reference's own check is one count of its content too: a reference that loses it has a lost check, Codex r6's
+  // control on #1663)
+  const lacking = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.filter((x) => JSON.stringify(x) !== text),
+    },
+  });
+  assert.ok(
+    stopProblems({
+      unstopped: {
+        ...lacking(reference),
+        without: (omit, key) => lacking(reference.without(omit, key)),
+      },
+      stopped,
+      fitting: [],
+      violating: [],
+    }).includes(`lost check ${text}`),
+  );
+  // (a check the stopped run alone owns, which the reference neither owns nor publishes, takes no count from what forms
+  // with the marks: a further copy of it is an extra; the natural reference, forward, a stop at program allowance 1)
+  const natural0 = heldRun(o, HELD_MODES[0]!);
+  const early0 = heldRun(o, HELD_MODES[0]!, 1);
+  const [own0] = early0.answers.budget.deferred.filter(
+    (mark) => mark.code === "TSV043" && plain.slice(mark.site.start, mark.site.end) === "box.k",
+  );
+  assert.ok(own0 !== undefined);
+  const owned0 = JSON.stringify(own0.obligation);
+  assert.ok(!natural0.answers.checks.some((x) => JSON.stringify(x) === owned0));
+  assert.ok(early0.answers.checks.some((x) => JSON.stringify(x) === owned0));
+  const once0 = (run: StopRun): string[] =>
+    stopProblems({ unstopped: natural0, stopped: run, fitting: [], violating: [] });
+  assert.deepEqual(once0(early0), []);
+  const again0 = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.some((x) => JSON.stringify(x) === owned0)
+        ? [...each.answers.checks, structuredClone(own0.obligation)]
+        : each.answers.checks,
+    },
+  });
+  assert.ok(
+    once0({
+      ...again0(early0),
+      without: (omit, key) => again0(early0.without(omit, key)),
+    }).includes(`extra check ${owned0}`),
+  );
+  // (and a further copy of a boundary that forms only with the marks, #1448's, is an extra: what forms takes one credit,
+  // Codex r4's control on #1663, forward with the sharing, a settled walk stop at program allowance 1,218)
+  const formedCase: HeldCase = {
+    name: "formed-boundary",
+    source:
+      'let root = {f0: hostValue}\nroot = {f0: hostOther}\nsay "BEFORE"\nrepeat root.f0 {say "ok"}\nsay "AFTER"\nexit\n',
+    slice: true,
+    values: [],
+  };
+  const plainRun = heldRun(formedCase, HELD_MODES[0]!);
+  const walked = heldRun(formedCase, HELD_MODES[0]!, 1218);
+  const isBoundary = (x: Answers["checks"][number]): boolean =>
+    x.boundary &&
+    x.target === "root" &&
+    formedCase.source.slice(x.site.start, x.site.end) === "hostValue";
+  assert.equal(plainRun.answers.checks.filter(isBoundary).length, 0);
+  const [boundary] = walked.answers.checks.filter(isBoundary);
+  assert.ok(boundary !== undefined);
+  const formedJudge = (run: StopRun): string[] =>
+    stopProblems({ unstopped: plainRun, stopped: run, fitting: [], violating: [] });
+  assert.deepEqual(formedJudge(walked), []);
+  const doubled = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.some(isBoundary)
+        ? [...each.answers.checks, structuredClone(boundary)]
+        : each.answers.checks,
+    },
+  });
+  assert.ok(
+    formedJudge({
+      ...doubled(walked),
+      without: (omit, key) => doubled(walked.without(omit, key)),
+    }).includes(`extra check ${JSON.stringify(boundary)}`),
+  );
+  // (a further copy of the boundary both runs owe, at 'hostOther', is an extra too: what forms takes no credit for a
+  // content the reference owes, Codex r5's control on #1663)
+  const isOwed = (x: Answers["checks"][number]): boolean =>
+    x.boundary &&
+    x.target === "root" &&
+    formedCase.source.slice(x.site.start, x.site.end) === "hostOther";
+  assert.equal(plainRun.answers.checks.filter(isOwed).length, 1);
+  const [owedBoundary] = walked.answers.checks.filter(isOwed);
+  assert.ok(owedBoundary !== undefined);
+  const owedTwice = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.some(isOwed)
+        ? [...each.answers.checks, structuredClone(owedBoundary)]
+        : each.answers.checks,
+    },
+  });
+  assert.ok(
+    formedJudge({
+      ...owedTwice(walked),
+      without: (omit, key) => owedTwice(walked.without(omit, key)),
+    }).includes(`extra check ${JSON.stringify(owedBoundary)}`),
+  );
+  // a check one record owns and the combined stop's rule accepts is one credit: a second copy of it is an extra (Codex
+  // r2's control on #1663, forward with the sharing, demand 256, a stop at program allowance 1)
+  const shapes: HeldCase = {
+    name: "object-shapes",
+    source:
+      'let boxes = [{n:1},{k:2}]\nlet box = boxes[hostValue]\nbox.n = hostOther\nsay "AFTER"\nexit\n',
+    slice: true,
+    values: [],
+  };
+  const forward = HELD_MODES[0]!;
+  const natural = heldRun(shapes, forward, undefined, 256);
+  const early = heldRun(shapes, forward, 1, 256);
+  const rule = combinedStopRule(shapes, forward, natural, early.answers);
+  const excused = {
+    records: new Set([...rule.records.keys(), ...rule.relabelled.records, ...rule.coarse.records]),
+    checks: new Set([
+      ...rule.checks.keys(),
+      ...rule.owing,
+      ...rule.relabelled.checks,
+      ...rule.coarse.checks.keys(),
+    ]),
+  };
+  const [owner] = early.answers.budget.deferred.filter(
+    (mark) =>
+      mark.code === "TSV043" && shapes.source.slice(mark.site.start, mark.site.end) === "box.n",
+  );
+  assert.ok(owner !== undefined);
+  const owned = JSON.stringify(owner.obligation);
+  assert.ok(excused.checks.has(owned));
+  const twice = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: [...each.answers.checks, structuredClone(owner.obligation)],
+    },
+  });
+  const shaped = (run: StopRun): string[] =>
+    stopProblems({ unstopped: natural, stopped: run, fitting: [], violating: [], excused });
+  assert.deepEqual(shaped(early), []);
+  assert.ok(
+    shaped({ ...twice(early), without: (omit, key) => twice(early.without(omit, key)) }).includes(
+      `extra check ${owned}`,
+    ),
+  );
+});
+
+/**
  * TABLE r4.162 at a stop (Astra r3 on #1273): a fix's code holds the author's text only where no other diagnostic lies
  * in it, nor a region the stop left unchecked, its "not checked" mark's, where the checks it moved to the runtime stand
  * unreported; and after a stop no fix fact is proved (`Consumers.withFacts`), so an error's code is words. So a stop
