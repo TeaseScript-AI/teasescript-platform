@@ -1257,6 +1257,22 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     );
     const planText = readFileSync(join(held, "area", "PLAN"), "utf8");
     const plannedAgain = await state.planned(joined.baseline, "area", planText);
+    // (#1647, Codex r4) a writer stores by its area as the gate rereads it: an issued area cannot be changed, an object
+    // made otherwise (other places, another multiple) only names the area, whose stored shard still counts and is
+    // skipped, and one of another PLAN is refused
+    assert.throws(() => {
+      plannedAgain.area.places[0] = sha256("");
+    }, TypeError);
+    for (const forged of [
+      { ...plannedAgain.area, places: [sha256("")] },
+      { ...plannedAgain.area, units: 8 },
+    ])
+      assert.equal((await state.beginShard(joined.baseline, forged, 0)).skipped, "stored");
+    const otherPlan = { ...plannedAgain.area, text: `${planText}x\n` };
+    assert.match(
+      (await state.beginShard(joined.baseline, otherPlan, 0)).refused,
+      /is not the area this writer planned/,
+    );
     rmSync(join(held, "area", "0of1.runs.jsonl"));
     const begun = await state.beginShard(joined.baseline, plannedAgain.area, 0);
     assert.notEqual(begun.claim, undefined);
@@ -1268,6 +1284,16 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     renameSync(held, `${held}-moved`);
     cpSync(`${held}-moved`, held, { recursive: true });
     assert.match((await state.planned(joined.baseline, "area", planText)).refused, /was replaced/);
+    // (and an area issued before its baseline was replaced, given with a new handle on the replacement: the writer
+    // stores by the replacement's area as the gate reads it, and says what its readers say, Codex r4)
+    const rejoined = await state.owned(
+      state.outside(fourth, [], fail),
+      state.identityOf(keeper),
+      null,
+    );
+    const again = await state.beginShard(rejoined.baseline, plannedAgain.area, 0);
+    const published = await state.endShard(again.claim, [], {});
+    assert.equal(published.verified, state.storedRuns(join(held, "area")).lines !== undefined);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -2268,6 +2294,18 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
       refusal.stderr,
       /g\.mjs budget: its run "src-on publication" is not one a store writes/,
     );
+    // (and a MANIFEST holding one area's record twice, which status refuses, refused by the comparison too: Codex r4)
+    const doubled = join(directory, "doubled");
+    cpSync(store, doubled, { recursive: true });
+    const doubledManifest = join(doubled, src!, "MANIFEST");
+    const areaLine = readFileSync(doubledManifest, "utf8").match(/^area units .*\n/m)![0];
+    writeFileSync(doubledManifest, `${readFileSync(doubledManifest, "utf8")}${areaLine}`);
+    const twice = run(runner, folder, head, "--baseline", join(doubled, src!, "units"));
+    assert.equal(twice.status, 2);
+    assert.match(
+      twice.stderr,
+      /MANIFEST is not one this tool writes: its line \d+ is no line this tool writes/,
+    );
     const restored = run(runner, folder, base, "--store", forged);
     assert.equal(lines(restored.stdout).at(-1).verified, true, restored.stdout);
     assert.equal(
@@ -2358,10 +2396,10 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
 });
 
 test("every reader of a stored shard accepts or refuses one line alike, none throwing, and a writer stores again what it refuses: a family over the line's PLAN, end, cut and run (#1647, Codex r2)", async () => {
-  // The family's whole product (FAMILIES_FORMAT=full: 3 PLANs × 3 bindings × 9 ends × 5 cuts × 4 runs) is queue
-  // evidence, under
-  // agents.home.arpa:~/work/evidence/1650/<head>/format-family/; CI runs one variant per class and boundary of each axis
-  // (the test-cost rule).
+  // Its readers: status, import, the comparison and, for plan 2, the stalls' listing, `state` and the store. The
+  // family's whole product (FAMILIES_FORMAT=full: 3 PLANs × 3 bindings × 9 ends × 5 cuts × 4 runs) is queue evidence,
+  // under agents.home.arpa:~/work/evidence/1650/<head>/format-family/; CI runs one variant per class and boundary of
+  // each axis (the test-cost rule).
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     const tree = join(directory, "tree");
@@ -2376,8 +2414,9 @@ test("every reader of a stored shard accepts or refuses one line alike, none thr
       join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
       unitsLibrary(false),
     );
-    const area = join(directory, "units");
-    mkdirSync(area);
+    // (the area in the tree, where `state` finds it)
+    const area = join(tree, "tests", "families", "units");
+    mkdirSync(area, { recursive: true });
     writeFileSync(join(area, "g.mjs"), `export const cases = [["s", "s"]];\n`);
     const tool = (...args: string[]) =>
       spawnSync(process.execPath, [baselines, ...args], { encoding: "utf8" });
@@ -2556,6 +2595,13 @@ test("every reader of a stored shard accepts or refuses one line alike, none thr
         );
         assert.ok([0, 2].includes(listing.status!), `${name} stalls: ${listing.stderr}`);
         answers["stalls"] = listing.status === 0;
+        // (`state`, the hook's and `baseline.sh status`'s reader, of the tree whose area this is)
+        const state = tool("state", tree, root, "--read-only");
+        assert.ok(
+          [0, 1, 2].includes(state.status!),
+          `${name} state: ${state.stdout}${state.stderr}`,
+        );
+        answers["state"] = state.status === 0;
         const store = spawnSync(process.execPath, [runner, area, tree, "--store", root], {
           encoding: "utf8",
         });

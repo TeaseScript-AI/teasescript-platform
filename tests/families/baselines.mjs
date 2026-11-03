@@ -135,8 +135,8 @@ function areaRead(dir, name, text) {
     return { refused: `${dir}/${name}'s PLAN is not one this tool writes: ${fault}` };
   const { version, units } = formatOf(plan);
   const { shards, places } = parsePlan(plan);
-  const area = { dir, name, text: plan, plan: record.plan, shards, places, version, units };
-  return { area: Object.freeze(area) };
+  const area = { dir, name, text: plan, plan: record.plan, shards, version, units };
+  return { area: Object.freeze({ ...area, places: Object.freeze([...places]) }) };
 }
 
 /** A git object's id, as `git hash-object` gives a blob's. */
@@ -760,62 +760,82 @@ export async function planned(baseline, area, plan) {
 const claims = new WeakMap();
 
 /**
- * The shard `shard` of the area `area` (`planned`'s, `areaRead`'s, of this baseline) to store (through the gate):
- * `skipped` where it counts or a running writer stores it, else this process's `claim` on it (above) and its `file`;
- * `refused` where the baseline refuses the writer.
+ * The area `given` names, as the gate reads it under the MANIFEST `text` it holds (`areaRead`), the one area a writer
+ * stores by (#1647, Codex r4): the caller's object (`planned`'s) only names the area and the PLAN its writer expects;
+ * where the area read is not that PLAN, why the writer is refused.
  */
-export async function beginShard(baseline, area, shard) {
-  const top = pathOf(baseline, "baseline");
-  if (area?.dir !== top)
-    throw new TypeError(`${String(area?.name)} is no area of ${top} this tool read`);
-  const { shards } = area;
-  const dir = path.join(top, areaName(area.name));
-  const file = shardFile(dir, shard, shards);
-  const outcome = await gate(baseline, (manifest) => {
-    if (verified(area, shard, identityIn(manifest))) return { skipped: "stored" };
-    if (!claimed(path.join(dir, claimName(shard, shards))))
-      return { skipped: "being stored by another writer" };
-    const claim = Object.freeze({});
-    claims.set(claim, { baseline, area, shard });
-    return { claim };
-  });
-  if (outcome === RETIRED)
-    return { refused: `${top} was replaced while this writer began a shard` };
-  return { file, ...outcome };
+function areaUnder(top, given, text) {
+  const name = areaName(given?.name);
+  const read = areaRead(top, name, text);
+  if (read.area === undefined || read.area.text !== given.text)
+    return {
+      refused: `${top}/${name} is not the area this writer planned: ${read.refused ?? read.missing ?? "another PLAN"}`,
+    };
+  return read;
 }
 
 /**
- * The shard of the claim `claim` (above) published whole through the gate, its lines (`lines`) then its total last: a
- * new one by a hard link, one that does not count by a rename over it, one another writer published meanwhile kept;
- * the claim released. Whether the shard then counts, or why the baseline refused it.
+ * The shard `shard` of the area `area` names (`planned`'s, reread under the gate, `areaUnder`) to store (through the
+ * gate): `skipped` where it counts or a running writer stores it, else this process's `claim` on it (above), with its
+ * `file`; `refused` where the baseline refuses the writer or its area is not the one it planned.
+ */
+export async function beginShard(baseline, area, shard) {
+  const top = pathOf(baseline, "baseline");
+  const name = areaName(area?.name);
+  const outcome = await gate(baseline, (manifest) => {
+    const read = areaUnder(top, area, manifest);
+    if (read.refused !== undefined) return read;
+    const { shards } = read.area;
+    if (!(Number.isInteger(shard) && shard >= 0 && shard < shards))
+      return { refused: `${shard} is no shard of ${top}/${name}` };
+    const file = shardFile(path.join(top, name), shard, shards);
+    if (verified(read.area, shard, identityIn(manifest))) return { file, skipped: "stored" };
+    if (!claimed(path.join(top, name, claimName(shard, shards))))
+      return { file, skipped: "being stored by another writer" };
+    const claim = Object.freeze({});
+    claims.set(claim, { baseline, area: { name, text: area.text }, shard });
+    return { file, claim };
+  });
+  if (outcome === RETIRED)
+    return { refused: `${top} was replaced while this writer began a shard` };
+  return outcome;
+}
+
+/**
+ * The shard of the claim `claim` (above) published whole through the gate, by its area reread there (`areaUnder`), its
+ * lines (`lines`) then its total last, naming that area's PLAN and the shard's places: a new one by a hard link, one
+ * that does not count by a rename over it, one another writer published meanwhile kept; the claim released. Whether the
+ * shard then counts, or why the baseline refused it.
  */
 export async function endShard(claim, lines, total) {
   const held = claims.get(claim);
   if (held === undefined) throw new TypeError(`${String(claim)} is no claim this tool gave`);
   claims.delete(claim);
   const { baseline, area, shard } = held;
-  const { shards, plan } = area;
-  const places = area.places[shard];
   const top = pathOf(baseline, "baseline");
-  const dir = path.join(top, area.name);
-  const file = shardFile(dir, shard, shards);
   const body = lines.join("");
-  const ended = `${JSON.stringify({ total: { ...total, plan, places, lines: hash(body) } })}\n`;
   const outcome = await gate(baseline, (text) => {
+    const read = areaUnder(top, area, text);
+    if (read.refused !== undefined) return read;
+    const { shards, plan, places } = read.area;
+    const dir = path.join(top, area.name);
+    const file = shardFile(dir, shard, shards);
     const identity = identityIn(text);
+    const counted = { ...total, plan, places: places[shard], lines: hash(body) };
+    const ended = `${JSON.stringify({ total: counted })}\n`;
     const tmp = temporaryName(file, WRITER);
     writeFileSync(tmp, body + ended);
     try {
       linkSync(tmp, file);
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      if (!verified(area, shard, identity)) renameSync(tmp, file);
+      if (!verified(read.area, shard, identity)) renameSync(tmp, file);
     }
     rmSync(tmp, { force: true });
     const claimFile = path.join(dir, claimName(shard, shards));
     if (existsSync(claimFile) && readFileSync(claimFile, "utf8").trim() === WRITER)
       rmSync(claimFile, { force: true });
-    return { verified: verified(area, shard, identity) };
+    return { verified: verified(read.area, shard, identity) };
   });
   if (outcome === RETIRED)
     return { refused: `${top} was replaced while this writer stored into it` };
@@ -856,6 +876,10 @@ export function storedRuns(folder) {
     return { status: 2, refused: `${dir}'s MANIFEST has a header this tool does not write` };
   if (identity.src !== path.basename(dir))
     return { status: 2, refused: `${dir}'s MANIFEST names another src tree than its folder` };
+  // (its MANIFEST checked as status checks it, line by line, before an area is read: Codex r4)
+  const fault = manifestFault(text, identity.src);
+  if (fault !== undefined)
+    return { status: 2, refused: `${dir}'s MANIFEST is not one this tool writes: ${fault}` };
   const read = areaRead(dir, area, text);
   if (read.missing !== undefined)
     return { status: 1, refused: `${folder} is no complete area: ${read.missing}` };
