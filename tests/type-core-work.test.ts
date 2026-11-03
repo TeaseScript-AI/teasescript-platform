@@ -2477,7 +2477,7 @@ test("a prefix of closed objects read once has main's counters, in either order,
  * prefix every entry of which is otherwise a closed object. A place given one object, 16 property stores and then a
  * host value charges `main`'s total at `007a90112` under a demand allowance of 16 in either order, shared or not (a
  * regression oracle of that order only; asking each object's holder first moved 285 units into the decisions that stop,
- * reversed). The receiving closure its stopped decisions make (#1526 phase C) is charged besides and taken off here.
+ * reversed).
  */
 test("a prefix the cheap checks refuse walks no holder's marks, main's total under a demand allowance of 16 (#1456)", () => {
   const source = `let b = {f0: 1}\n${many(16, (i) => `b.f${i} = ${i}`)}\nb = hostValue\nsay "AFTER"\nexit`;
@@ -2486,11 +2486,10 @@ test("a prefix the cheap checks refuse walks no holder's marks, main's total und
   const at = { name: "an object, 16 property stores and a host value", request };
   assert.deepEqual(
     [false, true].flatMap((reversed) =>
-      [false, true].map((unshared) => {
-        const { budget } = withTestDemandAllowance(16, () => analysed(at, reversed, unshared));
-        assert.ok(budget.closure !== null && budget.closure.units > 0);
-        return budget.total - budget.closure.units;
-      }),
+      [false, true].map(
+        (unshared) =>
+          withTestDemandAllowance(16, () => analysed(at, reversed, unshared)).budget.total,
+      ),
     ),
     [3988, 3988, 4844, 4862],
   );

@@ -11,9 +11,10 @@ import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { storeContracts } from "../src/type-inference/core/consumer.js";
+import { withoutRecords } from "../src/type-inference/core/consumers.js";
 import { propertyStep } from "../src/type-inference/core/program.js";
 import { outsideSyntax } from "../src/type-inference/core/slice-syntax.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { completedCore, coreRequest } from "./helpers/type-core-analysis.js";
 import {
   capturedWithin,
   planChecks,
@@ -241,11 +242,11 @@ test("host data inside a stored object literal is captured with its whole store 
 /**
  * #1526 phase C step 5: where a decision on the store's path stopped at its demand allowance, the settled pass leaves
  * the store's type unknown, and the receiving completion completes its contract; the plan checks that contract at the
- * store. Judged by what the script does under the demand allowance alone and at sampled settled stops past it (each
- * phase's first, last and two between): past the completion the store is checked whole; a stop that cut the completion
- * leaves its obligations lost with the cause `extraction` and the plan as the settled pass made it.
+ * store. Judged by what the script does under the demand allowance alone, and at sampled settled stops past it (each
+ * phase's first, last and two between): a stop always comes before the completion, which runs after everything that can
+ * stop, so there no completion runs and the plan is the settled pass's, as without the completion.
  */
-test("a stopped decision's store is checked against its completed contract, at the settled stops past the completion (#1526 phase C)", () => {
+test("a stopped decision's store is checked against its completed contract; at a stop the plan is the settled pass's (#1526 phase C)", () => {
   for (const witness of WITNESSES) {
     const { source } = witness;
     const store = spanOf(source, witness.store);
@@ -263,7 +264,7 @@ test("a stopped decision's store is checked against its completed contract, at t
                 ),
           );
         const where = `${witness.name} ${mode.name}, demand ${demand}`;
-        const answers = capped(() => analyseCore(request));
+        const answers = capped(() => completedCore(request));
         // (a mode where no decision stays stopped completes nothing: the settled pass checks the store itself)
         if (answers.budget.closure === null) continue;
         // (the checks the unstopped analysis makes, and only those: a stopped store the completion's own check owes
@@ -275,28 +276,15 @@ test("a stopped decision's store is checked against its completed contract, at t
         assert.deepEqual(storeRunProblems(compiled().plan!, store, FITTING, FORBIDDEN), [], where);
         for (const { allowance, phase } of sampledStops(source, mode, demand)) {
           const at = `${where}, ${phase} stop at ${allowance}`;
-          const stopped = capped(() => withTestAllowance(allowance, () => analyseCore(request)));
-          const owed = stopped.receiving.filter(
-            ({ obligation }) =>
-              obligation.extent === "complete" &&
-              store.start <= obligation.slot.site.start &&
-              obligation.slot.site.end <= store.end,
+          const stopped = capped(() => withTestAllowance(allowance, () => completedCore(request)));
+          assert.notEqual(stopped.budget.exhausted, null, at);
+          assert.equal(stopped.budget.closure, null, at);
+          assert.deepEqual(stopped.receiving, [], at);
+          const without = withoutRecords(
+            { diagnostic: () => false, check: () => false, completion: true },
+            () => compiled(allowance),
           );
-          if (owed.every(({ result }) => result?.state === "complete")) {
-            if (owed.length === 0) continue;
-            assert.deepEqual(
-              storeRunProblems(compiled(allowance).plan!, store, FITTING, FORBIDDEN),
-              [],
-              at,
-            );
-            continue;
-          }
-          assert.equal(phase, "extraction", at);
-          for (const { result } of owed)
-            assert.ok(
-              result?.state === "lost" && result.cause === "extraction",
-              `${at}: ${JSON.stringify(result)}`,
-            );
+          assert.deepEqual(compiled(allowance).plan, without.plan, at);
         }
       }
   }

@@ -350,8 +350,9 @@ export function stopProblems(c: StopCase): string[] {
   );
   const content: PlanDifference[] = [];
   // (a check the receiving completion gave a store whose decision stopped, #1526 phase C step 5, is that store's mark's
-  // content: a stop that cut the completion, or came before it, leaves the mark as the settled pass made it)
-  if (differences.length > 0 && unstopped.answers.budget.closure !== null)
+  // content: a stop always comes before the completion, which runs after everything that can stop, so it leaves the
+  // mark as the settled pass made it; only an analysis with a decision stopped completes)
+  if (differences.length > 0 && unstopped.answers.budget.decisions.some((d) => d.stopped))
     content.push(
       ...planDifferences(
         unstopped.without(

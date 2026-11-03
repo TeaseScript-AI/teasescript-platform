@@ -3,8 +3,8 @@ import type { CoreDiagnostic, Obligation } from "../result.js";
 // The records a run leaves out, for the tests (`withoutRecords`), and the warnings and checks they would have made.
 
 /**
- * The records a test leaves out (`withoutRecords`): warnings, checks no warning owns, and with `completion` the checks a
- * receiving completion gives the stores whose decisions stopped (#1526 phase C step 5).
+ * The records a test leaves out (`withoutRecords`): warnings, checks no warning owns, and with `completion` the receiving
+ * completion and the checks it gives the stores whose decisions stopped (#1526 phase C step 5): phase B's answers.
  */
 export interface Omission {
   readonly diagnostic: (diagnostic: CoreDiagnostic) => boolean;

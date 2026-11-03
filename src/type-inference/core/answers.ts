@@ -414,10 +414,11 @@ export interface BudgetAnswer {
   /** Facts of the indexes for the identity and mark controls (not work). */
   readonly facts: ContractFacts;
   /**
-   * The receiving closure's completion (#1526 phase C), `null` where the settled pass started with no frozen key: the
-   * units it charged to the total (its obligations found and its completion pass, included in `total`), its counters,
-   * and each decision it made, where a level first asked for it, as a scoped decision from the remaining total,
-   * recorded here, never among the settled pass's `decisions`.
+   * The receiving closure's completion (#1526 phase C, `Answers.completed`), `null` until it runs and where it does
+   * not (no frozen key, a stop, outside the slice): the units it charged to the total (its obligations found, its
+   * completion pass and the questions asked again, included in `total`), its counters, and each decision it made, where
+   * a level first asked for it, as a scoped decision from the remaining total, recorded here, never among the settled
+   * pass's `decisions`; past its allowance `capped`, with no decision kept.
    */
   readonly closure: {
     readonly units: number;
@@ -497,6 +498,13 @@ export interface Answers {
   received(id: PlaceId, path: readonly string[]): ContractResult | null;
   /** Whether the receiving completion's own store checks (C1) owe a runtime check at a site, as unstopped. */
   completedCheck(site: SourceSite): boolean;
+  /**
+   * The receiving completion (#1526 phase C, `Consumers.receive`), asked for once everything of the analysis that can
+   * stop has run, its questions included (`asked`): `again`'s result, the questions asked again with the completed
+   * contracts within the completion's own allowance, or `null` where no completion ran or it kept no result. It never
+   * stops the analysis.
+   */
+  completed<T>(again: () => T): T | null;
   at(node: FlowNode): OccurrenceAnswer | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
   /**
@@ -1111,7 +1119,8 @@ class CoreAnswers implements Answers {
   readonly checks: readonly Obligation[];
   readonly graph: FlowGraph;
   readonly dominators: Dominators;
-  readonly budget: BudgetAnswer;
+  /** As the analysis left it, and again once its receiving completion ran (`completed`). */
+  budget: BudgetAnswer;
   readonly deferred: {
     readonly parameters: readonly PlaceId[];
     readonly results: readonly PlaceId[];
@@ -1534,6 +1543,24 @@ class CoreAnswers implements Answers {
 
   public completedCheck(site: SourceSite): boolean {
     return this.#consumers.completedChecks.has(siteKey(site));
+  }
+
+  public completed<T>(again: () => T): T | null {
+    // (the completed contracts gathered again for the questions asked again, and once it ended)
+    this.#received = null;
+    const value = this.#consumers.receive(() => {
+      this.#received = null;
+      return again();
+    });
+    this.#received = null;
+    const work = this.#pass.program.work;
+    this.budget = {
+      ...this.budget,
+      total: work.total,
+      counts: work.counts(),
+      closure: this.#consumers.completion,
+    };
+    return value;
   }
 
   /** The completion's complete contracts by place and path (`received`), gathered on the first ask. */

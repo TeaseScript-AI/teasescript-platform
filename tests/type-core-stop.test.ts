@@ -44,7 +44,7 @@ import {
 import { REASON, STOPPED, type Item } from "../src/type-inference/core/items.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
+import { completedCore, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   combinedAnalyses,
   combinedStop,
@@ -3834,7 +3834,7 @@ test("an admission decision past its allowance stops: its key undecided, its rea
       const allowance = Math.floor(0.5 * own[0]!.units);
       const where = `reversed: ${reversed}, count: ${count}`;
       const answers: Answers = withTestDemandAllowance(allowance, () =>
-        inOrder(() => analyseCore(request)),
+        inOrder(() => completedCore(request)),
       );
       assert.deepEqual(
         answers.budget.decisions.filter((d) => d.stopped).map((d) => [d.place, d.path]),
@@ -4002,7 +4002,7 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
           );
         }
       }
-  assert.equal(compared, 58);
+  assert.equal(compared, 54);
 });
 
 /**

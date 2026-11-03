@@ -231,14 +231,14 @@ export function receivingRequirements(
 
 /**
  * A shape's result: its level proved (written, decided, or proved open), or lost where its proof is unfinished, or where
- * a stop or a completion decision it read cut it (`cause`).
+ * a completion decision it read cut it (`cause`).
  */
 export interface ShapeResult {
   readonly shape: true;
   readonly state: "complete" | "open" | "lost";
   readonly by: LevelProof["by"];
   readonly tags: readonly string[];
-  readonly cause?: "extraction" | Unsettled;
+  readonly cause?: Unsettled;
 }
 
 /** An obligation's result: a complete extent's contract (`ContractResult`), or a shape's. */
@@ -255,13 +255,10 @@ export function shapeOf(proof: LevelProof): ShapeResult {
 }
 
 /**
- * A requirement lost, nothing of it kept: a stop cut it while the capture ran (`extraction`), or a completion decision
- * its proof read would reject a store or retarget a selecting store (`Unsettled`).
+ * A requirement lost, nothing of it kept: a completion decision its proof read would reject a store or retarget a
+ * selecting store (`Unsettled`). No stop cuts the completion, which runs after everything that can stop (`receive`).
  */
-export function lostBy(
-  requirement: ReceivingRequirement,
-  cause: "extraction" | Unsettled,
-): ReceivingResult {
+export function lostBy(requirement: ReceivingRequirement, cause: Unsettled): ReceivingResult {
   if (requirement.extent === "shape")
     return { shape: true, state: "lost", by: "undecided", tags: [], cause };
   return {

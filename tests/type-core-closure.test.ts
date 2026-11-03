@@ -11,7 +11,12 @@ import {
   withTestDemandAllowance,
 } from "../src/type-inference/core/budget.js";
 import { propertyStep } from "../src/type-inference/core/program.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { completedCore, coreRequest } from "./helpers/type-core-analysis.js";
+import {
+  completionAllowances,
+  completionRun,
+  completionStopProblems,
+} from "./helpers/type-core-completion.js";
 import { HELD_MODES } from "./helpers/type-core-held-host.js";
 import {
   bisectedIntervals,
@@ -71,7 +76,7 @@ const mutual = (k: number): string =>
 function analyse(source: string, mode: (typeof HELD_MODES)[number], demand = 64): Answers {
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
   assert.ok(request !== null, source);
-  return mode.run(() => withTestDemandAllowance(demand, () => analyseCore(request)));
+  return mode.run(() => withTestDemandAllowance(demand, () => completedCore(request)));
 }
 
 /** Whether a slot's site lies within the statement `store` of `source`. */
@@ -505,6 +510,15 @@ const w15 = (k: number): string =>
 const fields = (k: number): string =>
   `let b = {f0: 1}\n${rowsOf(k, (i) => `b = {f${i}: ${i}}`)}\nb = hostValue`;
 
+/** The in-slice witnesses: #1556, #1526, the direct store, the ring at 8 and #1493's feedback copy. */
+const WITNESSES: readonly string[] = [
+  'let a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nb.f = hostValue',
+  'let root={f:[[1]], extra:42}\nlet w0={entry:root}\nlet w1={shell:w0}\nlet w2={entry:w1}\nlet old=w2.entry.shell.entry\nsay "BEFORE"\nw2.entry.shell.entry.f=hostValue',
+  'let o = {f: [[1]]}\nsay "BEFORE"\no.f = hostValue',
+  ring(8),
+  "let w = {f: 1, z: null}\nlet s = w\nlet r = {f: null, z: null}\nr = s\nw = r.z\nlet c = r",
+];
+
 test("a completion past its allowance ends and keeps no result, the analysis at most three times its settled work (#1526 phase C)", () => {
   for (const [name, body] of [
     ["a directed copy chain at 4", directed(4)],
@@ -516,7 +530,7 @@ test("a completion past its allowance ends and keeps no result, the analysis at 
     assert.ok(request !== null, name);
     for (const mode of HELD_MODES) {
       const answers: Answers = mode.run(() =>
-        withTestDemandAllowance(16, () => analyseCore(request)),
+        withTestDemandAllowance(16, () => completedCore(request)),
       );
       const at = `${name}, ${mode.name}`;
       const completion = answers.budget.closure;
@@ -533,20 +547,64 @@ test("a completion past its allowance ends and keeps no result, the analysis at 
         [],
         at,
       );
+      // (nothing of it kept: no decision's record, no completed check)
+      assert.deepEqual(completion.decisions, [], at);
+      assert.ok(
+        answers.receiving.every(({ obligation }) => !answers.completedCheck(obligation.slot.site)),
+        at,
+      );
+    }
+  }
+});
+
+/**
+ * The completion's place (the lead's ruling on #1637): after everything that can stop, the questions included, within
+ * the smaller of twice the work before it and what is left of the total, so it never makes or moves a stop. At each
+ * allowance the compile with it stops exactly as phase B's (the same compile without it) does, compiles the same where
+ * they stop, and where it does not stop charges no more than the allowance: the witnesses in every mode, the capped
+ * shapes forward, at demand 16, every allowance near either end (the compile without the completion's and the head's) and
+ * a sample below (the queue checks every allowance).
+ */
+test("the completion never makes or moves a stop: at each allowance the compile stops as phase B's (#1526 phase C)", () => {
+  const cases: readonly (readonly [
+    string,
+    readonly (typeof HELD_MODES)[number][],
+    number,
+    number,
+  ])[] = [
+    ...WITNESSES.map((body) => [body, HELD_MODES, 24, 32] as const),
+    [directed(4), HELD_MODES.slice(0, 1), 16, 16],
+    [fields(64), HELD_MODES.slice(0, 1), 16, 16],
+    [w15(128), HELD_MODES.slice(0, 1), 6, 4],
+  ];
+  for (const [body, modes, samples, band] of cases) {
+    const request = coreRequest(
+      [{ path: "main.tease", source: body + ending }],
+      [...GLOBALS, "hostFlag"],
+    );
+    assert.ok(request !== null, body);
+    for (const mode of modes) {
+      const head = completionRun(request, mode, 16, undefined, true);
+      const at = `${body.split("\n").at(-1)}, ${mode.name}`;
+      assert.ok(head.completed, at);
+      const step = Math.max(1, Math.ceil(head.total / samples));
+      assert.deepEqual(
+        completionStopProblems(
+          request,
+          mode,
+          16,
+          completionAllowances(request, mode, 16, step, band),
+        ),
+        [],
+        at,
+      );
     }
   }
 });
 
 test("the in-slice witnesses complete within the allowance at demand 16 and 64 in every mode (#1526 phase C)", () => {
   // (the largest need: the direct store's 1,237 units against its settled 858, 1.44 times, forward at demand 16)
-  const witnesses = [
-    'let a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nb.f = hostValue',
-    'let root={f:[[1]], extra:42}\nlet w0={entry:root}\nlet w1={shell:w0}\nlet w2={entry:w1}\nlet old=w2.entry.shell.entry\nsay "BEFORE"\nw2.entry.shell.entry.f=hostValue',
-    'let o = {f: [[1]]}\nsay "BEFORE"\no.f = hostValue',
-    ring(8),
-    "let w = {f: 1, z: null}\nlet s = w\nlet r = {f: null, z: null}\nr = s\nw = r.z\nlet c = r",
-  ];
-  for (const body of witnesses) {
+  for (const body of WITNESSES) {
     const source = body + ending;
     let completed = 0;
     for (const mode of HELD_MODES)
@@ -569,18 +627,25 @@ test("the in-slice witnesses complete within the allowance at demand 16 and 64 i
 });
 
 test("every settled stop interval is enumerated, its epoch's own (C-R2's census)", () => {
-  // (the shared family's frozen keys completed in its settled pass, and #1556's witness; every allowance below the total
-  // read once, against the bisection the held host's stops come from)
+  // (the shared family with its copies' decisions frozen, and #1556's witness, whose capture's extraction is a settled
+  // phase; every allowance below the total read once, against the bisection the held host's stops come from; the
+  // receiving completion runs after everything that can stop, so it has no interval)
   // (each in one mode: the family forward, where its copies' decisions froze, and the witness forward)
-  const cases: readonly (readonly [string, number | undefined, (typeof HELD_MODES)[number]])[] = [
-    [shared(2) + ending, 64, HELD_MODES[0]!],
+  const cases: readonly (readonly [
+    string,
+    number | undefined,
+    (typeof HELD_MODES)[number],
+    boolean,
+  ])[] = [
+    [shared(2) + ending, 64, HELD_MODES[0]!, false],
     [
       'let a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nb.f = hostValue' + ending,
       undefined,
       HELD_MODES[0]!,
+      true,
     ],
   ];
-  for (const [source, demand, mode] of cases) {
+  for (const [source, demand, mode, extraction] of cases) {
     const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
     const capped = <T>(make: () => T): T =>
       demand === undefined ? make() : withTestDemandAllowance(demand, make);
@@ -599,11 +664,12 @@ test("every settled stop interval is enumerated, its epoch's own (C-R2's census)
     };
     const census = settledIntervals(stopCensus(unstopped.budget.total, recordAt));
     const at = `${source.split("\n")[0]}, ${mode.name}`;
-    assert.ok(
+    assert.equal(
       census.some((interval) => interval.phase === "extraction"),
+      extraction,
       at,
     );
-    // (one interval a phase, each of the final epoch: the closure completes in the pass it settled in)
+    // (one interval a phase, each of the final epoch)
     assert.deepEqual(
       census.map((interval) => interval.epoch),
       census.map(() => unstopped.epoch),

@@ -679,15 +679,22 @@ function siteOrder(a: SourceSite, b: SourceSite): number {
 /**
  * What `ask` makes of a finished analysis's answers, its questions spending the analysis's allowance (TABLE §8): one past
  * it stops there, the finished analysis's findings and decisions standing, and what is asked from then on answers
- * `STOPPED` (D4 a′). The backend's outcome and the test-only checked result (`checkedResult`) both ask so.
+ * `STOPPED` (D4 a′). Where nothing stopped, the receiving completion runs then, after everything that can stop, and
+ * asks again with its completed contracts within its own allowance (`Answers.completed`, #1526 phase C); where it keeps
+ * no result, what was asked first stands. The backend's outcome and the test-only checked result (`checkedResult`) both
+ * ask so.
  */
 export function asked<T>(answers: Answers, ask: (answers: Answers) => T): T {
+  let first: T;
   try {
-    return ask(answers);
+    first = ask(answers);
   } catch (error) {
     if (!(error instanceof BudgetExhausted)) throw error;
     return ask(answers.stoppedAt(error.limit));
   }
+  // (a test that leaves the completion's checks out leaves the completion out: phase B's answers)
+  if (leftOutCompletion()) return first;
+  return answers.completed(() => ask(answers)) ?? first;
 }
 
 /**

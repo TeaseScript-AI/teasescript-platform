@@ -630,22 +630,29 @@ export class Consumers {
    * into (its statement's first live store, else its first, as `Answers.at` reads one), each destination once, in the
    * consumers' order; its result is kept (`captured`). A program outside the candidate slice's syntax (`slice-syntax.ts`,
    * the rule the candidate route declines by before its analysis) gets no store check, so the capture makes no request
-   * and charges nothing there: its analysis is main's. Phase C: in a pass that starts with frozen keys, every receiving
-   * obligation is then registered apart from the diagnostics and completed in a completion pass of its own
-   * (`#receive`), so this pass publishes what it would without them.
+   * and charges nothing there: its analysis is main's. Phase C: in a pass that starts with frozen keys, its receiving
+   * obligations are completed later, in a completion pass of their own after everything that can stop (`receive`, from
+   * `asked`), so this pass publishes what it would without them.
    */
   #capture(): void {
     this.#capturePhaseB();
-    // (outside the slice, by its syntax or where the capture left its depth, the analysis is main's: no inventory, no
-    // completion, the same gate as the capture's and the candidate route's)
-    if (
-      this.pass.contract.anyStopped &&
-      this.#completion !== null &&
-      !outsideSliceSyntax(this.pass.program) &&
-      !this.#leftSlice
-    )
-      this.#receive();
+    // (the receiving seed's store sites: admission's store warnings as they stand when the capture runs, #1526 phase C)
+    const storeSites: { site: SourceSite; stopped: boolean }[] = [];
+    for (const d of this.diagnostics)
+      if (
+        d.class === "warning-runtime-check" &&
+        d.kind === "written-target" &&
+        d.rule.rule === "store"
+      )
+        storeSites.push({ site: d.site, stopped: d.provenance.context === "budget" });
+    this.#storeSites = storeSites;
   }
+
+  /** The receiving seed's store sites (`#capture`); `null` in a pass whose admission did not settle. */
+  #storeSites: readonly { readonly site: SourceSite; readonly stopped: boolean }[] | null = null;
+
+  /** Whether the receiving completion was asked for (`receive`), once. */
+  #received = false;
 
   /** Whether the capture ended where the program left the slice's depth (`captureContracts`). */
   #leftSlice = false;
@@ -733,88 +740,88 @@ export class Consumers {
   /**
    * #1526 phase C: the pass's receiving obligations (`admission/receiving.ts`: the store checks the walk owes, a stopped
    * decision's stores among them, every live store that brings external data), each completed in the completion pass
-   * (`#completeFor`) and kept with its result (`receiving`), in the stable source order; a stop that cuts the completion
-   * leaves every one lost with the cause `extraction`, and is thrown on. The completion's allowance is twice the work the
-   * analysis charged before it, so an analysis with its completion at most triples: past it the completion ends and keeps
-   * no result (`capped`), every obligation without one and phase B's plan standing, as at the slice's depth.
+   * (`#completeFor`) and kept with its result (`receiving`), in the stable source order, then `again` (the questions
+   * asked again with the completed contracts, `asked`), whose result it returns. It runs after everything of the analysis
+   * that can stop (the lead's ruling on #1637): once, on an analysis whose admission settled with a decision stopped and
+   * whose questions ran to their end, inside the slice (the capture's gate). It never makes or moves a stop: its
+   * allowance is the smaller of twice the work charged before it and what is left of the total, and reaching it (or a
+   * read past the read-depth limit) ends it with no result kept (`capped`), every obligation without one and nothing
+   * asked again, phase B's answers standing. Anywhere else it does nothing and returns `null`.
    */
-  #receive(): void {
+  public receive<T>(again: () => T): T | null {
+    const work = this.pass.program.work;
+    if (
+      this.#received ||
+      this.#storeSites === null ||
+      this.stopped !== null ||
+      work.stopped !== null ||
+      !this.pass.contract.anyStopped ||
+      this.#completion === null ||
+      outsideSliceSyntax(this.pass.program) ||
+      this.#leftSlice
+    )
+      return null;
+    this.#received = true;
     // (all its work counted to setup's, which names no place: the heaviest place a stop's warning names stays this
     // pass's, D4)
-    const work = this.pass.program.work;
     const spender = work.spender;
     work.spender = 0;
     try {
-      this.#receiveCounted();
+      return this.#receiveCounted(again);
     } finally {
       work.spender = spender;
     }
   }
 
-  /** `#receive`, its work counted to setup's. */
-  #receiveCounted(): void {
+  /** `receive`, its work counted to setup's. */
+  #receiveCounted<T>(again: () => T): T | null {
     const work = this.pass.program.work;
     const since = work.total;
-    const storeSites: { site: SourceSite; stopped: boolean }[] = [];
-    for (const d of this.diagnostics)
-      if (
-        d.class === "warning-runtime-check" &&
-        d.kind === "written-target" &&
-        d.rule.rule === "store"
-      )
-        storeSites.push({ site: d.site, stopped: d.provenance.context === "budget" });
+    const storeSites = this.#storeSites!;
     this.reading = null;
-    let obligations: ReceivingObligation[] = [];
-    let completed: Completed | null = null;
-    let capped = false;
+    let obligations: readonly ReceivingObligation[] = [];
+    let value: T | null = null;
+    let ended = false;
     try {
-      // (its own allowance: twice what the analysis charged before it, so an analysis with its completion at most
-      // triples; past it the completion ends and keeps no result, as at the slice's depth)
-      completed = work.capped(2 * since, () => {
+      value = work.capped(Math.min(2 * since, work.allowance - since), () => {
         obligations = receivingObligations(this.admission, {
           epoch: epochOf(this.pass),
           storeSites,
           ingressSites: this.#ingressSites,
           siteKey,
         });
-        return this.#completeFor(obligations, since);
+        const { index, results } = this.#completeFor(obligations, since);
+        for (const obligation of obligations) {
+          const at = index.get(joinParts(obligation.place, obligation.path));
+          this.receiving.push({
+            obligation,
+            result: at === undefined ? null : (results[at] ?? null),
+          });
+        }
+        // (nothing completed, nothing to ask again)
+        return this.receiving.some(({ result }) => result !== null) ? again() : null;
       });
     } catch (error) {
-      if (!(error instanceof CapReached)) throw error;
-      capped = true;
-    } finally {
-      for (const obligation of obligations) {
-        const done = completed;
-        const at =
-          done === null ? undefined : done.index.get(joinParts(obligation.place, obligation.path));
-        this.receiving.push({
-          obligation,
-          result: capped
-            ? null
-            : done === null
-              ? lostBy(
-                  {
-                    place: obligation.place,
-                    path: obligation.path,
-                    extent: obligation.extent,
-                    sites: new Set(),
-                  },
-                  "extraction",
-                )
-              : at === undefined
-                ? null
-                : (done.results[at] ?? null),
-        });
-      }
-      // (its units counted to its end: the decisions' records and the results' index made after the pass included)
-      const units = work.total - since;
-      const record = this.completion ?? { units, counts: closureCounts(), decisions: [] };
-      this.completion = {
-        ...record,
-        units,
-        counts: capped ? { ...record.counts, capped: 1, cappedAt: units } : record.counts,
-      };
+      if (!(error instanceof CapReached) && !(error instanceof BudgetExhausted)) throw error;
+      ended = true;
     }
+    // (its units counted to its end: the decisions' records, the results' index and the questions asked again included)
+    const units = work.total - since;
+    if (!ended) {
+      if (this.completion !== null) this.completion = { ...this.completion, units };
+      return value;
+    }
+    // (past its allowance nothing of it is kept, wherever in it the allowance ended: every obligation without a result, no
+    // decision's record, no check's site)
+    this.receiving.length = 0;
+    for (const obligation of obligations) this.receiving.push({ obligation, result: null });
+    this.completedChecks.clear();
+    this.completion = {
+      units,
+      counts: { ...(this.completion?.counts ?? closureCounts()), capped: 1, cappedAt: units },
+      decisions: [],
+    };
+    return null;
   }
 
   /**
@@ -825,8 +832,7 @@ export class Consumers {
    * is unfrozen and no cache holds a frozen key's answer; each listing is a cell the frontier schedules, taken whole by a
    * search that reaches it (`Closure.run`). Nothing of it is this pass's: its answers, decisions and stops stand, and the
    * results are kept as each obligation's (the publication and decision 2 are later steps). Its work is this
-   * analysis's, charged where made; a stop in it is this pass's stop in its capture, and its allowance's end
-   * (`CapReached`, `#receive`) ends it with no result kept.
+   * analysis's, charged where made; its allowance's end (`CapReached`, `receive`) ends it with no result kept.
    */
   #completeFor(obligations: readonly ReceivingObligation[], since: number): Completed {
     const { pass, retargeted } = this.#completion!();
@@ -836,28 +842,23 @@ export class Consumers {
     const requirements = receivingRequirements(pass.program.work, obligations);
     const results: (ReceivingResult | null | undefined)[] = requirements.map(() => undefined);
     const work = pass.program.work;
-    let capped = false;
     try {
       completer.#completeIn(closure, requirements, results, epochOf(this.pass), retargeted);
-    } catch (error) {
-      if (error instanceof CapReached) capped = true;
-      throw error;
     } finally {
-      // (past its allowance nothing of it is kept: no decision's record, no check's site)
-      if (!capped) for (const site of completer.completedChecks) this.completedChecks.add(site);
-      const local = demandAllowanceFor(pass.program.flow.nodes.length);
-      this.completion = {
-        units: pass.program.work.total - since,
-        counts: { ...closure.counts },
-        decisions: capped
-          ? []
-          : closure.decisions.map(({ key, units, allowance }) => ({
-              ...completer.admission.decisionWork(decidedAt(keyed(key)), units, allowance, false),
-              completion: { local },
-            })),
-      };
+      // (its counters kept wherever it ended, its records only where it ran to its end: `receive` drops them past its
+      // allowance)
+      this.completion = { units: work.total - since, counts: { ...closure.counts }, decisions: [] };
       closure.close();
     }
+    for (const site of completer.completedChecks) this.completedChecks.add(site);
+    const local = demandAllowanceFor(pass.program.flow.nodes.length);
+    this.completion = {
+      ...this.completion,
+      decisions: closure.decisions.map(({ key, units, allowance }) => ({
+        ...completer.admission.decisionWork(decidedAt(keyed(key)), units, allowance, false),
+        completion: { local },
+      })),
+    };
     const index = new Map<string, number>();
     requirements.forEach((r, at) => index.set(keptParts(work, r.place, r.path), at));
     return { index, results };
@@ -1058,8 +1059,8 @@ export class Consumers {
   }
 
   /**
-   * The receiving closure's completion where one ran (`#completeFor`): the units it charged to the total from `#receive`'s
-   * start (its obligations found and its completion pass), its counters and decisions, else `null`.
+   * The receiving closure's completion where one ran (`receive`): the units it charged to the total from its start (its
+   * obligations found, its completion pass and the questions asked again), its counters and decisions, else `null`.
    */
   completion: {
     readonly units: number;
@@ -1074,7 +1075,7 @@ export class Consumers {
    */
   readonly completedChecks = new Set<string>();
 
-  /** Each receiving obligation with its result as the capture found it (`#capture`), in the stable source order. */
+  /** Each receiving obligation with its result as the completion found it (`receive`), in the stable source order. */
   readonly receiving: {
     readonly obligation: ReceivingObligation;
     readonly result: ReceivingResult | null;

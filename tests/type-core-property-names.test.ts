@@ -191,14 +191,10 @@ test("a demand stop with a question stop after it ends the search, its names wit
   let retried = 0;
   for (const mode of MODES) {
     const found = inMode(mode, () =>
-      withTestDemandAllowance(16, () => {
-        // (#1526 phase C: the stopped decisions' receiving closure is charged to the total besides, so the question has
-        // what the analysis left it before)
-        const closure = analyseCore(request).budget.closure?.units ?? 0;
-        return withTestAllowance(4000 + closure, () => {
+      withTestDemandAllowance(16, () =>
+        withTestAllowance(4000, () => {
           let answers = analyseCore(request);
           assert.ok(answers.budget.decisions.some((decision) => decision.stopped));
-          assert.equal(answers.budget.closure?.units ?? 0, closure);
           const node = answers.graph.nodes.find(
             (each) => each.expression?.kind === "identifier" && each.expression.name === "s",
           );
@@ -211,8 +207,8 @@ test("a demand stop with a question stop after it ends the search, its names wit
             answers = answers.stoppedAt(error.limit);
             return [...answers.properties(node).keys()];
           }
-        });
-      }),
+        }),
+      ),
     );
     assert.ok(
       found.every((name) => full.includes(name)),
