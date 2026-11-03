@@ -387,56 +387,88 @@ function holdingsOf(admission: Admission): Holdings {
 const CYCLES = new WeakMap<CoreProgram, boolean>();
 
 /**
- * Whether the program's copies can make a contract hold itself: whether the places, each linked to every binding a live
- * whole store, add or transfer into it copies (`copySources`), make a cycle, a copy of a place into a path below
- * itself (`a.q=a`, `b.q.q=b.q`) one. Without one no level reads a level above it, so no walk builds or reads a
- * holding, and every walk is exactly main's, its work included. Uncharged: it reads the copies the admission pass
- * already found and charged (its constructor's A4 pass asks `copySources` of each such store), once each.
+ * Whether the program's copies can make a contract hold itself below itself. Link each place to every binding that a
+ * live whole store, add or transfer into it copies (`copySources`), weighted by how much deeper the copy lands than
+ * the path it copies (`a.q=b`: 1; `a=b`: 0; `a=b.q`: -1). A contract holds itself below itself only round a cycle of
+ * those links whose weights add up to more than 0. Here: only where some strongly connected set of places has links
+ * whose weights no depth per place explains (a cycle that does not add up to 0); a ring of whole copies adds up to 0.
+ * Without one no level reads a level above it, so no walk builds or reads a holding, and every walk is exactly main's,
+ * its work included. Uncharged: it reads the copies the admission pass already found and charged (its constructor's A4
+ * pass asks `copySources` of each such store), once each, and walks those links twice.
  */
 function copiesCycle(admission: Admission): boolean {
   const { definitions, lists, program } = admission.pass;
   const known = CYCLES.get(program);
   if (known !== undefined) return known;
-  const edges = new Map<PlaceId, Set<PlaceId>>();
+  const links = new Map<PlaceId, { readonly to: PlaceId; readonly weight: number }[]>();
   for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
     if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
     if (writtenOf(program.place(d.place).kind) !== null) continue;
     if (!lists.live(d) || !program.live(d.node)) continue;
+    const depth = d.path.length + (d.kind === "add" && d.how !== "elements" ? 1 : 0);
     for (const { path, binding, strip } of copySources(admission, d.value)) {
-      // (a copy of a place into itself at its own path, `b=b`, holds nothing new)
-      if (binding === d.place && d.path.length === 0 && path.length === 0 && strip.length === 0)
-        continue;
-      let out = edges.get(d.place);
-      if (out === undefined) edges.set(d.place, (out = new Set()));
-      out.add(binding);
+      let out = links.get(d.place);
+      if (out === undefined) links.set(d.place, (out = []));
+      out.push({ to: binding, weight: depth + path.length - strip.length });
     }
   }
-  // (a depth-first search on an explicit stack: a place reached again while open closes a cycle)
-  const state = new Map<PlaceId, "open" | "done">();
-  let cycle = false;
-  for (const start of edges.keys()) {
-    if (cycle) break;
-    if (state.has(start)) continue;
-    const frames: { readonly place: PlaceId; readonly next: Iterator<PlaceId> }[] = [
-      { place: start, next: (edges.get(start) ?? new Set<PlaceId>()).values() },
-    ];
-    state.set(start, "open");
-    while (frames.length > 0 && !cycle) {
+  // (the strongly connected sets of places, on an explicit stack: Tarjan's algorithm)
+  const index = new Map<PlaceId, number>();
+  const low = new Map<PlaceId, number>();
+  const component = new Map<PlaceId, number>();
+  const open: PlaceId[] = [];
+  for (const start of links.keys()) {
+    if (index.has(start)) continue;
+    const frames: { readonly place: PlaceId; next: number }[] = [{ place: start, next: 0 }];
+    index.set(start, index.size);
+    low.set(start, index.get(start)!);
+    open.push(start);
+    while (frames.length > 0) {
       const frame = frames.at(-1)!;
-      const step = frame.next.next();
-      if (step.done === true) {
-        state.set(frame.place, "done");
-        frames.pop();
+      const out = links.get(frame.place) ?? [];
+      if (frame.next < out.length) {
+        const { to } = out[frame.next++]!;
+        if (!index.has(to)) {
+          index.set(to, index.size);
+          low.set(to, index.get(to)!);
+          open.push(to);
+          frames.push({ place: to, next: 0 });
+        } else if (!component.has(to))
+          low.set(frame.place, Math.min(low.get(frame.place)!, index.get(to)!));
         continue;
       }
-      const seen = state.get(step.value);
-      if (seen === "open") cycle = true;
-      else if (seen === undefined) {
-        state.set(step.value, "open");
-        frames.push({
-          place: step.value,
-          next: (edges.get(step.value) ?? new Set<PlaceId>()).values(),
-        });
+      frames.pop();
+      const parent = frames.at(-1)?.place;
+      if (parent !== undefined) low.set(parent, Math.min(low.get(parent)!, low.get(frame.place)!));
+      if (low.get(frame.place) !== index.get(frame.place)) continue;
+      for (let member = open.pop()!; ; member = open.pop()!) {
+        component.set(member, index.get(frame.place)!);
+        if (member === frame.place) break;
+      }
+    }
+  }
+  // (a depth per place along each set's links, from its first place; a link the depths do not explain closes a cycle
+  // that does not add up to 0)
+  const depthOf = new Map<PlaceId, number>();
+  let cycle = false;
+  for (const place of links.keys()) {
+    if (cycle) break;
+    if (depthOf.has(place)) continue;
+    depthOf.set(place, 0);
+    const queue = [place];
+    for (let at = 0; at < queue.length && !cycle; at += 1) {
+      const from = queue[at]!;
+      for (const { to, weight } of links.get(from) ?? []) {
+        if (component.get(to) !== component.get(from)) continue;
+        const depth = depthOf.get(from)! + weight;
+        const known = depthOf.get(to);
+        if (known === undefined) {
+          depthOf.set(to, depth);
+          queue.push(to);
+        } else if (known !== depth) {
+          cycle = true;
+          break;
+        }
       }
     }
   }
