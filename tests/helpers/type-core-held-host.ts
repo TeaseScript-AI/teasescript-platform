@@ -1692,8 +1692,8 @@ export function randomCopyGraph(
 }
 
 /**
- * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, and seven of
- * reads no place holds.
+ * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, seven of
+ * reads no place holds, and one of copies of an inferred place repeated at two levels, read through k wrappers (#1604).
  */
 function gateShapes(): Record<string, (k: number) => string> {
   const rows = (k: number, line: (i: number) => string) => lines(k, line).join("\n");
@@ -1726,6 +1726,10 @@ function gateShapes(): Record<string, (k: number) => string> {
       `repeat [[${"[".repeat(k)}hostValue${"]".repeat(k)}].toList()].toList()[0][0]${"[0]".repeat(k)} {}\nexit`,
     "nested-get-cells": (k) =>
       `repeat ${nest(k, "hostValue", (text) => `[1].get(5, default: [${text}][0])`)} {}\nexit`,
+    // (#1604, Codex r1's B1 on #1653: k stores copying `a` into `b` and k copying `b` into `c`, each wrapper's read
+    // through the stores' syntax meeting `a`'s shapes once a level, not once a store)
+    "repeated-copies": (k) =>
+      `let a = {f: hostValue}\nlet b = a\n${rows(k, () => "b = a")}\nlet c = b\n${rows(k, () => "c = b")}\n${rows(k, (i) => `let w${i} = {q: c}\nrepeat w${i}.q.f {}`)}\nexit`,
     // (a literal of k copies read k deep: past eight copies every read is cut, its root found once along the chain)
     "cut-chain": (k) =>
       `${rows(k, (i) => `let x${i} = hostValue`)}\nrepeat [${lines(k, (i) => `x${i}`).join(", ")}][0]${"[0]".repeat(k)} {}\nexit`,

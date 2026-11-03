@@ -43,7 +43,7 @@ import {
   type FrontierRead,
 } from "../src/type-inference/core/consumers/finishing.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
-import { CoreProgram } from "../src/type-inference/core/program.js";
+import { CoreProgram, propertyStep } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import {
   withEveryRecord,
@@ -3533,6 +3533,71 @@ test("a retained member below its root keeps admission's null (#1604)", () => {
         `${mode.name} @${allowance}`,
       );
   }
+});
+
+/**
+ * #1604's syntax through copies of inferred places answers each key alike whatever order its reads ask it (Codex r1's N1
+ * and N2 on #1653): a level made with a cycle of copies closed above it holds the cycle's values only in part and is
+ * never kept (two places copying each other, each wrapped), and a level cut past the copy bound from a deeper caller is
+ * kept only where its chain started (a chain of eight copies of a literal, wrapped once). Every binding's own key and
+ * its `q`, `f` and `q.f` paths asked in their order and reversed, on fresh walks of the analysis's settled pass, four
+ * modes: the same decisions.
+ */
+test("the stores' syntax through copies answers alike in either order of reads (#1604)", () => {
+  const sources = [
+    ["let a = {f: 1}", "let b = a", "a = b", "let w = {q: a}", "let v = {q: b}"],
+    [
+      "let a0 = {f: 1}",
+      ...Array.from({ length: 8 }, (_, i) => `let a${i + 1} = a${i}`),
+      "let w = {q: a8}",
+    ],
+  ].map((lines) => [...lines, 'say "${w.q.f}"', "exit", ""].join("\n"));
+  for (const source of sources)
+    for (const mode of HELD_MODES) {
+      let captured: Consumers | undefined;
+      const check = Consumers.prototype.check;
+      Consumers.prototype.check = function (this: Consumers) {
+        captured = this;
+        return check.call(this);
+      };
+      try {
+        mode.run(() =>
+          analyseCore(coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!),
+        );
+      } finally {
+        Consumers.prototype.check = check;
+      }
+      const pass = captured!.pass;
+      const asked = pass.program.places.flatMap((place) =>
+        place.kind.kind === "binding" && place.kind.declared === "let"
+          ? [[], ["q"], ["f"], ["q", "f"]].map((path) => ({
+              root: place.id,
+              path: path.map(propertyStep),
+            }))
+          : [],
+      );
+      const decisions = (order: typeof asked) => {
+        const walk = new Consumers(pass);
+        walk.finishing = true;
+        walk.settled = true;
+        const found = new Map<string, string>();
+        for (const { root, path } of order) {
+          const decided = walk.cheapDecided(root, path);
+          found.set(
+            `${root}:${path.join(".")}`,
+            JSON.stringify(
+              decided === null ? null : { kinds: decided.kinds, names: [...decided.names].sort() },
+            ),
+          );
+        }
+        return [...found].sort(([a], [b]) => a.localeCompare(b));
+      };
+      assert.deepEqual(
+        decisions([...asked].reverse()),
+        decisions(asked),
+        `${mode.name}: ${source}`,
+      );
+    }
 });
 
 /**
