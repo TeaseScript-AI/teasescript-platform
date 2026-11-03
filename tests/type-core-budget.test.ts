@@ -646,7 +646,10 @@ test("a settled stop finishes the host data of every copy-graph topology in line
             shape === "addAll-copies" ||
             shape === "cut-chain"
           ? [16, 32]
-          : [8, 16],
+          : // (k sources copied k times or through k places: their square term shows only from 32 on, #1604)
+            shape === "wide-repeated-copies" || shape === "wide-reconverging-copies"
+            ? [32, 64]
+            : [8, 16],
     ),
     [],
   );

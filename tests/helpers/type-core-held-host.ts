@@ -1693,7 +1693,8 @@ export function randomCopyGraph(
 
 /**
  * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, seven of
- * reads no place holds, and one of copies of an inferred place repeated at two levels, read through k wrappers (#1604).
+ * reads no place holds, and three of copies of an inferred place repeated at two levels, wide or reconverging, read
+ * through wrappers (#1604).
  */
 function gateShapes(): Record<string, (k: number) => string> {
   const rows = (k: number, line: (i: number) => string) => lines(k, line).join("\n");
@@ -1728,6 +1729,11 @@ function gateShapes(): Record<string, (k: number) => string> {
       `repeat ${nest(k, "hostValue", (text) => `[1].get(5, default: [${text}][0])`)} {}\nexit`,
     // (#1604, Codex r1's B1 on #1653: k stores copying `a` into `b` and k copying `b` into `c`, each wrapper's read
     // through the stores' syntax meeting `a`'s shapes once a level, not once a store)
+    // (and k sources stored into one, copied k times into another, or through k places into a third: Codex r2's B1)
+    "wide-repeated-copies": (k) =>
+      `${rows(k, (i) => `let a${i} = {f: hostValue}`)}\nlet source = a0\n${rows(k - 1, (i) => `source = a${i + 1}`)}\nlet b = source\n${rows(k, () => "b = source")}\nlet w = {q: b}\nrepeat w.q.f {}\nexit`,
+    "wide-reconverging-copies": (k) =>
+      `${rows(k, (i) => `let a${i} = {f: hostValue}`)}\nlet source = a0\n${rows(k - 1, (i) => `source = a${i + 1}`)}\n${rows(k, (i) => `let b${i} = source`)}\nlet c = b0\n${rows(k - 1, (i) => `c = b${i + 1}`)}\n${rows(k, (i) => `let w${i} = {q: c}\nrepeat w${i}.q.f {}`)}\nexit`,
     "repeated-copies": (k) =>
       `let a = {f: hostValue}\nlet b = a\n${rows(k, () => "b = a")}\nlet c = b\n${rows(k, () => "c = b")}\n${rows(k, (i) => `let w${i} = {q: c}\nrepeat w${i}.q.f {}`)}\nexit`,
     // (a literal of k copies read k deep: past eight copies every read is cut, its root found once along the chain)
