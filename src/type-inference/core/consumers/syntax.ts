@@ -1,5 +1,5 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
-import { joinSteps, keptSteps } from "../budget.js";
+import { joinSteps, keptSteps, type WorkLedger } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { defaultOf, termAt, typeTags, writtenOf } from "../contract.js";
 import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
@@ -341,15 +341,12 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
     }
     // (object literals with other properties where a copy brought some of the level's shapes, beside the key's own or
     // another copy's: a read of one may find it missing, which only the analysis tells, as within one key's shape)
-    let properties: ReadonlySet<string> | null = null;
+    let properties: string | null = null;
     for (const { shape } of told && shapes.some(({ by }) => by !== null) ? shapes : []) {
-      if (shape.properties === null) continue;
-      program.work.charge("checks", shape.properties.size);
-      if (properties === null) properties = shape.properties;
-      else if (
-        properties.size !== shape.properties.size ||
-        [...shape.properties].some((step) => !properties!.has(step))
-      ) {
+      const own = propertiesOf(program.work, shape);
+      if (own === null) continue;
+      if (properties === null) properties = own;
+      else if (own !== properties) {
         told = false;
         break;
       }
@@ -366,6 +363,26 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
     if ((!cut || state.depth === 0) && !partial) walk.cheapFrontiers.set(key, frontier);
   }
   return frontier!;
+}
+
+/** Each shape's object literal's properties as one text, made once a shape (`propertiesOf`). */
+const propertyTexts = new WeakMap<CheapShape, string | null>();
+
+/**
+ * A shape's object literal's properties as one text, in their order, `null` where it has none: made and charged once a
+ * shape, so the shapes a level compares cost one step each, whatever their size (#1604).
+ */
+function propertiesOf(work: WorkLedger, shape: CheapShape): string | null {
+  let text = propertyTexts.get(shape);
+  if (text === undefined) {
+    if (shape.properties === null) text = null;
+    else {
+      work.charge("checks", shape.properties.size);
+      text = [...shape.properties].sort().join(" ");
+    }
+    propertyTexts.set(shape, text);
+  }
+  return text;
 }
 
 /**
