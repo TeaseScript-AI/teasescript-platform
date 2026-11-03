@@ -407,10 +407,10 @@ test("outside the slice's syntax the capture requests nothing and charges nothin
 test("the capture ends at the first store whose contract leaves the slice's depth", () => {
   // (graph/533 of the corpus: two cyclic stores, read. The first contract deeper than the slice follows takes the program
   // out of the slice, as main's lowering leaves it at its first such check and asks nothing more: the analysis runs to its
-  // end, its work main's analysis and that one walk, which main pays after its analysis (22,958,262 units forward on
-  // `55bade020`), and the capture's own reads of the walk's levels (4,555). A regression oracle of this construction. In
-  // the first mode alone in CI: each mode walks one cyclic contract of about 23 million units, seconds; every mode is
-  // #1606's queue evidence)
+  // end, its work main's analysis and that one walk, which main pays after its analysis (22,957,750 units forward on
+  // `55bade020` with these globals, Codex r4), and the capture's own reads of the walk's levels (5,067). A regression
+  // oracle of this construction. In the first mode alone in CI: each mode walks one cyclic contract of about 23 million
+  // units, seconds; every mode is #1606's queue evidence)
   const source =
     'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nb.q=a\nc=[a,b][0]\nc=a\nlet out={p:c}\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
