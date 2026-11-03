@@ -6983,7 +6983,8 @@ export const LANDING_FAMILIES: readonly WorkFamily[] = (["first", "last"] as con
  * at every link, and a link skipping one; translations below wrappers; cold chains and aliases asked at their ends,
  * at a prefix or at every link; seeds overlapping a listing; sibling prefixes holding other paths; one place asked at two
  * prefixes, its other values loaded at each; a wide object read at one narrow property in every call (Codex r1's B1);
- * one place's two strips written into one destination (its H1); copies of a whole cycle, a fed cycle and a cycle that takes
+ * one place's two strips written into one destination (its H1); a longer prefix walked after a path it reaches was
+ * brought, so its walk is not kept; copies of a whole cycle, a fed cycle and a cycle that takes
  * steps; and a chain one of whose copies a list rejects, landed in every pass (Sol's design rounds r1–r3).
  */
 export const LANDING_SHAPES: readonly WorkFamily[] = (
@@ -7155,6 +7156,20 @@ export const LANDING_SHAPES: readonly WorkFamily[] = (
           "let x = [{r: mid.p}, {r: mid.q}][0]",
           "let y = [{r: mid.q}, {r: {b0: typed}}][0]",
           'say "${x.r} ${y.r}"',
+          "exit",
+        ),
+    ],
+    [
+      "seen-before-record",
+      () =>
+        lines(
+          LANDING_TYPED,
+          "let c0 = {p: {f0: typed}}",
+          "let a = [{p: c0.p}, {p: {f1: typed}}][0]",
+          "let q = [{p: c0.p}, {p: {f2: typed}}][0]",
+          "let x = [{p: a.p, r: {g: typed}}, {p: q.p, r: {g: typed}}][0]",
+          "let y = [{p: q.p, r: x.r}, {p: {f3: typed}, r: {g: typed}}][0]",
+          'say "${x.p.f0} ${y.p.f0}"',
           "exit",
         ),
     ],
