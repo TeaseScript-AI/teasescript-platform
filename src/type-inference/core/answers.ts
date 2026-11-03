@@ -1107,6 +1107,29 @@ function isStopped(item: Item): boolean {
   return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0;
 }
 
+/**
+ * After a stop, what a literal's own syntax proves at a step it writes nothing for, as the unstopped read answers it: an
+ * object without the property lacks it (`missing`, F11, its writer the literal's), an empty collection holds no element
+ * at any depth below (`EMPTY`); `STOPPED` at any other step. A typed load's default read by its own syntax so keeps the
+ * type the unstopped read gives it (#1460).
+ */
+function absentAt(
+  program: CoreProgram,
+  value: PlaceId,
+  own: "list" | "set" | "dict" | "object",
+  step: string,
+): readonly Item[] {
+  if (own !== "object") return stepName(step) === "element" ? [EMPTY] : STOPPED;
+  if (step === "element" || step === "iteration" || stepName(step) !== step) return STOPPED;
+  const site = program.hasOf.get(value)?.[0]?.site;
+  return [
+    makeItem("unknown", site === undefined ? null : program.writer("literal", site), {
+      reasons: REASON.missing,
+      context: "missing",
+    }),
+  ];
+}
+
 /** The property names a type term gives, through its unions. */
 function termProperties(term: TypeTerm): string[] {
   if (term.kind === "union") return term.members.flatMap(termProperties);
@@ -1426,7 +1449,10 @@ class CoreAnswers implements Answers {
     const items: Item[] = [];
     const names = new Set<string>();
     const rest = path.slice(1);
-    for (const child of this.#consumers.admission.literalChildren(value, path[0]!)) {
+    const step = path[0]!;
+    const children = this.#consumers.admission.literalChildren(value, step);
+    if (children.length === 0) return { items: absentAt(program, value, own, step), names };
+    for (const child of children) {
       if (child.value === undefined) continue;
       for (const name of this.#stoppedShape(child.value, rest).names) names.add(name);
       for (const item of this.#items(child.value, child.node, rest)) items.push(item);

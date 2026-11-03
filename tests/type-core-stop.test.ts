@@ -11,10 +11,19 @@ import {
 import type { Diagnostic } from "../src/diagnostics.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
-import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
+import {
+  createCheckpoint,
+  deserializeCheckpoint,
+  serializeCheckpoint,
+} from "../src/runtime/snapshot/checkpoint.js";
+import {
+  createSerializableList,
+  createSerializableObject,
+  type SerializableRuntimeValue,
+} from "../src/runtime/values/serializable-values.js";
 import { analyseCore, type Answers, type CorePass } from "../src/type-inference/core/answers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
-import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import {
   DemandExhausted,
@@ -77,7 +86,7 @@ import {
   stopIdentity,
   stopSet,
 } from "./helpers/type-core-oracles.js";
-import { runGlobals } from "./helpers/type-core-route.js";
+import { plannedContent, runGlobals } from "./helpers/type-core-route.js";
 import { stopProblems, type Globals, type StopRun } from "./helpers/type-core-stop-oracle.js";
 
 /*
@@ -275,6 +284,141 @@ test("after a stop a typed default's null leaves its level open, as without one 
     const { plan } = compiled(source, allowance);
     assert.ok(plan !== null, `@${allowance}`);
     assert.deepEqual(ran(plan, '{"n":"text","m":4}'), { said: ["text", "4"], failure: null });
+  }
+});
+
+/**
+ * A source's typed loads and parses as its plan reads them (`load` and `expected` lines, `plannedContent`), or how the
+ * candidate route ends without one: no plan (its errors), or declined.
+ */
+function readers(source: string): string[] {
+  try {
+    const { plan, diagnostics } = compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND);
+    if (plan === null) return [`no plan: ${diagnostics.map((d) => d.code).join(",")}`];
+    return plannedContent(plan, source)
+      .filter((line) => /^(load|expected) /u.test(line))
+      .map((line) => line.replace(/ repair=\w+$/u, ""));
+  } catch (error) {
+    if (error instanceof CandidateOutsideSlice) return ["declined"];
+    throw error;
+  }
+}
+
+/** Every stop a family visits in a mode: four total allowances from the first unit up, and three demand allowances. */
+function readerStops(source: string): (<T>(make: () => T) => T)[] {
+  const request = coreRequest([{ path: "main.tease", source }], []);
+  assert.ok(request !== null, source);
+  const total = analyseCore(request).budget.total;
+  return [
+    ...[1, Math.round(total / 3), Math.round((2 * total) / 3), total - 1].map(
+      (allowance) =>
+        <T>(make: () => T): T =>
+          withTestAllowance(allowance, make),
+    ),
+    ...[1, 16, 64].map(
+      (allowance) =>
+        <T>(make: () => T): T =>
+          withTestDemandAllowance(allowance, make),
+    ),
+  ];
+}
+
+test("a stop does not change what a typed load or parse reads: a record without a field lacks it and an empty collection holds nothing, as unstopped (#1460, ADR 0021 1.10)", () => {
+  // the family: each clause (an absent field, an empty collection) at each depth, through a load and a parse, in four
+  // modes, at stops before and after admission settles; controls with nothing absent
+  const defaults = [
+    "[{n: 1}, {m: 2}]",
+    "[{}, {n: 1}]",
+    "[[{n: 1}], [{m: 2}]]",
+    "{xs: [{n: 1}, {m: 2}]}",
+    "[{a: [{n: 1}, {m: 2}]}]",
+    "[[], [1]]",
+    "[{xs: []}, {xs: [1]}]",
+    "{xs: [[], [1]]}",
+    "[{n: 1}, {n: 2}]",
+    "[]",
+  ];
+  for (const fallback of defaults)
+    for (const call of ['load("seed", default: D)', 'fromJson("[]", default: D)']) {
+      const source = `let seed = ${call.replace("D", fallback)}\nsay "X"\nexit\n`;
+      for (const mode of HELD_MODES) {
+        const unstopped = mode.run(() => readers(source));
+        for (const stop of mode.run(() => readerStops(source)))
+          assert.deepEqual(
+            mode.run(() => stop(() => readers(source))),
+            unstopped,
+            `${source} (${mode.name})`,
+          );
+      }
+    }
+  // the unstopped readers the family holds every stop to, by the defaults' own types (V30 §13)
+  assert.deepEqual(readers('let seed = load("seed", default: [{n: 1}, {m: 2}])\nexit\n'), [
+    "load 11:50 list<{n: integer, m: integer}>",
+  ]);
+  assert.deepEqual(readers('let seed = load("seed", default: [[], [1]])\nexit\n'), [
+    "load 11:43 list<list<integer>>",
+  ]);
+});
+
+test("after a stop a load still takes its default for a stored value its default's type does not fit, warns, and restores the same (#1460)", () => {
+  const object = (n: SerializableRuntimeValue) =>
+    createSerializableObject([{ name: "n", value: n }]);
+  for (const [source, stored, kept, repaired] of [
+    // a field one record of the default lacks
+    [
+      'let seed = load("seed", default: [{n: 1}, {m: 2}])\nsay "BEFORE"\nsay seed[0].n\nsay "AFTER"\nexit\n',
+      (n: SerializableRuntimeValue) => createSerializableList([object(n)]),
+      ["BEFORE", "5", "AFTER"],
+      ["BEFORE", "1", "AFTER"],
+    ],
+    // an element of an empty collection of the default
+    [
+      'let seed = load("seed", default: [[], [1]])\nsay "BEFORE"\nsay seed[1][0]\nsay "AFTER"\nexit\n',
+      (n: SerializableRuntimeValue) =>
+        createSerializableList([createSerializableList([]), createSerializableList([n])]),
+      ["BEFORE", "5", "AFTER"],
+      ["BEFORE", "1", "AFTER"],
+    ],
+  ] as const) {
+    const load = source.indexOf("load(");
+    const end = source.indexOf(")\n") + 1;
+    for (const mode of HELD_MODES)
+      for (const stop of [
+        <T>(make: () => T): T => make(),
+        ...mode.run(() => readerStops(source)),
+      ]) {
+        const { plan } = mode.run(() =>
+          stop(() => compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND)),
+        );
+        assert.ok(plan !== null, `${source} (${mode.name})`);
+        const loaded = (value: SerializableRuntimeValue) => {
+          const snapshot = createImmediatePacingRuntimeSnapshot(plan, {
+            scriptStorage: [{ key: "seed", value }],
+          });
+          const restored = deserializeCheckpoint(
+            serializeCheckpoint(createCheckpoint(plan, snapshot)),
+          );
+          const runs = [run(plan, snapshot), run(restored.plan, restored.snapshot)].map(
+            (result) => ({
+              said: result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+              warned: result.events.flatMap((event) =>
+                event.kind === "developerWarning"
+                  ? [`${event.code}@${event.span.start.offset}:${event.span.end.offset}`]
+                  : [],
+              ),
+            }),
+          );
+          assert.deepEqual(runs[1], runs[0], `${source} (${mode.name}) restored`);
+          return runs[0];
+        };
+        // a stored value its default's type fits is read; one it does not fit takes the default, with TSW016 at the load
+        assert.deepEqual(loaded(stored(5)), { said: kept, warned: [] }, `${source} (${mode.name})`);
+        assert.deepEqual(
+          loaded(stored("wrong")),
+          { said: repaired, warned: [`TSW016@${load}:${end}`] },
+          `${source} (${mode.name})`,
+        );
+      }
   }
 });
 
