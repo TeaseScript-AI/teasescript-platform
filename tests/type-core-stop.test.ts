@@ -1696,14 +1696,22 @@ test("the stop oracle takes each side's marks as the owners of its checks, and a
     stopProblems({ unstopped: reference, stopped: run, fitting: [], violating: [] });
   assert.deepEqual(judge(stopped), []);
   // (the check left out of the answers, and the guard it gives the store, `requireExisting`, out of the plan)
-  const unguarded = (plan: unknown): unknown => {
+  const unguarded = (plan: StopRun["result"]["plan"]): StopRun["result"]["plan"] => {
     const copy = structuredClone(plan);
     const pending: unknown[] = [copy];
     while (pending.length > 0) {
       const node = pending.pop();
       if (node === null || typeof node !== "object") continue;
-      const each = node as { kind?: unknown; span?: { so?: unknown }; requireExisting?: unknown };
-      if (each.kind === "assign" && each.span?.so === check.site.start) delete each.requireExisting;
+      if (
+        "kind" in node &&
+        node.kind === "assign" &&
+        "span" in node &&
+        typeof node.span === "object" &&
+        node.span !== null &&
+        "so" in node.span &&
+        node.span.so === check.site.start
+      )
+        Reflect.deleteProperty(node, "requireExisting");
       pending.push(...Object.values(node));
     }
     return copy;
@@ -1717,7 +1725,7 @@ test("the stop oracle takes each side's marks as the owners of its checks, and a
       ...each.answers,
       checks: each.answers.checks.filter((x) => !checks || JSON.stringify(x) !== text),
     },
-    result: { ...each.result, plan: unguarded(each.result.plan) as StopRun["result"]["plan"] },
+    result: { ...each.result, plan: unguarded(each.result.plan) },
   });
   // (the guard alone: a plan change inside the mark's content, but the mark owes the reference's own check there)
   assert.ok(
@@ -1731,6 +1739,50 @@ test("the stop oracle takes each side's marks as the owners of its checks, and a
       ...dropped(stopped),
       without: (omit, key) => dropped(stopped.without(omit, key)),
     }).includes(`lost check ${text}`),
+  );
+  // a check one record owns and the combined stop's rule accepts is one credit: a second copy of it is an extra (Codex
+  // r2's control on #1663, forward with the sharing, demand 256, a stop at program allowance 1)
+  const shapes: HeldCase = {
+    name: "object-shapes",
+    source:
+      'let boxes = [{n:1},{k:2}]\nlet box = boxes[hostValue]\nbox.n = hostOther\nsay "AFTER"\nexit\n',
+    slice: true,
+    values: [],
+  };
+  const forward = HELD_MODES[0]!;
+  const natural = heldRun(shapes, forward, undefined, 256);
+  const early = heldRun(shapes, forward, 1, 256);
+  const rule = combinedStopRule(shapes, forward, natural, early.answers);
+  const excused = {
+    records: new Set([...rule.records.keys(), ...rule.relabelled.records, ...rule.coarse.records]),
+    checks: new Set([
+      ...rule.checks.keys(),
+      ...rule.owing,
+      ...rule.relabelled.checks,
+      ...rule.coarse.checks.keys(),
+    ]),
+  };
+  const [owner] = early.answers.budget.deferred.filter(
+    (mark) =>
+      mark.code === "TSV043" && shapes.source.slice(mark.site.start, mark.site.end) === "box.n",
+  );
+  assert.ok(owner !== undefined);
+  const owned = JSON.stringify(owner.obligation);
+  assert.ok(excused.checks.has(owned));
+  const twice = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: [...each.answers.checks, structuredClone(owner.obligation)],
+    },
+  });
+  const shaped = (run: StopRun): string[] =>
+    stopProblems({ unstopped: natural, stopped: run, fitting: [], violating: [], excused });
+  assert.deepEqual(shaped(early), []);
+  assert.ok(
+    shaped({ ...twice(early), without: (omit, key) => twice(early.without(omit, key)) }).includes(
+      `extra check ${owned}`,
+    ),
   );
 });
 

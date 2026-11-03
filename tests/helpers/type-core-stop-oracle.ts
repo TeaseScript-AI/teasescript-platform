@@ -360,18 +360,23 @@ export function stopProblems(c: StopCase): string[] {
   for (const [text, count] of ownedAfter)
     for (let missing = count - (published.get(text) ?? 0); missing > 0; missing -= 1)
       problems.push(`lost check ${text}`);
-  const checksBefore = unowned(unstopped.answers.checks, ownedBefore);
-  const checksAfter = unowned(stopped.answers.checks, ownedAfter);
+  // (a check the combined stop's rule accepts is left out once on each side, as one its record owns: the rule's credit
+  // and a record's are one, never two)
+  const credited = (owned: ReadonlyMap<string, number>): Map<string, number> => {
+    const credits = new Map(owned);
+    for (const text of accepted) credits.set(text, Math.max(credits.get(text) ?? 0, 1));
+    return credits;
+  };
+  const checksBefore = unowned(unstopped.answers.checks, credited(ownedBefore));
+  const checksAfter = unowned(stopped.answers.checks, credited(ownedAfter));
   const ofStores = checksBefore
     .filter((check) => ofStore(check.site))
-    .map((check) => JSON.stringify(check))
-    .filter((check) => !accepted.has(check));
+    .map((check) => JSON.stringify(check));
   const owed = checksBefore
     .filter((check) => !ofStore(check.site))
-    .map((check) => JSON.stringify(check))
-    .filter((check) => !accepted.has(check));
+    .map((check) => JSON.stringify(check));
   let kept = beyond(
-    checksAfter.map((check) => JSON.stringify(check)).filter((check) => !accepted.has(check)),
+    checksAfter.map((check) => JSON.stringify(check)),
     ofStores,
   );
   // (an extra the stopped analysis without its marks lacks is their content; a check both have stays compared)
