@@ -3415,7 +3415,8 @@ function coarseClass(problems: readonly string[]): {
  * #1604: at a combined stop the finishing read answers no kind that neither a finished contract nor a store gives, and a
  * receiver keeps the structure its key's literal stores give through a copy of an inferred place, so the stop owes the
  * demand-only run's checks, at most one for one in other words with their domain (`combinedMarkProblems`): two places
- * copying each other (the issue's witness 1, whose retained decision admitted a `null` no store gives) and a member
+ * copying each other (the issue's witness 1, whose retained decision admitted a `null` no store gives; four deep, its
+ * parts read through the cycle of copies the stores' syntax unites) and a member
  * below a stopped decision, read through a wrapper of a copied object (witness 2's receiver, by a repeat count). The
  * issue's witness 2 itself keeps the demand-only run's checks; what remains there is the interpolation's operand check
  * on the operation's result, owed beyond the reference's (not this mechanism). Every eighth settled stop under each
@@ -3425,17 +3426,19 @@ test("a combined stop owes the demand-only run's checks through a copied place a
   const held = heldFamily(false);
   for (const name of [
     "twoWay-1-arithmetic-plain",
+    "twoWay-4-say-plain",
     "wrappers-1-repeat-plain",
     "wrappers-1-laterOperation-plain",
   ]) {
     const c = held.find((each) => each.name === name)!;
-    for (const mode of HELD_MODES)
-      for (const which of heldDemands(c, mode).keys()) {
-        const demand = heldDemands(c, mode)[which]!;
+    for (const mode of HELD_MODES) {
+      // (the four-deep cycle under its largest stopping demand alone: the cycle's reads are the same under each)
+      const demands = heldDemands(c, mode);
+      for (const which of name === "twoWay-4-say-plain" ? [0] : demands.keys()) {
         const { natural, reference, stoppedAt } = combinedAnalyses(
           [{ path: "main.tease", source: c.source }],
           mode,
-          demand,
+          demands[which]!,
         );
         combinedStops(
           c,
@@ -3457,6 +3460,7 @@ test("a combined stop owes the demand-only run's checks through a copied place a
           which,
         );
       }
+    }
   }
 });
 
