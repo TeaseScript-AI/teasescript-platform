@@ -318,10 +318,10 @@ test("a genuinely open part stays open past the capture, as unstopped", () => {
 });
 
 test("a property whose proof a stop cut leaves its complete sibling checked whole", () => {
-  // (`a` also stored into below its root, so the stores' syntax does not decide `b` through the copy after the stop:
-  // the capture rests on the proof the stop cut, #1604)
+  // (`a.g` also stored from a loop's element, whose type the stores' syntax does not tell, so `b`'s copy of `a` is not
+  // decided by syntax after the stop: the capture rests on the proof the stop cut, #1604)
   const source =
-    'let a = {f: [[1]], g: [["s"]]}\na.f = [[2]]\nlet b = a\nsay "BEFORE"\nb = hostValue\nsay "AFTER"\nexit\n';
+    'let a = {f: [[1]], g: [["s"]]}\nfor x in [[["t"]]] {a.g = x}\nlet b = a\nsay "BEFORE"\nb = hostValue\nsay "AFTER"\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
   const g = propertyStep("g");
   let witnessed = 0;
@@ -376,10 +376,10 @@ test("a copy of an inferred place gives the capture its natural contract after a
 });
 
 test("a property whose proof a stop cut leaves its later complete sibling checked (Codex r1 on #1606)", () => {
-  // (`g` decided before the capture by its own store, `f` cut: the later sibling's check stands at the store; `a` stored
-  // into below its root, as above, #1604)
+  // (`g` decided before the capture by its own store, `f` cut: the later sibling's check stands at the store; `a.f`
+  // stored from a loop's element, as above, #1604)
   const source =
-    'let a = {f: [[1]], g: 1}\na.f = [[2]]\nlet b = a\nb.g = 2\nsay "BEFORE"\nb = hostValue\nsay "AFTER"\nexit\n';
+    'let a = {f: [[1]], g: 1}\nfor x in [[[2]]] {a.f = x}\nlet b = a\nb.g = 2\nsay "BEFORE"\nb = hostValue\nsay "AFTER"\nexit\n';
   const store = spanOf(source, "b = hostValue");
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
   const f = propertyStep("f");

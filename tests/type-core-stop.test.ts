@@ -1846,8 +1846,20 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
     assert.deepEqual([budget.allowance, budget.stoppedIn, budget.settled], [2039, "walk", true]);
   assert.ok(stopped.answers.budget.decisions.some((d) => d.stopped));
   assert.ok(!uncapped.answers.budget.decisions.some((d) => d.stopped));
+  // (a combined stop, judged under its rule: its finishing read answers `first` from its stores' syntax through the copy
+  // of `root`, as the natural analysis does, where the demand-only run's read stopped, #1604)
+  const rule = combinedStopRule(c, mode, unstopped, stopped.answers);
+  const excused = {
+    records: new Set([...rule.records.keys(), ...rule.relabelled.records, ...rule.coarse.records]),
+    checks: new Set([
+      ...rule.checks.keys(),
+      ...rule.owing,
+      ...rule.relabelled.checks,
+      ...rule.coarse.checks.keys(),
+    ]),
+  };
   const judge = (run: StopRun): string[] =>
-    stopProblems({ unstopped, stopped: run, fitting: [], violating: [] });
+    stopProblems({ unstopped, stopped: run, fitting: [], violating: [], excused });
   assert.deepEqual(judge(stopped), []);
   assert.throws(
     () => judge({ ...stopped, without: uncapped.without }),
@@ -3465,12 +3477,13 @@ test("a combined stop owes the demand-only run's checks through a copied place a
 });
 
 /**
- * #1604's copy of an inferred place by syntax holds only where its source's root stores tell its parts: a source the
- * script also stores into below its root (`root.f = {h: 2}`) is not followed, so a copy's read there keeps the natural
- * analysis's check that `w1.q.f` has `.g`, which the replacement lacks (`widerThan`: no place lets through more, words
- * apart). At every settled stop of the program alone, four modes.
+ * #1604's copy of an inferred place by syntax reads its source's stores below the source's root too, one step down a
+ * link (`root.f = {h: 2}` replacing `{g: 1}` in the copied `root`), so a copy's read there keeps the natural analysis's
+ * check that `w1.q.f` has `.g`, which the replacement lacks (`widerThan`: no place lets through more, words apart). At
+ * every settled stop of the program alone, four modes: the loss shows in a band of stops a sample (`testedStops`) misses,
+ * and the whole list takes about 3 s.
  */
-test("a copy of an inferred place stored into below its root is not told by syntax (#1604)", () => {
+test("a copy of an inferred place reads its source's stores below the source's root (#1604)", () => {
   const source = [
     "let root = {f: {g: 1}}",
     "root.f = {h: 2}",
@@ -3505,8 +3518,8 @@ test("a copy of an inferred place stored into below its root is not told by synt
 /**
  * #1604's retained `null` follows the contract at a binding's root only: below it a decision admitting `null` keeps it,
  * since a read there may find no such member (`w1.q = {h: 2}` replaces the object holding `g`), which the conservative
- * null's check stands for. No place lets through more than the natural run at `w1.q.g` (`widerThan`), at every settled
- * stop of the program alone, four modes. The receiver `w1.q` itself is #1654's (a presence check `main` drops there).
+ * null's check stands for. No place lets through more than the natural run at `w1.q.g` (`widerThan`), at the sampled
+ * settled stops of the program alone (`testedStops`), four modes. The receiver `w1.q` itself is #1654's (a presence check `main` drops there).
  */
 test("a retained member below its root keeps admission's null (#1604)", () => {
   const source = [
@@ -3523,7 +3536,7 @@ test("a retained member below its root keeps admission's null (#1604)", () => {
   const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!;
   for (const mode of HELD_MODES) {
     const natural = mode.run(() => analyseCore(request));
-    for (const { allowance } of heldStops(c, mode, 2))
+    for (const { allowance } of testedStops(heldStops(c, mode)))
       assert.deepEqual(
         widerThan(
           natural.checks,
