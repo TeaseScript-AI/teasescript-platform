@@ -253,6 +253,17 @@ export class DemandExhausted extends Error {
   }
 }
 
+/**
+ * Work that would pass a ceiling a caller set (`WorkLedger.capped`): the receiving completion's own allowance (#1526
+ * phase C), never the analysis's; the charge that would pass it is not made.
+ */
+export class CapReached extends Error {
+  public constructor() {
+    super("The work passed the ceiling its caller set.");
+    this.name = "CapReached";
+  }
+}
+
 export class BudgetExhausted extends Error {
   public constructor(public readonly limit: BudgetLimit) {
     super(`The analysis exceeded its ${LIMIT_NAMES[limit]}.`);
@@ -295,6 +306,11 @@ export class WorkLedger {
       this.#apartCounts.set(counter, (this.#apartCounts.get(counter) ?? 0) + units);
       return;
     }
+    if (this.#ceiling !== null && this.#total + units > this.#ceiling) {
+      // (once: the caller's records after it are charged as any work)
+      this.#ceiling = null;
+      throw new CapReached();
+    }
     this.#counts.set(counter, (this.#counts.get(counter) ?? 0) + units);
     this.#total += units;
     this.#spent[this.#spender] = (this.#spent[this.#spender] ?? 0) + units;
@@ -303,6 +319,23 @@ export class WorkLedger {
 
   public get total(): number {
     return this.#total;
+  }
+
+  /** The ceiling `capped` set on the total, or `null`. */
+  #ceiling: number | null = null;
+
+  /**
+   * Runs `callback` with at most `units` more charged to the total: a charge that would pass that throws `CapReached`
+   * instead of being made, and the ceiling is lifted, so what the caller charges after it is counted as any work.
+   */
+  public capped<T>(units: number, callback: () => T): T {
+    const outer = this.#ceiling;
+    this.#ceiling = this.#total + units;
+    try {
+      return callback();
+    } finally {
+      this.#ceiling = outer;
+    }
   }
 
   /** The limit the analysis stopped at, from then on, or `null`. */

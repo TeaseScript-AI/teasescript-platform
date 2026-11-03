@@ -438,15 +438,18 @@ test("after the capture left the slice's depth no receiving inventory or complet
 });
 
 test("a completion ends at the first request that reaches the slice's depth, keeping no result (#1526 phase C)", () => {
-  // (graph/533's shape: two cyclic stores and a selection of either, beside a frozen copy; a contract that reaches the
-  // slice's depth means the program has left the slice, as phase B's capture ends there too)
-  const frozen = `let x = {f: [[1]]}\nlet y = x\n${lines(16, (i) => `y = {f: [[${i}]]}`)}\ny.f = hostValue`;
-  const source = `${frozen}\nlet a = {q: null}\nlet b = {q: null}\na.q = b\nb.q = a\nlet c = [a, b][0]\nc.q = hostValue${ending}`;
-  for (const mode of HELD_MODES.slice(0, 2)) {
+  // (graph/533's shape: two cyclic stores and a selection of either, first, beside a frozen copy of 4,000 stores; a
+  // contract that reaches the slice's depth means the program has left the slice, as phase B's capture ends there too;
+  // its one walk there, about 5.5 M units and 660 more per frozen store, fits the completion's allowance only beside a
+  // settled pass of half that, at about 1,190 units per frozen store: past 3,200 of them, so 4,000, forward)
+  const frozen = `let x = {f: [[1]]}\nlet y = x\n${lines(4000, (i) => `y = {f: [[${i}]]}`)}\ny.f = hostValue`;
+  const source = `let a = {q: null}\nlet b = {q: null}\na.q = b\nb.q = a\nlet c = [a, b][0]\nc.q = hostValue\n${frozen}${ending}`;
+  for (const mode of HELD_MODES.slice(0, 1)) {
     const answers = analyse(source, mode, 16);
     const completion = answers.budget.closure;
     assert.ok(completion !== null, mode.name);
     assert.equal(completion.counts.leftSlice, 1, mode.name);
+    assert.equal(completion.counts.capped, 0, mode.name);
     // (no A6/#1275 check ran: nothing is marked, lost by it or forgone)
     assert.deepEqual(
       [completion.counts.marked, completion.counts.unsettled, completion.counts.forgone],
@@ -459,6 +462,109 @@ test("a completion ends at the first request that reaches the slice's depth, kee
       [],
       mode.name,
     );
+  }
+});
+
+/**
+ * The completion's allowance: twice what the analysis charged before it, so an analysis with its completion at most
+ * triples. Past it the completion ends and keeps no result, every obligation without one and phase B's plan standing.
+ * The shapes whose completion costs more: a directed copy chain (its frontier walks each cyclic contract again per
+ * listing), #1606's W15 (2,123 scoped decisions at size 1024, each scanning its stores again) and S8's whole stores into
+ * one place (fields: 932 decisions at 1024), each at a small size, at demand 16 in the four modes.
+ */
+const rowsOf = (k: number, f: (i: number) => string): string => lines(k, f);
+const directed = (k: number): string =>
+  [
+    "let a0={x:null,n:1}",
+    "let b0={x:null,y:null,n:1}",
+    "a0=b0",
+    "b0.y=a0",
+    rowsOf(k, (i) =>
+      [
+        `let a${i + 1}={x:null,n:1}`,
+        `let b${i + 1}={x:null,n:1}`,
+        `a${i + 1}=a${i}.x`,
+        `a${i}.x=a${i + 1}`,
+        `b${i + 1}=b${i}.x`,
+        `b${i}.x=b${i + 1}`,
+      ].join("\n"),
+    ),
+    "let c=a0",
+  ].join("\n");
+const w15 = (k: number): string =>
+  [
+    `let seed = {${Array.from({ length: k }, (_, i) => `f${i}: 0`).join(", ")}}`,
+    "let state = seed",
+    rowsOf(
+      k,
+      (i) => `let preset${i} = seed\npreset${i}.f${i} = 1\npreset${i}.f${(i * 7 + 3) % k} = 2`,
+    ),
+    rowsOf(k, (i) => `if hostFlag { state = preset${i} }`),
+    rowsOf(k, (i) => `let shown${i}: integer = state.f${i}`),
+  ].join("\n");
+const fields = (k: number): string =>
+  `let b = {f0: 1}\n${rowsOf(k, (i) => `b = {f${i}: ${i}}`)}\nb = hostValue`;
+
+test("a completion past its allowance ends and keeps no result, the analysis at most three times its settled work (#1526 phase C)", () => {
+  for (const [name, body] of [
+    ["a directed copy chain at 4", directed(4)],
+    ["W15 at 256", w15(256)],
+    ["whole stores into one place at 64", fields(64)],
+  ] as const) {
+    const source = body + ending;
+    const request = coreRequest([{ path: "main.tease", source }], [...GLOBALS, "hostFlag"]);
+    assert.ok(request !== null, name);
+    for (const mode of HELD_MODES) {
+      const answers: Answers = mode.run(() =>
+        withTestDemandAllowance(16, () => analyseCore(request)),
+      );
+      const at = `${name}, ${mode.name}`;
+      const completion = answers.budget.closure;
+      assert.ok(completion !== null, at);
+      assert.equal(completion.counts.capped, 1, at);
+      assert.equal(completion.counts.cappedAt, completion.units, at);
+      // (no stop: the analysis settles, its work at most three times what it charged before the completion)
+      assert.equal(answers.budget.exhausted, null, at);
+      assert.equal(answers.budget.stoppedIn, null, at);
+      assert.ok(answers.budget.total <= 3 * (answers.budget.total - completion.units), at);
+      assert.ok(answers.receiving.length > 0, at);
+      assert.deepEqual(
+        answers.receiving.filter(({ result }) => result !== null),
+        [],
+        at,
+      );
+    }
+  }
+});
+
+test("the in-slice witnesses complete within the allowance at demand 16 and 64 in every mode (#1526 phase C)", () => {
+  // (the largest need: the direct store's 1,237 units against its settled 858, 1.44 times, forward at demand 16)
+  const witnesses = [
+    'let a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nb.f = hostValue',
+    'let root={f:[[1]], extra:42}\nlet w0={entry:root}\nlet w1={shell:w0}\nlet w2={entry:w1}\nlet old=w2.entry.shell.entry\nsay "BEFORE"\nw2.entry.shell.entry.f=hostValue',
+    'let o = {f: [[1]]}\nsay "BEFORE"\no.f = hostValue',
+    ring(8),
+    "let w = {f: 1, z: null}\nlet s = w\nlet r = {f: null, z: null}\nr = s\nw = r.z\nlet c = r",
+  ];
+  for (const body of witnesses) {
+    const source = body + ending;
+    let completed = 0;
+    for (const mode of HELD_MODES)
+      for (const demand of [16, 64]) {
+        const answers = analyse(source, mode, demand);
+        const completion = answers.budget.closure;
+        if (completion === null) continue;
+        completed += 1;
+        const at = `${body.split("\n").at(-1)}, ${mode.name}, demand ${demand}`;
+        assert.equal(completion.counts.capped, 0, at);
+        assert.ok(completion.units <= 2 * (answers.budget.total - completion.units), at);
+        assert.deepEqual(
+          answers.receiving.filter(({ result }) => result === null),
+          [],
+          at,
+        );
+      }
+    assert.ok(completed > 0, `${body.split("\n").at(-1)}: some mode completes`);
   }
 });
 

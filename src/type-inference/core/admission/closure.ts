@@ -93,6 +93,34 @@ export interface ClosureCounts {
   forgone: number;
   /** Whether a request reached the slice's depth, ending the completion with no result kept (`LeftSlice`). */
   leftSlice: number;
+  /** Whether the completion reached its own allowance, twice the analysis's work before it (`CapReached`). */
+  capped: number;
+  /** The completion's units when it reached its allowance (0 where it did not). */
+  cappedAt: number;
+}
+
+/** A closure's counters before it runs. */
+export function closureCounts(): ClosureCounts {
+  return {
+    cells: 0,
+    edges: 0,
+    decisions: 0,
+    listings: 0,
+    deferred: 0,
+    taken: 0,
+    extractions: 0,
+    reextractions: 0,
+    unchanged: 0,
+    transactions: 0,
+    invalidated: 0,
+    visits: 0,
+    marked: 0,
+    unsettled: 0,
+    forgone: 0,
+    leftSlice: 0,
+    capped: 0,
+    cappedAt: 0,
+  };
 }
 
 /**
@@ -131,24 +159,7 @@ export class Closure {
   /** Per kind of cell, what clears its kept output (`handle`): its next read makes it anew. */
   readonly #handlers = new Map<CellKind, (name: string) => void>();
   #closed = false;
-  readonly counts: ClosureCounts = {
-    cells: 0,
-    edges: 0,
-    decisions: 0,
-    listings: 0,
-    deferred: 0,
-    taken: 0,
-    extractions: 0,
-    reextractions: 0,
-    unchanged: 0,
-    transactions: 0,
-    invalidated: 0,
-    visits: 0,
-    marked: 0,
-    unsettled: 0,
-    forgone: 0,
-    leftSlice: 0,
-  };
+  readonly counts: ClosureCounts = closureCounts();
 
   public constructor(work: WorkLedger) {
     this.#work = work;

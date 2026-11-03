@@ -2,7 +2,13 @@ import type { Expression } from "../../ast.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { Admission } from "./admission.js";
 import { admittedLevel } from "./admission/admitted.js";
-import { LeftSlice, Unlisted, type Closure, type ClosureCounts } from "./admission/closure.js";
+import {
+  closureCounts,
+  LeftSlice,
+  Unlisted,
+  type Closure,
+  type ClosureCounts,
+} from "./admission/closure.js";
 import { forgetDecision } from "./admission/decision.js";
 import type { DecidedAt } from "./admission/model.js";
 import {
@@ -18,6 +24,7 @@ import type { CorePass } from "./answers.js";
 import type { DecisionWork, ReadWork } from "./answers.js";
 import {
   BudgetExhausted,
+  CapReached,
   DemandExhausted,
   demandAllowanceFor,
   joinParts,
@@ -724,10 +731,12 @@ export class Consumers {
   }
 
   /**
-   * #1526 phase C steps 1–3: the pass's receiving obligations (`admission/receiving.ts`: the store checks the walk owes,
-   * the stores a stopped decision stands for, every live store that brings external data), each completed in the
-   * completion pass (`#completeFor`) and kept with its result (`receiving`), in the stable source order; a stop that cuts
-   * the completion leaves every one lost with the cause `extraction`, and is thrown on.
+   * #1526 phase C: the pass's receiving obligations (`admission/receiving.ts`: the store checks the walk owes, a stopped
+   * decision's stores among them, every live store that brings external data), each completed in the completion pass
+   * (`#completeFor`) and kept with its result (`receiving`), in the stable source order; a stop that cuts the completion
+   * leaves every one lost with the cause `extraction`, and is thrown on. The completion's allowance is twice the work the
+   * analysis charged before it, so an analysis with its completion at most triples: past it the completion ends and keeps
+   * no result (`capped`), every obligation without one and phase B's plan standing, as at the slice's depth.
    */
   #receive(): void {
     // (all its work counted to setup's, which names no place: the heaviest place a stop's warning names stays this
@@ -744,7 +753,8 @@ export class Consumers {
 
   /** `#receive`, its work counted to setup's. */
   #receiveCounted(): void {
-    const since = this.pass.program.work.total;
+    const work = this.pass.program.work;
+    const since = work.total;
     const storeSites: { site: SourceSite; stopped: boolean }[] = [];
     for (const d of this.diagnostics)
       if (
@@ -754,25 +764,34 @@ export class Consumers {
       )
         storeSites.push({ site: d.site, stopped: d.provenance.context === "budget" });
     this.reading = null;
-    const obligations = receivingObligations(this.admission, {
-      epoch: epochOf(this.pass),
-      storeSites,
-      ingressSites: this.#ingressSites,
-      siteKey,
-    });
+    let obligations: ReceivingObligation[] = [];
     let completed: Completed | null = null;
+    let capped = false;
     try {
-      completed = this.#completeFor(obligations, since);
+      // (its own allowance: twice what the analysis charged before it, so an analysis with its completion at most
+      // triples; past it the completion ends and keeps no result, as at the slice's depth)
+      completed = work.capped(2 * since, () => {
+        obligations = receivingObligations(this.admission, {
+          epoch: epochOf(this.pass),
+          storeSites,
+          ingressSites: this.#ingressSites,
+          siteKey,
+        });
+        return this.#completeFor(obligations, since);
+      });
+    } catch (error) {
+      if (!(error instanceof CapReached)) throw error;
+      capped = true;
     } finally {
       for (const obligation of obligations) {
+        const done = completed;
         const at =
-          completed === null
-            ? undefined
-            : completed.index.get(joinParts(obligation.place, obligation.path));
+          done === null ? undefined : done.index.get(joinParts(obligation.place, obligation.path));
         this.receiving.push({
           obligation,
-          result:
-            completed === null
+          result: capped
+            ? null
+            : done === null
               ? lostBy(
                   {
                     place: obligation.place,
@@ -784,12 +803,17 @@ export class Consumers {
                 )
               : at === undefined
                 ? null
-                : (completed.results[at] ?? null),
+                : (done.results[at] ?? null),
         });
       }
       // (its units counted to its end: the decisions' records and the results' index made after the pass included)
-      if (this.completion !== null)
-        this.completion = { ...this.completion, units: this.pass.program.work.total - since };
+      const units = work.total - since;
+      const record = this.completion ?? { units, counts: closureCounts(), decisions: [] };
+      this.completion = {
+        ...record,
+        units,
+        counts: capped ? { ...record.counts, capped: 1, cappedAt: units } : record.counts,
+      };
     }
   }
 
@@ -801,7 +825,8 @@ export class Consumers {
    * is unfrozen and no cache holds a frozen key's answer; each listing is a cell the frontier schedules, taken whole by a
    * search that reaches it (`Closure.run`). Nothing of it is this pass's: its answers, decisions and stops stand, and the
    * results are kept as each obligation's (the publication and decision 2 are later steps). Its work is this
-   * analysis's, charged where made; a stop in it is this pass's stop in its capture.
+   * analysis's, charged where made; a stop in it is this pass's stop in its capture, and its allowance's end
+   * (`CapReached`, `#receive`) ends it with no result kept.
    */
   #completeFor(obligations: readonly ReceivingObligation[], since: number): Completed {
     const { pass, retargeted } = this.#completion!();
@@ -811,18 +836,25 @@ export class Consumers {
     const requirements = receivingRequirements(pass.program.work, obligations);
     const results: (ReceivingResult | null | undefined)[] = requirements.map(() => undefined);
     const work = pass.program.work;
+    let capped = false;
     try {
       completer.#completeIn(closure, requirements, results, epochOf(this.pass), retargeted);
+    } catch (error) {
+      if (error instanceof CapReached) capped = true;
+      throw error;
     } finally {
-      for (const site of completer.completedChecks) this.completedChecks.add(site);
+      // (past its allowance nothing of it is kept: no decision's record, no check's site)
+      if (!capped) for (const site of completer.completedChecks) this.completedChecks.add(site);
       const local = demandAllowanceFor(pass.program.flow.nodes.length);
       this.completion = {
         units: pass.program.work.total - since,
         counts: { ...closure.counts },
-        decisions: closure.decisions.map(({ key, units, allowance }) => ({
-          ...completer.admission.decisionWork(decidedAt(keyed(key)), units, allowance, false),
-          completion: { local },
-        })),
+        decisions: capped
+          ? []
+          : closure.decisions.map(({ key, units, allowance }) => ({
+              ...completer.admission.decisionWork(decidedAt(keyed(key)), units, allowance, false),
+              completion: { local },
+            })),
       };
       closure.close();
     }
