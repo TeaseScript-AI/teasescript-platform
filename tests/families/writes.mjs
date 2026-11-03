@@ -105,6 +105,10 @@ const ALLOWED = {
     readSync: [() => true, "reads from an open descriptor into memory"],
     closeSync: [exactly(1), "closes a descriptor"],
     createReadStream: [optionsFrom(1), "reads a file as a stream"],
+    writeSync: [
+      (call) => ts.isNumericLiteral(call.arguments[0]) && call.arguments[0].text === "2",
+      "writes to the process's standard error, descriptor 2 (the runner's child's stall over the unit limit, #1647)",
+    ],
   },
   process: {
     exit: [() => true, "ends this process"],
@@ -754,7 +758,11 @@ export function inventory(checkout = process.cwd()) {
       continue;
     }
     const op = opOf(name);
-    if (WRITERS.has(op) && !(op === "open" && ALLOWED.fs.openSync[0](call)))
+    // (an open for reading only, and a write to standard error by its descriptor, reach no file: the allowed forms)
+    const allowedForm =
+      (op === "open" && ALLOWED.fs.openSync[0](call)) ||
+      (name === "writeSync" && ALLOWED.fs.writeSync[0](call));
+    if (WRITERS.has(op) && !allowedForm)
       sites.push({ ...entry, write: name, kind: kindOf(call, op) });
     else {
       const read = ALLOWED.fs[name] ?? ALLOWED.fs[`${name}Sync`];
