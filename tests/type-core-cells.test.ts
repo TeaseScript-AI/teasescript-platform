@@ -3,12 +3,15 @@ import test from "node:test";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CARRIER_ROLES, operandsOf } from "../src/type-inference/core/carriers.js";
+import { checkedResult } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
+import type { CheckedDiagnostic } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
+import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import {
   BOUNDED_ADMISSION_WITNESSES,
   CARRIER_WITNESSES,
@@ -3659,6 +3662,54 @@ test("A2's witnesses: whole copies err where they meet the place or the list, re
     'let a = {n: 1}\nlet b = {n: "x"}\nlet c: object? = null\nc = a\nc = b\nc = {n: 1}\nc = {n: "x"}\nexit',
     ["valid"],
   );
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * #1317's witness: two objects whose properties hold different types, copied into each other, both copies rejected, so
+ * each keeps its own contents; an alias of each, a fitting store into a different property of each, then both aliases in
+ * one list. Each property errs at the list, in all four modes: after the cycle splits, the meetings of the elements' tries
+ * reach only `nest.g`, and the meetings of what they definitely hold (A2, #1293) bring `f` before the literal's conflict
+ * paths are kept. The aliases in the other order err at the other element; the same alias twice is quiet at the list.
+ */
+test("a split cycle's aliases, each stored into after the split, err at their list at each property, in all four modes (#1317)", () => {
+  const setup =
+    'let t:integer=7\nlet w:string="w"\nlet a={f:1,nest:{g:1}}\nlet b={f:"s",nest:{g:"s"}}\n' +
+    "b=a\na=b\nlet before=a\nlet peer=b\na.f=t\nb.nest.g=w\n";
+  // (each rejected copy's error per property, where it meets its place)
+  const copies = ["TSV041 'a' b.f", "TSV041 'a' b.nest.g", "TSV041 'b' a.f", "TSV041 'b' a.nest.g"];
+  const listed = (element: string): string[] => [
+    `TSV044 '${element}' f`,
+    `TSV044 '${element}' nest.g`,
+  ];
+  const differing: string[] = [];
+  for (const [list, expected] of [
+    ["[before,peer]", [...copies, ...listed("peer")]],
+    ["[peer,before]", [...copies, ...listed("before")]],
+    ["[before,before]", copies],
+  ] as const) {
+    const source = `${setup}let final=${list}\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, list);
+    const text = (diagnostic: CheckedDiagnostic): string => {
+      const at = `${diagnostic.code} '${source.slice(diagnostic.site.start, diagnostic.site.end)}'`;
+      if (diagnostic.class !== "compile-error" || !("rule" in diagnostic))
+        return `${diagnostic.class} ${at}`;
+      const { rule } = diagnostic;
+      if (rule.rule === "mixed") return `${at} ${rule.path.join(".")}`;
+      return rule.rule === "store" ? `${at} ${rule.into.replace(/'/gu, "")}` : `${at} ${rule.rule}`;
+    };
+    for (const mode of MODES) {
+      const result = inMode(mode, () => checkedResult(analyseCore(request), request));
+      const actual = [
+        result.outcome,
+        ...result.diagnostics.map(text).sort(),
+        `${result.checks.length} checks`,
+      ];
+      if (JSON.stringify(actual) !== JSON.stringify(["compile-error", ...expected, "0 checks"]))
+        differing.push(`${list} ${JSON.stringify(mode)}: ${actual.join(", ")}`);
+    }
+  }
   assert.deepEqual(differing, []);
 });
 
