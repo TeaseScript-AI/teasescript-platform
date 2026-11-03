@@ -1109,18 +1109,19 @@ function isStopped(item: Item): boolean {
 
 /**
  * After a stop, what a literal's own syntax proves at a step it writes nothing for, as the unstopped read answers it: an
- * object without the property lacks it (`missing`, F11, its writer the literal's), an empty collection holds no element
- * at any depth below (`EMPTY`); `STOPPED` at any other step. A typed load's default read by its own syntax so keeps the
- * type the unstopped read gives it (#1460).
+ * object without the step lacks it (`missing`, F11, its writer the literal's), an empty collection holds no element
+ * (`EMPTY` where the path ends at its element step), and a scalar below any step, a collection at any other step or
+ * below an element it lacks holds nothing. A typed load's default read by its own syntax so keeps the type the
+ * unstopped read gives it, a sibling's included (#1460).
  */
 function absentAt(
   program: CoreProgram,
   value: PlaceId,
-  own: "list" | "set" | "dict" | "object",
-  step: string,
+  own: "atom" | "list" | "set" | "dict" | "object",
+  path: readonly string[],
 ): readonly Item[] {
-  if (own !== "object") return stepName(step) === "element" ? [EMPTY] : STOPPED;
-  if (step === "element" || step === "iteration" || stepName(step) !== step) return STOPPED;
+  if (own === "atom") return [];
+  if (own !== "object") return path.length === 1 && path[0] === "element" ? [EMPTY] : [];
   const site = program.hasOf.get(value)?.[0]?.site;
   return [
     makeItem("unknown", site === undefined ? null : program.writer("literal", site), {
@@ -1431,7 +1432,8 @@ class CoreAnswers implements Answers {
     if (own === undefined) return { items: STOPPED, names: NO_NAMES };
     if (own === "atom") {
       const has = program.hasOf.get(value);
-      return path.length === 0 && has?.length === 1 && has[0]!.type.kind === "atom"
+      if (path.length > 0) return { items: absentAt(program, value, own, path), names: NO_NAMES };
+      return has?.length === 1 && has[0]!.type.kind === "atom"
         ? { items: [makeItem(has[0]!.type.name, null, { cert: "def" })], names: NO_NAMES }
         : { items: STOPPED, names: NO_NAMES };
     }
@@ -1445,19 +1447,25 @@ class CoreAnswers implements Answers {
     // each child at the path's own step (`literalChildren` keys a collection's elements and a dict's values alike): its
     // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question,
     // TABLE r4.158), beside its known siblings, the composition in its one order (#1398); its names its own
-    // syntax's alone
+    // syntax's alone; no item at all is an answer where every child's own syntax proves its own (`absentAt`)
     const items: Item[] = [];
     const names = new Set<string>();
     const rest = path.slice(1);
     const step = path[0]!;
     const children = this.#consumers.admission.literalChildren(value, step);
-    if (children.length === 0) return { items: absentAt(program, value, own, step), names };
+    if (children.length === 0) return { items: absentAt(program, value, own, path), names };
+    let proved = true;
     for (const child of children) {
-      if (child.value === undefined) continue;
-      for (const name of this.#stoppedShape(child.value, rest).names) names.add(name);
+      if (child.value === undefined) {
+        proved = false;
+        continue;
+      }
+      const shape = this.#stoppedShape(child.value, rest);
+      if (shape.items === STOPPED) proved = false;
+      for (const name of shape.names) names.add(name);
       for (const item of this.#items(child.value, child.node, rest)) items.push(item);
     }
-    return { items: items.length === 0 ? STOPPED : inItsOrder(items), names };
+    return { items: items.length === 0 && !proved ? STOPPED : inItsOrder(items), names };
   }
 
   /** The value place of an expression node, the place a statement stores into, or `null`. */

@@ -343,13 +343,18 @@ test("a stop does not change what a typed load or parse reads: a record without 
   // the family: each clause at each depth, in four modes, at stops before and after admission settles and at a
   // decision's demand stop: an absent field (a record's, a nested list's, below an object's property, an empty record)
   // through a load, where a parse declines unstopped as stopped (JSON's records need every field, #1458); an empty
-  // collection (a nested list's, below a record's property) through both; an empty default as the open boundary
+  // collection (a nested list's, below a record's property) and a `null` beside a collection or a record (nothing below
+  // a scalar, Codex r1's N1; a level all of whose literals hold nothing) through both or a load; an empty default as the
+  // open boundary
   const sources = [
     ...["[{n: 1}, {m: 2}]", "[{}, {n: 1}]", "[[{n: 1}], [{m: 2}]]", "{xs: [{n: 1}, {m: 2}]}"].map(
       (fallback) => `let seed = load("seed", default: ${fallback})`,
     ),
     'let seed = fromJson("[]", default: [{n: 1}, {m: 2}])',
-    ...["[[], [1]]", "[{xs: []}, {xs: [1]}]", "[]"].flatMap((fallback) => [
+    ...["[null, {n: 1}]", "[[null], [{n: 1}]]"].map(
+      (fallback) => `let seed = load("seed", default: ${fallback})`,
+    ),
+    ...["[[], [1]]", "[{xs: []}, {xs: [1]}]", "[null, [1]]", "[]"].flatMap((fallback) => [
       `let seed = load("seed", default: ${fallback})`,
       `let seed = fromJson("[]", default: ${fallback})`,
     ]),
@@ -373,6 +378,45 @@ test("a stop does not change what a typed load or parse reads: a record without 
   ]);
 });
 
+test("after a stop a literal answers each step it writes nothing for as unstopped: an object lacks it, an empty collection holds no element, a scalar or another step nothing (#1460)", () => {
+  // literals a written union lets mix, a `null` beside them, an empty one, each read by its own syntax at a stop before
+  // admission settles; every literal at every path of these steps, by kind and reason, in four modes
+  const steps = ["element", "n", "index"];
+  const paths = steps.flatMap((first) => [[first], ...steps.map((second) => [first, second])]);
+  for (const source of [
+    'let s: (integer[] | object)?[] = [null, [1], {n: 2}, []]\nsay "X"\nexit\n',
+    'let s: (integer[] | object)?[][] = [[null], [[1]], [{n: 2}, {}]]\nsay "X"\nexit\n',
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }], []);
+    assert.ok(request !== null, source);
+    const answered = (answers: Answers): string[] =>
+      answers.graph.nodes.flatMap((node) => {
+        const kind = node.expression?.kind;
+        if (kind === undefined || !/Literal$/u.test(kind)) return [];
+        return paths.map(
+          (path) =>
+            `${kind}@${node.expression!.span.start.offset} ${path.join(".")}: ` +
+            answers
+              .valueAt(node, path)
+              // (its distinct kinds and reasons: a stop's composition keeps an item per writer, #1398's order)
+              .items.map((item) => `${item.tag}/${item.reasons}`)
+              .filter((item, at, all) => all.indexOf(item) === at)
+              .sort()
+              .join(" "),
+        );
+      });
+    for (const mode of HELD_MODES) {
+      const stopped: Answers = mode.run(() => withTestAllowance(1, () => analyseCore(request)));
+      assert.equal(stopped.budget.settled, false, source);
+      assert.deepEqual(
+        answered(stopped),
+        answered(mode.run(() => analyseCore(request))),
+        `${source} (${mode.name})`,
+      );
+    }
+  }
+});
+
 test("after a stop a load still takes its default for a stored value its default's type does not fit, warns, and restores the same (#1460)", () => {
   const object = (n: SerializableRuntimeValue) =>
     createSerializableObject([{ name: "n", value: n }]);
@@ -392,11 +436,18 @@ test("after a stop a load still takes its default for a stored value its default
       ["BEFORE", "5", "AFTER"],
       ["BEFORE", "1", "AFTER"],
     ],
+    // an element beside a `null` element of the default (Codex r1's N1)
+    [
+      'let seed = load("seed", default: [null, [1]])\nlet inner = seed[1] otherwise [0]\nsay "BEFORE"\nsay inner[0]\nsay "AFTER"\nexit\n',
+      (n: SerializableRuntimeValue) => createSerializableList([null, createSerializableList([n])]),
+      ["BEFORE", "5", "AFTER"],
+      ["BEFORE", "1", "AFTER"],
+    ],
   ] as const) {
     const load = source.indexOf("load(");
     const end = source.indexOf(")\n") + 1;
     for (const mode of HELD_MODES)
-      for (const stop of [<T>(make: () => T): T => make(), ...readerStops(source, mode)]) {
+      for (const stop of [<T>(make: () => T): T => make(), ...sampled(readerStops(source, mode))]) {
         const { plan } = mode.run(() =>
           stop(() => compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND)),
         );
