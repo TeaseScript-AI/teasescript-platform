@@ -84,13 +84,20 @@ export interface CheapShape {
 }
 
 /**
- * What reaches one key and path by syntax: the shapes of the keys at and above it, there, each with the store a copy
- * brought it by (`by`, `null` for the key's own); the written types copies bring there; whether every value there is
- * told by syntax (`told`, which holds for each path below only while it holds).
+ * What reaches one key and path by syntax: the shapes of the key's own stores and of the keys above it, there; the
+ * written types copies of written places bring there; the frontiers of the inferred places copied there (`links`), each
+ * by reference with the earliest store that copies it, once a source, so no source's shapes are copied into another's
+ * (#1604); whether every value there is told by syntax (`told`, which holds for each path below only while it holds).
  */
 export interface CheapFrontier {
-  readonly shapes: readonly { readonly shape: CheapShape; readonly by: Definition | null }[];
+  readonly shapes: readonly CheapShape[];
   readonly written: readonly { readonly term: TypeTerm; readonly by: Definition }[];
+  readonly links: readonly {
+    readonly root: PlaceId;
+    readonly path: readonly string[];
+    readonly by: Definition;
+    readonly frontier: CheapFrontier;
+  }[];
   readonly told: boolean;
   /** The longest chain of copies of inferred places it follows (`Infinity` where one passed the bound, #1604). */
   readonly reach: number;
