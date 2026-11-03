@@ -319,10 +319,11 @@ export function stopProblems(c: StopCase): string[] {
   // the checks, in their published order: an unstopped one a mark's record owns or one of a marked store's records; a
   // stopped one a mark's record owns, one of a marked store's records the unstopped analysis has too (the record kept,
   // on both sides alike, TABLE r4.122), or one that forms only with the marks, their content (r4.110 (a): the stopped
-  // analysis without them lacks it); any other stopped check inside a marked store's value is compared. A record's
-  // obligation owns a check by its content, not its object (#1642: the stopped mark carries the reference's check, which
-  // is another object of the same content): each side leaves out as many checks of one content as the side owning it
-  // more has records owning it.
+  // analysis without them lacks it); any other stopped check inside a marked store's value is compared. Each side's
+  // checks are owned by its own excused records, its marks included (#1642: the reference's mark owned the receiver's
+  // check, which then stayed compared against a stopped one its mark owned), by content and one check per owning record;
+  // a record of the stopped compile owns only a check that compile publishes, so an obligation it holds is never lost
+  // with its check.
   const owners = (list: readonly CoreDiagnostic[]): Map<string, number> => {
     const objects = new Set<Obligation>();
     for (const d of list)
@@ -334,16 +335,10 @@ export function stopProblems(c: StopCase): string[] {
     }
     return counts;
   };
-  const [ownedBefore, ownedAfter] = [
-    owners(unstopped.answers.diagnostics),
-    owners([...stopped.answers.diagnostics, ...marks]),
-  ];
-  const owned = new Map(
-    [...new Set([...ownedBefore.keys(), ...ownedAfter.keys()])].map(
-      (text) => [text, Math.max(ownedBefore.get(text) ?? 0, ownedAfter.get(text) ?? 0)] as const,
-    ),
-  );
-  const unowned = (checks: readonly Obligation[]): Obligation[] => {
+  const unowned = (
+    checks: readonly Obligation[],
+    owned: ReadonlyMap<string, number>,
+  ): Obligation[] => {
     const left = new Map(owned);
     return checks.filter((check) => {
       const text = JSON.stringify(check);
@@ -352,18 +347,31 @@ export function stopProblems(c: StopCase): string[] {
       return count === 0;
     });
   };
-  const ofStores = unowned(unstopped.answers.checks)
+  const ownedBefore = owners([
+    ...unstopped.answers.diagnostics,
+    ...unstopped.answers.budget.deferred,
+  ]);
+  const ownedAfter = owners([...stopped.answers.diagnostics, ...marks]);
+  const published = new Map<string, number>();
+  for (const check of stopped.answers.checks) {
+    const text = JSON.stringify(check);
+    published.set(text, (published.get(text) ?? 0) + 1);
+  }
+  for (const [text, count] of ownedAfter)
+    for (let missing = count - (published.get(text) ?? 0); missing > 0; missing -= 1)
+      problems.push(`lost check ${text}`);
+  const checksBefore = unowned(unstopped.answers.checks, ownedBefore);
+  const checksAfter = unowned(stopped.answers.checks, ownedAfter);
+  const ofStores = checksBefore
     .filter((check) => ofStore(check.site))
     .map((check) => JSON.stringify(check))
     .filter((check) => !accepted.has(check));
-  const owed = unowned(unstopped.answers.checks)
+  const owed = checksBefore
     .filter((check) => !ofStore(check.site))
     .map((check) => JSON.stringify(check))
     .filter((check) => !accepted.has(check));
   let kept = beyond(
-    unowned(stopped.answers.checks)
-      .map((check) => JSON.stringify(check))
-      .filter((check) => !accepted.has(check)),
+    checksAfter.map((check) => JSON.stringify(check)).filter((check) => !accepted.has(check)),
     ofStores,
   );
   // (an extra the stopped analysis without its marks lacks is their content; a check both have stays compared)
@@ -388,7 +396,7 @@ export function stopProblems(c: StopCase): string[] {
   // the plans, whole: each difference inside a changing mark's content
   const differences = planDifferences(want, got);
   const obligations = new Map(
-    unstopped.answers.diagnostics.flatMap((d) =>
+    [...unstopped.answers.diagnostics, ...unstopped.answers.budget.deferred].flatMap((d) =>
       "obligation" in d ? [[recordOf(d.code, d.site), JSON.stringify(d.obligation)] as const] : [],
     ),
   );

@@ -1642,12 +1642,13 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
 });
 
 /**
- * #1642: a record's obligation owns a check by its content. The issue's `dict-path` witness reversed, under demand
- * allowance 256, stopped at program allowance 2,464 (#1642's reversed modes): the stopped run's TSV043 mark carries the
- * receiver's null-check that both runs publish, the reference's as another object of the same content, so neither is
- * lost.
+ * #1642: each side's checks are owned by its own records, its marks included. The issue's `dict-path` witness reversed,
+ * under demand allowance 256, stopped at program allowance 2,464 (#1642's reversed modes): the reference's TSV043 mark
+ * and the stopped run's each carry the receiver's null-check that both runs publish, so neither is lost. A stopped run
+ * that keeps its mark but drops the check, and the plan's guard, from its compile and its reruns loses it (Codex r1's
+ * control on #1663, a stop at program allowance 1).
  */
-test("the stop oracle takes a mark's obligation as the owner of an equal check on both sides (#1642)", () => {
+test("the stop oracle takes each side's marks as the owners of its checks, and a mark keeps its check (#1642)", () => {
   const source =
     'let p = hostValue otherwise hostOther\nlet box: integer[] dict = dict{k: []}\nbox.k = [p, hostOther]\nsay "AFTER"\nexit\n';
   const c: HeldCase = { name: "dict-path", source, slice: true, values: [] };
@@ -1677,6 +1678,60 @@ test("the stop oracle takes a mark's obligation as the owner of an equal check o
       mode.name,
     );
   }
+  const plain =
+    'let p = hostValue otherwise hostOther\nlet box = {k: [1]}\nbox.k = [p, hostOther]\nsay "AFTER"\nexit\n';
+  const o: HeldCase = { name: "object", source: plain, slice: true, values: [] };
+  const mode = HELD_MODES[1]!;
+  const reference = heldRun(o, mode, undefined, 256);
+  const stopped = heldRun(o, mode, 1, 256);
+  const [check] = reference.answers.checks.filter(
+    (each) => each.kind === "null-check" && plain.slice(each.site.start, each.site.end) === "box.k",
+  );
+  assert.ok(check !== undefined);
+  const text = JSON.stringify(check);
+  assert.ok(
+    stopped.answers.budget.deferred.some((mark) => JSON.stringify(mark.obligation) === text),
+  );
+  const judge = (run: StopRun): string[] =>
+    stopProblems({ unstopped: reference, stopped: run, fitting: [], violating: [] });
+  assert.deepEqual(judge(stopped), []);
+  // (the check left out of the answers, and the guard it gives the store, `requireExisting`, out of the plan)
+  const unguarded = (plan: unknown): unknown => {
+    const copy = structuredClone(plan);
+    const pending: unknown[] = [copy];
+    while (pending.length > 0) {
+      const node = pending.pop();
+      if (node === null || typeof node !== "object") continue;
+      const each = node as { kind?: unknown; span?: { so?: unknown }; requireExisting?: unknown };
+      if (each.kind === "assign" && each.span?.so === check.site.start) delete each.requireExisting;
+      pending.push(...Object.values(node));
+    }
+    return copy;
+  };
+  const dropped = <T extends { readonly answers: Answers; readonly result: StopRun["result"] }>(
+    each: T,
+    checks = true,
+  ): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.filter((x) => !checks || JSON.stringify(x) !== text),
+    },
+    result: { ...each.result, plan: unguarded(each.result.plan) as StopRun["result"]["plan"] },
+  });
+  // (the guard alone: a plan change inside the mark's content, but the mark owes the reference's own check there)
+  assert.ok(
+    judge({
+      ...dropped(stopped, false),
+      without: (omit, key) => dropped(stopped.without(omit, key), false),
+    }).some((problem) => problem.startsWith("plan ")),
+  );
+  assert.ok(
+    judge({
+      ...dropped(stopped),
+      without: (omit, key) => dropped(stopped.without(omit, key)),
+    }).includes(`lost check ${text}`),
+  );
 });
 
 /**
