@@ -261,7 +261,7 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
     // the key's own: past the bound from it, so never told there whatever was made before; elsewhere it is made again)
     partial ||= level.partial;
     if ((!cut || state.depth === 0) && !partial)
-      walk.cheapFrontiers.set(keyOf(root, path.slice(0, at)), frontier);
+      walk.cheapFrontiers.set(keptKey(walk.pass.program.work, root, path.slice(0, at)), frontier);
   }
   return frontier!;
 }
@@ -434,7 +434,8 @@ function linkedBelow(
   try {
     const level = levelBelow(walk, root, path, parent, false);
     // (a level made from a parent no frontier keeps, one a cycle of copies made in part, is that cycle's part too)
-    const kept = walk.cheapFrontiers.get(keyOf(root, path.slice(0, -1))) === parent;
+    const kept =
+      walk.cheapFrontiers.get(keptKey(walk.pass.program.work, root, path.slice(0, -1))) === parent;
     if (kept && !level.cut && !level.partial) walk.cheapFrontiers.set(key, level.frontier);
     return level.frontier;
   } finally {
