@@ -1444,14 +1444,15 @@ test("a chain of copies between selection levels lands its paths once per link, 
  * #1547, #1428: each call's landed paths, taking the pass's listings, are those its walk finds without them, in their
  * order (`withLandingComparison`), on every landing shape in the four modes: chains, meeting routes, skipping links,
  * translations, cold chains and aliases asked at their ends or at every link, overlapping seeds, sibling prefixes,
- * cycles of copies, and a cycle split by its rejected copies, whose next pass lands without them (its listings that
- * pass's own).
+ * cycles of copies, and a chain one of whose copies a list rejects, landed in every pass (each pass's listings its
+ * own).
  */
 test("the landings' listings give each call the paths its walk finds, in order, in the four modes (#1547)", () => {
   const differing: string[] = [];
-  let calls = 0;
+  const quiet: string[] = [];
   for (const family of LANDING_SHAPES) {
     const { request } = sized(family, 6);
+    let calls = 0;
     for (const mode of MODES)
       withLandingComparison(
         (place, prefix, listed, walked) => {
@@ -1463,9 +1464,10 @@ test("the landings' listings give each call the paths its walk finds, in order, 
         },
         () => inMode(mode, () => analyseCore(request)),
       );
+    if (calls === 0) quiet.push(family.name);
   }
   assert.deepEqual(differing, []);
-  assert.ok(calls >= 1000, `${calls} calls compared`);
+  assert.deepEqual(quiet, [], "every shape lands paths");
 });
 
 /**

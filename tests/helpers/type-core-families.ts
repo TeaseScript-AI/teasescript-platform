@@ -6981,8 +6981,8 @@ export const LANDING_FAMILIES: readonly WorkFamily[] = (["first", "last"] as con
  * #1547, #1428: the shapes the landings' listings must answer as their walk does (each call's paths in order): chains
  * asked at every link, through a selection, a property, an object and a growing listing; two and three routes meeting
  * at every link, and a link skipping one; translations below wrappers; cold chains and aliases asked at their ends,
- * at a prefix or at every link; seeds overlapping a listing; copies of a whole cycle, a fed cycle and a cycle that takes
- * steps; and a cycle split by its rejected copies, landed again in the pass after (Sol's design rounds r1–r3).
+ * at a prefix or at every link; seeds overlapping a listing; sibling prefixes holding other paths; copies of a whole cycle, a fed cycle and a cycle that takes
+ * steps; and a chain one of whose copies a list rejects, landed in every pass (Sol's design rounds r1–r3).
  */
 export const LANDING_SHAPES: readonly WorkFamily[] = (
   [
@@ -7105,6 +7105,16 @@ export const LANDING_SHAPES: readonly WorkFamily[] = (
         ),
     ],
     [
+      "asymmetric-siblings",
+      (k: number) =>
+        landingChain(
+          k,
+          "{p: {a: typed}, q: {b0: typed}}",
+          (x, i) => `[{p: ${x}.q, q: {b${i}: typed}}, {p: {z: typed}, q: {z: typed}}][0]`,
+          "out.q",
+        ),
+    ],
+    [
       "cycles",
       (k: number) =>
         lines(
@@ -7131,21 +7141,13 @@ export const LANDING_SHAPES: readonly WorkFamily[] = (
         ),
     ],
     [
-      "split-cycle",
-      () =>
-        lines(
-          "let t: integer = 7",
-          'let w: string = "w"',
-          "let a = {f: 1, nest: {g: 1}}",
-          'let b = {f: "s", nest: {g: "s"}}',
-          "b = a",
-          "a = b",
-          "let before = a",
-          "let peer = b",
-          "a.f = t",
-          "b.nest.g = w",
-          "let final = [before, peer]",
-          "exit",
+      "rejected-link",
+      (k: number) =>
+        landingChain(
+          k,
+          "{p: {f: 1, g: typed}}",
+          (x, i) => (i === 2 ? `[{p: {f: "s"}}, ${x}][0]` : `[${x}, {p: {f: 1}}][0]`),
+          "out.p.f",
         ),
     ],
   ] as const
