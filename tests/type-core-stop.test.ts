@@ -304,18 +304,34 @@ function readers(source: string): string[] {
   }
 }
 
-/** Every stop a family visits in a mode: four total allowances from the first unit up, and three demand allowances. */
-function readerStops(source: string): (<T>(make: () => T) => T)[] {
+/**
+ * The stops a reader family visits of a source in a mode (TESTING.md, "Sampled sweeps"): the program stops before
+ * admission settles (`sampled`, from the first unit to the last before the first settled phase), each settled phase's
+ * sample (`testedStops`), and the demand allowances at which a decision stops (`heldDemands`), each a run's wrapper.
+ */
+function readerStops(
+  source: string,
+  mode: (typeof HELD_MODES)[number],
+): (<T>(make: () => T) => T)[] {
+  const c: HeldCase = { name: source, slice: true, values: [], source };
+  const settled = heldStops(c, mode);
   const request = coreRequest([{ path: "main.tease", source }], []);
   assert.ok(request !== null, source);
-  const total = analyseCore(request).budget.total;
+  const first =
+    settled.length > 0
+      ? Math.min(...settled.map((stop) => stop.allowance))
+      : mode.run(() => analyseCore(request)).budget.total;
+  const allowances = [
+    ...sampled(Array.from({ length: first - 1 }, (_, i) => i + 1)),
+    ...testedStops(settled).map((stop) => stop.allowance),
+  ];
   return [
-    ...[1, Math.round(total / 3), Math.round((2 * total) / 3), total - 1].map(
+    ...allowances.map(
       (allowance) =>
         <T>(make: () => T): T =>
           withTestAllowance(allowance, make),
     ),
-    ...[1, 16, 64].map(
+    ...heldDemands(c, mode).map(
       (allowance) =>
         <T>(make: () => T): T =>
           withTestDemandAllowance(allowance, make),
@@ -324,32 +340,29 @@ function readerStops(source: string): (<T>(make: () => T) => T)[] {
 }
 
 test("a stop does not change what a typed load or parse reads: a record without a field lacks it and an empty collection holds nothing, as unstopped (#1460, ADR 0021 1.10)", () => {
-  // the family: each clause (an absent field, an empty collection) at each depth, through a load and a parse, in four
-  // modes, at stops before and after admission settles; controls with nothing absent
-  const defaults = [
-    "[{n: 1}, {m: 2}]",
-    "[{}, {n: 1}]",
-    "[[{n: 1}], [{m: 2}]]",
-    "{xs: [{n: 1}, {m: 2}]}",
-    "[{a: [{n: 1}, {m: 2}]}]",
-    "[[], [1]]",
-    "[{xs: []}, {xs: [1]}]",
-    "{xs: [[], [1]]}",
-    "[{n: 1}, {n: 2}]",
-    "[]",
-  ];
-  for (const fallback of defaults)
-    for (const call of ['load("seed", default: D)', 'fromJson("[]", default: D)']) {
-      const source = `let seed = ${call.replace("D", fallback)}\nsay "X"\nexit\n`;
-      for (const mode of HELD_MODES) {
-        const unstopped = mode.run(() => readers(source));
-        for (const stop of mode.run(() => readerStops(source)))
-          assert.deepEqual(
-            mode.run(() => stop(() => readers(source))),
-            unstopped,
-            `${source} (${mode.name})`,
-          );
-      }
+  // the family: each clause at each depth, in four modes, at stops before and after admission settles and at a
+  // decision's demand stop: an absent field (a record's, a nested list's, below an object's property, an empty record)
+  // through a load, where a parse declines unstopped as stopped (JSON's records need every field, #1458); an empty
+  // collection (a nested list's, below a record's property) through both; an empty default as the open boundary
+  const sources = [
+    ...["[{n: 1}, {m: 2}]", "[{}, {n: 1}]", "[[{n: 1}], [{m: 2}]]", "{xs: [{n: 1}, {m: 2}]}"].map(
+      (fallback) => `let seed = load("seed", default: ${fallback})`,
+    ),
+    'let seed = fromJson("[]", default: [{n: 1}, {m: 2}])',
+    ...["[[], [1]]", "[{xs: []}, {xs: [1]}]", "[]"].flatMap((fallback) => [
+      `let seed = load("seed", default: ${fallback})`,
+      `let seed = fromJson("[]", default: ${fallback})`,
+    ]),
+  ].map((line) => `${line}\nsay "X"\nexit\n`);
+  for (const source of sources)
+    for (const mode of HELD_MODES) {
+      const unstopped = mode.run(() => readers(source));
+      for (const stop of readerStops(source, mode))
+        assert.deepEqual(
+          mode.run(() => stop(() => readers(source))),
+          unstopped,
+          `${source} (${mode.name})`,
+        );
     }
   // the unstopped readers the family holds every stop to, by the defaults' own types (V30 §13)
   assert.deepEqual(readers('let seed = load("seed", default: [{n: 1}, {m: 2}])\nexit\n'), [
@@ -383,10 +396,7 @@ test("after a stop a load still takes its default for a stored value its default
     const load = source.indexOf("load(");
     const end = source.indexOf(")\n") + 1;
     for (const mode of HELD_MODES)
-      for (const stop of [
-        <T>(make: () => T): T => make(),
-        ...mode.run(() => readerStops(source)),
-      ]) {
+      for (const stop of [<T>(make: () => T): T => make(), ...readerStops(source, mode)]) {
         const { plan } = mode.run(() =>
           stop(() => compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND)),
         );
