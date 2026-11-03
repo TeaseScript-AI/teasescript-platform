@@ -85,7 +85,10 @@ head alone stalled (over the unit limit on a run the base ended with its units r
 error), inherited where the base stalled too, or alone, and unknown where no units of the base are recorded on the run
 the head's stall cut (a baseline before #1647, a tree without a ledger), the base stalled at a time limit, or no record
 names the tree. The base's units decide only a stall over the unit limit: a head that alone stalls for memory or a
-fatal error is a candidate whatever units are recorded, as no unit record would change that verdict. A record made before #1647 is judged by the rule then (a candidate, load or unknown, its time
+fatal error is a candidate whatever units are recorded, as no unit record would change that verdict. The transition
+rule: a replay recorded before #1647 (no unit limit in its configuration) is judged by the rule then, also after its
+stalls are rerun by a runner since; the rerun's unit limit is added to its configuration and ignored for that verdict.
+A replay since #1647 is judged by units. A record made before #1647 is judged by the rule then (a candidate, load or unknown, its time
 clause a heuristic). An
 area's records must share one configuration (another is refused, exit 2), so the area is complete only with its shards
 0/N to N-1/N of one N, together every source of one plan, and a source a plan lists more than once (a repeat, which the
@@ -138,9 +141,10 @@ does not skip it but stores it again; one that does not verify leaves the area d
 that shard replaces it. `--baseline` reads an area only where it is complete under that rule, and is
 refused as status refuses it otherwise. One running writer at a time stores a shard. Every write into the baseline
 but its `MANIFEST`'s making goes through one gate in `baselines.mjs`, which holds the baseline's lock. A store writes
-into its tree's baseline only (and its `--out`), and runs where only that folder and its scratch are writable:
-`sx-sandbox --write ~/work/baselines/<src tree> --write <scratch> -- node … --store ~/work/baselines …`, with
-`TMPDIR=<scratch>`, as the hook queues its jobs; a write anywhere else fails (EROFS). `node tests/families/writes.mjs`
+into its tree's baseline only (and its `--out` and `--work` records, with the latter's progress record), and runs
+where only that folder and its scratch are writable: `sx-sandbox --write ~/work/baselines/<src tree> --write <scratch>
+-- node … --store ~/work/baselines …`, with `TMPDIR=<scratch>`, as the hook queued its jobs (`baseline.sh compute`
+also makes `<out>` writable, where its store's `--work` record goes); a write anywhere else fails (EROFS). `node tests/families/writes.mjs`
 lists the writes the tools' source shows, an advisory check for the plain forms of a write outside the gate. Nothing
 removes a baseline.
 `bash tools/corpus/baseline.sh status <commit>` says in one line what each area of the commit's tree holds, and exits 0

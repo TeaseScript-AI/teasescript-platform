@@ -658,7 +658,7 @@ if (process.argv[2] === "--child") {
       shards,
       plan.plan,
       plan.places[shard],
-      plan.units,
+      plan.text,
     );
     if (storing.refused !== undefined) refused(storing.refused);
     if (storing.skipped !== undefined) {

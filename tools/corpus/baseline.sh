@@ -33,7 +33,8 @@
 #
 # The sandbox (#1542, orchestrator 2's contract; `sx-sandbox`, bubblewrap): a store writes into its tree's baseline,
 # ~/work/baselines/<src tree>/ (`git rev-parse <commit>:src`), and nothing else, its locks and temporary files and the
-# MANIFEST it makes there included; a process may also write its TMPDIR scratch, and its own `--out`. The hook runs in
+# MANIFEST it makes there included; a process may also write its TMPDIR scratch, and its own `--out` and `--work`
+# records (`compute` makes its <out> writable for the latter). The hook runs in
 # a sandbox whose only writable places are that baseline and ~/queue/pending (the wrapper orchestrator 2 installs as
 # the hook runs `sx-sandbox --write ~/work/baselines/<src tree> --write ~/queue/pending -- baseline.sh <tree> <sha>`),
 # and queues each job so that it runs in one whose only writable places are that baseline and its own scratch in

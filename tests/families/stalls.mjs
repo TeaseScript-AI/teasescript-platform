@@ -251,8 +251,9 @@ function shardOf(file) {
   if (ran === undefined)
     return {
       file,
+      // (its sources that stalled or reached the safety net, #1647, each counted so)
       entries: lines
-        .filter((line) => line.stalled !== undefined)
+        .filter((line) => line.stalled !== undefined || line.uncharged !== undefined)
         .map((line) => ({
           ...entryOf(
             { ...line, key: sourceKey(line), runs: undefined },
@@ -261,7 +262,7 @@ function shardOf(file) {
           ),
           files: undefined,
           globals: undefined,
-          counts: { stalled: 1 },
+          counts: { [line.stalled === undefined ? "uncharged" : "stalled"]: 1 },
           listed: true,
         })),
     };
@@ -555,6 +556,9 @@ for (const shard of rerunFiles.map(shardOf)) {
     refused(`${shard.file} compares otherwise than its replay (${other}): it is not merged`);
   const within = new Map();
   for (const entry of shard.entries) {
+    // (the transition rule, #1647: a rerun merged into a replay recorded before #1647, whose configuration names no
+    // unit limit, is judged by that replay's rule, the rerun's added unit limit ignored for the verdict)
+    if (configuration.units === undefined) delete entry.units;
     const place = placeOf(entry);
     if (!replay.has(place)) refused(`${shard.file} holds a source the replay does not: ${place}`);
     merge(within, entry, shard.file);

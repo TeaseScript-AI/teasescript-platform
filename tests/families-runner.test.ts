@@ -1648,13 +1648,13 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
             "uncertified",
             { work: 4000, allowance: 1000 },
             true,
-            /stored\.mjs mixed: its stall is not over 4 times its run's allowance/,
+            /stored\.mjs mixed: its stall is not a run cut over 4 times its allowance/,
           ],
           [
             "uncharged-cut",
             { work: 1, allowance: 0 },
             true,
-            /stored\.mjs mixed: its stall is not over 4 times its run's allowance/,
+            /stored\.mjs mixed: its stall is not a run cut over 4 times its allowance/,
           ],
           [
             "uncut",
@@ -2006,7 +2006,8 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
  * head, `both` on both trees, `budget` 1,500 more (past its allowance, within 4 times it); `ledgers` 7,001 more on three
  * ledgers of allowances 1,000, 2,000 and 1,000 (within 4 times the largest only); `noisy` on the head writes 1 MiB on
  * stderr, then charges 5,000; `slowall` waits 600 ms each run on each tree, and `hang` 3 s in the head's first. Where
- * `between`, the modes wait 1.5 s before the first: between the source's runs, in none; without a `ledger`, it charges
+ * `between`, the modes wait 1.5 s before the first: between the source's runs, in none; `grow` charges 90,000 on the
+ * head on a ledger of allowance 100,000, within 4 times it; without a `ledger`, it charges
  * a ledger of its own, which no runner counts.
  */
 const unitsLibrary = (
@@ -2025,6 +2026,7 @@ export function publicationHashes(files, mode) {
   ledger.charge("frames", 300);
   if (source === "both" || (${head} && source === "over")) ledger.charge("frames", 5000);
   if (source === "budget") ledger.charge("frames", 1500);
+  if (${head} && source === "grow") new WorkLedger(100000).charge("frames", 90000);
   if (source === "ledgers") {
     new WorkLedger(1000).charge("frames", 3500);
     new WorkLedger(2000).charge("frames", 3500);
@@ -2303,24 +2305,29 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
       /"uncharged":\{"base":"outside its runs","head":"outside its runs"\}/,
     );
 
-    // a replay recorded before #1647 (its configuration without a unit limit, its stall a time limit's) is rerun by
-    // this runner and merged with it, the rerun's unit limit added: the stall decided by its units (Codex r1)
+    // a replay recorded before #1647 (its configuration without a unit limit, its stalls a time limit's) is rerun by
+    // this runner and merged, the rerun's unit limit added, and judged by its own rule (the transition rule, Codex r1,
+    // r2): `over` stalls again, a candidate; `grow`, whose head charged far more than the base before its old time
+    // limit, ends in the rerun and stays a candidate, as that rule says a rerun that ends does not clear it
     const legacy = join(directory, "legacy.work.jsonl");
-    run(runner, areaOf("legacy", ["fast", "over"]), base, head, "--work", legacy);
+    run(runner, areaOf("legacy", ["fast", "over", "grow"]), base, head, "--work", legacy);
     const [header, ...body] = lines(readFileSync(legacy, "utf8"));
     delete header.work.units;
     delete header.work.configuration.units;
-    const total = body.pop();
-    delete total.total.units;
-    delete total.total.uncharged;
-    const older = body.map(({ runs, stalled, ...line }) => ({
-      ...line,
-      runs: runs.map(({ allowance: _allowance, ...ran }: Record<string, unknown>) => ran),
-      ...(stalled === undefined ? {} : { stalled: "timeout" }),
-    }));
+    const total = body.pop().total;
+    const older = body.map(({ runs, stalled, counts, ...line }) => {
+      const ran = runs.map(({ allowance: _allowance, ...one }: Record<string, unknown>) => one);
+      // (`grow`'s first run cut at its old time limit, its units then the head's whole run's)
+      return line.source === "grow"
+        ? { ...line, runs: [{ ...ran[0], running: 1 }], counts: { stalled: 1 }, stalled: "timeout" }
+        : { ...line, runs: ran, counts, ...(stalled === undefined ? {} : { stalled: "timeout" }) };
+    });
+    const { units: _units, uncharged: _uncharged, ...kept } = total;
+    for (const key of ["runs", "stalled"])
+      kept[key] = older.reduce((sum, { counts }) => sum + (counts[key] ?? 0), 0);
     writeFileSync(
       legacy,
-      [header, ...older, total].map((line) => `${JSON.stringify(line)}\n`).join(""),
+      [header, ...older, { total: kept }].map((line) => `${JSON.stringify(line)}\n`).join(""),
     );
     const legacyIndex = join(directory, "legacy-index.json");
     assert.equal(run(stalls, legacy, "--index", legacyIndex).status, 1);
@@ -2328,17 +2335,22 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
     assert.equal(run(stalls, "rerun", legacyIndex, base, head, reran).status, 1);
     const merged = run(stalls, legacy, "--rerun", join(reran, "legacy.work.jsonl"));
     assert.equal(merged.status, 1, merged.stderr);
+    const after = lines(merged.stdout);
     assert.deepEqual(
-      lines(merged.stdout)
-        .slice(1, 2)
+      after
+        .slice(1, 3)
         .map(({ source, verdict, rerun: { outcome, verdict: now } }) => [
           source,
           verdict,
           outcome,
           now,
         ]),
-      [["over", "candidate", "stalled", "candidate"]],
+      [
+        ["over", "candidate", "stalled", "candidate"],
+        ["grow", "candidate", "agreed", "candidate"],
+      ],
     );
+    assert.deepEqual([after.at(-1).candidate, after.at(-1).closed], [2, false]);
 
     // and a plan 2 baseline is compared only at its own unit limit
     const elsewhere = run(runner, folder, head, "--baseline", area, "--units", "3");
@@ -2347,6 +2359,214 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
       elsewhere.stderr,
       /is stored at 4 times the allowance: run the head there \(--units 4\)/,
     );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("every reader of a stored shard accepts or refuses one line alike, none throwing, and a writer stores again what it refuses: a family over the line's PLAN, end, cut and run (#1647, Codex r2)", async () => {
+  // The family's whole product (FAMILIES_FORMAT=full: 3 PLANs × 8 ends × 5 cuts × 4 runs) is queue evidence, under
+  // agents.home.arpa:~/work/evidence/1650/<head>/format-family/; CI runs one variant per class and boundary of each axis
+  // (the test-cost rule).
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const tree = join(directory, "tree");
+    mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+    mkdirSync(join(tree, "dist", "src", "type-inference", "core"), { recursive: true });
+    mkdirSync(join(tree, "src"));
+    writeFileSync(join(tree, "src", "a.ts"), "a\n");
+    writeFileSync(join(tree, ".sha"), `${"1".repeat(40)}\n`);
+    writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+    writeFileSync(join(tree, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
+    writeFileSync(
+      join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+      unitsLibrary(false),
+    );
+    const area = join(directory, "units");
+    mkdirSync(area);
+    writeFileSync(join(area, "g.mjs"), `export const cases = [["s", "s"]];\n`);
+    const tool = (...args: string[]) =>
+      spawnSync(process.execPath, [baselines, ...args], { encoding: "utf8" });
+    const lines = (text: string) =>
+      text
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+    // the source stored once, its MANIFEST naming the tree's build (as a seed's does)
+    const stored = join(directory, "stored");
+    mkdirSync(stored);
+    assert.equal(spawnSync(process.execPath, [runner, area, tree, "--store", stored]).status, 0);
+    assert.equal(tool("compiled", tree, stored).status, 0);
+    const [src] = readdirSync(stored);
+    const { storedRuns: comparisonOf } = await import(pathToFileURL(baselines).href);
+
+    type Variant = { plan: string; end: string; cut: string; run: string };
+    const PLANS = ["2", "1", "mismatched"];
+    const ENDS = ["none", "units", "exit", "at-run", "at-ended", "outside", "thrown", "two"];
+    const CUTS = ["absent", "valid", "zero", "under", "ended"];
+    const RUNS = ["valid", "null", "no-work", "over"];
+    /** Whether a store writes the variant (the rule apart from the tools: #1647's format, plan 1 as before it). */
+    const accepted = ({ plan, end, cut, run }: Variant) => {
+      if (plan === "mismatched" || run === "null" || ["two", "at-ended"].includes(end))
+        return false;
+      if (plan === "1") return cut === "absent" && !["at-run", "outside"].includes(end);
+      if (run !== "valid") return false;
+      return end === "units" ? cut === "valid" : cut === "absent";
+    };
+    /** The variant's baseline: the stored line made so, its totals and digests repaired, and its stalls' listing. */
+    const made = (name: string, { plan, end, cut, run }: Variant) => {
+      const root = join(directory, "variants", name);
+      cpSync(stored, root, { recursive: true });
+      const dir = join(root, src!);
+      const file = join(dir, "units", "0of1.runs.jsonl");
+      const [line, { total }] = lines(readFileSync(file, "utf8"));
+      const names: string[] = Object.keys(line.runs);
+      const [first, second] = [names[0]!, names[1]!];
+      const result = (ran: Record<string, unknown>): Record<string, unknown> => {
+        const { work: _work, allowance: _allowance, ...value } = ran;
+        return plan === "2" ? ran : value;
+      };
+      const ended = result(line.runs[first]);
+      // (a run's units, which only plan 2 stores, missing or over the limit)
+      const firstRun =
+        run === "null"
+          ? null
+          : run === "no-work" && plan === "2"
+            ? Object.fromEntries(Object.entries(ended).filter(([name]) => name !== "work"))
+            : run === "over" && plan === "2"
+              ? { ...ended, work: 5000 }
+              : ended;
+      const runs =
+        end === "none"
+          ? {
+              ...Object.fromEntries(names.map((at) => [at, result(line.runs[at])])),
+              [first]: firstRun,
+            }
+          : { [first]: firstRun };
+      const cutOf = (kind: string) =>
+        kind === "valid"
+          ? { run: second, work: 4001, allowance: 1000 }
+          : kind === "zero"
+            ? { run: second, work: 1, allowance: 0 }
+            : kind === "under"
+              ? { run: second, work: 4000, allowance: 1000 }
+              : { run: first, work: 4001, allowance: 1000 };
+      const { generator, source, key } = line;
+      const stall =
+        end === "units" ? "units" : end === "exit" || end === "two" ? "exit 3" : undefined;
+      const written = {
+        generator,
+        source,
+        key,
+        ...(stall === undefined ? {} : { stalled: stall }),
+        ...(end === "thrown" ? { thrown: { runner: "Error: thrown" } } : {}),
+        ...(end === "at-run" || end === "two" ? { uncharged: second } : {}),
+        ...(end === "at-ended" ? { uncharged: first } : {}),
+        ...(end === "outside" ? { uncharged: "outside its runs" } : {}),
+        ...(cut === "absent" ? {} : { cut: cutOf(cut) }),
+        runs,
+      };
+      const body = `${JSON.stringify(written)}\n`;
+      let text = readFileSync(join(dir, "units", "PLAN"), "utf8");
+      const was = sha256(text);
+      if (plan === "1") text = text.replace(/^plan 2$/m, "plan 1");
+      if (plan !== "2") text = text.replace(/^limits .*$/m, "limits 180 s, 2048 MB");
+      writeFileSync(join(dir, "units", "PLAN"), text);
+      const manifest = join(dir, "MANIFEST");
+      writeFileSync(manifest, readFileSync(manifest, "utf8").replace(was, sha256(text)));
+      const { units: _units, uncharged: _uncharged, ...kept } = total;
+      const counted = {
+        ...kept,
+        stalled: stall === undefined ? 0 : 1,
+        ...(plan === "2" ? { units: 4, uncharged: "uncharged" in written ? 1 : 0 } : {}),
+        plan: sha256(text),
+        lines: sha256(body),
+      };
+      writeFileSync(file, `${body}${JSON.stringify({ total: counted })}\n`);
+      const entry = { area: "units", shard: "0/1", generator, source, key, stalled: stall };
+      const listed =
+        stall === undefined
+          ? []
+          : [
+              plan === "1"
+                ? { ...entry, alone: { generator, source, key, stalled: stall, runs: {} } }
+                : { ...entry, ...(cut === "absent" ? {} : { cut: cutOf(cut) }) },
+            ];
+      writeFileSync(
+        join(root, "stalls.json"),
+        JSON.stringify({ area: "units", shard: "0/1", stalls: listed }),
+      );
+      return { root, dir, file };
+    };
+    /** Each reader's answer on the variant: accepted (true), refused (false); a throw fails the test. */
+    const readers = (name: string, variant: Variant) => {
+      const { root, dir, file } = made(name, variant);
+      const answers: Record<string, boolean> = {};
+      const status = tool("status", root, src!);
+      assert.ok(
+        [0, 2].includes(status.status!),
+        `${name} status: ${status.stdout}${status.stderr}`,
+      );
+      answers["status"] = status.status === 0;
+      const central = join(directory, "central", name);
+      const seed = tool("import", central, root);
+      const shard = seed.status === 0 ? tool("import", central, root, "units", "0/1") : seed;
+      assert.ok([0, 2].includes(shard.status!), `${name} import: ${shard.stdout}${shard.stderr}`);
+      answers["import"] = shard.status === 0;
+      const compared = comparisonOf(join(dir, "units"));
+      answers["comparison"] = compared.lines !== undefined;
+      if (variant.plan === "2") {
+        // (the plan 2 writers: the stalls' listing, and a store, which skips only what it accepts and stores the rest
+        // again; a plan 2 writer refuses a plan 1 area as another plan)
+        const listing = tool(
+          "stalls",
+          file,
+          "units",
+          "0/1",
+          join(directory, `${name}.stalls.json`),
+        );
+        assert.ok([0, 2].includes(listing.status!), `${name} stalls: ${listing.stderr}`);
+        answers["stalls"] = listing.status === 0;
+        const store = spawnSync(process.execPath, [runner, area, tree, "--store", root], {
+          encoding: "utf8",
+        });
+        const ended = lines(store.stdout).at(-1);
+        answers["store"] = ended.skipped === "stored";
+        if (!answers["store"])
+          assert.equal(ended.verified, true, `${name} stored again: ${store.stdout}`);
+      }
+      return answers;
+    };
+    const base: Variant = { plan: "2", end: "none", cut: "absent", run: "valid" };
+    const variants: Variant[] =
+      process.env.FAMILIES_FORMAT === "full"
+        ? PLANS.flatMap((plan) =>
+            ENDS.flatMap((end) =>
+              CUTS.flatMap((cut) => RUNS.map((run) => ({ plan, end, cut, run }))),
+            ),
+          )
+        : [
+            base,
+            ...PLANS.slice(1).map((plan) => ({ ...base, plan })),
+            ...ENDS.slice(1).map((end) => ({
+              ...base,
+              end,
+              cut: end === "units" ? "valid" : "absent",
+            })),
+            ...CUTS.filter((cut) => cut !== "valid").map((cut) => ({ ...base, end: "units", cut })),
+            { ...base, cut: "valid" },
+            ...RUNS.slice(1).map((run) => ({ ...base, run })),
+            { ...base, plan: "1", end: "exit" },
+          ];
+    const disagreements = variants.flatMap((variant) => {
+      const name = Object.values(variant).join("-");
+      const answers = readers(name, variant);
+      const expected = accepted(variant);
+      return Object.entries(answers)
+        .filter(([, answer]) => answer !== expected)
+        .map(([reader, answer]) => `${name}: ${reader} ${answer ? "accepts" : "refuses"}`);
+    });
+    assert.deepEqual(disagreements, []);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -2971,7 +3191,9 @@ test("the stall index decides each stalled source from its record by one rule: t
     const files = [{ path: "main.tease", source: "x" }];
     writeFileSync(
       out,
-      `${JSON.stringify({ generator: "s8-stores.mjs", source: "x", stalled: { head: "timeout" }, files, globals: [] })}\n`,
+      `${JSON.stringify({ generator: "s8-stores.mjs", source: "x", stalled: { head: "timeout" }, files, globals: [] })}\n` +
+        // (#1647, Codex r2: a source at the safety net, which the `--out` file names too)
+        `${JSON.stringify({ generator: "s8-stores.mjs", source: "y", uncharged: { head: "src-on publication" }, files, globals: [] })}\n`,
     );
     const run = (...args: string[]) =>
       spawnSync(process.execPath, [stalls, ...args], { encoding: "utf8" });
@@ -3020,6 +3242,17 @@ test("the stall index decides each stalled source from its record by one rule: t
         ["property", false, 0, 1, 0],
         ["stored", true, 0, 3, 1],
       ],
+    );
+    // (the source at the safety net named as a defect and counted so, never agreement)
+    assert.deepEqual(
+      printed
+        .filter(({ defect }) => defect !== undefined)
+        .map(({ source, uncharged }) => [source, uncharged]),
+      [["y", { head: "src-on publication" }]],
+    );
+    assert.equal(
+      printed.find(({ area, complete }) => area === "property" && complete !== undefined).uncharged,
+      1,
     );
     // closed where every source agrees; refused, a record cut short, one whose sources do not add up to its total, and
     // a rerun of a source the replay does not hold
