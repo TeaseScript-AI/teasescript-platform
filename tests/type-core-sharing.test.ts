@@ -37,7 +37,7 @@ import {
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
-import { SWEEP } from "./helpers/sweep.js";
+import { sampled, SWEEP } from "./helpers/sweep.js";
 import {
   ingressAnswers,
   inMode,
@@ -68,10 +68,10 @@ import {
  * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
  * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered
  * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`; `type-core-oracles.ts`).
- * Any difference fails the test. On CI (GitHub Actions sets `CI`) the fixtures' records and the written-domain matrices'
- * sources (whose own tests run each source in both orders) run in the source order only, every other program in both;
- * a local `npm run check` runs them all in both orders (the orchestrator's decision on the CI job's time, 2026-10-26,
- * and the lead's for the matrices). `type-core-written.test.ts` compares the sources of the matrices it checks in three
+ * Any difference fails the test. Of the fixture's records and of each written-domain matrix's sources (whose own tests
+ * run each source in both orders) the test takes a sample (`sampled`: the first, the last and two between), every
+ * other program whole; `TEASESCRIPT_SWEEP=full` takes them all, the sweep's queue evidence (`docs/TESTING.md`, "Sampled
+ * sweeps"; the lead's decision on #1638). `type-core-written.test.ts` compares the sources of the matrices it checks in three
  * layers (`WRITTEN_DOMAIN_MATRIX`, `V30_TYPE_MATRIX`, `INFERRED_COPY_MATRIX`, `DEFAULT_CHAIN_MATRIX`) on the analyses
  * and plans its own tests observe.
  *
@@ -88,11 +88,7 @@ import {
 interface Program {
   readonly name: string;
   readonly files: readonly SourceFile[];
-  /** A fixture's record or a written-domain matrix's source, in the source order only outside the sweep (`SWEEP`). */
-  readonly sourceOrderSampled?: true;
 }
-
-const SAMPLED_ORDERS = SWEEP ? [false, true] : [false];
 
 const one = (name: string, source: string): Program => ({
   name,
@@ -333,17 +329,22 @@ function programs(): Program[] {
     out.push(one(`#1210 ${name}`, unmarked(lines).source));
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
-  // the merged S6's other written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3)
+  // the merged S6's other written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3), each
+  // matrix's sources sampled (`sampled`; every one in the sweep)
   const sources = new Set<string>();
-  for (const { name, source } of [
-    ...UNRESTRICTED_COLLECTION_MATRIX,
-    ...OBJECT_PROPERTY_MATRIX,
-    ...UNION_RULE_MATRIX,
-  ])
-    if (!sources.has(source)) {
-      sources.add(source);
-      out.push({ ...one(`written domain ${name}`, source), sourceOrderSampled: true });
-    }
+  for (const matrix of [
+    UNRESTRICTED_COLLECTION_MATRIX,
+    OBJECT_PROPERTY_MATRIX,
+    UNION_RULE_MATRIX,
+  ]) {
+    const own: Program[] = [];
+    for (const { name, source } of matrix)
+      if (!sources.has(source)) {
+        sources.add(source);
+        own.push(one(`written domain ${name}`, source));
+      }
+    out.push(...sampled(own));
+  }
   // Astra's round-5 D1 witness: a decider beside an unselected read of its source (her B1 shape is the oracle's)
   out.push(
     one(
@@ -351,8 +352,8 @@ function programs(): Program[] {
       'let raw = hostValue\nraw = 1\nlet out = [[raw].get(9, default: null), raw, "tail"]\nrepeat out[0] {}\nexit\n',
     ),
   );
-  for (const record of readFixture())
-    out.push({ name: record.name, files: record.files, sourceOrderSampled: true });
+  // the fixture's records, sampled (every one in the sweep)
+  out.push(...sampled(readFixture().map(({ name, files }) => ({ name, files }))));
   return out;
 }
 
@@ -405,7 +406,7 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   for (const program of all) {
     let ready: Prepared | undefined;
     const records: string[] = [];
-    for (const reversed of program.sourceOrderSampled === true ? SAMPLED_ORDERS : [false, true]) {
+    for (const reversed of [false, true]) {
       const input = `${reversed}|${JSON.stringify(program.files)}`;
       let differs = changed.get(input);
       if (differs === undefined) {
@@ -422,8 +423,8 @@ test("the core's sharing of answers is output-neutral for every family, witness 
     if (records.length === 2 && records[0] !== records[1]) reordered.push(program.name);
   }
   t.diagnostic(
-    `${all.length} programs in ${runs} runs (each in both orders, the fixtures' and the matrices' in ` +
-      `${SAMPLED_ORDERS.length}; one run per exact input and order), with the sharing on and off`,
+    `${all.length} programs in ${runs} runs (each in both orders, one run per exact input and order; the fixture's ` +
+      `records and the written-domain matrices' sources ${SWEEP ? "all" : "sampled"}), with the sharing on and off`,
   );
   assert.deepEqual(differing, []);
   assert.deepEqual(reordered, []);
