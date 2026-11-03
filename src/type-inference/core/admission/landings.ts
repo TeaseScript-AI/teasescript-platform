@@ -818,7 +818,7 @@ export function withLandingComparison<T>(
  * source, prefix and way of writing its paths once. A source and prefix an earlier call of the pass asked give that
  * call's listing instead of their walk (#1547, #1428): the stack ends a task's walk before anything under it, so the
  * listing is what the walk would add there, in order, written where the task writes its paths; a longer prefix of a
- * place whose listing started at the place itself takes that listing's paths below it. Every call runs at the pass's
+ * place with a listing at its root takes that listing's paths below it. Every call runs at the pass's
  * own level, before any decision, so no demand counts the work a listing saves.
  */
 export function landedBelow(
@@ -859,9 +859,8 @@ function walkLandings(
     readonly drop: number;
     readonly prepend: readonly string[];
   }[] = [{ place, below: prefix, drop: 0, prepend: [] }];
-  // (whether the walk starts at the place itself; the listings this call took, each with the prefix and writing it took
-  // them with; and while the paths so far are one listing's, written as there, that listing, which is then the result)
-  let own = true;
+  // (the listings this call took, each with the prefix and writing it took them with; and while the paths so far are
+  // one listing's, written as there, that listing, which is then the result)
   const taken = new Set<string>();
   const one: { same: Listing | null | undefined } = { same: null };
   let taking = false;
@@ -934,7 +933,6 @@ function walkLandings(
     // (a place that lands through its parent lands its root and what the copy it lands through does, `landsThrough`)
     const through = landsThrough(admission, task.place, task.below);
     if (through !== task.place) {
-      if (root) own = false;
       emit([]);
       tasks.push({ ...task, place: through });
       continue;
@@ -942,14 +940,14 @@ function walkLandings(
     // (a cycle's landed paths, and the copies at, above or below the prefix, from indexes by path: never every one
     // for each prefix, Astra's review r2 B2)
     if (cycleOf.has(task.place) && !fed.has(task.place) && !wholes.has(task.place)) {
-      if (root) own = false;
       const landing = cycleLanding(admission, task.place);
       for (const path of landing.under.get(keptText(admission.work, task.below)) ?? []) emit(path);
       continue;
     }
-    // (the place's own listing at its root, its paths below the prefix: Sol's completed-root prefix view)
+    // (the place's listing at its root, its paths below the prefix: Sol's completed-root prefix view. A place that lands
+    // through its parent or stands in a cycle does at every prefix, so it never comes here)
     const whole = task.below.length > 0 ? lists?.get("") : undefined;
-    if (whole?.own === true) {
+    if (whole !== undefined) {
       take(whole, true);
       continue;
     }
@@ -984,8 +982,8 @@ function walkLandings(
   }
   // (a result that is one listing's paths, written as there, is that listing: equal listings are one)
   if (one.same !== null && one.same !== undefined && out.size === one.same.texts.length)
-    return one.same.own === own ? one.same : { ...one.same, own };
-  return { id: (admission.listingCount += 1), paths, texts: [...out], own };
+    return one.same;
+  return { id: (admission.listingCount += 1), paths, texts: [...out] };
 }
 
 /** The members of a place's cycle of copies (`Inheritance.order`), once per pass. */

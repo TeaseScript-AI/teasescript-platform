@@ -6981,7 +6981,8 @@ export const LANDING_FAMILIES: readonly WorkFamily[] = (["first", "last"] as con
  * #1547, #1428: the shapes the landings' listings must answer as their walk does (each call's paths in order): chains
  * asked at every link, through a selection, a property, an object and a growing listing; two and three routes meeting
  * at every link, and a link skipping one; translations below wrappers; cold chains and aliases asked at their ends,
- * at a prefix or at every link; seeds overlapping a listing; sibling prefixes holding other paths; copies of a whole cycle, a fed cycle and a cycle that takes
+ * at a prefix or at every link; seeds overlapping a listing; sibling prefixes holding other paths; one place asked at two
+ * prefixes, its other values loaded at each; copies of a whole cycle, a fed cycle and a cycle that takes
  * steps; and a chain one of whose copies a list rejects, landed in every pass (Sol's design rounds r1–r3).
  */
 export const LANDING_SHAPES: readonly WorkFamily[] = (
@@ -7112,6 +7113,22 @@ export const LANDING_SHAPES: readonly WorkFamily[] = (
           "{p: {a: typed}, q: {b0: typed}}",
           (x, i) => `[{p: ${x}.q, q: {b${i}: typed}}, {p: {z: typed}, q: {z: typed}}][0]`,
           "out.q",
+        ),
+    ],
+    [
+      "two-prefixes",
+      (k: number) =>
+        lines(
+          LANDING_TYPED,
+          "let base = {p: {f: typed}, q: {g: typed}}",
+          "let d = base",
+          'd.p = load("a", default: {f: 1})',
+          'd.q = load("b", default: {g: 1})',
+          "let e0 = d",
+          rows(k, (i) => `let e${i + 1} = [e${i}, {p: {f: 1}, q: {g: 1}}][0]`),
+          `let z = [{w: e${k}.q}, {w: {g: 2}}][0]`,
+          'say "${z.w.g}"',
+          "exit",
         ),
     ],
     [
