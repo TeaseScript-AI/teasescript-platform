@@ -192,3 +192,14 @@ test("lists that hold themselves leave the slice at its depth instead of failing
     "The candidate type analysis does not cover a value whose structure the slice does not follow yet (main.tease, offset 21).",
   );
 });
+
+test("a store whose contract's lists nest past the slice's depth leaves the slice at the lowering's depth cut (#1646)", () => {
+  // (found on main by #1652's generated family, 57 of its first 1,300 seeds: `a.q=[a]` nests the lists below `a.q`
+  // without end, and the lowering's walk of the store `a=a.q` threw past the slice's depth from its own `levelWalk`,
+  // failing the compile; it now leaves the slice at that store's value, as its depth cut below an object or a collection
+  // does)
+  assert.equal(
+    sliceExit("let a={}\na=a.q\na.q=[a]\na.f=hostValue\nexit\n"),
+    "The candidate type analysis does not cover a value whose structure the slice does not follow yet (main.tease, offset 11).",
+  );
+});
