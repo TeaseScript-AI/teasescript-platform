@@ -12,6 +12,7 @@ import {
   SliceIndex,
   OutsideContract,
 } from "./consumer.js";
+import { OpenLevels } from "./contract-descriptors.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
 
@@ -217,6 +218,11 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
     if (statement.typeAnnotation === null) {
       const place = answers.at(nodeOf(answers, index, statement))?.place;
       if (place === null || place === undefined) continue;
+      // (each level open while the walk is below it: a level whose key reads one is a cycle of copies, whose lists nest
+      // without end, #1646)
+      const open = new OpenLevels();
+      let holding = answers.holding(place.id, place.path);
+      open.enter(holding);
       for (let path: string[] = [...place.path]; ; path = [...path, "element"]) {
         // (as the facts read it, `admittedType`: the admitted kinds where decided, else the contract's)
         const answer = answers.place(place.id, path);
@@ -225,12 +231,14 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
             ? answer.contract.kinds.map((item) => item.tag)
             : answer.admitted.kinds;
         if (!tags.includes("list")) break;
-        if (path.length + 1 >= SLICE_DEPTH)
+        holding = holding.child("element");
+        if (path.length + 1 >= SLICE_DEPTH || open.cyclic(holding))
           return {
             file: index.fileOf(statement),
             span: statement.name.span,
             what: `the variable '${statement.name.name}', whose lists nest deeper than the slice follows`,
           };
+        open.enter(holding);
       }
     }
   return null;

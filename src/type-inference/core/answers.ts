@@ -98,8 +98,10 @@ import {
   newEpoch,
   type CapturedContract,
   type ContractResult,
+  type Holding,
 } from "./contract-descriptors.js";
 import { admittedLevel } from "./admission/admitted.js";
+import { holdingAt } from "./admission/holdings.js";
 
 // (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
 export { closedType };
@@ -526,6 +528,8 @@ export interface Answers {
   properties(node: FlowNode): ReadonlyMap<string, readonly Item[]>;
   /** The names of a place's known properties at a path, as `properties` finds a value's from its key. */
   placeProperties(id: PlaceId, path?: readonly string[]): ReadonlySet<string>;
+  /** A place's holding at a path: the positions its key reads whole, a contract walk's cycle certificate (#1646). */
+  holding(id: PlaceId, path: readonly string[]): Holding;
   /**
    * The occurrence answer at a path below a value (`project` over several steps) with the names of the properties the
    * value is known to have there (`properties` at that path).
@@ -1614,6 +1618,10 @@ class CoreAnswers implements Answers {
     // one in this pass, is the answer, #1526)
     const key = this.#pass.contract.keyAt(id, path);
     return this.#consumers.propertySets.get(key) ?? this.#propertyNames({ key });
+  }
+
+  public holding(id: PlaceId, path: readonly string[]): Holding {
+    return holdingAt(this.#consumers.admission, id, path);
   }
 
   public targetName(node: FlowNode): string | null {
