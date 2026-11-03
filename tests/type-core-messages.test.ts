@@ -10,6 +10,7 @@ import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
+import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 /*
  * The sentences of the coarse core's diagnostics (D1–D3, TABLE r4.53, `core/messages.ts`): each consumer's and
@@ -1672,5 +1673,158 @@ test("a store's property below the warned value is the property its fix names, a
       [],
       followed,
     );
+  }
+});
+
+/**
+ * V30 §19 (#1352): an `askChoice` whose buttons return more than one type is a compile error where it is stored with its
+ * type inferred (a variable's start value, an untyped parameter's argument at either of two calls, an inferred result, a
+ * list's element, an add to an empty list, an object's property), also where one button's value is a union, with the
+ * declaration that keeps both, which pasted
+ * compiles under both checkers, else buttons of one type in words; in four modes. An argument is typed by its own call
+ * (V30 §11), whatever another call passes. A written union, a copy of one, an unrestricted `list`, one family (numbers
+ * with whole numbers, `null` beside a type), a button the script cannot know, a list option whose own elements mix
+ * (that list's error), and a place another store decides (whose
+ * store warning keeps the choice in a variable declared with the union, as a choice used directly does) get no such
+ * error.
+ */
+test("an askChoice of more than one type errs where its type would be inferred, and its fixes keep both (V30 §19, #1352)", () => {
+  const MIXED = "This askChoice returns a whole number (integer) or text (string).";
+  const BUTTONS = "or give every button a value of one type.";
+  const C = 'askChoice [{text: "A", value: 1}, {text: "B"}]';
+  const S = 'askChoice "None", [5, 10]';
+  const call = "function f(p) {\n  say p\n}\n";
+  // [source, the error's sentence after MIXED (none: no error), the code it replaces and the code that replaces it]
+  const cases: readonly (readonly [string, string | null, readonly [string, string] | null])[] = [
+    [
+      `let value = ${C}\nif value is integer {\n  say value + 1\n}\nexit\n`,
+      `To keep both, declare the variable as 'let value: integer | string = ${C}', ${BUTTONS}`,
+      ["let value =", "let value: integer | string ="],
+    ],
+    [
+      `let other = ${S}\nexit\n`,
+      `To keep both, declare the variable as 'let other: integer | string = ${S}', ${BUTTONS}`,
+      ["let other =", "let other: integer | string ="],
+    ],
+    [
+      `let opts = [{text: "A", value: 1}, {text: "B"}]\nlet value = askChoice opts\nexit\n`,
+      `To keep both, declare the variable as 'let value: integer | string = askChoice opts', ${BUTTONS}`,
+      ["let value =", "let value: integer | string ="],
+    ],
+    [
+      `${call}f(1)\nf(${S})\nexit\n`,
+      `To keep both, declare the parameter as 'p: integer | string', ${BUTTONS}`,
+      ["f(p)", "f(p: integer | string)"],
+    ],
+    [
+      `function g {\n  return ${S}\n}\nsay g()\nexit\n`,
+      `To keep both, declare the result type of function 'g' as 'integer | string', ${BUTTONS}`,
+      ["function g {", "function g: integer | string {"],
+    ],
+    [
+      `let xs = [${S}]\nexit\n`,
+      `To keep both, declare the list as 'let xs: (integer | string)[] = [${S}]', ${BUTTONS}`,
+      ["let xs =", "let xs: (integer | string)[] ="],
+    ],
+    [
+      `let xs = []\nxs.add(${S})\nexit\n`,
+      `To keep both, declare the list as 'let xs: (integer | string)[] = []', ${BUTTONS}`,
+      ["let xs =", "let xs: (integer | string)[] ="],
+    ],
+    [
+      'let u: integer | string = 1\nlet v = askChoice [{text: "A", value: u}]\nexit\n',
+      `To keep both, declare the variable as 'let v: integer | string = askChoice [{text: "A", value: u}]', ${BUTTONS}`,
+      ["let v =", "let v: integer | string ="],
+    ],
+    [
+      `let box = {value: ${S}}\nexit\n`,
+      "but 'box.value' keeps one type. Give every button a value of one type.",
+      null,
+    ],
+    [
+      `${call}let u: integer | string = 1\nf(u)\nf(${S})\nexit\n`,
+      `To keep both, declare the parameter as 'p: integer | string', ${BUTTONS}`,
+      ["f(p)", "f(p: integer | string)"],
+    ],
+    [`let other: integer | string = ${S}\nexit\n`, null, null],
+    [`let u: integer | string = 1\nlet w = u\nw = ${S}\nexit\n`, null, null],
+    [`let xs: list = [${S}]\nexit\n`, null, null],
+    // (a list option whose elements mix is that list's error alone)
+    ['let v = askChoice ["a", 1]\nexit\n', null, null],
+    [`let u: integer | string = ${S}\nlet copy = u\nexit\n`, null, null],
+    ["let value = askChoice 1, 1.5\nexit\n", null, null],
+    ['let value = askChoice "A", null\nexit\n', null, null],
+    [
+      'let value = askChoice [{text: "A", value: 1}, {text: "B", value: hostValue}]\nexit\n',
+      null,
+      null,
+    ],
+    [`let v = 1\nv = ${S}\nexit\n`, null, null],
+  ];
+  const v1Errors = (source: string) =>
+    compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] }).diagnostics.filter(
+      (diagnostic) => diagnostic.severity === "error",
+    );
+  for (const [source, sentence, fix] of cases) {
+    for (const mode of MODES) {
+      const mixed = inMode(mode, () => reported(main(source))).filter(
+        ({ code, message }) => code === "TSV044" && message.startsWith("This askChoice"),
+      );
+      const name = `${JSON.stringify(mode)} ${source}`;
+      if (sentence === null) {
+        assert.deepEqual(mixed, [], name);
+        continue;
+      }
+      assert.equal(mixed.length, 1, name);
+      assert.ok(mixed[0]!.error, name);
+      assert.ok(source.includes(mixed[0]!.site) && mixed[0]!.site.startsWith("askChoice"), name);
+      assert.equal(
+        mixed[0]!.message,
+        sentence.startsWith("but") ? `${MIXED.slice(0, -1)}, ${sentence}` : `${MIXED} ${sentence}`,
+        name,
+      );
+    }
+    if (fix === null) continue;
+    const pasted = source.replace(fix[0], fix[1]);
+    assert.notEqual(pasted, source, fix[1]);
+    assert.deepEqual(
+      reported(main(pasted)).filter(({ error }) => error),
+      [],
+      `the core: ${pasted}`,
+    );
+    assert.deepEqual(v1Errors(pasted), [], `the current checker: ${pasted}`);
+  }
+  // (a store warning's and a count's kept value: the variable declared with the union, which pasted compiles, or in
+  // words where no form is proved)
+  const kept: readonly (readonly [string, string, string | null])[] = [
+    [
+      `let o = {a: 1}\no.a = ${S}\nexit\n`,
+      `Keep '${S}' in a new variable declared with the type 'integer | string' and check that it is a whole number (integer) first.`,
+      null,
+    ],
+    [
+      `let v = 1\nv = ${S}\nexit\n`,
+      `Keep '${S}' in a new variable, as in 'let value: integer | string = ${S}', and check it, as in 'if value is integer { v = value }'.`,
+      `let v = 1\nlet value: integer | string = ${S}\nif value is integer { v = value }\nexit\n`,
+    ],
+    [
+      `repeat ${C} {}\nexit\n`,
+      `Keep '${C}' in a new variable, as in 'let value: integer | string = ${C}', and check it, as in 'if value is integer { repeat value {} }'.`,
+      `let value: integer | string = ${C}\nif value is integer { repeat value {} }\nexit\n`,
+    ],
+  ];
+  for (const [source, sentence, pasted] of kept) {
+    const warned = reported(main(source)).filter(({ error }) => !error);
+    assert.ok(
+      warned.length === 1 && warned[0]!.message.includes(` ${sentence}`),
+      `${source}: ${JSON.stringify(warned)}`,
+    );
+    if (pasted === null) continue;
+    assert.deepEqual(
+      reported(main(pasted)).filter(({ error }) => error),
+      [],
+      `the core: ${pasted}`,
+    );
+    assert.deepEqual(v1Errors(pasted), [], `the current checker: ${pasted}`);
   }
 });

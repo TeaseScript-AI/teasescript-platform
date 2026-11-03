@@ -2,13 +2,18 @@ import type { PlaceId, SourceSite } from "../../graph.js";
 import { Admission } from "../admission.js";
 import { joinParts, joinSteps, keepText, keptArray } from "../budget.js";
 import type { Consumers } from "../consumers.js";
-import { propertyStep } from "../program.js";
+import { termAt, writtenOf } from "../contract.js";
+import type { ItemTag } from "../items.js";
+import { propertyStep, type ValueConstraint } from "../program.js";
+import type { DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
+import { mixedAnswer } from "./kinds.js";
 import type { Landing, LandingQuestion } from "./model.js";
 import { copiesOnly, firstDirect, valueReach } from "./reach.js";
 import { placeText, storeRoot, storeSteps } from "./warnings.js";
 
-// Elements of more than one type (ADR 0021 1.3): a literal's where it lands, and a list join's (#1272).
+// Values of more than one type (ADR 0021 1.3): a literal's elements where it lands, a list join's (#1272), and an
+// `askChoice`'s answer where its type would be inferred (V30 §19, #1352).
 
 /**
  * Where a literal lands (A2): the place and the key path that a whole store, an add (an added list as the collection
@@ -156,9 +161,8 @@ export function mixed(
       const copy = reach!.copy === null ? null : (program.places[reach!.copy]?.site ?? null);
       if (question.first !== null) {
         question.into ??= placeText(walk, store.place, question.path);
-        error(
+        mixedError(
           walk,
-          "written-target",
           question.first,
           {
             rule: "store",
@@ -177,9 +181,8 @@ export function mixed(
     }
   }
   const node = literal === undefined ? null : program.place(literal).kind;
-  error(
+  mixedError(
     walk,
-    "written-target",
     site,
     {
       rule: "mixed",
@@ -225,9 +228,8 @@ export function mixedJoin(
       d.path.length === 0 &&
       (d.how === "initializer" || d.how === "parameter default"),
   );
-  error(
+  mixedError(
     walk,
-    "written-target",
     compound ? (program.places[right]?.site ?? c.site) : c.site,
     {
       rule: "mixed",
@@ -240,4 +242,106 @@ export function mixedJoin(
     },
     found.kinds,
   );
+}
+
+/**
+ * Per pass, the sites of the literals' and joins' errors of mixed elements (`mixed`, `mixedJoin`, made before the walk,
+ * `Consumers.check`), and whether they are in order yet.
+ */
+const MIXED_SITES = new WeakMap<Consumers, { sites: SourceSite[]; sorted: boolean }>();
+
+/** A literal's or a join's error of mixed elements, its site recorded for `holdsMixed`. */
+function mixedError(
+  walk: Consumers,
+  site: SourceSite,
+  rule: DiagnosticRule,
+  kinds: readonly ItemTag[],
+): void {
+  error(walk, "written-target", site, rule, kinds);
+  let made = MIXED_SITES.get(walk);
+  if (made === undefined) MIXED_SITES.set(walk, (made = { sites: [], sorted: true }));
+  made.sites.push(site);
+  made.sorted = false;
+}
+
+/** Whether a literal's or a join's error of mixed elements lies within `site`: a search of their sites, by start. */
+function holdsMixed(walk: Consumers, site: SourceSite): boolean {
+  const made = MIXED_SITES.get(walk);
+  if (made === undefined) return false;
+  if (!made.sorted) {
+    walk.pass.program.work.charge("checks", made.sites.length);
+    made.sites.sort((a, b) => a.file - b.file || a.start - b.start);
+    made.sorted = true;
+  }
+  const { sites } = made;
+  // (the first at or after the site's start, which lies within it where any does)
+  let low = 0;
+  let high = sites.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    const at = sites[middle]!;
+    if (at.file < site.file || (at.file === site.file && at.start < site.start)) low = middle + 1;
+    else high = middle;
+  }
+  const first = sites[low];
+  return first !== undefined && first.file === site.file && first.end <= site.end;
+}
+
+/**
+ * V30 §19 (#1352): an `askChoice` whose buttons return more than one type (`mixedAnswer`), stored where its type would
+ * be inferred, is an error at the choice: a store, an argument, a return or an add of its answer, or a literal holding
+ * it where the literal lands (`landingOf`), into a place with no written type there and none another store decides (A2,
+ * a copy of a written type by A4: that store's check owns the misfit, C1); an argument's call alone types its parameter
+ * (V30 §11). Once per choice, at its first such store.
+ */
+export function mixedChoice(
+  walk: Consumers,
+  c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+): void {
+  const kinds = mixedAnswer(walk, c.result);
+  // (a list or set option whose elements mix is that literal's error already, as the current checker gives it)
+  if (kinds === null || holdsMixed(walk, c.site)) return;
+  const { program, definitions } = walk.pass;
+  const { admission } = walk;
+  const stores = definitions.byValue.get(c.result) ?? [];
+  program.work.charge("checks", stores.length);
+  for (const d of stores) {
+    if (d.kind !== "whole" && d.kind !== "add") continue;
+    // (a literal's cell: where the literal lands, at the cell's step below it)
+    const owner = program.cellOwner.get(d.place);
+    let place = d.place;
+    let path = admission.destPath(d);
+    if (owner !== undefined) {
+      const landing = landingOf(walk, owner.owner);
+      if (landing === null) continue;
+      const cell = program.place(d.place).kind;
+      place = landing.place;
+      path = joinSteps(landingPath(walk, landing), [
+        cell.kind === "property" ? propertyStep(cell.name) : "element",
+      ]);
+    }
+    const written = writtenOf(program.place(place).kind);
+    if (written !== null && termAt(written, path) !== null) continue;
+    // (another store deciding the place, a copy of a written type among them (A4), is outside the choice; each call
+    // types a parameter without a type from its own argument, V30 §11: another call's decides nothing there)
+    const decider = d.how === "argument" ? null : admission.deciderAt(place, path);
+    if (
+      decider !== null &&
+      (decider.file !== c.site.file || decider.start < c.site.start || decider.end > c.site.end)
+    )
+      continue;
+    error(
+      walk,
+      "written-target",
+      c.site,
+      {
+        rule: "mixed-choice",
+        into: placeText(walk, place, path),
+        root: storeRoot(walk, place),
+        steps: storeSteps(walk, place, path),
+      },
+      kinds,
+    );
+    return;
+  }
 }

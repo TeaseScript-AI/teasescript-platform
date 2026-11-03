@@ -40,7 +40,7 @@ import {
   variable,
 } from "./words.js";
 import { codeAt, type Diagnosed, UNPROVED } from "./code-forms.js";
-import { storeFix, type StoreRule, storeSubject } from "./stores.js";
+import { storeFix, type StoreRule, storeSubject, typeAt } from "./stores.js";
 import {
   choiceFix,
   conditionFix,
@@ -107,6 +107,7 @@ export function warningSentence(
         : `${operandRule(rule, text)}, but '${rule.receiver}' may hold ${known(kinds).length > 0 ? plural(kinds) : "values of another type"} here. If it does, ${STOPS}`;
     case "absent":
     case "mixed":
+    case "mixed-choice":
       throw new Error(`The rule '${rule.rule}' gives errors only.`);
     default:
       return `${operandRule(rule, text)}, but '${text}' ${may}`;
@@ -244,7 +245,13 @@ function guardForms(
       "statement",
     );
   const check = form(`if ${test.code(kept ? "value" : subject)} { ${held.text} }`, held.statement);
-  const keep = kept ? form(`let value = ${subject}`, held.read) : null;
+  // (an askChoice whose buttons return more than one type is kept only by a variable declared with their union, V30
+  // §19, #1352: with that type, else in words)
+  const keeps = use.diagnosed.keeps === undefined ? "" : typeText(use.diagnosed.keeps);
+  const keep =
+    kept && keeps !== null
+      ? form(`let value${keeps === "" ? "" : `: ${keeps}`} = ${subject}`, held.read)
+      : null;
   return check === null || (kept && keep === null) ? null : { check, keep };
 }
 
@@ -268,13 +275,16 @@ function checkFix(
 ): string {
   const name = variable(text);
   const forms = use === null ? null : guardForms(use, text, name === null, test);
+  // (a kept askChoice whose buttons return more than one type: the variable's union, V30 §19, #1352)
+  const keeps = use?.diagnosed.keeps === undefined ? null : typeText(use.diagnosed.keeps);
+  const type = keeps === null ? null : typeAt(keeps, use!.diagnosed);
   const check =
     name !== null
       ? forms === null
         ? `Check that '${name}' ${test.words} first`
         : `Check '${name}' first, as in '${forms.check}'`
       : forms === null
-        ? `Keep '${text}' in a new variable and check that it ${test.words} first`
+        ? `Keep '${text}' in a new variable${type === null ? "" : ` declared with the type '${type}'`} and check that it ${test.words} first`
         : `Keep '${text}' in a new variable, as in '${forms.keep!}', and check it, as in '${forms.check}'`;
   if (fallback === null || !ownText(text)) return `${check}.`;
   const { value, site, at, diagnosed } = fallback;

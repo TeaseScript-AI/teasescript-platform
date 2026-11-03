@@ -78,6 +78,10 @@ export const READS = new Map([
     "copiedAt",
     "the written type a copy decides a key by: a decision's answer, recorded by `decide`",
   ],
+  [
+    "deciderAt",
+    "the site of the contribution that decides a path: a decision's answer, recorded by `decide`",
+  ],
   ["decisionStopped", "whether a key's decision stopped at its demand allowance: a test"],
   [
     "decisionStoppedAt",
@@ -87,6 +91,7 @@ export const READS = new Map([
     "decisionWork",
     "a decision's work record (its path a packet's for a cursor's, G3 stage 1): research data, no obligation",
   ],
+  ["destPath", "a store's destination path, an add's element: syntax"],
   [
     "expand",
     "a stored value's recipe of the store walk (its own stop, its cells and operands): syntax, read",

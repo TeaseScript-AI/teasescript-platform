@@ -14,6 +14,8 @@ import {
   type MessageSource,
 } from "../src/type-inference/core/messages.js";
 import type { CheckedDiagnostic } from "../src/type-inference/core/result.js";
+import { kindsInOrder } from "../src/type-inference/core/items.js";
+import { parsedExpression, typeText } from "../src/type-inference/core/messages/words.js";
 import { VALUE_KINDS } from "../src/value-kinds.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { pasteCases, pastedForms, pasteFailure, type Pasted } from "./helpers/type-core-paste.js";
@@ -50,6 +52,11 @@ interface Named {
    * unproved fact gives (`INTENDED`, `unproved`).
    */
   readonly proved: boolean;
+  /**
+   * The written union a new variable keeping the subject declares: an `askChoice` whose value has kinds of more than one
+   * type (V30 §19, #1352); else `null`.
+   */
+  readonly keeps: string | null;
 }
 
 /** A fix sentence of the current checker, and the sentence the new checker writes for it (#1195 rule 1). */
@@ -118,7 +125,12 @@ const typeWords = (type: string): string => {
  * first, its `let` shown where its own text may stand in code; around the use's statement where it is code on one line
  * and reads a kept value once, else the test in words (#1268, TABLE r4.146). Without the closing period.
  */
-const checkForm = (subject: string, test: string, statement: string | null): string => {
+const checkForm = (
+  subject: string,
+  test: string,
+  statement: string | null,
+  keeps: string | null = null,
+): string => {
   const words = test === "!= null" ? "is not null" : `is ${typeWords(test.slice("is ".length))}`;
   const held = statement !== null && ownText(statement) ? statement : null;
   if (/^[A-Za-z_]\w*$/.test(subject))
@@ -130,10 +142,11 @@ const checkForm = (subject: string, test: string, statement: string | null): str
     held !== null && ownText(subject) && held.split(subject).length === 2
       ? held.replace(subject, "value")
       : null;
+  // (an askChoice whose buttons return more than one type: the variable declared with their union, V30 §19, #1352)
   return kept === null
-    ? `Keep '${subject}' in a new variable and check that it ${words} first`
-    : `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check it, as in ` +
-        `'if value ${test} { ${kept} }'`;
+    ? `Keep '${subject}' in a new variable${keeps === null ? "" : ` declared with the type '${keeps}'`} and check that it ${words} first`
+    : `Keep '${subject}' in a new variable, as in 'let value${keeps === null ? "" : `: ${keeps}`} = ${subject}', ` +
+        `and check it, as in 'if value ${test} { ${kept} }'`;
 };
 
 /**
@@ -182,19 +195,20 @@ const PORTS: readonly Port[] = [
   },
   {
     from: /^Keep it in a variable and check it first, as in: if value != null \{ \.\.\. \}, or give a fallback: value otherwise (.+)$/,
-    to: ([, value], { subject, statement, proved }) =>
+    to: ([, value], { subject, statement, proved, keeps }) =>
       ownText(subject) && value === "..."
-        ? exact(`${checkForm(subject, "!= null", statement)}, ${SAME_TYPE}`)
+        ? exact(`${checkForm(subject, "!= null", statement, keeps)}, ${SAME_TYPE}`)
         : ownText(subject)
           ? form(
-              `${checkForm(subject, "!= null", statement)}, `,
+              `${checkForm(subject, "!= null", statement, keeps)}, `,
               fallbackForm(`\\(?${grouped(subject)} otherwise ${escaped(value!)}\\)?`, proved),
             )
-          : exact(`${checkForm(subject, "!= null", statement)}.`),
+          : exact(`${checkForm(subject, "!= null", statement, keeps)}.`),
   },
   {
     from: /^Keep it in a variable and check it first, as in: if value (!= null|is .+) \{ \.\.\. \}$/,
-    to: ([, test], { subject, statement }) => exact(`${checkForm(subject, test!, statement)}.`),
+    to: ([, test], { subject, statement, keeps }) =>
+      exact(`${checkForm(subject, test!, statement, keeps)}.`),
   },
   // C13 (S9b): a method argument's conversion, in the words of its contract's own fix (`argumentFix`)
   {
@@ -650,6 +664,7 @@ function namedBy(diagnostic: Compared, source: MessageSource): Named {
       statement: null,
       declared: null,
       proved: true,
+      keeps: null,
     };
   const { rule } = diagnostic;
   const subject =
@@ -682,7 +697,31 @@ function namedBy(diagnostic: Compared, source: MessageSource): Named {
     statement: statement === null ? null : source.text(statement),
     declared: root === null || root.site === null ? null : source.text(root.site),
     proved: true,
+    keeps: choiceUnion(diagnostic, subject),
   };
+}
+
+/**
+ * V30 §19: the union a variable keeping a warned `askChoice` declares, of every known kind of its value (the warning's
+ * and those that fit), where they are more than one type (whole numbers and numbers are one); else `null`.
+ */
+function choiceUnion(diagnostic: Compared, subject: string): string | null {
+  if (diagnostic.class !== "warning-runtime-check") return null;
+  let expression = parsedExpression(subject)?.expression;
+  while (expression?.kind === "parenthesizedExpression") expression = expression.expression;
+  if (expression?.kind !== "interactionExpression" || expression.interactionKind !== "choice")
+    return null;
+  const kinds = kindsInOrder(
+    new Set(
+      [...diagnostic.kinds, ...diagnostic.fits].filter(
+        (kind) => kind !== "unknown" && kind !== "empty",
+      ),
+    ),
+  );
+  const values = kinds.filter((kind) => kind !== "null");
+  return values.length > 1 && !values.every((kind) => kind === "integer" || kind === "number")
+    ? typeText(kinds)
+    : null;
 }
 
 interface Pair {
@@ -827,10 +866,10 @@ const allPairs = (): Pair[] => analysed().pairs;
 const ROUND = "Round the number with the floor, round or ceil function first.";
 
 /** The type test of a subject (ADR 0021 rule 3.5), as `checkForm` writes it: in code, or in words (TABLE r4.162). */
-const typeTest = ({ subject, statement }: Named, type: string): RegExp =>
+const typeTest = ({ subject, statement, keeps }: Named, type: string): RegExp =>
   code(
-    `(?:${escaped(`${checkForm(subject, `is ${type}`, statement)}.`)}|` +
-      `${escaped(`${checkForm(subject, `is ${type}`, null)}.`)})`,
+    `(?:${escaped(`${checkForm(subject, `is ${type}`, statement, keeps)}.`)}|` +
+      `${escaped(`${checkForm(subject, `is ${type}`, null, keeps)}.`)})`,
   );
 
 /**

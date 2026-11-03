@@ -248,6 +248,16 @@ export type DiagnosticRule =
        * (`null` and numbers kept): the type a fix writes; `null` below a property.
        */
       readonly levels?: readonly (readonly ItemTag[])[] | null;
+    }
+  /**
+   * V30 §19: an `askChoice` whose buttons return values of more than one type (the diagnostic's kinds), stored in
+   * `into`, whose type would be inferred (#1352): its root, which a fix declares, and the steps below it.
+   */
+  | {
+      readonly rule: "mixed-choice";
+      readonly into: string;
+      readonly root: StoreRoot | null;
+      readonly steps: readonly StoreStep[];
     };
 
 /**
@@ -434,6 +444,11 @@ export type CoreDiagnostic =
        * beside them a fix of this kind alone, such as a fallback for null, leaves the use invalid (#1268).
        */
       readonly besides: readonly ItemTag[];
+      /**
+       * Where the warned value is an `askChoice` whose buttons return more than one type (`mixedAnswer`): those types,
+       * which a new variable keeping it declares (V30 §19, #1352).
+       */
+      readonly keeps?: readonly ItemTag[];
     };
 
 /** A diagnostic the core reports: the analysis's own (`CoreDiagnostic`), or a check's that owes the runtime nothing. */

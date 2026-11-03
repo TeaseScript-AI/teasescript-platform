@@ -472,6 +472,57 @@ function mixedSentence(
 }
 
 /**
+ * An `askChoice` whose buttons return more than one type, stored where its type would be inferred (V30 §19, #1352): the
+ * declaration of its root with their union (`declaration`, the author's own start value, where `codeAt` proves it), a
+ * collection's root with the union as its elements' type where the choice is its element, or a function's result type,
+ * each beside buttons of one type; else buttons of one type in words, where no written type holds the answer.
+ */
+function mixedChoiceSentence(
+  rule: Extract<DiagnosticRule, { rule: "mixed-choice" }>,
+  kinds: readonly ItemTag[],
+  source: MessageSource,
+  diagnosed: Diagnosed,
+): string {
+  const first = `This askChoice returns ${described(kinds)}.`;
+  const one = "give every button a value of one type";
+  const union = typeText(kinds);
+  const { root, steps } = rule;
+  // (the collection whose element the choice is, `null` for a deeper or a property's place, the root itself without)
+  const step = steps[0];
+  const collection =
+    step === undefined
+      ? undefined
+      : steps.length === 1 && "collection" in step
+        ? step.collection
+        : null;
+  const written =
+    union === null || collection === null
+      ? null
+      : collection === undefined
+        ? union
+        : collectionText(collection, union);
+  const result = root?.kind === "result" && collection === undefined && written !== null;
+  const type = result ? typeAt(written!, diagnosed) : null;
+  const declared =
+    written === null || root === null
+      ? null
+      : result
+        ? type === null
+          ? null
+          : `declare the result type of function '${root.name}' as '${type}'`
+        : declaration(
+            root,
+            written,
+            source,
+            diagnosed,
+            collection === undefined ? "the variable" : `the ${collection}`,
+          );
+  if (declared === null)
+    return `${first.slice(0, -1)}, but ${rule.into} keeps one type. ${capitalized(one)}.`;
+  return `${first} To keep ${named(kinds).length > 2 ? "all of them" : "both"}, ${declared}, or ${one}.`;
+}
+
+/**
  * A list `+` that mixes types (#1272): a written union the joined list's elements need, from what they hold at each list
  * level (`levels`): every kind, `null` and numbers among them, so the type holds every value the joined lists bring
  * (Codex r2–r4 on #1310); one union inside the lists, an optional list where a level holds `null` beside lists (V30
@@ -818,6 +869,8 @@ export function errorSentence(
       return `'${rule.collection}' is empty here, so it has no element for '${rule.member}'.`;
     case "mixed":
       return mixedSentence(rule, kinds, source, diagnosed);
+    case "mixed-choice":
+      return mixedChoiceSentence(rule, kinds, source, diagnosed);
     case "operator": {
       const join = joined(rule, text, kinds, [], source);
       if (join !== null)

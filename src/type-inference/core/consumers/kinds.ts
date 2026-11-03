@@ -5,8 +5,12 @@ import * as handles from "../../adapters/handles.js";
 import type { OperandView, OperationInputs } from "../../adapters/relation.js";
 import * as text from "../../adapters/text.js";
 import type { MemberRules } from "../../adapters/views.js";
-import { requiredKind } from "../admission.js";
-import { REASON, type Item, type ItemTag } from "../items.js";
+import type { PlaceId } from "../../graph.js";
+import { concrete, requiredKind } from "../admission.js";
+import { family } from "../admission/kinds.js";
+import type { Consumers } from "../consumers.js";
+import { withoutEmpty } from "../exact-path.js";
+import { kindsInOrder, REASON, type Item, type ItemTag } from "../items.js";
 import { OPERATOR_ROWS } from "../operator-table.js";
 import type { RequiredKind } from "../result.js";
 
@@ -125,4 +129,23 @@ export const LITERALS: ReadonlySet<string> = new Set([
 /** Whether an item is the unknown a stop leaves where nothing is settled (`STOPPED`'s). */
 export function unsettledItem(item: Item): boolean {
   return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0;
+}
+
+/**
+ * V30 §19: the types an `askChoice`'s buttons return where they are more than one (whole numbers with numbers are one,
+ * `null` beside a type makes it optional, ADR 0021 1.2, 1.3), in their one order: the types a place keeps only where
+ * it is declared with their union; `null` for any other value. The known values decide it, whatever a button the
+ * script cannot know adds, as the current checker's `#reportMixedChoice` does.
+ */
+export function mixedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
+  const c = walk.pass.program.opOf.get(value);
+  if (c?.kind !== "operation" || c.evidence?.kind !== "choice") return null;
+  const tags = kindsInOrder(
+    new Set(
+      withoutEmpty(walk.run(walk.pass.contract.contractOfValueAt(value, [])))
+        .filter(concrete)
+        .map((item) => item.tag),
+    ),
+  );
+  return tags.length === 0 || family(tags) ? null : tags;
 }

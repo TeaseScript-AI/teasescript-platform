@@ -8,6 +8,7 @@ import { selectsElement } from "../method-categories.js";
 import { siteKey } from "../program.js";
 import type { CoreDiagnostic, DiagnosticKind, DiagnosticRule, Presence } from "../result.js";
 import { expected } from "./expected.js";
+import { mixedAnswer } from "./kinds.js";
 
 // The consumers' diagnostics: an error at its site, and the facts a fix's code forms read (TABLE r4.151).
 
@@ -98,13 +99,44 @@ export function withFacts(walk: Consumers, diagnostic: CoreDiagnostic): CoreDiag
       diagnostic.kinds.includes("null") || rule.rule === "operator"
         ? expected(walk, site)
         : undefined;
+    const keeps = keptChoice(walk, site, rule);
     return {
       ...diagnostic,
       ...(expects === undefined ? {} : { expects }),
       present: present(walk, site, rule),
+      ...(keeps === null ? {} : { keeps }),
     };
   }
   return diagnostic;
+}
+
+/**
+ * The types a new variable keeping a warning's subject declares (`keeps`): its subject, a member's receiver or the
+ * value at `site`, where it is an `askChoice` whose buttons return more than one type (`mixedAnswer`, V30 §19, #1352);
+ * else `null`.
+ */
+function keptChoice(
+  walk: Consumers,
+  site: SourceSite,
+  rule: DiagnosticRule,
+): readonly ItemTag[] | null {
+  const { program } = walk.pass;
+  const expression = program.exprAt(site)?.expression;
+  if (expression === undefined) return null;
+  let subject =
+    rule.rule !== "member"
+      ? expression
+      : expression.kind === "callExpression" &&
+          expression.callee.kind === "propertyAccessExpression"
+        ? expression.callee.object
+        : expression.kind === "propertyAccessExpression" || expression.kind === "indexExpression"
+          ? expression.object
+          : expression;
+  while (subject.kind === "parenthesizedExpression") subject = subject.expression;
+  const place = program.placeBySite.get(
+    siteKey({ file: site.file, start: subject.span.start.offset, end: subject.span.end.offset }),
+  );
+  return place === undefined ? null : mixedAnswer(walk, place);
 }
 
 /**
