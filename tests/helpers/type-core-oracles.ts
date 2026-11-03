@@ -53,32 +53,12 @@ import { itemScope } from "./type-core-items.js";
  * A diagnostic as a stop must keep it, its identity: without the facts its fix's code forms read (`expects`,
  * `present`), which a stop never proves, so a fix there may be words (TABLE r4.162). The stop tests compare these.
  */
-export function stopIdentity(diagnostic: CoreDiagnostic): Readonly<Record<string, unknown>> {
+export function stopIdentity(
+  diagnostic: CoreDiagnostic | CheckedDiagnostic,
+): Readonly<Record<string, unknown>> {
   return Object.fromEntries(
     Object.entries(diagnostic).filter(([key]) => key !== "expects" && key !== "present"),
   );
-}
-
-/**
- * A diagnostic where it stands: its code, its whole site (file, start, end) and what it names there (a literal's or a
- * join's property path, a store's destination, else its rule), the identity a test of an error's place compares.
- */
-export function placedDiagnostic(diagnostic: CheckedDiagnostic): {
-  readonly code: string;
-  readonly site: { readonly file: number; readonly start: number; readonly end: number };
-  readonly names: string;
-} {
-  const { file, start, end } = diagnostic.site;
-  const rule = "rule" in diagnostic ? diagnostic.rule : null;
-  const names =
-    rule === null
-      ? diagnostic.class
-      : rule.rule === "mixed"
-        ? rule.path.join(".")
-        : rule.rule === "store"
-          ? rule.into
-          : rule.rule;
-  return { code: diagnostic.code, site: { file, start, end }, names };
 }
 
 /** A message's sentences, split where a sentence ends and the next starts with a capital or a quote. */
