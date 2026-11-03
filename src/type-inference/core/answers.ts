@@ -1109,19 +1109,24 @@ function isStopped(item: Item): boolean {
 
 /**
  * After a stop, what a literal's own syntax proves at a step it writes nothing for, as the unstopped read answers it: an
- * object without the step lacks it (`missing`, F11, its writer the literal's), an empty collection holds no element
- * (`EMPTY` where the path ends at its element step), and a scalar below any step, a collection at any other step or
- * below an element it lacks holds nothing. A typed load's default read by its own syntax so keeps the type the
- * unstopped read gives it, a sibling's included (#1460).
+ * object, which has no member steps, lacks it (`missing`, F11, its writer the literal's); `null` holds nothing below
+ * any step; an empty collection holds no element (`EMPTY` where the path ends at its element step, nothing below it).
+ * Any other step stays `STOPPED`: a scalar's or a collection's named step may be a member its kind declares (a dict's
+ * `keys`, a calendar duration's parts), which the syntax does not answer. A typed load's default read by its own syntax
+ * so keeps the type the unstopped read gives it, a `null` sibling's included (#1460).
  */
 function absentAt(
   program: CoreProgram,
   value: PlaceId,
   own: "atom" | "list" | "set" | "dict" | "object",
+  node: string,
   path: readonly string[],
 ): readonly Item[] {
-  if (own === "atom") return [];
-  if (own !== "object") return path.length === 1 && path[0] === "element" ? [EMPTY] : [];
+  if (own === "atom") return node === "nullLiteral" ? [] : STOPPED;
+  if (own !== "object") {
+    if (path[0] !== "element") return STOPPED;
+    return path.length === 1 ? [EMPTY] : [];
+  }
   const site = program.hasOf.get(value)?.[0]?.site;
   return [
     makeItem("unknown", site === undefined ? null : program.writer("literal", site), {
@@ -1428,11 +1433,13 @@ class CoreAnswers implements Answers {
     const { program } = this.#pass;
     program.work.charge("checks");
     const kind = program.places[value]?.kind;
-    const own = kind?.kind === "value" ? OWN_KINDS.get(kind.node) : undefined;
-    if (own === undefined) return { items: STOPPED, names: NO_NAMES };
+    const node = kind?.kind === "value" ? kind.node : null;
+    const own = node === null ? undefined : OWN_KINDS.get(node);
+    if (node === null || own === undefined) return { items: STOPPED, names: NO_NAMES };
     if (own === "atom") {
       const has = program.hasOf.get(value);
-      if (path.length > 0) return { items: absentAt(program, value, own, path), names: NO_NAMES };
+      if (path.length > 0)
+        return { items: absentAt(program, value, own, node, path), names: NO_NAMES };
       return has?.length === 1 && has[0]!.type.kind === "atom"
         ? { items: [makeItem(has[0]!.type.name, null, { cert: "def" })], names: NO_NAMES }
         : { items: STOPPED, names: NO_NAMES };
@@ -1453,7 +1460,7 @@ class CoreAnswers implements Answers {
     const rest = path.slice(1);
     const step = path[0]!;
     const children = this.#consumers.admission.literalChildren(value, step);
-    if (children.length === 0) return { items: absentAt(program, value, own, path), names };
+    if (children.length === 0) return { items: absentAt(program, value, own, node, path), names };
     let proved = true;
     for (const child of children) {
       if (child.value === undefined) {

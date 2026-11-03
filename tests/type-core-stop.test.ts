@@ -8,6 +8,7 @@ import {
   compileSourceWithBackend,
   type ProjectDiagnostic,
 } from "../src/compiler.js";
+import type { Expression } from "../src/ast.js";
 import type { Diagnostic } from "../src/diagnostics.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
@@ -378,41 +379,64 @@ test("a stop does not change what a typed load or parse reads: a record without 
   ]);
 });
 
-test("after a stop a literal answers each step it writes nothing for as unstopped: an object lacks it, an empty collection holds no element, a scalar or another step nothing (#1460)", () => {
-  // literals a written union lets mix, a `null` beside them, an empty one, each read by its own syntax at a stop before
-  // admission settles; every literal at every path of these steps, by kind and reason, in four modes
-  const steps = ["element", "n", "index"];
+test("after a stop a literal answers a step it writes nothing for as unstopped where its syntax proves the answer: an object lacks it, null and an empty collection hold nothing (#1460)", () => {
+  // every literal at every path of these steps to depth 2, at a stop before admission settles, in four modes, by its
+  // distinct kinds and reasons: where the literal's own syntax proves the answer (an object at a first step it lacks:
+  // it has no member steps; `null`; an empty collection read at its element step) it is the unstopped one; anywhere
+  // else it is that, or it holds the stop's unknown, which stands for whatever the stop left unread, and no kind the
+  // unstopped one lacks; never an answer without the unknown that drops a kind: a named step of a scalar or a
+  // collection may be a member its kind declares (a dict's `keys`, a calendar duration's parts, Codex r2's N2), and a
+  // composition keeps an unproved sibling's unknown
+  const STOP = "unknown/16";
+  const steps = ["element", "n", "index", "keys", "values", "months"];
   const paths = steps.flatMap((first) => [[first], ...steps.map((second) => [first, second])]);
+  const proved = (expression: Expression, path: readonly string[]): boolean =>
+    (expression.kind === "objectLiteral" &&
+      !expression.properties.some((property) => property.name.name === path[0])) ||
+    expression.kind === "nullLiteral" ||
+    (path[0] === "element" &&
+      (((expression.kind === "listLiteral" || expression.kind === "setLiteral") &&
+        expression.elements.length === 0) ||
+        (expression.kind === "dictLiteral" && expression.entries.length === 0)));
   for (const source of [
     'let s: (integer[] | object)?[] = [null, [1], {n: 2}, []]\nsay "X"\nexit\n',
     'let s: (integer[] | object)?[][] = [[null], [[1]], [{n: 2}, {}]]\nsay "X"\nexit\n',
+    "let d = dict{n: 1}\nlet e = dict{}\nlet c = 1 calendar month\nexit\n",
   ]) {
     const request = coreRequest([{ path: "main.tease", source }], []);
     assert.ok(request !== null, source);
-    const answered = (answers: Answers): string[] =>
-      answers.graph.nodes.flatMap((node) => {
-        const kind = node.expression?.kind;
-        if (kind === undefined || !/Literal$/u.test(kind)) return [];
-        return paths.map(
-          (path) =>
-            `${kind}@${node.expression!.span.start.offset} ${path.join(".")}: ` +
+    const answered = (answers: Answers): Map<string, string> => {
+      const out = new Map<string, string>();
+      for (const node of answers.graph.nodes) {
+        const expression = node.expression;
+        if (expression === undefined || !/Literal$/u.test(expression.kind)) continue;
+        for (const path of paths)
+          out.set(
+            `${expression.kind}@${expression.span.start.offset} ${path.join(".")}${proved(expression, path) ? " proved" : ""}`,
+            // (its distinct kinds and reasons: a stop's composition keeps an item per writer, #1398's order)
             answers
               .valueAt(node, path)
-              // (its distinct kinds and reasons: a stop's composition keeps an item per writer, #1398's order)
               .items.map((item) => `${item.tag}/${item.reasons}`)
               .filter((item, at, all) => all.indexOf(item) === at)
               .sort()
               .join(" "),
-        );
-      });
+          );
+      }
+      return out;
+    };
     for (const mode of HELD_MODES) {
       const stopped: Answers = mode.run(() => withTestAllowance(1, () => analyseCore(request)));
       assert.equal(stopped.budget.settled, false, source);
-      assert.deepEqual(
-        answered(stopped),
-        answered(mode.run(() => analyseCore(request))),
-        `${source} (${mode.name})`,
-      );
+      const unstopped = answered(mode.run(() => analyseCore(request)));
+      const wrong = [...answered(stopped)].filter(([key, answer]) => {
+        const want = unstopped.get(key) ?? "";
+        if (answer === want) return false;
+        if (key.endsWith(" proved")) return true;
+        const got = answer.split(" ");
+        const held = new Set(want.split(" "));
+        return !got.includes(STOP) || got.some((item) => item !== STOP && !held.has(item));
+      });
+      assert.deepEqual(wrong, [], `${source} (${mode.name})`);
     }
   }
 });
