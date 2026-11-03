@@ -2619,7 +2619,8 @@ test("a long copied key's store check charges its positions' work, in every mode
  * #1221: a search of a sorted list of event positions charges each comparison it makes, so its charge grows with the
  * list's logarithm (before, two flat units a pair of searches whatever the list's length: a warmed X6 query read a list
  * of 1,025 events 22 times). X6's first event of `n` in a span after k conditional stores of it, its list built by a
- * first query: the second query's charge is at least the comparisons a binary search over k + 1 positions makes.
+ * first query: the second query's charge is at least the comparisons a binary search over k + 1 positions makes; and
+ * its one search a range finds an event at the range's end and none past the last.
  */
 test("a search of a key's events charges each comparison it makes (#1221)", () => {
   for (const k of [64, 1024]) {
@@ -2635,5 +2636,9 @@ test("a search of a key's events charges each comparison it makes (#1221)", () =
     lists.eventIn(key, span);
     const charged = program.work.total - before;
     assert.ok(charged >= Math.log2(k + 1), `k = ${k}: ${charged} units`);
+    // (one search a range: the last event is in a range ending at it, and none is in one past it)
+    const last = Math.max(...lists.ownEvents(key).stores);
+    assert.equal(lists.eventIn(key, [[last, last]]), "branch", `k = ${k}`);
+    assert.equal(lists.eventIn(key, [[last + 1, Number.MAX_SAFE_INTEGER]]), null, `k = ${k}`);
   }
 });
