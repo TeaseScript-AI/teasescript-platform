@@ -245,8 +245,6 @@ class Holdings {
         continue;
       }
       const reads = this.#reads(at, top.needs);
-      // (complete only where its parent's reads, which it carries, and every one it reads were complete: a parent still
-      // being made, `a=a.q`, carried nothing yet)
       at.held = [...reads];
       stack.pop();
     }
@@ -315,7 +313,9 @@ function holdingsOf(admission: Admission): Holdings {
     if (!lists.live(d) || !program.live(d.node)) continue;
     let at = made.at(d.place, d.path);
     if (d.kind === "add" && d.how !== "elements") at = made.below(at, "element");
-    for (const { path, binding, strip } of copySources(admission, d.value)) {
+    for (const { path, binding, strip, cellsLive } of copySources(admission, d.value)) {
+      // (a copy through a literal cell the contract does not read, A6 having rejected it, Codex r4 B1)
+      if (!cellsLive) continue;
       let landing = at;
       for (const step of path) landing = made.below(landing, step);
       made.land(landing, made.at(binding, strip));
@@ -351,7 +351,8 @@ function copiesCycle(admission: Admission): boolean {
     if (writtenOf(program.place(d.place).kind) !== null) continue;
     if (!lists.live(d) || !program.live(d.node)) continue;
     const depth = d.path.length + (d.kind === "add" && d.how !== "elements" ? 1 : 0);
-    for (const { path, binding, strip } of copySources(admission, d.value)) {
+    for (const { path, binding, strip, cellsLive } of copySources(admission, d.value)) {
+      if (!cellsLive) continue;
       let out = links.get(d.place);
       if (out === undefined) links.set(d.place, (out = []));
       out.push({ to: binding, weight: depth + path.length - strip.length });

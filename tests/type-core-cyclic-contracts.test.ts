@@ -13,8 +13,8 @@ import { HELD_MODES } from "./helpers/type-core-held-host.js";
  * A store contract that holds a cycle of copies (#1646, TABLE r4.278 (3)): its contract is infinite, and no finite plan
  * carries it. Each walk of a contract (the capture, the completion, the lowering, the facts) gives each level a holding,
  * the positions its key reads whole through copies (`admission/holdings.ts`); a level whose key reads a level still
- * open above it, or reads what one reads below it, takes the program out of the slice there, as at the slice's depth,
- * instead of walking 256 ever longer keys. Elsewhere every walk is the walk without the certificate.
+ * open above it takes the program out of the slice there, as at the slice's depth, instead of walking 256 ever longer
+ * keys. Elsewhere every walk is the walk without the certificate.
  */
 
 const GLOBALS = ["hostValue", "hostOther"];
@@ -126,6 +126,10 @@ test("a contract walk without a cycle of copies is the walk without the certific
     'let b={}\nb.q=null\nb.q.q=b.q\nlet a={q:{q:{q:{f:[[1]]}}}}\na=b.q\na=hostValue\nsay "AFTER"\nexit',
     // (Codex r2: a copy that lands below a level, `a.q.q=seed`, with an unrelated cycle that makes holdings be built)
     "let seed={f:[[1]]}\nlet unused={}\nunused.x=unused\nlet a={q:seed}\na.q.q=seed\na=hostValue\nexit",
+    // (Codex r4 B1: a literal's cell that A6 rejects, selected or projected, copies nothing the contract reads)
+    'let a={f:[[1]],q:1}\na.q=[{r:1},{r:a}][0].r\na=hostValue\nsay "AFTER"\nexit',
+    'let a={f:[[1]],q:1}\na.q=[{r:a},{r:1}][1].r\na=hostValue\nsay "AFTER"\nexit',
+    'let a={f:[[1]],q:1}\na.q={s:{r:a}}.s.r\na=hostValue\nsay "AFTER"\nexit',
     // (copies no contract reads, which would close a cycle along a path the walk descends: a store A6 rejects, and one
     // into a place with a written type, whose contract is that type)
     "let a={f:[[1]]}\nlet b={s:[[1]]}\nb.q=[[1]]\nb.q=a\na.q=b\na=hostValue\nexit",
@@ -161,7 +165,8 @@ function rng(seed: number): () => number {
 /**
  * The generated family's program of a seed (the PR's queue evidence runs 4,000 of them): two to four places, some
  * empty, two to six copies among them (a property copy, an object or list literal around one, a whole copy, a
- * projection into a property or a property's property, a whole store of a projection), host data stored, and half the
+ * projection into a property or a property's property, a whole store of a projection, a selected literal's cell that
+ * A6 may reject), host data stored, and half the
  * time a place outside reading one of them.
  */
 function generated(seed: number): string {
@@ -186,6 +191,7 @@ function generated(seed: number): string {
         `${a}.${prop}=${b}.${pick(["q", "s", "g"])}`,
         `${a}.${prop}.${pick(["q", "s"])}=${b}.${pick(["q", "s"])}`,
         `${a}=${b}.${pick(["q", "s"])}`,
+        `${a}.${prop}=[{r:1},{r:${b}}][${pick(["0", "1"])}].r`,
       ]),
     );
   }
@@ -195,20 +201,13 @@ function generated(seed: number): string {
 }
 
 test("the generated family's first seeds compile alike with and without the certificate (#1646)", () => {
-  // (seeds 1 to 30, forward. Five hold cycles a walk is inside of, whose walks without the certificate take 13 to 28
+  // (seeds 1 to 30, forward. Six hold cycles a walk is inside of, whose walks without the certificate take 9 to 29
   // million units: there the program leaves the slice at linear cost, the outcome the walk to the slice's depth gives.
-  // Seed 19 is the ruling's case (c): without the certificate the walk exhausts the allowance (TSV076, a plan of runtime
-  // checks); with it the analysis ends and the program leaves the slice at another construct. Seeds 24 and 25 walk a
-  // cycle from a place outside it, which the certificate does not prove: 8 and 15 million units as on main. Seed 8
-  // stops before admission on main as on the head, #1655)
-  const cyclic = new Set([6, 9, 15, 17, 28]);
+  // Seeds 1 and 8 stop before admission on main as on the head, #1655)
+  const cyclic = new Set([7, 9, 17, 21, 26, 27]);
   for (let seed = 1; seed <= 30; seed += 1) {
-    if ([8, 24, 25].includes(seed)) continue;
+    if (seed === 1 || seed === 8) continue;
     const source = generated(seed);
-    if (seed === 19) {
-      assert.match(outcome(source), /^outside: /, `seed ${seed}`);
-      continue;
-    }
     if (!cyclic.has(seed)) {
       assert.equal(
         outcome(source),
@@ -217,7 +216,8 @@ test("the generated family's first seeds compile alike with and without the cert
       );
       continue;
     }
-    assert.match(outcome(source), /^outside: .*a value whose structure the slice/, `seed ${seed}`);
+    // (out of the slice, as without the certificate: at the cycle, or for seed 27 at a member read that also takes it out)
+    assert.match(outcome(source), /^outside: /, `seed ${seed}`);
     const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
     assert.ok(analyseCore(request).budget.total < 25_000, `seed ${seed}`);
   }
@@ -228,7 +228,8 @@ test("a ring of whole copies costs its copies once, in both orders (Codex r1 B2)
   // every other, a ring of k copies k × k reads; at k = 128, 4.5 million units where main takes 154,530. The ring is one
   // position now, so the total at most doubles with k; and it compiles as without the certificate)
   const ring = (k: number): string => {
-    const lines = ["let seed={f:[[1]],q:{}}"];
+    // (an unrelated cycle that deepens makes the holdings be built, so the ring is one position: Codex r4 N1)
+    const lines = ["let seed={f:[[1]],q:{}}", "let other={}", "other.x=other"];
     for (let i = 0; i < k; i += 1) lines.push(`let a${i}=seed`);
     for (let i = 0; i < k; i += 1) lines.push(`a${i}=a${(i + 1) % k}`, `a${i}.q=seed`);
     return `${lines.join("\n")}\na0.f=hostValue\nexit\n`;
