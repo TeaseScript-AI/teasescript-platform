@@ -724,15 +724,14 @@ function literalSteps(walk: Consumers, value: PlaceId, own: ItemTag): Set<string
 
 /**
  * A copy of an inferred place by its syntax (#1604): a read of a `let` or global binding with no written type, through
- * its projections, and the path it is copied from; `null` for anything else, and for a place the script stores into
- * below its root (an add among them), whose parts its root's stores alone do not tell, so its frontier there is its
- * root's shapes' parts and nothing else.
+ * its projections, and the path it is copied from; `null` for anything else. Its source's stores below its root are its
+ * frontier's own there, one step down a link (`linkedBelow`).
  */
 function inferredCopy(
   walk: Consumers,
   value: PlaceId,
 ): { readonly root: PlaceId; readonly path: readonly string[] } | null {
-  const { program, definitions } = walk.pass;
+  const { program } = walk.pass;
   const copied: string[] = [];
   let at = value;
   for (let projection = program.projOf.get(at); projection !== undefined;) {
@@ -748,14 +747,7 @@ function inferredCopy(
   const kind = program.place(root).kind;
   if (kind.kind !== "binding" || (kind.declared !== "let" && kind.declared !== "global"))
     return null;
-  if (walk.storedBelow === null) {
-    walk.storedBelow = new Set();
-    for (const key of definitions.byKey.keys()) {
-      program.work.charge("checks");
-      if (keyPath(key).length > 0) walk.storedBelow.add(keyPlace(key));
-    }
-  }
-  return walk.storedBelow.has(root) ? null : { root, path: joinSteps(path, copied.reverse()) };
+  return { root, path: joinSteps(path, copied.reverse()) };
 }
 
 /**
