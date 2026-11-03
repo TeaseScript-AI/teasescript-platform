@@ -4,6 +4,7 @@ import { keep, textUnits, type WorkLedger } from "../budget.js";
 import { writtenOf } from "../contract.js";
 import type { Holding } from "../contract-descriptors.js";
 import type { CoreProgram } from "../program.js";
+import { fieldsOf } from "./structure.js";
 import { copySources } from "./walk.js";
 
 // The holdings of a store contract's levels (#1646, TABLE r4.278 (3)): the contract positions a level's key reads
@@ -21,10 +22,12 @@ class Position implements Holding {
   /** Whether a copy lands strictly below it, so a key below it reads more than its prefixes give it. */
   deeper = false;
   /**
-   * Whether a store puts at it a value of its own (a literal, a scalar, external data: anything but one whole copy of a
-   * binding), or it is a written binding's: then its contract is not empty.
+   * Whether a store of its place puts something of its own here, not a copy: a node of a stored literal (an object, a
+   * list, a scalar field), or a value that is neither a binding nor a part of one.
    */
-  grounded = false;
+  owned = false;
+  /** Whether something of its place's own lies strictly below it (`owned`), so its walk below reads more than copies. */
+  ownBelow = false;
   /** The position whose contract equals its own, where a ring of whole copies made them one (`Holdings.collapse`). */
   alias: Position | null = null;
   /** The positions its key reads whole (`Holdings.made`); `null` while they are being made. */
@@ -108,6 +111,16 @@ class Holdings {
     for (let up = landing.parent; up !== null && !up.deeper; up = up.parent) up.deeper = true;
   }
 
+  /** Marks `position` as holding something of its place's own, and the positions above it as having that below them. */
+  public owns(position: Position): void {
+    position.owned = true;
+    this.#ownBelow(position);
+  }
+
+  #ownBelow(position: Position): void {
+    for (let up = position.parent; up !== null && !up.ownBelow; up = up.parent) up.ownBelow = true;
+  }
+
   /**
    * Makes each ring of whole copies one position (#1646, Codex r1 B2): positions that copy one another whole, each a
    * source of the next round the ring (a strongly connected component of the landings), have one contract, so their
@@ -176,7 +189,11 @@ class Holdings {
         target.deeper = true;
         this.#deepen(target);
       }
-      target.grounded ||= from.grounded;
+      if (from.owned) this.owns(target);
+      if (from.ownBelow) {
+        target.ownBelow = true;
+        this.#ownBelow(target);
+      }
       for (const [step, child] of from.next) pending.push([this.below(target, step), child]);
     }
   }
@@ -328,19 +345,15 @@ class Holdings {
   }
 
   /**
-   * `position`'s complete reads but itself as one number per distinct set, where no copy lands strictly below it and one
-   * of those reads is grounded (its contract is not empty): then a key below it reads only what those reads give, so a
-   * level below with the same state holds that non-empty contribution again one walk further down, without end
-   * (`Holding.state`); `null` elsewhere, where an equal set would prove nothing (Codex r1 B1: reads whose contracts are
-   * all empty repeat nothing).
+   * `position`'s complete reads but itself as one number per distinct set, where it reads something and is pure: everything strictly below it
+   * comes from those reads, no copy landing below it (`deeper`) and nothing of its place's own (`ownBelow`: no store, no
+   * node of a literal stored at or above it). A walk that went down from it to a level with the same state went through
+   * structure those reads supply, and they supply it again from there, without end (`Holding.state`); `null` elsewhere,
+   * where an equal set would prove nothing (Codex r1 and r2 B1: the walk went down `a`'s own literal while the reads
+   * repeated nothing).
    */
   public stateOf(position: Position, reads: ReadonlySet<Position>): number | null {
-    if (
-      !position.whole ||
-      position.deeper ||
-      ![...reads].some((read) => read !== position && read.grounded)
-    )
-      return null;
+    if (!position.whole || position.deeper || position.ownBelow || reads.size < 2) return null;
     const ids: number[] = [];
     for (const read of reads) {
       this.#work.charge("structureSteps");
@@ -421,16 +434,15 @@ function holdingsOf(admission: Admission): Holdings {
     if (!lists.live(d) || !program.live(d.node)) continue;
     let at = made.at(d.place, d.path);
     if (d.kind === "add" && d.how !== "elements") at = made.below(at, "element");
-    const copies = copySources(admission, d.value);
-    // (a value other than one whole copy of a binding puts kinds of its own there)
-    if (!copies.some(({ path }) => path.length === 0)) at.grounded = true;
-    for (const { path, binding, strip } of copies) {
+    for (const path of ownNodes(admission, d.value, () => made.charge())) {
+      let node = at;
+      for (const step of path) node = made.below(node, step);
+      made.owns(node);
+    }
+    for (const { path, binding, strip } of copySources(admission, d.value)) {
       let landing = at;
       for (const step of path) landing = made.below(landing, step);
-      const source = made.at(binding, strip);
-      // (a written binding's contract is its written type, never empty)
-      if (writtenOf(program.place(binding).kind) !== null) source.grounded = true;
-      made.land(landing, source);
+      made.land(landing, made.at(binding, strip));
       landings.push(landing);
     }
   }
@@ -438,6 +450,29 @@ function holdingsOf(admission: Admission): Holdings {
   // (kept once whole: a stop while it ran indexes it anew where next asked)
   HOLDINGS.set(program, (holdings = made));
   return holdings;
+}
+
+/**
+ * The paths below a stored value where it puts something of its own: each node of a literal (an object, a list, a
+ * scalar field) and any value that is neither a binding nor a part of one; a binding or a projection is a copy
+ * (`copySources`), nothing of its own. One step per field, each charged.
+ */
+function ownNodes(admission: Admission, value: PlaceId, charge: () => void): string[][] {
+  const { definitions, program } = admission.pass;
+  const out: string[][] = [];
+  const pending: [PlaceId, string[]][] = [[value, []]];
+  while (pending.length > 0) {
+    const [at, path] = pending.pop()!;
+    charge();
+    if (program.occurrenceOf.has(at) || program.projOf.has(at)) continue;
+    out.push(path);
+    for (const has of program.hasOf.get(at) ?? [])
+      for (const [name, term] of fieldsOf(has.type))
+        if (term.kind === "ref")
+          for (const d of definitions.cellDefs.get(term.place) ?? [])
+            if (d.value !== undefined) pending.push([d.value, [...path, name]]);
+  }
+  return out;
 }
 
 /** Each program's answer to `copiesCycle`. */

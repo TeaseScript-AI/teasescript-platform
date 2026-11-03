@@ -140,6 +140,11 @@ test("a contract walk without a cycle of copies is the walk without the certific
     // (Codex r1 B1: `b.q` copied into `b.q.q` holds nothing, so its reads repeat without a contribution: `a`'s levels read
     // the same two positions two levels apart, and the contract is `a`'s finite literal)
     'let b={}\nb.q.q=b.q\nlet a={q:{q:{q:{f:[[1]]}}}}\na=b.q\na=hostValue\nsay "AFTER"\nexit',
+    // (Codex r2 B1: the same with `b.q=null`, which repeats no structure either; both walks go down `a`'s own literal,
+    // so the levels below `a.q` are not pure)
+    'let b={}\nb.q=null\nb.q.q=b.q\nlet a={q:{q:{q:{f:[[1]]}}}}\na=b.q\na=hostValue\nsay "AFTER"\nexit',
+    // (Codex r2: a copy that lands below a level, `a.q.q=seed`, with an unrelated cycle that makes holdings be built)
+    "let seed={f:[[1]]}\nlet unused={}\nunused.x=unused\nlet a={q:seed}\na.q.q=seed\na=hostValue\nexit",
     // (copies no contract reads, which would close a cycle along a path the walk descends: a store A6 rejects, and one
     // into a place with a written type, whose contract is that type)
     "let a={f:[[1]]}\nlet b={s:[[1]]}\nb.q=[[1]]\nb.q=a\na.q=b\na=hostValue\nexit",
