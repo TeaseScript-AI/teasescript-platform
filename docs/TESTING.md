@@ -138,14 +138,16 @@ counts. CI runs only `npm run test:families`, which checks that every module sti
 
 ### Sampled sweeps
 
-CI's `check` job keeps at least 3 minutes under its 15-minute limit at the slow end of runner variance (#1638). The test
-files whose tests take 30 s or more together in a measured run of the suite as CI runs it are listed, costliest first,
-in `tools/costly-test-files.mjs`, and the full suite starts them first. Such a file visits, of each list of settled
-stops, allowances or sizes at every member of which it claims something, the first, the last and two evenly between
-(`sampled`, `tests/helpers/sweep.ts`); a search for a member where something happens keeps its list.
-`TEASESCRIPT_SWEEP=full` makes every sampled list whole: `TEASESCRIPT_SWEEP=full npm run test:compiled`, after
-`npm run build`, is the sweeps' queue evidence, which the builder of a change that can move a stop runs on a worker
-before a type-core review round, beside the generator areas above.
+CI's `check` job is meant to stay at least 3 minutes under its 15-minute limit at the slow end of runner variance
+(#1638). The test files whose tests take 30 s or more together in a measured run of the suite as CI runs it are
+listed, costliest first, in `tools/costly-test-files.mjs`, and the full suite starts them first. Their costliest sweeps
+that claim something at every member of a list of settled stops or allowances (`testedStops`, the stops before admission
+settled in `type-core-stop`, `completionAllowances`) visit of each list the first, the last and two evenly between
+(`sampled`, `tests/helpers/sweep.ts`), and `type-core-sharing` runs its fixture and matrix programs in the source order
+alone; a search for a member where something happens keeps its list. `TEASESCRIPT_SWEEP=full` makes every sampled list
+whole and runs those programs in both orders: `TEASESCRIPT_SWEEP=full npm run test:compiled`, after `npm run build`,
+is the sweeps' queue evidence, which the builder of a change that can move a stop runs on a worker before a type-core
+review round, beside the generator areas above.
 
 ## Test layers
 
