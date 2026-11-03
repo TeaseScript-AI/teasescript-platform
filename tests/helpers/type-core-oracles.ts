@@ -30,7 +30,11 @@ import {
   CoreProgram,
   propertyStep,
 } from "../../src/type-inference/core/program.js";
-import { type CoreDiagnostic, coreRecord } from "../../src/type-inference/core/result.js";
+import {
+  type CheckedDiagnostic,
+  type CoreDiagnostic,
+  coreRecord,
+} from "../../src/type-inference/core/result.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import type { PlaceId } from "../../src/type-inference/graph.js";
@@ -49,7 +53,9 @@ import { itemScope } from "./type-core-items.js";
  * A diagnostic as a stop must keep it, its identity: without the facts its fix's code forms read (`expects`,
  * `present`), which a stop never proves, so a fix there may be words (TABLE r4.162). The stop tests compare these.
  */
-export function stopIdentity(diagnostic: CoreDiagnostic): Readonly<Record<string, unknown>> {
+export function stopIdentity(
+  diagnostic: CoreDiagnostic | CheckedDiagnostic,
+): Readonly<Record<string, unknown>> {
   return Object.fromEntries(
     Object.entries(diagnostic).filter(([key]) => key !== "expects" && key !== "present"),
   );
