@@ -145,13 +145,7 @@ export interface ContractReader {
  */
 export interface Holding {
   readonly own: object;
-  /**
-   * Where no copy lands strictly below its level and its key reads other positions: those reads as one number per
-   * distinct set, else `null`. A key below it then reads only what they give, so a level below with the same state reads
-   * a contract that holds itself one walk further down: a cycle of copies, though no read is the level's own.
-   */
-  readonly state: number | null;
-  /** Whether its key reads, besides its own, a position `open` holds (each read charged). */
+  /** Whether its position, or one its key reads, is a position `open` holds (each read charged). */
   readsAny(open: ReadonlySet<object>): boolean;
   child(step: string): Holding;
 }
@@ -159,28 +153,19 @@ export interface Holding {
 /** The positions of the levels a walk is inside of, each until its walk below it ends (`Holding`). */
 export class OpenLevels {
   readonly #open = new Set<object>();
-  readonly #states = new Map<number, number>();
 
-  /** Whether `holding`'s key reads a level already open, or reads what one reads below it: a cycle of copies. */
+  /** Whether `holding`'s key reads a level already open (or is one, a ring having made them one): a cycle of copies. */
   public cyclic(holding: Holding): boolean {
-    return (
-      (holding.state !== null && this.#states.has(holding.state)) || holding.readsAny(this.#open)
-    );
+    return holding.readsAny(this.#open);
   }
 
   /** Opens `holding`'s level: its walk asked first whether it is cyclic (`cyclic`), or it opens a walk. */
   public open(holding: Holding): void {
     this.#open.add(holding.own);
-    if (holding.state !== null)
-      this.#states.set(holding.state, (this.#states.get(holding.state) ?? 0) + 1);
   }
 
   public leave(holding: Holding): void {
     this.#open.delete(holding.own);
-    if (holding.state === null) return;
-    const count = this.#states.get(holding.state)! - 1;
-    if (count === 0) this.#states.delete(holding.state);
-    else this.#states.set(holding.state, count);
   }
 }
 

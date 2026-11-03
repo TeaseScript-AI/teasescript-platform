@@ -466,20 +466,19 @@ test("outside the slice's syntax the capture requests nothing and charges nothin
 });
 
 test("the capture ends at the first store whose contract leaves the slice's depth", () => {
-  // (graph/533 of the corpus: two cyclic stores, read. The first contract the slice does not follow takes the program
+  // (graph/533 of the corpus: two cyclic stores, read. The first contract deeper than the slice follows takes the program
   // out of the slice, as main's lowering leaves it at its first such check and asks nothing more: the analysis runs to its
-  // end. Its contract holds a cycle of copies, which the walk meets again a few levels down (#1646): before, it walked the
-  // cycle to the slice's depth, 22,962,817 units forward. A regression oracle of this construction)
+  // end. Its walk is `out`'s, which reads the cycle of `a` and `b` without lying on it, so it runs to the slice's depth,
+  // as on main (#1646 proves a cycle only where a level reads one the walk is inside of). A regression oracle of this
+  // construction. In the first mode alone in CI: each mode walks one cyclic contract of about 23 million units, seconds)
   const source =
     'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nb.q=a\nc=[a,b][0]\nc=a\nlet out={p:c}\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
-  for (const mode of HELD_MODES) {
-    const { budget, contracts } = mode.run(() => analyseCore(request));
-    assert.equal(budget.exhausted, null, mode.name);
-    assert.equal(budget.stoppedIn, null, mode.name);
-    assert.deepEqual(contracts, [], mode.name);
-    assert.equal(budget.total, mode.name.endsWith("unshared") ? 16_911 : 18_664, mode.name);
-  }
+  const { budget, contracts } = HELD_MODES[0]!.run(() => analyseCore(request));
+  assert.equal(budget.exhausted, null);
+  assert.equal(budget.stoppedIn, null);
+  assert.deepEqual(contracts, []);
+  assert.equal(budget.total, 22_985_013);
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {

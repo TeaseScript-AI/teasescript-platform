@@ -1,10 +1,9 @@
 import type { PlaceId } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { keep, textUnits, type WorkLedger } from "../budget.js";
+import type { WorkLedger } from "../budget.js";
 import { writtenOf } from "../contract.js";
 import type { Holding } from "../contract-descriptors.js";
 import type { CoreProgram } from "../program.js";
-import { fieldsOf } from "./structure.js";
 import { copySources } from "./walk.js";
 
 // The holdings of a store contract's levels (#1646, TABLE r4.278 (3)): the contract positions a level's key reads
@@ -21,19 +20,10 @@ class Position implements Holding {
   sources: Position[] | null = null;
   /** Whether a copy lands strictly below it, so a key below it reads more than its prefixes give it. */
   deeper = false;
-  /**
-   * Whether a store of its place puts something of its own here, not a copy: a node of a stored literal (an object, a
-   * list, a scalar field), or a value that is neither a binding nor a part of one.
-   */
-  owned = false;
-  /** Whether something of its place's own lies strictly below it (`owned`), so its walk below reads more than copies. */
-  ownBelow = false;
   /** The position whose contract equals its own, where a ring of whole copies made them one (`Holdings.collapse`). */
   alias: Position | null = null;
   /** The positions its key reads whole (`Holdings.made`); `null` while they are being made. */
   held: readonly Position[] | null | undefined = undefined;
-  /** Its reads but itself, as one number per distinct set (`Holding.state`): `undefined` until first asked. */
-  #state: number | null | undefined = undefined;
   /**
    * Whether its holding is complete: neither its parent's nor any it read was still being made. Since rings of whole
    * copies are one position (`collapse`), a copy of a position's own part into it (`a=a.q`) leaves holdings waiting on
@@ -51,18 +41,6 @@ class Position implements Holding {
 
   public get own(): object {
     return this;
-  }
-
-  /**
-   * Asked of a holding a walk was given (`Holdings.made` returned it), so it is complete: every ring it waited on was
-   * closed before the walk got it. Made once, on first asking.
-   */
-  public get state(): number | null {
-    if (this.#state === undefined)
-      this.#state = this.holdings.shared(() =>
-        this.holdings.stateOf(this, new Set(this.holdings.made(this).held!)),
-      );
-    return this.#state;
   }
 
   public readsAny(open: ReadonlySet<object>): boolean {
@@ -92,7 +70,6 @@ class Position implements Holding {
  */
 class Holdings {
   readonly #roots = new Map<PlaceId, Position>();
-  readonly #states = new Map<string, number>();
   readonly #work: WorkLedger;
   #positions = 0;
 
@@ -109,16 +86,6 @@ class Holdings {
   /** Marks the positions above `landing` as having a copy below them. */
   #deepen(landing: Position): void {
     for (let up = landing.parent; up !== null && !up.deeper; up = up.parent) up.deeper = true;
-  }
-
-  /** Marks `position` as holding something of its place's own, and the positions above it as having that below them. */
-  public owns(position: Position): void {
-    position.owned = true;
-    this.#ownBelow(position);
-  }
-
-  #ownBelow(position: Position): void {
-    for (let up = position.parent; up !== null && !up.ownBelow; up = up.parent) up.ownBelow = true;
   }
 
   /**
@@ -188,11 +155,6 @@ class Holdings {
       if (from.deeper) {
         target.deeper = true;
         this.#deepen(target);
-      }
-      if (from.owned) this.owns(target);
-      if (from.ownBelow) {
-        target.ownBelow = true;
-        this.#ownBelow(target);
       }
       for (const [step, child] of from.next) pending.push([this.below(target, step), child]);
     }
@@ -268,7 +230,7 @@ class Holdings {
    * A ring of copies' holdings, each made while another it reads was still being made: made again from what they read
    * until none reads more (their reads only grow over the finite set of positions the program's landings and the walks
    * make, so this ends), a holding made meanwhile (one it newly reads) made on the same footing and joining the ring.
-   * Then each is whole. No walk gets a holding before its ring is closed, so a state is only made from complete reads.
+   * Then each is whole: no walk gets a holding before its ring is closed.
    */
   #close(ring: Position[]): void {
     for (let grew = true; grew;) {
@@ -345,28 +307,6 @@ class Holdings {
   }
 
   /**
-   * `position`'s complete reads but itself as one number per distinct set, where it reads something and is pure: everything strictly below it
-   * comes from those reads, no copy landing below it (`deeper`) and nothing of its place's own (`ownBelow`: no store, no
-   * node of a literal stored at or above it). A walk that went down from it to a level with the same state went through
-   * structure those reads supply, and they supply it again from there, without end (`Holding.state`); `null` elsewhere,
-   * where an equal set would prove nothing (Codex r1 and r2 B1: the walk went down `a`'s own literal while the reads
-   * repeated nothing).
-   */
-  public stateOf(position: Position, reads: ReadonlySet<Position>): number | null {
-    if (!position.whole || position.deeper || position.ownBelow || reads.size < 2) return null;
-    const ids: number[] = [];
-    for (const read of reads) {
-      this.#work.charge("structureSteps");
-      if (read !== position) ids.push(read.id);
-    }
-    const text = ids.sort((a, b) => a - b).join(",");
-    keep(this.#work, textUnits(text.length));
-    let state = this.#states.get(text);
-    if (state === undefined) this.#states.set(text, (state = this.#states.size));
-    return state;
-  }
-
-  /**
    * What `position`'s holding is made from: the positions copied whole into it, and the position one step below each
    * position its parent reads that a copy lands strictly below (the parent's own step below is `position` itself).
    */
@@ -393,12 +333,7 @@ class Holdings {
 const HOLDINGS = new WeakMap<CoreProgram, Holdings>();
 
 /** A holding that reads nothing (`withoutCycleCertificate`): every walk runs to the slice's depth, as before #1646. */
-const NO_HOLDING: Holding = {
-  own: {},
-  state: null,
-  readsAny: () => false,
-  child: () => NO_HOLDING,
-};
+const NO_HOLDING: Holding = { own: {}, readsAny: () => false, child: () => NO_HOLDING };
 
 let certificate = true;
 
@@ -434,11 +369,6 @@ function holdingsOf(admission: Admission): Holdings {
     if (!lists.live(d) || !program.live(d.node)) continue;
     let at = made.at(d.place, d.path);
     if (d.kind === "add" && d.how !== "elements") at = made.below(at, "element");
-    for (const path of ownNodes(admission, d.value, () => made.charge())) {
-      let node = at;
-      for (const step of path) node = made.below(node, step);
-      made.owns(node);
-    }
     for (const { path, binding, strip } of copySources(admission, d.value)) {
       let landing = at;
       for (const step of path) landing = made.below(landing, step);
@@ -450,29 +380,6 @@ function holdingsOf(admission: Admission): Holdings {
   // (kept once whole: a stop while it ran indexes it anew where next asked)
   HOLDINGS.set(program, (holdings = made));
   return holdings;
-}
-
-/**
- * The paths below a stored value where it puts something of its own: each node of a literal (an object, a list, a
- * scalar field) and any value that is neither a binding nor a part of one; a binding or a projection is a copy
- * (`copySources`), nothing of its own. One step per field, each charged.
- */
-function ownNodes(admission: Admission, value: PlaceId, charge: () => void): string[][] {
-  const { definitions, program } = admission.pass;
-  const out: string[][] = [];
-  const pending: [PlaceId, string[]][] = [[value, []]];
-  while (pending.length > 0) {
-    const [at, path] = pending.pop()!;
-    charge();
-    if (program.occurrenceOf.has(at) || program.projOf.has(at)) continue;
-    out.push(path);
-    for (const has of program.hasOf.get(at) ?? [])
-      for (const [name, term] of fieldsOf(has.type))
-        if (term.kind === "ref")
-          for (const d of definitions.cellDefs.get(term.place) ?? [])
-            if (d.value !== undefined) pending.push([d.value, [...path, name]]);
-  }
-  return out;
 }
 
 /** Each program's answer to `copiesCycle`. */
