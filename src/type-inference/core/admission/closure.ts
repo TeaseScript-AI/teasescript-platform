@@ -91,6 +91,19 @@ export interface ClosureCounts {
   unsettled: number;
   /** Of those, the ones the completion had completed: what the whole loss leaves unpublished. */
   forgone: number;
+  /** Whether a request reached the slice's depth, ending the completion with no result kept (`LeftSlice`). */
+  leftSlice: number;
+}
+
+/**
+ * A request whose contract reaches the slice's depth: the program has left the slice, where main's lowering requests
+ * nothing more, so the completion ends there (as phase B's capture does).
+ */
+export class LeftSlice extends Error {
+  public constructor() {
+    super("A receiving request reached the slice's depth.");
+    this.name = "LeftSlice";
+  }
 }
 
 /** A request whose extraction needed a listing not yet made: the listing, and the keys its search deferred. */
@@ -134,6 +147,7 @@ export class Closure {
     marked: 0,
     unsettled: 0,
     forgone: 0,
+    leftSlice: 0,
   };
 
   public constructor(work: WorkLedger) {
@@ -436,31 +450,35 @@ export class Closure {
         park({ request: index }, [error.key]);
       }
     };
-    for (let index = 0; index < frontier.requests; index += 1) extract(index);
-    for (;;) {
-      const key = listings.pop();
-      if (key !== undefined) {
-        if (!queued.has(key)) continue;
-        queued.delete(key);
-        if (!frontier.listed(key)) {
-          this.counts.listings += 1;
-          const found = frontier.list(key);
-          if ("deferred" in found) {
-            this.counts.deferred += 1;
-            park({ listing: key }, found.deferred);
-            continue;
+    // (the views released however the run ends: a request that leaves the slice ends it, `LeftSlice`)
+    try {
+      for (let index = 0; index < frontier.requests; index += 1) extract(index);
+      for (;;) {
+        const key = listings.pop();
+        if (key !== undefined) {
+          if (!queued.has(key)) continue;
+          queued.delete(key);
+          if (!frontier.listed(key)) {
+            this.counts.listings += 1;
+            const found = frontier.list(key);
+            if ("deferred" in found) {
+              this.counts.deferred += 1;
+              park({ listing: key }, found.deferred);
+              continue;
+            }
           }
+          made(key);
+          continue;
         }
-        made(key);
-        continue;
+        if (ready.size === 0) break;
+        extract(ready.pop());
       }
-      if (ready.size === 0) break;
-      extract(ready.pop());
+    } finally {
+      this.#parkedView = null;
+      this.#reready = null;
     }
     // (every parked item woke: one left waiting is counted, never by construction)
     this.counts.unchanged += parked.size;
-    this.#parkedView = null;
-    this.#reready = null;
     return view;
   }
 

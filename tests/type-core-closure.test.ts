@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { TypePlan } from "../src/plan/model.js";
-import { Closure, Unlisted } from "../src/type-inference/core/admission/closure.js";
+import { Closure, LeftSlice, Unlisted } from "../src/type-inference/core/admission/closure.js";
 import type { ReceivingResult } from "../src/type-inference/core/admission/receiving.js";
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
 import {
@@ -21,12 +21,13 @@ import {
 } from "./helpers/type-core-intervals.js";
 
 /*
- * The receiving closure (#1526 phase C steps 1–4, TABLE r4.308; Sol's round 2 §1 and §5): a settled pass that started
+ * The receiving closure (#1526 phase C steps 1–5, TABLE r4.308; Sol's round 2 §1 and §5): a settled pass that started
  * with frozen keys registers every receiving obligation apart from the diagnostics and completes them in a completion
  * pass without those keys, each decision made where a proof first reads it and each property listing a cell the
- * frontier schedules, taken whole by a search that reaches it. The gate's witnesses (Astra's C-R1 chain of function
- * results, an independent sibling, a pair of chains, a ring) at one doubling; the full series is the PR's evidence,
- * outside CI.
+ * frontier schedules, taken whole by a search that reaches it. Outside the candidate slice, by its syntax or its depth,
+ * no completion runs and the analysis is main's: Astra's C-R1 chain of function results, the function result, an
+ * argument, an `add` and a list join are outside its syntax, so the gate's witnesses are the in-slice families (copy
+ * chains, shared, wide, ring, mutual) at one doubling; the full series is the PR's evidence, outside CI.
  */
 
 const GLOBALS = ["hostValue", "hostOther"];
@@ -41,28 +42,31 @@ const lines = (k: number, line: (i: number) => string): string =>
   Array.from({ length: k }, (_, i) => line(i)).join("\n");
 
 /** Astra's C-R1 chain: k functions, each returning the preceding one's result through a defaulted parameter. */
-function chain(k: number, name = "f", root = "a0", out = "out"): string {
+function chain(k: number): string {
   return [
-    `let ${root} = {f: [[1]]}`,
+    "let a0 = {f: [[1]]}",
     lines(
       k,
-      (i) =>
-        `function ${name}${i + 1}(x=null) {\n  x=${i === 0 ? root : `${name}${i}()`}\n  return x\n}`,
+      (i) => `function f${i + 1}(x=null) {\n  x=${i === 0 ? "a0" : `f${i}()`}\n  return x\n}`,
     ),
-    `let ${out} = ${name}${k}()`,
-    `${out}.f = hostValue`,
+    `let out = f${k}()`,
+    "out.f = hostValue",
   ].join("\n");
 }
 
 const ending = '\nsay "AFTER"\nexit\n';
 
-/** The chain beside an independent sibling whose own store owes its check. */
-const sibling = (k: number): string =>
-  `let steady = {g: [[1]]}\nsteady.g = hostValue\n${chain(k)}${ending}`;
+/** #1606's shared family: a copy chain of `a`, its last copy copied k times, each copy's `f` given host data. */
+const shared = (k: number, root = "a", c = "c", d = "d"): string =>
+  `let ${root} = {f: [[1]]}\n${lines(k, (i) => `let ${c}${i} = ${i === 0 ? root : `${c}${i - 1}`}`)}\n${lines(k, (i) => `let ${d}${i} = ${c}${k - 1}\n${d}${i}.f = hostValue`)}`;
 
-/** Two independent chains, each with its own store: each completes as it does alone. */
-const pair = (k: number): string =>
-  `${chain(k, "f", "a0", "out")}\n${chain(k, "g", "b0", "other")}${ending}`;
+/** #1606's wide family: one object of k properties, each given host data. */
+const wide = (k: number): string =>
+  `let a = {${Array.from({ length: k }, (_, i) => `f${i}: [[${i}]]`).join(", ")}}\n${lines(k, (i) => `a.f${i} = hostValue`)}`;
+
+/** #1606's mutual family: k pairs of mutual copies, the first one's `f` given host data. */
+const mutual = (k: number): string =>
+  `${lines(k, (i) => `let a${i} = {f: [[1]]}\nlet b${i} = a${i}\na${i} = b${i}`)}\na0.f = hostValue`;
 
 function analyse(source: string, mode: (typeof HELD_MODES)[number], demand = 64): Answers {
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
@@ -102,86 +106,86 @@ const F = [propertyStep("f")];
 
 /** A ring of k copies (#1606's stress family): each listing on it reaches the next, the last the first. */
 const ring = (k: number): string =>
-  `${lines(k, (i) => `let a${i} = {f: [[1]]}`)}\n${lines(k, (i) => `a${i} = a${(i + 1) % k}`)}\na0.f = hostValue${ending}`;
+  `${lines(k, (i) => `let a${i} = {f: [[1]]}`)}\n${lines(k, (i) => `a${i} = a${(i + 1) % k}`)}\na0.f = hostValue`;
 
-test("a chain of results whose decisions froze is completed in every mode, its work linear with every obligation (C-R1)", () => {
-  for (const mode of HELD_MODES) {
-    const sizes = [16, 32].map((k) => {
-      const source = chain(k) + ending;
-      const answers = analyse(source, mode);
-      const at = `${mode.name}, k = ${k}`;
-      const result = resultAt(answers, source, "out.f = hostValue", F);
-      assert.ok(result?.state === "complete" && !("shape" in result), `${at}: ${result?.state}`);
-      assert.deepEqual(result.ref, NESTED, at);
-      // (the stopped decisions' stores owe their obligations, by the marks the stop gave them)
-      assert.ok(
-        answers.receiving.some(({ obligation }) => obligation.slot.role === "stopped"),
-        `${at}: a stopped store's slot`,
-      );
-      // (every obligation of the seed completes, the stopped stores' among them: none left without a result)
-      assert.deepEqual(
-        answers.receiving.filter((r) => r.result === null || r.result.state !== "complete"),
-        [],
-        at,
-      );
-      const completion = answers.budget.closure;
-      assert.ok(completion !== null, at);
-      const { counts } = completion;
-      // (each listing listed at most twice: once deferring the keys another listing finds, once taking them; nothing
-      // left waiting, no transaction)
-      assert.ok(counts.listings <= 2 * counts.cells, `${at}: ${counts.listings} listing runs`);
-      assert.equal(counts.unchanged, 0, at);
-      assert.equal(counts.transactions, 0, at);
-      return {
-        counts,
-        total: answers.budget.total,
-        nodes: answers.budget.counts.get("syntaxNodes")!,
-      };
-    });
-    const small = sizes[0]!;
-    const large = sizes[1]!;
-    const scale = large.nodes / small.nodes;
-    const grows = (a: number, b: number): number => (2 * (b / Math.max(1, a))) / scale;
-    // (the aggregate with the full seed, and the completion's own counts)
-    assert.ok(grows(small.total, large.total) <= DOUBLING, `${mode.name}: total`);
-    for (const counter of ["decisions", "listings", "edges", "extractions"] as const)
-      assert.ok(
-        grows(small.counts[counter], large.counts[counter]) <= DOUBLING,
-        `${mode.name}: ${counter}`,
-      );
+test("an in-slice family whose decisions froze is completed where it freezes, its work linear with every obligation", () => {
+  // (each family in every mode where a decision of it freezes at demand 64: the shared and wide families forward, the
+  // ring forward with the sharing, the mutual one reversed; the ring's frontier lists and extracts again)
+  const families: readonly (readonly [string, (k: number) => string])[] = [
+    ["shared", (k) => shared(k)],
+    ["wide", wide],
+    ["ring", ring],
+    ["mutual", mutual],
+  ];
+  for (const [name, family] of families) {
+    let completed = 0;
+    for (const mode of HELD_MODES) {
+      const sizes = [16, 32].map((k) => analyse(family(k) + ending, mode));
+      if (sizes.some((answers) => answers.budget.closure === null)) continue;
+      completed += 1;
+      const at = `${name}, ${mode.name}`;
+      const measured = sizes.map((answers) => {
+        // (every obligation of the seed completes: none left without a result)
+        assert.deepEqual(
+          answers.receiving.filter((r) => r.result === null || r.result.state !== "complete"),
+          [],
+          at,
+        );
+        const { counts } = answers.budget.closure!;
+        // (each listing listed at most twice: once deferring the keys another listing finds, once taking them; nothing
+        // left waiting, no transaction)
+        assert.ok(counts.listings <= 2 * counts.cells, `${at}: ${counts.listings} listing runs`);
+        assert.equal(counts.unchanged, 0, at);
+        assert.equal(counts.transactions, 0, at);
+        return {
+          counts,
+          total: answers.budget.total,
+          nodes: answers.budget.counts.get("syntaxNodes")!,
+        };
+      });
+      const [small, large] = [measured[0]!, measured[1]!];
+      const scale = large.nodes / small.nodes;
+      const grows = (a: number, b: number): number => (2 * (b / Math.max(1, a))) / scale;
+      assert.ok(grows(small.total, large.total) <= DOUBLING, `${at}: total`);
+      for (const counter of ["decisions", "listings", "edges", "extractions"] as const)
+        assert.ok(
+          grows(small.counts[counter], large.counts[counter]) <= DOUBLING,
+          `${at}: ${counter}`,
+        );
+    }
+    assert.ok(completed > 0, `${name}: some mode freezes a decision`);
   }
 });
 
-test("an independent sibling and a second chain complete as they do alone, and a ring lists without waiting on itself", () => {
+test("an independent second family completes as it does alone, and a ring lists without waiting on itself", () => {
   for (const mode of HELD_MODES) {
-    const source = sibling(16);
-    const answers = analyse(source, mode);
-    const steady = resultAt(answers, source, "steady.g = hostValue", [propertyStep("g")]);
-    assert.ok(steady?.state === "complete" && !("shape" in steady), mode.name);
-    assert.deepEqual(steady.ref, NESTED, mode.name);
-    const out = resultAt(answers, source, "out.f = hostValue", F);
-    assert.ok(out?.state === "complete" && !("shape" in out), mode.name);
-    const paired = pair(16);
+    const alone = analyse(shared(16) + ending, mode).budget.closure;
+    if (alone === null) continue;
+    const paired = `${shared(16)}\n${shared(16, "e", "g", "h")}${ending}`;
     const both = analyse(paired, mode);
-    for (const store of ["out.f = hostValue", "other.f = hostValue"]) {
+    for (const store of ["d0.f = hostValue", "h0.f = hostValue"]) {
       const result = resultAt(both, paired, store, F);
       assert.ok(result?.state === "complete" && !("shape" in result), `${mode.name}: ${store}`);
       assert.deepEqual(result.ref, NESTED, `${mode.name}: ${store}`);
     }
-    // (each chain's listings and decisions its own: twice the single chain's)
+    // (each family's decisions, listings and taken listings its own: twice the single family's)
     const counts = both.budget.closure!.counts;
-    const alone = analyse(chain(16) + ending, mode).budget.closure!.counts;
     assert.equal(counts.unchanged, 0, mode.name);
-    assert.equal(counts.listings, 2 * alone.listings, mode.name);
-    assert.equal(counts.decisions, 2 * alone.decisions, mode.name);
-    const ringed = ring(8);
-    const around = analyse(ringed, mode, 16);
+    for (const counter of ["decisions", "listings", "taken", "extractions"] as const)
+      assert.equal(counts[counter], 2 * alone.counts[counter], `${mode.name}: ${counter}`);
+  }
+  let ringed = 0;
+  for (const mode of HELD_MODES) {
+    const source = ring(8) + ending;
+    const around = analyse(source, mode, 16);
     if (around.budget.closure === null) continue;
+    ringed += 1;
     assert.equal(around.budget.closure.counts.unchanged, 0, `${mode.name}: ring`);
-    const a0 = resultAt(around, ringed, "a0.f = hostValue", F);
+    const a0 = resultAt(around, source, "a0.f = hostValue", F);
     assert.ok(a0?.state === "complete" && !("shape" in a0), `${mode.name}: ring ${a0?.state}`);
     assert.deepEqual(a0.ref, NESTED, `${mode.name}: ring`);
   }
+  assert.ok(ringed > 0, "some mode completes the ring");
 });
 
 test("a feedback copy's completion lists finitely many keys, each deeper one in the search that reaches it (#1493)", () => {
@@ -204,15 +208,10 @@ test("a feedback copy's completion lists finitely many keys, each deeper one in 
   }
 });
 
-test("the unmarked function result and the copied and direct nested stores owe their checks at every mode's stop", () => {
-  // (Astra's round 1 M2 and R/Ru witnesses: a destination whose decision read a frozen key has no warning, yet owes)
+test("the copied and direct nested stores owe their checks at every mode's stop", () => {
+  // (Astra's round 1 R/Ru witnesses: a destination whose decision read a frozen key has no warning, yet owes; her M2,
+  // the unmarked function result, is outside the slice's syntax, a gate witness below)
   const witnesses: readonly (readonly [string, string, readonly string[]])[] = [
-    [
-      'function make {\n  let r = {nest: {n: [[1]]}}\n  return r\n}\nlet out = make()\nsay "BEFORE"\nout.nest.n = hostValue' +
-        ending,
-      "out.nest.n = hostValue",
-      [propertyStep("nest"), propertyStep("n")],
-    ],
     ['let a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nb.f = hostValue' + ending, "b.f = hostValue", F],
     ['let o = {f: [[1]]}\nsay "BEFORE"\no.f = hostValue' + ending, "o.f = hostValue", F],
   ];
@@ -228,37 +227,65 @@ test("the unmarked function result and the copied and direct nested stores owe t
       }
 });
 
-test("an argument and a return owe their checks as a store does, each its own destination (#1526 phase C)", () => {
-  // (Codex r1: a checked argument or return is a transfer, not a store; its warning's site owes its obligation too)
-  const cases = [
-    [
-      "function take(x: integer[]) { }\nlet maybe = null\nif hostValue { maybe = [1] }\ntake(maybe)",
-      "take(maybe)",
-    ],
-    [
-      "function give: integer[] {\n  let maybe = null\n  if hostValue { maybe = [1] }\n  return maybe\n}\nlet got = give()",
-      "return maybe",
-    ],
-  ] as const;
-  for (const [body, store] of cases) {
-    const source = `${chain(4)}\n${body}${ending}`;
-    let checked = 0;
-    for (const mode of HELD_MODES)
-      for (const demand of [16, 64]) {
+/**
+ * Programs outside the candidate slice's syntax, a decision of each freezing: a function's result chain (Astra's C-R1),
+ * the unmarked function result (her M2), a checked argument and return, an `add`, a list join, a compound assignment and
+ * an interpolation. The candidate route declines them, and the analysis is main's: no receiving obligation, no
+ * completion, and every unit charged as on `main` at `92a970442` (a regression oracle of this gate only), at demand 16
+ * and 64 in the four modes (each list: demand 16's four modes, then 64's).
+ */
+const frozen = `let a = {f: [[1]]}\nlet b = a\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\nb.f = hostValue`;
+const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
+  ["the C-R1 chain", chain(16), [11837, 12194, 11837, 12194, 18874, 14874, 18895, 14874]],
+  [
+    "the unmarked function result",
+    'function make {\n  let r = {nest: {n: [[1]]}}\n  return r\n}\nlet out = make()\nsay "BEFORE"\nout.nest.n = hostValue',
+    [1692, 1768, 1692, 1768, 2579, 2304, 2444, 2304],
+  ],
+  [
+    "a checked argument",
+    `${chain(4)}\nfunction take(x: integer[]) { }\nlet maybe = null\nif hostValue { maybe = [1] }\ntake(maybe)`,
+    [4958, 5425, 4958, 5153, 7200, 6183, 7221, 5911],
+  ],
+  [
+    "a checked return",
+    `${chain(4)}\nfunction give: integer[] {\n  let maybe = null\n  if hostValue { maybe = [1] }\n  return maybe\n}\nlet got = give()`,
+    [5090, 5525, 5090, 5252, 6973, 6346, 6875, 6073],
+  ],
+  ["an add", "let b = [[1]]\nb.add(hostValue)", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],
+  [
+    "a list join",
+    `${frozen}\nlet xs = [1]\nlet ys = ["s"]\nb.f = [xs + ys]`,
+    [20591, 21799, 20377, 21568, 33461, 34928, 32626, 34004],
+  ],
+  [
+    "a compound assignment",
+    `${frozen}\nlet n = 1\nn += 1`,
+    [18994, 19136, 18864, 19006, 20720, 22706, 20460, 21814],
+  ],
+  [
+    "an interpolation",
+    `${frozen}\nsay "n \${b.f}"`,
+    [19746, 19862, 19616, 19732, 21471, 22896, 21211, 22538],
+  ],
+];
+
+test("outside the slice's syntax the analysis is main's: no inventory, no completion, main's charges (#1526 phase C)", () => {
+  for (const [name, body, totals] of OUTSIDE) {
+    const source = body + ending;
+    let at = 0;
+    let froze = 0;
+    for (const demand of [16, 64])
+      for (const mode of HELD_MODES) {
         const answers = analyse(source, mode, demand);
-        if (answers.budget.closure === null) continue;
-        checked += 1;
-        const at = `${store}, ${mode.name}, demand ${demand}`;
-        const owed = answers.receiving.filter(({ obligation }) =>
-          within(source, store, obligation.slot.site),
-        );
-        assert.ok(owed.length > 0, `${at}: owes`);
-        assert.ok(
-          owed.every(({ result }) => result !== null),
-          `${at}: ${JSON.stringify(owed.map(({ result }) => result))}`,
-        );
+        const where = `${name}, ${mode.name}, demand ${demand}`;
+        if (answers.budget.decisions.some((d) => d.stopped)) froze += 1;
+        assert.equal(answers.budget.closure, null, where);
+        assert.deepEqual(answers.receiving, [], where);
+        assert.equal(answers.budget.total, totals[at], where);
+        at += 1;
       }
-    assert.ok(checked > 0, `${store}: some mode completes`);
+    assert.ok(froze > 0, `${name}: a decision freezes`);
   }
 });
 
@@ -302,15 +329,7 @@ test("a receiving obligation's extent is its store's form's (D1)", () => {
       ],
       [["complete", ""]],
     ],
-    // (an add owes its element's contract and its list's shape)
-    [
-      "let b = [[1]]\nb.add(hostValue)",
-      "b.add(hostValue)",
-      [
-        ["shape", ""],
-        ["complete", "element"],
-      ],
-    ],
+    // (an add, outside the slice's syntax, is a gate witness: `OUTSIDE`)
   ];
   for (const [body, store, expected, others = expected] of rows) {
     const source = body + ending;
@@ -359,13 +378,7 @@ test("a completion decision that would reject a store or retarget a selecting st
     [retargeting(16), "retarget", ["box.first.n = hostValue"]],
     [copied('b.f = "s"', "let c = b.f\nc = hostValue"), "rejection", ["c = hostValue"]],
     [copied('b.f = "s"', "let c = {q: b}\nc.q = hostValue"), "rejection", ["c.q = hostValue"]],
-    // (a join's operand, rejected outside every decision's check: where the settled pass's own join check rejects it,
-    // it stands there and the completion completes, unwidened)
-    [
-      copied('let xs = [1]\nlet ys = ["s"]\nb.f = [xs + ys]', "let c = b\nc = hostValue"),
-      "rejection",
-      ["c = hostValue"],
-    ],
+    // (a list join, outside the slice's syntax, is a gate witness: `OUTSIDE`)
     [
       "let b = {first: {n: null}}\nb.first.n = [[1]]\nlet c = {q: b}\nc.q = hostValue" + ending,
       "retarget",
@@ -412,12 +425,49 @@ test("a completion decision that would reject a store or retarget a selecting st
   }
 });
 
+test("after the capture left the slice's depth no receiving inventory or completion is made (#1526 phase C)", () => {
+  // (a literal 260 objects deep, its host store's decision made, beside a copy whose 300 stores freeze it: the capture
+  // ends at the literal's contract, where the program leaves the slice, and the completion follows it; forward, the
+  // demand allowance that decides the one and freezes the other)
+  const deep = `let d = ${"{q: ".repeat(260)}1${"}".repeat(260)}\nd = hostValue`;
+  const heavy = `let x = {f: [[1]]}\nlet y = x\n${lines(300, (i) => `y = {f: [[${i}]]}`)}\ny.f = hostValue`;
+  const answers = analyse(`${deep}\n${heavy}${ending}`, HELD_MODES[0]!, 16000);
+  assert.ok(answers.budget.decisions.some((d) => d.stopped));
+  assert.equal(answers.budget.closure, null);
+  assert.deepEqual(answers.receiving, []);
+});
+
+test("a completion ends at the first request that reaches the slice's depth, keeping no result (#1526 phase C)", () => {
+  // (graph/533's shape: two cyclic stores and a selection of either, beside a frozen copy; a contract that reaches the
+  // slice's depth means the program has left the slice, as phase B's capture ends there too)
+  const frozen = `let x = {f: [[1]]}\nlet y = x\n${lines(16, (i) => `y = {f: [[${i}]]}`)}\ny.f = hostValue`;
+  const source = `${frozen}\nlet a = {q: null}\nlet b = {q: null}\na.q = b\nb.q = a\nlet c = [a, b][0]\nc.q = hostValue${ending}`;
+  for (const mode of HELD_MODES.slice(0, 2)) {
+    const answers = analyse(source, mode, 16);
+    const completion = answers.budget.closure;
+    assert.ok(completion !== null, mode.name);
+    assert.equal(completion.counts.leftSlice, 1, mode.name);
+    // (no A6/#1275 check ran: nothing is marked, lost by it or forgone)
+    assert.deepEqual(
+      [completion.counts.marked, completion.counts.unsettled, completion.counts.forgone],
+      [0, 0, 0],
+      mode.name,
+    );
+    assert.ok(answers.receiving.length > 0, mode.name);
+    assert.deepEqual(
+      answers.receiving.filter(({ result }) => result !== null),
+      [],
+      mode.name,
+    );
+  }
+});
+
 test("every settled stop interval is enumerated, its epoch's own (C-R2's census)", () => {
-  // (the chain's frozen keys completed in its settled pass, and #1556's witness; every allowance below the total read
-  // once, against the bisection the held host's stops come from)
-  // (each in one mode: the chain reversed, where every function's result froze, and the witness forward)
+  // (the shared family's frozen keys completed in its settled pass, and #1556's witness; every allowance below the total
+  // read once, against the bisection the held host's stops come from)
+  // (each in one mode: the family forward, where its copies' decisions froze, and the witness forward)
   const cases: readonly (readonly [string, number | undefined, (typeof HELD_MODES)[number]])[] = [
-    [chain(2) + ending, 64, HELD_MODES[1]!],
+    [shared(2) + ending, 64, HELD_MODES[0]!],
     [
       'let a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nb.f = hostValue' + ending,
       undefined,
@@ -506,6 +556,23 @@ test("the frontier lists a chain from its far end, each listing twice at most, a
   });
   assert.ok(done.has("x") && done.has("y"));
   assert.equal(cyclic.counts.unchanged, 0);
+  // (a request that ends the run, `LeftSlice`, while a listing is parked: the frontier's views are released all the same)
+  const ended = new Closure(work);
+  assert.throws(
+    () =>
+      ended.run({
+        requests: 2,
+        extract: (index) => {
+          if (index === 0) throw new Unlisted("p", ["q"]);
+          assert.ok(ended.parked("p"));
+          throw new LeftSlice();
+        },
+        list: () => ({ deferred: ["q"] }),
+        listed: () => false,
+      }),
+    LeftSlice,
+  );
+  assert.equal(ended.parked("p"), false);
 });
 
 test("a decision made after a cell read it unmade invalidates that cell and what read it, once, and nothing after close", () => {

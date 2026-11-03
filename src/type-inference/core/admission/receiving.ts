@@ -85,7 +85,7 @@ const formOf = (d: Definition): string => `${d.kind}/${d.how ?? ""}`;
 /**
  * The pass's receiving obligations, in the stable source order (site, role, extent, path), each slot once: the store
  * checks the walk owes and those a stop marked, a stopped decision's stores among them (by their stores' sites, each
- * store's destination its node's first live definition, as an answer reads one, an argument's or a return's its own),
+ * store's destination its node's first live definition, as an answer reads one),
  * and every live store that brings external data (the landing index's stores, at the subpath its boundary stands at).
  * Every store and slot visited charged.
  */
@@ -102,16 +102,13 @@ export function receivingObligations(
     keepText(work, slot.store.length);
     found.push(...extents(work, slot, epoch, place, path));
   };
-  // (a store's destination: its node's first live definition, else its first, as `Answers.at` reads one; an argument
-  // or a return, a checked dead call's argument among them, is its own: a call's arguments share its node)
+  // (a store's destination: its node's first live definition, else its first, as `Answers.at` reads one; an argument's
+  // and a return's, transfers, return with functions to the slice's syntax, which has none)
   const destinations = new Map<unknown, Definition>();
   const bySite = new Map<string, Definition[]>();
-  const transfers = new Set<Definition>(definitions.transferDefs);
-  for (const dead of definitions.deadArguments.values()) for (const d of dead) transfers.add(d);
-  for (const d of [...definitions.storeDefs, ...transfers]) {
+  for (const d of definitions.storeDefs) {
     work.charge("checks");
-    if (!transfers.has(d) && !destinations.has(d.node) && lists.live(d))
-      destinations.set(d.node, d);
+    if (!destinations.has(d.node) && lists.live(d)) destinations.set(d.node, d);
     const at = siteKey(d.site);
     const list = bySite.get(at);
     if (list === undefined) bySite.set(at, [d]);
@@ -121,7 +118,7 @@ export function receivingObligations(
   const atSite = (site: SourceSite, role: ReceivingRole): void => {
     const made = new Set<Definition>();
     for (const d of bySite.get(siteKey(site)) ?? []) {
-      const destination = transfers.has(d) ? d : destinations.get(d.node)!;
+      const destination = destinations.get(d.node)!;
       if (made.has(destination)) continue;
       made.add(destination);
       add(

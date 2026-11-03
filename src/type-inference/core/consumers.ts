@@ -2,7 +2,7 @@ import type { Expression } from "../../ast.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { Admission } from "./admission.js";
 import { admittedLevel } from "./admission/admitted.js";
-import { Unlisted, type Closure, type ClosureCounts } from "./admission/closure.js";
+import { LeftSlice, Unlisted, type Closure, type ClosureCounts } from "./admission/closure.js";
 import { forgetDecision } from "./admission/decision.js";
 import type { DecidedAt } from "./admission/model.js";
 import {
@@ -629,8 +629,19 @@ export class Consumers {
    */
   #capture(): void {
     this.#capturePhaseB();
-    if (this.pass.contract.anyStopped && this.#completion !== null) this.#receive();
+    // (outside the slice, by its syntax or where the capture left its depth, the analysis is main's: no inventory, no
+    // completion, the same gate as the capture's and the candidate route's)
+    if (
+      this.pass.contract.anyStopped &&
+      this.#completion !== null &&
+      !outsideSliceSyntax(this.pass.program) &&
+      !this.#leftSlice
+    )
+      this.#receive();
   }
+
+  /** Whether the capture ended where the program left the slice's depth (`captureContracts`). */
+  #leftSlice = false;
 
   /** Phase B's capture (`#capture`). */
   #capturePhaseB(): void {
@@ -702,7 +713,7 @@ export class Consumers {
     };
     // (its work is the capture's, no consumer read's)
     this.reading = null;
-    captureContracts(
+    this.#leftSlice = captureContracts(
       this.order(requests),
       reader,
       epochOf(this.pass),
@@ -839,17 +850,26 @@ export class Consumers {
     closure.handle("listing", (name) => this.propertySets.delete(keyed(name)));
     closure.handle("extent", (key) => descriptors.forget(key));
     closure.handle("request", (name) => dirty.add(Number(name)));
-    // (a literal's element of another family and a join's operand of another kind are rejected outside every
-    // decision's check: the whole program's are checked first, as the walk checks them, so each decision they make is
-    // made before a request reads it; a store they reject that the settled pass did not is a rejection, below)
+    // (a literal's element of another family is rejected outside every decision's check: the whole program's are
+    // checked first, as the walk checks them, so each decision they make is made before a request reads it; a store
+    // they reject that the settled pass did not is a rejection, below; a list join's check returns with joins to the
+    // slice's syntax, which has none)
     this.admission.literalElements(this.order, () => {});
-    this.admission.joinElements(this.order, () => {});
-    closure.run({
-      requests: requirements.length,
-      extract,
-      list,
-      listed: (key) => this.propertySets.has(keyed(key)),
-    });
+    // (the first request that reaches the slice's depth ends the completion, as it ends phase B's capture: the program
+    // has left the slice, where main's lowering requests nothing more, so no result of it is kept or published)
+    try {
+      closure.run({
+        requests: requirements.length,
+        extract,
+        list,
+        listed: (key) => this.propertySets.has(keyed(key)),
+      });
+    } catch (error) {
+      if (!(error instanceof LeftSlice)) throw error;
+      closure.counts.leftSlice = 1;
+      results.fill(null);
+      return;
+    }
     // A6, #1275: a completion decision that would reject a store or give a selecting store another target than the
     // settled pass's inputs leaves every obligation whose proof read it lost with that cause: never a refusal, a
     // widening or a changed settled answer (decision 2 is deferred). Each decision the frontier made is checked as C1
@@ -998,6 +1018,9 @@ export class Consumers {
               closure.took("fact", `rejected@${epoch}`);
               return make();
             });
+      // (a contract that reaches the slice's depth: the program has left the slice, the completion ends)
+      if (closure !== null && extent === "complete" && results[index] === null)
+        throw new LeftSlice();
     };
     return { extract, dirty, descriptors, list };
   }
