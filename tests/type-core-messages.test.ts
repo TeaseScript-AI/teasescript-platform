@@ -1718,7 +1718,7 @@ test("an askChoice of more than one type errs where its type would be inferred, 
     ],
     [
       `function g {\n  return ${S}\n}\nsay g()\nexit\n`,
-      `To keep both, declare the result type of function 'g' as 'integer | string', ${BUTTONS}`,
+      `To return both, declare the result type of function 'g' as 'integer | string', ${BUTTONS}`,
       ["function g {", "function g: integer | string {"],
     ],
     [
@@ -1737,8 +1737,14 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       ["let v =", "let v: integer | string ="],
     ],
     [
+      // (a declaration on more than one line: the type in words, the variable named)
+      'let v = askChoice [\n  {text: "A", value: 1},\n  {text: "B"}\n]\nexit\n',
+      `To keep both, declare the variable 'v' with the type 'integer | string', ${BUTTONS}`,
+      ["let v =", "let v: integer | string ="],
+    ],
+    [
       `let box = {value: ${S}}\nexit\n`,
-      "but 'box.value' keeps one type. Give every button a value of one type.",
+      "but 'box.value' holds one type. Give every button a value of one type.",
       null,
     ],
     [

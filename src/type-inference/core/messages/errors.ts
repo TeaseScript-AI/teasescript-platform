@@ -510,16 +510,14 @@ function mixedChoiceSentence(
         ? type === null
           ? null
           : `declare the result type of function '${root.name}' as '${type}'`
-        : declaration(
-            root,
-            written,
-            source,
-            diagnosed,
+        : ((subject) =>
+            declaration(root, written, source, diagnosed, subject, `${subject} '${root.name}'`))(
             collection === undefined ? "the variable" : `the ${collection}`,
           );
   if (declared === null)
-    return `${first.slice(0, -1)}, but ${rule.into} keeps one type. ${capitalized(one)}.`;
-  return `${first} To keep ${named(kinds).length > 2 ? "all of them" : "both"}, ${declared}, or ${one}.`;
+    return `${first.slice(0, -1)}, but ${rule.into} holds one type. ${capitalized(one)}.`;
+  const all = named(kinds).length > 2 ? "all of them" : "both";
+  return `${first} To ${result ? "return" : "keep"} ${all}, ${declared}, or ${one}.`;
 }
 
 /**
