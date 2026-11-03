@@ -1642,6 +1642,44 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
 });
 
 /**
+ * #1642: a record's obligation owns a check by its content. The issue's `dict-path` witness reversed, under demand
+ * allowance 256, stopped at program allowance 2,464 (#1642's reversed modes): the stopped run's TSV043 mark carries the
+ * receiver's null-check that both runs publish, the reference's as another object of the same content, so neither is
+ * lost.
+ */
+test("the stop oracle takes a mark's obligation as the owner of an equal check on both sides (#1642)", () => {
+  const source =
+    'let p = hostValue otherwise hostOther\nlet box: integer[] dict = dict{k: []}\nbox.k = [p, hostOther]\nsay "AFTER"\nexit\n';
+  const c: HeldCase = { name: "dict-path", source, slice: true, values: [] };
+  const receiver = (answers: Answers) =>
+    answers.checks.filter(
+      (check) =>
+        check.kind === "null-check" &&
+        check.target === "box" &&
+        source.slice(check.site.start, check.site.end) === "box.k",
+    );
+  for (const mode of [HELD_MODES[1]!, HELD_MODES[3]!]) {
+    const reference = heldRun(c, mode, undefined, 256);
+    const stopped = heldRun(c, mode, 2464, 256);
+    const [owed, kept] = [receiver(reference.answers), receiver(stopped.answers)];
+    assert.equal(owed.length, 1, mode.name);
+    assert.deepEqual(kept, owed, mode.name);
+    assert.ok(
+      stopped.answers.budget.deferred.some(
+        (mark) =>
+          mark.code === "TSV043" && JSON.stringify(mark.obligation) === JSON.stringify(owed[0]),
+      ),
+      mode.name,
+    );
+    assert.deepEqual(
+      stopProblems({ unstopped: reference, stopped, fitting: [], violating: [] }),
+      [],
+      mode.name,
+    );
+  }
+});
+
+/**
  * TABLE r4.162 at a stop (Astra r3 on #1273): a fix's code holds the author's text only where no other diagnostic lies
  * in it, nor a region the stop left unchecked, its "not checked" mark's, where the checks it moved to the runtime stand
  * unreported; and after a stop no fix fact is proved (`Consumers.withFacts`), so an error's code is words. So a stop
