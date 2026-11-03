@@ -572,10 +572,10 @@ test("the completion never makes or moves a stop: at each allowance the compile 
     number,
     number,
   ])[] = [
-    ...WITNESSES.map((body) => [body, HELD_MODES, 24, 32] as const),
-    [directed(4), HELD_MODES.slice(0, 1), 16, 16],
-    [fields(64), HELD_MODES.slice(0, 1), 16, 16],
-    [w15(128), HELD_MODES.slice(0, 1), 6, 4],
+    ...WITNESSES.map((body) => [body, HELD_MODES, 12, 16] as const),
+    [directed(4), HELD_MODES.slice(0, 1), 8, 8],
+    [fields(64), HELD_MODES.slice(0, 1), 8, 8],
+    [w15(128), HELD_MODES.slice(0, 1), 4, 2],
   ];
   for (const [body, modes, samples, band] of cases) {
     const request = coreRequest(

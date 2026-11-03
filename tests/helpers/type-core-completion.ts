@@ -3,24 +3,54 @@ import {
   withTestAllowance,
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
-import { asked, coreCheckResult, SliceIndex } from "../../src/type-inference/core/consumer.js";
+import {
+  asked,
+  coreCheckResult,
+  coreFacts,
+  SliceIndex,
+} from "../../src/type-inference/core/consumer.js";
 import { withoutRecords } from "../../src/type-inference/core/consumers.js";
 import type { CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
 import type { HeldMode } from "./type-core-held-host.js";
 
-/** What a compile did at an allowance: its stop, its total, whether a completion ran, and what the compiler consumes. */
+/**
+ * What a compile did at an allowance: its stop, its total, whether a completion ran and the units it charged, and what
+ * the compiler consumes (its checked result and its facts, maps and sets by their contents).
+ */
 export interface CompletionRun {
   readonly exhausted: string | null;
   readonly stoppedIn: string | null;
   readonly total: number;
   readonly completed: boolean;
+  readonly units: number;
   readonly result: string;
 }
 
+/** A syntax node's span side as its offset, or `-`. */
+function offsetOf(span: unknown, side: "start" | "end"): string {
+  if (span === null || typeof span !== "object") return "-";
+  const position: unknown =
+    side === "start" ? ("start" in span ? span.start : null) : "end" in span ? span.end : null;
+  if (position === null || typeof position !== "object" || !("offset" in position)) return "-";
+  return String(position.offset);
+}
+
+/** A value as text with its maps' entries and its sets' members, a syntax node as its kind and span. */
+function contents(value: unknown): string {
+  return JSON.stringify(value, (_, each: unknown) => {
+    if (each instanceof Map) return { map: [...each.entries()] };
+    if (each instanceof Set) return { set: [...each] };
+    if (typeof each === "function") return "function";
+    if (each !== null && typeof each === "object" && "kind" in each && "span" in each)
+      return `${String(each.kind)}@${offsetOf(each.span, "start")}:${offsetOf(each.span, "end")}`;
+    return each;
+  });
+}
+
 /**
- * The compiler's run of a request (`asked` with `coreCheckResult`, as the backend asks) in a mode under a demand
- * allowance, at a work allowance (`undefined`: the natural one), with its receiving completion (#1526 phase C) or
- * without it (phase B's): the stop as the answers it asked last report it.
+ * The compiler's run of a request (`asked` with `coreCheckResult` and `coreFacts`, as the backend asks after its own
+ * slice check) in a mode under a demand allowance, at a work allowance (`undefined`: the natural one), with its
+ * receiving completion (#1526 phase C) or without it (phase B's): the stop as the answers it asked last report it.
  */
 export function completionRun(
   request: CoreAnalysisRequest,
@@ -35,14 +65,18 @@ export function completionRun(
     let last: Answers = answers;
     const result = asked(answers, (each) => {
       last = each;
-      return coreCheckResult(each, index, request);
+      return {
+        checked: coreCheckResult(each, index, request),
+        facts: coreFacts(each, index, request),
+      };
     });
     return {
       exhausted: last.budget.exhausted,
       stoppedIn: last.budget.stoppedIn,
       total: last.budget.total,
       completed: last.budget.closure !== null,
-      result: JSON.stringify(result),
+      units: last.budget.closure?.units ?? 0,
+      result: contents(result),
     };
   };
   const omitted = (): CompletionRun =>
@@ -90,8 +124,9 @@ export function completionStopProblems(
 }
 
 /**
- * The allowances the invariant is checked at: every `step`th from 1, and every one within `band` of each end the
- * compile without the completion reaches (its total) and of the head's natural total.
+ * The allowances the invariant is checked at: every `step`th from 1, and every one within `band` of each end: where the
+ * compile without the completion ends, its questions included (where the head's completion starts), and the head's
+ * natural total.
  */
 export function completionAllowances(
   request: CoreAnalysisRequest,
@@ -100,8 +135,9 @@ export function completionAllowances(
   step: number,
   band: number,
 ): number[] {
-  const own = completionRun(request, mode, demand, undefined, false).total;
-  const head = completionRun(request, mode, demand, undefined, true).total;
+  const run = completionRun(request, mode, demand, undefined, true);
+  const head = run.total;
+  const own = run.total - run.units;
   const allowances = new Set<number>();
   for (let allowance = 1; allowance <= head + band; allowance += step) allowances.add(allowance);
   for (const end of [own, head])
