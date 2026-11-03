@@ -1595,6 +1595,53 @@ test("the stop oracle refuses a stopped run whose without leaves the run's allow
 });
 
 /**
+ * #1631: a rerun without the run's demand allowance can stop in the same phase, settled, at the same program allowance,
+ * yet under another demand allowance none of its decisions stops, so its compile differs. The issue's witness at program
+ * allowance 2,039 and demand allowance 27: the run's own `without` gives no problem, the uncapped run's is refused.
+ */
+test("the stop oracle refuses a stopped run whose without leaves the run's demand allowance (#1631)", () => {
+  const c: HeldCase = {
+    name: "domain-nested",
+    slice: true,
+    values: [],
+    source:
+      'let root = {inside: {f0: hostValue}}\nlet first = root\nroot = {inside: {f0: hostOther}}\nsay "BEFORE"\nrepeat first.inside.f0 {say "ok"}\nsay "AFTER"\nexit\n',
+  };
+  const mode = HELD_MODES[0]!;
+  const unstopped = heldRun(c, mode, undefined, 27);
+  const stopped = heldRun(c, mode, 2039, 27);
+  const uncapped = heldRun(c, mode, 2039);
+  for (const { budget } of [stopped.answers, uncapped.answers])
+    assert.deepEqual([budget.allowance, budget.stoppedIn, budget.settled], [2039, "walk", true]);
+  assert.ok(stopped.answers.budget.decisions.some((d) => d.stopped));
+  assert.ok(!uncapped.answers.budget.decisions.some((d) => d.stopped));
+  const judge = (run: StopRun): string[] =>
+    stopProblems({ unstopped, stopped: run, fitting: [], violating: [] });
+  assert.deepEqual(judge(stopped), []);
+  assert.throws(
+    () => judge({ ...stopped, without: uncapped.without }),
+    /the demand allowance \d+ at its decision [^,]*, not the run's 27/,
+  );
+  // (and the reference's rerun without its completion, Codex r1's F1 on #1662: a decision of the reference stopped)
+  const tally: HeldCase = {
+    name: "tally",
+    slice: true,
+    values: [],
+    source: `let tally = 1\n${Array.from({ length: 12 }, (_, i) => `tally = ${i + 2}\n`).join("")}tally = hostValue\nlet picked: integer = tally\nrepeat tally {}\nsay "DONE"\nexit\n`,
+  };
+  const reference = heldRun(tally, mode, undefined, 27);
+  assert.ok(reference.answers.budget.decisions.some((d) => d.stopped));
+  const early = heldRun(tally, mode, 1, 27);
+  const against = (run: StopRun): string[] =>
+    stopProblems({ unstopped: run, stopped: early, fitting: [], violating: [] });
+  assert.deepEqual(against(reference), []);
+  assert.throws(
+    () => against({ ...reference, without: heldRun(tally, mode).without }),
+    /the demand allowance \d+ at its decision [^,]*, not the run's 27/,
+  );
+});
+
+/**
  * TABLE r4.162 at a stop (Astra r3 on #1273): a fix's code holds the author's text only where no other diagnostic lies
  * in it, nor a region the stop left unchecked, its "not checked" mark's, where the checks it moved to the runtime stand
  * unreported; and after a stop no fix fact is proved (`Consumers.withFacts`), so an error's code is words. So a stop
