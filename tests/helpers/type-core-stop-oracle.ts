@@ -387,10 +387,15 @@ export function stopProblems(c: StopCase): string[] {
   let formed: string[] = [];
   if (extra.length > 0 && marks.length > 0) {
     const without = rerun(stopped, ...omission(excused)).answers.checks;
-    formed = beyond(
-      extra.filter((check) => !creditsAfter.has(check)),
-      without.map((check) => JSON.stringify(check)),
-    );
+    // (what forms with the marks is one credit a content, as the rule's: a further copy of it is an extra)
+    formed = [
+      ...new Set(
+        beyond(
+          extra.filter((check) => !creditsAfter.has(check)),
+          without.map((check) => JSON.stringify(check)),
+        ),
+      ),
+    ];
     kept = beyond(kept, formed);
   }
   if (JSON.stringify(owed) !== JSON.stringify(kept)) {

@@ -1647,7 +1647,7 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
  * and the stopped run's each carry the receiver's null-check that both runs publish, so neither is lost. A stopped run
  * that keeps its mark but drops the check, and the plan's guard, from its compile and its reruns loses it, and one that
  * publishes it twice has an extra (Codex r1's and r3's controls on #1663, a stop at program allowance 1); each owned
- * check takes one credit, the combined stop's rule's included (r2's).
+ * check takes one credit, the combined stop's rule's included (r2's), and what forms only with the marks (r4's).
  */
 test("the stop oracle takes each side's marks as the owners of its checks, and a mark keeps its check (#1642)", () => {
   const source =
@@ -1757,6 +1757,42 @@ test("the stop oracle takes each side's marks as the owners of its checks, and a
       ...again(stopped),
       without: (omit, key) => again(stopped.without(omit, key)),
     }).includes(`extra check ${text}`),
+  );
+  // (and a further copy of a boundary that forms only with the marks, #1448's, is an extra: what forms takes one credit,
+  // Codex r4's control on #1663, forward with the sharing, a settled walk stop at program allowance 1,218)
+  const formedCase: HeldCase = {
+    name: "formed-boundary",
+    source:
+      'let root = {f0: hostValue}\nroot = {f0: hostOther}\nsay "BEFORE"\nrepeat root.f0 {say "ok"}\nsay "AFTER"\nexit\n',
+    slice: true,
+    values: [],
+  };
+  const plainRun = heldRun(formedCase, HELD_MODES[0]!);
+  const walked = heldRun(formedCase, HELD_MODES[0]!, 1218);
+  const isBoundary = (x: Answers["checks"][number]): boolean =>
+    x.boundary &&
+    x.target === "root" &&
+    formedCase.source.slice(x.site.start, x.site.end) === "hostValue";
+  assert.equal(plainRun.answers.checks.filter(isBoundary).length, 0);
+  const [boundary] = walked.answers.checks.filter(isBoundary);
+  assert.ok(boundary !== undefined);
+  const formedJudge = (run: StopRun): string[] =>
+    stopProblems({ unstopped: plainRun, stopped: run, fitting: [], violating: [] });
+  assert.deepEqual(formedJudge(walked), []);
+  const doubled = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.some(isBoundary)
+        ? [...each.answers.checks, structuredClone(boundary)]
+        : each.answers.checks,
+    },
+  });
+  assert.ok(
+    formedJudge({
+      ...doubled(walked),
+      without: (omit, key) => doubled(walked.without(omit, key)),
+    }).includes(`extra check ${JSON.stringify(boundary)}`),
   );
   // a check one record owns and the combined stop's rule accepts is one credit: a second copy of it is an extra (Codex
   // r2's control on #1663, forward with the sharing, demand 256, a stop at program allowance 1)
