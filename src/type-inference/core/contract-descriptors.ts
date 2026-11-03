@@ -233,7 +233,7 @@ export function levelWalk(
 /**
  * A place's collections nested deeper than the slice's facts follow, or a cycle of copies (`levelWalk`, `OpenLevels`).
  */
-export class SliceDepth extends Error {
+class SliceDepth extends Error {
   public constructor() {
     super("A place of the slice holds collections deeper than its facts follow.");
   }

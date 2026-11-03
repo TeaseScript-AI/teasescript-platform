@@ -20,6 +20,13 @@ class Position implements Holding {
   sources: Position[] | null = null;
   /** Whether a copy lands strictly below it, so a key below it reads more than its prefixes give it. */
   deeper = false;
+  /**
+   * Whether a store puts at it a value of its own (a literal, a scalar, external data: anything but one whole copy of a
+   * binding), or it is a written binding's: then its contract is not empty.
+   */
+  grounded = false;
+  /** The position whose contract equals its own, where a ring of whole copies made them one (`Holdings.collapse`). */
+  alias: Position | null = null;
   /** The positions its key reads whole (`Holdings.made`); `null` while they are being made. */
   held: readonly Position[] | null | undefined = undefined;
   /** Its reads but itself, as one number per distinct set (`Holding.state`), once its holding is made. */
@@ -40,6 +47,8 @@ class Position implements Holding {
   }
 
   public readsAny(open: ReadonlySet<object>): boolean {
+    // (a level whose position is one already open: a ring of whole copies made the level below one with it)
+    if (open.has(this)) return true;
     return this.holdings.shared(() => {
       for (const read of this.holdings.made(this).held!) {
         this.holdings.charge();
@@ -77,7 +86,92 @@ class Holdings {
     // (a copy of a position into itself, `b=b`, adds nothing it does not read)
     if (source === landing) return;
     (landing.sources ??= []).push(source);
+    this.#deepen(landing);
+  }
+
+  /** Marks the positions above `landing` as having a copy below them. */
+  #deepen(landing: Position): void {
     for (let up = landing.parent; up !== null && !up.deeper; up = up.parent) up.deeper = true;
+  }
+
+  /**
+   * Makes each ring of whole copies one position (#1646, Codex r1 B2): positions that copy one another whole, each a
+   * source of the next round the ring (a strongly connected component of the landings), have one contract, so their
+   * landings, those below them included, become one position's (the member made first), and every later step into a
+   * member is a step into it. Without this, each member read every other and a ring of k copies made k × k reads. Found
+   * on an explicit stack (Tarjan's algorithm), each landing visited once.
+   */
+  public collapse(positions: readonly Position[]): void {
+    const index = new Map<Position, number>();
+    const low = new Map<Position, number>();
+    const onStack = new Set<Position>();
+    const stack: Position[] = [];
+    for (const start of positions) {
+      if (index.has(start)) continue;
+      const frames: { readonly at: Position; next: number }[] = [{ at: start, next: 0 }];
+      index.set(start, index.size);
+      low.set(start, index.get(start)!);
+      stack.push(start);
+      onStack.add(start);
+      while (frames.length > 0) {
+        const frame = frames.at(-1)!;
+        const sources = frame.at.sources ?? [];
+        if (frame.next < sources.length) {
+          this.charge();
+          const source = sources[frame.next++]!;
+          if (!index.has(source)) {
+            index.set(source, index.size);
+            low.set(source, index.get(source)!);
+            stack.push(source);
+            onStack.add(source);
+            frames.push({ at: source, next: 0 });
+          } else if (onStack.has(source))
+            low.set(frame.at, Math.min(low.get(frame.at)!, index.get(source)!));
+          continue;
+        }
+        frames.pop();
+        const parent = frames.at(-1)?.at;
+        if (parent !== undefined) low.set(parent, Math.min(low.get(parent)!, low.get(frame.at)!));
+        if (low.get(frame.at) !== index.get(frame.at)) continue;
+        const ring: Position[] = [];
+        for (let member = stack.pop()!; ; member = stack.pop()!) {
+          onStack.delete(member);
+          ring.push(member);
+          if (member === frame.at) break;
+        }
+        if (ring.length > 1) this.#merge(ring);
+      }
+    }
+  }
+
+  /** One position for a ring's members: the one made first, each other member's landings moved into it. */
+  #merge(ring: readonly Position[]): void {
+    const one = ring.reduce((a, b) => (a.id <= b.id ? a : b));
+    const pending: [Position, Position][] = ring.filter((m) => m !== one).map((m) => [one, m]);
+    while (pending.length > 0) {
+      const [into, from] = pending.pop()!;
+      const target = this.canonical(into);
+      if (from === target || from.alias !== null) continue;
+      this.charge();
+      from.alias = target;
+      if (from.sources !== null) {
+        for (const source of from.sources) (target.sources ??= []).push(source);
+        this.#deepen(target);
+      }
+      if (from.deeper) {
+        target.deeper = true;
+        this.#deepen(target);
+      }
+      target.grounded ||= from.grounded;
+      for (const [step, child] of from.next) pending.push([this.below(target, step), child]);
+    }
+  }
+
+  /** The position whose contract is `position`'s, past every ring that made it one with another. */
+  public canonical(position: Position): Position {
+    let at = position;
+    while (at.alias !== null) at = at.alias;
+    return at;
   }
 
   /** One unit of the holdings' work. */
@@ -97,19 +191,19 @@ class Holdings {
       this.#work.charge("structureSteps");
       this.#roots.set(place, (position = new Position(this, this.#positions++, place, null, "")));
     }
+    position = this.canonical(position);
     for (const step of path) position = this.below(position, step);
     return position;
   }
 
   /** The position one `step` below `parent`. */
-  public below(parent: Position, step: string): Position {
+  public below(of: Position, step: string): Position {
     this.#work.charge("structureSteps");
-    let position = parent.next.get(step);
-    if (position === undefined)
-      parent.next.set(
-        step,
-        (position = new Position(this, this.#positions++, parent.place, parent, step)),
-      );
+    const parent = this.canonical(of);
+    const known = parent.next.get(step);
+    if (known !== undefined) return this.canonical(known);
+    const position = new Position(this, this.#positions++, parent.place, parent, step);
+    parent.next.set(step, position);
     return position;
   }
 
@@ -225,12 +319,15 @@ class Holdings {
   }
 
   /**
-   * `position`'s complete reads but itself as one number per distinct set, where no copy lands strictly below it and it
-   * reads something: then a key below it reads only what those reads give, so a level below with the same state is a
-   * cycle of copies (`Holding.state`); `null` elsewhere, where an equal set would prove nothing.
+   * `position`'s complete reads but itself as one number per distinct set, where no copy lands strictly below it and one
+   * of those reads is grounded (its contract is not empty): then a key below it reads only what those reads give, so a
+   * level below with the same state holds that non-empty contribution again one walk further down, without end
+   * (`Holding.state`); `null` elsewhere, where an equal set would prove nothing (Codex r1 B1: reads whose contracts are
+   * all empty repeat nothing).
    */
   #state(position: Position, reads: ReadonlySet<Position>): number | null {
-    if (position.deeper || reads.size < 2) return null;
+    if (position.deeper || ![...reads].some((read) => read !== position && read.grounded))
+      return null;
     const ids: number[] = [];
     for (const read of reads) {
       this.#work.charge("structureSteps");
@@ -248,7 +345,13 @@ class Holdings {
    * position its parent reads that a copy lands strictly below (the parent's own step below is `position` itself).
    */
   #needs(position: Position): Position[] {
-    const needs: Position[] = [...(position.sources ?? [])];
+    // (each source past the rings that made it one with another, none the position itself)
+    const found = new Set<Position>();
+    for (const source of position.sources ?? []) {
+      const at = this.canonical(source);
+      if (at !== position) found.add(at);
+    }
+    const needs = [...found];
     const parent = position.parent;
     if (parent !== null)
       for (const read of parent.held ?? []) {
@@ -296,6 +399,7 @@ function holdingsOf(admission: Admission): Holdings {
   let holdings = HOLDINGS.get(program);
   if (holdings !== undefined) return holdings;
   const made = new Holdings(program.work);
+  const landings: Position[] = [];
   for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
     made.charge();
     if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
@@ -303,12 +407,20 @@ function holdingsOf(admission: Admission): Holdings {
     if (!lists.live(d) || !program.live(d.node)) continue;
     let at = made.at(d.place, d.path);
     if (d.kind === "add" && d.how !== "elements") at = made.below(at, "element");
-    for (const { path, binding, strip } of copySources(admission, d.value)) {
+    const copies = copySources(admission, d.value);
+    // (a value other than one whole copy of a binding puts kinds of its own there)
+    if (!copies.some(({ path }) => path.length === 0)) at.grounded = true;
+    for (const { path, binding, strip } of copies) {
       let landing = at;
       for (const step of path) landing = made.below(landing, step);
-      made.land(landing, made.at(binding, strip));
+      const source = made.at(binding, strip);
+      // (a written binding's contract is its written type, never empty)
+      if (writtenOf(program.place(binding).kind) !== null) source.grounded = true;
+      made.land(landing, source);
+      landings.push(landing);
     }
   }
+  made.collapse(landings);
   // (kept once whole: a stop while it ran indexes it anew where next asked)
   HOLDINGS.set(program, (holdings = made));
   return holdings;
