@@ -6,7 +6,6 @@ import { withoutCycleCertificate } from "../src/type-inference/core/admission/ho
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
-import { propertyStep } from "../src/type-inference/core/program.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { HELD_MODES } from "./helpers/type-core-held-host.js";
 
@@ -260,20 +259,16 @@ test("a ring of whole copies costs its copies once, in both orders (Codex r1 B2)
   }
 });
 
-test("a holding that read one still being made records no state, so it never certifies a cycle (#1646)", () => {
-  // (`a=a.q`: `a`'s holding reads `a.q`'s, which carries what `a` reads, so each waits on the other and `a.q`'s reads
-  // only `h` of all it holds: equal sets of such reads would prove nothing. `c`, a copy of `h`, reads it whole, and nothing is copied below `c`)
+test("a cycle read through a copy of a place's own part is closed at linear cost (#1646)", () => {
+  // (the generated family's seed 129: `p1=p1.s` copies `p1`'s own part into it, so `p1`'s holding and its part's wait on
+  // each other; closed by a fixpoint, the walk meets the cycle `p0.q=p1`, `p1.q=p0` again. Left unclosed, the walk ran
+  // to the slice's depth, 24,881,081 units of the compile)
   const source =
-    "let h={x:1}\nlet a={q:{r:1}}\na.q=h\na=a.q\nlet c=h\nlet e=c\nh.x=hostValue\nexit\n";
-  const answers = analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!);
-  const placeOf = (name: string): number => {
-    const node = answers.graph.nodes.find(
-      (each) => each.expression?.kind === "identifier" && each.expression.name === name,
-    );
-    const place = node === undefined ? null : answers.at(node)?.place;
-    assert.ok(place !== null && place !== undefined, name);
-    return place.id;
-  };
-  assert.equal(answers.holding(placeOf("a"), [propertyStep("q")]).state, null);
-  assert.notEqual(answers.holding(placeOf("c"), []).state, null);
+    'let typed:object={x:1}\nlet p0={f:typed,g:"s"}\nlet p1={g:2}\np0.q=p1\np1.q=p0\np0.s=[p0]\np1=p1.s\np0.f=hostValue\nsay "AFTER"\nexit\n';
+  assert.match(outcome(source), /^outside: .*a value whose structure the slice/);
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+  for (const mode of HELD_MODES) {
+    const { budget } = mode.run(() => analyseCore(request));
+    assert.ok(budget.total < 25_000, `${mode.name}: ${budget.total}`);
+  }
 });
