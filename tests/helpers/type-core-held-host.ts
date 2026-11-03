@@ -25,6 +25,7 @@ import { REASON, type Item } from "../../src/type-inference/core/items.js";
 import type { SourceSite } from "../../src/type-inference/graph.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
+import { sampled } from "./sweep.js";
 
 /*
  * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3 §5, TABLE
@@ -664,31 +665,31 @@ export function heldStops(
   return stops;
 }
 
-/** At most four of a list: its first, its last and two evenly between. */
-function fourOf<T>(list: readonly T[]): T[] {
-  return list.length <= 4
-    ? [...list]
-    : [0, 1, 2, 3].map((i) => list[Math.round((i * (list.length - 1)) / 3)]!);
+/** The stops a test visits of a case's settled stops (`heldStops`'s): each phase's sample (`sampled`). */
+export function testedStops<T extends { readonly phase: string }>(stops: readonly T[]): T[] {
+  const kept = new Set<T>();
+  for (const phase of new Set(stops.map((stop) => stop.phase)))
+    for (const stop of sampled(stops.filter((each) => each.phase === phase))) kept.add(stop);
+  return stops.filter((stop) => kept.has(stop));
 }
 
 /**
- * CI's sample of a case's settled stops (`heldStops`'s): the capture's extraction (#1526 phase B) at most four, its
- * first, its last and two between, every other phase as `heldStops` gives it. The sweep of every extraction allowance in
- * four modes is #1606's queue evidence.
+ * The stops a test searches for one where something happens (`heldStops`'s): the capture's extraction (#1526 phase B)
+ * sampled, as `testedStops`, every other phase whole.
  */
-export function testedStops<T extends { readonly phase: string }>(stops: readonly T[]): T[] {
-  const kept = new Set(fourOf(stops.filter((stop) => stop.phase === "extraction")));
+export function searchedStops<T extends { readonly phase: string }>(stops: readonly T[]): T[] {
+  const kept = new Set(testedStops(stops.filter((stop) => stop.phase === "extraction")));
   return stops.filter((stop) => stop.phase !== "extraction" || kept.has(stop));
 }
 
 /**
- * The allowances CI visits in a settled phase from `low` to `high`, every `step`th: in the capture's extraction at most
- * four, as `testedStops`.
+ * The allowances a test searches in a settled phase from `low` to `high`, every `step`th: in the capture's extraction
+ * sampled, as `searchedStops`.
  */
 export function testedAllowances(phase: string, low: number, high: number, step = 1): number[] {
   const all: number[] = [];
   for (let allowance = low; allowance <= high; allowance += step) all.push(allowance);
-  return phase === "extraction" ? fourOf(all) : all;
+  return phase === "extraction" ? sampled(all) : all;
 }
 
 /** A diagnostic's record: its code at its site (`code start:end`, as the problems name it). */

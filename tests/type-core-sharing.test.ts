@@ -37,6 +37,7 @@ import {
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
+import { SWEEP } from "./helpers/sweep.js";
 import {
   ingressAnswers,
   inMode,
@@ -87,11 +88,11 @@ import {
 interface Program {
   readonly name: string;
   readonly files: readonly SourceFile[];
-  /** A fixture's record or a written-domain matrix's source, in the source order only on CI. */
-  readonly sourceOrderOnCi?: true;
+  /** A fixture's record or a written-domain matrix's source, in the source order only outside the sweep (`SWEEP`). */
+  readonly sourceOrderSampled?: true;
 }
 
-const CI_ORDERS = process.env["CI"] === "true" ? [false] : [false, true];
+const SAMPLED_ORDERS = SWEEP ? [false, true] : [false];
 
 const one = (name: string, source: string): Program => ({
   name,
@@ -341,7 +342,7 @@ function programs(): Program[] {
   ])
     if (!sources.has(source)) {
       sources.add(source);
-      out.push({ ...one(`written domain ${name}`, source), sourceOrderOnCi: true });
+      out.push({ ...one(`written domain ${name}`, source), sourceOrderSampled: true });
     }
   // Astra's round-5 D1 witness: a decider beside an unselected read of its source (her B1 shape is the oracle's)
   out.push(
@@ -351,7 +352,7 @@ function programs(): Program[] {
     ),
   );
   for (const record of readFixture())
-    out.push({ name: record.name, files: record.files, sourceOrderOnCi: true });
+    out.push({ name: record.name, files: record.files, sourceOrderSampled: true });
   return out;
 }
 
@@ -404,7 +405,7 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   for (const program of all) {
     let ready: Prepared | undefined;
     const records: string[] = [];
-    for (const reversed of program.sourceOrderOnCi === true ? CI_ORDERS : [false, true]) {
+    for (const reversed of program.sourceOrderSampled === true ? SAMPLED_ORDERS : [false, true]) {
       const input = `${reversed}|${JSON.stringify(program.files)}`;
       let differs = changed.get(input);
       if (differs === undefined) {
@@ -422,7 +423,7 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   }
   t.diagnostic(
     `${all.length} programs in ${runs} runs (each in both orders, the fixtures' and the matrices' in ` +
-      `${CI_ORDERS.length}; one run per exact input and order), with the sharing on and off`,
+      `${SAMPLED_ORDERS.length}; one run per exact input and order), with the sharing on and off`,
   );
   assert.deepEqual(differing, []);
   assert.deepEqual(reordered, []);
