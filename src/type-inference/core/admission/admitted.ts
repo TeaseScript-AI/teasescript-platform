@@ -1,10 +1,12 @@
-import type { PlaceId, SourceSite } from "../../graph.js";
+import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
+import type { AdmittedType } from "../answers.js";
+import type { CheapDecision } from "../consumers/model.js";
 import { keepText, keptSteps, pathText } from "../budget.js";
 import { termAt, typeTags, writtenOf } from "../contract.js";
 import { type CanonicalKey, isKeyId, keptKeyAt, keyAt } from "../contract/key-ids.js";
 import { withoutEmpty } from "../exact-path.js";
-import type { ItemTag } from "../items.js";
+import { kindsInItsOrder, type ItemTag } from "../items.js";
 import { drive, openAbove } from "./inherited.js";
 import { admitsNumber, concrete } from "./kinds.js";
 import { inheritance, landed } from "./landings.js";
@@ -222,4 +224,53 @@ export function deciderAt(
     );
   }
   return admission.deciderSites.get(key)!;
+}
+
+/**
+ * A path's admitted type as every answer reads a level (A1–A9): its written type (`term`), else what admission decided
+ * (`admitted`), with the decider found where it is read and whether a copy of a written type decides it; after a stop
+ * before admission settled nothing but the written type; after one where it had settled, a path admission retained
+ * nothing for answered by what the stores' syntax decides (`cheap`, the finishing read's source 4, TABLE r4.122). The one
+ * level reader of the answers (`CoreAnswers.place`) and of the contract capture (`Consumers`), so both read a level alike.
+ */
+export function admittedLevel(
+  admission: Admission,
+  place: PlaceId,
+  path: readonly string[],
+  term: TypeTerm | null,
+  after: {
+    readonly stopped: boolean;
+    readonly settled: boolean;
+    readonly cheap: (place: PlaceId, path: readonly string[]) => CheapDecision | null;
+  },
+): AdmittedType {
+  // (each kind once: `(null | string)?` admits `null` and `string`)
+  if (term !== null) return { by: "written", kinds: [...new Set(typeTags(term))] };
+  // (after a stop nothing is decided but what is written, unless admission had settled: its decisions stand)
+  if (after.stopped && !after.settled) return { by: "undecided" };
+  const kinds = admission.admitted(place, path);
+  // (after a stop admission decides nothing more: where what it retained leaves the path undecided, what every
+  // store's syntax decides answers, as the finishing read's source 4, TABLE r4.122)
+  if (kinds.length === 0 && after.stopped) {
+    const decided = after.cheap(place, path);
+    if (decided !== null)
+      return {
+        by: "decided",
+        // (in their one order once more, by the spelling the decision kept, #1398)
+        kinds: kindsInItsOrder(decided.kinds, decided.spelling),
+        decider: decided.decider.site,
+        inherited: decided.inherited,
+      };
+  }
+  // (the decider's site is found where it is read: A3's settled paths have no scan to keep it from)
+  return kinds.length === 0
+    ? { by: "undecided" }
+    : {
+        by: "decided",
+        kinds,
+        get decider(): SourceSite | null {
+          return admission.deciderAt(place, path);
+        },
+        inherited: admission.inheritsWritten(place, path),
+      };
 }

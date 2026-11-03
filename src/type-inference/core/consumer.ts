@@ -1224,7 +1224,10 @@ class Contracts {
   ) {
     this.#descriptors = new ContractDescriptors(
       {
-        level: (id, path) => levelProof(answers.place(id, path)),
+        level: (id, path) => {
+          const place = answers.place(id, path);
+          return levelProof(place.admitted, () => place.contract.kinds);
+        },
         properties: (id, path) => answers.placeProperties(id, path),
       },
       (records) => {
@@ -2002,7 +2005,12 @@ function placeType(answers: Answers, id: PlaceId, path: readonly string[]): Stat
  * contract's kinds, and a collection's elements' below it (`levelWalk`, `levelProof`).
  */
 function admittedType(answers: Answers, id: PlaceId, path: readonly string[]): StaticType {
-  return typeOfLevels(levelWalk((at) => levelProof(answers.place(id, at)).tags, path));
+  return typeOfLevels(
+    levelWalk((at) => {
+      const place = answers.place(id, at);
+      return levelProof(place.admitted, () => place.contract.kinds).tags;
+    }, path),
+  );
 }
 
 /** The facts the core settled on for a program inside the slice, by source site (see `SolvedTypeFacts`). */
