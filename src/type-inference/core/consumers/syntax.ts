@@ -209,19 +209,22 @@ function syntaxDecides(walk: Consumers): boolean {
 
 /**
  * Each walk's following of copies of inferred places (`linkedFrontier`): the levels being made (a copy reaching one
- * again is a cycle of copies, not told); the chain's depth now; and how often a chain was cut at `FRONTIER_COPIES`.
+ * again is a cycle of copies, not told); the chain's depth now; how often a chain was cut at `FRONTIER_COPIES`; and
+ * each level found cut, by the least depth it was made at (`cutFrom`).
  */
 interface Following {
   readonly making: Set<Key>;
   depth: number;
   cuts: number;
+  readonly cutFrom: Map<Key, number>;
 }
 
 const following = new WeakMap<Consumers, Following>();
 
 function followingOf(walk: Consumers): Following {
   let state = following.get(walk);
-  if (state === undefined) following.set(walk, (state = { making: new Set(), depth: 0, cuts: 0 }));
+  if (state === undefined)
+    following.set(walk, (state = { making: new Set(), depth: 0, cuts: 0, cutFrom: new Map() }));
   return state;
 }
 
@@ -269,6 +272,16 @@ function levelBelow(
   const { program } = walk.pass;
   const state = followingOf(walk);
   program.work.charge("checks");
+  const key = keptKey(program.work, root, path);
+  // (a level found cut where it was made at `d` has a chain of copies longer than `FRONTIER_COPIES` - `d` below it:
+  // cut again wherever it is asked at `d` or deeper, made again only where it is asked higher up, so each level is
+  // made at most `FRONTIER_COPIES` + 1 times; a level cut higher up may be told lower down, never the other way,
+  // Codex r5's B1 on #1653)
+  const cutFrom = state.cutFrom.get(key);
+  if (cutFrom !== undefined && state.depth >= cutFrom) {
+    state.cuts += 1;
+    return { frontier: CUT, cut: true };
+  }
   const shapes: CheapShape[] = [];
   const written: { term: TypeTerm; by: Definition }[] = [];
   const links: {
@@ -325,6 +338,8 @@ function levelBelow(
   };
   const step = path.at(-1);
   if (above !== undefined && step !== undefined && told) {
+    // (each shape and written type above looked at once here, charged)
+    program.work.charge("checks", above.shapes.length + above.written.length);
     for (const shape of above.shapes) {
       const child = shape.children.get(step);
       if (child !== undefined) enter(child);
@@ -342,7 +357,6 @@ function levelBelow(
       else enterTerm(below, by);
     }
   }
-  const key = keptKey(program.work, root, path);
   // (a level below one being made, reached again through copies: what it holds only the analysis tells)
   const again = state.making.has(key);
   if (again) told = false;
@@ -360,6 +374,7 @@ function levelBelow(
     // place by its source's frontier there, linked)
     for (let index = 0; index < shapes.length && told; index += 1) {
       const shape = shapes[index]!;
+      program.work.charge("checks", 1 + shape.written.length);
       if (shape.opaque) told = false;
       for (const { term, path: from, by } of shape.written) {
         const below = termAt(term, from);
@@ -384,11 +399,15 @@ function levelBelow(
     if (properties === CONFLICT) told = false;
   }
   const cut = cutAbove || state.cuts !== cuts;
+  if (cut) state.cutFrom.set(key, Math.min(cutFrom ?? Infinity, state.depth));
   return {
     frontier: { shapes, written, links, told: told && !cut, reach: cut ? Infinity : reach },
     cut,
   };
 }
+
+/** A level cut at `FRONTIER_COPIES` (`levelBelow`): untold, its chain past the bound. */
+const CUT: CheapFrontier = { shapes: [], written: [], links: [], told: false, reach: Infinity };
 
 /**
  * A linked source's next level (`levelBelow`) below the frontier `parent` it was linked at one step above, one link
