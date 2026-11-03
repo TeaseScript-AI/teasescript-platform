@@ -6,7 +6,7 @@ import { keepText, keptSteps, pathText } from "../budget.js";
 import { termAt, typeTags, writtenOf } from "../contract.js";
 import { type CanonicalKey, isKeyId, keptKeyAt, keyAt } from "../contract/key-ids.js";
 import { withoutEmpty } from "../exact-path.js";
-import { kindsInItsOrder, type ItemTag } from "../items.js";
+import { kindsInItsOrder, REASON, type Item, type ItemTag } from "../items.js";
 import { drive, openAbove } from "./inherited.js";
 import { admitsNumber, concrete } from "./kinds.js";
 import { inheritance, landed } from "./landings.js";
@@ -94,20 +94,29 @@ export function admitted(admission: Admission, place: PlaceId, path: readonly st
   ];
   if (decided === undefined && tags.includes("integer") && kinds.some(admitsNumber))
     tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
-  const permitsNull = admission.permitsNull.has(key);
-  return (tags.length > 0 || permitsNull) &&
-    (permitsNull ||
-      (admission.nullable.get(key) !== false && kinds.some((item) => item.tag === "null")))
+  return (tags.length > 0 || admission.permitsNull.has(key)) && admitsNull(admission, key, kinds)
     ? [...tags, "null"]
     : tags;
+}
+
+/**
+ * Admission's null rule for a decided key, its checks' `against` (`admitted`): `null` where a copy of a written type with
+ * it decided the key (`permitsNull`), else where the decision admits one and the key's contract holds one.
+ */
+function admitsNull(admission: Admission, key: CanonicalKey, kinds: readonly Item[]): boolean {
+  return (
+    admission.permitsNull.has(key) ||
+    (admission.nullable.get(key) !== false && kinds.some((item) => item.tag === "null"))
+  );
 }
 
 /**
  * After a stop, a path's admitted type as admission retained it, without new solving (S3 §5 revision 14, TABLE r4.102):
  * its written type (A1), its decision (A2), else a copied written type landing there (A4's seeds), else, where a copy
  * of another place lands at or above it (a lazily decided copy path among them), that source's at the same path below
- * the copy, through the copy forest's edges; with `null` where the decision admits one (admission's null rule, its
- * contract question answered as admitting); `null` where none of these decides the path, `["unknown"]` where every
+ * the copy, through the copy forest's edges; with `null` where the decision admits one, at a binding's root only where
+ * its contract, as it finished, holds one or leaves the question open (admission's null rule, #1604); `null` where none
+ * of these decides the path, `["unknown"]` where every
  * kind fits it. With whether a written type decides it through copies (`inherited`), which keeps its spelling (#1398).
  */
 export function retained(
@@ -147,14 +156,23 @@ function retainedSource(
     const key = keptKeyAt(admission.pass.contract, at.place, at.path);
     if (admission.unrestricted.has(key)) return { tags: ["unknown"], inherited: at.copied };
     const decided = admission.decided.get(key);
-    if (decided !== undefined)
+    if (decided !== undefined) {
+      // (a binding's own value, which every read of it finds: its null by the rule its stores' checks admit by, the
+      // key's contract read as it finished, no new solving, #1604; a contract of which nothing finished leaves the
+      // question open. Below the root a decision admitting `null` keeps it: a read there may find no such member, which
+      // the analysis tells and the retained decision does not)
+      const kinds = admission.run(admission.pass.contract.contractOf(key));
+      const open =
+        at.path.length > 0 ||
+        kinds.every((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
       return {
         tags:
-          admission.permitsNull.has(key) || admission.nullable.get(key) !== false
+          admitsNull(admission, key, kinds) || (open && admission.nullable.get(key) !== false)
             ? [...new Set([...decided, "null" as const])]
             : [...decided],
         inherited: admission.inheritsWrittenKeys.has(key),
       };
+    }
     if (seen.has(key)) continue;
     seen.add(key);
     const { seeds, into, cycleOf } = inheritance(admission);
