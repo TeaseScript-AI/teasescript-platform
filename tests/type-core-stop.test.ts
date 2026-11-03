@@ -63,10 +63,12 @@ import {
   phaseEnds,
   testedAllowances,
   testedStops,
+  searchedStops,
   type CombinedStop,
   type HeldCase,
 } from "./helpers/type-core-held-host.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
+import { sampled } from "./helpers/sweep.js";
 import {
   inMode,
   itemText,
@@ -2117,8 +2119,8 @@ test("a marked store's records within its value are compared alike on both sides
  * error, a record literal its own kind, in a list, a set, a dict and a nested list; and admission's mixed-element check
  * (ADR 0021 1.3) as it runs it, a mixed literal's grouping and an error that only it finds, written or inferred, and a
  * join of two literals' (#1272); a written
- * parameter's every call, a dead one too (Codex r16, r17). At every stop before admission settled the errors, their
- * sites and sentences equal the unstopped ones.
+ * parameter's every call, a dead one too (Codex r16, r17). At the sample (`sampled`) of the stops before admission
+ * settled the errors, their sites and sentences equal the unstopped ones.
  */
 test("a stop before admission settled checks a written store by admission's own C1, error for error", () => {
   for (const source of [
@@ -2142,7 +2144,8 @@ test("a stop before admission settled checks a written store by admission's own 
     const want = errors(unstopped);
     assert.ok(want.length > 0, source);
     let stops = 0;
-    for (let allowance = 1; allowance < unstopped.budget.total; allowance += 1) {
+    const last = lastUnsettled(source);
+    for (const allowance of sampled(Array.from({ length: last }, (_, i) => i + 1))) {
       const stopped: Answers = withTestAllowance(allowance, () => analyseCore(request));
       if (stopped.budget.settled) continue;
       stops += 1;
@@ -2311,9 +2314,9 @@ test("#1216's redundant check stands at its counted stops", () => {
  * answers by a domain holds the host data its key's stores hold, as the unstopped read does, so its consumer owes its
  * check (a mark carrying the unstopped obligation) and the store's boundary forms: through a dictionary's values
  * list (#1452), and where an unrestricted written type stands, whose store owes no other boundary (#1450). The anchors
- * (`heldFamily`: each holder at depth 1, read by a repeat count and by an interpolation) at every twelfth stop of each
- * settled phase and its last (the capture's extraction at most four, `testedStops`), forward with the sharing and reversed
- * without it; the whole family runs outside CI.
+ * (`heldFamily`: each holder at depth 1, read by a repeat count and by an interpolation) at the sample of every twelfth
+ * stop of each settled phase and its last (`testedStops`), forward with the sharing and reversed without it; the whole
+ * family runs outside CI.
  */
 test("a settled stop keeps the checks of the host data a place's stores hold (#1432, #1415)", () => {
   for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!])
@@ -2444,8 +2447,9 @@ function unusedGet(name: string, setup: readonly string[], receiver: string): He
  * alone: a projection of a literal no place holds by the literal's cells (`[[hostValue, 4][0]]`, the issue's; a
  * dictionary literal's `values` list by the dictionary's), a store of one by the stores' syntax through the same cells,
  * and a requirement one domain leaves to several families or to every kind by the next domain that gives one (a written
- * `list` or union receiver: the stores' syntax). At every eighth settled stop of each phase and its last, forward with
- * the sharing and reversed without it, all five preserve the unstopped check against the integer family. The
+ * `list` or union receiver: the stores' syntax). At the sample of every eighth settled stop of each phase and its last
+ * (`testedStops`), forward with the sharing and reversed without it, all five preserve the unstopped check against the
+ * integer family. The
  * projection, stored projection and written-list cases also reject `bad` before `AFTER`; dictionary values and the
  * written union are analysis-only (the candidate route declines them).
  */
@@ -2488,8 +2492,9 @@ test("a settled stop keeps the family of an unused get's default that structure 
  * #1563, Codex r1's B1 on #1581: structure decides a projection only where every literal it may read has a part at the
  * step, so a selection of two objects of which one lacks `f` leaves `.f` undecided, and the read's obligations stay:
  * the natural analysis's null-checks of the selection and of its `f` (its property and its index read) are kept or
- * owned at every settled stop in four modes. The unused default's family, which no structure decides there, is reported
- * lost as #1580's forms are, and nothing else: at every eighth stop, forward with the sharing and reversed without it.
+ * owned at each phase's sample of its settled stops (`testedStops`) in four modes. The unused default's family, which no
+ * structure decides there, is reported lost as #1580's forms are, and nothing else: at the sample of every eighth stop,
+ * forward with the sharing and reversed without it.
  */
 test("a settled stop keeps a projection's read obligations where one literal lacks its step (#1563)", () => {
   const c = unusedGet("lacking step", [], "[[{f: [hostValue, 4]}, {g: 4}][0].f[0]]");
@@ -2558,7 +2563,7 @@ test("a settled stop reports an unused get's default lost where only a rule deci
     ["hostValue", "hostOther"],
   )!;
   let reported = 0;
-  for (const { allowance, phase } of testedStops(heldStops(c, mode, 8))) {
+  for (const { allowance, phase } of searchedStops(heldStops(c, mode, 8))) {
     const found = heldProblems(c, mode, allowance, unstopped);
     if (found.length === 0) continue;
     reported += 1;
@@ -2647,7 +2652,7 @@ function combinedStops(
   assert.ok(demand !== undefined, `${c.name}, ${mode.name}: no decision stops`);
   const { run: unstopped } = heldUnstopped(c, mode, demand);
   const { stoppedAt } = combinedAnalyses([{ path: "main.tease", source: c.source }], mode, demand);
-  for (const { allowance, phase } of testedStops(heldStops(c, mode, 8, demand))) {
+  for (const { allowance, phase } of searchedStops(heldStops(c, mode, 8, demand))) {
     const stopped = stoppedAt(allowance);
     each(
       `${c.name}, ${mode.name}, demand ${demand}, ${phase} @${allowance}`,

@@ -12,6 +12,7 @@ import {
 import { withoutRecords } from "../../src/type-inference/core/consumers.js";
 import type { CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
 import type { HeldMode } from "./type-core-held-host.js";
+import { sampled } from "./sweep.js";
 
 /**
  * What a compile did at an allowance: its stop, its total, whether a completion ran and the units it charged, and what
@@ -124,9 +125,10 @@ export function completionStopProblems(
 }
 
 /**
- * The allowances the invariant is checked at: every `step`th from 1, and every one within `band` of each end: where the
- * compile without the completion ends, its questions included (where the head's completion starts), and the head's
- * natural total.
+ * The allowances the invariant is checked at: of every `step`th from 1 and every one within `band` of each end (where the
+ * compile without the completion ends, its questions included, so the head's completion starts after it, and the head's
+ * natural total), the sample (`sampled`) of those up to the first end, of those after it up to the second, and of those
+ * after the second.
  */
 export function completionAllowances(
   request: CoreAnalysisRequest,
@@ -143,5 +145,10 @@ export function completionAllowances(
   for (const end of [own, head])
     for (let allowance = Math.max(1, end - band); allowance <= end + band; allowance += 1)
       allowances.add(allowance);
-  return [...allowances].sort((a, b) => a - b);
+  const sorted = [...allowances].sort((a, b) => a - b);
+  return [
+    ...sampled(sorted.filter((allowance) => allowance <= own)),
+    ...sampled(sorted.filter((allowance) => allowance > own && allowance <= head)),
+    ...sampled(sorted.filter((allowance) => allowance > head)),
+  ];
 }

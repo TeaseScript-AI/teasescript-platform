@@ -562,8 +562,8 @@ test("a completion past its allowance ends and keeps no result, the analysis at 
  * the smaller of twice the work before it and what is left of the total, so it never makes or moves a stop. At each
  * allowance the compile with it stops exactly as phase B's (the same compile without it) does, compiles the same where
  * they stop, and where it does not stop charges no more than the allowance: the witnesses in every mode, the capped
- * shapes forward, at demand 16, every allowance near either end (the compile without the completion's and the head's) and
- * a sample below (the queue checks every allowance).
+ * shapes forward, at demand 16, a sample of the allowances near either end (the compile without the completion's and the
+ * head's) and below (`completionAllowances`; all of them in the sweep, every allowance on the queue).
  */
 test("the completion never makes or moves a stop: at each allowance the compile stops as phase B's (#1526 phase C)", () => {
   const cases: readonly (readonly [
