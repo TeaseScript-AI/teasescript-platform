@@ -1674,10 +1674,15 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
             (line: string) => line.replace('"unparsed":false', '"unparsed":"no"'),
             /its run "src-on publication" is not one a store writes/,
           ],
-          // (#1647: a plan 2 run without its units)
+          // (#1647: a plan 2 run without its units, and one that ended over the unit limit)
           [
             "no-units",
             (line: string) => line.replace(/,"work":\d+/, ""),
+            /stored\.mjs same: its run "src-on publication" is not one a store writes/,
+          ],
+          [
+            "ended-over",
+            (line: string) => line.replace(/"work":\d+/, '"work":4001'),
             /stored\.mjs same: its run "src-on publication" is not one a store writes/,
           ],
           // (Codex r3: a hash proved a string before its pattern, which an array or object would pass by coercion)
@@ -1951,8 +1956,8 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
 
 /**
  * A built tree's library whose analyses charge its ledger (allowance 1,000) 300 units a run: `over` 5,000 more on the
- * head, `both` on both trees, `budget` 1,500 more (past its allowance, a budget stop, within 4 times it); on the head,
- * `slowall` waits 600 ms each run and `hang` 3 s in its first.
+ * head, `both` on both trees, `budget` 1,500 more (past its allowance, a budget stop, within 4 times it); `slowall` waits
+ * 600 ms each run on each tree, and `hang` 3 s in the head's first.
  */
 const unitsLibrary = (
   head: boolean,
@@ -1967,7 +1972,7 @@ export function publicationHashes(files, mode) {
   ledger.charge("frames", 300);
   if (source === "both" || (${head} && source === "over")) ledger.charge("frames", 5000);
   if (source === "budget") ledger.charge("frames", 1500);
-  if (${head} && source === "slowall") wait(600);
+  if (source === "slowall") wait(600);
   if (${head} && source === "hang" && mode === MODES[0]) wait(3000);
   return { parts: ["a", "b"], unanswered: 0 };
 }
@@ -2018,7 +2023,8 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
 
     // both trees in one process, a safety net of 1 s a run: `over` stalls in the head's first run at the charge that
     // passes 4 × 1,000 units, `both` in the base's (the head's not run); `budget` ends past its allowance, a budget stop;
-    // `slowall` ends, its head's runs together far past the safety net; `hang` reaches it, uncharged work, not a stall
+    // `slowall` ends, each tree's run within the safety net, a run of both trees and its head's runs together past it;
+    // `hang` reaches it, uncharged work, not a stall
     const paired = join(directory, "paired.work.jsonl");
     const ran = run(runner, folder, base, head, "--timeout", "1", "--work", paired);
     assert.equal(ran.status, 1, ran.stderr);
