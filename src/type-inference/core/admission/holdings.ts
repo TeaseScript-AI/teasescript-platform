@@ -31,7 +31,10 @@ class Position implements Holding {
   held: readonly Position[] | null | undefined = undefined;
   /** Its reads but itself, as one number per distinct set (`Holding.state`), once its holding is made. */
   state: number | null = null;
-  /** Whether its holding is complete: none it read was still being made (a ring of copies, closed by `#close`). */
+  /**
+   * Whether its holding is complete: neither its parent's nor any it read was still being made. Since rings of whole
+   * copies are one position (`collapse`), only a copy of a position's own part into it (`a=a.q`) leaves one incomplete.
+   */
   whole = true;
 
   public constructor(
@@ -211,58 +214,14 @@ class Holdings {
     const stack: { readonly position: Position; needs: Position[] | null }[] = [
       { position, needs: null },
     ];
-    const made: Position[] = [];
     try {
-      this.#make(stack, made);
+      this.#make(stack);
     } catch (error) {
       // (a stop while it ran leaves no holding half made: each is made anew when next asked)
       for (const { position: at } of stack) if (at.held === null) at.held = undefined;
       throw error;
     }
-    const ring = made.filter((at) => !at.whole);
-    // (made while a ring is being closed: its unfinished holdings join that ring, closed with it)
-    if (this.#closing !== null) this.#closing.push(...ring);
-    else if (ring.length > 0)
-      try {
-        this.#closing = ring;
-        this.#close(ring);
-      } catch (error) {
-        // (a stop while it closed the ring keeps none of its holdings: each is made anew when next asked)
-        for (const at of ring) [at.held, at.whole, at.state] = [undefined, true, null];
-        throw error;
-      } finally {
-        this.#closing = null;
-      }
     return position;
-  }
-
-  /** The ring `#close` is closing, which a holding made meanwhile that reads one of its members joins. */
-  #closing: Position[] | null = null;
-
-  /**
-   * A ring of copies' holdings, each made while another it reads was still being made, so without a state: made again
-   * from what they read until none reads more (their reads only grow, so this ends). Then each is whole, and its state
-   * is recorded from its complete reads: no state is ever recorded from a holding still being made.
-   */
-  #close(ring: Position[]): void {
-    for (let grew = true; grew;) {
-      grew = false;
-      // (by index: a holding made meanwhile may join the ring)
-      for (let index = 0; index < ring.length; index += 1) {
-        const at = ring[index]!;
-        const needs = this.#needs(at);
-        for (const need of needs) if (need.held === undefined) this.made(need);
-        const reads = this.#reads(at, needs);
-        if (reads.size > at.held!.length) {
-          at.held = [...reads];
-          grew = true;
-        }
-      }
-    }
-    for (const at of ring) {
-      at.whole = true;
-      at.state = this.#state(at, new Set(at.held!));
-    }
   }
 
   /** `position`'s reads from `needs`: itself, each need, and of each need's reads those a copy lands below. */
@@ -281,10 +240,7 @@ class Holdings {
     return reads;
   }
 
-  #make(
-    stack: { readonly position: Position; needs: Position[] | null }[],
-    made: Position[],
-  ): void {
+  #make(stack: { readonly position: Position; needs: Position[] | null }[]): void {
     while (stack.length > 0) {
       const top = stack.at(-1)!;
       const at = top.position;
@@ -310,10 +266,10 @@ class Holdings {
       at.whole =
         (at.parent === null || (at.parent.held !== null && at.parent.whole)) &&
         top.needs.every((need) => need.held !== null && need.whole);
-      // (one that read a holding still being made gets its state once its ring is closed, `#close`)
+      // (one that read a holding still being made reads less than its key does, so no state: equal sets would prove
+      // nothing)
       at.state = at.whole ? this.#state(at, reads) : null;
       at.held = [...reads];
-      made.push(at);
       stack.pop();
     }
   }

@@ -6,6 +6,7 @@ import { withoutCycleCertificate } from "../src/type-inference/core/admission/ho
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import { propertyStep } from "../src/type-inference/core/program.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { HELD_MODES } from "./helpers/type-core-held-host.js";
 
@@ -257,4 +258,22 @@ test("a ring of whole copies costs its copies once, in both orders (Codex r1 B2)
     const [small, large] = [total(32), total(64)];
     assert.ok(large / small < 2.2, `${mode.name}: ${small} → ${large}`);
   }
+});
+
+test("a holding that read one still being made records no state, so it never certifies a cycle (#1646)", () => {
+  // (`a=a.q`: `a`'s holding reads `a.q`'s, which carries what `a` reads, so each waits on the other and `a.q`'s reads
+  // only `h` of all it holds: equal sets of such reads would prove nothing. `c`, a copy of `h`, reads it whole, and nothing is copied below `c`)
+  const source =
+    "let h={x:1}\nlet a={q:{r:1}}\na.q=h\na=a.q\nlet c=h\nlet e=c\nh.x=hostValue\nexit\n";
+  const answers = analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!);
+  const placeOf = (name: string): number => {
+    const node = answers.graph.nodes.find(
+      (each) => each.expression?.kind === "identifier" && each.expression.name === name,
+    );
+    const place = node === undefined ? null : answers.at(node)?.place;
+    assert.ok(place !== null && place !== undefined, name);
+    return place.id;
+  };
+  assert.equal(answers.holding(placeOf("a"), [propertyStep("q")]).state, null);
+  assert.notEqual(answers.holding(placeOf("c"), []).state, null);
 });
