@@ -342,9 +342,14 @@ export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource
     present: diagnostic.present ?? "unproved",
     severity: diagnostic.class === "compile-error" ? "error" : "warning",
     alone,
-    ...(diagnostic.class === "warning-runtime-check" && diagnostic.keeps !== undefined
-      ? { keeps: diagnostic.keeps }
-      : {}),
+    // (a warning whose facts were not asked proves no plain kept `let`: #1352)
+    ...(diagnostic.class !== "warning-runtime-check"
+      ? {}
+      : diagnostic.keeps !== undefined
+        ? { keeps: diagnostic.keeps }
+        : diagnostic.present === undefined
+          ? { keeps: "unproved" as const }
+          : {}),
   };
   if (diagnostic.class === "compile-error")
     return errorSentence(rule, text, kinds, source, diagnostic.site, diagnostic.expects, diagnosed);

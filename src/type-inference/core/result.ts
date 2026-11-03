@@ -449,9 +449,10 @@ export type CoreDiagnostic =
       readonly besides: readonly ItemTag[];
       /**
        * What a new variable keeping the warned value declares (`keptTypes`): a mixed `askChoice` answer's types (V30
-       * §19, #1352), none for a plain `let`; absent where the value is not found, so no kept form is proved.
+       * §19, #1352); `unproved` where the value is not found, so no kept form is proved; absent for a plain `let`, which
+       * a warning whose facts were asked (`present`) proves.
        */
-      readonly keeps?: readonly ItemTag[];
+      readonly keeps?: readonly ItemTag[] | "unproved";
     };
 
 /** A diagnostic the core reports: the analysis's own (`CoreDiagnostic`), or a check's that owes the runtime nothing. */

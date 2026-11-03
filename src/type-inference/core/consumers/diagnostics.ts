@@ -104,7 +104,8 @@ export function withFacts(walk: Consumers, diagnostic: CoreDiagnostic): CoreDiag
       ...diagnostic,
       ...(expects === undefined ? {} : { expects }),
       present: present(walk, site, rule),
-      ...(keeps === null ? {} : { keeps }),
+      // (a plain kept `let` proved adds nothing to the record: main's records stand)
+      ...(keeps === null ? { keeps: "unproved" as const } : keeps.length === 0 ? {} : { keeps }),
     };
   }
   return diagnostic;

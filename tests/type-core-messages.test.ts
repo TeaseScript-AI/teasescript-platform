@@ -1919,9 +1919,10 @@ test("an askChoice of more than one type errs where its type would be inferred, 
   assert.ok(request !== null);
   const { diagnostics } = analyseCore(request);
   const text = messageSource([direct], diagnostics);
+  // (as after a stop: no facts asked)
   const unproved = diagnostics.map((diagnostic) => {
     if (!("keeps" in diagnostic)) return coreMessage(diagnostic, text);
-    const { keeps: _, ...rest } = diagnostic;
+    const { keeps: _, present: __, ...rest } = diagnostic;
     return coreMessage(rest, text);
   });
   assert.ok(
