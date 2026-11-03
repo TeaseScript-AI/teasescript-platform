@@ -1237,7 +1237,7 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     for (const write of [
       () => state.owned(raw, { src: "1".repeat(40) }, "commit x y"),
       () => state.planned(raw, "area", "plan 1\n"),
-      () => state.beginShard(raw, "area", 0, 1, "", ""),
+      () => state.beginShard(raw, "area", 0),
       // (and a checked path of another kind: a folder of baselines given as a baseline)
       () => state.planned(state.outside(join(directory, "kinds"), [], fail), "area", "plan 1\n"),
     ])
@@ -1258,14 +1258,7 @@ test("the stored baselines finish or clear what a writer killed at a write left,
     const planText = readFileSync(join(held, "area", "PLAN"), "utf8");
     const plannedAgain = await state.planned(joined.baseline, "area", planText);
     rmSync(join(held, "area", "0of1.runs.jsonl"));
-    const begun = await state.beginShard(
-      joined.baseline,
-      "area",
-      0,
-      1,
-      plannedAgain.plan,
-      plannedAgain.places[0],
-    );
+    const begun = await state.beginShard(joined.baseline, plannedAgain.area, 0);
     assert.notEqual(begun.claim, undefined);
     await state.endShard(begun.claim, [], {});
     await assert.rejects(
@@ -2365,7 +2358,8 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
 });
 
 test("every reader of a stored shard accepts or refuses one line alike, none throwing, and a writer stores again what it refuses: a family over the line's PLAN, end, cut and run (#1647, Codex r2)", async () => {
-  // The family's whole product (FAMILIES_FORMAT=full: 3 PLANs × 8 ends × 5 cuts × 4 runs) is queue evidence, under
+  // The family's whole product (FAMILIES_FORMAT=full: 3 PLANs × 3 bindings × 9 ends × 5 cuts × 4 runs) is queue
+  // evidence, under
   // agents.home.arpa:~/work/evidence/1650/<head>/format-family/; CI runs one variant per class and boundary of each axis
   // (the test-cost rule).
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
@@ -2400,21 +2394,33 @@ test("every reader of a stored shard accepts or refuses one line alike, none thr
     const [src] = readdirSync(stored);
     const { storedRuns: comparisonOf } = await import(pathToFileURL(baselines).href);
 
-    type Variant = { plan: string; end: string; cut: string; run: string };
+    type Variant = { plan: string; binding: string; end: string; cut: string; run: string };
     const PLANS = ["2", "1", "mismatched"];
-    const ENDS = ["none", "units", "exit", "at-run", "at-ended", "outside", "thrown", "two"];
+    // (the PLAN as its MANIFEST records it, changed after it was recorded, or recorded with no shard: Codex r3)
+    const BINDINGS = ["recorded", "other-hash", "zero-shards"];
+    const ENDS = [
+      "none",
+      "units",
+      "exit",
+      "at-run",
+      "at-ended",
+      "outside",
+      "thrown",
+      "two",
+      "stall-thrown",
+    ];
     const CUTS = ["absent", "valid", "zero", "under", "ended"];
     const RUNS = ["valid", "null", "no-work", "over"];
     /** Whether a store writes the variant (the rule apart from the tools: #1647's format, plan 1 as before it). */
-    const accepted = ({ plan, end, cut, run }: Variant) => {
-      if (plan === "mismatched" || run === "null" || ["two", "at-ended"].includes(end))
-        return false;
-      if (plan === "1") return cut === "absent" && !["at-run", "outside"].includes(end);
+    const accepted = ({ plan, binding, end, cut, run }: Variant) => {
+      if (plan === "mismatched" || binding !== "recorded" || run === "null") return false;
+      if (["two", "at-ended", "stall-thrown"].includes(end)) return false;
+      if (plan === "1") return cut === "absent" && !["at-run", "outside", "units"].includes(end);
       if (run !== "valid") return false;
       return end === "units" ? cut === "valid" : cut === "absent";
     };
     /** The variant's baseline: the stored line made so, its totals and digests repaired, and its stalls' listing. */
-    const made = (name: string, { plan, end, cut, run }: Variant) => {
+    const made = (name: string, { plan, binding, end, cut, run }: Variant) => {
       const root = join(directory, "variants", name);
       cpSync(stored, root, { recursive: true });
       const dir = join(root, src!);
@@ -2453,13 +2459,19 @@ test("every reader of a stored shard accepts or refuses one line alike, none thr
               : { run: first, work: 4001, allowance: 1000 };
       const { generator, source, key } = line;
       const stall =
-        end === "units" ? "units" : end === "exit" || end === "two" ? "exit 3" : undefined;
+        end === "units"
+          ? "units"
+          : ["exit", "two", "stall-thrown"].includes(end)
+            ? "exit 3"
+            : undefined;
       const written = {
         generator,
         source,
         key,
         ...(stall === undefined ? {} : { stalled: stall }),
-        ...(end === "thrown" ? { thrown: { runner: "Error: thrown" } } : {}),
+        ...(end === "thrown" || end === "stall-thrown"
+          ? { thrown: { runner: "Error: thrown" } }
+          : {}),
         ...(end === "at-run" || end === "two" ? { uncharged: second } : {}),
         ...(end === "at-ended" ? { uncharged: first } : {}),
         ...(end === "outside" ? { uncharged: "outside its runs" } : {}),
@@ -2471,18 +2483,34 @@ test("every reader of a stored shard accepts or refuses one line alike, none thr
       const was = sha256(text);
       if (plan === "1") text = text.replace(/^plan 2$/m, "plan 1");
       if (plan !== "2") text = text.replace(/^limits .*$/m, "limits 180 s, 2048 MB");
+      // (the PLAN its MANIFEST and the shard's total name: another PLAN in its place, or one of no shard)
+      let recorded = `area units 1 ${sha256(text)}`;
+      if (binding === "zero-shards") {
+        text = text.replace(/^shards 1$/m, "shards 0").replace(/^shard 0 .*\n/m, "");
+        recorded = `area units 0 ${sha256(text)}`;
+      }
+      const named = sha256(text);
+      if (binding === "other-hash")
+        text = text.replace(/^limits 4 x/m, "limits 8 x").replace(/^limits 180 s/m, "limits 360 s");
       writeFileSync(join(dir, "units", "PLAN"), text);
       const manifest = join(dir, "MANIFEST");
-      writeFileSync(manifest, readFileSync(manifest, "utf8").replace(was, sha256(text)));
+      writeFileSync(
+        manifest,
+        readFileSync(manifest, "utf8").replace(`area units 1 ${was}`, recorded),
+      );
       const { units: _units, uncharged: _uncharged, ...kept } = total;
       const counted = {
         ...kept,
         stalled: stall === undefined ? 0 : 1,
-        ...(plan === "2" ? { units: 4, uncharged: "uncharged" in written ? 1 : 0 } : {}),
-        plan: sha256(text),
+        ...(plan === "2"
+          ? { units: binding === "other-hash" ? 8 : 4, uncharged: "uncharged" in written ? 1 : 0 }
+          : {}),
+        plan: named,
         lines: sha256(body),
       };
       writeFileSync(file, `${body}${JSON.stringify({ total: counted })}\n`);
+      // (an area recorded with no shard holds none)
+      if (binding === "zero-shards") rmSync(file);
       const entry = { area: "units", shard: "0/1", generator, source, key, stalled: stall };
       const listed =
         stall === undefined
@@ -2504,7 +2532,7 @@ test("every reader of a stored shard accepts or refuses one line alike, none thr
       const answers: Record<string, boolean> = {};
       const status = tool("status", root, src!);
       assert.ok(
-        [0, 2].includes(status.status!),
+        [0, 1, 2].includes(status.status!),
         `${name} status: ${status.stdout}${status.stderr}`,
       );
       answers["status"] = status.status === 0;
@@ -2517,7 +2545,8 @@ test("every reader of a stored shard accepts or refuses one line alike, none thr
       answers["comparison"] = compared.lines !== undefined;
       if (variant.plan === "2") {
         // (the plan 2 writers: the stalls' listing, and a store, which skips only what it accepts and stores the rest
-        // again; a plan 2 writer refuses a plan 1 area as another plan)
+        // again; a plan 2 writer refuses a plan 1 area as another plan, and one recorded with no shard, and replaces
+        // a PLAN that is not the recorded one, so that the area then reads complete)
         const listing = tool(
           "stalls",
           file,
@@ -2530,24 +2559,41 @@ test("every reader of a stored shard accepts or refuses one line alike, none thr
         const store = spawnSync(process.execPath, [runner, area, tree, "--store", root], {
           encoding: "utf8",
         });
-        const ended = lines(store.stdout).at(-1);
-        answers["store"] = ended.skipped === "stored";
-        if (!answers["store"])
-          assert.equal(ended.verified, true, `${name} stored again: ${store.stdout}`);
+        if (variant.binding === "zero-shards")
+          assert.equal(store.status, 2, `${name} store: ${store.stdout}${store.stderr}`);
+        else if (variant.binding === "other-hash")
+          assert.equal(tool("status", root, src!).status, 0, `${name} repaired: ${store.stdout}`);
+        else {
+          const ended = lines(store.stdout).at(-1);
+          answers["store"] = ended.skipped === "stored";
+          if (!answers["store"])
+            assert.equal(ended.verified, true, `${name} stored again: ${store.stdout}`);
+        }
       }
       return answers;
     };
-    const base: Variant = { plan: "2", end: "none", cut: "absent", run: "valid" };
+    const base: Variant = {
+      plan: "2",
+      binding: "recorded",
+      end: "none",
+      cut: "absent",
+      run: "valid",
+    };
     const variants: Variant[] =
       process.env.FAMILIES_FORMAT === "full"
         ? PLANS.flatMap((plan) =>
-            ENDS.flatMap((end) =>
-              CUTS.flatMap((cut) => RUNS.map((run) => ({ plan, end, cut, run }))),
+            BINDINGS.flatMap((binding) =>
+              ENDS.flatMap((end) =>
+                CUTS.flatMap((cut) => RUNS.map((run) => ({ plan, binding, end, cut, run }))),
+              ),
             ),
           )
         : [
             base,
             ...PLANS.slice(1).map((plan) => ({ ...base, plan })),
+            ...BINDINGS.slice(1).map((binding) => ({ ...base, binding })),
+            { ...base, plan: "1", end: "units" },
+            { ...base, plan: "1", end: "stall-thrown" },
             ...ENDS.slice(1).map((end) => ({
               ...base,
               end,

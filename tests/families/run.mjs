@@ -651,15 +651,8 @@ if (process.argv[2] === "--child") {
     const name = path.basename(folder);
     const plan = await planned(top.baseline, name, planOf(name, every, shards));
     if (plan.refused !== undefined) refused(plan.refused);
-    storing = await beginShard(
-      top.baseline,
-      name,
-      shard,
-      shards,
-      plan.plan,
-      plan.places[shard],
-      plan.text,
-    );
+    // (the area as every reader reads it, `areaRead`, which `planned` gives)
+    storing = await beginShard(top.baseline, plan.area, shard);
     if (storing.refused !== undefined) refused(storing.refused);
     if (storing.skipped !== undefined) {
       const { file, skipped } = storing;

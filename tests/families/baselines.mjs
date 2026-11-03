@@ -105,17 +105,38 @@ function limitsOf(plan) {
 }
 
 /**
- * A PLAN's format, the one boundary every reader of its shards and every check of it goes through (#1647, Codex r2):
- * its version (its first line, `plan 1` or `plan 2`) and that version's limits (`limitsOf`, its fourth line), which
- * select the schema its shards' lines are read by (`sourceFault`); else why not (`fault`), a PLAN whose limits are
- * another version's included.
+ * A PLAN's format: its limits line (`limitsOf`, its fourth), whose version selects the schema its shards' lines are
+ * read by (`sourceFault`); else why not (`fault`). `planFault`, through which `areaRead` reads every PLAN, binds that
+ * version to the PLAN's first line (#1647, Codex r2), so a PLAN whose limits are another version's is refused.
  */
 function formatOf(plan) {
-  const lines = String(plan).split("\n");
-  const version = { "plan 1": 1, "plan 2": 2 }[lines[0]];
-  if (version === undefined) return { fault: `its line 1 is not "plan 1" or "plan 2"` };
-  const limits = limitsOf(`${lines[3] ?? ""}\n`);
-  return limits?.version === version ? limits : { fault: "it has no limits line of its version" };
+  return limitsOf(`${String(plan).split("\n")[3] ?? ""}\n`) ?? { fault: "it has no limits line" };
+}
+
+/**
+ * The area `name` of the baseline folder `dir`, whose MANIFEST is `text`, as one bound object: the one reader of an
+ * area, and through it of every shard (#1647, Codex r1 to r3). Its MANIFEST record (`area <name> <shards> <PLAN hash>`)
+ * and its PLAN are read together: the PLAN the recorded one (its hash), of the recorded count of shards, one at least,
+ * and one `planOf` writes (`planFault`, its version and limits by `formatOf`). `{ area }`: its baseline folder, name,
+ * PLAN text and hash, count of shards and each shard's places, version and unit multiple; `missing` where it is not
+ * recorded, or its PLAN is absent or not the recorded one (an area not made yet, which a writer makes; with its
+ * `record` where there is one); else why it is refused. Every reader of a shard (`shardRead`) takes such an area, never
+ * a PLAN's text or hash apart from it, and the store's writer gets its area from here too (`planned`).
+ */
+function areaRead(dir, name, text) {
+  const record = recorded(text).get(name);
+  if (record === undefined) return { missing: "not recorded in its baseline" };
+  const plan = bytesOf(path.join(dir, name, "PLAN"))?.toString();
+  if (plan === undefined || hash(plan) !== record.plan)
+    return { missing: "its PLAN is not the recorded one", record };
+  if (record.shards < 1) return { refused: `${dir}/${name} is recorded with no shard` };
+  const fault = planFault(plan, name, record.shards);
+  if (fault !== undefined)
+    return { refused: `${dir}/${name}'s PLAN is not one this tool writes: ${fault}` };
+  const { version, units } = formatOf(plan);
+  const { shards, places } = parsePlan(plan);
+  const area = { dir, name, text: plan, plan: record.plan, shards, places, version, units };
+  return { area: Object.freeze(area) };
 }
 
 /** A git object's id, as `git hash-object` gives a blob's. */
@@ -664,11 +685,11 @@ function bytesOf(file) {
 }
 
 /**
- * Whether the stored shard `file` counts, read as every consumer reads it (`shardRead`, by its PLAN `text`): a writer
- * skips only such a shard, and replaces any other.
+ * Whether the shard `shard` of the area `area` (`areaRead`) counts, read as every consumer reads it (`shardRead`): a
+ * writer skips only such a shard, and replaces any other.
  */
-export const verified = (file, plan, places, identity, text) =>
-  shardRead(file, plan, places, identity, text).lines !== undefined;
+export const verified = (area, shard, identity) =>
+  shardRead(area, shard, identity).lines !== undefined;
 
 /** Whether a running writer claims a shard of the area of `shards` shards in `dir`, or the shard `shard` only. */
 function claimedIn(dir, shards, shard) {
@@ -726,8 +747,12 @@ export async function planned(baseline, area, plan) {
     return {};
   });
   if (outcome === RETIRED) return { refused: `${top} was replaced while this writer planned it` };
-  // (and its text, by which every read of its shards validates them: `shardRead`)
-  return outcome.refused === undefined ? { plan: id, shards, places, text: plan } : outcome;
+  if (outcome.refused !== undefined) return outcome;
+  // (the area as every reader reads it, `areaRead`, which its shards are written and read by)
+  const read = areaRead(top, area, readFileSync(path.join(top, "MANIFEST"), "utf8"));
+  return read.area === undefined
+    ? { refused: read.refused ?? `${top}/${area}: ${read.missing}` }
+    : read;
 }
 
 // A claim on a shard (`beginShard`), which only `endShard` takes, once: the shard's paths are made from it and from its
@@ -735,19 +760,23 @@ export async function planned(baseline, area, plan) {
 const claims = new WeakMap();
 
 /**
- * A shard to store (through the gate): `skipped` where it counts or a running writer stores it, else this process's
- * `claim` on it (above) and its `file`; `refused` where the baseline refuses the writer.
+ * The shard `shard` of the area `area` (`planned`'s, `areaRead`'s, of this baseline) to store (through the gate):
+ * `skipped` where it counts or a running writer stores it, else this process's `claim` on it (above) and its `file`;
+ * `refused` where the baseline refuses the writer.
  */
-export async function beginShard(baseline, area, shard, shards, plan, places, text) {
+export async function beginShard(baseline, area, shard) {
   const top = pathOf(baseline, "baseline");
-  const dir = path.join(top, areaName(area));
+  if (area?.dir !== top)
+    throw new TypeError(`${String(area?.name)} is no area of ${top} this tool read`);
+  const { shards } = area;
+  const dir = path.join(top, areaName(area.name));
   const file = shardFile(dir, shard, shards);
   const outcome = await gate(baseline, (manifest) => {
-    if (verified(file, plan, places, identityIn(manifest), text)) return { skipped: "stored" };
+    if (verified(area, shard, identityIn(manifest))) return { skipped: "stored" };
     if (!claimed(path.join(dir, claimName(shard, shards))))
       return { skipped: "being stored by another writer" };
     const claim = Object.freeze({});
-    claims.set(claim, { baseline, area, shard, shards, plan, places, text });
+    claims.set(claim, { baseline, area, shard });
     return { claim };
   });
   if (outcome === RETIRED)
@@ -764,9 +793,11 @@ export async function endShard(claim, lines, total) {
   const held = claims.get(claim);
   if (held === undefined) throw new TypeError(`${String(claim)} is no claim this tool gave`);
   claims.delete(claim);
-  const { baseline, area, shard, shards, plan, places, text: planText } = held;
+  const { baseline, area, shard } = held;
+  const { shards, plan } = area;
+  const places = area.places[shard];
   const top = pathOf(baseline, "baseline");
-  const dir = path.join(top, area);
+  const dir = path.join(top, area.name);
   const file = shardFile(dir, shard, shards);
   const body = lines.join("");
   const ended = `${JSON.stringify({ total: { ...total, plan, places, lines: hash(body) } })}\n`;
@@ -778,13 +809,13 @@ export async function endShard(claim, lines, total) {
       linkSync(tmp, file);
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      if (!verified(file, plan, places, identity, planText)) renameSync(tmp, file);
+      if (!verified(area, shard, identity)) renameSync(tmp, file);
     }
     rmSync(tmp, { force: true });
     const claimFile = path.join(dir, claimName(shard, shards));
     if (existsSync(claimFile) && readFileSync(claimFile, "utf8").trim() === WRITER)
       rmSync(claimFile, { force: true });
-    return { verified: verified(file, plan, places, identity, planText) };
+    return { verified: verified(area, shard, identity) };
   });
   if (outcome === RETIRED)
     return { refused: `${top} was replaced while this writer stored into it` };
@@ -825,24 +856,19 @@ export function storedRuns(folder) {
     return { status: 2, refused: `${dir}'s MANIFEST has a header this tool does not write` };
   if (identity.src !== path.basename(dir))
     return { status: 2, refused: `${dir}'s MANIFEST names another src tree than its folder` };
-  const record = recorded(text).get(area);
-  const plan = bytesOf(path.join(real, "PLAN"))?.toString();
-  if (record === undefined || plan === undefined || hash(plan) !== record.plan)
-    return {
-      status: 1,
-      refused: `${folder} is no complete area: ${record === undefined ? "not recorded in its baseline" : "its PLAN is not the recorded one"}`,
-    };
-  const { shards, places } = parsePlan(plan);
-  const units = formatOf(plan).units ?? null;
+  const read = areaRead(dir, area, text);
+  if (read.missing !== undefined)
+    return { status: 1, refused: `${folder} is no complete area: ${read.missing}` };
+  if (read.refused !== undefined) return { status: 2, refused: read.refused };
+  const { shards, units } = read.area;
   const lines = [];
   let incomplete;
   for (let shard = 0; shard < shards; shard += 1) {
-    const file = shardFile(real, shard, shards);
-    const read = shardRead(file, record.plan, places[shard], identity, plan);
-    if (read.refused !== undefined) return { status: 2, refused: read.refused };
-    if (read.lines === undefined)
-      incomplete ??= `${folder} is no complete area: ${shardName(shard, shards)} ${existsSync(file) ? "does not verify" : "is absent"}`;
-    else lines.push(...read.lines);
+    const stored = shardRead(read.area, shard, identity);
+    if (stored.refused !== undefined) return { status: 2, refused: stored.refused };
+    if (stored.lines === undefined)
+      incomplete ??= `${folder} is no complete area: ${shardName(shard, shards)} ${existsSync(stored.file) ? "does not verify" : "is absent"}`;
+    else lines.push(...stored.lines);
   }
   // (and the PLAN's unit multiple, null for a plan 1 area, which stores no units: #1647)
   return incomplete === undefined ? { lines, identity, units } : { status: 1, refused: incomplete };
@@ -893,18 +919,17 @@ async function stateOf(tree, root, readOnly) {
     const area = path.basename(folder);
     const dir = path.join(own.dir, area);
     const record = records.get(area);
-    const stored = existsSync(path.join(dir, "PLAN"))
-      ? readFileSync(path.join(dir, "PLAN"), "utf8")
-      : null;
+    const made = areaRead(own.dir, area, manifest);
     let line;
+    if (made.refused !== undefined) return refusal(made.refused);
     if (record === undefined) line = { area, folder, state: "absent", store: "all" };
-    else if (stored === null || hash(stored) !== record.plan)
+    else if (made.area === undefined)
       // (recorded, its PLAN not made yet: the next writer's to finish, in the recorded count)
       line = { area, folder, state: "absent", shards: record.shards, verified: 0, store: "all" };
     else {
-      const { shards, places } = parsePlan(stored);
-      const read = places.map((place, shard) =>
-        shardRead(shardFile(dir, shard, shards), record.plan, place, identityIn(manifest), stored),
+      const { shards, plan } = made.area;
+      const read = [...Array(shards).keys()].map((shard) =>
+        shardRead(made.area, shard, identityIn(manifest)),
       );
       const refused = read.find((shard) => shard.refused !== undefined);
       if (refused !== undefined) return refusal(refused.refused);
@@ -912,7 +937,7 @@ async function stateOf(tree, root, readOnly) {
       const count = good.filter(Boolean).length;
       if (
         (readOnly || count < shards) &&
-        hash(planOf(area, await generatorsOf(folder), shards)) !== record.plan
+        hash(planOf(area, await generatorsOf(folder), shards)) !== plan
       )
         line = { area, folder, state: "another plan" };
       else {
@@ -1140,8 +1165,9 @@ const allowanceIn = (value) => value === null || (Number.isInteger(value) && val
  * holds the units it charged (`work`) and its program's allowance (`allowance`), a stall over the unit limit (`units`)
  * the run it cut (`cut`: its name, its units and allowance, a charged ledger's (above 0), the units over `units` times
  * the allowance: the stall's certificate, the same on every machine), and a run that reached the wall-clock safety net
- * is named apart (`uncharged`: the run, or `OUTSIDE_RUNS`), never a stall; a line ends one way at most (a stall, the
- * safety net or the runner's exception), and a cut run or one at the safety net is none that ended (Codex r2). These are
+ * is named apart (`uncharged`: the run, or `OUTSIDE_RUNS`), never a stall; a cut run or one at the safety net is none
+ * that ended (Codex r2). Under either version a line ends one way at most (a stall, the safety net or the runner's
+ * exception), and a plan 1 line has no stall over a unit limit, which no runner then wrote (Codex r3). These are
  * what a comparison against the
  * baseline (`run.mjs --baseline`) reads. The one rule for a stored line: the runner checks each line it stores by it,
  * and every reader of a shard (`shardRead`) does.
@@ -1184,11 +1210,15 @@ export function sourceFault(line, units = null) {
           (result.allowance === null || result.work <= units * result.allowance)));
     if (!fits) return `its run ${JSON.stringify(run)} is not one a store writes`;
   }
-  if (units === null) return undefined;
-  // (plan 2) one end at most: a stall, a run at the safety net or the runner's exception; a stall over the unit limit,
-  // and only it, with the run it cut, and the run a stall cut or the safety net reached one that did not end
+  // one end at most, under either version (no runner wrote two): a stall, a run at the safety net (plan 2) or the
+  // runner's exception
   const ends = ["stalled", "uncharged", "thrown"].filter((key) => line[key] !== undefined);
   if (ends.length > 1) return `it ends more than one way: ${ends.join(", ")}`;
+  // (plan 1: no runner before #1647 stalled a run over a unit limit)
+  if (units === null)
+    return line.stalled === "units" ? "its stall over a unit limit is no plan 1 stall" : undefined;
+  // (plan 2) a stall over the unit limit, and only it, with the run it cut, and the run a stall cut or the safety net
+  // reached one that did not end
   if (line.uncharged !== undefined && !runName(line.uncharged) && line.uncharged !== OUTSIDE_RUNS)
     return "its run that reached the safety net is none";
   if (line.uncharged !== undefined && Object.hasOwn(line.runs, line.uncharged))
@@ -1212,42 +1242,41 @@ export function sourceFault(line, units = null) {
 }
 
 /**
- * The stored shard `file` read as its consumers read it, the one reader of a shard (#1647, Codex r1 and r2): where it
- * counts under `shardIn` (against the PLAN's hash `plan`, the shard's `places` and the MANIFEST's `identity`), its PLAN
- * `text` is one of a version this tool writes (`formatOf`), each source line one a store writes under that version
- * (`sourceFault`) and its total counting its sources, those that stalled and, under plan 2, those that reached the
- * safety net, and naming the multiple: its `body`, `lines` and `sources` (read); `absent` where it does not count
- * (absent or damaged); else why it is refused. Status, import, the comparison (`storedRuns`), the store (`verified`),
+ * The shard `shard` of the area `area` (`areaRead`'s bound MANIFEST record and PLAN, never a PLAN apart from it) read
+ * as its consumers read it, the one reader of a shard (#1647, Codex r1 to r3): where it counts under `shardIn` (against
+ * the area's PLAN hash, the shard's places and the MANIFEST's `identity`), each source line one a store writes under its
+ * PLAN's version (`sourceFault`) and its total counting its sources, those that stalled and, under plan 2, those that
+ * reached the safety net, and naming the multiple: its `file`, `body`, `lines` and `sources` (read); `absent` where it
+ * does not count (absent or damaged); else why it is refused. Status, import, the comparison (`storedRuns`), the store (`verified`),
  * `state` and the stalls' listing (`stallsOf`) read every shard through it.
  */
-function shardRead(file, plan, places, identity, text) {
+function shardRead(area, shard, identity) {
+  const file = shardFile(path.join(area.dir, area.name), shard, area.shards);
   const body = bytesOf(file);
-  const read = shardIn(body, plan, places, identity);
-  if (read.other !== undefined)
-    return { refused: otherInputs(path.dirname(path.dirname(file)), file, read.other) };
-  if (read.lines === undefined) return { absent: true };
-  const format = formatOf(text);
-  if (format.fault !== undefined)
-    return { refused: `${file}: its PLAN is not one this tool writes: ${format.fault}` };
-  const { units } = format;
+  const read = shardIn(body, area.plan, area.places[shard], identity);
+  if (read.other !== undefined) return { file, refused: otherInputs(area.dir, file, read.other) };
+  if (read.lines === undefined) return { file, absent: true };
+  const { units } = area;
   const sources = read.lines.map((line) => JSON.parse(line));
   for (const source of sources) {
     const fault = sourceFault(source, units);
     if (fault !== undefined)
-      return { refused: `${file}: ${source.generator} ${source.source}: ${fault}` };
+      return { file, refused: `${file}: ${source.generator} ${source.source}: ${fault}` };
   }
   const { total } = JSON.parse(body.subarray(body.lastIndexOf(10, body.length - 2) + 1).toString());
   const count = (key) => sources.filter((source) => source[key] !== undefined).length;
   const [stalled, uncharged] = [count("stalled"), count("uncharged")];
   if (total.sources !== sources.length || total.stalled !== stalled)
     return {
+      file,
       refused: `${file}'s total counts ${total.sources} sources and ${total.stalled} stalled, its lines ${sources.length} and ${stalled}`,
     };
   if (units !== null && (total.units !== units || total.uncharged !== uncharged))
     return {
+      file,
       refused: `${file}'s total names ${total.units} times the allowance and ${total.uncharged} runs at the safety net, its PLAN ${units} and its lines ${uncharged}`,
     };
-  return { body, lines: read.lines, sources };
+  return { file, body, lines: read.lines, sources };
 }
 
 /**
@@ -1324,17 +1353,16 @@ function heldIn(root) {
     return {
       refused: `${dir} holds foreign contents, which this tool did not write: ${foreign.join(", ")}`,
     };
-  const plans = new Map();
-  for (const [area, record] of recorded(text)) {
-    const plan = bytesOf(path.join(dir, area, "PLAN"))?.toString();
-    if (plan === undefined || hash(plan) !== record.plan)
+  // (each recorded area read as every reader reads one, `areaRead`)
+  const areas = new Map();
+  for (const area of recorded(text).keys()) {
+    const read = areaRead(dir, area, text);
+    if (read.missing !== undefined)
       return { refused: `${dir}/${area}'s PLAN is not the one its MANIFEST records` };
-    const wrong = planFault(plan, area, record.shards);
-    if (wrong !== undefined)
-      return { refused: `${dir}/${area}'s PLAN is not one this tool writes: ${wrong}` };
-    plans.set(area, plan);
+    if (read.refused !== undefined) return read;
+    areas.set(area, read.area);
   }
-  return { dir, text, identity: identityIn(text), plans };
+  return { dir, text, identity: identityIn(text), areas };
 }
 
 /** Where a computed baseline's MANIFEST (`given`) and the central one (`held`) differ, each line named by what it records. */
@@ -1365,7 +1393,7 @@ function differenceOf(held, given) {
  * area's PLAN made where the baseline lacks it (`planned`). `seed` says whether anything was written.
  */
 async function adopt(central, held) {
-  if (held.plans.size === 0) return { refused: `${held.dir}'s MANIFEST records no area` };
+  if (held.areas.size === 0) return { refused: `${held.dir}'s MANIFEST records no area` };
   if (compiledIn(held.text).length === 0)
     return {
       refused: `${held.dir}'s MANIFEST names no build of the compiler (dist/src/) its shards are stored from`,
@@ -1384,7 +1412,7 @@ async function adopt(central, held) {
   );
   if (outcome === RETIRED) return { refused: `${dir} was replaced while this writer adopted it` };
   if (outcome.differs !== undefined || outcome.refused !== undefined) return outcome;
-  for (const [area, plan] of held.plans) {
+  for (const [area, { text: plan }] of held.areas) {
     if (bytesOf(path.join(dir, area, "PLAN"))?.toString() !== plan) wrote = true;
     const made = await planned(own.baseline, area, plan);
     if (made.refused !== undefined) return made;
@@ -1402,13 +1430,10 @@ async function adopt(central, held) {
  * stands, kept or put in the stalled one's place, and the sources are named (`stallOnly`) (#1612).
  */
 async function importShard(central, held, area, shard, shards, listing) {
-  const record = recorded(held.text).get(area);
-  if (record === undefined) return { refused: `${held.dir} records no area ${area}` };
-  if (record.shards !== shards)
-    return { refused: `${held.dir} plans ${area} in ${record.shards} shards, not ${shards}` };
-  const plan = held.plans.get(area);
-  const { places } = parsePlan(plan);
-  const { units } = formatOf(plan);
+  const given = held.areas.get(area);
+  if (given === undefined) return { refused: `${held.dir} records no area ${area}` };
+  if (given.shards !== shards)
+    return { refused: `${held.dir} plans ${area} in ${given.shards} shards, not ${shards}` };
   const baseline = baselineIn(central, held.identity.src);
   const dir = pathOf(baseline, "baseline");
   if (!isOwned(dir))
@@ -1418,16 +1443,19 @@ async function importShard(central, held, area, shard, shards, listing) {
       return {
         refused: `${held.dir}'s MANIFEST is not the central one: ${differenceOf(text, held.text)}`,
       };
-    if (bytesOf(path.join(dir, area, "PLAN"))?.toString() !== plan)
+    // (the central area read as every reader reads one, its PLAN the received one's)
+    const central = areaRead(dir, area, text);
+    if (central.refused !== undefined) return central;
+    if (central.area?.text !== given.text)
       return { refused: `${dir}/${area} holds no PLAN or another one: import its seed first` };
-    const file = shardFile(path.join(held.dir, area), shard, shards);
-    const read = shardRead(file, record.plan, places[shard], held.identity, plan);
+    const read = shardRead(given, shard, held.identity);
+    const { file } = read;
     if (read.absent) return { refused: `${file} is no shard that counts: absent or damaged` };
     if (read.refused !== undefined) return read;
-    const fault = listingFault(listing, read.sources, area, `${shard}/${shards}`, units);
+    const fault = listingFault(listing, read.sources, area, `${shard}/${shards}`, given.units);
     if (fault !== undefined) return { refused: `${file}: ${fault}` };
-    const target = shardFile(path.join(dir, area), shard, shards);
-    const there = shardRead(target, record.plan, places[shard], identityIn(text), plan);
+    const there = shardRead(central.area, shard, identityIn(text));
+    const target = there.file;
     if (there.refused !== undefined) return there;
     if (there.lines !== undefined) {
       // (#1612: two lines of a source that differ only in that one stalled are no value difference, the complete one
@@ -1457,7 +1485,7 @@ async function importShard(central, held, area, shard, shards, listing) {
       renameSync(tmp, target);
       return {
         imported: target,
-        verified: verified(target, record.plan, places[shard], identityIn(text), plan),
+        verified: verified(central.area, shard, identityIn(text)),
         stallOnly,
       };
     }
@@ -1470,10 +1498,7 @@ async function importShard(central, held, area, shard, shards, listing) {
       renameSync(tmp, target);
     }
     rmSync(tmp, { force: true });
-    return {
-      imported: target,
-      verified: verified(target, record.plan, places[shard], identityIn(text), plan),
-    };
+    return { imported: target, verified: verified(central.area, shard, identityIn(text)) };
   });
   return outcome === RETIRED
     ? { refused: `${dir} was replaced while this writer imported into it` }
@@ -1544,23 +1569,20 @@ function statusOf(root, src) {
   // (a MANIFEST names a build only once a seed recorded every area of its tree; else its areas are known only with it)
   const seeded = compiledIn(text).length > 0;
   for (const [area, record] of recorded(text)) {
-    const plan = bytesOf(path.join(dir, area, "PLAN"))?.toString();
-    if (plan === undefined || hash(plan) !== record.plan) {
+    const made = areaRead(dir, area, text);
+    if (made.missing !== undefined) {
       areas.push({ area, state: "absent", count: 0, shards: record.shards });
       continue;
     }
-    const wrong = planFault(plan, area, record.shards);
-    if (wrong !== undefined)
-      return say(`${dir}/${area}'s PLAN is not one this tool writes: ${wrong}`, 2);
-    const { shards, places } = parsePlan(plan);
+    if (made.refused !== undefined) return say(made.refused, 2);
+    const { shards } = made.area;
     let count = 0;
     let damaged = false;
     for (let shard = 0; shard < shards; shard += 1) {
-      const file = shardFile(path.join(dir, area), shard, shards);
-      const read = shardRead(file, record.plan, places[shard], identity, plan);
+      const read = shardRead(made.area, shard, identity);
       if (read.refused !== undefined) return say(read.refused, 2);
       if (!read.absent) count += 1;
-      else if (existsSync(file)) damaged = true;
+      else if (existsSync(read.file)) damaged = true;
     }
     const state = count === shards ? "complete" : damaged ? "damaged" : "partial";
     areas.push({ area, state, count, shards });
@@ -1658,21 +1680,17 @@ function stallsOf(file, area, shard, out, refuse) {
   const [index, count] = /^\d+\/\d+$/.test(shard) ? shard.split("/").map(Number) : [];
   if (!/^[^/]+$/.test(area) || !(index < count) || path.basename(file) !== shardName(index, count))
     refuse(`${file} is no file of the shard ${area} ${shard}`);
-  const dir = path.dirname(path.dirname(realOf(file)));
+  const real = realOf(file);
+  const dir = path.dirname(path.dirname(real));
+  if (path.basename(path.dirname(real)) !== area) refuse(`${file} is no shard of the area ${area}`);
   const manifest = bytesOf(path.join(dir, "MANIFEST"))?.toString() ?? "";
-  const record = recorded(manifest).get(area);
-  const plan = bytesOf(path.join(dir, area, "PLAN"))?.toString() ?? "";
-  if (record === undefined || record.shards !== count)
-    refuse(`${dir} records no area ${area} of ${count} shards`);
-  if (formatOf(plan).version === 1)
+  // (the area as every reader reads one, `areaRead`, and the shard through it)
+  const made = areaRead(dir, area, manifest);
+  if (made.area === undefined) refuse(made.refused ?? `${dir}/${area}: ${made.missing}`);
+  if (made.area.shards !== count) refuse(`${dir} records no area ${area} of ${count} shards`);
+  if (made.area.version === 1)
     refuse(`${file} is a shard stored before #1647: list its stalls with its own tree's tool`);
-  const read = shardRead(
-    file,
-    record.plan,
-    parsePlan(plan).places[index],
-    identityIn(manifest),
-    plan,
-  );
+  const read = shardRead(made.area, index, identityIn(manifest));
   if (read.lines === undefined) refuse(read.refused ?? `${file} is no shard that counts`);
   const stalls = read.sources
     .filter((line) => line.stalled !== undefined)
