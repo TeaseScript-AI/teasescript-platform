@@ -20,13 +20,13 @@
 #   tree's build of the compiler, `compiled <dist/src/ tree>`, with the PLAN of every area and no shard) and
 #   <out>/shards.tsv, one line per shard to store (`<area>\t<i>\t<N>`).
 # - `compute` stores one shard from the seed baseline into a new copy of it in its scratch (`import`, `compiled`, then the
-#   tree's runner at the seed PLAN's time limit, under sx-sandbox where it is found, only the scratch writable). Where
-#   sources stalled, it stores them again alone with the PLAN's memory and twice its time limit (`baselines.mjs alone`,
-#   #1612): a source that ends alone within that margin stalled under the machine's load and is stored with its result,
-#   put in its stalled line's place (`baselines.mjs merge`); a source that stalls alone within it stalls on its own and
-#   stays; any other stall fails (exit 1). Then <out>/<src tree>/ is that copy's MANIFEST, PLANs and shard (`import`),
-#   and <out>/stalls.json lists each stall with its run alone and the limit it ran at (`baselines.mjs stalls`), as
-#   `import` requires.
+#   tree's runner at the seed PLAN's limits, its unit multiple and safety net, with `--work`, under sx-sandbox where it is
+#   found, only the scratch and <out> writable). A stall is a run over the unit limit (or out of memory), the same on every machine
+#   (#1647), so it is stored once, with no run alone (#1612's reruns at twice a time limit are gone; `baselines.mjs`
+#   still reads a baseline stored before). Then <out>/<src tree>/ is that copy's MANIFEST, PLANs and shard (`import`),
+#   <out>/stalls.json lists each stall (`baselines.mjs stalls`), as `import` requires, and
+#   <out>/<area>.<i>of<N>.work.jsonl is the store's record of each source's units, allowance and time.
+#   A seed before #1647 (a plan 1 PLAN) is computed by its own tree's script.
 #   Its scratch is a new folder in $SX_SCRATCH (the central queue's, removed with the job), else in TMPDIR.
 # - `submit` prints (`--dry`) or submits the fill's jobs, one line each: the seed's, or with the seed's job id and its
 #   shards.tsv one per shard (`sx-job submit … -- bash -c '…'`; #1590's lines, whose command runs without a shell).
@@ -149,40 +149,26 @@ if [ "${1:-}" = compute ]; then
     echo "baseline ${src:0:9} $area $i/$n: $*" >&2
     exit 1
   }
-  # the seed PLAN's time limit, which every store of this shard runs at, and twice it for the stalled sources alone
-  limit=$(sed -n 's/^limits \([0-9][0-9]*\) s, [0-9][0-9]* MB$/\1/p' "$seed/$area/PLAN")
-  [ -n "$limit" ] || fail "its seed PLAN $seed/$area/PLAN has no limits line"
-  # a store into a folder of baselines in the scratch at a time limit (seconds), under sx-sandbox where it is found
-  # (only the scratch writable): whether its shard then counts
-  stored() {
-    local sandbox=("${BASELINE_SANDBOX:-sx-sandbox}" --write "$work" --) ended
-    command -v "${sandbox[0]}" > /dev/null || sandbox=()
-    ended=$("${sandbox[@]}" env TMPDIR="$work" FAMILIES_TIMEOUT="$4" node "$runner" "$1" "$tree" --store "$2" \
-      --shard "$3" | tee /dev/stderr | tail -n 1)
-    grep -q '"verified":true\|"skipped":"stored"' <<< "$ended"
-  }
-  # the shard stored into a new copy of the seed baseline, named by this tree's build
+  # the seed PLAN's limits, which every store of this shard runs at: the unit multiple and the safety net (#1647)
+  limits=$(sed -n 's/^limits \([0-9][0-9]*\) x allowance units, \([0-9][0-9]*\) s safety net, [0-9][0-9]* MB$/\1 \2/p' \
+    "$seed/$area/PLAN")
+  [ -n "$limits" ] || fail "its seed PLAN $seed/$area/PLAN has no unit limits line (a seed before #1647?)"
+  read -r units limit <<< "$limits"
+  # the shard stored into a new copy of the seed baseline, named by this tree's build, under sx-sandbox where it is
+  # found (only the scratch and <out>, where the runner writes its record, writable): whether it then counts
   copy() {
-    node "$state" import "$1" "${seed%/*}" >&2 && node "$state" compiled "$tree" "$1" >&2 &&
-      stored "$folder" "$1" "$i/$n" "$limit" && [ -f "$1/$src/$area/${i}of${n}.runs.jsonl" ]
+    local sandbox=("${BASELINE_SANDBOX:-sx-sandbox}" --write "$work" --write "$out" --) ended
+    command -v "${sandbox[0]}" > /dev/null || sandbox=()
+    node "$state" import "$1" "${seed%/*}" >&2 && node "$state" compiled "$tree" "$1" >&2 || return 1
+    ended=$("${sandbox[@]}" env TMPDIR="$work" FAMILIES_UNITS="$units" FAMILIES_TIMEOUT="$limit" node "$runner" \
+      "$folder" "$tree" --store "$1" --shard "$i/$n" --work "$out/$area.${i}of${n}.work.jsonl" | tee /dev/stderr |
+      tail -n 1)
+    grep -q '"verified":true' <<< "$ended" && [ -f "$1/$src/$area/${i}of${n}.runs.jsonl" ]
   }
   take=$work/first
   copy "$take" || fail "the shard could not be stored from the seed $seed"
-  stalled=$(node "$state" alone "$folder" "$take/$src/$area/${i}of${n}.runs.jsonl" "$work/alone/$area") || exit 2
-  ran=-
-  if [ "$(jq -r .stalled <<< "$stalled")" != 0 ]; then
-    ran=$work/alone-root/$src/$area/0of1.runs.jsonl
-    stored "$work/alone/$area" "$work/alone-root" 0/1 "$((2 * limit))" ||
-      fail "its stalled sources could not be stored alone"
-    # a source that ended alone within the margin: its result in its stalled line's place (#1612)
-    node "$state" merge "$take" "$area" "$i/$n" "$work/alone-root" >&2 ||
-      fail "its sources that ended alone could not be merged"
-  fi
-  # each stall left a stall of its own (it stalled alone too), decided in the scratch before <out> is written
-  node "$state" stalls "$take/$src/$area/${i}of${n}.runs.jsonl" "$ran" "$area" "$i/$n" "$work/stalls.json" >&2 ||
-    fail "a source stalled that neither stalled alone nor ended alone within twice the time limit of its PLAN"
   node "$state" import "$out" "$take" >&2 &&
-    node "$state" stalls "$take/$src/$area/${i}of${n}.runs.jsonl" "$ran" "$area" "$i/$n" "$out/stalls.json" >&2 &&
+    node "$state" stalls "$take/$src/$area/${i}of${n}.runs.jsonl" "$area" "$i/$n" "$out/stalls.json" >&2 &&
     node "$state" import "$out" "$take" "$area" "$i/$n" "$out/stalls.json"
   exit
 fi

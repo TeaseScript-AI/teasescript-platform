@@ -1,23 +1,27 @@
 // node tests/families/stalls.mjs <replay record>... [--rerun <record>...] [--index <new file>]
-// node tests/families/stalls.mjs rerun <index> <base> <head> <new folder> [--timeout 180] [--memory 2048]
+// node tests/families/stalls.mjs rerun <index> <base> <head> <new folder> [--timeout 1800] [--memory 2048]
 //   [--shard i/N | --items <file> | --items-from-env]
 // A replay's comparison from its shards' records (`run.mjs --work`: what was compared, then one line per source with
-// each run's charged work and milliseconds on each tree and what the source counted), with a verdict on each stalled
-// source (`verdictOf`, its rule `RULE`), and a rerun's records read in place of the replay's for the sources it ran
-// (#1564). A replay's `--out` file stands in for a shard recorded without `--work`: it gives the shard's stalls alone,
-// each `unknown`, and no count of what agreed. One comparison is one configuration (`configuration`: the sources'
-// sizes, the area's plan (the hash of every source's place in its order), the stop runs' allowances, each generator's
-// checks, each tree's identity): an area's shards and every rerun record merged into it must share it (another is
-// refused, exit 2, never closed), and the area is complete only with its shards 0/N to N-1/N, one N, of that plan. A
+// each run's charged work, allowance and milliseconds on each tree, a stored base's units, and what the source
+// counted), with a verdict on each stalled source (`verdictOf`, its rule `RULE`: since #1647 from the records alone, a
+// stall being a run over the unit limit, the same on every machine), and a rerun's records read in place of the
+// replay's for the sources it ran (#1564: needed only where the base's units are not stored, a baseline before #1647,
+// or for a record before it). A replay's `--out` file stands in for a shard recorded without `--work`: it gives the
+// shard's stalls alone, each `unknown`, and no count of what agreed. One comparison is one configuration
+// (`configuration`: the sources' sizes, the area's plan (the hash of every source's place in its order), the stop runs'
+// allowances, the unit limit's multiple, each generator's checks, each tree's identity): an area's shards and every
+// rerun record merged into it must share it (another is refused, exit 2, never closed), and the area is complete only
+// with its shards 0/N to N-1/N, one N, of that plan. A
 // plan may list one source more than once: its repeats (one place, each run and counted by the runner, and each shard's
 // lines checked against its total) are one source where they record the same counts, stall and runs, milliseconds apart
 // (`repeats` counts the others), and are refused (exit 2, naming the place) where they differ, in a replay and in a
 // rerun record alike (#1582). Rerun records are judgement attempts, read in the order given: a source's latest stands
 // where it or an earlier one stalled, and two that ended must say the same (#1587); the replay's are never replaced.
-// Prints the rule, one line per stalled source of the replay (with what its rerun did) and per source whose runs agree
-// but for some left unanswered alike on both trees (`unansweredAlike`, #1592: agreement named apart), one per area and a
-// total; exits 0 only where every area is complete, every source of it was compared and agrees or is unanswered alike,
-// an unavailable one (stalled) never counting as agreement, and no candidate stall is left, 1 otherwise, 2 on a record
+// Prints the rule, one line per stalled source of the replay (with what its rerun did), per source whose runs agree
+// but for some left unanswered alike on both trees (`unansweredAlike`, #1592: agreement named apart) and per source a
+// run of which reached the safety net (`uncharged`, a defect, #1647), one per area and a total; exits 0 only where
+// every area is complete, every source of it was compared and agrees or is unanswered alike, an unavailable one
+// (stalled) or an uncharged one never counting as agreement, and no candidate stall is left, 1 otherwise, 2 on a record
 // it cannot read or merge. `--index` writes the sources still unavailable, with their verdicts and records, and each
 // area's configuration: the stall index, which `rerun` runs on both trees in one process, one source at a time, an area
 // after another (by its name, once whatever paths its entries name), with that configuration (`run.mjs <area> <base>
@@ -42,9 +46,15 @@ import { sourceKey } from "./sources.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-/** What `verdictOf` decides, stated in the summary and the index. */
+/** What `verdictOf` decides, stated in the summary and the index: the unit rule (#1647), then the earlier records' rule. */
 export const RULE =
-  "A stalled source is a candidate stall where the head alone stalled for a reason other than time (memory, a fatal " +
+  "A run stalls where its charged units pass the unit limit (a multiple of its program's allowance, the same on every " +
+  "machine); the wall clock is only a safety net, whose trigger is uncharged work, never a stall. A stalled source is a " +
+  "candidate stall where the head alone stalled (over the unit limit on a run the base ended within it, or for memory or " +
+  "a fatal error); inherited where the base stalled too, or alone; unknown where the base's units are not stored (a " +
+  "baseline before #1647) or no record says which tree stalled: rerun it on both trees. " +
+  "A record without units (before #1647) is judged as before: " +
+  "a stalled source is a candidate stall where the head alone stalled for a reason other than time (memory, a fatal " +
   "error), where on one run the head charged more work than the base charged in the whole run, or, a heuristic for " +
   "work no ledger charges, where the trees ran in one process and over the runs the head started it took more than " +
   "twice the time the base's rate of work gives the head's work, plus ten seconds (a loaded worker can stretch either " +
@@ -54,11 +64,52 @@ export const RULE =
   "the base recorded, as against a stored baseline): rerun it on both trees.";
 
 /**
- * A stalled source's verdict from its normalized record (`entryOf`): `candidate`, `load` or `unknown` (`RULE`), and why,
- * naming the run that decides. Work is compared run by run, as each tree's work on a run does not depend on the load;
- * time over the runs the head started, as one run's time on a loaded worker can double at equal work.
+ * A stalled source's verdict from its normalized record (`entryOf`), by the unit rule (#1647) where a runner limiting
+ * each run's units made it (`units`), else as before: `candidate`, `inherited`, `load` (before #1647 only) or `unknown`
+ * (`RULE`), and why, naming the run that decides.
  */
-export function verdictOf({ stalled = {}, runs, paired }) {
+export function verdictOf(entry) {
+  return entry.units === undefined ? timeVerdictOf(entry) : unitVerdictOf(entry);
+}
+
+/**
+ * The unit rule (#1647): a run's units are the same on every machine, so a stall is decided by which tree stalled. The
+ * head alone stalled: a candidate, where the base's units are known (both trees ran, or its stored area holds them,
+ * `baseUnits`); the base stalled too, or alone: inherited; else unknown, rerun on both trees.
+ */
+function unitVerdictOf({ stalled = {}, runs = [], units, baseUnits }) {
+  const { base, head, source } = stalled;
+  if (head === undefined && base === undefined)
+    return {
+      verdict: "unknown",
+      why: `the source stalled (${source}), and no record names the tree`,
+    };
+  if (base !== undefined && head === undefined)
+    return { verdict: "inherited", why: `the base stalled (${base}), and the head did not` };
+  if (!baseUnits)
+    return {
+      verdict: "unknown",
+      why: `the head stalled (${head}), and no units of the base are stored (a baseline before #1647)`,
+    };
+  if (base !== undefined)
+    return { verdict: "inherited", why: `the base stalled too (${base}), the head (${head})` };
+  const cut = runs.findLast(({ head: is }) => is !== null && !is.done);
+  if (head !== "units" || cut === undefined)
+    return { verdict: "candidate", why: `the head alone stalled: ${head}` };
+  const { mode, check, base: was, head: is } = cut;
+  const of = was === null ? "none recorded" : `${was.work} within it`;
+  return {
+    verdict: "candidate",
+    why: `on ${mode} ${check} the head charged ${is.work} units, over ${units} × its allowance ${is.allowance}; the base ${of}`,
+  };
+}
+
+/**
+ * The rule before #1647, for a record without units: `candidate`, `load` or `unknown`. Work is compared run by run, as
+ * each tree's work on a run does not depend on the load; time over the runs the head started, as one run's time on a
+ * loaded worker can double at equal work.
+ */
+function timeVerdictOf({ stalled = {}, runs, paired }) {
   const { base, head, source } = stalled;
   if (head !== undefined && head !== "timeout" && base === undefined)
     return { verdict: "candidate", why: `the head alone stalled: ${head}` };
@@ -134,12 +185,20 @@ function areaOf(generator) {
 }
 
 /**
- * A record's run as the verdict reads it: each tree's work, milliseconds and whether it ended (`base` and `head`, `null`
- * where the tree did not run it here), the base being the stored one, not recorded, where one tree ran.
+ * A record's run as the verdict reads it: each tree's work, allowance, milliseconds and whether it ended (`base` and
+ * `head`, `null` where the tree did not run it here), the base being the stored one where one tree ran: not recorded
+ * before #1647, its stored units since (`ms` none).
  */
-function runOf({ mode, check, work, ms, running }) {
+function runOf({ mode, check, work, allowance = [], ms, running }) {
   const tree = (index) =>
-    ms[index] === null ? null : { work: work[index], ms: ms[index], done: running !== index };
+    ms[index] === null && (index === 1 || work[index] === null)
+      ? null
+      : {
+          work: work[index],
+          allowance: allowance[index] ?? null,
+          ms: ms[index],
+          done: running !== index,
+        };
   return work.length === 2
     ? { mode, check, base: tree(0), head: tree(1) }
     : { mode, check, base: null, head: tree(0) };
@@ -149,7 +208,7 @@ function runOf({ mode, check, work, ms, running }) {
  * A record's source as this tool reads it: its place, what it counted, its runs (`runOf`) and which tree stalled
  * (`base`, `head`, or `source` where neither is known).
  */
-function entryOf(line, area, trees) {
+function entryOf(line, area, trees, ran) {
   const runs = line.runs?.map(runOf);
   let { stalled } = line;
   if (typeof stalled === "string") {
@@ -158,10 +217,15 @@ function entryOf(line, area, trees) {
     stalled = { [tree ?? (trees === 1 ? "head" : "source")]: stalled };
   } else if (stalled !== undefined)
     stalled = Object.fromEntries(Object.entries(stalled).filter(([, why]) => why !== undefined));
-  return { ...line, area, stalled, runs, paired: trees === 2 };
+  // (#1647: the unit multiple of the runner that made the record, and whether the base's units are known)
+  const units =
+    ran?.units === undefined
+      ? {}
+      : { units: ran.units, baseUnits: ran.baseline === undefined || ran.stored?.units != null };
+  return { ...line, area, stalled, runs, paired: trees === 2, ...units };
 }
 
-const PROBLEMS = ["differences", "exceptions", "unanswered", "uncompared"];
+const PROBLEMS = ["differences", "exceptions", "unanswered", "uncompared", "uncharged"];
 const COUNTED = ["runs", "unparsed", ...PROBLEMS, "stalled"];
 
 /**
@@ -202,15 +266,15 @@ function shardOf(file) {
   const total = lines.at(-1)?.total;
   if (total === undefined || lines.length < 2)
     refused(`${file} has no total: its shard did not end`);
-  const entries = lines.slice(1, -1).map((line) => entryOf(line, ran.area, ran.roots.length));
+  const entries = lines.slice(1, -1).map((line) => entryOf(line, ran.area, ran.roots.length, ran));
   const sums = Object.fromEntries(
     [...COUNTED, "unansweredAlike"].map((key) => [
       key,
       entries.reduce((sum, { counts }) => sum + (counts[key] ?? 0), 0),
     ]),
   );
-  // (a runner before #1592 counts no run unanswered alike, and its total has none)
-  const expected = { unansweredAlike: 0, ...total };
+  // (a runner before #1592 counts no run unanswered alike, one before #1647 none uncharged, and their totals have none)
+  const expected = { unansweredAlike: 0, uncharged: 0, ...total };
   const differ = ["sources", ...COUNTED, "unansweredAlike"].filter(
     (key) => (key === "sources" ? entries.length : sums[key]) !== expected[key],
   );
@@ -232,7 +296,7 @@ const sameTree = (expected, actual) =>
  * part, a rerun (`rerun`) in its trees as `sameTree` matches them against the replay's.
  */
 const differing = (one, other, rerun = false) =>
-  ["sizes", "plan", "allowances", "checks", "trees"].filter((part) =>
+  ["sizes", "plan", "allowances", "units", "checks", "trees"].filter((part) =>
     part === "trees" && rerun
       ? one.trees.length !== other.trees.length ||
         one.trees.some((tree, index) => !sameTree(tree, other.trees[index]))
@@ -403,7 +467,7 @@ if (process.argv[2] === "rerun") {
   // the shard has no entry of
   for (const name of new Set(mine.map((entry) => nameOf(entry.area)))) {
     const area = areas.get(name);
-    const { sizes, allowances } = configurations[name];
+    const { sizes, allowances, units } = configurations[name];
     const { status: ended } = spawnSync(
       process.execPath,
       [
@@ -416,6 +480,8 @@ if (process.argv[2] === "rerun") {
         ...(sizes === null ? [] : ["--sizes", sizes.join(",")]),
         "--allowances",
         allowances.map((allowance) => allowance ?? "natural").join(","),
+        // (a replay before #1647 names no unit limit: the runner's)
+        ...(units === undefined ? [] : ["--units", String(units ?? "none")]),
         "--work",
         path.join(folder, `${name}${part}.work.jsonl`),
         "--out",
@@ -489,7 +555,7 @@ for (const shard of rerunFiles.map(shardOf)) {
 }
 
 console.log(JSON.stringify({ rule: RULE }));
-const VERDICTS = ["load", "candidate", "unknown"];
+const VERDICTS = ["load", "candidate", "inherited", "unknown"];
 const zeros = () =>
   Object.fromEntries(
     [
@@ -531,6 +597,12 @@ for (const [place, was] of replay) {
     const named = { generator, source, unansweredAlike: counts.unansweredAlike };
     console.log(JSON.stringify({ area: nameOf(area), ...named }));
     alike.push({ area, ...named, key });
+  }
+  // (a run that reached the safety net is a defect, uncharged work, named with its run: #1647)
+  if (is.uncharged !== undefined) {
+    const { area, generator, source, uncharged } = is;
+    const defect = "uncharged work: a run reached the safety net";
+    console.log(JSON.stringify({ area: nameOf(area), generator, source, uncharged, defect }));
   }
   if (verdict !== undefined) row[verdict.verdict] += 1;
   if (is.stalled !== undefined) {

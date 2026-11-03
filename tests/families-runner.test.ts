@@ -23,6 +23,65 @@ const runner = resolve(process.cwd(), "tests/families/run.mjs");
 const baselines = resolve(process.cwd(), "tests/families/baselines.mjs");
 const stalls = resolve(process.cwd(), "tests/families/stalls.mjs");
 
+/**
+ * A built tree's work ledger, which every unit of its analyses' work passes (the runner counts its charges and limits
+ * them at its multiple of the ledger's `allowance`, #1647), its program's allowance 30,000,000 unless given.
+ */
+const LEDGER = `export class WorkLedger {
+  #total = 0;
+  constructor(allowance = 30000000) {
+    this.allowance = allowance;
+  }
+  charge(counter, units = 1) {
+    this.#total += units;
+  }
+}
+`;
+
+const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+
+/** A stored source line's runs, each one tree's result with its units and allowance (#1647). */
+type Stored = { runs: Record<string, { work?: number; allowance?: number | null }> };
+const storedRuns = ({ runs }: Stored) => Object.values(runs);
+
+/**
+ * The plan 2 baseline `dir` (`<folder>/<src tree>`) rewritten as one stored before #1647, a plan 1 one: each PLAN's
+ * limits a time a source, its runs without units, a stall without its cut run, no run named at the safety net, and its
+ * MANIFEST's records and its shards' totals repaired, so that it counts as such a baseline did.
+ */
+const asPlanOne = (dir: string) => {
+  let manifest = readFileSync(join(dir, "MANIFEST"), "utf8");
+  for (const area of readdirSync(dir).filter((name) => existsSync(join(dir, name, "PLAN")))) {
+    const was = readFileSync(join(dir, area, "PLAN"), "utf8");
+    const plan = was
+      .replace(/^plan 2$/m, "plan 1")
+      .replace(/^limits .*$/m, "limits 180 s, 2048 MB");
+    writeFileSync(join(dir, area, "PLAN"), plan);
+    manifest = manifest.replace(sha256(was), sha256(plan));
+    for (const name of readdirSync(join(dir, area)).filter((one) => one.endsWith(".runs.jsonl"))) {
+      const lines = readFileSync(join(dir, area, name), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const { units: _units, uncharged: _uncharged, ...total } = lines.pop().total;
+      const body = lines
+        .map(
+          ({ cut: _cut, uncharged: _named, runs, ...line }: Stored & Record<string, unknown>) => {
+            // (each run's result without its units and allowance)
+            const results = Object.entries(runs).map(
+              ([run, { work: _work, allowance: _allowance, ...result }]) => [run, result],
+            );
+            return `${JSON.stringify({ ...line, runs: Object.fromEntries(results) })}\n`;
+          },
+        )
+        .join("");
+      const ended = { total: { ...total, plan: sha256(plan), lines: sha256(body) } };
+      writeFileSync(join(dir, area, name), `${body}${JSON.stringify(ended)}\n`);
+    }
+  }
+  writeFileSync(join(dir, "MANIFEST"), manifest);
+};
+
 /** A built tree's oracle library that throws in every mode where a source says `throw`, as #1439's stale caller did. */
 const library = `export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
@@ -490,8 +549,8 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     assert.deepEqual(counts(beside), [6, 1, 4, 4, 4, 0, 20, 4]);
     assert.deepEqual(counts(against), counts(beside));
     assert.equal(against.status, 1);
-    // its record (#1564): one tree, whose work these trees without a ledger record as `null`, and each stall's trees,
-    // a stall of both trees for a reason other than time unknown without the base's work
+    // its record (#1564, #1647): the stored base's units first, then the head's, which these trees without a ledger
+    // record as `null`, and each stall's trees, a stall of both trees inherited
     const record = join(directory, "against.work.jsonl");
     assert.equal(run(head, "--baseline", baseline, "--work", record).status, 1);
     const recorded = readFileSync(record, "utf8")
@@ -504,14 +563,21 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
       names,
     );
     for (const { runs: ran } of recorded)
-      for (const { work, ms } of ran) assert.deepEqual([work, ms.length], [[null], 1]);
+      for (const { work, ms } of ran)
+        assert.deepEqual(
+          [work, ms],
+          [
+            [null, null],
+            [null, ms[1]],
+          ],
+        );
     assert.deepEqual(recorded.find(({ source }) => source === "ends").stalled, {
       base: "exit 3",
       head: "exit 3",
     });
     assert.match(
       spawnSync(process.execPath, [stalls, record], { encoding: "utf8" }).stdout,
-      /"source":"ends".*"verdict":"unknown"/,
+      /"source":"ends".*"verdict":"inherited"/,
     );
     // its index rerun on both trees: a base of the MANIFEST's identity is the stored base, one of another oracle
     // library is not (#1564 r4)
@@ -1206,18 +1272,21 @@ test("the stored baselines finish or clear what a writer killed at a write left,
 });
 
 /**
- * A built tree's library where `ends` ends the process on every run, a stall of its own, and `flaky` and `mixed` end it on
- * the runs FLAKY's characters say (`x`, one each, counted in TMPDIR, which a fill's stores share), a stall of the
- * machine's load.
+ * A built tree's library whose runs charge its ledger (allowance 1,000) 300 units, the source HEAVY names 3,500 (over 3
+ * times its allowance, within 4 times it); where `ends` ends the process on every run, and `flaky` and `mixed` end it on
+ * the runs FLAKY's characters say (`x`, one each, counted in TMPDIR, which a fill's stores share); `flaky` waits SLOW
+ * ms in its first run.
  */
 const FILLABLE = `import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { WorkLedger } from "../../src/type-inference/core/budget.js";
 export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
 );
 export function publicationHashes(files) {
   const source = files[0].source;
+  new WorkLedger(1000).charge("frames", source === process.env.HEAVY ? 3500 : 300);
   if (source === "ends") process.exit(3);
   if (source === "flaky" && process.env.SLOW !== undefined && !globalThis.slept) {
     globalThis.slept = true;
@@ -1244,6 +1313,8 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         mkdirSync(join(folder, part), { recursive: true });
       writeFileSync(join(folder, "src", "a.ts"), "a\n");
       writeFileSync(join(folder, "dist", "src", "a.js"), compiled);
+      mkdirSync(join(folder, "dist", "src", "type-inference", "core"), { recursive: true });
+      writeFileSync(join(folder, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
       writeFileSync(join(folder, "dist", "tests", "helpers", "type-core-oracles.js"), FILLABLE);
       writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
       writeFileSync(join(folder, "package-lock.json"), "{}\n");
@@ -1252,7 +1323,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         cpSync(join("tests", "families", tool), join(folder, "tests", "families", tool));
       writeFileSync(
         join(folder, "tests", "families", "area", "stored.mjs"),
-        // (shard i of 16 holds the sources i and i + 16: shard 1 `ends` and `mixed`, a stall of its own and one of the load)
+        // (shard i of 16 holds the sources i and i + 16: shard 1 `ends` and `mixed`)
         `export const cases = ${JSON.stringify(
           [
             "same",
@@ -1310,75 +1381,76 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     ]);
     assert.equal(lines.split("\n").length, 17);
 
-    // shards computed from the seed: a stall of its own (`ends`, on every run alone too) stays, listed with its run
-    // alone in stalls.json; a stall under the machine's load (`flaky`, which ends alone) is stored with its run alone's
-    // result in its stalled line's place (#1612)
+    // shards computed from the seed: a stall (`ends`, which ends the process) stored once and listed in stalls.json with
+    // its reason, no run alone (#1647: a stall is the same on every machine); the store's record of each source beside
     const compute = (out: string, index: number, more = {}, from = built) =>
       sh(more, "compute", from, at("seed", src), "area", `${index}/16`, at(out));
-    for (const [out, index, flaky] of [
-      ["zero", 0, ""],
-      ["one", 1, "x...."],
-      ["two", 2, "x...."],
+    for (const [out, index] of [
+      ["zero", 0],
+      ["one", 1],
+      ["two", 2],
     ] as const) {
-      const computed = compute(out, index, { FLAKY: flaky });
+      const computed = compute(out, index);
       assert.equal(computed.status, 0, computed.stderr);
+      assert.ok(existsSync(at(out, `area.${index}of16.work.jsonl`)), out);
     }
     assert.deepEqual(listed("zero"), []);
-    assert.deepEqual(
-      listed("one").map(
-        (entry: { source: string; stalled: string; alone: { stalled: string } }) => [
-          entry.source,
-          entry.stalled,
-          entry.alone.stalled,
-        ],
-      ),
-      [["ends", "exit 3", "exit 3"]],
-    );
-    assert.equal(
-      JSON.parse(readFileSync(shard("one", 1), "utf8").split("\n")[1]!).stalled,
-      undefined,
-    );
-    assert.deepEqual(listed("two"), []);
-    assert.equal(
-      JSON.parse(readFileSync(shard("two", 2), "utf8").split("\n")[0]!).stalled,
-      undefined,
-    );
-    // (a stall the store after it would have repeated: the shard is not stored once more, its run alone's result stands)
-    const twice = compute("twice", 2, { FLAKY: "x....x" });
-    assert.equal(twice.status, 0, twice.stderr);
-    assert.deepEqual(listed("twice"), []);
-    const twiceShard = readFileSync(shard("twice", 2), "utf8").trim().split("\n");
-    assert.equal(JSON.parse(twiceShard[0]!).stalled, undefined);
-    assert.deepEqual(JSON.parse(twiceShard.at(-1)!).total.merged, [
-      ["stored.mjs", "flaky", JSON.parse(twiceShard[0]!).key],
+    assert.deepEqual(listed("one"), [
+      {
+        area: "area",
+        shard: "1/16",
+        generator: "stored.mjs",
+        source: "ends",
+        key: JSON.parse(readFileSync(shard("one", 1), "utf8").split("\n")[0]!).key,
+        stalled: "exit 3",
+      },
     ]);
-    assert.equal(JSON.parse(twiceShard.at(-1)!).total.runs, runsIn(twiceShard));
-    assert.equal(twiceShard[0], readFileSync(shard("two", 2), "utf8").split("\n")[0]);
-    // the margin (#1612): a source that takes longer than the PLAN's time limit but less than twice it (`flaky`, which
-    // waits 2.6 s once, in a seed whose limit is 2 s) stalls in the store and ends alone, stored with its result; a stall
-    // of its own (`ends`) is listed with the limit its run alone ran at
-    assert.equal(sh({ FAMILIES_TIMEOUT: "2" }, "seed", built, sha, at("seed-short")).status, 0);
+    assert.deepEqual(listed("two"), []);
+    // the seed's limits (#1647), at which its shards are stored: a run over its unit limit stalls whatever its time,
+    // listed with the run it cut (`mixed`, 3,500 units, at 3 times its allowance), and ends within 4 times it; a run
+    // that reaches its safety net (`flaky`, which waits 2.6 s once at 2 s) is uncharged work, stored so, no stall
+    assert.equal(
+      sh({ FAMILIES_UNITS: "3", FAMILIES_TIMEOUT: "2" }, "seed", built, sha, at("seed-short"))
+        .status,
+      0,
+    );
     assert.match(
       readFileSync(at("seed-short", src, "area", "PLAN"), "utf8"),
-      /^limits 2 s, 2048 MB$/m,
+      /^limits 3 x allowance units, 2 s safety net, 2048 MB$/m,
     );
     const short = (out: string, index: number, more = {}) =>
       sh(more, "compute", built, at("seed-short", src), "area", `${index}/16`, at(out));
+    const heavy = short("heavy", 1, { HEAVY: "mixed" });
+    assert.equal(heavy.status, 0, heavy.stderr);
+    assert.deepEqual(
+      listed("heavy").map(({ source, stalled, cut }: Record<string, unknown>) => [
+        source,
+        stalled,
+        cut,
+      ]),
+      [
+        ["ends", "exit 3", undefined],
+        ["mixed", "units", { run: "src-on publication", work: 3500, allowance: 1000 }],
+      ],
+    );
+    const within = compute("within", 1, { HEAVY: "mixed" });
+    assert.equal(within.status, 0, within.stderr);
+    assert.deepEqual(
+      storedRuns(JSON.parse(readFileSync(shard("within", 1), "utf8").split("\n")[1]!)).map(
+        ({ work }) => work,
+      ),
+      [3500, 3500, 3500, 3500],
+    );
     const slow = short("slow", 2, { SLOW: "2600" });
     assert.equal(slow.status, 0, slow.stderr);
     assert.deepEqual(listed("slow"), []);
-    const slowShard = readFileSync(shard("slow", 2), "utf8").trim().split("\n");
-    assert.equal(JSON.parse(slowShard[0]!).stalled, undefined);
-    assert.equal(JSON.parse(slowShard.at(-1)!).total.timeout, 2);
-    assert.deepEqual(JSON.parse(slowShard.at(-1)!).total.merged, [
-      ["stored.mjs", "flaky", JSON.parse(slowShard[0]!).key],
-    ]);
-    assert.equal(JSON.parse(slowShard.at(-1)!).total.runs, runsIn(slowShard));
-    const own = short("own", 1);
-    assert.equal(own.status, 0, own.stderr);
+    const [reached, slowEnd] = readFileSync(shard("slow", 2), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
     assert.deepEqual(
-      listed("own").map((entry: { source: string; limit: number }) => [entry.source, entry.limit]),
-      [["ends", 4]],
+      [reached.stalled, reached.uncharged, slowEnd.total.uncharged, slowEnd.total.timeout],
+      [undefined, "src-on publication", 1, 2],
     );
 
     // the central store: the seed adopted, then equal; status reads the tree's own folder without a tree, another
@@ -1456,7 +1528,8 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     );
 
     // refused (exit 2) and nothing written: another build of the compiler (computed from `rebuilt`), another MANIFEST
-    // line (a commit and tree), another PLAN, another Node, a stall stalls.json does not show alone, no baseline
+    // line (a commit and tree), another PLAN, another Node, a stall stalls.json does not list so, a stall over the unit
+    // limit whose cut run is not over it, no baseline
     const contents = () =>
       readdirSync(join(central, src, "area"))
         .sort()
@@ -1502,7 +1575,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       [
         copied("one", "unlisted", () => rmSync(at("unlisted", "stalls.json"))),
         1,
-        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
+        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not list it so/,
       ],
       [
         copied("zero", "damaged", (dir) =>
@@ -1512,31 +1585,12 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         /0of16\.runs\.jsonl is no shard that counts/,
       ],
       [
-        // (a run alone of the same source that ended, and no run alone)
-        copied("one", "ended-alone", () =>
-          edit(at("ended-alone", "stalls.json"), '"stalled":"exit 3","runs"', '"runs"'),
-        ),
-        1,
-        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
-      ],
-      [
-        copied("one", "alone", () =>
-          edit(at("alone", "stalls.json"), /"alone":\{.*\}(,"limit":\d+)\}\]\}/, '"alone":{}$1}]}'),
-        ),
-        1,
-        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
-      ],
-      [
-        // (a certificate of another reason than the shard's stalled line)
+        // (a listing of another reason than the shard's stalled line)
         copied("one", "reason", () =>
-          edit(
-            at("reason", "stalls.json"),
-            '"stalled":"exit 3","alone"',
-            '"stalled":"timeout","alone"',
-          ),
+          edit(at("reason", "stalls.json"), '"stalled":"exit 3"}', '"stalled":"timeout"}'),
         ),
         1,
-        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not show it stalling alone/,
+        /stored\.mjs ends stalled \(exit 3\), and stalls\.json does not list it so/,
       ],
       [
         copied("one", "twice-listed", () =>
@@ -1552,28 +1606,49 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         1,
         /total counts 2 sources and 0 stalled, its lines 2 and 1/,
       ],
-      [
-        // (a stall certificate is bound to its source: `mixed` stalled, its run alone `ends`'s)
-        copied("one", "borrowed", (dir) => {
-          const file = join(dir, "area", "1of16.runs.jsonl");
-          const lines = readFileSync(file, "utf8")
-            .trim()
-            .split("\n")
-            .map((line) => JSON.parse(line));
-          const ended = lines.pop();
-          Object.assign(lines[1], { stalled: "exit 4", runs: {} });
-          const body = lines.map((line) => `${JSON.stringify(line)}\n`).join("");
-          ended.total.lines = createHash("sha256").update(body).digest("hex");
-          ended.total.stalled = 2;
-          writeFileSync(file, `${body}${JSON.stringify(ended)}\n`);
-          const listing = JSON.parse(readFileSync(at("borrowed", "stalls.json"), "utf8"));
-          const [own] = listing.stalls;
-          listing.stalls.push({ ...own, source: "mixed", key: lines[1].key, stalled: "exit 4" });
-          writeFileSync(at("borrowed", "stalls.json"), JSON.stringify(listing));
-        }),
-        1,
-        /stored\.mjs mixed stalled \(exit 4\), and stalls\.json does not show it stalling alone/,
-      ],
+      // (#1647: a stall over the unit limit is certified by the run it cut, over the PLAN's 4 times its allowance, and
+      // listed with it)
+      ...(
+        [
+          [
+            "uncertified",
+            4000,
+            true,
+            /stored\.mjs mixed: its stall is not over 4 times its run's allowance/,
+          ],
+          [
+            "uncut",
+            4001,
+            false,
+            /stored\.mjs mixed stalled \(units\), and stalls\.json does not list it so/,
+          ],
+        ] as const
+      ).map(
+        ([name, units, withCut, refusal]) =>
+          [
+            copied("one", name, (dir) => {
+              const file = join(dir, "area", "1of16.runs.jsonl");
+              const lines = readFileSync(file, "utf8")
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line));
+              const ended = lines.pop();
+              const cut = { run: "src-on publication", work: units, allowance: 1000 };
+              Object.assign(lines[1], { stalled: "units", cut, runs: {} });
+              const body = lines.map((line) => `${JSON.stringify(line)}\n`).join("");
+              ended.total.lines = createHash("sha256").update(body).digest("hex");
+              ended.total.stalled = 2;
+              writeFileSync(file, `${body}${JSON.stringify(ended)}\n`);
+              const listing = JSON.parse(readFileSync(at(name, "stalls.json"), "utf8"));
+              const [own] = listing.stalls;
+              const entry = { ...own, source: "mixed", key: lines[1].key, stalled: "units" };
+              listing.stalls.push(withCut ? { ...entry, cut } : entry);
+              writeFileSync(at(name, "stalls.json"), JSON.stringify(listing));
+            }),
+            1,
+            refusal,
+          ] as const,
+      ),
       [
         copied("one", "elsewhere", () =>
           edit(
@@ -1598,6 +1673,12 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
             "unparsed-text",
             (line: string) => line.replace('"unparsed":false', '"unparsed":"no"'),
             /its run "src-on publication" is not one a store writes/,
+          ],
+          // (#1647: a plan 2 run without its units)
+          [
+            "no-units",
+            (line: string) => line.replace(/,"work":\d+/, ""),
+            /stored\.mjs same: its run "src-on publication" is not one a store writes/,
           ],
           // (Codex r3: a hash proved a string before its pattern, which an array or object would pass by coercion)
           [
@@ -1792,28 +1873,20 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         const value = runs[first!].value;
         const kept = otherwise
           ? {
+              ...runs[first!],
               value: {
                 ...value,
                 hash: `${value.hash[0] === "0" ? "1" : "0"}${value.hash.slice(1)}`,
               },
             }
           : runs[first!];
-        const stalled = { generator, source, key, stalled: "timeout", runs: { [first!]: kept } };
+        const stalled = { generator, source, key, stalled: "exit 4", runs: { [first!]: kept } };
         const body = [JSON.stringify(stalled), ...rest].map((one) => `${one}\n`).join("");
         ended.total.stalled += 1;
         ended.total.runs -= Object.keys(runs).length - 1;
         ended.total.lines = createHash("sha256").update(body).digest("hex");
         writeFileSync(file, `${body}${JSON.stringify(ended)}\n`);
-        const entry = {
-          area: "area",
-          shard: "0/16",
-          generator,
-          source,
-          key,
-          stalled: "timeout",
-          alone: stalled,
-          limit: 4,
-        };
+        const entry = { area: "area", shard: "0/16", generator, source, key, stalled: "exit 4" };
         writeFileSync(
           join(dir, "..", "stalls.json"),
           `${JSON.stringify({ area: "area", shard: "0/16", stalls: [entry] })}\n`,
@@ -1829,7 +1902,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
           generator: "stored.mjs",
           source: "same",
           key: sameKey,
-          stalled: "timeout",
+          stalled: "exit 4",
           complete: "stored",
         },
       ],
@@ -1844,7 +1917,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
         generator: "stored.mjs",
         source: "same",
         key: sameKey,
-        stalled: "timeout",
+        stalled: "exit 4",
         complete: "computed",
       },
     ]);
@@ -1863,81 +1936,6 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
     const otherwise = imported(stalledCopy("stall-otherwise", true), 0);
     assert.equal(otherwise.status, 3, otherwise.stdout);
     assert.match(said(otherwise).differs, /says otherwise than .* of stored\.mjs same/);
-    // (#1612) `merge` takes a run alone only as one of the shard's inputs within the margin, read as a stored shard is,
-    // and refuses any other before it writes (exit 2): one of another src/ tree and oracle library whose line of the
-    // stalled source is complete (job 1102190416b170's pair), one of a tree the shard's MANIFEST does not name
-    // (`alias`), one at the PLAN's own time limit; then the run alone of its own tree at twice it merges
-    const limit = Number(
-      /^limits (\d+) s/m.exec(readFileSync(at("seed", src, "area", "PLAN"), "utf8"))![1],
-    );
-    const foreign = tree("foreign", "3");
-    writeFileSync(join(foreign, "src", "a.ts"), "foreign\n");
-    writeFileSync(
-      join(foreign, "dist", "tests", "helpers", "type-core-oracles.js"),
-      `${FILLABLE}// another oracle library\n`,
-    );
-    const into = stalledCopy("merge-into");
-    const aloneOf = (name: string, from: string, seconds: number) => {
-      const area = at(name, "area");
-      const made = tool("alone", join(from, "tests", "families", "area"), shard(into, 0), area);
-      assert.equal(made.status, 0, made.stderr);
-      const runner = join(from, "tests", "families", "run.mjs");
-      const ran = spawnSync(
-        process.execPath,
-        [runner, area, from, "--store", at(name, "root"), "--shard", "0/1"],
-        { encoding: "utf8", env: { ...env, FAMILIES_TIMEOUT: String(seconds) } },
-      );
-      assert.equal(ran.status, 0, ran.stderr);
-      return at(name, "root");
-    };
-    const intoArea = () =>
-      readdirSync(at(into, src, "area"))
-        .sort()
-        .map((name) => [name, readFileSync(at(into, src, "area", name), "utf8")]);
-    const unmerged = intoArea();
-    for (const [name, from, seconds, refusal] of [
-      ["foreign", foreign, 2 * limit, /holds runs of other inputs than the shard's: src, oracles$/],
-      [
-        "alias",
-        alias,
-        2 * limit,
-        /ran from a commit and tree .* does not name: "commit 2{40} .*alias"$/,
-      ],
-      [
-        "at-limit",
-        built,
-        limit,
-        new RegExp(`ran at "limits ${limit} s, 2048 MB", not "limits ${2 * limit} s, 2048 MB"$`),
-      ],
-    ] as const) {
-      const refused = tool(
-        "merge",
-        at(into),
-        "area",
-        "0/16",
-        aloneOf(`alone-${name}`, from, seconds),
-      );
-      assert.equal(refused.status, 2, refused.stdout);
-      assert.match(refused.stderr.trim(), refusal);
-      assert.deepEqual(intoArea(), unmerged);
-    }
-    const mergedInto = tool(
-      "merge",
-      at(into),
-      "area",
-      "0/16",
-      aloneOf("alone-own", built, 2 * limit),
-    );
-    assert.equal(mergedInto.status, 0, mergedInto.stderr);
-    assert.deepEqual(said(mergedInto), {
-      merged: [["stored.mjs", "same", sameKey]],
-      verified: true,
-    });
-    // (byte for byte the shard the stall-only import completed: its lines, its runs and its merged sources)
-    assert.equal(
-      readFileSync(shard(into, 0), "utf8"),
-      readFileSync(join(second, src, "area", "0of16.runs.jsonl"), "utf8"),
-    );
     // a seed into the complete baseline: equal, nothing written; one from another commit's tree differs (exit 3)
     assert.equal(sh({}, "seed", alias, "2".repeat(40), at("alias-seed")).status, 0);
     const reseeded = tool("import", central, at("alias-seed"));
@@ -1951,24 +1949,224 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
   }
 });
 
-/** A built tree's work ledger, which every unit of its analyses' work passes (`--work` counts its charges). */
-const LEDGER = `export class WorkLedger {
-  #total = 0;
-  charge(counter, units = 1) {
-    this.#total += units;
-  }
+/**
+ * A built tree's library whose analyses charge its ledger (allowance 1,000) 300 units a run: `over` 5,000 more on the
+ * head, `both` on both trees, `budget` 1,500 more (past its allowance, a budget stop, within 4 times it); on the head,
+ * `slowall` waits 600 ms each run and `hang` 3 s in its first.
+ */
+const unitsLibrary = (
+  head: boolean,
+): string => `import { WorkLedger } from "../../src/type-inference/core/budget.js";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+export function publicationHashes(files, mode) {
+  const source = files[0].source;
+  const ledger = new WorkLedger(1000);
+  ledger.charge("frames", 300);
+  if (source === "both" || (${head} && source === "over")) ledger.charge("frames", 5000);
+  if (source === "budget") ledger.charge("frames", 1500);
+  if (${head} && source === "slowall") wait(600);
+  if (${head} && source === "hang" && mode === MODES[0]) wait(3000);
+  return { parts: ["a", "b"], unanswered: 0 };
 }
 `;
 
+test("a run stalls where its charged units pass the unit limit, the same on every machine, and the wall clock is only a safety net, whose trigger is uncharged work; a baseline stores each run's units, so the stall index judges a head stall from the records, and says so where an older baseline stores none (#1647)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const built = (name: string, isHead: boolean) => {
+      const tree = join(directory, name);
+      mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+      mkdirSync(join(tree, "dist", "src", "type-inference", "core"), { recursive: true });
+      mkdirSync(join(tree, "src"));
+      writeFileSync(join(tree, "src", "a.ts"), "a\n");
+      writeFileSync(join(tree, ".sha"), `${(isHead ? "2" : "1").repeat(40)}\n`);
+      writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(tree, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
+      writeFileSync(
+        join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+        unitsLibrary(isHead),
+      );
+      return tree;
+    };
+    const [base, head] = [built("base", false), built("head", true)];
+    const folder = join(directory, "units");
+    mkdirSync(folder);
+    const names = ["fast", "over", "both", "budget", "slowall", "hang"];
+    writeFileSync(
+      join(folder, "g.mjs"),
+      `export const cases = ${JSON.stringify(names.map((name) => [name, name]))};\n`,
+    );
+    const run = (tool: string, ...args: string[]) =>
+      spawnSync(process.execPath, [tool, ...args], { encoding: "utf8" });
+    const lines = (text: string) =>
+      text
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+    const sources = (file: string) =>
+      new Map(
+        lines(readFileSync(file, "utf8"))
+          .slice(1, -1)
+          .map((line) => [line.source, line]),
+      );
+    const charged = ({ runs }: { runs: Record<string, unknown>[] }) =>
+      runs.map(({ work, allowance, running }) => ({ work, allowance, running }));
+    const MODES = ["src-on", "src-off", "rev-on", "rev-off"];
+
+    // both trees in one process, a safety net of 1 s a run: `over` stalls in the head's first run at the charge that
+    // passes 4 × 1,000 units, `both` in the base's (the head's not run); `budget` ends past its allowance, a budget stop;
+    // `slowall` ends, its head's runs together far past the safety net; `hang` reaches it, uncharged work, not a stall
+    const paired = join(directory, "paired.work.jsonl");
+    const ran = run(runner, folder, base, head, "--timeout", "1", "--work", paired);
+    assert.equal(ran.status, 1, ran.stderr);
+    const ended = lines(ran.stdout).at(-1);
+    assert.deepEqual([ended.stalled, ended.uncharged, ended.units], [2, 1, 4]);
+    assert.match(ran.stderr, /"source":"hang","uncharged":\{"head":"src-on publication"\}/);
+    const record = sources(paired);
+    // (judged from the record alone: `over` the head's stall on a run the base ended within the limit, `both` the base's)
+    assert.deepEqual(
+      lines(run(stalls, paired).stdout)
+        .slice(1, 4)
+        .map(({ source, verdict, uncharged }) => [source, verdict ?? uncharged]),
+      [
+        ["over", "candidate"],
+        ["both", "inherited"],
+        ["hang", { head: "src-on publication" }],
+      ],
+    );
+    assert.deepEqual(
+      ["over", "both"].map((source) => [record.get(source).stalled, charged(record.get(source))]),
+      [
+        ["units", [{ work: [300, 5300], allowance: [1000, 1000], running: 1 }]],
+        ["units", [{ work: [5300, null], allowance: [1000, null], running: 0 }]],
+      ],
+    );
+    assert.deepEqual(
+      charged(record.get("budget")),
+      MODES.map(() => ({ work: [1800, 1800], allowance: [1000, 1000], running: undefined })),
+    );
+    const slowest = record.get("slowall").runs.map(({ ms }: { ms: number[] }) => ms[1]);
+    assert.ok(
+      record.get("slowall").stalled === undefined &&
+        slowest.reduce((sum: number, ms: number) => sum + ms, 0) > 2000,
+      String(slowest),
+    );
+    assert.deepEqual(
+      [record.get("hang").stalled, record.get("hang").uncharged, record.get("hang").counts],
+      [undefined, { head: "src-on publication" }, { uncharged: 1 }],
+    );
+
+    // the base stored (plan 2): each run with its units and allowance, a stall over the unit limit with the run it cut,
+    // its certificate
+    const store = join(directory, "store");
+    mkdirSync(store);
+    assert.equal(run(runner, folder, base, "--store", store).status, 1);
+    const [src] = readdirSync(store);
+    const area = join(store, src!, "units");
+    assert.match(
+      readFileSync(join(area, "PLAN"), "utf8"),
+      /^plan 2\n(?:.*\n)*limits 4 x allowance units, \d+ s safety net, 2048 MB\n/,
+    );
+    const shard = lines(readFileSync(join(area, "0of1.runs.jsonl"), "utf8"));
+    const storedOf = (source: string) => shard.find((line) => line.source === source);
+    assert.deepEqual(
+      [storedOf("both").stalled, storedOf("both").cut],
+      ["units", { run: "src-on publication", work: 5300, allowance: 1000 }],
+    );
+    assert.deepEqual(
+      storedRuns(storedOf("budget")).map(({ work, allowance }) => [work, allowance]),
+      MODES.map(() => [1800, 1000]),
+    );
+    assert.deepEqual([shard.at(-1).total.units, shard.at(-1).total.uncharged], [4, 0]);
+
+    // the head against it: the stall index judges each stall from the records, no rerun: `over` a candidate (the base
+    // ended the run within the limit), `both` inherited (the base stalled too), `hang` uncharged work, a defect
+    const judged = (name: string, baseline: string) => {
+      const file = join(directory, `${name}.work.jsonl`);
+      const compared = run(
+        runner,
+        folder,
+        head,
+        "--baseline",
+        baseline,
+        "--timeout",
+        "1",
+        "--work",
+        file,
+      );
+      assert.equal(compared.status, 1, compared.stderr);
+      const verdicts = run(stalls, file);
+      assert.equal(verdicts.status, 1, verdicts.stderr);
+      return [lines(readFileSync(file, "utf8"))[0].work.stored, lines(verdicts.stdout)] as const;
+    };
+    const [stored, verdicts] = judged("against", area);
+    assert.deepEqual(stored, { units: 4 });
+    assert.deepEqual(
+      verdicts.slice(1, 4).map(({ source, verdict, uncharged }) => [source, verdict ?? uncharged]),
+      [
+        ["over", "candidate"],
+        ["both", "inherited"],
+        ["hang", { head: "src-on publication" }],
+      ],
+    );
+    assert.equal(
+      verdicts[1].why,
+      "on src-on publication the head charged 5300 units, over 4 × its allowance 1000; the base 300 within it",
+    );
+    assert.deepEqual(
+      [
+        verdicts.at(-1).candidate,
+        verdicts.at(-1).inherited,
+        verdicts.at(-1).unknown,
+        verdicts.at(-1).uncharged,
+      ],
+      [1, 1, 0, 1],
+    );
+
+    // a baseline stored before #1647 (plan 1) is read: no units of its base, so a head stall is unknown, said so
+    const old = join(directory, "old");
+    cpSync(store, old, { recursive: true });
+    asPlanOne(join(old, src!));
+    const [none, unknown] = judged("before", join(old, src!, "units"));
+    assert.deepEqual(none, { units: null });
+    assert.deepEqual(
+      unknown.slice(1, 3).map(({ source, verdict, why }) => [source, verdict, why]),
+      [
+        [
+          "over",
+          "unknown",
+          "the head stalled (units), and no units of the base are stored (a baseline before #1647)",
+        ],
+        [
+          "both",
+          "unknown",
+          "the head stalled (units), and no units of the base are stored (a baseline before #1647)",
+        ],
+      ],
+    );
+    // and a plan 2 baseline is compared only at its own unit limit
+    const elsewhere = run(runner, folder, head, "--baseline", area, "--units", "3");
+    assert.equal(elsewhere.status, 2);
+    assert.match(
+      elsewhere.stderr,
+      /is stored at 4 times the allowance: run the head there \(--units 4\)/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 /**
- * A built tree's library whose analyses charge its ledger 3,000 units a run: `throws` throws on both trees, `ends` ends
- * the process there, as `twin` and each `once…` do where `FIXTURE_ENDS` is set; else the head's clock (its process's
- * `performance.now`) moves 3,000 ms on through each of `twin`'s runs in its first repeat or its second
- * (`FIXTURE_SKEW`), no time passing; `busy` waits 200 ms on the base; `lagging` waits 600 ms on the head's first run; `slow` charges a billion units more on the head and
- * waits 150 ms there; `burst` charges 10,000 times 65,536 units at once on the head, then waits; `changed` publishes its
- * second part otherwise on the head. Its stop sets differ on the head at demand allowance 1 and wait there at 2. Where
- * `FIXTURE_TRACE` names a file, the head appends a source's name to it in the source's first mode: once each time the
- * source runs.
+ * A built tree's library whose analyses charge its ledger (allowance 30,000,000, so the runner's limit is 120,000,000
+ * units a run) 3,000 units a run: `throws` throws on both trees, `ends` ends the process there, as each `once…` does
+ * where `FIXTURE_ENDS` is set; `busy` waits 200 ms on the base; `lagging` waits 600 ms on the head's first run; `slow`
+ * charges a billion units more on the head at once and waits 150 ms there; `burst` charges 10,000 times 65,536 units on
+ * the head, then waits; `changed` publishes its second part otherwise on the head. Its stop sets differ on the head at
+ * demand allowance 1 and charge a billion units there at 2. Where `FIXTURE_TRACE` names a file, the head appends a
+ * source's name to it in the source's first mode: once each time the source runs.
  */
 const charging = (head: boolean): string => `import { appendFileSync } from "node:fs";
 import { WorkLedger } from "../../src/type-inference/core/budget.js";
@@ -1976,21 +2174,14 @@ export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
 );
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const clock = performance.now.bind(performance);
-let skew = 0;
-let twins = 0;
-performance.now = () => clock() + skew;
 export function publicationHashes(files, mode) {
   const source = files[0].source;
   const ledger = new WorkLedger();
   for (let unit = 0; unit < 1000; unit += 1) ledger.charge("frames", 3);
   if (source === "throws") throw new Error("independent exception witness");
-  if (source === "ends" || ((source === "twin" || source.startsWith("once")) && process.env.FIXTURE_ENDS))
-    process.exit(3);
+  if (source === "ends" || (source.startsWith("once") && process.env.FIXTURE_ENDS)) process.exit(3);
   if (${head} && mode === MODES[0] && process.env.FIXTURE_TRACE)
     appendFileSync(process.env.FIXTURE_TRACE, source + "\\n");
-  if (${head} && source === "twin" && (twins++ < 4) === (process.env.FIXTURE_SKEW === "first"))
-    skew += 3000;
   if (!${head} && source === "busy") wait(200);
   if (${head} && source === "lagging" && mode === MODES[0]) wait(600);
   if (${head} && source === "slow") {
@@ -2005,12 +2196,12 @@ export function publicationHashes(files, mode) {
 }
 export function stopSet(files, mode, globals, allowance) {
   if (${head} && allowance === 1) return { stops: [[1, "x", "y", 1]] };
-  if (${head} && allowance === 2) wait(10000);
+  if (${head} && allowance === 2) new WorkLedger().charge("frames", 1e9);
   return { stops: [] };
 }
 `;
 
-test("the corpus runner records each source's work and time, a stalled run's to the stall, and a rerun of the stall index on both trees, whole or in shards that rerun it once, closes a timeout but never a stall, a candidate or a difference (#1564, #1598)", () => {
+test("the corpus runner records each source's units, allowance and time, a cut run's to the stall, and a rerun of the stall index on both trees, whole or in shards that rerun it once, closes a stall that ends but never a stall over the unit limit, a candidate or a difference (#1564, #1598, #1647)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     const built = (isHead: boolean) => {
@@ -2127,40 +2318,11 @@ test("the corpus runner records each source's work and time, a stalled run's to 
     assert.equal(once.status, 0, once.stderr);
     const { sources, repeats, agreed, closed } = lines(once.stdout).at(-1);
     assert.deepEqual([sources, repeats, agreed, closed], [3, 1, 3, true]);
-    // a source the plan lists twice whose repeats end alike in a rerun, one of them in times the time clause judges a
-    // candidate, first or second, as the head's clock says (#1583 r1): the candidate stands, so the replay stays open
-    const clocked = area("clocked", ["twin", "twin"]);
     const withEnv = (env: Record<string, string>, tool: string, ...args: string[]) =>
       spawnSync(process.execPath, [tool, ...args], {
         encoding: "utf8",
         env: { ...process.env, ...env },
       });
-    for (const skew of ["first", "second"]) {
-      const clockedWork = join(directory, `clocked-${skew}.work.jsonl`);
-      const clockedIndex = join(directory, `clocked-${skew}.json`);
-      withEnv({ FIXTURE_ENDS: "1" }, runner, clocked, base, head, "--work", clockedWork);
-      run(stalls, clockedWork, "--index", clockedIndex);
-      const reran = join(directory, `clocked-${skew}`);
-      withEnv({ FIXTURE_SKEW: skew }, stalls, "rerun", clockedIndex, base, head, reran);
-      const ms = lines(readFileSync(join(reran, "clocked.work.jsonl"), "utf8"))
-        .slice(1, -1)
-        .map(({ runs: ran }) =>
-          ran.reduce((sum: number, { ms: [, of] }: { ms: number[] }) => sum + (of ?? 0), 0),
-        );
-      assert.ok(
-        skew === "first" ? ms[0] >= 12000 && ms[1] < 1000 : ms[1] >= 12000 && ms[0] < 1000,
-        String(ms),
-      );
-      const merged = lines(
-        run(stalls, clockedWork, "--rerun", join(reran, "clocked.work.jsonl")).stdout,
-      );
-      const [twin] = merged.filter(({ source }) => source === "twin");
-      assert.deepEqual([twin.rerun.outcome, twin.rerun.verdict], ["agreed", "candidate"]);
-      assert.deepEqual(
-        [merged.at(-1).repeats, merged.at(-1).candidate, merged.at(-1).closed],
-        [1, 1, false],
-      );
-    }
     // one library (#1564 r3's mixed-dist witness): two heads given as their `dist/`, one compiled `src/` and two oracle
     // libraries, compare otherwise and are refused together; one head's `dist/` in both shards closes
     const twin = join(directory, "twin");
@@ -2215,16 +2377,22 @@ test("the corpus runner records each source's work and time, a stalled run's to 
       1,
     );
 
-    // charges far faster than the runner reads them, then a wait past the limit: the record holds them all, as the
-    // child wrote it over at the last charge (#1564 r1's saturation witness)
+    // charges far faster than the runner reads them, then a wait past the safety net: the run stalls at the charge that
+    // passes the unit limit, 3,000 + 1,832 × 65,536 units, and the record holds it exactly, as the child wrote it over
+    // there (#1564 r1's saturation witness, #1647)
     const burst = join(directory, "burst.work.jsonl");
     run(runner, area("burst", ["burst"]), base, head, "--timeout", "1.5", "--work", burst);
-    const flooded = lines(readFileSync(burst, "utf8"))[1].runs.at(-1);
-    assert.deepEqual([flooded.work, flooded.running], [[3000, 3000 + 10_000 * 65_536], 1]);
+    const [, flooding] = lines(readFileSync(burst, "utf8"));
+    const flooded = flooding.runs.at(-1);
+    assert.deepEqual(
+      [flooding.stalled, flooded.work, flooded.allowance, flooded.running],
+      ["units", [3000, 3000 + 1832 * 65_536], [30_000_000, 30_000_000], 1],
+    );
 
-    // a replay at a half-second limit: `slow` stalls in the head's long runs, `busy` in the base's turn, `lagging` in the
-    // head's first run; each source's record holds each run's units and milliseconds on each tree, a stalled run's
-    // those it had when the runner ended it
+    // a replay at a half-second safety net: `slow` stalls in the head's first run over the unit limit, before its wait;
+    // `busy` ends, its base's runs each within the safety net; `lagging` reaches it in the head's first run, uncharged
+    // work and no stall; each source's record holds each run's units, allowance and milliseconds on each tree, a cut
+    // run's those it had when the runner ended it
     const replay = area("replay", ["fast", "slow", "busy", "lagging"]);
     const work = join(directory, "replay.work.jsonl");
     const ran = run(runner, replay, base, head, "--timeout", "0.5", "--work", work);
@@ -2236,8 +2404,9 @@ test("the corpus runner records each source's work and time, a stalled run's to 
         header.work.shard,
         header.work.roots,
         header.work.configuration.allowances,
+        header.work.configuration.units,
       ],
-      [replay, "0/1", [base, head], [null, 16, 256]],
+      [replay, "0/1", [base, head], [null, 16, 256], 4],
     );
     assert.deepEqual(total.total, JSON.parse(ran.stdout.trim().split("\n").at(-1)!));
     assert.deepEqual(
@@ -2246,40 +2415,46 @@ test("the corpus runner records each source's work and time, a stalled run's to 
     );
     assert.deepEqual([fast.counts, fast.stalled], [{ runs: 4 }, undefined]);
     assert.deepEqual(
-      [slow.stalled, busy.stalled, lagging.stalled],
-      ["timeout", "timeout", "timeout"],
+      [slow.stalled, busy.stalled, lagging.stalled, lagging.uncharged],
+      ["units", undefined, undefined, { head: "src-on publication" }],
     );
     const cut = slow.runs.at(-1);
     assert.deepEqual([cut.work, cut.running], [[3000, 1e9 + 3000], 1]);
-    assert.ok(cut.ms[1] > 0 && cut.ms[1] <= 200, String(cut.ms));
-    assert.equal(busy.runs.at(-1).running, 0);
-    assert.deepEqual(lagging.runs.at(-1).running, 1);
+    assert.deepEqual([busy.counts, busy.runs.at(-1).running], [{ runs: 4 }, undefined]);
+    assert.deepEqual([lagging.counts, lagging.runs.at(-1).running], [{ uncharged: 1 }, 1]);
 
-    // the index: `slow` a candidate (the head charged more than the base on a run), `busy` load (the base's turn ran
-    // out), `lagging` unknown (the head's run cut short of the base's work); none agreement
+    // the index: `slow` a candidate (the head alone over the unit limit, on a run the base ended within it), `lagging`
+    // named as uncharged work; neither agreement
     const index = join(directory, "index.json");
     const indexed = run(stalls, work, "--index", index);
     assert.equal(indexed.status, 1, indexed.stderr);
     const printed = lines(indexed.stdout);
-    assert.match(printed[0].rule, /^A stalled source is a candidate stall/);
+    assert.match(printed[0].rule, /^A run stalls where its charged units pass the unit limit/);
     assert.deepEqual(
-      printed.slice(1, 4).map(({ source, verdict }) => [source, verdict]),
+      printed.slice(1, 3).map(({ source, verdict, uncharged }) => [source, verdict ?? uncharged]),
       [
         ["slow", "candidate"],
-        ["busy", "load"],
-        ["lagging", "unknown"],
+        ["lagging", { head: "src-on publication" }],
       ],
     );
     const counted = (row: Record<string, unknown>) =>
-      ["sources", "agreed", "unavailable", "load", "candidate", "unknown", "rerun", "closed"].map(
-        (key) => row[key],
-      );
-    assert.deepEqual(counted(printed[5]), [4, 1, 3, 1, 1, 1, 0, false]);
+      [
+        "sources",
+        "agreed",
+        "unavailable",
+        "uncharged",
+        "candidate",
+        "inherited",
+        "unknown",
+        "rerun",
+        "closed",
+      ].map((key) => row[key]);
+    assert.deepEqual(counted(printed[4]), [4, 2, 1, 1, 1, 0, 0, 0, false]);
     assert.deepEqual(
       JSON.parse(readFileSync(index, "utf8")).entries.map(
         ({ source }: { source: string }) => source,
       ),
-      ["slow", "busy", "lagging"],
+      ["slow"],
     );
 
     // an index naming a source its area does not hold is refused before any runs
@@ -2287,25 +2462,21 @@ test("the corpus runner records each source's work and time, a stalled run's to 
     const fewer = area(join("elsewhere", "replay"), ["fast"]);
     assert.match(run(runner, fewer, base, head, "--only", index).stderr, /does not hold/);
 
-    // the rerun: each source alone, both trees in one process; all three end and agree, but `slow` charged the head
-    // more, so the replay stays open
+    // the rerun: each source alone, both trees in one process; `slow` stalls again, at the same units, as it does on
+    // every machine, so the replay stays open
     const again = join(directory, "again");
     const rerun = run(stalls, "rerun", index, base, head, again, "--timeout", "5");
-    assert.equal(rerun.status, 0, rerun.stderr);
+    assert.equal(rerun.status, 1, rerun.stderr);
     const merged = run(stalls, work, "--rerun", join(again, "replay.work.jsonl"));
     assert.equal(merged.status, 1, merged.stderr);
     const after = lines(merged.stdout);
     assert.deepEqual(
       after
-        .slice(1, 4)
+        .slice(1, 2)
         .map(({ source, rerun: { outcome, verdict } }) => [source, outcome, verdict]),
-      [
-        ["slow", "agreed", "candidate"],
-        ["busy", "agreed", undefined],
-        ["lagging", "agreed", undefined],
-      ],
+      [["slow", "stalled", "candidate"]],
     );
-    assert.deepEqual(counted(after.at(-1)), [4, 4, 0, 0, 1, 0, 3, false]);
+    assert.deepEqual(counted(after.at(-1)), [4, 2, 1, 1, 1, 0, 0, 1, false]);
 
     // `rerun --shard i/N` (#1598): an index over two areas, one of them replayed at two paths in two shards (a replay
     // sharded across workers), its entry k rerun by shard k mod N alone, one runner per area whatever paths its entries

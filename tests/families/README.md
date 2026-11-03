@@ -11,8 +11,8 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
-  [--allowances natural,16,256] [--shard i/N] [--timeout 180] [--memory 2048] [--out differences.jsonl] \
-  [--work <area>-<i>of<N>.work.jsonl] [--only <stall index>]
+  [--allowances natural,16,256] [--shard i/N] [--units 4] [--timeout 1800] [--memory 2048] \
+  [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl] [--only <stall index>]
 node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base src tree>/<area> [the same options]
 node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/16]
 node tests/families/stalls.mjs <shards' --work records>... [--rerun <rerun's records>...] [--index <new file>]
@@ -23,12 +23,21 @@ Each source runs in the four modes (source and reversed order, the sharing on an
 publishes (`publication`) part by part (`publicationHashes`: the answers, the record, each occurrence's answer and the
 route, in that order, each hashed as it is made), so a publication of any size is compared without one string of it, and
 a difference names its first differing part by that index and each tree's count of parts (#1503); and, for a generator
-whose `checks` include `"stops"`, which decisions stop and when at each demand allowance (`stopSet`). A source that
-takes more than `--timeout` seconds (180 by default; 60 in CI, which sets `CI=true` and runs only the runner's own
-tests) or `--memory` MB of heap, or that ends its analysing process (a fatal V8 error), is counted as stalled with the
-reason (`--out`), and the runner goes on with the next. The runs its process had written before the runner ended it
-still count; one whose outcome it was still writing is lost with the process, and a final reply cannot finish the source
-once its timeout callback has run (#1498). After the kill the runner waits for the process and its pipes to close, so a
+whose `checks` include `"stops"`, which decisions stop and when at each demand allowance (`stopSet`).
+
+A run (a source's mode and check on one tree) stalls where the units it charges pass `--units` times its program's
+allowance (#1647): every `WorkLedger.charge` of the run (the analysis, its finishing work after a stop, the lowering's
+store checks) against the largest `allowance` of a ledger it charged, max(30 M, 256 × syntax nodes). Units are the same
+on every machine, so a stall is too. A run that ends past its allowance but within the limit (a budget stop, TSV076) is
+an outcome, not a stall. A source that takes more than `--memory` MB of heap, or that ends its analysing process (a
+fatal V8 error), stalls as well. A stall is counted with its reason (`units`, or how the process ended; `--out`), and
+the runner goes on with the next source. The wall clock is only a safety net, `--timeout` seconds a run (60 in CI,
+which sets `CI=true` and runs only the runner's own tests): a run that reaches it does work no ledger charges (#1424's
+class), and is reported as a defect with its source and run (`uncharged`, on stderr and in `--out`), counted apart,
+never as a stall. The limit and the safety net were derived from a measured corpus (below); they replace the 180 s a
+source that the agents chose on 2026-10-30 (#1512). The runs its process had written before the runner ended it still
+count; one whose outcome it was still writing is lost with the process, and a final reply cannot finish the source once
+its safety net has run out (#1498). After the kill the runner waits for the process and its pipes to close, so a
 descendant holding its stderr delays the next source (no compiler or oracle code spawns one). A run that throws on
 either tree is an exception, never compared, because identical exceptions on both trees are not agreement (#1439): the
 runner prints it on stderr with its source, mode and check, writes it with each stack to `--out` and counts it apart
@@ -38,34 +47,43 @@ unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on either
 the same count unanswered and published the same parts up to them (#1592): the allowance is the same on both trees, so
 what it leaves unanswered is too. Such a run is counted apart (`unansweredAlike`); any other is neither agreement nor an
 exception: the runner writes it to `--out` and counts it apart (`unanswered`). It prints one JSON line per generator and
-a total (sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, modes, runs, differences, the
-limit in seconds), and exits 1 when any run differs, throws, leaves nodes unanswered other than alike or is uncompared,
-or any source stalls. Run large sizes as one capped job per area or shard on a worker. Some recorded large inputs exceed
-the default timeout on unchanged trees. Report stalls and publication exceptions separately; neither establishes
-agreement.
+a total (sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, uncharged, modes, runs,
+differences, the unit limit's multiple and the safety net in seconds), and exits 1 when any run differs, throws, leaves
+nodes unanswered other than alike, is uncompared or reaches the safety net, or any source stalls. Run large sizes as one
+capped job per area or shard on a worker. Report stalls, uncharged runs and publication exceptions separately; none
+establishes agreement.
 
 With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the stored
 result of the same source (its generator, name and key, so an edited source is new), mode and check (unanswered alike
 only where that result holds the base's parts and count), and a run the baseline does not hold is `uncompared`, never
 agreement (`--out` names its source and runs); a source stalls or throws outside its runs where either the stored run or
-the head did. The limits then apply to each tree alone, where a run of both trees shares them in one process, so a
-source that stalls there may end here, and the head's runs after a stored stall are uncompared. `--baseline` reads a
-folder's `*.runs.jsonl` files, and stops (exit 2) at a source stored twice with other results.
+the head did, and the head's runs after a stored stall are uncompared. A baseline stored since #1647 (its PLAN `plan
+2`) holds each run's units and allowance, and a stall over the unit limit the run it cut; the head runs at its unit
+limit (another `--units` is refused, exit 2). One stored before (`plan 1`) holds no units: it is read as before, and
+the stall index says so (below). `--baseline` reads a folder's `*.runs.jsonl` files, and stops (exit 2) at a source
+stored twice with other results.
 
 `--work` writes a record of each source and changes no other output (#1564): a first line with what ran and the
 comparison's configuration (`configuration`: the sources' sizes, the area's plan (the hash of every source's place, its
 generator, name and key, in the area's order, before a shard or `--only` selects), the stop runs' allowances, each
-generator's checks, each tree as the runner executes it, its compiled compiler and oracle library read from the build it
+generator's checks, the unit limit's multiple, each tree as the runner executes it, its compiled compiler and oracle library read from the build it
 loads, for a checkout, its `dist/` or a tree without sources alike, and a stored base as its baseline's MANIFEST names
 it, which a rerun's base matches by its own identity), one line per source with each run's charged work (`work`: the
 units its analyses charged their work ledgers, `WorkLedger.charge`, finishing work included; `null` for a tree without
-one) and milliseconds (`ms`) on each tree and what the source counted, and the total last. A source that stalls keeps
-the run then going on as the runner ended it, from a progress record the child writes over beside the record
+one), its allowance (`allowance`) and milliseconds (`ms`) on each tree (with `--baseline`, the stored base's units and
+allowance first, its milliseconds `null`, and the first line names the stored unit multiple, `stored`) and what the
+source counted, and the total last. A source that stalls or reaches the safety net keeps the run then going on as the
+runner ended it, from a progress record the child writes over beside the record
 (`<file>.progress`, removed at the end; `--out`, `--work` and it must name three files) as a tree starts a run, every
-65,536 units and as it ends it: the units charged, at most 65,536 short, the milliseconds until the stall and the tree
-running it (`running`). `stalls.mjs` reads a replay's records (a shard run without `--work` by its `--out` file, which
-gives its stalls alone) and prints the rule it judges each stalled source by (`RULE`: a candidate stall, load or
-unknown; its time clause a heuristic), each stalled source with its verdict, and each area's counts and the total. An
+65,536 units and as it ends it: the units charged, at most 65,536 short (exact at a stall over the unit limit), the
+milliseconds until the stall and the tree running it (`running`). `stalls.mjs` reads a replay's records (a shard run
+without `--work` by its `--out` file, which gives its stalls alone) and prints the rule it judges each stalled source by
+(`RULE`), each stalled source with its verdict, each source a run of which reached the safety net (a defect, uncharged
+work), and each area's counts and the total. Since #1647 a stall is judged from the records alone: a candidate where the
+head alone stalled (over the unit limit on a run the base ended within it, or for memory or a fatal error), inherited
+where the base stalled too, or alone, and unknown where the base's units are not stored (a baseline before #1647) or no
+record names the tree. A record made before #1647 is judged by the rule then (a candidate, load or unknown, its time
+clause a heuristic). An
 area's records must share one configuration (another is refused, exit 2), so the area is complete only with its shards
 0/N to N-1/N of one N, together every source of one plan, and a source a plan lists more than once (a repeat, which the
 runner runs and counts each time) is one source where its repeats record the same counts, stall and runs, milliseconds
@@ -73,17 +91,19 @@ apart, refused (exit 2, naming the place) where they differ; a source counts as 
 every run and agrees, and as `unansweredAlike` where its runs agree but for some unanswered alike, each such source
 named on a line of its own with its number of those runs; `closed` (exit 0) needs every area complete, every source
 agreed or unanswered alike and no candidate left. `--index` writes the sources still unavailable, with their verdicts
-and records and each area's configuration, and names those unanswered alike apart. Against a stored baseline the base's
-work is not recorded, so a head's timeout is unknown: `stalls.mjs rerun` runs the index's sources alone, one at a time
-with both trees in one process and the replay's configuration (`run.mjs <area> <base> <head> --only <index>`, an area
-after another, each once by its name, whatever paths its entries name; only `--timeout` and `--memory` may differ),
+and records and each area's configuration, and names those unanswered alike apart. A stall is the same on every machine,
+so a rerun decides only an unknown one, against a baseline that stores no units: `stalls.mjs rerun` runs the index's
+sources alone, one at a time with both trees in one process and the replay's configuration (`run.mjs <area> <base>
+<head> --only <index>`, an area after another, each once by its name, whatever paths its entries name; only `--timeout`
+and `--memory` may differ),
 and `--rerun <folder>/*.work.jsonl` reads its records in place of the replay's, so the replay closes without another
 campaign; a record of another configuration is refused, and a rerun that ends does not clear a candidate. Older
 `--work`/`--out` comparison records omit the answered parts, so `stalls.mjs` cannot reclassify their `unanswered` runs.
 A runner implementing #1592 must compare them again; `rerun` does this for indexed stalled sources, including their
 earlier unanswered runs. Completed sources' unanswered runs need a fresh comparison. Rerun records are read in the order
 given, an earlier round's first: where a source's earlier rerun stalled, or its later one stalls, the later stands (a
-round at a longer `--timeout` or `--memory` may run what an earlier one could not), and two that ended must say the
+round at a larger `--memory`, or a record before #1647 at a longer `--timeout`, may run what an earlier one could not),
+and two that ended must say the
 same, else refused (#1587); a replay's records are never replaced. `rerun --shard i/N` (#1598) reruns only the index's
 entries `k` with `k mod N = i`, in its order, into `<area>.<i>of<N>.work.jsonl` and `<area>.<i>of<N>.jsonl` beside that
 part of the index (`index.<i>of<N>.json`) and nothing for an area that part does not hold, so N jobs rerun the index
@@ -100,7 +120,12 @@ none there (base and head run instead). `baselines.mjs` reads and writes the bas
 wrote while the folder held nothing else (what its runs depend on, the commits stored there, each area's `PLAN`),
 holding only paths it writes, each named exactly as it names them; a folder holding another path is not written into,
 and the refusal names the path. Each area's `PLAN` binds its shards' sources in their order and its checks, and a
-writer that would run another is refused (exit 2). One rule says whether a stored shard counts, and status, the store
+writer that would run another is refused (exit 2); its limits (`plan 2`, since #1647: `limits <multiple> x allowance
+units, <seconds> s safety net, <MB> MB`, `FAMILIES_UNITS` and `FAMILIES_TIMEOUT` overriding the runner's defaults; a
+`plan 1` one's a time a source) bind it too. Under `plan 2` each stored run holds its units and allowance, an ended
+run's within the limit, a stall over the limit the run it cut, over it (its certificate, the same on every machine),
+and a run that reached the safety net is named apart (`uncharged`), never a stall. One rule says whether a stored shard
+counts, and status, the store
 and `--baseline` all read shards through it: its total line names its own baseline's inputs (the `MANIFEST`'s `src/`
 tree, oracle library, lockfile and Node; any commit of that tree), the `PLAN` and the shard's planned sources, which
 are its lines in their order, and hashes every line before it. A shard that would count but names other inputs makes
@@ -126,17 +151,16 @@ that tree to be `main`'s again.
 A fill can also run on any worker into a central store (#1590). `bash tools/corpus/baseline.sh seed <tree> <SHA> <out>`
 makes `<out>/<src tree>/` (its `MANIFEST` also naming the tree's build of the compiler, `compiled <dist/src/ tree>`,
 and every area's `PLAN`) and `<out>/shards.tsv`, one line per shard to store. `baseline.sh compute <tree> <seed
-baseline> <area> <i>/<N> <out>` stores one shard into a copy of the seed at the `PLAN`'s time limit, and the sources
-that stalled again alone, with the `PLAN`'s memory and twice its time limit: one that ends alone within that margin
-stalled under the machine's load and is stored with its result (`baselines.mjs merge`, which refuses a run alone of
-other inputs before it writes: another identity, a commit and tree the shard's `MANIFEST` does not name, other checks
-or allowances, or limits other than the `PLAN`'s memory and twice its time limit), one that stalls alone within it
-is a stall of its own and stays, listed with its run alone and the limit it ran at in `<out>/stalls.json` (#1612). `baseline.sh submit <SHA> <src tree> [<seed job id> <shards.tsv>] [--dry]`
+baseline> <area> <i>/<N> <out>` stores one shard into a copy of the seed at the `PLAN`'s limits, with `--work`: a stall
+is the same on every machine, so it is stored once and listed in `<out>/stalls.json` with its reason and, over the unit
+limit, the run it cut; `<out>/<area>.<i>of<N>.work.jsonl` is the store's record of each source's units and time. #1612's
+run alone at twice a time limit, with `baselines.mjs alone` and `merge`, went with #1647; a seed before #1647 (`plan 1`)
+is computed by its own tree's script. `baseline.sh submit <SHA> <src tree> [<seed job id> <shards.tsv>] [--dry]`
 prints or submits these steps as central-queue jobs. Every write into the central store is `node
 tests/families/baselines.mjs import <central folder> <computed folder> [<area> <i>/<N>]`: a seed's `MANIFEST` and
 `PLAN`s are adopted where its baseline is absent, else checked equal; a shard is accepted only where its `MANIFEST` and
-`PLAN` are the central ones, it counts, and each source that stalled in it is listed in stalls.json as stalling alone,
-and one already there is compared by its lines, which hold no time, and never replaced, with one exception: where they
+`PLAN` are the central ones, it counts, and each source that stalled in it is listed in stalls.json (under `plan 1`
+with its run alone that stalled too), and one already there is compared by its lines, which hold no time, and never replaced, with one exception: where they
 differ only in that one of a source stalled and the other holds its complete result (every run the stalled line ended
 the same in it), that is no value difference, and the complete result stands, kept or put in the stalled line's place,
 since a stalled line holds no result; the source is named (`stallOnly`; `sx-fill`, the platform's wrapper, does not yet

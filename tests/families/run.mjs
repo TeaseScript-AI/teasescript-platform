@@ -1,5 +1,6 @@
 // node tests/families/run.mjs <area> <base> <head> [--sizes 4,8] [--allowances natural,16,256] [--shard i/N]
-//   [--timeout 180] [--memory 2048] [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl] [--only <index>]
+//   [--units 4] [--timeout 1800] [--memory 2048] [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl]
+//   [--only <index>]
 // node tests/families/run.mjs <area> <head> --baseline <folder> [options]
 // node tests/families/run.mjs <area> <tree> --store <folder> [--shard i/N]
 // Runs every generator of tests/families/<area>/ (or of the folder an absolute <area> names) against two built trees (a
@@ -7,8 +8,11 @@
 // compares what the sources publish (`publication`, part by part: a difference names the first part that differs,
 // #1503) and, for a generator whose `checks` include "stops", which decisions stop and when (`stopSet`) at each demand
 // allowance. Each tree's own oracle library (`dist/tests/helpers/type-core-oracles.js`) analyses its sources, in a
-// child process: a source that takes longer than `--timeout` seconds, more than `--memory` MB of heap, or that ends the
-// process (a fatal V8 error) is counted as stalled, with the reason, and the next source runs in a fresh process. A run
+// child process: a run (a source's mode and check on one tree) whose charged units pass `--units` times its program's
+// allowance (`units`, the same on every machine, #1647), or a source that takes more than `--memory` MB of heap or ends
+// the process (a fatal V8 error), is counted as stalled, with the reason, and the next source runs in a fresh process. A
+// run that takes longer than `--timeout` seconds, the safety net, does work no ledger charges: it is counted apart
+// (`uncharged`, named by its run, on stderr and in `--out`), never a stall, and the next source runs. A run
 // that throws on either tree is an exception, never compared (#1439): printed to stderr with its source, mode and
 // check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. A publication whose
 // oracle left nodes unanswered at its own budget stop (`publicationHashes`'s `unanswered`) on either tree agrees only
@@ -20,11 +24,13 @@
 // stores one shard of each source's results, one JSON line each, in the baseline of its `src/` tree (`baselines.mjs`),
 // whose area folder `--baseline` then reads, only where the area is complete under the rule status shares
 // (`storedRuns`); it is refused as status refuses it otherwise (exit 1 or 2).
-// `--work` keeps a record of each source: each run's charged work (the units its analyses charge their work ledgers)
-// and milliseconds on each tree, a stalled run's up to the stall, and what the source counted (#1564), which
-// `stalls.mjs` reads; `--only` runs the sources of the area that a stall index lists.
+// A stored run holds its charged units and allowance (a plan 2 area's, #1647), a stall over the unit limit the run it
+// cut. `--work` keeps a record of each source: each run's charged work (the units its analyses charge their work
+// ledgers), allowance and milliseconds on each tree (with `--baseline`, the stored base's units first), a stalled run's
+// up to the stall, and what the source counted (#1564), which `stalls.mjs` reads; `--only` runs the sources of the area
+// that a stall index lists.
 // Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, unansweredAlike,
-// uncompared, modes, runs, differences.
+// uncompared, uncharged, modes, runs, differences.
 import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -65,6 +71,14 @@ async function ledgerOf(root) {
 /** With `--work`, the units charged between two writes of a run's progress record, and the record's length. */
 const STEP = 65_536;
 const RECORD = 512;
+
+/**
+ * A run over the unit limit (#1647): the child writes the run, its units and its allowance on stderr after `OVER` (a
+ * write that completes before the next statement where stderr is a pipe, as the runner makes it, on Linux), and ends
+ * with `OVER_EXIT`, which the runner reads as the run's stall.
+ */
+const OVER = "families-runner over the unit limit: ";
+const OVER_EXIT = 86;
 
 /** An oracle's result as text (the publication's own text as it is: encoding it again would double a large one). */
 const textOf = (value) => (typeof value === "string" ? value : JSON.stringify(value));
@@ -156,7 +170,7 @@ function judged(was, is) {
 
 if (process.argv[2] === "--child") {
   // the child: each source's runs in the four modes on each tree (the base and the head, or one)
-  const { roots, allowances, progress } = JSON.parse(process.argv[3]);
+  const { roots, allowances, progress, units } = JSON.parse(process.argv[3]);
   const trees = await Promise.all(roots.map(oracles));
   const head = trees.at(-1);
   /**
@@ -168,18 +182,25 @@ if (process.argv[2] === "--child") {
       process.send(message, (error) => (error ? reject(error) : resolve())),
     );
   /**
-   * With `--work` (#1564): the units the running tree's analyses charge (every `WorkLedger.charge`, finishing work
-   * included), counted while it runs. Its progress record, the runner's file beside `--work`, holds the run going on: it
+   * Every charge of each tree's work ledger (`WorkLedger.charge`), counted while a tree runs a run (#1564): its units
+   * (`spent`, the analysis's, its finishing work's and the lowering's) and the largest allowance of a ledger it charged
+   * (`allowance`, its program's: max(30 M, 256 × nodes)). A run whose units pass `units` times that allowance stalls,
+   * the same on every machine (#1647): at the charge that passes it, the child writes the run and its units on stderr
+   * and ends (`OVER`). With `--work`, its progress record, the runner's file beside `--work`, holds the run going on: it
    * is written over as a tree starts a run, each `STEP` units and as the tree ends it, by a write that completes while an
    * analysis holds this process, so the runner reads the work a run had charged when it ended the process, less at most
-   * `STEP` units. A tree with no ledger counts `null`.
+   * `STEP` units (exactly, at a stall over the unit limit). A tree with no ledger counts `null` and has no unit limit.
    */
   const record = progress === undefined ? undefined : outside(progress, [], () => {});
-  const ledgers = record === undefined ? [] : await Promise.all(roots.map(ledgerOf));
+  const ledgers = await Promise.all(roots.map(ledgerOf));
+  const multiple = units ?? Infinity;
   let spent = 0;
+  let allowance = null;
+  let limit = Infinity;
   let next = Infinity;
   let running = null;
   const write = (fields) => {
+    if (record === undefined) return;
     try {
       const text = JSON.stringify({ ...running, ...fields }).padEnd(RECORD);
       writeFileSync(pathOf(record, "outside"), text, { flag: "r+" });
@@ -187,43 +208,66 @@ if (process.argv[2] === "--child") {
       // (a record not written leaves the one before it)
     }
   };
+  const over = () => {
+    write({ work: spent, allowance });
+    const { run, tree, mode, check } = running;
+    console.error(`\n${OVER}${JSON.stringify({ run, tree, mode, check, work: spent, allowance })}`);
+    process.exit(OVER_EXIT);
+  };
   for (const ledger of new Set(ledgers.filter((found) => found !== null))) {
     const { charge } = ledger.prototype;
     ledger.prototype.charge = function (counter, units = 1) {
       spent += units;
+      if (Number.isInteger(this.allowance) && this.allowance > (allowance ?? 0)) {
+        allowance = this.allowance;
+        limit = multiple * allowance;
+      }
+      if (spent > limit) over();
       if (spent >= next) {
         next = spent + STEP;
-        write({ work: spent });
+        write({ work: spent, allowance });
       }
       return charge.call(this, counter, units);
     };
   }
   /**
-   * Tree `tree`'s result of the source's run `index` (`run`), its units and milliseconds added to `used`, through one call
-   * whether or not they are recorded, so that an exception's stack is the same.
+   * Tree `tree`'s result of the source's run `index` (`run`), its units, allowance and milliseconds added to `used`,
+   * through one call whether or not they are recorded, so that an exception's stack is the same.
    */
   const counted = (seq, index, tree, mode, check, run, used) => {
-    const measured = ledgers[tree] !== undefined && ledgers[tree] !== null;
-    if (record !== undefined) {
-      const before = used.work.map((units, earlier) => [units, used.ms[earlier]]);
-      running = { seq, run: index, tree, mode, check, since: Date.now(), before };
-      spent = 0;
-      next = measured ? STEP : Infinity;
-      write({ work: measured ? 0 : null });
-    }
+    const measured = ledgers[tree] !== null;
+    const before = used.work.map((units, earlier) => [
+      units,
+      used.ms[earlier],
+      used.allowance[earlier],
+    ]);
+    running = { seq, run: index, tree, mode, check, since: Date.now(), before };
+    spent = 0;
+    allowance = null;
+    limit = Infinity;
+    next = measured && record !== undefined ? STEP : Infinity;
+    write({ work: measured ? 0 : null, allowance: null });
     const started = performance.now();
     const result = attempt(() => digest(run(trees[tree])));
     const ms = Math.round(performance.now() - started);
     used.work.push(measured ? spent : null);
+    used.allowance.push(measured ? allowance : null);
     used.ms.push(ms);
-    if (record !== undefined) write({ work: measured ? spent : null, ms, done: true });
+    write({
+      work: measured ? spent : null,
+      allowance: measured ? allowance : null,
+      ms,
+      done: true,
+    });
     next = Infinity;
+    limit = Infinity;
     return result;
   };
   /**
    * One source's runs in the four modes on its trees, each run's outcome (`run`: a difference or an exception, or one
    * tree's result) sent as it ends and written before the next run starts, so that a later stall in the source keeps
-   * it; with `--work`, each tree's units and milliseconds with it (`spent`).
+   * it, with each tree's units, allowance and milliseconds (`spent`); and each tree's start of a run (`start`), from
+   * which the runner times it (its safety net, #1647).
    */
   const compared = async ({ files, checks, globals, seq }) => {
     let parsed = true;
@@ -241,17 +285,18 @@ if (process.argv[2] === "--child") {
           ]);
       for (const [check, run] of runs) {
         // compared by hash, so that the base's text is not held while the head runs
-        const used = { work: [], ms: [] };
-        const results = trees.map((_, tree) => counted(seq, index, tree, label, check, run, used));
+        const used = { work: [], allowance: [], ms: [] };
+        const results = [];
+        for (const tree of trees.keys()) {
+          await sent({ start: { run: index, tree, mode: label, check } });
+          results.push(counted(seq, index, tree, label, check, run, used));
+        }
         index += 1;
         const is = results.at(-1);
         if (is.value?.unparsed) parsed = false;
         // one tree's result goes to the runner, which compares it with the stored one or stores it
         const outcome = results.length === 2 ? judged(results[0], is) : { result: is };
-        await sent({
-          run: { mode: label, check, ...outcome },
-          ...(record === undefined ? {} : { spent: used }),
-        });
+        await sent({ run: { mode: label, check, ...outcome }, spent: used });
       }
     }
     return { parsed };
@@ -308,7 +353,7 @@ if (process.argv[2] === "--child") {
     refused(`--shard ${option("shard")} is no shard i/N with 0 <= i < N`);
   // a baseline holds the runs of a commit's tree at the runner's defaults, so that every writer stores the same ones
   if (store !== undefined) {
-    const changed = ["sizes", "allowances", "timeout", "memory"].filter((name) =>
+    const changed = ["sizes", "allowances", "units", "timeout", "memory"].filter((name) =>
       options.has(name),
     );
     const tree = roots[0];
@@ -317,7 +362,12 @@ if (process.argv[2] === "--child") {
     if (!existsSync(path.join(tree, "src")) || !existsSync(path.join(tree, ".sha")))
       refused(`${tree} is no built tree of a commit (sx-tree's, with src/ and .sha) to store`);
   }
-  // 180 s by default, 60 s in CI (GitHub Actions sets `CI`), whose runs are the runner's own tests (owner, 2026-10-30)
+  // a run stalls where its units pass `--units` times its allowance (`none`: never), the same on every machine; the wall
+  // clock is a safety net a run, whose trigger is uncharged work, not a stall (#1647, which superseded the agents' 180 s
+  // a source of 2026-10-30, #1512); 60 s in CI (GitHub Actions sets `CI`), whose runs are the runner's own tests
+  const units = option("units") === "none" ? null : Number(option("units") ?? DEFAULTS.units);
+  if (units !== null && !(Number.isInteger(units) && units > 0))
+    refused(`--units ${option("units")} is no positive whole multiple of the allowance, or none`);
   const seconds = Number(option("timeout") ?? DEFAULTS.timeout);
   const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? DEFAULTS.memory);
@@ -381,6 +431,7 @@ if (process.argv[2] === "--child") {
           roots,
           allowances,
           progress: progress === undefined ? undefined : pathOf(progress, "outside"),
+          units,
         }),
       ],
       {
@@ -403,8 +454,8 @@ if (process.argv[2] === "--child") {
     });
   /**
    * With `--work`, the run a stalled source's child had going on, from its progress record where that is the source's
-   * (`seq`) and its run after those that ended (`run`), else none: each tree's units and milliseconds so far, the tree
-   * then running (`running`) counted to `at` (the clock's milliseconds).
+   * (`seq`) and its run after those that ended (`run`), else none: each tree's units, allowance and milliseconds so far,
+   * the tree then running (`running`) counted to `at` (the clock's milliseconds).
    */
   const cutOf = (seq, run, at) => {
     if (progress === undefined) return undefined;
@@ -417,16 +468,30 @@ if (process.argv[2] === "--child") {
     if (state.seq !== seq || state.run !== run) return undefined;
     const work = roots.map((_, tree) => state.before[tree]?.[0] ?? null);
     const ms = roots.map((_, tree) => state.before[tree]?.[1] ?? null);
+    const allowance = roots.map((_, tree) => state.before[tree]?.[2] ?? null);
     work[state.tree] = state.work;
+    allowance[state.tree] = state.allowance ?? null;
     ms[state.tree] = state.done ? state.ms : Math.max(0, at - state.since);
     const { mode, check } = state;
-    return { mode, check, work, ms, ...(state.done ? {} : { running: state.tree }) };
+    return { mode, check, work, allowance, ms, ...(state.done ? {} : { running: state.tree }) };
+  };
+  /** The run over the unit limit a child wrote on stderr before it ended (`OVER`), else undefined. */
+  const overOf = (errors) => {
+    const at = errors.lastIndexOf(OVER);
+    if (at === -1) return undefined;
+    try {
+      return JSON.parse(errors.slice(at + OVER.length).split("\n", 1)[0]);
+    } catch {
+      return undefined;
+    }
   };
   /**
-   * One source's reply, or why it stalled (`timeout`, or how the process ended), with the runs that ended (`runs`). At
-   * the deadline the process ends and the runs it had written are read before it closes: a source whose timeout
-   * callback has run stalls, with them. With `--work`, each ended run's mode, check and each tree's units and
-   * milliseconds (`spent`), and at a stall the run then going on (`cutOf`).
+   * One source's reply, or why it stalled (`units`: a run over the unit limit, `over`; or how the process ended), with
+   * the runs that ended (`runs`). Each tree's run has `timeout` from its start (the safety net, #1647): a run that
+   * reaches it does work no ledger charges, and the source ends there, as `uncharged` (the run and tree then going on,
+   * none between runs), never a stall. At the deadline the process ends and the runs it had written are read before it
+   * closes. Each ended run's mode, check and each tree's units, allowance and milliseconds (`spent`), and with `--work`,
+   * at a stall or the safety net, the run then going on (`cutOf`).
    */
   const analysed = (message) =>
     new Promise((resolve) => {
@@ -435,41 +500,56 @@ if (process.argv[2] === "--child") {
       const current = child;
       const runs = [];
       const spent = [];
-      let expired = false;
+      let going = null;
+      let expired;
       let ended;
+      let timer;
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          expired = going ?? {};
+          ended = Date.now();
+          current.kill("SIGKILL");
+        }, timeout);
+      };
       const onMessage = (reply) => {
-        if ("run" in reply) {
+        if ("start" in reply) {
+          going = reply.start;
+          arm();
+        } else if ("run" in reply) {
+          going = null;
+          arm();
           runs.push(reply.run);
           const { mode, check } = reply.run;
-          if (reply.spent !== undefined) spent.push({ mode, check, ...reply.spent });
-        } else if (!expired) settle(reply);
+          spent.push({ mode, check, ...reply.spent });
+        } else if (expired === undefined) settle(reply);
       };
       const onError = (error) => settle({ stalled: String(error).slice(0, 200) });
       // after `close`, the process's error output is complete
       const onClose = (code, signal) => {
+        const over = code === OVER_EXIT ? overOf(current.errors) : undefined;
         const fatal = /FATAL ERROR: [^\n]*/.exec(current.errors)?.[0];
-        settle({
-          stalled: [signal ?? `exit ${code}`, fatal].filter(Boolean).join(": ").slice(0, 200),
-        });
+        settle(
+          over !== undefined
+            ? { stalled: "units", over }
+            : {
+                stalled: [signal ?? `exit ${code}`, fatal].filter(Boolean).join(": ").slice(0, 200),
+              },
+        );
       };
       const settle = (result) => {
         clearTimeout(timer);
         current.off("message", onMessage).off("error", onError).off("close", onClose);
-        if ("stalled" in result) {
+        const cut = "stalled" in result || expired !== undefined;
+        if (cut) {
           child = null;
           current.kill("SIGKILL");
         }
-        const cut =
-          "stalled" in result ? cutOf(message.seq, spent.length, ended ?? Date.now()) : undefined;
-        if (cut !== undefined) spent.push(cut);
-        resolve({ ...(expired ? { stalled: "timeout" } : result), runs, spent });
+        const record = cut ? cutOf(message.seq, spent.length, ended ?? Date.now()) : undefined;
+        if (record !== undefined) spent.push(record);
+        resolve({ ...(expired === undefined ? result : { uncharged: expired }), runs, spent });
       };
-      // (the process's `close` then settles the source, after the frames it had written)
-      const timer = setTimeout(() => {
-        expired = true;
-        ended = Date.now();
-        current.kill("SIGKILL");
-      }, timeout);
+      arm();
       current.on("message", onMessage).on("error", onError).on("close", onClose);
       current.send(message);
     });
@@ -516,6 +596,7 @@ if (process.argv[2] === "--child") {
    */
   const stored = new Map();
   let storedIdentity;
+  let storedUnits;
   if (baseline !== undefined) {
     const runs = storedRuns(baseline);
     if (runs.refused !== undefined) {
@@ -523,6 +604,12 @@ if (process.argv[2] === "--child") {
       process.exit(runs.status);
     }
     storedIdentity = runs.identity;
+    // (a plan 2 area stores each run's units at its PLAN's unit limit, which the head runs at; a plan 1 one none, #1647)
+    storedUnits = runs.units;
+    if (storedUnits !== null && storedUnits !== units)
+      refused(
+        `${baseline} is stored at ${storedUnits} times the allowance: run the head there (--units ${storedUnits})`,
+      );
     const places = new Set(
       generators.flatMap(({ name, sources }) => sources.map((source) => placeOf(name, source))),
     );
@@ -560,9 +647,29 @@ if (process.argv[2] === "--child") {
       lines: [],
     });
   }
-  /** What the stored tree and the head did (a stall's or an exception's text), where either did. */
+  /** What the stored tree and the head did (a stall's, an exception's or an uncharged run's text), where either did. */
   const either = (base, head) =>
     base === undefined && head === undefined ? undefined : { base, head };
+  /**
+   * A head's run of a `--work` record (one tree's units, allowance and milliseconds) with the stored base's first: its
+   * units and allowance on that run where the stored line (`kept`) holds them (a plan 2 area's ended run, or the run
+   * its stall over the unit limit cut), else none; its milliseconds none, as no time is stored (#1647).
+   */
+  const besideStored = (
+    { mode, check, work: [units], allowance: [allowance], ms: [ms], running },
+    kept,
+  ) => {
+    const id = `${mode} ${check}`;
+    const was = kept?.runs[id] ?? (kept?.cut?.run === id ? kept.cut : undefined);
+    return {
+      mode,
+      check,
+      work: [was?.work ?? null, units],
+      allowance: [was?.allowance ?? null, allowance],
+      ms: [null, ms],
+      ...(running === undefined ? {} : { running: 1 }),
+    };
+  };
   const counts = [
     "sources",
     "unparsed",
@@ -571,6 +678,7 @@ if (process.argv[2] === "--child") {
     "unanswered",
     "unansweredAlike",
     "uncompared",
+    "uncharged",
     "runs",
     "differences",
   ];
@@ -585,15 +693,20 @@ if (process.argv[2] === "--child") {
       ...(baseline === undefined ? {} : { baseline }),
       ...(store === undefined ? {} : { store: option("store") }),
       ...(only === undefined ? {} : { only: option("only") }),
+      units,
+      // (a stored base's unit multiple, null where its area stores no units: a plan 1 one, before #1647)
+      ...(baseline === undefined ? {} : { stored: { units: storedUnits } }),
       timeout: seconds,
       memory,
       // what the comparison is (stalls.mjs merges only records of one): the sources' sizes, the area's plan (the hash of
-      // every source's place in its order, whichever shard or index runs), the stop runs' allowances, each generator's
-      // checks, and each tree as compared (`comparedOf`; a stored base as its baseline's MANIFEST names it, `stored`)
+      // every source's place in its order, whichever shard or index runs), the stop runs' allowances, the unit limit's
+      // multiple, each generator's checks, and each tree as compared (`comparedOf`; a stored base as its baseline's
+      // MANIFEST names it, `stored`)
       configuration: {
         sizes: sizesOption ?? null,
         plan: hash(places.join("\n")),
         allowances,
+        units,
         checks: Object.fromEntries(every.map(({ name, checks }) => [name, checks])),
         trees: [
           ...(baseline === undefined ? [] : [{ stored: storedIdentity }]),
@@ -622,10 +735,14 @@ if (process.argv[2] === "--child") {
       const uncompared = [];
       // the runs that ended count, those of a source that stalls or throws after them included
       row.runs += reply.runs.length;
-      for (const { result, ...run } of reply.runs) {
-        // one tree's result, judged against the stored one, where there is one
+      for (const [at, { result, ...run }] of reply.runs.entries()) {
+        // one tree's result, judged against the stored one, where there is one; stored with its units and allowance
         const id = `${run.mode} ${run.check}`;
-        results[id] = result;
+        const {
+          work: [charged],
+          allowance: [allowance],
+        } = reply.spent[at];
+        results[id] = { ...result, work: charged, allowance };
         const outcome = result === undefined ? run : { ...run, ...judged(kept?.runs[id], result) };
         const {
           thrown: exception,
@@ -655,33 +772,65 @@ if (process.argv[2] === "--child") {
       const stalled = baseline === undefined ? reply.stalled : either(kept?.stalled, reply.stalled);
       const failed =
         baseline === undefined ? reply.thrown : either(kept?.thrown?.runner, reply.thrown?.runner);
+      // a run that reached the safety net does work no ledger charges (#1647, #1424): named by its run (and tree), a
+      // defect counted apart, never a stall
+      const reached =
+        reply.uncharged === undefined
+          ? undefined
+          : reply.uncharged.mode === undefined
+            ? "outside its runs"
+            : `${reply.uncharged.mode} ${reply.uncharged.check}`;
+      const uncharged =
+        baseline !== undefined
+          ? either(kept?.uncharged, reached)
+          : reached === undefined || roots.length === 1
+            ? reached
+            : { [["base", "head"][reply.uncharged.tree] ?? "source"]: reached };
       if (storing !== undefined) {
         const key = sourceKey(source);
+        // (a stall over the unit limit with the run it cut: its certificate, the same on every machine)
+        const { over } = reply;
+        const cut =
+          over === undefined
+            ? undefined
+            : { run: `${over.mode} ${over.check}`, work: over.work, allowance: over.allowance };
         const entry = { generator: name, source: source.name, key, stalled, thrown: failed };
-        storing.lines.push(`${JSON.stringify({ ...entry, runs: results })}\n`);
+        const after = { uncharged, cut, runs: results };
+        storing.lines.push(`${JSON.stringify({ ...entry, ...after })}\n`);
       }
       // (with a baseline, one tree may stall where the other threw)
       if (stalled !== undefined) {
         row.stalled += 1;
         record({ generator: name, source: source.name, stalled, ...inputs });
       }
+      if (uncharged !== undefined) {
+        row.uncharged += 1;
+        console.error(JSON.stringify({ generator: name, source: source.name, uncharged }));
+        record({ generator: name, source: source.name, uncharged, ...inputs });
+      }
       if (failed !== undefined) {
         row.exceptions += 1;
         thrown({ generator: name, source: source.name, thrown: failed }, source);
-      } else if (stalled === undefined && !reply.parsed) row.unparsed += 1;
-      // the source's record: each run's units and milliseconds on each tree, and what it counted
+      } else if (stalled === undefined && uncharged === undefined && !reply.parsed)
+        row.unparsed += 1;
+      // the source's record: each run's units, allowance and milliseconds on each tree (with a baseline, the stored
+      // base's units and allowance first, its milliseconds none), and what it counted
       if (work !== undefined)
         worked({
           generator: name,
           source: source.name,
           key: sourceKey(source),
-          runs: reply.spent,
+          runs:
+            baseline === undefined
+              ? reply.spent
+              : reply.spent.map((ran) => besideStored(ran, kept)),
           counts: Object.fromEntries(
             counts
               .filter((key) => key !== "sources" && row[key] !== before[key])
               .map((key) => [key, row[key] - before[key]]),
           ),
           ...(stalled === undefined ? {} : { stalled }),
+          ...(uncharged === undefined ? {} : { uncharged }),
         });
     }
     console.log(JSON.stringify(row));
@@ -690,7 +839,7 @@ if (process.argv[2] === "--child") {
   }
   child?.kill();
   if (progress !== undefined) rmSync(pathOf(progress, "outside"), { force: true });
-  const ended = { ...total, timeout: seconds, node: process.version };
+  const ended = { ...total, units, timeout: seconds, node: process.version };
   if (storing !== undefined) {
     // the shard whole, its total last, with what made it
     const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));
@@ -703,7 +852,13 @@ if (process.argv[2] === "--child") {
   worked({ total: ended });
   console.log(JSON.stringify(ended));
   process.exitCode =
-    total.differences + total.stalled + total.exceptions + total.unanswered + total.uncompared === 0
+    total.differences +
+      total.stalled +
+      total.exceptions +
+      total.unanswered +
+      total.uncompared +
+      total.uncharged ===
+    0
       ? 0
       : 1;
 }
