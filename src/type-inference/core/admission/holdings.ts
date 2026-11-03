@@ -24,7 +24,7 @@ class Position implements Holding {
   held: readonly Position[] | null | undefined = undefined;
   /** Its reads but itself, as one number per distinct set (`Holding.state`), once its holding is made. */
   state: number | null = null;
-  /** Whether its holding read every position it reads: none it depends on was still being made (a ring of copies). */
+  /** Whether its holding is complete: none it read was still being made (a ring of copies, closed by `#close`). */
   whole = true;
 
   public constructor(
@@ -128,18 +128,36 @@ class Holdings {
       throw error;
     }
     const ring = made.filter((at) => !at.whole);
-    if (ring.length > 0) this.#close(ring);
+    // (made while a ring is being closed: its unfinished holdings join that ring, closed with it)
+    if (this.#closing !== null) this.#closing.push(...ring);
+    else if (ring.length > 0)
+      try {
+        this.#closing = ring;
+        this.#close(ring);
+      } catch (error) {
+        // (a stop while it closed the ring keeps none of its holdings: each is made anew when next asked)
+        for (const at of ring) [at.held, at.whole, at.state] = [undefined, true, null];
+        throw error;
+      } finally {
+        this.#closing = null;
+      }
     return position;
   }
 
+  /** The ring `#close` is closing, which a holding made meanwhile that reads one of its members joins. */
+  #closing: Position[] | null = null;
+
   /**
-   * A ring of copies' holdings, each made while another it reads was still being made: made again from what they read
-   * until none reads more (their reads only grow, so this ends), then whole where every position they read is.
+   * A ring of copies' holdings, each made while another it reads was still being made, so without a state: made again
+   * from what they read until none reads more (their reads only grow, so this ends). Then each is whole, and its state
+   * is recorded from its complete reads: no state is ever recorded from a holding still being made.
    */
-  #close(ring: readonly Position[]): void {
+  #close(ring: Position[]): void {
     for (let grew = true; grew;) {
       grew = false;
-      for (const at of ring) {
+      // (by index: a holding made meanwhile may join the ring)
+      for (let index = 0; index < ring.length; index += 1) {
+        const at = ring[index]!;
         const needs = this.#needs(at);
         for (const need of needs) if (need.held === undefined) this.made(need);
         const reads = this.#reads(at, needs);
@@ -149,21 +167,10 @@ class Holdings {
         }
       }
     }
-    // (whole unless its parent or a position it reads is not: one outside the ring, or a member that fell)
-    const needs = new Map(ring.map((at) => [at, this.#needs(at)]));
-    for (const at of ring) at.whole = true;
-    for (let fell = true; fell;) {
-      fell = false;
-      for (const at of ring)
-        if (
-          at.whole &&
-          ((at.parent !== null && !at.parent.whole) || needs.get(at)!.some((need) => !need.whole))
-        ) {
-          at.whole = false;
-          fell = true;
-        }
+    for (const at of ring) {
+      at.whole = true;
+      at.state = this.#state(at, new Set(at.held!));
     }
-    for (const at of ring) at.state = this.#state(at, new Set(at.held!));
   }
 
   /** `position`'s reads from `needs`: itself, each need, and of each need's reads those a copy lands below. */
@@ -209,7 +216,8 @@ class Holdings {
       at.whole =
         (at.parent === null || at.parent.whole) &&
         top.needs.every((need) => need.held !== null && need.whole);
-      at.state = this.#state(at, reads);
+      // (one that read a holding still being made gets its state once its ring is closed, `#close`)
+      at.state = at.whole ? this.#state(at, reads) : null;
       at.held = [...reads];
       made.push(at);
       stack.pop();
@@ -217,12 +225,12 @@ class Holdings {
   }
 
   /**
-   * `position`'s reads but itself as one number per distinct set, where no copy lands strictly below it, it reads
-   * something and its holding is whole: then a key below it reads only what those reads give, so a level below with the
-   * same state is a cycle of copies (`Holding.state`); `null` elsewhere, where an equal set would prove nothing.
+   * `position`'s complete reads but itself as one number per distinct set, where no copy lands strictly below it and it
+   * reads something: then a key below it reads only what those reads give, so a level below with the same state is a
+   * cycle of copies (`Holding.state`); `null` elsewhere, where an equal set would prove nothing.
    */
   #state(position: Position, reads: ReadonlySet<Position>): number | null {
-    if (position.deeper || !position.whole || reads.size < 2) return null;
+    if (position.deeper || reads.size < 2) return null;
     const ids: number[] = [];
     for (const read of reads) {
       this.#work.charge("structureSteps");

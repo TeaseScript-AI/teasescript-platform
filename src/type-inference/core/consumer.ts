@@ -65,7 +65,6 @@ import {
   levelProof,
   levelWalk,
   SLICE_DEPTH,
-  SliceDepth,
   typeOfKinds,
   typeOfLevels,
   type ContractResult,
@@ -2037,61 +2036,36 @@ function* termTask(term: TypeTerm): CompileTask<StaticType> {
 }
 
 /**
- * A place's type at a path: its contract's kinds, and a collection's elements' below it (`levelWalk`); the program leaves
- * the slice at `site` where they nest deeper than the facts follow or in a cycle of copies (#1646).
+ * A place's type at a path: its contract's kinds, and a collection's elements' below it (`levelWalk`, a cycle of copies
+ * ending it as the slice's depth does, #1646).
  */
-function placeType(
-  answers: Answers,
-  id: PlaceId,
-  path: readonly string[],
-  site: Expression,
-): StaticType {
-  return factLevels(
-    () =>
-      levelWalk(
-        (at) => answers.place(id, at).contract.kinds.map((item) => item.tag),
-        path,
-        SLICE_DEPTH,
-        { holding: answers.holding(id, path) },
-      ),
-    site,
+function placeType(answers: Answers, id: PlaceId, path: readonly string[]): StaticType {
+  return typeOfLevels(
+    levelWalk(
+      (at) => answers.place(id, at).contract.kinds.map((item) => item.tag),
+      path,
+      SLICE_DEPTH,
+      { holding: answers.holding(id, path) },
+    ),
   );
 }
 
 /**
  * A place's admitted type at a path (A1–A9): per level its written or decided kinds, a place admission never decided its
- * contract's kinds, and a collection's elements' below it (`levelWalk`, `levelProof`); the slice left at `site` as
- * `placeType` leaves it.
+ * contract's kinds, and a collection's elements' below it (`levelWalk`, `levelProof`).
  */
-function admittedType(
-  answers: Answers,
-  id: PlaceId,
-  path: readonly string[],
-  site: Expression,
-): StaticType {
-  return factLevels(
-    () =>
-      levelWalk(
-        (at) => {
-          const place = answers.place(id, at);
-          return levelProof(place.admitted, () => place.contract.kinds).tags;
-        },
-        path,
-        SLICE_DEPTH,
-        { holding: answers.holding(id, path) },
-      ),
-    site,
+function admittedType(answers: Answers, id: PlaceId, path: readonly string[]): StaticType {
+  return typeOfLevels(
+    levelWalk(
+      (at) => {
+        const place = answers.place(id, at);
+        return levelProof(place.admitted, () => place.contract.kinds).tags;
+      },
+      path,
+      SLICE_DEPTH,
+      { holding: answers.holding(id, path) },
+    ),
   );
-}
-
-/** A facts walk's type (`levelWalk`), or the program out of the slice at `site` where the walk left it. */
-function factLevels(walk: () => (readonly ItemTag[])[], site: Expression): StaticType {
-  try {
-    return typeOfLevels(walk());
-  } catch (error) {
-    if (!(error instanceof SliceDepth)) throw error;
-    return outsideStructure(site);
-  }
 }
 
 /** The facts the core settled on for a program inside the slice, by source site (see `SolvedTypeFacts`). */
@@ -2114,7 +2088,7 @@ export function coreFacts(
     // a read of a place with a written type holds that type: every store into it is checked against it (C1, A1)
     const place = answer?.place ?? null;
     if (place !== null && answers.place(place.id, place.path).admitted.by === "written") {
-      types.set(expression, placeType(answers, place.id, place.path, expression));
+      types.set(expression, placeType(answers, place.id, place.path));
       continue;
     }
     const tags = answer?.items.map((item) => item.tag) ?? ["unknown"];
@@ -2125,8 +2099,7 @@ export function coreFacts(
           expression.elements.length === 0 ? openType() : union(expression.elements.map(typeOf));
       else if (expression.kind === "indexExpression")
         element = elementOf(elementOf(typeOf(expression.object)));
-      else if (place !== null)
-        element = placeType(answers, place.id, [...place.path, "element"], expression);
+      else if (place !== null) element = placeType(answers, place.id, [...place.path, "element"]);
     types.set(expression, typeOfKinds(tags, element));
   }
   const lets = declarations(answers, index);
@@ -2141,7 +2114,7 @@ export function coreFacts(
           ? typeFromAnnotation(statement.typeAnnotation)
           : place === null
             ? UNKNOWN_TYPE
-            : admittedType(answers, place.id, place.path, statement.initializer);
+            : admittedType(answers, place.id, place.path);
       return {
         site: factSite(index.fileOf(statement), statement.span),
         kind: statement.kind,
