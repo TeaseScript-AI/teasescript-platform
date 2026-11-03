@@ -74,6 +74,8 @@ class Holdings {
 
   /** A copy of `source` landing at `landing` (`holdingsOf`). */
   public land(landing: Position, source: Position): void {
+    // (a copy of a position into itself, `b=b`, adds nothing it does not read)
+    if (source === landing) return;
     (landing.sources ??= []).push(source);
     for (let up = landing.parent; up !== null && !up.deeper; up = up.parent) up.deeper = true;
   }
@@ -117,17 +119,73 @@ class Holdings {
     const stack: { readonly position: Position; needs: Position[] | null }[] = [
       { position, needs: null },
     ];
+    const made: Position[] = [];
     try {
-      this.#make(stack);
+      this.#make(stack, made);
     } catch (error) {
       // (a stop while it ran leaves no holding half made: each is made anew when next asked)
       for (const { position: at } of stack) if (at.held === null) at.held = undefined;
       throw error;
     }
+    const ring = made.filter((at) => !at.whole);
+    if (ring.length > 0) this.#close(ring);
     return position;
   }
 
-  #make(stack: { readonly position: Position; needs: Position[] | null }[]): void {
+  /**
+   * A ring of copies' holdings, each made while another it reads was still being made: made again from what they read
+   * until none reads more (their reads only grow, so this ends), then whole where every position they read is.
+   */
+  #close(ring: readonly Position[]): void {
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const at of ring) {
+        const needs = this.#needs(at);
+        for (const need of needs) if (need.held === undefined) this.made(need);
+        const reads = this.#reads(at, needs);
+        if (reads.size > at.held!.length) {
+          at.held = [...reads];
+          grew = true;
+        }
+      }
+    }
+    // (whole unless its parent or a position it reads is not: one outside the ring, or a member that fell)
+    const needs = new Map(ring.map((at) => [at, this.#needs(at)]));
+    for (const at of ring) at.whole = true;
+    for (let fell = true; fell;) {
+      fell = false;
+      for (const at of ring)
+        if (
+          at.whole &&
+          ((at.parent !== null && !at.parent.whole) || needs.get(at)!.some((need) => !need.whole))
+        ) {
+          at.whole = false;
+          fell = true;
+        }
+    }
+    for (const at of ring) at.state = this.#state(at, new Set(at.held!));
+  }
+
+  /** `position`'s reads from `needs`: itself, each need, and of each need's reads those a copy lands below. */
+  #reads(position: Position, needs: readonly Position[]): Set<Position> {
+    const reads = new Set<Position>([position]);
+    for (const need of needs) {
+      this.#work.charge("structureSteps");
+      reads.add(need);
+      // (of its reads, those a copy lands below, which a step further down still reads; one still being made, in a
+      // ring of copies, reads nothing more yet)
+      for (const read of need.held ?? []) {
+        this.#work.charge("structureSteps");
+        if (read.deeper) reads.add(read);
+      }
+    }
+    return reads;
+  }
+
+  #make(
+    stack: { readonly position: Position; needs: Position[] | null }[],
+    made: Position[],
+  ): void {
     while (stack.length > 0) {
       const top = stack.at(-1)!;
       const at = top.position;
@@ -147,21 +205,13 @@ class Holdings {
           if (need.held === undefined) stack.push({ position: need, needs: null });
         continue;
       }
-      const reads = new Set<Position>([at]);
-      at.whole = at.parent === null || at.parent.whole;
-      for (const need of top.needs) {
-        this.#work.charge("structureSteps");
-        reads.add(need);
-        if (need.held === null || !need.whole) at.whole = false;
-        // (of its reads, those a copy lands below, which a step further down still reads; one still being made, in a
-        // ring of copies, reads nothing more here)
-        for (const read of need.held ?? []) {
-          this.#work.charge("structureSteps");
-          if (read.deeper) reads.add(read);
-        }
-      }
+      const reads = this.#reads(at, top.needs);
+      at.whole =
+        (at.parent === null || at.parent.whole) &&
+        top.needs.every((need) => need.held !== null && need.whole);
       at.state = this.#state(at, reads);
       at.held = [...reads];
+      made.push(at);
       stack.pop();
     }
   }

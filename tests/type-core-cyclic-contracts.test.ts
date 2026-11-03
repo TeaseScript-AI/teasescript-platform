@@ -76,6 +76,23 @@ test("a store contract that holds a cycle of copies leaves the slice at linear c
       }
 });
 
+test("a cycle of copies read through a ring of whole copies leaves the slice at linear cost (#1646)", () => {
+  // (the generated family's seed 11: `p1` holds `p2`, a copy of itself, so `p1`'s levels read a ring of whole copies;
+  // each wraps `p0`, whose `q` and `s` hold it again. Before the ring was closed, its holding stayed unfinished and
+  // the walk ran to the slice's depth, 16,836,900 units)
+  const source =
+    'let typed:object={x:1}\nlet p0={f:typed,g:"s"}\nlet p1={f:typed,g:"s"}\nlet p2={f:typed,g:"s"}\np1.q=[p0]\np1=p2\np0.q={r:p0}\np1.q=[p0]\np2=p2\np0.s={r:p0}\np0.f=hostValue\nsay "AFTER"\nexit\n';
+  assert.equal(
+    outcome(source),
+    withoutCycleCertificate(() => outcome(source)),
+  );
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+  for (const mode of HELD_MODES) {
+    const { budget } = mode.run(() => analyseCore(request));
+    assert.ok(budget.total < 25_000, `${mode.name}: ${budget.total}`);
+  }
+});
+
 test("a list that holds itself leaves the slice instead of failing the compile (#1646)", () => {
   // (`l=[l]`: its lists nest without end; before, the facts' walk threw past the slice's depth and failed the compile)
   assert.equal(
@@ -99,6 +116,9 @@ test("a contract walk without a cycle of copies is the walk without the certific
     "let out={p:{q:{r:[[1]]}}}\nout.p.q.r=hostValue\nexit",
     "let a={f:[[1]]}\nlet out={p:a}\nout.p.q={s:a}\nout.p.f=hostValue\nexit",
     'let a={f:[[1]]}\nlet b=a\nb.f=hostValue\nsay "AFTER"\nexit',
+    // (copies no contract reads: dead after `exit`, and into a place with a written type)
+    "let a={f:[[1]],g:1}\nlet b={f:[[2]],g:2}\na.f=hostValue\nlet out={p:a}\nout.p.g=hostOther\nexit\na.q=b\nb.q=a",
+    "let t:object={x:1}\nlet a={f:[[1]],g:1}\na.q=t\nt=a\na.f=hostValue\nlet out={p:a}\nexit",
   ];
   for (const source of sources) {
     const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
