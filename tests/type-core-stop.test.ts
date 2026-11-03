@@ -1645,8 +1645,9 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
  * #1642: each side's checks are owned by its own records, its marks included. The issue's `dict-path` witness reversed,
  * under demand allowance 256, stopped at program allowance 2,464 (#1642's reversed modes): the reference's TSV043 mark
  * and the stopped run's each carry the receiver's null-check that both runs publish, so neither is lost. A stopped run
- * that keeps its mark but drops the check, and the plan's guard, from its compile and its reruns loses it (Codex r1's
- * control on #1663, a stop at program allowance 1).
+ * that keeps its mark but drops the check, and the plan's guard, from its compile and its reruns loses it, and one that
+ * publishes it twice has an extra (Codex r1's and r3's controls on #1663, a stop at program allowance 1); each owned
+ * check takes one credit, the combined stop's rule's included (r2's).
  */
 test("the stop oracle takes each side's marks as the owners of its checks, and a mark keeps its check (#1642)", () => {
   const source =
@@ -1739,6 +1740,23 @@ test("the stop oracle takes each side's marks as the owners of its checks, and a
       ...dropped(stopped),
       without: (omit, key) => dropped(stopped.without(omit, key)),
     }).includes(`lost check ${text}`),
+  );
+  // (a further copy of the owned check where a run publishes it is an extra: what forms with the marks credits no content
+  // a record owns, Codex r3's control on #1663)
+  const again = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.some((x) => JSON.stringify(x) === text)
+        ? [...each.answers.checks, structuredClone(check)]
+        : each.answers.checks,
+    },
+  });
+  assert.ok(
+    judge({
+      ...again(stopped),
+      without: (omit, key) => again(stopped.without(omit, key)),
+    }).includes(`extra check ${text}`),
   );
   // a check one record owns and the combined stop's rule accepts is one credit: a second copy of it is an extra (Codex
   // r2's control on #1663, forward with the sharing, demand 256, a stop at program allowance 1)

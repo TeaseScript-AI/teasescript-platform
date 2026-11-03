@@ -361,14 +361,16 @@ export function stopProblems(c: StopCase): string[] {
     for (let missing = count - (published.get(text) ?? 0); missing > 0; missing -= 1)
       problems.push(`lost check ${text}`);
   // (a check the combined stop's rule accepts is left out once on each side, as one its record owns: the rule's credit
-  // and a record's are one, never two)
+  // and a record's are one, never two; with formation below, each content takes its credit from one source alone, its
+  // owning records, else the rule, else what forms with the marks)
   const credited = (owned: ReadonlyMap<string, number>): Map<string, number> => {
     const credits = new Map(owned);
     for (const text of accepted) credits.set(text, Math.max(credits.get(text) ?? 0, 1));
     return credits;
   };
+  const creditsAfter = credited(ownedAfter);
   const checksBefore = unowned(unstopped.answers.checks, credited(ownedBefore));
-  const checksAfter = unowned(stopped.answers.checks, credited(ownedAfter));
+  const checksAfter = unowned(stopped.answers.checks, creditsAfter);
   const ofStores = checksBefore
     .filter((check) => ofStore(check.site))
     .map((check) => JSON.stringify(check));
@@ -379,13 +381,14 @@ export function stopProblems(c: StopCase): string[] {
     checksAfter.map((check) => JSON.stringify(check)),
     ofStores,
   );
-  // (an extra the stopped analysis without its marks lacks is their content; a check both have stays compared)
+  // (an extra the stopped analysis without its marks lacks is their content; a check both have stays compared; a
+  // content a record or the rule credits takes no second credit here, so a further copy of it stays an extra)
   const extra = beyond(kept, owed);
   let formed: string[] = [];
   if (extra.length > 0 && marks.length > 0) {
     const without = rerun(stopped, ...omission(excused)).answers.checks;
     formed = beyond(
-      extra,
+      extra.filter((check) => !creditsAfter.has(check)),
       without.map((check) => JSON.stringify(check)),
     );
     kept = beyond(kept, formed);
