@@ -1,5 +1,5 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
-import { joinSteps, keptSteps, type WorkLedger } from "../budget.js";
+import { joinSteps, keptSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { defaultOf, termAt, typeTags, writtenOf } from "../contract.js";
 import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
@@ -281,14 +281,35 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
   for (let at = made + 1; at <= path.length; at += 1) {
     program.work.charge("checks");
     const shapes: { shape: CheapShape; by: Definition | null }[] = [];
-    const written: { readonly term: TypeTerm; readonly by: Definition }[] = [];
+    const written: { term: TypeTerm; by: Definition }[] = [];
+    // (each shape and written type once a level, given by the earliest store that brings it, as the decider is: copies
+    // of one source through several stores or levels bring the same ones again, Codex r1's B1 on #1653)
+    const entered = new Map<CheapShape, number>();
+    const enter = (shape: CheapShape, by: Definition | null): void => {
+      const known = entered.get(shape);
+      if (known === undefined) {
+        entered.set(shape, shapes.length);
+        shapes.push({ shape, by });
+        return;
+      }
+      const entry = shapes[known]!;
+      entry.by = entry.by === null || by === null ? null : earlierStore(entry.by, by);
+    };
+    const enteredTerms = new Map<TypeTerm, number>();
+    const enterTerm = (term: TypeTerm, by: Definition): void => {
+      const known = enteredTerms.get(term);
+      if (known === undefined) {
+        enteredTerms.set(term, written.length);
+        written.push({ term, by });
+      } else written[known]!.by = earlierStore(written[known]!.by, by);
+    };
     let told = !cut && (frontier?.told ?? true);
     let reach = frontier?.reach ?? 0;
     if (frontier !== undefined && told) {
       const step = path[at - 1]!;
       for (const { shape, by } of frontier.shapes) {
         const child = shape.children.get(step);
-        if (child !== undefined) shapes.push({ shape: child, by });
+        if (child !== undefined) enter(child, by);
         // (a value of another kind has no such part: what a read finds there only the analysis tells)
         for (const tag of shape.tags)
           if (
@@ -300,14 +321,14 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
       for (const { term, by } of frontier.written) {
         const below = termAt(term, [step]);
         if (below === null) told = false;
-        else written.push({ term: below, by });
+        else enterTerm(below, by);
       }
     }
     const key = keptKey(program.work, root, path.slice(0, at));
     // (a level below one being made, reached again through copies: what it holds only the analysis tells)
     const again = state.making.has(key);
     if (again) told = false;
-    if (told) shapes.push({ shape: cheapShapeOf(walk, key), by: null });
+    if (told) enter(cheapShapeOf(walk, key), null);
     const [cuts, back] = [state.cuts, state.back];
     state.back = Infinity;
     if (!again) state.making.set(key, state.depth);
@@ -319,9 +340,9 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
         const { shape, by } = shapes[index]!;
         if (shape.opaque) told = false;
         for (const { term, path: from, by: store } of shape.written) {
-          const entered = termAt(term, from);
-          if (entered === null) told = false;
-          else written.push({ term: entered, by: by ?? store });
+          const below = termAt(term, from);
+          if (below === null) told = false;
+          else enterTerm(below, by ?? store);
         }
         for (const copy of shape.copies) {
           const source = linkedFrontier(walk, copy.root, copy.path);
@@ -331,8 +352,8 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
           }
           // (each of the source's shapes and types looked at once, charged)
           program.work.charge("checks", source.shapes.length + source.written.length);
-          for (const each of source.shapes) shapes.push({ shape: each.shape, by: by ?? copy.by });
-          for (const each of source.written) written.push({ term: each.term, by: by ?? copy.by });
+          for (const each of source.shapes) enter(each.shape, by ?? copy.by);
+          for (const each of source.written) enterTerm(each.term, by ?? copy.by);
           reach = Math.max(reach, source.reach + 1);
         }
       }
@@ -341,9 +362,9 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
     }
     // (object literals with other properties where a copy brought some of the level's shapes, beside the key's own or
     // another copy's: a read of one may find it missing, which only the analysis tells, as within one key's shape)
-    let properties: string | null = null;
+    let properties: number | null = null;
     for (const { shape } of told && shapes.some(({ by }) => by !== null) ? shapes : []) {
-      const own = propertiesOf(program.work, shape);
+      const own = propertiesOf(walk, shape);
       if (own === null) continue;
       if (properties === null) properties = own;
       else if (own !== properties) {
@@ -365,24 +386,30 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
   return frontier!;
 }
 
-/** Each shape's object literal's properties as one text, made once a shape (`propertiesOf`). */
-const propertyTexts = new WeakMap<CheapShape, string | null>();
+/** Each shape's object literal's properties as a token (`propertiesOf`), and each walk's tokens by their sets. */
+const propertyTokens = new WeakMap<CheapShape, number | null>();
+const tokensOf = new WeakMap<Consumers, Map<string, number>>();
 
 /**
- * A shape's object literal's properties as one text, in their order, `null` where it has none: made and charged once a
- * shape, so the shapes a level compares cost one step each, whatever their size (#1604).
+ * A shape's object literal's properties as a token, one per set of names in the walk, `null` where it has none: made and
+ * charged once a shape, its names looked at once there, so a level compares its shapes in one step each whatever their
+ * width, also where distinct shapes hold the same names (#1604; Codex r1's B2 on #1653).
  */
-function propertiesOf(work: WorkLedger, shape: CheapShape): string | null {
-  let text = propertyTexts.get(shape);
-  if (text === undefined) {
-    if (shape.properties === null) text = null;
+function propertiesOf(walk: Consumers, shape: CheapShape): number | null {
+  let token = propertyTokens.get(shape);
+  if (token === undefined) {
+    if (shape.properties === null) token = null;
     else {
-      work.charge("checks", shape.properties.size);
-      text = [...shape.properties].sort().join(" ");
+      walk.pass.program.work.charge("checks", shape.properties.size);
+      let tokens = tokensOf.get(walk);
+      if (tokens === undefined) tokensOf.set(walk, (tokens = new Map()));
+      const names = [...shape.properties].sort().join(" ");
+      token = tokens.get(names);
+      if (token === undefined) tokens.set(names, (token = tokens.size));
     }
-    propertyTexts.set(shape, text);
+    propertyTokens.set(shape, token);
   }
-  return text;
+  return token;
 }
 
 /**
