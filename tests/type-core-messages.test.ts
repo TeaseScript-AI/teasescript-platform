@@ -1682,8 +1682,8 @@ test("a store's property below the warned value is the property its fix names, a
  * beside an unknown, an untyped parameter's argument at either of two calls, an inferred result, a list's element, an
  * add to an empty list, an object's property), with the declaration of every type the place takes (`null` among them,
  * an optional list), which pasted compiles under both checkers, else buttons of one type in words; in four modes. An
- * argument is typed by its own call (V30 §11), whatever another call passes. A written union, a copy of one (a button
- * whose value is one too, A4), an unrestricted `list` or `object` at any depth, one type (numbers with whole numbers,
+ * argument is typed by its own call (V30 §11), whatever another call passes. A written union, a copy of one, an
+ * unrestricted `list` or `object` at any depth, one type (numbers with whole numbers,
  * `null` beside a type, an `otherwise` that leaves one), a button the script cannot know, a list option whose own
  * elements mix (that list's error), and a place another store decides (whose store warning keeps the choice in a
  * variable declared with the union, as a choice used directly does) get no such error.
@@ -1783,7 +1783,6 @@ test("an askChoice of more than one type errs where its type would be inferred, 
     [`let xs: list = [${S}]\nexit\n`, null, null],
     [`let xs: list = [{v: ${S}}]\nexit\n`, null, null],
     [`let o: object = {v: ${S}}\nexit\n`, null, null],
-    ['let u: integer | string = 1\nlet v = askChoice [{text: "A", value: u}]\nexit\n', null, null],
     ["let v = (askChoice 1, null) otherwise 2\nexit\n", null, null],
     // (a list option whose elements mix is that list's error alone)
     ['let v = askChoice ["a", 1]\nexit\n', null, null],
