@@ -234,11 +234,11 @@ test("two choices read in k lists grow with the program in either order, each co
 });
 
 /**
- * #1573 (Codex r1's B2 on #1628): a further list of m loads of one class, the members of an earlier list in its order or
- * in another, names their leaves through the node that list made (`setNode`), found by the members' ids in any order,
- * never by sorting them: the contract's steps (`invSteps`) such a list adds are linear in its members, each doubling
- * from 16 to 32 to 64 adding at most 1.05 × twice what the doubling before added, in either order of the analysis (a
- * sort per list adds 2.18 times as much at each).
+ * #1573 (Codex r1's B2 on #1628): a third list of m loads of one class, the members of the first two lists in their order
+ * or in another, names their leaves through one node per sequence of its other members (`setNode`), shared with an
+ * earlier list of that sequence and else folded anew, one step per member, never by sorting them: the contract's steps
+ * (`invSteps`) the third list adds at 16, 32 and 64 members are linear in its members, the second doubling adding at
+ * most 2.1 times what the first added, in either order of the analysis (with a sort per list, 2.18 times).
  */
 test("a further list of a set's members, in any order, adds contract steps linear in its members (#1573)", () => {
   const steps = (m: number, lists: readonly (readonly number[])[], reversed: boolean): number => {
