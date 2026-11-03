@@ -502,10 +502,12 @@ const NO_RECORDS: RecordsBelow<null> = {
 /**
  * The capture of the contracts the stores owing a check require (#1526 phase B, TABLE r4.278): each request's contract
  * from `reader` over the settled admission pass, in order, kept in `into`, its levels decided and their contracts
- * solved while nothing stops the solver, so a later stop finds them retained. A request deeper than the slice follows
- * is left to the check, where the program leaves the slice. A stop while it runs (`isStop`; `charge` the work of
- * finding the requests, charged first) leaves the request it cut and every later one lost with the cause `extraction`,
- * and is thrown on: nothing is reclassified.
+ * solved while nothing stops the solver, so a later stop finds them retained. The first request deeper than the slice
+ * follows ends the capture: the program has left the slice there, as the lowering's check of that store leaves it and
+ * requests nothing more, so that request and every later one stay unrecorded, as outside the slice's syntax (no `Lost`,
+ * no diagnostic; the second half of the one gate, `slice-syntax.ts` the first). A stop while it runs (`isStop`;
+ * `charge` the work of finding the requests, charged first) leaves the request it cut and every later one lost with the
+ * cause `extraction`, and is thrown on: nothing is reclassified.
  */
 export function captureContracts(
   requests: readonly ContractRequest[],
@@ -529,6 +531,8 @@ export function captureContracts(
         into.push({ ...request, result });
       } catch (error) {
         if (!(error instanceof SliceDepth)) throw error;
+        // (the program has left the slice: nothing more to capture)
+        return;
       }
     }
   } catch (error) {
