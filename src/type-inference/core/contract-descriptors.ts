@@ -145,7 +145,7 @@ export interface ContractReader {
  */
 export interface Holding {
   readonly own: object;
-  /** Whether its position, or one its key reads, is a position `open` holds (each read charged). */
+  /** Whether its key reads, besides its own, a position `open` holds (each read charged). */
   readsAny(open: ReadonlySet<object>): boolean;
   child(step: string): Holding;
 }
@@ -154,7 +154,7 @@ export interface Holding {
 export class OpenLevels {
   readonly #open = new Set<object>();
 
-  /** Whether `holding`'s key reads a level already open (or is one, a ring having made them one): a cycle of copies. */
+  /** Whether `holding`'s key reads a level already open: a cycle of copies. */
   public cyclic(holding: Holding): boolean {
     return holding.readsAny(this.#open);
   }

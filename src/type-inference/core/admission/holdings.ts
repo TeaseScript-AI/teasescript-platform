@@ -24,12 +24,6 @@ class Position implements Holding {
   alias: Position | null = null;
   /** The positions its key reads whole (`Holdings.made`); `null` while they are being made. */
   held: readonly Position[] | null | undefined = undefined;
-  /**
-   * Whether its holding is complete: neither its parent's nor any it read was still being made. Since rings of whole
-   * copies are one position (`collapse`), a copy of a position's own part into it (`a=a.q`) leaves holdings waiting on
-   * each other, closed by `#close`.
-   */
-  whole = true;
 
   public constructor(
     private readonly holdings: Holdings,
@@ -44,8 +38,6 @@ class Position implements Holding {
   }
 
   public readsAny(open: ReadonlySet<object>): boolean {
-    // (a level whose position is one already open: a ring of whole copies made the level below one with it)
-    if (open.has(this)) return true;
     return this.holdings.shared(() => {
       for (const read of this.holdings.made(this).held!) {
         this.holdings.charge();
@@ -206,53 +198,14 @@ class Holdings {
     const stack: { readonly position: Position; needs: Position[] | null }[] = [
       { position, needs: null },
     ];
-    const made: Position[] = [];
     try {
-      this.#make(stack, made);
+      this.#make(stack);
     } catch (error) {
       // (a stop while it ran leaves no holding half made: each is made anew when next asked)
       for (const { position: at } of stack) if (at.held === null) at.held = undefined;
       throw error;
     }
-    const ring = made.filter((at) => !at.whole);
-    if (ring.length > 0)
-      try {
-        this.#close(ring);
-      } catch (error) {
-        // (a stop while it closed the ring keeps none of its holdings: each is made anew when next asked)
-        for (const at of ring) [at.held, at.whole] = [undefined, true];
-        throw error;
-      }
     return position;
-  }
-
-  /**
-   * A ring of copies' holdings, each made while another it reads was still being made: made again from what they read
-   * until none reads more (their reads only grow over the finite set of positions the program's landings and the walks
-   * make, so this ends), a holding made meanwhile (one it newly reads) made on the same footing and joining the ring.
-   * Then each is whole: no walk gets a holding before its ring is closed.
-   */
-  #close(ring: Position[]): void {
-    for (let grew = true; grew;) {
-      grew = false;
-      // (by index: a holding made meanwhile may join the ring)
-      for (let index = 0; index < ring.length; index += 1) {
-        const at = ring[index]!;
-        const needs = this.#needs(at);
-        for (const need of needs)
-          if (need.held === undefined) {
-            const joined: Position[] = [];
-            this.#make([{ position: need, needs: null }], joined);
-            for (const at of joined) if (!at.whole) ring.push(at);
-          }
-        const reads = this.#reads(at, needs);
-        if (reads.size > at.held!.length) {
-          at.held = [...reads];
-          grew = true;
-        }
-      }
-    }
-    for (const at of ring) at.whole = true;
   }
 
   /** `position`'s reads from `needs`: itself, each need, and of each need's reads those a copy lands below. */
@@ -271,10 +224,7 @@ class Holdings {
     return reads;
   }
 
-  #make(
-    stack: { readonly position: Position; needs: Position[] | null }[],
-    made: Position[],
-  ): void {
+  #make(stack: { readonly position: Position; needs: Position[] | null }[]): void {
     while (stack.length > 0) {
       const top = stack.at(-1)!;
       const at = top.position;
@@ -297,11 +247,7 @@ class Holdings {
       const reads = this.#reads(at, top.needs);
       // (complete only where its parent's reads, which it carries, and every one it reads were complete: a parent still
       // being made, `a=a.q`, carried nothing yet)
-      at.whole =
-        (at.parent === null || (at.parent.held !== null && at.parent.whole)) &&
-        top.needs.every((need) => need.held !== null && need.whole);
       at.held = [...reads];
-      made.push(at);
       stack.pop();
     }
   }
