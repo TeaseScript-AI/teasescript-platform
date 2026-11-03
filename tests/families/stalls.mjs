@@ -50,9 +50,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const RULE =
   "A run stalls where its charged units pass the unit limit (a multiple of its program's allowance, the same on every " +
   "machine); the wall clock is only a safety net, whose trigger is uncharged work, never a stall. A stalled source is a " +
-  "candidate stall where the head alone stalled (over the unit limit on a run the base ended within it, or for memory or " +
-  "a fatal error); inherited where the base stalled too, or alone; unknown where the base's units are not stored (a " +
-  "baseline before #1647) or no record says which tree stalled: rerun it on both trees. " +
+  "candidate stall where the head alone stalled (over the unit limit on a run the base ended with its units recorded, " +
+  "or for memory or a fatal error); inherited where the base stalled too, or alone; unknown where no units of the base " +
+  "are recorded on that run (a baseline before #1647, a tree without a ledger), the base stalled at a time limit, or no " +
+  "record says which tree stalled: rerun it on both trees. " +
   "A record without units (before #1647) is judged as before: " +
   "a stalled source is a candidate stall where the head alone stalled for a reason other than time (memory, a fatal " +
   "error), where on one run the head charged more work than the base charged in the whole run, or, a heuristic for " +
@@ -73,34 +74,41 @@ export function verdictOf(entry) {
 }
 
 /**
- * The unit rule (#1647): a run's units are the same on every machine, so a stall is decided by which tree stalled. The
- * head alone stalled: a candidate, where the base's units are known (both trees ran, or its stored area holds them,
- * `baseUnits`); the base stalled too, or alone: inherited; else unknown, rerun on both trees.
+ * The unit rule (#1647): a run's units are the same on every machine, so a stall is decided by which tree stalled and,
+ * over the unit limit, by the base's units on the run the head's stall cut (`cut`), read from that run's own record:
+ * the head alone stalled, over the limit on a run the base ended with its units recorded, or for memory or a fatal
+ * error: a candidate; the base stalled too (but at a time limit, a record before #1647), or alone: inherited; else
+ * unknown, rerun on both trees: no tree named, a base's time limit, or no units of the base recorded on the cut run (a
+ * baseline before #1647, or a tree without a ledger).
  */
-function unitVerdictOf({ stalled = {}, runs = [], units, baseUnits }) {
+function unitVerdictOf({ stalled = {}, runs = [], units }) {
   const { base, head, source } = stalled;
   if (head === undefined && base === undefined)
     return {
       verdict: "unknown",
       why: `the source stalled (${source}), and no record names the tree`,
     };
-  if (base !== undefined && head === undefined)
+  if (head === undefined)
     return { verdict: "inherited", why: `the base stalled (${base}), and the head did not` };
-  if (!baseUnits)
+  if (base === "timeout")
     return {
       verdict: "unknown",
-      why: `the head stalled (${head}), and no units of the base are stored (a baseline before #1647)`,
+      why: `the head stalled (${head}), and the base at a time limit (a baseline before #1647)`,
     };
   if (base !== undefined)
     return { verdict: "inherited", why: `the base stalled too (${base}), the head (${head})` };
+  if (head !== "units") return { verdict: "candidate", why: `the head alone stalled: ${head}` };
   const cut = runs.findLast(({ head: is }) => is !== null && !is.done);
-  if (head !== "units" || cut === undefined)
-    return { verdict: "candidate", why: `the head alone stalled: ${head}` };
-  const { mode, check, base: was, head: is } = cut;
-  const of = was === null ? "none recorded" : `${was.work} within it`;
+  const run = cut === undefined ? "its cut run" : `${cut.mode} ${cut.check}`;
+  const was = cut?.base;
+  if (was === null || was === undefined || !was.done || !Number.isInteger(was.work))
+    return {
+      verdict: "unknown",
+      why: `the head stalled over the unit limit on ${run}, and no units of the base are recorded on it (a baseline before #1647, or a tree without a ledger)`,
+    };
   return {
     verdict: "candidate",
-    why: `on ${mode} ${check} the head charged ${is.work} units, over ${units} × its allowance ${is.allowance}; the base ${of}`,
+    why: `on ${run} the head charged ${cut.head.work} units, over ${units} × its allowance ${cut.head.allowance}; the base ${was.work} within it`,
   };
 }
 
@@ -217,11 +225,8 @@ function entryOf(line, area, trees, ran) {
     stalled = { [tree ?? (trees === 1 ? "head" : "source")]: stalled };
   } else if (stalled !== undefined)
     stalled = Object.fromEntries(Object.entries(stalled).filter(([, why]) => why !== undefined));
-  // (#1647: the unit multiple of the runner that made the record, and whether the base's units are known)
-  const units =
-    ran?.units === undefined
-      ? {}
-      : { units: ran.units, baseUnits: ran.baseline === undefined || ran.stored?.units != null };
+  // (#1647: the unit multiple of the runner that made the record)
+  const units = ran?.units === undefined ? {} : { units: ran.units };
   return { ...line, area, stalled, runs, paired: trees === 2, ...units };
 }
 
@@ -293,14 +298,17 @@ const sameTree = (expected, actual) =>
 
 /**
  * Where two configurations of a comparison differ (`run.mjs`'s `configuration`), by part: shards of one area in every
- * part, a rerun (`rerun`) in its trees as `sameTree` matches them against the replay's.
+ * part, a rerun (`rerun`) in its trees as `sameTree` matches them against the replay's, and in its unit limit only
+ * where the replay names one: a replay recorded before #1647 names none, and its rerun by a runner since adds it.
  */
 const differing = (one, other, rerun = false) =>
   ["sizes", "plan", "allowances", "units", "checks", "trees"].filter((part) =>
     part === "trees" && rerun
       ? one.trees.length !== other.trees.length ||
         one.trees.some((tree, index) => !sameTree(tree, other.trees[index]))
-      : JSON.stringify(one[part]) !== JSON.stringify(other[part]),
+      : part === "units" && rerun && one.units === undefined
+        ? false
+        : JSON.stringify(one[part]) !== JSON.stringify(other[part]),
   );
 
 /**

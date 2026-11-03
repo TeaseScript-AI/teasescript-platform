@@ -33,7 +33,14 @@
 // uncompared, uncharged, modes, runs, differences.
 import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -44,11 +51,13 @@ import {
   endShard,
   identityOf,
   outside,
+  OUTSIDE_RUNS,
   owned,
   pathOf,
   planned,
   planOf,
   readFrom,
+  sourceFault,
   storedRuns,
 } from "./baselines.mjs";
 import { generatorsOf, placeOf, sourceKey } from "./sources.mjs";
@@ -73,9 +82,9 @@ const STEP = 65_536;
 const RECORD = 512;
 
 /**
- * A run over the unit limit (#1647): the child writes the run, its units and its allowance on stderr after `OVER` (a
- * write that completes before the next statement where stderr is a pipe, as the runner makes it, on Linux), and ends
- * with `OVER_EXIT`, which the runner reads as the run's stall.
+ * A run over the unit limit (#1647): the child writes the run, its units and its allowance on stderr after `OVER`, by
+ * a synchronous write to its descriptor that it repeats while the pipe is full (`process.stderr` may still queue
+ * earlier writes, which the exit drops), and ends with `OVER_EXIT`, which the runner reads as the run's stall.
  */
 const OVER = "families-runner over the unit limit: ";
 const OVER_EXIT = 86;
@@ -211,7 +220,15 @@ if (process.argv[2] === "--child") {
   const over = () => {
     write({ work: spent, allowance });
     const { run, tree, mode, check } = running;
-    console.error(`\n${OVER}${JSON.stringify({ run, tree, mode, check, work: spent, allowance })}`);
+    const marker = Buffer.from(
+      `\n${OVER}${JSON.stringify({ run, tree, mode, check, work: spent, allowance })}\n`,
+    );
+    for (let at = 0; at < marker.length;)
+      try {
+        at += writeSync(2, marker, at);
+      } catch (error) {
+        if (error.code !== "EAGAIN") throw error;
+      }
     process.exit(OVER_EXIT);
   };
   for (const ledger of new Set(ledgers.filter((found) => found !== null))) {
@@ -634,7 +651,15 @@ if (process.argv[2] === "--child") {
     const name = path.basename(folder);
     const plan = await planned(top.baseline, name, planOf(name, every, shards));
     if (plan.refused !== undefined) refused(plan.refused);
-    storing = await beginShard(top.baseline, name, shard, shards, plan.plan, plan.places[shard]);
+    storing = await beginShard(
+      top.baseline,
+      name,
+      shard,
+      shards,
+      plan.plan,
+      plan.places[shard],
+      plan.units,
+    );
     if (storing.refused !== undefined) refused(storing.refused);
     if (storing.skipped !== undefined) {
       const { file, skipped } = storing;
@@ -778,7 +803,7 @@ if (process.argv[2] === "--child") {
         reply.uncharged === undefined
           ? undefined
           : reply.uncharged.mode === undefined
-            ? "outside its runs"
+            ? OUTSIDE_RUNS
             : `${reply.uncharged.mode} ${reply.uncharged.check}`;
       const uncharged =
         baseline !== undefined
@@ -795,8 +820,11 @@ if (process.argv[2] === "--child") {
             ? undefined
             : { run: `${over.mode} ${over.check}`, work: over.work, allowance: over.allowance };
         const entry = { generator: name, source: source.name, key, stalled, thrown: failed };
-        const after = { uncharged, cut, runs: results };
-        storing.lines.push(`${JSON.stringify({ ...entry, ...after })}\n`);
+        const text = JSON.stringify({ ...entry, uncharged, cut, runs: results });
+        // (each line checked by the rule every reader of a shard checks it by, before anything is published)
+        const fault = sourceFault(JSON.parse(text), DEFAULTS.units);
+        if (fault !== undefined) refused(`${name} ${source.name} would be stored as ${fault}`);
+        storing.lines.push(`${text}\n`);
       }
       // (with a baseline, one tree may stall where the other threw)
       if (stalled !== undefined) {

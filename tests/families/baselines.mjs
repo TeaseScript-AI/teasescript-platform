@@ -599,8 +599,9 @@ function parsePlan(text) {
 export const shardFile = (dir, shard, shards) => path.join(dir, shardName(shard, shards));
 
 /**
- * A stored shard as the one rule reads it, which status, the store (which skips a shard that counts and replaces one
- * that does not) and the comparison (`storedRuns`) share: `lines` (each source's runs) where it counts; `other` (the
+ * A stored shard's frame as the one rule reads it, under `shardRead`, which status, import, the store (which skips a
+ * shard that counts and replaces one that does not) and the comparison (`storedRuns`) share: `lines` (each source's
+ * runs) where it counts; `other` (the
  * inputs it names otherwise) where it would count but names other inputs than its own baseline's MANIFEST (`identity`:
  * its src tree, oracle library, lockfile and Node; any commit of that tree, never the tree run against it), which makes
  * the baseline hold runs of other inputs; else nothing (absent or damaged). It counts where its last line, its total,
@@ -648,9 +649,12 @@ function bytesOf(file) {
   }
 }
 
-/** Whether the stored shard `file` counts (`shardIn`). */
-export const verified = (file, plan, places, identity) =>
-  shardIn(bytesOf(file), plan, places, identity).lines !== undefined;
+/**
+ * Whether the stored shard `file` counts, read as every consumer reads it (`shardRead`, under its PLAN's unit multiple
+ * `units`): a writer skips only such a shard, and replaces any other.
+ */
+export const verified = (file, plan, places, identity, units) =>
+  shardRead(file, plan, places, identity, units).lines !== undefined;
 
 /** Whether a running writer claims a shard of the area of `shards` shards in `dir`, or the shard `shard` only. */
 function claimedIn(dir, shards, shard) {
@@ -708,7 +712,10 @@ export async function planned(baseline, area, plan) {
     return {};
   });
   if (outcome === RETIRED) return { refused: `${top} was replaced while this writer planned it` };
-  return outcome.refused === undefined ? { plan: id, shards, places } : outcome;
+  // (and its unit multiple, which every read of its shards validates them under: `shardRead`)
+  return outcome.refused === undefined
+    ? { plan: id, shards, places, units: limitsOf(plan)?.units ?? null }
+    : outcome;
 }
 
 // A claim on a shard (`beginShard`), which only `endShard` takes, once: the shard's paths are made from it and from its
@@ -719,16 +726,16 @@ const claims = new WeakMap();
  * A shard to store (through the gate): `skipped` where it counts or a running writer stores it, else this process's
  * `claim` on it (above) and its `file`; `refused` where the baseline refuses the writer.
  */
-export async function beginShard(baseline, area, shard, shards, plan, places) {
+export async function beginShard(baseline, area, shard, shards, plan, places, units) {
   const top = pathOf(baseline, "baseline");
   const dir = path.join(top, areaName(area));
   const file = shardFile(dir, shard, shards);
   const outcome = await gate(baseline, (text) => {
-    if (verified(file, plan, places, identityIn(text))) return { skipped: "stored" };
+    if (verified(file, plan, places, identityIn(text), units)) return { skipped: "stored" };
     if (!claimed(path.join(dir, claimName(shard, shards))))
       return { skipped: "being stored by another writer" };
     const claim = Object.freeze({});
-    claims.set(claim, { baseline, area, shard, shards, plan, places });
+    claims.set(claim, { baseline, area, shard, shards, plan, places, units });
     return { claim };
   });
   if (outcome === RETIRED)
@@ -745,7 +752,7 @@ export async function endShard(claim, lines, total) {
   const held = claims.get(claim);
   if (held === undefined) throw new TypeError(`${String(claim)} is no claim this tool gave`);
   claims.delete(claim);
-  const { baseline, area, shard, shards, plan, places } = held;
+  const { baseline, area, shard, shards, plan, places, units } = held;
   const top = pathOf(baseline, "baseline");
   const dir = path.join(top, area);
   const file = shardFile(dir, shard, shards);
@@ -759,13 +766,13 @@ export async function endShard(claim, lines, total) {
       linkSync(tmp, file);
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      if (!verified(file, plan, places, identity)) renameSync(tmp, file);
+      if (!verified(file, plan, places, identity, units)) renameSync(tmp, file);
     }
     rmSync(tmp, { force: true });
     const claimFile = path.join(dir, claimName(shard, shards));
     if (existsSync(claimFile) && readFileSync(claimFile, "utf8").trim() === WRITER)
       rmSync(claimFile, { force: true });
-    return { verified: verified(file, plan, places, identity) };
+    return { verified: verified(file, plan, places, identity, units) };
   });
   if (outcome === RETIRED)
     return { refused: `${top} was replaced while this writer stored into it` };
@@ -814,20 +821,19 @@ export function storedRuns(folder) {
       refused: `${folder} is no complete area: ${record === undefined ? "not recorded in its baseline" : "its PLAN is not the recorded one"}`,
     };
   const { shards, places } = parsePlan(plan);
+  const units = limitsOf(plan)?.units ?? null;
   const lines = [];
   let incomplete;
   for (let shard = 0; shard < shards; shard += 1) {
     const file = shardFile(real, shard, shards);
-    const read = shardIn(bytesOf(file), record.plan, places[shard], identity);
-    if (read.other !== undefined) return { status: 2, refused: otherInputs(dir, file, read.other) };
+    const read = shardRead(file, record.plan, places[shard], identity, units);
+    if (read.refused !== undefined) return { status: 2, refused: read.refused };
     if (read.lines === undefined)
       incomplete ??= `${folder} is no complete area: ${shardName(shard, shards)} ${existsSync(file) ? "does not verify" : "is absent"}`;
     else lines.push(...read.lines);
   }
   // (and the PLAN's unit multiple, null for a plan 1 area, which stores no units: #1647)
-  return incomplete === undefined
-    ? { lines, identity, units: limitsOf(plan)?.units ?? null }
-    : { status: 1, refused: incomplete };
+  return incomplete === undefined ? { lines, identity, units } : { status: 1, refused: incomplete };
 }
 
 /** A built tree's areas: the folders of tests/families/ with generators, and tools/corpus/fixture/. */
@@ -885,12 +891,12 @@ async function stateOf(tree, root, readOnly) {
       line = { area, folder, state: "absent", shards: record.shards, verified: 0, store: "all" };
     else {
       const { shards, places } = parsePlan(stored);
+      const units = limitsOf(stored)?.units ?? null;
       const read = places.map((place, shard) =>
-        shardIn(bytesOf(shardFile(dir, shard, shards)), record.plan, place, identityIn(manifest)),
+        shardRead(shardFile(dir, shard, shards), record.plan, place, identityIn(manifest), units),
       );
-      const other = read.findIndex((shard) => shard.other !== undefined);
-      if (other >= 0)
-        return refusal(otherInputs(own.dir, shardFile(dir, other, shards), read[other].other));
+      const refused = read.find((shard) => shard.refused !== undefined);
+      if (refused !== undefined) return refusal(refused.refused);
       const good = read.map((shard) => shard.lines !== undefined);
       const count = good.filter(Boolean).length;
       if (
@@ -1095,6 +1101,12 @@ function planFault(text, area, shards) {
 /** Whether `value` is a sha256 in hex, a string proved before the pattern applies (`test` would coerce an array). */
 const hash64 = (value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 
+/**
+ * What a source that reached the safety net between its runs, not in one, is stored with (`uncharged`): the one
+ * representation the runner writes and every reader accepts (#1647).
+ */
+export const OUTSIDE_RUNS = "outside its runs";
+
 /** A stored run's name: its mode and check (`<src|rev>-<on|off> <publication|stops <allowance>>`). */
 const runName = (run) =>
   typeof run === "string" &&
@@ -1114,11 +1126,13 @@ const allowanceIn = (value) => value === null || (Number.isInteger(value) && val
  * them, and its runs, each a mode and check (`runName`) with one tree's result: a value (its hash, its parts' hashes or
  * none, its count of unanswered nodes, whether the files did not parse) or the text it threw. Under plan 2 each run also
  * holds the units it charged (`work`) and its program's allowance (`allowance`), a stall over the unit limit (`units`)
- * the run it cut (`cut`: its name, its units and allowance, the units over `units` times the allowance: the stall's
- * certificate, the same on every machine), and a run that reached the wall-clock safety net is named apart
- * (`uncharged`), never a stall. These are what a comparison against the baseline (`run.mjs --baseline`) reads.
+ * the run it cut (`cut`: its name, its units and allowance, a charged ledger's (above 0), the units over `units` times
+ * the allowance: the stall's certificate, the same on every machine), and a run that reached the wall-clock safety net
+ * is named apart (`uncharged`: the run, or `OUTSIDE_RUNS`), never a stall. These are what a comparison against the
+ * baseline (`run.mjs --baseline`) reads. The one rule for a stored line: the runner checks each line it stores by it,
+ * and every reader of a shard (`shardRead`) does.
  */
-function sourceFault(line, units = null) {
+export function sourceFault(line, units = null) {
   const optional =
     units === null ? ["stalled", "thrown"] : ["stalled", "thrown", "uncharged", "cut"];
   if (!shaped(line, ["generator", "source", "key", "runs"], optional))
@@ -1131,7 +1145,7 @@ function sourceFault(line, units = null) {
     !(shaped(line.thrown, ["runner"]) && typeof line.thrown.runner === "string")
   )
     return "its exception is not the runner's text";
-  if (line.uncharged !== undefined && !runName(line.uncharged))
+  if (line.uncharged !== undefined && !runName(line.uncharged) && line.uncharged !== OUTSIDE_RUNS)
     return "its run that reached the safety net is none";
   if (units !== null && (line.stalled === "units") !== (line.cut !== undefined))
     return "its stall over the unit limit has no cut run, or a cut run another stall";
@@ -1142,6 +1156,7 @@ function sourceFault(line, units = null) {
       runName(line.cut.run) &&
       Number.isInteger(line.cut.work) &&
       Number.isInteger(line.cut.allowance) &&
+      line.cut.allowance > 0 &&
       line.cut.work > units * line.cut.allowance
     )
   )
@@ -1382,8 +1397,8 @@ async function importShard(central, held, area, shard, shards, listing) {
     const fault = listingFault(listing, read.sources, area, `${shard}/${shards}`, units);
     if (fault !== undefined) return { refused: `${file}: ${fault}` };
     const target = shardFile(path.join(dir, area), shard, shards);
-    const there = shardIn(bytesOf(target), record.plan, places[shard], identityIn(text));
-    if (there.other !== undefined) return { refused: otherInputs(dir, target, there.other) };
+    const there = shardRead(target, record.plan, places[shard], identityIn(text), units);
+    if (there.refused !== undefined) return there;
     if (there.lines !== undefined) {
       // (#1612: two lines of a source that differ only in that one stalled are no value difference, the complete one
       // standing: kept where the stored line is it, else put in its place)
@@ -1412,7 +1427,7 @@ async function importShard(central, held, area, shard, shards, listing) {
       renameSync(tmp, target);
       return {
         imported: target,
-        verified: verified(target, record.plan, places[shard], identityIn(text)),
+        verified: verified(target, record.plan, places[shard], identityIn(text), units),
         stallOnly,
       };
     }
@@ -1427,7 +1442,7 @@ async function importShard(central, held, area, shard, shards, listing) {
     rmSync(tmp, { force: true });
     return {
       imported: target,
-      verified: verified(target, record.plan, places[shard], identityIn(text)),
+      verified: verified(target, record.plan, places[shard], identityIn(text), units),
     };
   });
   return outcome === RETIRED
@@ -1578,10 +1593,14 @@ function completeOf(first, second) {
   if (placeIn(a) !== placeIn(b)) return undefined;
   const [stalled, complete, text] =
     a.stalled !== undefined && b.stalled === undefined ? [a, b, second] : [b, a, first];
+  // (#1647: a line that reached the safety net is no complete result, and a stall over the unit limit is the same on
+  // every machine, so a line that ended its cut run is a value difference, not a stall-only one)
   if (
     stalled.stalled === undefined ||
     complete.stalled !== undefined ||
-    complete.thrown !== undefined
+    complete.thrown !== undefined ||
+    complete.uncharged !== undefined ||
+    (stalled.cut !== undefined && complete.runs[stalled.cut.run] !== undefined)
   )
     return undefined;
   const ended = Object.entries(stalled.runs);
@@ -1607,9 +1626,11 @@ function mergedBody(body, lines, replacing) {
     (sum, [index, line]) => sum + counted(line) - counted(lines[index]),
     0,
   );
+  const count = (key) => merged.filter((line) => JSON.parse(line)[key] !== undefined).length;
   const recounted = {
     ...total,
-    stalled: merged.filter((line) => JSON.parse(line).stalled !== undefined).length,
+    stalled: count("stalled"),
+    ...(total.uncharged === undefined ? {} : { uncharged: count("uncharged") }),
     runs: (total.runs ?? 0) + runs,
     merged: [
       ...(total.merged ?? []),

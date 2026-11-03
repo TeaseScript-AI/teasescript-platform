@@ -66,7 +66,8 @@ stored twice with other results.
 `--work` writes a record of each source and changes no other output (#1564): a first line with what ran and the
 comparison's configuration (`configuration`: the sources' sizes, the area's plan (the hash of every source's place, its
 generator, name and key, in the area's order, before a shard or `--only` selects), the stop runs' allowances, each
-generator's checks, the unit limit's multiple, each tree as the runner executes it, its compiled compiler and oracle library read from the build it
+generator's checks, the unit limit's multiple (a replay recorded before #1647 names none, and its rerun since adds
+it), each tree as the runner executes it, its compiled compiler and oracle library read from the build it
 loads, for a checkout, its `dist/` or a tree without sources alike, and a stored base as its baseline's MANIFEST names
 it, which a rerun's base matches by its own identity), one line per source with each run's charged work (`work`: the
 units its analyses charged their work ledgers, `WorkLedger.charge`, finishing work included; `null` for a tree without
@@ -80,9 +81,10 @@ milliseconds until the stall and the tree running it (`running`). `stalls.mjs` r
 without `--work` by its `--out` file, which gives its stalls alone) and prints the rule it judges each stalled source by
 (`RULE`), each stalled source with its verdict, each source a run of which reached the safety net (a defect, uncharged
 work), and each area's counts and the total. Since #1647 a stall is judged from the records alone: a candidate where the
-head alone stalled (over the unit limit on a run the base ended within it, or for memory or a fatal error), inherited
-where the base stalled too, or alone, and unknown where the base's units are not stored (a baseline before #1647) or no
-record names the tree. A record made before #1647 is judged by the rule then (a candidate, load or unknown, its time
+head alone stalled (over the unit limit on a run the base ended with its units recorded, or for memory or a fatal
+error), inherited where the base stalled too, or alone, and unknown where no units of the base are recorded on the run
+the head's stall cut (a baseline before #1647, a tree without a ledger), the base stalled at a time limit, or no record
+names the tree. A record made before #1647 is judged by the rule then (a candidate, load or unknown, its time
 clause a heuristic). An
 area's records must share one configuration (another is refused, exit 2), so the area is complete only with its shards
 0/N to N-1/N of one N, together every source of one plan, and a source a plan lists more than once (a repeat, which the
@@ -123,14 +125,16 @@ and the refusal names the path. Each area's `PLAN` binds its shards' sources in 
 writer that would run another is refused (exit 2); its limits (`plan 2`, since #1647: `limits <multiple> x allowance
 units, <seconds> s safety net, <MB> MB`, `FAMILIES_UNITS` and `FAMILIES_TIMEOUT` overriding the runner's defaults; a
 `plan 1` one's a time a source) bind it too. Under `plan 2` each stored run holds its units and allowance, an ended
-run's within the limit, a stall over the limit the run it cut, over it (its certificate, the same on every machine),
-and a run that reached the safety net is named apart (`uncharged`), never a stall. One rule says whether a stored shard
-counts, and status, the store
-and `--baseline` all read shards through it: its total line names its own baseline's inputs (the `MANIFEST`'s `src/`
-tree, oracle library, lockfile and Node; any commit of that tree), the `PLAN` and the shard's planned sources, which
-are its lines in their order, and hashes every line before it. A shard that would count but names other inputs makes
-the baseline hold runs of other inputs (exit 2); one that does not verify leaves the area damaged (exit 1), and the
-next writer of that shard replaces it. `--baseline` reads an area only where it is complete under that rule, and is
+run's within the limit, a stall over the limit the run it cut, a charged ledger's allowance above 0 and units over the
+limit (its certificate, the same on every machine), and a run that reached the safety net is named apart (`uncharged`,
+the run or `outside its runs`), never a stall: one rule for a stored line (`sourceFault`), by which the store checks
+each line it writes and every reader of a shard reads it. One rule says whether a stored shard counts, and status,
+import, the store and `--baseline` all read shards through it: its total line names its own baseline's inputs (the
+`MANIFEST`'s `src/` tree, oracle library, lockfile and Node; any commit of that tree), the `PLAN` and the shard's
+planned sources, which are its lines in their order, each one a store writes, and hashes every line before it. A shard
+that would count but names other inputs or holds a line no store writes is refused by its readers (exit 2), and a store
+does not skip it but stores it again; one that does not verify leaves the area damaged (exit 1), and the next writer of
+that shard replaces it. `--baseline` reads an area only where it is complete under that rule, and is
 refused as status refuses it otherwise. One running writer at a time stores a shard. Every write into the baseline
 but its `MANIFEST`'s making goes through one gate in `baselines.mjs`, which holds the baseline's lock. A store writes
 into its tree's baseline only (and its `--out`), and runs where only that folder and its scratch are writable:
