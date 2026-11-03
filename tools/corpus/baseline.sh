@@ -19,14 +19,14 @@
 # - `seed` makes <out>/<src tree>/ a new baseline of the tree (`baselines.mjs seed`: as `state` makes it, named by the
 #   tree's build of the compiler, `compiled <dist/src/ tree>`, with the PLAN of every area and no shard) and
 #   <out>/shards.tsv, one line per shard to store (`<area>\t<i>\t<N>`).
-# - `compute` stores one shard from the seed baseline into a new copy of it in its scratch (`import`, `compiled`, then the
-#   tree's runner at the seed PLAN's limits, its unit multiple and safety net, with `--work`, under sx-sandbox where it is
-#   found, only the scratch and <out> writable). A stall is a run over the unit limit (or out of memory), the same on every machine
-#   (#1647), so it is stored once, with no run alone (#1612's reruns at twice a time limit are gone; `baselines.mjs`
-#   still reads a baseline stored before). Then <out>/<src tree>/ is that copy's MANIFEST, PLANs and shard (`import`),
-#   <out>/stalls.json lists each stall (`baselines.mjs stalls`), as `import` requires, and
-#   <out>/<area>.<i>of<N>.work.jsonl is the store's record of each source's units, allowance and time.
-#   A seed before #1647 (a plan 1 PLAN) is computed by its own tree's script.
+# - `compute` stores one shard from the seed baseline into <out> (an existing folder, the job's $SX_OUT), from a new
+#   copy of the seed in its scratch (`import`, `compiled`, then the tree's runner at the seed PLAN's limits, its unit
+#   multiple and safety net, with `--work`, under sx-sandbox where it is found, only the scratch and <out> writable). A
+#   stall is a run over the unit limit (or out of memory), the same on every machine (#1647), so it is stored once, with
+#   no run alone (#1612's reruns at twice a time limit are gone; `baselines.mjs` still reads a baseline stored before).
+#   Then <out>/<src tree>/ is that copy's MANIFEST, PLANs and shard (`import`), <out>/stalls.json lists each stall
+#   (`baselines.mjs stalls`), as `import` requires, and <out>/<area>.<i>of<N>.work.jsonl is the store's record of each
+#   source's units, allowance and time. A seed before #1647 (a plan 1 PLAN) is computed by its own tree's script.
 #   Its scratch is a new folder in $SX_SCRATCH (the central queue's, removed with the job), else in TMPDIR.
 # - `submit` prints (`--dry`) or submits the fill's jobs, one line each: the seed's, or with the seed's job id and its
 #   shards.tsv one per shard (`sx-job submit … -- bash -c '…'`; #1590's lines, whose command runs without a shell).
@@ -138,6 +138,11 @@ if [ "${1:-}" = compute ]; then
     exit 2
   fi
   tree=$2 seed=${3%/} area=$4 i=${5%/*} n=${5#*/} out=$6
+  # (<out> an existing folder, as the queue's $SX_OUT is, where the store writes its --work record: #1647)
+  if [ ! -d "$out" ]; then
+    echo "baseline compute: $out is no folder (the job output folder, \$SX_OUT)" >&2
+    exit 2
+  fi
   src=${seed##*/} state=$tree/tests/families/baselines.mjs runner=$tree/tests/families/run.mjs
   folder=$tree/tests/families/$area
   [ "$area" != fixture ] || folder=$tree/tools/corpus/fixture

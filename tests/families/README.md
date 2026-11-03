@@ -160,7 +160,8 @@ that tree to be `main`'s again.
 A fill can also run on any worker into a central store (#1590). `bash tools/corpus/baseline.sh seed <tree> <SHA> <out>`
 makes `<out>/<src tree>/` (its `MANIFEST` also naming the tree's build of the compiler, `compiled <dist/src/ tree>`,
 and every area's `PLAN`) and `<out>/shards.tsv`, one line per shard to store. `baseline.sh compute <tree> <seed
-baseline> <area> <i>/<N> <out>` stores one shard into a copy of the seed at the `PLAN`'s limits, with `--work`: a stall
+baseline> <area> <i>/<N> <out>` stores one shard into a copy of the seed at the `PLAN`'s limits, with `--work`, into
+`<out>` (an existing folder, the job's `$SX_OUT`): a stall
 is the same on every machine, so it is stored once and listed in `<out>/stalls.json` with its reason and, over the unit
 limit, the run it cut; `<out>/<area>.<i>of<N>.work.jsonl` is the store's record of each source's units and time. #1612's
 run alone at twice a time limit, with `baselines.mjs alone` and `merge`, went with #1647; a seed before #1647 (`plan 1`)

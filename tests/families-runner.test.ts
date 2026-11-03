@@ -1411,8 +1411,11 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
 
     // shards computed from the seed: a stall (`ends`, which ends the process) stored once and listed in stalls.json with
     // its reason, no run alone (#1647: a stall is the same on every machine); the store's record of each source beside
-    const compute = (out: string, index: number, more = {}, from = built) =>
-      sh(more, "compute", from, at("seed", src), "area", `${index}/16`, at(out));
+    // (each into a new folder, as the queue's $SX_OUT is)
+    const compute = (out: string, index: number, more = {}, from = built) => {
+      mkdirSync(at(out), { recursive: true });
+      return sh(more, "compute", from, at("seed", src), "area", `${index}/16`, at(out));
+    };
     for (const [out, index] of [
       ["zero", 0],
       ["one", 1],
@@ -1446,8 +1449,10 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       readFileSync(at("seed-short", src, "area", "PLAN"), "utf8"),
       /^limits 3 x allowance units, 2 s safety net, 2048 MB$/m,
     );
-    const short = (out: string, index: number, more = {}) =>
-      sh(more, "compute", built, at("seed-short", src), "area", `${index}/16`, at(out));
+    const short = (out: string, index: number, more = {}) => {
+      mkdirSync(at(out), { recursive: true });
+      return sh(more, "compute", built, at("seed-short", src), "area", `${index}/16`, at(out));
+    };
     const heavy = short("heavy", 1, { HEAVY: "mixed" });
     assert.equal(heavy.status, 0, heavy.stderr);
     assert.deepEqual(
