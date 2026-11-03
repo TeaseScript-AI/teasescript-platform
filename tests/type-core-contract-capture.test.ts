@@ -3,7 +3,10 @@ import test from "node:test";
 
 import { compileSourceWithBackend } from "../src/compiler.js";
 import type { TypePlan } from "../src/plan/model.js";
-import { createSerializableList } from "../src/runtime/values/serializable-values.js";
+import {
+  createSerializableList,
+  createSerializableObject,
+} from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
@@ -29,6 +32,9 @@ import { heldStops, HELD_MODES, type HeldMode } from "./helpers/type-core-held-h
 
 const GLOBALS = ["hostValue", "hostOther"];
 const L = (...items: Parameters<typeof createSerializableList>[0]) => createSerializableList(items);
+const O = (
+  fields: Readonly<Record<string, Parameters<typeof createSerializableList>[0][number]>>,
+) => createSerializableObject(Object.entries(fields).map(([name, value]) => ({ name, value })));
 
 /** A list of lists of whole numbers, the type each witness's store receives. */
 const NESTED: TypePlan = { kind: "list", element: { kind: "list", element: { kind: "integer" } } };
@@ -120,6 +126,108 @@ test("a copied store's whole contract is checked at the settled stops past its c
   }
 });
 
+/** A receiving literal: `a`'s copy `depth` copies down stores `width` fields, host data in its first or its last. */
+function receiving(depth: number, width: number, hostFirst: boolean): [string, string] {
+  const fields = ["f0: [[1]]", ...Array.from({ length: width - 1 }, (_, i) => `f${i + 1}: ["s"]`)];
+  const copies = Array.from(
+    { length: depth },
+    (_, i) => `let c${i + 1} = ${i === 0 ? "a" : `c${i}`}`,
+  );
+  const stored = [
+    "f0: hostValue",
+    ...Array.from({ length: width - 1 }, (_, i) => `f${i + 1}: ["t"]`),
+  ];
+  const literal = hostFirst ? stored : [...stored.slice(1), stored[0]!];
+  return [
+    `let a = {${fields.join(", ")}}\n${copies.join("\n")}`,
+    `c${depth} = {${literal.join(", ")}}`,
+  ];
+}
+
+test("host data inside a stored object literal is captured with its whole store (Codex r1 on #1606)", () => {
+  // (the ingress sites lie inside the store's value, not at it: the store owes its whole check all the same, as the
+  // lowering finds the store of each obligation's expression; no stop past the capture weakens it, the questions' stops
+  // after the analysis included. Codex's two witnesses in four modes, the receiving-literal family across copy depth,
+  // width and field order in two)
+  const nested = { hostValue: L(L(2)), hostOther: 3 };
+  const wrong = { hostValue: L(L("x")), hostOther: 3 };
+  const rows: readonly (readonly [
+    string,
+    string,
+    readonly Globals[],
+    readonly Globals[],
+    readonly HeldMode[],
+  ])[] = [
+    [
+      'let a = {z: [[1]], a: ["s"]}\nlet b = a',
+      "b = {a: hostOther, z: hostValue}",
+      [{ hostValue: L(L(2)), hostOther: L("t") }],
+      [
+        { hostValue: L(L("x")), hostOther: L("t") },
+        { hostValue: L(L(2)), hostOther: L(3) },
+      ],
+      HELD_MODES,
+    ],
+    [
+      'let a = {f: [[1]], g: ["s"]}\nlet b = a',
+      'b = {f: hostValue, g: ["t"]}',
+      [nested],
+      [wrong],
+      HELD_MODES,
+    ],
+    ...(
+      [
+        [1, 2, false],
+        [3, 2, true],
+        [2, 4, false],
+      ] as const
+    ).map(
+      ([depth, width, hostFirst]) =>
+        [
+          ...receiving(depth, width, hostFirst),
+          [nested],
+          [wrong],
+          [HELD_MODES[0]!, HELD_MODES[3]!],
+        ] as const,
+    ),
+  ];
+  for (const [setup, storeText, fitting, forbidden, modes] of rows) {
+    const source = `${setup}\nsay "BEFORE"\n${storeText}\nsay "AFTER"\nexit\n`;
+    const store = spanOf(source, storeText);
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+    for (const mode of modes) {
+      const natural = mode.run(() => analyseCore(request));
+      const [captured] = capturedWithin(natural, store);
+      assert.ok(captured?.result.state === "complete", `${storeText} ${mode.name}: unstopped`);
+      const compiled = (allowance?: number) =>
+        mode.run(() =>
+          allowance === undefined
+            ? compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND)
+            : withTestAllowance(allowance, () =>
+                compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+              ),
+        ).plan;
+      const naturalPlan = compiled();
+      const whole = planChecks(naturalPlan);
+      assert.deepEqual(whole, [captured.result.ref], `${storeText} ${mode.name}`);
+      assert.deepEqual(storeRunProblems(naturalPlan!, store, fitting, forbidden), []);
+      // (the settled stops past the capture, and four where the questions after the analysis run out)
+      const total = natural.budget.total;
+      const questions = [0, 128, 256, 384].map((more) => ({
+        allowance: total + more,
+        phase: "question",
+      }));
+      for (const { allowance, phase } of [...sampledStops(source, mode), ...questions]) {
+        if (phase === "extraction") continue;
+        const at = `${storeText} ${mode.name}, ${phase} stop at ${allowance}`;
+        const plan = compiled(allowance);
+        assert.deepEqual(planChecks(plan), whole, at);
+        assert.deepEqual(storeRunProblems(plan!, store, fitting, forbidden), [], at);
+      }
+    }
+  }
+});
+
 test("a genuinely open part stays open past the capture, as unstopped", () => {
   for (const [name, source] of [
     ["host element", 'let a = {f: [hostOther]}\nlet b = a\nb.f = hostValue\nsay "AFTER"\nexit\n'],
@@ -171,6 +279,75 @@ test("a property whose proof a stop cut leaves its complete sibling checked whol
     if (witnessed === 2) break;
   }
   assert.ok(witnessed > 0, "some stop leaves `g` alone unfinished");
+});
+
+test("a property whose proof a stop cut leaves its later complete sibling checked (Codex r1 on #1606)", () => {
+  // (`g` decided before the capture by its own store, `f` cut: the later sibling's check stands at the store)
+  const source =
+    'let a = {f: [[1]], g: 1}\nlet b = a\nb.g = 2\nsay "BEFORE"\nb = hostValue\nsay "AFTER"\nexit\n';
+  const store = spanOf(source, "b = hostValue");
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+  const f = propertyStep("f");
+  let witnessed = 0;
+  for (const { allowance, phase } of heldStops(
+    { name: "later sibling", source, slice: true, values: [] },
+    HELD_MODES[0]!,
+  )) {
+    if (phase !== "extraction") continue;
+    const answers = withTestAllowance(allowance, () => analyseCore(request));
+    const [result] = storeContracts(answers, request).values();
+    if (result?.state !== "lost" || !result.required.every((level) => level.path[0] === f))
+      continue;
+    witnessed += 1;
+    const at = `stop at ${allowance}`;
+    const partial = result.partial;
+    assert.ok(partial?.kind === "object", at);
+    assert.deepEqual(
+      partial.properties.find((property) => property.name === "g")?.type,
+      { kind: "integer" },
+      at,
+    );
+    const { plan } = withTestAllowance(allowance, () =>
+      compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+    );
+    assert.deepEqual(
+      storeRunProblems(
+        plan!,
+        store,
+        [{ hostValue: O({ f: L(L(2)), g: 3 }), hostOther: 3 }],
+        [{ hostValue: O({ f: L(L(2)), g: "x" }), hostOther: 3 }],
+      ),
+      [],
+      at,
+    );
+    // (two such stops are enough here; every allowance is the PR's queue evidence)
+    if (witnessed === 2) break;
+  }
+  assert.ok(witnessed > 0, "some stop leaves `f` alone unfinished");
+});
+
+test("a stop in the capture leaves every request after the one it cut lost, never absent (Codex r1 on #1606)", () => {
+  const source =
+    'let a = {f: [[1]]}\nlet b = a\nlet c = a\nsay "BEFORE"\nb.f = hostValue\nc.f = hostValue\nsay "AFTER"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+  const stores = [spanOf(source, "b.f = hostValue"), spanOf(source, "c.f = hostValue")];
+  let cutFirst = 0;
+  for (const { allowance, phase } of heldStops(
+    { name: "tail", source, slice: true, values: [] },
+    HELD_MODES[0]!,
+    3,
+  )) {
+    if (phase !== "extraction") continue;
+    const answers = withTestAllowance(allowance, () => analyseCore(request));
+    const at = `stop at ${allowance}`;
+    for (const span of stores) assert.equal(capturedWithin(answers, span).length, 1, at);
+    const first = answers.contracts.findIndex(({ result }) => result.state === "lost");
+    assert.ok(first >= 0, at);
+    if (first === 0) cutFirst += 1;
+    for (const { result } of answers.contracts.slice(first))
+      assert.ok(result.state === "lost" && result.cause === "extraction", at);
+  }
+  assert.ok(cutFirst > 0, "some stop cuts the first request");
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {

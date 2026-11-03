@@ -540,8 +540,9 @@ export class Consumers {
    * The capture (#1526 phase B, TABLE r4.278): once admission settled, before the walk, the contract of each destination
    * whose store admission owes a check so far (its store warnings, C1, and its ingress stores, C9), read level by level
    * through the answers' own level reader (`admittedLevel`), so each level's decision and contract are made and kept while
-   * the solver still runs. Each request is a store's site and the place and path its statement stores into (its first
-   * live store, else its first, as `Answers.at` reads one), in the consumers' order; its result is kept (`captured`).
+   * the solver still runs. Each request is an owing site and the place and path the `let` or assignment holding it stores
+   * into (its statement's first live store, else its first, as `Answers.at` reads one), each destination once, in the
+   * consumers' order; its result is kept (`captured`).
    */
   #capture(): void {
     const { program, definitions, lists, contract } = this.pass;
@@ -559,27 +560,25 @@ export class Consumers {
     for (const site of this.#ingressSites) sites.set(siteKey(site), site);
     if (sites.size === 0) return;
     const destinations = new Map<FlowNode, Definition>();
-    const bySite = new Map<string, Definition[]>();
-    for (const d of definitions.storeDefs) {
+    for (const d of definitions.storeDefs)
       if (!destinations.has(d.node) && lists.live(d)) destinations.set(d.node, d);
-      const at = siteKey(d.site);
-      if (!sites.has(at)) continue;
-      const list = bySite.get(at);
-      if (list === undefined) bySite.set(at, [d]);
-      else list.push(d);
-    }
     for (const d of definitions.storeDefs)
       if (!destinations.has(d.node)) destinations.set(d.node, d);
+    // (a site owes its check at the `let` or assignment whose stored value holds it, however deep inside: the statement
+    // a store definition takes effect at (`effectNode`), as the lowering finds the store of an obligation's expression
+    // (`SliceIndex.storeOf`) and reads its destination at that statement's node (`Answers.at`); host data in an object
+    // literal's property is the whole store's)
     const requests: ContractRequest[] = [];
-    for (const [at, site] of sites) {
-      // (each destination once a site, by its store: no key text made)
-      const made = new Set<Definition>();
-      for (const d of bySite.get(at) ?? []) {
-        const destination = destinations.get(d.node)!;
-        if (made.has(destination)) continue;
-        made.add(destination);
-        requests.push({ site, place: destination.place, path: destination.path });
-      }
+    const requested = new Set<Definition>();
+    for (const site of sites.values()) {
+      const node = program.effectNode(site);
+      const kind = node?.statement?.kind;
+      if (node === null || (kind !== "letStatement" && kind !== "assignmentStatement")) continue;
+      // (each destination once, by its store: no key text made; the first owing site names it)
+      const destination = destinations.get(node);
+      if (destination === undefined || requested.has(destination)) continue;
+      requested.add(destination);
+      requests.push({ site, place: destination.place, path: destination.path });
     }
     const reader: ContractReader = {
       level: (place, path) => {
