@@ -14,7 +14,12 @@ import {
 import { conversionCategory, dictList } from "../method-categories.js";
 import { propertyName, propertyStep, stepName } from "../program.js";
 import { LITERALS } from "./kinds.js";
-import type { CheapDecision, CheapFrontier, CheapShape } from "./model.js";
+import {
+  FRONTIER_COPIES,
+  type CheapDecision,
+  type CheapFrontier,
+  type CheapShape,
+} from "./model.js";
 import { readKey } from "./names.js";
 
 // What the stores' syntax decides (source 4): the shape below a read's key by syntax, built once per path.
@@ -229,15 +234,9 @@ function syntaxDecides(walk: Consumers): boolean {
 }
 
 /**
- * How long a chain of copies of inferred places the stores' syntax follows from the key it decides (#1604): a copy past
- * it is not told by syntax, as before the chain was followed.
- */
-const SYNTAX_COPIES = 8;
-
-/**
  * Each walk's following of copies of inferred places (`linkedFrontier`): the levels being made, each with the chain's
  * depth it is made at (a copy reaching one again closes a cycle of copies); the chain's depth now; the least depth a
- * cycle closed at while the running level was made (`back`); and how often a chain was cut at `SYNTAX_COPIES`.
+ * cycle closed at while the running level was made (`back`); and how often a chain was cut at `FRONTIER_COPIES`.
  */
 interface Following {
   readonly making: Map<Key, number>;
@@ -275,7 +274,7 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
     if (frontier !== undefined) break;
   }
   // (a prefix whose chain reaches past the bound from here is cut, as its levels below are)
-  let cut = frontier !== undefined && state.depth + frontier.reach > SYNTAX_COPIES;
+  let cut = frontier !== undefined && state.depth + frontier.reach > FRONTIER_COPIES;
   if (cut) state.cuts += 1;
   let partial = false;
   for (let at = made + 1; at <= path.length; at += 1) {
@@ -364,7 +363,7 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
     // another copy's: a read of one may find it missing, which only the analysis tells, as within one key's shape)
     let properties: number | null = null;
     for (const { shape } of told && shapes.some(({ by }) => by !== null) ? shapes : []) {
-      const own = propertiesOf(walk, shape);
+      const own = propertyToken(walk, shape);
       if (own === null) continue;
       if (properties === null) properties = own;
       else if (own !== properties) {
@@ -386,7 +385,7 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
   return frontier!;
 }
 
-/** Each shape's object literal's properties as a token (`propertiesOf`), and each walk's tokens by their sets. */
+/** Each shape's object literal's properties as a token (`propertyToken`), and each walk's tokens by their sets. */
 const propertyTokens = new WeakMap<CheapShape, number | null>();
 const tokensOf = new WeakMap<Consumers, Map<string, number>>();
 
@@ -395,7 +394,7 @@ const tokensOf = new WeakMap<Consumers, Map<string, number>>();
  * charged once a shape, its names looked at once there, so a level compares its shapes in one step each whatever their
  * width, also where distinct shapes hold the same names (#1604; Codex r1's B2 on #1653).
  */
-function propertiesOf(walk: Consumers, shape: CheapShape): number | null {
+function propertyToken(walk: Consumers, shape: CheapShape): number | null {
   let token = propertyTokens.get(shape);
   if (token === undefined) {
     if (shape.properties === null) token = null;
@@ -415,7 +414,7 @@ function propertiesOf(walk: Consumers, shape: CheapShape): number | null {
 /**
  * A copy's source's frontier at its copied path (`cheapFrontier`), one link further along the chain: `CLOSED` where the
  * chain reaches that level while it is being made (a cycle of copies, whose first level unites its values); `null`
- * where it reaches past `SYNTAX_COPIES` from the key being decided (counted in `cuts`, so no level made on it is kept for
+ * where it reaches past `FRONTIER_COPIES` from the key being decided (counted in `cuts`, so no level made on it is kept for
  * another chain).
  */
 function linkedFrontier(
@@ -431,8 +430,8 @@ function linkedFrontier(
     return CLOSED;
   }
   const known = walk.cheapFrontiers.get(key);
-  if (known !== undefined && state.depth + 1 + known.reach <= SYNTAX_COPIES) return known;
-  if (state.depth + 1 > SYNTAX_COPIES || known !== undefined) {
+  if (known !== undefined && state.depth + 1 + known.reach <= FRONTIER_COPIES) return known;
+  if (state.depth + 1 > FRONTIER_COPIES || known !== undefined) {
     state.cuts += 1;
     return null;
   }

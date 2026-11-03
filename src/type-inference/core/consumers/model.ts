@@ -105,3 +105,22 @@ export interface CheapDecision {
   readonly decider: Definition;
   readonly inherited: boolean;
 }
+
+/**
+ * How deep in copies (`FRONTIER_DEPTH`) and how many copies met (`FRONTIER_COPIES`: each copy standing at a frontier's
+ * path, each time it is met, and each single copy a frontier is followed through, `sameOf`) a read's host data is followed
+ * before the read answers its place's component's (TABLE r4.208): each read's walk is then bounded by a constant, so the finishing reads' work stays linear
+ * in the program by construction, whatever the copy graph's shape. Where the walk is cut, the read answers the host
+ * data its place's component of the place-level copy graph reaches (`placeIngress`): every path, so a superset, never a
+ * dropped check. Measured with this walk over the stop corpus (170 sources), the repository's scripts (19) and the held
+ * family (480), at sampled settled stops in two orders: of 9,933 finishing reads, 9,722 end at their own frontier (depth
+ * 0), 179 one copy deep and 32 two; no read meets more than 7 copies (2,096 none, 4,304 one, 2,162 two, 694 three, 677
+ * four to seven). At 2 and 8, 15 reads are cut (the family's rings), each naming the same writers as its exact walk, so
+ * the cut adds no mark, warning, runtime check or boundary there. `FRONTIER_COPIES` also bounds the chain of copies of
+ * inferred places the stores' syntax follows from a key (`consumers/syntax.ts`, #1604): past it the key is not told by
+ * syntax, so a read answers its later sources or `STOPPED`, never a dropped check. Chains past it occur only in generated
+ * or constructed families (the areas: 339 of 45,796 measured sources, to 1,025; the 15,406-source set: 9, to 17), and
+ * following them whole grows as the square of the chain.
+ */
+export const FRONTIER_DEPTH = 2;
+export const FRONTIER_COPIES = 8;
