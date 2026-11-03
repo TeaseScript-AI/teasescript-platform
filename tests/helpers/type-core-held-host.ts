@@ -1289,6 +1289,84 @@ export function isNamedException(problem: string): boolean {
   return problem.startsWith("exception #") || problem.startsWith("exception coarse(a) ");
 }
 
+/**
+ * Where a stop lets through more than a requirement (a run's checks): each place (whole site, target, boundary) and
+ * dimension the requirement checks where the stop's owed checks (kept and marks' obligations) are none, or together let
+ * through a kind the requirement's do not; with the requirement's first check there. Words apart: a check lost, never one
+ * said otherwise (#1604).
+ */
+export function widerThan(required: readonly Obligation[], stopped: Answers): string[] {
+  const owed = [...stopped.checks, ...stopped.budget.deferred.map((mark) => mark.obligation)];
+  const domains = (list: readonly Obligation[]) => {
+    const map = new Map<string, ReadonlySet<string>>();
+    for (const check of list) {
+      const place = JSON.stringify([placeOf(check), dimensionOf(check)]);
+      const known = map.get(place);
+      map.set(
+        place,
+        known === undefined ? domainOfCheck(check) : intersect(known, domainOfCheck(check)),
+      );
+    }
+    return map;
+  };
+  const [want, have] = [domains(required), domains(owed)];
+  return [...want]
+    .filter(([place, kinds]) => [...(have.get(place) ?? ["none"])].some((kind) => !kinds.has(kind)))
+    .map(([place]) => `wider ${place}`);
+}
+
+/**
+ * #1604's invariant at a combined stop, against the demand-only run R (TABLE r4.290's (w) made exact by count): at each
+ * place (whole site, target, boundary) and dimension, the checks the stop owes (kept and marks' obligations) are R's
+ * there, or replace R's one for one (no more of them than R has) letting through together exactly R's domain, or are
+ * none where the rule's (a) takes every check R owes there. Each other place is a problem: `missing` (R owes there, the
+ * stop nothing, not (a)), `beyond` (the stop owes where R owes nothing), `differs` (another domain), `excess` (R's
+ * domain by more marks than R's), with the stop's first check there.
+ */
+export function combinedMarkProblems(
+  reference: Answers,
+  natural: Answers,
+  stopped: Answers,
+): string[] {
+  const owed = [...stopped.checks, ...stopped.budget.deferred.map((mark) => mark.obligation)];
+  const rule = combinedStop(reference, natural, stopped);
+  const places = (list: readonly Obligation[]) => {
+    const map = new Map<string, Obligation[]>();
+    for (const check of list) {
+      const place = JSON.stringify([placeOf(check), dimensionOf(check)]);
+      map.set(place, [...(map.get(place) ?? []), check]);
+    }
+    return map;
+  };
+  const domain = (list: readonly Obligation[]): string =>
+    domainText(list.map(domainOfCheck).reduce(intersect));
+  const [mine, theirs] = [places(owed), places(reference.checks)];
+  const problems: string[] = [];
+  for (const place of new Set([...mine.keys(), ...theirs.keys()])) {
+    const [c, r] = [mine.get(place), theirs.get(place)];
+    const texts = (list: readonly Obligation[] | undefined) =>
+      new Set((list ?? []).map((check) => JSON.stringify(check)));
+    if (c !== undefined && r !== undefined) {
+      const [own, ref] = [texts(c), texts(r)];
+      if (own.size === ref.size && [...ref].every((text) => own.has(text))) continue;
+    }
+    const kind =
+      c === undefined
+        ? r!.every((check) => rule.checks.get(JSON.stringify(check)) === "a")
+          ? null
+          : "missing"
+        : r === undefined
+          ? "beyond"
+          : domain(c) !== domain(r)
+            ? "differs"
+            : texts(c).size > texts(r).size
+              ? "excess"
+              : null;
+    if (kind !== null) problems.push(`${kind} ${JSON.stringify((c ?? r)![0])}`);
+  }
+  return problems;
+}
+
 /** The natural analysis (no demand allowance, no stop) beside each demand-only reference run, made once per run. */
 const naturals = new WeakMap<StopRun, Answers>();
 
