@@ -87,7 +87,7 @@ round at a longer `--timeout` or `--memory` may run what an earlier one could no
 same, else refused (#1587); a replay's records are never replaced. `rerun --shard i/N` (#1598) reruns only the index's
 entries `k` with `k mod N = i`, in its order, into `<area>.<i>of<N>.work.jsonl` and `<area>.<i>of<N>.jsonl` beside that
 part of the index (`index.<i>of<N>.json`) and nothing for an area that part does not hold, so N jobs rerun the index
-once and `--rerun` reads their records as one round. `rerun --items <file>` (or `--items-from-env`, the central queue's `$SX_ITEMS`) reruns only the entries its lines
+once and `--rerun` reads their records as one round. `rerun --items <file>` (or `--items-from-env`, the file the central queue's `$SX_ITEMS` names) reruns only the entries its lines
 name by number (0-based, in the index's order), into `<area>.items-<hash>.work.jsonl` beside `index.items-<hash>.json`,
 so that an item pool (`sx-job submit --items <file of entry numbers> --campaign T … -- bash -c '… stalls.mjs rerun …
 --items-from-env'`) sizes the jobs (5 to 15 minutes each, the owner's rule) and its batches rerun the index once (#1612).

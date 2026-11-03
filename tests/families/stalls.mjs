@@ -24,11 +24,11 @@
 // <head> --only <index>`), into a new folder of records, `<area>.work.jsonl` and `<area>.jsonl` (`--out`), to be read
 // with `--rerun`; with `--shard i/N` (#1598) only its entries k with k mod N = i, into `<area>.<i>of<N>.work.jsonl` and
 // `<area>.<i>of<N>.jsonl` beside that part of the index (`index.<i>of<N>.json`), so that N shards rerun it once; with
-// `--items <file>` (or `--items-from-env`, the central queue's `$SX_ITEMS`: an item pool's batch, #1612) only the entries
-// whose numbers (0-based, in the index's order; `jq -r '.entries | keys[]' <index>` lists them) the batch gives, one per
-// line, into `<area>.items-<hash>.work.jsonl` and `<area>.items-<hash>.jsonl` beside `index.items-<hash>.json` (`<hash>`
-// the batch's), so that the queue sizes the jobs and the pool's batches rerun the index once; the
-// index names the sources unanswered alike apart (`unansweredAlike`), which `rerun` does not run. Older
+// `--items <file>` (or `--items-from-env`, the file the central queue's `$SX_ITEMS` names: an item pool's batch, #1612)
+// only the entries whose numbers (0-based, in the index's order; `jq -r '.entries | keys[]' <index>` lists them) the
+// batch gives, one per line, into `<area>.items-<hash>.work.jsonl` and `<area>.items-<hash>.jsonl` beside
+// `index.items-<hash>.json` (`<hash>` the batch's), so that the queue sizes the jobs and the pool's batches rerun the
+// index once; the index names the sources unanswered alike apart (`unansweredAlike`), which `rerun` does not run. Older
 // `--work`/`--out` comparison records omit the answered parts, so this tool cannot reclassify their `unanswered` runs.
 // A runner implementing #1592 must compare them again; `rerun` does this for indexed stalled sources, including their
 // earlier unanswered runs. Completed sources' unanswered runs need a fresh comparison.
@@ -306,28 +306,33 @@ if (process.argv[2] === "rerun") {
       "usage: node tests/families/stalls.mjs rerun <index> <base> <head> <new folder> [options]",
     );
   // `--shard i/N` (#1598): the index's entries in their order, entry k to shard k mod N, so that shards 0/N to N-1/N
-  // together rerun it once; `--items <file>` or `--items-from-env` (`$SX_ITEMS`, #1612): the entries an item pool's
-  // batch names by number, one per line
+  // together rerun it once; `--items <file>` or `--items-from-env` (the file `$SX_ITEMS` names, an item pool's batch in
+  // the central queue, #1612, #1644): the entries the file names by number, one per line
   const at = options.indexOf("--shard");
   const sharding = at === -1 ? "0/1" : (options[at + 1] ?? "");
   let rest = at === -1 ? options : options.toSpliced(at, 2);
-  let items;
+  let itemsFile;
   const from = rest.indexOf("--items");
   if (from !== -1) {
-    const file = rest[from + 1];
-    if (file === undefined) refused("--items names a file of entry numbers, one per line");
-    try {
-      items = readFileSync(file, "utf8");
-    } catch (error) {
-      refused(`--items ${file}: ${error.message}`);
-    }
+    itemsFile = rest[from + 1];
+    if (itemsFile === undefined) refused("--items names a file of entry numbers, one per line");
     rest = rest.toSpliced(from, 2);
   }
   if (rest.includes("--items-from-env")) {
-    if (process.env.SX_ITEMS === undefined) refused("--items-from-env, and $SX_ITEMS is not set");
-    items = process.env.SX_ITEMS;
+    if (itemsFile !== undefined)
+      refused("--items and --items-from-env each name the items file: give one");
+    itemsFile = process.env.SX_ITEMS;
+    if (!itemsFile)
+      refused("--items-from-env, and $SX_ITEMS (the path of the items file) is not set");
     rest = rest.filter((arg) => arg !== "--items-from-env");
   }
+  let items;
+  if (itemsFile !== undefined)
+    try {
+      items = readFileSync(itemsFile, "utf8");
+    } catch (error) {
+      refused(`the items file ${itemsFile}: ${error.message}`);
+    }
   if (items !== undefined && at !== -1)
     refused("--shard and --items each choose the entries: give one");
   const given = rest.filter(

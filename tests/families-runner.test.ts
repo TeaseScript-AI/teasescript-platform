@@ -2405,15 +2405,18 @@ test("the corpus runner records each source's work and time, a stalled run's to 
       assert.match(refusal.stderr, /is no shard i\/N with 0 <= i < N/);
     }
     assert.equal(existsSync(refused), false);
-    // `rerun --items` (#1612, the owner's job-size rule): an item pool's batches, each naming entries by number (one from
-    // a file, one from `$SX_ITEMS`), rerun the index once, each batch's records beside its part of the index, named by
-    // its hash, and merge as the whole rerun's do; an entry named twice, one out of range, or `--shard` beside it refused
+    // `rerun --items` (#1612, the owner's job-size rule): an item pool's batches, each naming entries by number (one in
+    // a file given, one in the file `$SX_ITEMS` names, as the central queue sets it, #1644), rerun the index once, each
+    // batch's records beside its part of the index, named by its hash, and merge as the whole rerun's do; an entry named
+    // twice, one out of range, a missing items file, or `--shard` beside it refused
     const batches = [join(directory, "items-0"), join(directory, "items-1")];
     const itemFile = join(directory, "items-0.txt");
     writeFileSync(itemFile, "2\n0\n");
     assert.deepEqual(traced(batches[0]!, "--items", itemFile), ["once-a", "once-b"]);
+    const envFile = join(directory, "items-1.txt");
+    writeFileSync(envFile, "1\n3\n");
     const fromEnv = withEnv(
-      { SX_ITEMS: "1\n3\n" },
+      { SX_ITEMS: envFile },
       stalls,
       "rerun",
       partedIndex,
@@ -2440,6 +2443,19 @@ test("the corpus runner records each source's work and time, a stalled run's to 
       assert.equal(refusal.status, 2, items);
       assert.match(refusal.stderr, why);
     }
+    const missing = join(directory, "no-items.txt");
+    const unread = withEnv(
+      { SX_ITEMS: missing },
+      stalls,
+      "rerun",
+      partedIndex,
+      base,
+      head,
+      refused,
+      "--items-from-env",
+    );
+    assert.equal(unread.status, 2, unread.stderr);
+    assert.ok(unread.stderr.includes(`the items file ${missing}: ENOENT`), unread.stderr);
     const shardAndItems = run(
       stalls,
       "rerun",
