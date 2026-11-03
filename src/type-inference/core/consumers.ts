@@ -53,7 +53,8 @@ import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, STOPPED, type Item, type Writer } from "./items.js";
 import { Laminar } from "./narrowing.js";
-import { siteKey } from "./program.js";
+import { siteKey, type CoreProgram } from "./program.js";
+import { outsideSyntax } from "./slice-syntax.js";
 import { propertyNames } from "./property-names.js";
 import type { CoreDiagnostic, Obligation, SiteExpectation } from "./result.js";
 import type { Work } from "./solver.js";
@@ -96,6 +97,17 @@ function withBudget(items: readonly Item[]): readonly Item[] {
       ? item
       : { ...item, reasons: item.reasons | REASON.budget, context: "budget" },
   );
+}
+
+/** Whether a program is outside the candidate slice's syntax (`slice-syntax.ts`), walked once per analysis. */
+const OUTSIDE_SYNTAX = new WeakMap<CoreProgram, boolean>();
+function outsideSliceSyntax(program: CoreProgram): boolean {
+  let outside = OUTSIDE_SYNTAX.get(program);
+  if (outside === undefined) {
+    outside = outsideSyntax(program.files, program.globals) !== null;
+    OUTSIDE_SYNTAX.set(program, outside);
+  }
+  return outside;
 }
 
 /** The walk's stages after admission's, in order (D4: a stop keeps every unit before it). */
@@ -542,7 +554,9 @@ export class Consumers {
    * through the answers' own level reader (`admittedLevel`), so each level's decision and contract are made and kept while
    * the solver still runs. Each request is an owing site and the place and path the `let` or assignment holding it stores
    * into (its statement's first live store, else its first, as `Answers.at` reads one), each destination once, in the
-   * consumers' order; its result is kept (`captured`).
+   * consumers' order; its result is kept (`captured`). A program outside the candidate slice's syntax (`slice-syntax.ts`,
+   * the rule the candidate route declines by before its analysis) gets no store check, so the capture makes no request
+   * and charges nothing there: its analysis is main's.
    */
   #capture(): void {
     const { program, definitions, lists, contract } = this.pass;
@@ -558,7 +572,10 @@ export class Consumers {
       )
         sites.set(siteKey(d.site), d.site);
     for (const site of this.#ingressSites) sites.set(siteKey(site), site);
-    if (sites.size === 0) return;
+    // (a program outside the candidate slice's syntax has no store check to keep: the capture makes no request and
+    // charges nothing there, the analysis exactly main's; the syntax walk is the candidate route's own, uncharged as the
+    // route runs it before its analysis)
+    if (sites.size === 0 || outsideSliceSyntax(program)) return;
     const destinations = new Map<FlowNode, Definition>();
     for (const d of definitions.storeDefs)
       if (!destinations.has(d.node) && lists.live(d)) destinations.set(d.node, d);

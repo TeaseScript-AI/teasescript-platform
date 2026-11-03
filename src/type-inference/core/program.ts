@@ -192,6 +192,9 @@ export class CoreProgram {
   readonly places: readonly Place[];
   readonly constraints: readonly Constraint[];
   readonly syntaxNodes: number;
+  /** The request's files and host values, as the candidate slice's syntax reads them (`slice-syntax.ts`). */
+  readonly files: readonly CoreFile[];
+  readonly globals: ReadonlySet<string>;
   /** The deepest nesting of the programs' blocks. */
   readonly nesting: number;
   /** The outermost blocks nested past the nesting limit, by file and start: their code is checked when it runs. */
@@ -227,6 +230,8 @@ export class CoreProgram {
     this.work = ledgerFor(this.syntaxNodes);
     this.scope = { work: this.work, ingress: new IngressGraph() };
     this.#sources = request.files.map((file) => file.source);
+    this.files = request.files;
+    this.globals = new Set(request.options.globals ?? []);
     this.graph = collectGraph(request);
     this.flow = buildFlowGraph(request.files);
     this.dom = dominators(this.flow);

@@ -8,10 +8,11 @@ import {
   createSerializableObject,
 } from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { storeContracts } from "../src/type-inference/core/consumer.js";
 import { propertyStep } from "../src/type-inference/core/program.js";
+import { outsideSyntax } from "../src/type-inference/core/slice-syntax.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import {
   capturedWithin,
@@ -348,6 +349,59 @@ test("a stop in the capture leaves every request after the one it cut lost, neve
       assert.ok(result.state === "lost" && result.cause === "extraction", at);
   }
   assert.ok(cutFirst > 0, "some stop cuts the first request");
+});
+
+test("the candidate route's decline and the capture's skip read one syntax rule", () => {
+  // (whether a program is inside the slice's syntax is the slice's: the route declines before its analysis exactly where
+  // the capture requests nothing, at the same construct)
+  const programs: readonly (readonly [string, boolean])[] = [
+    ['let a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nsay "AFTER"\nexit\n', true],
+    ['let a = {f: [[1]], g: ["s"]}\nlet b = a\nb = hostValue\nexit\n', true],
+    [
+      'let a = {f: [[1]]}\nlet b = a\nif hostValue is integer {say "x"}\nb.f = hostValue\nexit\n',
+      false,
+    ],
+    ['let a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nsay "${hostOther}"\nexit\n', false],
+    ["let n = 1\nn += hostOther\nlet a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nexit\n", false],
+  ];
+  for (const [source, inside] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+    const outside = outsideSyntax(request.files, new Set(GLOBALS));
+    assert.equal(outside === null, inside, source);
+    let declined: CandidateOutsideSlice | null = null;
+    try {
+      compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND);
+    } catch (error) {
+      if (!(error instanceof CandidateOutsideSlice)) throw error;
+      declined = error;
+    }
+    if (outside !== null) {
+      assert.equal(declined?.what, outside.what, source);
+      assert.equal(declined.site.start, outside.span.start.offset, source);
+    }
+    // (every program here owes a store's check: captured inside the syntax, nothing outside)
+    assert.equal(analyseCore(request).contracts.length > 0, inside, source);
+  }
+});
+
+test("outside the slice's syntax the capture requests nothing and charges nothing", () => {
+  // (a program the route declines by its syntax: the analysis is main's, no extraction phase at any allowance and no
+  // contract, also where a store's value is cyclic, which the capture would follow to the slice's depth)
+  const source =
+    'let typed:integer[]=[1]\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\nif hostValue is integer {a=b}\nb=a\nb.q=a\nc=b\nlet out={p:c}\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+  assert.notEqual(outsideSyntax(request.files, new Set(GLOBALS)), null);
+  for (const mode of HELD_MODES) {
+    const natural = mode.run(() => analyseCore(request));
+    assert.equal(natural.budget.exhausted, null, mode.name);
+    assert.deepEqual(natural.contracts, [], mode.name);
+    const phases = new Set(
+      heldStops({ name: "outside", source, slice: false, values: [] }, mode, 64).map(
+        (stop) => stop.phase,
+      ),
+    );
+    assert.ok(!phases.has("extraction"), `${mode.name}: ${[...phases].join(", ")}`);
+  }
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {

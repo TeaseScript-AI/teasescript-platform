@@ -2575,7 +2575,9 @@ test("a long copied key's store check grows with its copy chain in every mode (#
  * reversed), with its analysis's charged total: a regression oracle of this construction only, so a level's work
  * charged nowhere shows. Since #1526 phase B the analysis captures the store's contract before its walk, so most of the
  * check's work is charged there: on `c0ab92ced`, before the capture, the analyses charged 7,843 / 7,003, 8,971 / 8,098
- * and 10,226 / 9,225 (10,228 reversed) and the checks after them 451 / 380, 274 / 236 and 518 / 429. On `3d052bf43`
+ * and 10,226 / 9,225 (10,228 reversed) and the checks after them 451 / 380, 274 / 236 and 518 / 429. The store at the
+ * element (`b.q….f[0] = …`) is outside the candidate slice's syntax, so the analysis captures nothing there and its work
+ * is main's (`slice-syntax.ts`). On `3d052bf43`
  * the store at the long key's check charged 3,266 and 2,197 units; the store at its element's analysis asked its
  * element levels through every wrapper (10,329 and 8,632), its check 1,101 and 889; the store at a property of its
  * element's 12,448 and 10,225, its check 2,353 and 1,880.
@@ -2598,10 +2600,10 @@ test("a long copied key's store check charges its positions' work, in every mode
       [7346, 60],
     ],
     [
-      [9214, 51],
-      [8303, 51],
-      [9214, 51],
-      [8303, 51],
+      [8971, 274],
+      [8098, 236],
+      [8971, 274],
+      [8098, 236],
     ],
     [
       [10707, 64],
