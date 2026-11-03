@@ -2,10 +2,14 @@ import type { CoreDiagnostic, Obligation } from "../result.js";
 
 // The records a run leaves out, for the tests (`withoutRecords`), and the warnings and checks they would have made.
 
-/** The records a test leaves out (`withoutRecords`): warnings, and checks no warning owns. */
+/**
+ * The records a test leaves out (`withoutRecords`): warnings, checks no warning owns, and with `completion` the checks a
+ * receiving completion gives the stores whose decisions stopped (#1526 phase C step 5).
+ */
 export interface Omission {
   readonly diagnostic: (diagnostic: CoreDiagnostic) => boolean;
   readonly check: (check: Obligation) => boolean;
+  readonly completion?: boolean;
 }
 
 let leftOut: Omission | null = null;
@@ -33,4 +37,9 @@ export function leftOutWarning(diagnostic: CoreDiagnostic): boolean {
 /** Whether `withoutRecords` leaves a check no warning owns out of the discharge. */
 export function leftOutCheck(check: Obligation): boolean {
   return leftOut?.check(check) === true;
+}
+
+/** Whether `withoutRecords` leaves the receiving completion's checks out of the discharge. */
+export function leftOutCompletion(): boolean {
+  return leftOut?.completion === true;
 }

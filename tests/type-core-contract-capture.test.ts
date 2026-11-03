@@ -9,7 +9,7 @@ import {
 } from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
-import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { storeContracts } from "../src/type-inference/core/consumer.js";
 import { propertyStep } from "../src/type-inference/core/program.js";
 import { outsideSyntax } from "../src/type-inference/core/slice-syntax.js";
@@ -69,9 +69,18 @@ const FORBIDDEN: readonly Globals[] = [{ hostValue: L(L("x")), hostOther: 3 }];
  * these; the sweep of every allowance in four modes, against `main` at the same work (TABLE r4.295), is the PR's queue
  * evidence.
  */
-function sampledStops(source: string, mode: HeldMode): { allowance: number; phase: string }[] {
+function sampledStops(
+  source: string,
+  mode: HeldMode,
+  demand?: number,
+): { allowance: number; phase: string }[] {
   const byPhase = new Map<string, { allowance: number; phase: string }[]>();
-  for (const stop of heldStops({ name: "sampled", source, slice: true, values: [] }, mode)) {
+  for (const stop of heldStops(
+    { name: "sampled", source, slice: true, values: [] },
+    mode,
+    1,
+    demand,
+  )) {
     const list = byPhase.get(stop.phase) ?? [];
     list.push(stop);
     byPhase.set(stop.phase, list);
@@ -226,6 +235,70 @@ test("host data inside a stored object literal is captured with its whole store 
         assert.deepEqual(storeRunProblems(plan!, store, fitting, forbidden), [], at);
       }
     }
+  }
+});
+
+/**
+ * #1526 phase C step 5: where a decision on the store's path stopped at its demand allowance, the settled pass leaves
+ * the store's type unknown, and the receiving completion completes its contract; the plan checks that contract at the
+ * store. Judged by what the script does under the demand allowance alone and at sampled settled stops past it (each
+ * phase's first, last and two between): past the completion the store is checked whole; a stop that cut the completion
+ * leaves its obligations lost with the cause `extraction` and the plan as the settled pass made it.
+ */
+test("a stopped decision's store is checked against its completed contract, at the settled stops past the completion (#1526 phase C)", () => {
+  for (const witness of WITNESSES) {
+    const { source } = witness;
+    const store = spanOf(source, witness.store);
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+    for (const mode of HELD_MODES)
+      for (const demand of [16, 64]) {
+        const capped = <T>(make: () => T): T =>
+          mode.run(() => withTestDemandAllowance(demand, make));
+        const compiled = (allowance?: number) =>
+          capped(() =>
+            allowance === undefined
+              ? compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND)
+              : withTestAllowance(allowance, () =>
+                  compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+                ),
+          );
+        const where = `${witness.name} ${mode.name}, demand ${demand}`;
+        const answers = capped(() => analyseCore(request));
+        // (a mode where no decision stays stopped completes nothing: the settled pass checks the store itself)
+        if (answers.budget.closure === null) continue;
+        // (the checks the unstopped analysis makes, and only those: a stopped store the completion's own check owes
+        // nothing, as its decider's, takes none)
+        const natural = mode.run(() =>
+          compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+        );
+        assert.deepEqual(planChecks(compiled().plan), planChecks(natural.plan), where);
+        assert.deepEqual(storeRunProblems(compiled().plan!, store, FITTING, FORBIDDEN), [], where);
+        for (const { allowance, phase } of sampledStops(source, mode, demand)) {
+          const at = `${where}, ${phase} stop at ${allowance}`;
+          const stopped = capped(() => withTestAllowance(allowance, () => analyseCore(request)));
+          const owed = stopped.receiving.filter(
+            ({ obligation }) =>
+              obligation.extent === "complete" &&
+              store.start <= obligation.slot.site.start &&
+              obligation.slot.site.end <= store.end,
+          );
+          if (owed.every(({ result }) => result?.state === "complete")) {
+            if (owed.length === 0) continue;
+            assert.deepEqual(
+              storeRunProblems(compiled(allowance).plan!, store, FITTING, FORBIDDEN),
+              [],
+              at,
+            );
+            continue;
+          }
+          assert.equal(phase, "extraction", at);
+          for (const { result } of owed)
+            assert.ok(
+              result?.state === "lost" && result.cause === "extraction",
+              `${at}: ${JSON.stringify(result)}`,
+            );
+        }
+      }
   }
 });
 

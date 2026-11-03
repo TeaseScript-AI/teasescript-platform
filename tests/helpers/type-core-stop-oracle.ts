@@ -349,6 +349,18 @@ export function stopProblems(c: StopCase): string[] {
       .map((mark) => recordOf(mark.code, mark.site)),
   );
   const content: PlanDifference[] = [];
+  // (a check the receiving completion gave a store whose decision stopped, #1526 phase C step 5, is that store's mark's
+  // content: a stop that cut the completion, or came before it, leaves the mark as the settled pass made it)
+  if (differences.length > 0 && unstopped.answers.budget.closure !== null)
+    content.push(
+      ...planDifferences(
+        unstopped.without(
+          { diagnostic: () => false, check: () => false, completion: true },
+          "#completion",
+        ).result.plan,
+        unstopped.result.plan,
+      ),
+    );
   if (differences.length > 0 && changing.size > 0) {
     const own = (each: StopRun): PlanDifference[] =>
       planDifferences(

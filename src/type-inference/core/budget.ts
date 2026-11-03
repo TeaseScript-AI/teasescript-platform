@@ -100,7 +100,11 @@ export type WorkCounter =
   // what a decision's stop forgets by (#1403), counted apart (`countApart`): each demand's reader, each key a demand
   // asked whether it stopped
   | "readerRecords"
-  | "stopAsks";
+  | "stopAsks"
+  // the receiving closure of a pass that starts with frozen keys (#1526 phase C): each read it keeps (an edge), each
+  // node a walk of it visits (taint, blockers, an invalidation transaction)
+  | "closureEdges"
+  | "closureVisits";
 
 /**
  * The units a kept text of `length` UTF-16 code units costs (TABLE r4.58): about its size in 8-byte words, a header of
@@ -376,6 +380,10 @@ export class WorkLedger {
   }
 
   /** Who the next units are counted to: 0 for setup, a callable's number otherwise. */
+  public get spender(): number {
+    return this.#spender;
+  }
+
   public set spender(spender: number) {
     this.#spender = spender;
   }

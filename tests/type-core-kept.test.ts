@@ -307,6 +307,10 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "the candidate's lowering after the analysis (no ledger): a memo key of a store target's path, cut below",
   ],
+  "answers.ts received inline": [
+    1,
+    "the candidate's lowering after the analysis (no ledger): the receiving completion's results by place and path",
+  ],
   "consumers/stores.ts admittedStores side": [1, "a definition's id and two positions"],
   "consumers/operations.ts operatorUse key": [1, "an operand's index and a kind"],
   "consumers/finishing.ts recordRead read": [

@@ -11,6 +11,7 @@ import {
 import { typePlan } from "../../type-plans.js";
 import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
 import type { PlaceId, SourceSite } from "../graph.js";
+import type { Closure, Unsettled } from "./admission/closure.js";
 import { concrete } from "./admission/kinds.js";
 import type { AdmittedType, CorePass } from "./answers.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
@@ -59,8 +60,10 @@ export interface ContractLevel {
 
 /**
  * A store's required contract: complete (each level written, decided, or proved open), open (nothing constrains it), or
- * lost (a required level's proof is unfinished: the stop of the analysis or of a decision cut it). A lost contract keeps
- * the part it holds (`partial`), which the plan carries until decision 2 (TABLE r4.269, r4.275); it is never complete.
+ * lost (a required level's proof is unfinished: the stop of the analysis or of a decision cut it; or, in a receiving
+ * completion, a decision it read would reject a store or retarget a selecting store, #1526 phase C). A lost contract
+ * keeps the part it holds (`partial`), which the plan carries until decision 2 (TABLE r4.269, r4.275); it is never
+ * complete.
  */
 export type ContractResult =
   | { readonly state: "complete"; readonly ref: ContractRef; readonly epoch: number }
@@ -77,8 +80,11 @@ export type ContractResult =
   | {
       readonly state: "lost";
       readonly required: readonly ContractLevel[];
-      /** What cut it: the analysis's stop, a decision's stop at its allowance, or a stop while it was captured. */
-      readonly cause: "stop" | "decision" | "extraction";
+      /**
+       * What cut it: the analysis's stop, a decision's stop at its allowance, a stop while it was captured, or a
+       * completion decision it read that would reject a store (A6) or give a selecting store another target (#1275).
+       */
+      readonly cause: "stop" | "decision" | "extraction" | Unsettled;
       readonly partial: ContractRef | null;
     };
 
@@ -232,7 +238,18 @@ export class ContractDescriptors<R> {
     /** Whether the analysis stopped (a lost level's cause), else a decision did. */
     private readonly stopped: boolean,
     private readonly limit = SLICE_DEPTH,
+    /**
+     * The receiving closure of a pass that completes frozen proofs (#1526 phase C): each place's contract assembled at
+     * a path is its cell (an extent), its kept assembly a read of it, and an assembly the closure invalidated goes
+     * (`forget`), so the next read assembles it anew.
+     */
+    private readonly cells: Closure | null = null,
   ) {}
+
+  /** The assembly of `place|path` goes (the closure invalidated it): its next read assembles it anew. */
+  public forget(key: string): void {
+    this.#known.delete(key);
+  }
 
   /** A written type's or a retained copy's term as a contract: complete, or open where it constrains nothing. */
   public written(
@@ -272,27 +289,36 @@ export class ContractDescriptors<R> {
   ): CompileTask<Assembled> {
     const key = `${place}|${path.join(".")}`;
     const known = this.#known.get(key);
-    if (known !== undefined) return known;
-    const lost: ContractLevel[] = [];
-    let by: LevelProof["by"] | null = null;
-    const levels = levelWalk(
-      (at) => {
-        const proof = this.reader.level(place, at);
-        by ??= proof.by;
-        if (proof.unfinished) lost.push({ place, path: at });
-        return proof.tags;
-      },
-      path,
-      this.limit,
-    );
-    const admitted = typePlan(typeOfLevels(levels));
-    const plan =
-      admitted === null
-        ? null
-        : yield* compileChild(this.#fill(place, path, admitted, records, outside, lost));
-    const assembled: Assembled = { plan, lost, by: by! };
-    this.#known.set(key, assembled);
-    return assembled;
+    if (known !== undefined) {
+      this.cells?.took("extent", key);
+      return known;
+    }
+    // (an extent cell of the receiving closure's where a completion pass assembles it, #1526 phase C)
+    const entered = this.cells?.enter("extent", key) ?? false;
+    try {
+      const lost: ContractLevel[] = [];
+      let by: LevelProof["by"] | null = null;
+      const levels = levelWalk(
+        (at) => {
+          const proof = this.reader.level(place, at);
+          by ??= proof.by;
+          if (proof.unfinished) lost.push({ place, path: at });
+          return proof.tags;
+        },
+        path,
+        this.limit,
+      );
+      const admitted = typePlan(typeOfLevels(levels));
+      const plan =
+        admitted === null
+          ? null
+          : yield* compileChild(this.#fill(place, path, admitted, records, outside, lost));
+      const assembled: Assembled = { plan, lost, by: by! };
+      this.#known.set(key, assembled);
+      return assembled;
+    } finally {
+      this.cells?.leave(entered);
+    }
   }
 
   *#fill(
@@ -498,6 +524,34 @@ const NO_RECORDS: RecordsBelow<null> = {
   field: () => null,
   order: (names) => [...names],
 };
+
+/**
+ * One request's contract from `descriptors` (`ContractDescriptors.result`), `null` where it lies deeper than the slice
+ * follows: left to the check, where the program leaves the slice.
+ */
+export function extractContract(
+  descriptors: ContractDescriptors<null>,
+  place: PlaceId,
+  path: readonly string[],
+): ContractResult | null {
+  try {
+    return descriptors.result(place, path, null, () => {
+      throw new SliceDepth();
+    });
+  } catch (error) {
+    if (!(error instanceof SliceDepth)) throw error;
+    return null;
+  }
+}
+
+/** A capture's descriptor service: no literal records below a level, so properties take the order found. */
+export function captureDescriptors(
+  reader: ContractReader,
+  epoch: number,
+  cells: Closure | null = null,
+): ContractDescriptors<null> {
+  return new ContractDescriptors<null>(reader, () => NO_RECORDS, epoch, false, SLICE_DEPTH, cells);
+}
 
 /**
  * The capture of the contracts the stores owing a check require (#1526 phase B, TABLE r4.278): each request's contract

@@ -119,8 +119,26 @@ export function stopDecision(admission: Admission, at: DecidedAt): void {
   else admission.pass.contract.stopKey(at.key);
 }
 
+/**
+ * #1526 phase C: the receiving closure invalidated the decision of `key` (a decision it read was made after it read it
+ * unmade, `Closure.made`): what it made of its key goes, so the next read that asks for it makes it again (`admitted`'s
+ * pull), as a lazily decided path.
+ */
+export function forgetDecision(admission: Admission, key: CanonicalKey): void {
+  admission.decisions.delete(key);
+  admission.decided.delete(key);
+  admission.nullable.delete(key);
+  admission.permitsNull.delete(key);
+  admission.inheritsWrittenKeys.delete(key);
+  admission.unrestricted.delete(key);
+  admission.deciderSites.delete(key);
+  admission.attempted.delete(key);
+}
+
 /** Whether the decision of a decided path or of a key above it stopped (`stopDecision`). */
 export function decisionStoppedAt(admission: Admission, at: DecidedAt): boolean {
+  // (a completion pass carries no stopped key, #1526 phase C: nothing is asked, no path made a cursor to ask it)
+  if (admission.pass.closure && !admission.pass.contract.anyStopped) return false;
   return at.key === undefined
     ? admission.pass.contract.stopped(at.root, at.path)
     : admission.pass.contract.keyStopped(at.key);
@@ -159,12 +177,15 @@ function decidedAtOf(at: At): DecidedAt {
  * the key in its identity, as `decide` records it (a wrapper family's its cursor, G3 stage 1).
  */
 export function copiedAt(admission: Admission, asked: Key): TypeTerm | null {
-  return admission.decisions.get(admission.pass.contract.canonicalKey(asked))?.copied ?? null;
+  const key = admission.pass.contract.canonicalKey(asked);
+  admission.pass.closure?.took("decision", key);
+  return admission.decisions.get(key)?.copied ?? null;
 }
 
 /** The kinds this pass's decision of a key decided it by, or A3 settled it by (`Decided.settled`), or `null`. */
 export function kindsAt(admission: Admission, asked: Key): readonly ItemTag[] | null {
   const key = admission.pass.contract.canonicalKey(asked);
+  admission.pass.closure?.took("decision", key);
   return (
     admission.decided.get(key) ??
     admission.decisions.get(key)?.settled?.map((item) => item.tag) ??
@@ -338,10 +359,21 @@ export function decided(
 function decidedOf(admission: Admission, at: At, inputs: Inputs | null): Decided | null {
   // (a text key made again, as its legacy site made it, its text charged)
   const key = at.path === null ? at.key : keptKeyAt(admission.pass.contract, at.root, at.path);
+  // (in a completion pass a decision is a cell of the receiving closure: its reads its own, a hit read, #1526 phase C)
+  const closure = admission.pass.closure ?? null;
   const known = admission.decisions.get(key);
-  if (known !== undefined) return known;
-  const found = inputs === null ? null : decision(admission, at, key, inputs);
+  if (known !== undefined) {
+    closure?.took("decision", key);
+    return known;
+  }
+  const found =
+    inputs === null
+      ? null
+      : closure === null
+        ? decision(admission, at, key, inputs)
+        : closure.within("decision", key, () => decision(admission, at, key, inputs));
   admission.decisions.set(key, found);
+  closure?.made("decision", key);
   return found;
 }
 

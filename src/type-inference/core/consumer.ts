@@ -70,7 +70,7 @@ import {
   type ContractResult,
 } from "./contract-descriptors.js";
 import { typedDefault as defaultKinds } from "./contract.js";
-import { leftOutCheck, leftOutWarning } from "./consumers.js";
+import { leftOutCheck, leftOutCompletion, leftOutWarning } from "./consumers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import { REASON, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
@@ -372,10 +372,15 @@ export class SliceIndex {
 
   /** The expression at a site of the analysis. */
   public expressionAt(site: SourceSite): Expression {
-    const found = this.#bySite.get(`${site.file}:${site.start}:${site.end}`);
+    const found = this.findExpressionAt(site);
     if (found === undefined)
       throw new Error(`The slice's source has no expression at ${site.file}:${site.start}.`);
     return found;
+  }
+
+  /** The expression at a site, if the slice's source has one. */
+  public findExpressionAt(site: SourceSite): Expression | undefined {
+    return this.#bySite.get(`${site.file}:${site.start}:${site.end}`);
   }
 
   /** The `let` or assignment whose stored value holds `expression`, if any. */
@@ -979,8 +984,17 @@ function runtimeChecks(
   const stopped = answers.budget.exhausted !== null;
   for (const { obligation, kinds } of owed) {
     // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
-    // every plan: no plan content (S3 §4)
-    if (obligation.against.length === 1 && obligation.against[0] === "unknown") continue;
+    // every plan: no plan content (S3 §4); where a stopped decision left a store's own check against `unknown` (no
+    // boundary's), the receiving completion completed its contract and its own store check owes a check at this site,
+    // as the unstopped analysis does (#1526 phase C step 5), the store checks that contract
+    if (obligation.against.length === 1 && obligation.against[0] === "unknown") {
+      const at =
+        !obligation.boundary && answers.completedCheck(obligation.site) && !leftOutCompletion()
+          ? index.findExpressionAt(obligation.site)
+          : undefined;
+      const owner = at === undefined ? undefined : index.storeOf(at);
+      if (owner === undefined || !contracts.completes(owner)) continue;
+    }
     const expression = index.expressionAt(obligation.site);
     const store = index.storeOf(expression);
     if (store === undefined) {
@@ -1270,8 +1284,12 @@ class Contracts {
             )
           : place === null
             ? null
-            : this.#descriptors.result(place.id, place.path, [value], () =>
-                outsideStructure(value),
+            : this.#completed(
+                place.id,
+                place.path,
+                this.#descriptors.result(place.id, place.path, [value], () =>
+                  outsideStructure(value),
+                ),
               );
     if (result !== null) this.results.set(store, result);
     const type = result === null ? null : checkedType(result);
@@ -1281,6 +1299,22 @@ class Contracts {
       ...(whole ? [] : (place?.path ?? []).map(propertyName)),
     ].join(".");
     return { type, place: `'${name}'` };
+  }
+
+  /** Whether the receiving completion completed the contract at a store's destination (`#completed`). */
+  public completes(store: Store): boolean {
+    const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
+    return place !== null && this.answers.received(place.id, place.path) !== null;
+  }
+
+  /**
+   * A store's contract where the settled pass's own is not complete (a decision on its path stopped): the receiving
+   * completion's complete contract there (#1526 phase C step 5), else the settled pass's (a lost one's part, decision 2
+   * pending). A completion's lost result never stands in, so nothing is widened.
+   */
+  #completed(id: PlaceId, path: readonly string[], settled: ContractResult): ContractResult {
+    if (settled.state === "complete" || leftOutCompletion()) return settled;
+    return this.answers.received(id, path) ?? settled;
   }
 
   /**

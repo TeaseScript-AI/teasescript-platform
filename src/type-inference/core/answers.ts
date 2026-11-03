@@ -13,10 +13,24 @@ import {
   type BudgetLimit,
   type WorkCounter,
 } from "./budget.js";
-import { Consumers, STOP_RULE, typedCall } from "./consumers.js";
+import {
+  Consumers,
+  STOP_RULE,
+  typedCall,
+  type CompletionPass,
+  type Retargeted,
+} from "./consumers.js";
 import { keyLabel } from "./consumers/names.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
-import { compareDemandNames, exportNames, importNames } from "./contract/key-ids.js";
+import { Closure, type ClosureCounts } from "./admission/closure.js";
+import type { ReceivingObligation, ReceivingResult } from "./admission/receiving.js";
+import {
+  compareDemandNames,
+  exportNames,
+  importNames,
+  keptKeyAt,
+  type CanonicalKey,
+} from "./contract/key-ids.js";
 import { labelText } from "./contract/labels.js";
 import { replayLayer } from "./contract/prefix-index.js";
 import { selectLanes } from "./contract/lanes.js";
@@ -78,7 +92,13 @@ import {
 import { Solver, type DemandWork, type Work } from "./solver.js";
 import { narrowingKey, Values } from "./values.js";
 import { writtenTypeErrors } from "./written.js";
-import { closedType, epochOf, newEpoch, type CapturedContract } from "./contract-descriptors.js";
+import {
+  closedType,
+  epochOf,
+  newEpoch,
+  type CapturedContract,
+  type ContractResult,
+} from "./contract-descriptors.js";
 import { admittedLevel } from "./admission/admitted.js";
 
 // (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
@@ -106,6 +126,8 @@ export interface CorePass {
   readonly contract: Contract;
   readonly values: Values;
   readonly solver: Solver;
+  /** The receiving closure of a completion pass (#1526 phase C, `Consumers.#completeFor`), absent in any other pass. */
+  readonly closure?: Closure | null;
 }
 
 /** Stores' targets by their places (`DefinitionIndex`'s `storeTargets`). */
@@ -121,6 +143,7 @@ function createPass(
   rejected: ReadonlyMap<number, unknown> = new Map(),
   stopped: readonly StoppedKey[] = [],
   targets: StoreTargets = new Map(),
+  completion = false,
 ): CorePass {
   const definitions = new DefinitionIndex(program, targets);
   const parts: {
@@ -130,6 +153,7 @@ function createPass(
     handlers: HandlerIndex;
     guards: GuardIndex;
     solver: Solver;
+    closure: Closure | null;
   } = {
     program,
     definitions,
@@ -142,6 +166,8 @@ function createPass(
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
     solver: new Solver(program.scope),
+    // (#1526 phase C: a completion pass keeps its cells for the receiving closure from its start, the completion lease)
+    closure: completion ? new Closure(program.work) : null,
   };
   const pass: CorePass = {
     ...parts,
@@ -158,13 +184,17 @@ function createPass(
   const exact = new ExactPath(pass);
   const contract = new Contract(pass);
   const values = new Values(pass);
+  // (#1526 phase C: no decision of a completion pass stops at its allowance, so nothing #1599 keeps for one is kept,
+  // from before anything of the pass solves)
+  if (completion) contract.closeDecisions();
   // (G3 stage 1: the families reads start choose their keys' lane first, before anything is built; demands holding a
   // cursor order by their logical texts)
   selectLanes(contract);
   parts.solver.names = (a, b) => compareDemandNames(contract, a, b);
   parts.solver.replayOf = (names) => exportNames(contract, names);
   for (const key of stopped) contract.stop(key.place, key.path);
-  newEpoch(program, pass);
+  // (a completion pass is no admission pass of its own: its results are its settled pass's epoch's)
+  if (!completion) newEpoch(program, pass);
   return pass;
 }
 
@@ -219,7 +249,7 @@ function storeTargets(
   program: CoreProgram,
   pass: CorePass,
   admission: Consumers["admission"],
-  decide: (root: PlaceId, path: readonly string[]) => void,
+  decide: (root: PlaceId, path: readonly string[], into: PlaceId) => void,
   stores: readonly SelectingStore[],
 ): StoreTargets {
   const out = new Map<PlaceId, ReturnType<CoreProgram["targetRoot"]>>();
@@ -230,7 +260,7 @@ function storeTargets(
   for (const { into, value } of stores) {
     const target = program.targetRoot(into, true, (root, steps, length) => {
       const path = keptSlice(program.work, steps, 0, length);
-      decide(root, path);
+      decide(root, path, into);
       const admitted = admission.admitted(root, path).filter((kind) => kind !== "null");
       return objects(admitted.length > 0 ? admitted : (settled.get(keyOf(root, path)) ?? []));
     });
@@ -242,6 +272,49 @@ function storeTargets(
     if (kinds.length > 0 && !kinds.includes("unknown")) settled.set(key, kinds);
   }
   return out;
+}
+
+/**
+ * #1275 in a receiving completion pass (#1526 phase C): the selecting stores whose target the completion's admission
+ * gives (`storeTargets`, each receiver decided there where first asked, as every completion decision is) is another
+ * than the settled pass's (`targets`): their receivers' keys, each once, and whether any moved.
+ */
+function retargeted(
+  program: CoreProgram,
+  pass: CorePass,
+  admission: Consumers["admission"],
+  stores: readonly SelectingStore[],
+  targets: StoreTargets,
+): Retargeted {
+  if (stores.length === 0) return { receivers: [], moved: false };
+  const receivers = new Map<PlaceId, CanonicalKey[]>();
+  const next = storeTargets(
+    program,
+    pass,
+    admission,
+    (root, path, into) => {
+      let keys = receivers.get(into);
+      if (keys === undefined) receivers.set(into, (keys = []));
+      keys.push(keptKeyAt(pass.contract, root, path));
+    },
+    stores,
+  );
+  const keys = new Set<CanonicalKey>();
+  let moved = false;
+  for (const [into, target] of next) {
+    program.work.charge("checks", 1 + target.path.length);
+    const before = targets.get(into);
+    if (
+      before !== undefined &&
+      before.root === target.root &&
+      before.path.length === target.path.length &&
+      before.path.every((step, at) => step === target.path[at])
+    )
+      continue;
+    moved = true;
+    for (const key of receivers.get(into) ?? []) keys.add(key);
+  }
+  return { receivers: [...keys], moved };
 }
 
 /** Store targets as one text, for comparing passes' targets. */
@@ -340,6 +413,17 @@ export interface BudgetAnswer {
   readonly finished: readonly DemandWork[];
   /** Facts of the indexes for the identity and mark controls (not work). */
   readonly facts: ContractFacts;
+  /**
+   * The receiving closure's completion (#1526 phase C), `null` where the settled pass started with no frozen key: the
+   * units it charged to the total (its obligations found and its completion pass, included in `total`), its counters,
+   * and each decision it made, where a level first asked for it, as a scoped decision from the remaining total,
+   * recorded here, never among the settled pass's `decisions`.
+   */
+  readonly closure: {
+    readonly units: number;
+    readonly counts: ClosureCounts;
+    readonly decisions: readonly DecisionWork[];
+  } | null;
 }
 
 export type StopPhase = "setup" | "admission" | "extraction" | "walk" | "publication" | "questions";
@@ -361,6 +445,11 @@ export interface DecisionWork {
   readonly units: number;
   readonly allowance: number;
   readonly stopped: boolean;
+  /**
+   * A decision of the receiving closure's completion pass (#1526 phase C): its own allowance, the one a decision of the
+   * settled pass has (`allowance` is what was left of the total, r4.269).
+   */
+  readonly completion?: { readonly local: number };
 }
 
 /** A value's answer at a path below it (`Answers.valueAt`). */
@@ -395,6 +484,19 @@ export interface Answers {
    * (#1526 phase B): each store's destination with its result, in the order captured; none where admission did not settle.
    */
   readonly contracts: readonly CapturedContract[];
+  /** Each receiving obligation of the capture with its result (#1526 phase C step 1), in the stable source order. */
+  readonly receiving: readonly {
+    readonly obligation: ReceivingObligation;
+    readonly result: ReceivingResult | null;
+  }[];
+  /**
+   * The receiving completion's complete contract at a place's path (#1526 phase C step 5): an obligation bound there that
+   * the completion completed, which a store's check there takes where the settled pass's own contract is not complete;
+   * `null` elsewhere (no completion ran, or each obligation there is lost, open or a shape).
+   */
+  received(id: PlaceId, path: readonly string[]): ContractResult | null;
+  /** Whether the receiving completion's own store checks (C1) owe a runtime check at a site, as unstopped. */
+  completedCheck(site: SourceSite): boolean;
   at(node: FlowNode): OccurrenceAnswer | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
   /**
@@ -462,7 +564,8 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
       const selecting = selectingStores(program);
       const used = new Set<string>();
       for (let last = false, restarted = false; ;) {
-        const pass = createPass(program, rejected, stops, targets);
+        const [passRejected, passTargets] = [rejected, targets];
+        const pass = createPass(program, passRejected, stops, passTargets);
         // (its targets' receivers are decided where they can stop: every place may, until they are, #1599)
         pass.contract.targetsDecide = selecting.length > 0 && !last;
         // (the targets the pass's admission gives, asked before its walk: new ones start the passes again, and a pass
@@ -482,6 +585,16 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
             if (used.has(targetsText(next))) return true;
             asked.next = next;
             return false;
+          },
+          // (the pass's own inputs without its frozen keys, for the receiving closure's completion pass, #1526 phase C:
+          // nothing there is frozen, so nothing is unfrozen and no cache of it holds a frozen key's answer)
+          (): CompletionPass => {
+            const completing = createPass(program, passRejected, [], passTargets, true);
+            return {
+              pass: completing,
+              retargeted: (admission) =>
+                retargeted(program, completing, admission, selecting, passTargets),
+            };
           },
         );
         analysed = { pass, consumers };
@@ -1006,6 +1119,7 @@ class CoreAnswers implements Answers {
   readonly initializers: ReadonlyMap<string, SourceSite>;
   readonly epoch: number;
   readonly contracts: readonly CapturedContract[];
+  readonly receiving: Answers["receiving"];
   readonly #pass: CorePass;
   readonly #consumers: Consumers;
   readonly #written: readonly WrittenTypeError[];
@@ -1027,6 +1141,7 @@ class CoreAnswers implements Answers {
     this.#written = written;
     this.epoch = epochOf(pass);
     this.contracts = consumers.captured;
+    this.receiving = consumers.receiving;
     // (a stop, not statements nested too deep after an analysis that ran to its end: its answers stand)
     this.#stopped = pass.program.work.stopped !== null;
     const program = pass.program;
@@ -1109,6 +1224,7 @@ class CoreAnswers implements Answers {
       decisions: consumers.decisions,
       finished: pass.solver.demandWork(),
       facts: { ...pass.contract.facts },
+      closure: consumers.completion,
     };
   }
 
@@ -1414,6 +1530,28 @@ class CoreAnswers implements Answers {
 
   public requirement(id: PlaceId, path: readonly string[]): TypeTerm | null {
     return this.#consumers.requirements.get(keyOf(id, path)) ?? null;
+  }
+
+  public completedCheck(site: SourceSite): boolean {
+    return this.#consumers.completedChecks.has(siteKey(site));
+  }
+
+  /** The completion's complete contracts by place and path (`received`), gathered on the first ask. */
+  #received: Map<string, ContractResult> | null = null;
+
+  public received(id: PlaceId, path: readonly string[]): ContractResult | null {
+    if (this.#received === null) {
+      this.#received = new Map();
+      for (const { obligation, result } of this.receiving)
+        if (
+          obligation.extent === "complete" &&
+          result !== null &&
+          !("shape" in result) &&
+          result.state === "complete"
+        )
+          this.#received.set(joinParts(obligation.place, obligation.path), result);
+    }
+    return this.#received.get(joinParts(id, path)) ?? null;
   }
 
   #admitted(id: PlaceId, path: readonly string[], term: TypeTerm | null): AdmittedType {
