@@ -2620,7 +2620,7 @@ test("a long copied key's store check charges its positions' work, in every mode
  * list's logarithm (before, two flat units a pair of searches whatever the list's length: a warmed X6 query read a list
  * of 1,025 events 22 times). X6's first event of `n` in a span after k conditional stores of it, its list built by a
  * first query: the second query's charge is at least the comparisons a binary search over k + 1 positions makes; and
- * its one search a range finds an event at the range's end and none past the last.
+ * its one search a range finds an event at the range's end, none between two events and none past the last.
  */
 test("a search of a key's events charges each comparison it makes (#1221)", () => {
   for (const k of [64, 1024]) {
@@ -2636,9 +2636,12 @@ test("a search of a key's events charges each comparison it makes (#1221)", () =
     lists.eventIn(key, span);
     const charged = program.work.total - before;
     assert.ok(charged >= Math.log2(k + 1), `k = ${k}: ${charged} units`);
-    // (one search a range: the last event is in a range ending at it, and none is in one past it)
+    // (one search a range: an event is in a range ending at it, and none in a range between two events or past the last)
+    const [first, second] = [...lists.ownEvents(key).stores].sort((a, b) => a - b);
     const last = Math.max(...lists.ownEvents(key).stores);
+    assert.ok(second! - first! >= 2, `k = ${k}: positions between the first two events`);
     assert.equal(lists.eventIn(key, [[last, last]]), "branch", `k = ${k}`);
+    assert.equal(lists.eventIn(key, [[first! + 1, second! - 1]]), null, `k = ${k}`);
     assert.equal(lists.eventIn(key, [[last + 1, Number.MAX_SAFE_INTEGER]]), null, `k = ${k}`);
   }
 });
