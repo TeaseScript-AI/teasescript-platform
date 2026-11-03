@@ -26,13 +26,39 @@ export interface InheritedCopy {
 }
 
 /**
- * The paths copies land in a place at or below a prefix a caller asked (`landedBelow`), in order, as steps and as texts.
- * Equal listings are one (`id`).
+ * A step of `landedBelow`'s walk: a place, the prefix its paths are taken at or below, and how its path is written in
+ * the place asked (its first `drop` steps replaced by `prepend`); the step that reached it (`parent`).
+ */
+export interface LandingTask {
+  readonly place: PlaceId;
+  readonly below: readonly string[];
+  readonly drop: number;
+  readonly prepend: readonly string[];
+  readonly parent?: LandingTask;
+}
+
+/**
+ * The paths copies land in a place at or below a prefix (`landedBelow`), as the walk of one task (`frame`) wrote them:
+ * indexes into the paths and texts of the call that made it (`data`), in order; the first `own` the task's own, then per
+ * task its walk took next (`children`) that task's paths (`start` to `end`) and the tasks its walk went through; and
+ * every task the listing's walk went through (`tasks`).
  */
 export interface Listing {
-  readonly id: number;
-  readonly paths: readonly (readonly string[])[];
-  readonly texts: readonly string[];
+  readonly data: {
+    readonly id: number;
+    readonly paths: readonly (readonly string[])[];
+    readonly texts: readonly string[];
+  };
+  readonly indices: readonly number[];
+  readonly own: number;
+  readonly children: readonly {
+    readonly task: LandingTask;
+    readonly start: number;
+    readonly end: number;
+    readonly tasks: readonly LandingTask[];
+  }[];
+  readonly tasks: readonly LandingTask[];
+  readonly frame: LandingTask;
 }
 
 /**

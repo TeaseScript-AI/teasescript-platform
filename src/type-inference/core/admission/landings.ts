@@ -31,6 +31,7 @@ import type {
   CopyForest,
   Inheritance,
   InheritedCopy,
+  LandingTask,
   Listing,
   Storing,
   WholeCycle,
@@ -815,11 +816,10 @@ export function withLandingComparison<T>(
 /**
  * The paths copies land in a place at or below `prefix` (`Inheritance`), each once: its own landings and, through each
  * copy, its source's at or below the copy's strip, written where the copy lands them; on an explicit stack, each
- * source, prefix and way of writing its paths once. A source and prefix an earlier call of the pass asked give that
- * call's listing instead of their walk (#1547, #1428): the stack ends a task's walk before anything under it, so the
- * listing is what the walk would add there, in order, written where the task writes its paths; a longer prefix of a
- * place with a listing at its root takes that listing's paths below it. Every call runs at the pass's
- * own level, before any decision, so no demand counts the work a listing saves.
+ * source, prefix and way of writing its paths once. Where an earlier call of the pass asked a place, its walk is kept
+ * (#1547, #1428): the call's result, and the walk of each longer prefix of that place a later call goes through, as
+ * listings; a later walk reaching one takes its paths as the walk would bring them (`walkLandings`). Every call runs at
+ * the pass's own level, before any decision, so no demand counts the work a listing saves.
  */
 export function landedBelow(
   admission: Admission,
@@ -827,19 +827,69 @@ export function landedBelow(
   prefix: readonly string[],
 ): string[] {
   const listing = walkLandings(admission, place, prefix, true);
-  let byPrefix = admission.listings.get(place);
-  if (byPrefix === undefined) admission.listings.set(place, (byPrefix = new Map()));
-  byPrefix.set(keptText(admission.work, prefix), listing);
+  keepListing(admission, listing);
+  const texts = listing.indices.map((index) => listing.data.texts[index]!);
   if (comparison !== null) {
-    const walked = admission.pass.program.work.apart(
-      () => walkLandings(admission, place, prefix, false).texts,
-    );
-    comparison(place, prefix, listing.texts, walked);
+    const walked = admission.pass.program.work.apart(() => {
+      const fresh = walkLandings(admission, place, prefix, false);
+      return fresh.indices.map((index) => fresh.data.texts[index]!);
+    });
+    comparison(place, prefix, texts, walked);
   }
-  return [...listing.texts];
+  return texts;
 }
 
-/** `landedBelow`'s walk, taking the pass's listings where `listed`. */
+/** A listing kept for its place and prefix, for the pass (`Admission.listings`). */
+function keepListing(admission: Admission, listing: Listing): void {
+  let byPrefix = admission.listings.get(listing.frame.place);
+  if (byPrefix === undefined) admission.listings.set(listing.frame.place, (byPrefix = new Map()));
+  byPrefix.set(keptText(admission.work, listing.frame.below), listing);
+}
+
+/**
+ * How a listing's path is written where `task` writes: `prepend`, then the path from `cut` (the listing's frame and the
+ * task's composed, as a task's push composes them).
+ */
+function writing(
+  from: Listing,
+  task: LandingTask,
+): { readonly prepend: readonly string[]; readonly cut: number } {
+  const { below, drop, prepend } = from.frame;
+  return task.drop <= drop
+    ? { prepend: joinSteps(task.prepend, below.slice(task.drop, drop)), cut: prepend.length }
+    : { prepend: task.prepend, cut: prepend.length + task.drop - drop };
+}
+
+/** A task of a listing written where `written` writes: its id in the walk taking it. */
+function writtenId(
+  admission: Admission,
+  written: { readonly prepend: readonly string[]; readonly cut: number },
+  task: LandingTask,
+): string {
+  return written.cut <= task.prepend.length
+    ? keptParts(
+        admission.work,
+        task.place,
+        task.below,
+        task.drop,
+        joinSteps(written.prepend, task.prepend.slice(written.cut)),
+      )
+    : keptParts(
+        admission.work,
+        task.place,
+        task.below,
+        task.drop + written.cut - task.prepend.length,
+        written.prepend,
+      );
+}
+
+/**
+ * `landedBelow`'s walk, taking the pass's listings where `listed`. The stack ends a task's walk before anything under
+ * it, so a task's paths and tasks are contiguous: a record (the call's root, and each longer prefix of a place with a
+ * listing) keeps them, with each child of its root's, as a listing, where nothing in it was skipped as brought before it
+ * opened. A task with a listing takes it as its walk would bring it: its root's own paths, then each child not brought
+ * before, its paths and tasks.
+ */
 function walkLandings(
   admission: Admission,
   place: PlaceId,
@@ -848,34 +898,117 @@ function walkLandings(
 ): Listing {
   const { cycleOf, fed, wholes } = inheritance(admission);
   const work = admission.pass.program.work;
-  const out = new Set<string>();
-  const paths: (readonly string[])[] = [];
-  const seen = new Set<string>();
-  // a task: a place, the prefix its paths are taken at or below, and how its path is written in the place asked:
-  // its first `drop` steps replaced by `prepend`
-  const tasks: {
-    readonly place: PlaceId;
-    readonly below: readonly string[];
-    readonly drop: number;
-    readonly prepend: readonly string[];
-  }[] = [{ place, below: prefix, drop: 0, prepend: [] }];
-  // (the listings this call took, each with the prefix and writing it took them with; and while the paths so far are
-  // one listing's, written as there, that listing, which is then the result)
-  const taken = new Set<string>();
-  const one: { same: Listing | null | undefined } = { same: null };
-  let taking = false;
-  const put = (steps: readonly string[], text: string): void => {
-    if (out.has(text)) return;
-    out.add(text);
-    paths.push(steps);
-    if (!taking && one.same !== null) one.same = undefined;
+  const data: { readonly id: number; readonly paths: string[][]; readonly texts: string[] } = {
+    id: (admission.listingCount += 1),
+    paths: [],
+    texts: [],
   };
+  // (per text, per task id and per listing taken with its writing, the order it was first brought in)
+  const out = new Map<string, number>();
+  const seen = new Map<string, number>();
+  const taken = new Map<string, number>();
+  const root: LandingTask = { place, below: prefix, drop: 0, prepend: [] };
+  const tasks: (LandingTask | null)[] = [root];
+  interface Child {
+    readonly task: LandingTask;
+    readonly start: number;
+    end: number;
+    readonly tasks: LandingTask[];
+  }
+  interface Record {
+    readonly task: LandingTask;
+    readonly start: number;
+    readonly indices: number[];
+    readonly earlier: Set<number>;
+    own: number | null;
+    readonly children: Child[];
+    readonly tasks: LandingTask[];
+    readonly marks: { readonly seen: number; readonly taken: number };
+    readonly least: { seen: number; taken: number };
+  }
+  // the open records, innermost last
+  const records: Record[] = [];
+  const open = (task: LandingTask): void => {
+    records.push({
+      task,
+      start: data.texts.length,
+      indices: [],
+      earlier: new Set(),
+      own: null,
+      children: [],
+      tasks: [task],
+      marks: { seen: seen.size - 1, taken: taken.size },
+      least: { seen: Infinity, taken: Infinity },
+    });
+  };
+  // (a task or a listing skipped as brought: each record open since then is no longer whole)
+  const skipped = (kind: "seen" | "taken", order: number): void => {
+    for (let at = records.length - 1; at >= 0; at -= 1) {
+      const record = records[at]!;
+      record.least[kind] = Math.min(record.least[kind], order);
+      if (order >= record.marks[kind]) break;
+    }
+  };
+  const close = (record: Record): Listing => {
+    const last = record.children.at(-1);
+    if (last !== undefined) last.end = record.indices.length;
+    return {
+      data,
+      indices: record.indices,
+      own: record.own ?? record.indices.length,
+      children: record.children,
+      tasks: record.tasks,
+      frame: record.task,
+    };
+  };
+  const put = (steps: string[], text: string): void => {
+    const at = out.get(text);
+    if (at !== undefined) {
+      // (a path brought before a record opened is that record's too, once)
+      for (let index = records.length - 1; index >= 0; index -= 1) {
+        const record = records[index]!;
+        if (at >= record.start) break;
+        if (!record.earlier.has(at)) {
+          record.earlier.add(at);
+          record.indices.push(at);
+        }
+      }
+      return;
+    }
+    const index = data.texts.length;
+    for (const record of records) record.indices.push(index);
+    out.set(text, index);
+    data.paths.push(steps);
+    data.texts.push(text);
+  };
+  open(root);
   while (tasks.length > 0) {
     const task = tasks.pop()!;
+    if (task === null) {
+      const record = records.pop()!;
+      if (record.least.seen >= record.marks.seen && record.least.taken >= record.marks.taken)
+        keepListing(admission, close(record));
+      continue;
+    }
+    // (a child of an open record's root: its paths and tasks start here)
+    for (const record of records)
+      if (task.parent === record.task) {
+        record.own ??= record.indices.length;
+        const last = record.children.at(-1);
+        if (last !== undefined) last.end = record.indices.length;
+        record.children.push({ task, start: record.indices.length, end: -1, tasks: [] });
+      }
     const id = keptParts(admission.work, task.place, task.below, task.drop, task.prepend);
-    if (seen.has(id)) continue;
-    const root = seen.size === 0;
-    seen.add(id);
+    const at = seen.get(id);
+    if (at !== undefined) {
+      skipped("seen", at);
+      continue;
+    }
+    seen.set(id, seen.size);
+    for (const record of records) {
+      if (record.task !== task) record.tasks.push(task);
+      record.children.at(-1)?.tasks.push(task);
+    }
     const add = (path: readonly string[]): void => {
       if (!isPrefix(task.below, path)) return;
       const steps = joinSteps(task.prepend, path.slice(task.drop));
@@ -885,56 +1018,62 @@ function walkLandings(
       work.charge("indexSteps");
       add(path);
     };
-    // (a listing's paths, each charged as its emit; with a longer prefix, every one tested. One listing, prefix and
-    // writing taken again brings only paths it brought)
-    const take = (from: Listing, below: boolean): void => {
+    // (a listing's paths written where this task writes, each charged as its emit: its root's own, then each child of
+    // its root not brought before, its paths and its tasks. One listing taken again with the same writing brings
+    // nothing new)
+    const take = (from: Listing): void => {
+      const written = writing(from, task);
       const key = keptParts(
         admission.work,
-        from.id,
-        below ? task.below : "",
-        task.drop,
-        task.prepend,
+        from.data.id,
+        from.frame.below,
+        from.frame.drop,
+        from.frame.prepend,
+        written.prepend,
+        written.cut,
       );
-      if (taken.has(key)) return;
-      taken.add(key);
-      const before = out.size;
-      // (compared once per call, before its first listing: each text compared rides on the emit that made it)
-      let matches = one.same === null && before <= from.texts.length;
-      if (matches) {
-        let index = 0;
-        for (const text of out) {
-          if (text !== from.texts[index++]) {
-            matches = false;
-            break;
-          }
-        }
+      const was = taken.get(key);
+      if (was !== undefined) {
+        skipped("taken", was);
+        return;
       }
-      taking = true;
-      for (const [index, path] of from.paths.entries()) {
-        work.charge("indexSteps");
-        if (!isPrefix(task.below, path)) {
-          matches = false;
+      taken.set(key, taken.size);
+      const bring = (start: number, end: number): void => {
+        for (let at = start; at < end; at += 1) {
+          work.charge("indexSteps");
+          const steps = joinSteps(
+            written.prepend,
+            from.data.paths[from.indices[at]!]!.slice(written.cut),
+          );
+          put(steps, keptText(admission.work, steps));
+        }
+      };
+      bring(0, from.own);
+      for (const child of from.children) {
+        const childId = writtenId(admission, written, child.task);
+        const brought = seen.get(childId);
+        if (brought !== undefined) {
+          skipped("seen", brought);
           continue;
         }
-        const steps = joinSteps(task.prepend, path.slice(task.drop));
-        const text = keptText(admission.work, steps);
-        if (text !== from.texts[index] || out.has(text) !== index < before) matches = false;
-        put(steps, text);
+        for (const sub of child.tasks) {
+          const subId = writtenId(admission, written, sub);
+          if (!seen.has(subId)) seen.set(subId, seen.size);
+        }
+        bring(child.start, child.end);
       }
-      taking = false;
-      one.same = matches && out.size === from.texts.length ? from : undefined;
     };
-    const lists = listed && !root ? admission.listings.get(task.place) : undefined;
+    const lists = listed && task !== root ? admission.listings.get(task.place) : undefined;
     const known = lists?.get(pathText(task.below));
     if (known !== undefined) {
-      take(known, false);
+      take(known);
       continue;
     }
     // (a place that lands through its parent lands its root and what the copy it lands through does, `landsThrough`)
     const through = landsThrough(admission, task.place, task.below);
     if (through !== task.place) {
       emit([]);
-      tasks.push({ ...task, place: through });
+      tasks.push({ ...task, place: through, parent: task });
       continue;
     }
     // (a cycle's landed paths, and the copies at, above or below the prefix, from indexes by path: never every one
@@ -944,12 +1083,10 @@ function walkLandings(
       for (const path of landing.under.get(keptText(admission.work, task.below)) ?? []) emit(path);
       continue;
     }
-    // (the place's listing at its root, its paths below the prefix: Sol's completed-root prefix view. A place that lands
-    // through its parent or stands in a cycle does at every prefix, so it never comes here)
-    const whole = task.below.length > 0 ? lists?.get("") : undefined;
-    if (whole !== undefined) {
-      take(whole, true);
-      continue;
+    // (a longer prefix of a place a call asked: this walk kept as its listing, Sol's prefix view)
+    if (lists !== undefined && task.below.length > 0) {
+      open(task);
+      tasks.push(null);
     }
     // (a cycle of whole copies lands its root)
     if (wholes.has(task.place) && task.below.length === 0) emit([]);
@@ -970,20 +1107,19 @@ function walkLandings(
               below,
               drop: copy.strip.length,
               prepend: keptSteps(admission.work, task.prepend, copy.path.slice(task.drop)),
+              parent: task,
             }
           : {
               place: copy.from,
               below,
               drop: copy.strip.length + task.drop - copy.path.length,
               prepend: task.prepend,
+              parent: task,
             },
       );
     }
   }
-  // (a result that is one listing's paths, written as there, is that listing: equal listings are one)
-  if (one.same !== null && one.same !== undefined && out.size === one.same.texts.length)
-    return one.same;
-  return { id: (admission.listingCount += 1), paths, texts: [...out] };
+  return close(records.pop()!);
 }
 
 /** The members of a place's cycle of copies (`Inheritance.order`), once per pass. */

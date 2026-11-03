@@ -6982,7 +6982,8 @@ export const LANDING_FAMILIES: readonly WorkFamily[] = (["first", "last"] as con
  * asked at every link, through a selection, a property, an object and a growing listing; two and three routes meeting
  * at every link, and a link skipping one; translations below wrappers; cold chains and aliases asked at their ends,
  * at a prefix or at every link; seeds overlapping a listing; sibling prefixes holding other paths; one place asked at two
- * prefixes, its other values loaded at each; copies of a whole cycle, a fed cycle and a cycle that takes
+ * prefixes, its other values loaded at each; a wide object read at one narrow property in every call (Codex r1's B1);
+ * one place's two strips written into one destination (its H1); copies of a whole cycle, a fed cycle and a cycle that takes
  * steps; and a chain one of whose copies a list rejects, landed in every pass (Sol's design rounds r1–r3).
  */
 export const LANDING_SHAPES: readonly WorkFamily[] = (
@@ -7128,6 +7129,32 @@ export const LANDING_SHAPES: readonly WorkFamily[] = (
           rows(k, (i) => `let e${i + 1} = [e${i}, {p: {f: 1}, q: {g: 1}}][0]`),
           `let z = [{w: e${k}.q}, {w: {g: 2}}][0]`,
           'say "${z.w.g}"',
+          "exit",
+        ),
+    ],
+    [
+      "sparse-prefixes",
+      (k: number) =>
+        lines(
+          LANDING_TYPED,
+          `let base = {p: {${typedFields(k)}}, q: {f: typed}}`,
+          `let mid = [base, {p: {${typedFields(k)}}, q: {f: typed}}][0]`,
+          rows(k, (i) =>
+            lines(`let x${i} = [{a: mid.q}, {a: {f: typed}}][0]`, `say "\${x${i}.a.f}"`),
+          ),
+          "exit",
+        ),
+    ],
+    [
+      "two-strips",
+      () =>
+        lines(
+          LANDING_TYPED,
+          "let base = {p: {a0: typed}, q: {b0: typed}}",
+          "let mid = [base, {p: {a0: typed}, q: {b0: typed}}][0]",
+          "let x = [{r: mid.p}, {r: mid.q}][0]",
+          "let y = [{r: mid.q}, {r: {b0: typed}}][0]",
+          'say "${x.r} ${y.r}"',
           "exit",
         ),
     ],
