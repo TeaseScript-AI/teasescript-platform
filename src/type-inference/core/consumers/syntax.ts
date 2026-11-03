@@ -232,7 +232,7 @@ function syntaxDecides(walk: Consumers): boolean {
  * How long a chain of copies of inferred places the stores' syntax follows from the key it decides (#1604): a copy past
  * it is not told by syntax, as before the chain was followed.
  */
-export const SYNTAX_COPIES = 8;
+const SYNTAX_COPIES = 8;
 
 /**
  * Each walk's following of copies of inferred places (`linkedFrontier`): the levels being made, each with the chain's
