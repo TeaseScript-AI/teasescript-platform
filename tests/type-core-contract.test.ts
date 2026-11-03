@@ -47,6 +47,7 @@ import {
   publishedAnswers,
   publishedRoute,
   publishedUpToOrder,
+  stopSet,
 } from "./helpers/type-core-oracles.js";
 
 /**
@@ -1163,4 +1164,84 @@ test("a replayed component below a place replaced by objects answers alike, its 
         .reverse();
       assert.deepEqual(again, first, JSON.stringify(mode));
     });
+});
+
+/**
+ * #1607: a long key's levels fold each path from its parent path's groups one step down (`groupsAt`), each group's
+ * ancestors one interned vector, never its whole ancestor list again (a fold from each group's root at every path joins
+ * its vector and spells it in its key). Each group folds from its own parent group's fold: two literals unlike above a
+ * path stay two groups there. The fold is a shared build; its demand counts what the fold from the root charged
+ * (`WorkLedger.repeat`), so a demand's allowance runs out where it did and every stop stays: its demand's units (`own`)
+ * along a path k steps into one nested literal grow as that fold's, faster than twice per doubling of k. The path is a
+ * span, so the memo's names are short.
+ */
+test("a long key's level groups fold each path one step below its parent's (#1607)", () => {
+  const work = (depth: number): number => {
+    const source = `let a = {f: [[1]]}\nlet b = ${"{q: ".repeat(depth)}a${"}".repeat(depth)}\nsay "x"\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const pass = narrowingPass(request);
+    const { contract } = pass;
+    const prefix = keyOf(bindingOf(pass, "b"), []);
+    const levels = prefixLevels(contract, prefix, contract.prefixStores(prefix));
+    assert.equal(levels.base.length, 1);
+    const path = contract.pathIdOf([...Array.from({ length: depth }, () => "q"), "f"]);
+    const own = contract.work.own;
+    const groups = groupsAt(contract, prefix, levels.base, spanRef(contract, path));
+    assert.equal(groups.length, 1);
+    return contract.work.own - own;
+  };
+  const [small, large] = [work(32), work(64)];
+  assert.ok(large >= 2.4 * small, `${small} demand units at 32, ${large} at 64`);
+  // (each group from its own parent group's fold: two literals unlike above the path stay two groups below it)
+  const source =
+    'let b = {q: {q: {f: 1}}}\nif hostValue { b = {q: {r: 2, q: {f: 1}}} }\nsay "x"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+  assert.ok(request !== null);
+  const pass = narrowingPass(request);
+  const { contract } = pass;
+  const prefix = keyOf(bindingOf(pass, "b"), []);
+  const levels = prefixLevels(contract, prefix, contract.prefixStores(prefix));
+  assert.equal(levels.base.length, 2);
+  const path = spanRef(contract, contract.pathIdOf(["q", "q", "f"]));
+  assert.equal(groupsAt(contract, prefix, levels.base, path).length, 2);
+});
+
+/**
+ * #1607 (Codex r5 on #1632): a projected literal's folds count to each demand exactly what `main`'s folds from the root
+ * charged, so a demand allowance stops each decision where `main` stops it. `main` `f5c460475` stops nothing at these
+ * allowances and publishes two runtime checks; folds that charged their interned vectors to the demand stopped `b.f`
+ * there (three checks) and, in reverse order, `b.g` and then the analysis (five).
+ */
+test("a projected long key's folds keep main's demand stops (#1607)", () => {
+  const source = "let b = ({q: {q: {f: 1, g: 2}}}).q.q\nb.f = hostValue\nsay b.f\nsay b.g\nexit\n";
+  const files = [{ path: "main.tease", source }];
+  for (const [reversed, allowance] of [
+    [false, 617],
+    [true, 421],
+  ] as const) {
+    const stops = stopSet(files, { reversed, unshared: false }, ["hostValue"], allowance)!;
+    assert.deepEqual(stops.stops, [], `reversed: ${reversed}`);
+    assert.equal(JSON.parse(stops.record).checks.length, 2, `reversed: ${reversed}`);
+  }
+});
+
+/**
+ * #1607 (Codex r5 on #1632): the folds along a span path eight steps into one nested literal count to their demand what
+ * `main`'s folds from the root charged, its path's reads included: 655 units on `main` `f5c460475`, where folds that
+ * read the span once counted 517 (the queue's evidence compares direct, projected, plain-path, span-path and sparse
+ * folds at depths 2, 3, 8 and 18 in four modes).
+ */
+test("the folds along a span path count main's units to their demand (#1607)", () => {
+  const source = `let a = {f: 1}\nlet b = ${"{q: ".repeat(8)}a${"}".repeat(8)}\nsay "x"\nexit\n`;
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+  assert.ok(request !== null);
+  const pass = narrowingPass(request);
+  const { contract } = pass;
+  const prefix = keyOf(bindingOf(pass, "b"), []);
+  const levels = prefixLevels(contract, prefix, contract.prefixStores(prefix));
+  const path = spanRef(contract, contract.pathIdOf([...Array.from({ length: 8 }, () => "q"), "f"]));
+  const before = contract.work.own;
+  groupsAt(contract, prefix, levels.base, path);
+  assert.equal(contract.work.own - before, 655);
 });

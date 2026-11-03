@@ -2430,7 +2430,8 @@ test("a place replaced by objects of distinct properties takes work that grows w
  * charged or kept for it (`propertyItems`). Every counter of a place replaced by two objects and of 8 places each
  * replaced by two wide objects, each read at one property, in either order with the sharing on and off, is `main`'s
  * at `465532f4a` (a regression oracle of this construction only; before it, the wide places took 2 `structureSteps` and
- * 2 `literalUnits` each).
+ * 2 `literalUnits` each), but the literal work of the levels' folds, which #1607 keeps as one interned vector per group
+ * and path where they kept each group's whole vector: 16 and 147 units fewer with the sharing on.
  */
 test("a prefix of closed objects read once has main's counters, in either order, shared or not (#1456)", () => {
   const wide = (k: number): string =>
@@ -2441,7 +2442,7 @@ test("a prefix of closed objects read once has main's counters, in either order,
       "a place replaced by two objects",
       'let a = {n: 1}\nlet b = {n: 2, m: "x"}\nlet c = a\nc = b\nsay c.n\nexit',
       [
-        "checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 26 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 456 invSteps 105 literalUnits 504 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 26 syntaxNodes 28 yields 75",
+        "checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 26 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 456 invSteps 105 literalUnits 488 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 26 syntaxNodes 28 yields 75",
         "checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 26 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 456 invSteps 103 literalUnits 346 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 12 syntaxNodes 28 yields 75",
       ],
     ],
@@ -2449,7 +2450,7 @@ test("a prefix of closed objects read once has main's counters, in either order,
       "8 places each replaced by two wide objects",
       wide(8),
       [
-        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 529 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 822 literalUnits 2533 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 124 syntaxNodes 144 yields 724",
+        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 529 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 822 literalUnits 2386 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 124 syntaxNodes 144 yields 724",
         "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 529 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 2319 invSteps 820 literalUnits 1785 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 56 syntaxNodes 144 yields 724",
       ],
     ],
@@ -2577,7 +2578,9 @@ test("a long copied key's store check grows with its copy chain in every mode (#
  * check's work is charged there: on `c0ab92ced`, before the capture, the analyses charged 7,843 / 7,003, 8,971 / 8,098
  * and 10,226 / 9,225 (10,228 reversed) and the checks after them 451 / 380, 274 / 236 and 518 / 429. The store at the
  * element (`b.q….f[0] = …`) is outside the candidate slice's syntax, so the analysis captures nothing there and its work
- * is main's (`slice-syntax.ts`). On `3d052bf43`
+ * is main's (`slice-syntax.ts`). With #1607's level folds, whose literal work is lower with the sharing on, the analyses
+ * with the sharing on charge 121, 105 and 164 units less than on `main` `92a970442` (8,257, 8,971 and 10,707 to 10,709).
+ * On `3d052bf43`
  * the store at the long key's check charged 3,266 and 2,197 units; the store at its element's analysis asked its
  * element levels through every wrapper (10,329 and 8,632), its check 1,101 and 889; the store at a property of its
  * element's 12,448 and 10,225, its check 2,353 and 1,880.
@@ -2594,21 +2597,21 @@ test("a long copied key's store check charges its positions' work, in every mode
   });
   assert.deepEqual(measured, [
     [
-      [8257, 60],
+      [8136, 60],
       [7346, 60],
-      [8257, 60],
+      [8136, 60],
       [7346, 60],
     ],
     [
-      [8971, 274],
+      [8866, 258],
       [8098, 236],
-      [8971, 274],
+      [8866, 258],
       [8098, 236],
     ],
     [
-      [10707, 64],
+      [10543, 64],
       [9617, 64],
-      [10709, 64],
+      [10545, 64],
       [9617, 64],
     ],
   ]);

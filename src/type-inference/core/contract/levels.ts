@@ -1,5 +1,5 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, keptParts } from "../budget.js";
+import { joinParts, keptParts, textUnits } from "../budget.js";
 import { keyBelowRef, restPart, restRef, restTo, stepsRest, type Rest } from "./key-ids.js";
 import type { Contract } from "../contract.js";
 import { type Key } from "../definitions.js";
@@ -341,43 +341,106 @@ export function groupsAt(
   contract.keepText(memoKey.length);
   collectMarks(contract);
   // the members themselves at the prefix (a projection's literal at its steps into it)
-  const groups = foldGroups(
-    contract,
-    path,
+  const parents =
     path.length === 0
-      ? base
-      : groupsAt(contract, prefix, base, restTo(contract, path, path.length - 1)),
-  );
+      ? null
+      : groupsAt(contract, prefix, base, restTo(contract, path, path.length - 1));
+  const groups = foldGroups(contract, path, parents ?? base, parents);
   contract.levelGroups.set(memoKey, groups);
   return groups;
 }
 
 /**
+ * What a fold read of a group at its path (#1607): its literal's path there (`id`, -1 where its index holds none) and
+ * what stands at each step above it, one interned vector (`above`, `aboveOf`). A fold one step down takes both from its
+ * parent group's, one step more, so the folds at each of a path's k prefixes walk k steps, never k².
+ */
+interface Folded {
+  readonly id: number;
+  readonly above: number;
+  /** The length of the vector's parts' texts, as a fold that joins them makes them (`foldGroups`'s accounting). */
+  readonly length: number;
+}
+
+/** The fold facts of the groups `foldGroups` made, in their order. */
+const foldsOf = new WeakMap<readonly LevelGroup[], readonly Folded[]>();
+
+/** Per pass, the interned vectors of `Folded.above`: each one's id by its parent vector's and its last part. */
+const vectorsOf = new WeakMap<Contract, Map<string, number>>();
+
+/**
+ * The interned vector `parent` (0 the empty one) with `part` after it, made where new: its entry charged there unless the
+ * caller's walk charged each step already (`charged`).
+ */
+function aboveOf(contract: Contract, parent: number, part: string, charged: boolean): number {
+  let vectors = vectorsOf.get(contract);
+  if (vectors === undefined) vectorsOf.set(contract, (vectors = new Map()));
+  const name = joinParts(parent, part);
+  let id = vectors.get(name);
+  if (id === undefined) {
+    contract.keepText(name.length);
+    if (!charged) contract.keep(1);
+    vectors.set(name, (id = vectors.size + 1));
+  }
+  return id;
+}
+
+/**
  * `groupsAt`'s fold at a path of the groups one step above it (`parents`), the marks collected; for a property of a
- * prefix of closed objects, its holders' groups alone (`propertyItems`).
+ * prefix of closed objects, its holders' groups alone (`propertyItems`). Each group's fold read from its parent's one
+ * step up where the parents are `groupsAt`'s at the path's parent (`above`, their facts, #1607), else from its root, as
+ * a shared build; its demand counts what the fold from the root charged (`WorkLedger.repeat`), its path read as there.
  */
 function foldGroups(
   contract: Contract,
   path: Rest,
   parents: readonly LevelGroup[],
+  above: readonly LevelGroup[] | null = null,
 ): readonly LevelGroup[] {
   const { program } = contract.pass;
+  const known = above === null ? undefined : foldsOf.get(above);
   // each group's key, to its position in the list
   const merged = new Map<string, number>();
   const groups: LevelGroup[] = [];
-  for (const group of parents) {
+  const folds: Folded[] = [];
+  for (const [index, group] of parents.entries()) {
     program.work.charge("structureSteps");
     const levels = levelsOf(contract, group.literal);
     // (what stands at each step above the path: entries read below it, objects lacking the next step, a
     // reference, an empty collection; and whether the literal is a cell, every path then below an element)
-    const above: string[] = [];
-    let id = 0;
-    contract.keep(group.at.length + path.length);
-    for (let index = 0; index < group.at.length + path.length; index += 1) {
-      above.push(levels.at.get(id) ?? "");
-      const step = index < group.at.length ? group.at[index]! : path.at(index - group.at.length)!;
-      id = pathBelow(contract, id, step);
-    }
+    const parent = known?.[index];
+    const steps = group.at.length + path.length;
+    // (the path's steps read as a fold from the root reads them, through the path's own reads, each charged as there)
+    const along: string[] = [];
+    for (let at = 0; at < path.length; at += 1) along.push(path.at(at)!);
+    // (the fold itself a shared build: its interned vector, from the parent group's fold or from the root, charged to
+    // the analysis and never to the demand, which counts the fold from the root below)
+    const fold = program.work.shared((): Folded => {
+      if (parent !== undefined) {
+        const part = levels.at.get(parent.id) ?? "";
+        return {
+          id: pathBelow(contract, parent.id, along.at(-1)!),
+          above: aboveOf(contract, parent.above, part, false),
+          length: parent.length + part.length,
+        };
+      }
+      // (from the literal's root: each step walked charged, as the vector it makes)
+      let id = 0;
+      let vector = 0;
+      let length = 0;
+      contract.keep(steps);
+      for (let at = 0; at < steps; at += 1) {
+        const part = levels.at.get(id) ?? "";
+        vector = aboveOf(contract, vector, part, true);
+        length += part.length;
+        id = pathBelow(
+          contract,
+          id,
+          at < group.at.length ? group.at[at]! : along[at - group.at.length]!,
+        );
+      }
+      return { id, above: vector, length };
+    });
     const cell = program.cellOwner.get(group.literal)?.kind === "cell" ? "cell" : "";
     // (its marks: alike where they cannot depend on steps past the path, else its own, §3.2 r4.23)
     const marks =
@@ -386,13 +449,21 @@ function foldGroups(
         : depthOf(contract, group.holder) <= path.length
           ? String(marksAt(contract, group.holder, path))
           : group.holder.id;
-    const key = contract.kept(
-      `${levels.below.get(id) ?? ""}|${contract.joined(above, "|")}|${cell}|${marks}`,
+    const key = program.work.shared(() =>
+      contract.kept(`${levels.below.get(fold.id) ?? ""}|${fold.above}|${cell}|${marks}`),
+    );
+    // (to its demand exactly what the fold of the group from its root charges besides its path's reads: its steps kept,
+    // its vector's parts joined and its key holding that text, `WorkLedger.repeat`; so every demand stops where the folds
+    // from the root stopped it, and the saving is the analysis's alone)
+    const joined = steps === 0 ? 0 : fold.length + steps - 1;
+    program.work.repeat(
+      steps + textUnits(joined) + textUnits(key.length - String(fold.above).length + joined),
     );
     const position = merged.get(key);
     if (position === undefined) {
       merged.set(key, groups.length);
       groups.push(group);
+      folds.push(fold);
       continue;
     }
     const into = groups[position]!;
@@ -405,6 +476,7 @@ function foldGroups(
       ingress: program.scope.ingress.union(into.ingress, group.ingress),
     };
   }
+  foldsOf.set(groups, folds);
   return groups;
 }
 
