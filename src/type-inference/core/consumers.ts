@@ -288,6 +288,8 @@ export class Consumers {
   readonly cheapDecisions = new Map<Key, CheapDecision | null>();
   /** The places the script stores into, at any path (`copySource`). */
   storedRoots: Set<PlaceId> | null = null;
+  /** The places the script stores into below their root (`inferredCopy`, #1604). */
+  storedBelow: Set<PlaceId> | null = null;
 
   public constructor(
     readonly pass: CorePass,

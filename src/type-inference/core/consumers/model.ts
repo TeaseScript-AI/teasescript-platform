@@ -72,16 +72,28 @@ export interface CheapShape {
   properties: ReadonlySet<string> | null;
   first: Definition | null;
   opaque: boolean;
+  /**
+   * The copies of inferred places stored here (#1604): each copies its source's own syntax there, from its path on,
+   * read through the source's frontier (`cheapFrontier`), its types given by the store that copies.
+   */
+  readonly copies: {
+    readonly root: PlaceId;
+    readonly path: readonly string[];
+    readonly by: Definition;
+  }[];
 }
 
 /**
- * What reaches one key and path by syntax: the shapes of the keys at and above it, there; the written types copies bring
- * there; whether every value there is told by syntax (`told`, which holds for each path below only while it holds).
+ * What reaches one key and path by syntax: the shapes of the keys at and above it, there, each with the store a copy
+ * brought it by (`by`, `null` for the key's own); the written types copies bring there; whether every value there is
+ * told by syntax (`told`, which holds for each path below only while it holds).
  */
 export interface CheapFrontier {
-  readonly shapes: readonly CheapShape[];
+  readonly shapes: readonly { readonly shape: CheapShape; readonly by: Definition | null }[];
   readonly written: readonly { readonly term: TypeTerm; readonly by: Definition }[];
   readonly told: boolean;
+  /** The longest chain of copies of inferred places it follows (`Infinity` where one passed the bound, #1604). */
+  readonly reach: number;
 }
 
 /** A cheap decider's decision of a place at a path (`Consumers.cheapDecided`). */
