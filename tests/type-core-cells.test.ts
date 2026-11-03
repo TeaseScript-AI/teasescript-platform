@@ -6,12 +6,11 @@ import { CARRIER_ROLES, operandsOf } from "../src/type-inference/core/carriers.j
 import { checkedResult } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
-import type { CheckedDiagnostic } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
-import { inMode, MODES } from "./helpers/type-core-oracles.js";
+import { inMode, MODES, placedDiagnostic } from "./helpers/type-core-oracles.js";
 import {
   BOUNDED_ADMISSION_WITNESSES,
   CARRIER_WITNESSES,
@@ -3685,44 +3684,38 @@ test("a split cycle's aliases, each stored into after the split, err at their li
     const source = `${setup}let final=${list}\nexit\n`;
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, list);
-    // (a site as the token's offsets in the first occurrence of the text around it)
-    const at = (around: string, token: string): string => {
+    // (a diagnostic at the token in the first occurrence of the text around it, in the program's one file)
+    const at = (code: string, around: string, token: string, names: string) => {
       const start = source.indexOf(around) + around.indexOf(token);
-      return `${start}:${start + token.length} '${token}'`;
+      return { code, site: { file: 0, start, end: start + token.length }, names };
     };
     // each rejected copy's error per property where it meets its place; with two aliases, each property's error at the
     // list's second element
     const expected = [
-      `TSV041 ${at("\nb=a\n", "a")} b.f`,
-      `TSV041 ${at("\nb=a\n", "a")} b.nest.g`,
-      `TSV041 ${at("\na=b\n", "b")} a.f`,
-      `TSV041 ${at("\na=b\n", "b")} a.nest.g`,
+      at("TSV041", "\nb=a\n", "a", "'b.f'"),
+      at("TSV041", "\nb=a\n", "a", "'b.nest.g'"),
+      at("TSV041", "\na=b\n", "b", "'a.f'"),
+      at("TSV041", "\na=b\n", "b", "'a.nest.g'"),
       ...(element === null
         ? []
         : [
-            `TSV044 ${at(`,${element}]`, element)} f`,
-            `TSV044 ${at(`,${element}]`, element)} nest.g`,
+            at("TSV044", `,${element}]`, element, "f"),
+            at("TSV044", `,${element}]`, element, "nest.g"),
           ]),
-    ].sort();
-    const text = (diagnostic: CheckedDiagnostic): string => {
-      const { start, end } = diagnostic.site;
-      const site = `${diagnostic.code} ${start}:${end} '${source.slice(start, end)}'`;
-      if (diagnostic.class !== "compile-error" || !("rule" in diagnostic))
-        return `${diagnostic.class} ${site}`;
-      const { rule } = diagnostic;
-      if (rule.rule === "mixed") return `${site} ${rule.path.join(".")}`;
-      return rule.rule === "store"
-        ? `${site} ${rule.into.replace(/'/gu, "")}`
-        : `${site} ${rule.rule}`;
-    };
+    ];
+    const ordered = (list: readonly unknown[]): string[] =>
+      list.map((entry) => JSON.stringify(entry)).sort();
     for (const mode of MODES) {
       const result = inMode(mode, () => checkedResult(analyseCore(request), request));
       const actual = [
         result.outcome,
-        ...result.diagnostics.map(text).sort(),
+        ...ordered(result.diagnostics.map(placedDiagnostic)),
         `${result.checks.length} checks`,
       ];
-      if (JSON.stringify(actual) !== JSON.stringify(["compile-error", ...expected, "0 checks"]))
+      if (
+        JSON.stringify(actual) !==
+        JSON.stringify(["compile-error", ...ordered(expected), "0 checks"])
+      )
         differing.push(`${list} ${JSON.stringify(mode)}: ${actual.join(", ")}`);
     }
   }

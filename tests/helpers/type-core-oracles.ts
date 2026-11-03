@@ -30,7 +30,11 @@ import {
   CoreProgram,
   propertyStep,
 } from "../../src/type-inference/core/program.js";
-import { type CoreDiagnostic, coreRecord } from "../../src/type-inference/core/result.js";
+import {
+  type CheckedDiagnostic,
+  type CoreDiagnostic,
+  coreRecord,
+} from "../../src/type-inference/core/result.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import type { PlaceId } from "../../src/type-inference/graph.js";
@@ -53,6 +57,28 @@ export function stopIdentity(diagnostic: CoreDiagnostic): Readonly<Record<string
   return Object.fromEntries(
     Object.entries(diagnostic).filter(([key]) => key !== "expects" && key !== "present"),
   );
+}
+
+/**
+ * A diagnostic where it stands: its code, its whole site (file, start, end) and what it names there (a literal's or a
+ * join's property path, a store's destination, else its rule), the identity a test of an error's place compares.
+ */
+export function placedDiagnostic(diagnostic: CheckedDiagnostic): {
+  readonly code: string;
+  readonly site: { readonly file: number; readonly start: number; readonly end: number };
+  readonly names: string;
+} {
+  const { file, start, end } = diagnostic.site;
+  const rule = "rule" in diagnostic ? diagnostic.rule : null;
+  const names =
+    rule === null
+      ? diagnostic.class
+      : rule.rule === "mixed"
+        ? rule.path.join(".")
+        : rule.rule === "store"
+          ? rule.into
+          : rule.rule;
+  return { code: diagnostic.code, site: { file, start, end }, names };
 }
 
 /** A message's sentences, split where a sentence ends and the next starts with a capital or a quote. */
