@@ -1647,7 +1647,8 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
  * and the stopped run's each carry the receiver's null-check that both runs publish, so neither is lost. A stopped run
  * that keeps its mark but drops the check, and the plan's guard, from its compile and its reruns loses it, and one that
  * publishes it twice has an extra (Codex r1's and r3's controls on #1663, a stop at program allowance 1); each owned
- * check takes one credit, the combined stop's rule's included (r2's), and what forms only with the marks (r4's).
+ * check takes one credit, the combined stop's rule's included (r2's), and what forms only with the marks, never for a content the
+ * reference owes (r4's and r5's).
  */
 test("the stop oracle takes each side's marks as the owners of its checks, and a mark keeps its check (#1642)", () => {
   const source =
@@ -1793,6 +1794,30 @@ test("the stop oracle takes each side's marks as the owners of its checks, and a
       ...doubled(walked),
       without: (omit, key) => doubled(walked.without(omit, key)),
     }).includes(`extra check ${JSON.stringify(boundary)}`),
+  );
+  // (a further copy of the boundary both runs owe, at 'hostOther', is an extra too: what forms takes no credit for a
+  // content the reference owes, Codex r5's control on #1663)
+  const isOwed = (x: Answers["checks"][number]): boolean =>
+    x.boundary &&
+    x.target === "root" &&
+    formedCase.source.slice(x.site.start, x.site.end) === "hostOther";
+  assert.equal(plainRun.answers.checks.filter(isOwed).length, 1);
+  const [owedBoundary] = walked.answers.checks.filter(isOwed);
+  assert.ok(owedBoundary !== undefined);
+  const owedTwice = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: {
+      ...each.answers,
+      checks: each.answers.checks.some(isOwed)
+        ? [...each.answers.checks, structuredClone(owedBoundary)]
+        : each.answers.checks,
+    },
+  });
+  assert.ok(
+    formedJudge({
+      ...owedTwice(walked),
+      without: (omit, key) => owedTwice(walked.without(omit, key)),
+    }).includes(`extra check ${JSON.stringify(owedBoundary)}`),
   );
   // a check one record owns and the combined stop's rule accepts is one credit: a second copy of it is an extra (Codex
   // r2's control on #1663, forward with the sharing, demand 256, a stop at program allowance 1)

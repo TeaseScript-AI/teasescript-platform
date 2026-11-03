@@ -382,7 +382,8 @@ export function stopProblems(c: StopCase): string[] {
     ofStores,
   );
   // (an extra the stopped analysis without its marks lacks is their content; a check both have stays compared; a
-  // content a record or the rule credits takes no second credit here, so a further copy of it stays an extra)
+  // content a record or the rule credits, or one the unstopped analysis owes, takes no credit here, so a further copy of
+  // it stays an extra)
   const extra = beyond(kept, owed);
   let formed: string[] = [];
   if (extra.length > 0 && marks.length > 0) {
@@ -391,7 +392,10 @@ export function stopProblems(c: StopCase): string[] {
     formed = [
       ...new Set(
         beyond(
-          extra.filter((check) => !creditsAfter.has(check)),
+          extra.filter(
+            (check) =>
+              !creditsAfter.has(check) && !owed.includes(check) && !ofStores.includes(check),
+          ),
           without.map((check) => JSON.stringify(check)),
         ),
       ),
