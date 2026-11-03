@@ -34,8 +34,8 @@ fatal V8 error), stalls as well. A stall is counted with its reason (`units`, or
 the runner goes on with the next source. The wall clock is only a safety net, `--timeout` seconds a run (60 in CI,
 which sets `CI=true` and runs only the runner's own tests): a run that reaches it does work no ledger charges (#1424's
 class), and is reported as a defect with its source and run (`uncharged`, on stderr and in `--out`), counted apart,
-never as a stall. The limit and the safety net were derived from a measured corpus (below); they replace the 180 s a
-source that the agents chose on 2026-10-30 (#1512). The runs its process had written before the runner ended it still
+never as a stall. The limit and the safety net were derived from a measured corpus ("The unit limit and the safety
+net", below); they replace the 180 s a source that the agents chose on 2026-10-30 (#1512). The runs its process had written before the runner ended it still
 count; one whose outcome it was still writing is lost with the process, and a final reply cannot finish the source once
 its safety net has run out (#1498). After the kill the runner waits for the process and its pipes to close, so a
 descendant holding its stderr delays the next source (no compiler or oracle code spawns one). A run that throws on
@@ -84,7 +84,8 @@ work), and each area's counts and the total. Since #1647 a stall is judged from 
 head alone stalled (over the unit limit on a run the base ended with its units recorded, or for memory or a fatal
 error), inherited where the base stalled too, or alone, and unknown where no units of the base are recorded on the run
 the head's stall cut (a baseline before #1647, a tree without a ledger), the base stalled at a time limit, or no record
-names the tree. A record made before #1647 is judged by the rule then (a candidate, load or unknown, its time
+names the tree. The base's units decide only a stall over the unit limit: a head that alone stalls for memory or a
+fatal error is a candidate whatever units are recorded, as no unit record would change that verdict. A record made before #1647 is judged by the rule then (a candidate, load or unknown, its time
 clause a heuristic). An
 area's records must share one configuration (another is refused, exit 2), so the area is complete only with its shards
 0/N to N-1/N of one N, together every source of one plan, and a source a plan lists more than once (a repeat, which the
@@ -175,6 +176,21 @@ line what a central baseline holds, without a tree, and exits 0 only when it is 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
 "killed", the same way identical exceptions on both trees are not agreement (#1439).
+
+## The unit limit and the safety net (#1647)
+
+The rule is orchestrator 2's, on the owner's delegation of its threshold (#1647, 2026-11-03). It was measured with this
+runner on `main`'s `src/` tree `a5af3a394`: a fill of every area at the runner's defaults (231,456 runs) and the
+15,406-source set without a unit limit (61,624 runs). Every run ended; none stalled or reached the safety net.
+
+- `m = 4`: the largest total was 2.46 times its allowance (73.8 M units of 30 M, `copies` `3a-spike14-gates.mjs`
+  `W18-number@1024`, `rev-off publication`; the set's largest 1.62, `graph/224`). 4 is the smallest whole multiple at
+  least 1.5 times that.
+- A safety net of 1,800 s a run: the longest run took 380 s (`messages` `1241-astra-r4-extra.mjs` `original-4`,
+  39.5 M units, on the laptop). The unit limit at the floor, 120 M units, takes 255 s at the slowest worker's
+  10th-percentile rate (TrueNAS, 470 units/ms; the laptop's 638), so the net is 7 times that and 4.7 times the longest
+  run. A run as slow per unit as the slowest measured (52 units/ms) would reach the net before the limit: it does
+  mostly work no ledger charges, and the net reports it so.
 
 ## A generator
 
