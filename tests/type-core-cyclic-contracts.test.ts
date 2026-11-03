@@ -5,6 +5,7 @@ import { compileSourceWithBackend } from "../src/compiler.js";
 import { withoutCycleCertificate } from "../src/type-inference/core/admission/holdings.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { HELD_MODES } from "./helpers/type-core-held-host.js";
 
@@ -109,6 +110,18 @@ test("a list that holds itself leaves the slice instead of failing the compile (
   }
 });
 
+test("a list below a property that holds itself leaves the slice instead of failing the compile (#1646)", () => {
+  // (found on main: `a.f=[a.f]` nests `a.f`'s lists without end; the facts' walk threw past the slice's depth and failed
+  // the compile, after the lowering's walk had followed the elements 256 levels down, about 555,000 units. The lowering's
+  // walk of the store's contract meets the cycle at its first element level and leaves the slice there, so the compile
+  // fits an allowance a tenth of that)
+  const source = "let a={f:[[1]]}\na.f=[a.f]\na.f=hostValue\nexit\n";
+  assert.match(
+    withTestAllowance(50_000, () => outcome(source)),
+    /^outside: .*a value whose structure the slice/,
+  );
+});
+
 test("a contract walk without a cycle of copies is the walk without the certificate (#1646)", () => {
   // (copies that never hold a level in itself: chains, rings of whole copies at one path, wrappers, projections,
   // nested literals and a copy landing deeper than the copied place; and the corpus's in-slice families at small sizes)
@@ -127,9 +140,10 @@ test("a contract walk without a cycle of copies is the walk without the certific
     // (Codex r1 B1: `b.q` copied into `b.q.q` holds nothing, so its reads repeat without a contribution: `a`'s levels read
     // the same two positions two levels apart, and the contract is `a`'s finite literal)
     'let b={}\nb.q.q=b.q\nlet a={q:{q:{q:{f:[[1]]}}}}\na=b.q\na=hostValue\nsay "AFTER"\nexit',
-    // (copies no contract reads: dead after `exit`, and into a place with a written type)
-    "let a={f:[[1]],g:1}\nlet b={f:[[2]],g:2}\na.f=hostValue\nlet out={p:a}\nout.p.g=hostOther\nexit\na.q=b\nb.q=a",
-    "let t:object={x:1}\nlet a={f:[[1]],g:1}\na.q=t\nt=a\na.f=hostValue\nlet out={p:a}\nexit",
+    // (copies no contract reads, which would close a cycle along a path the walk descends: a store A6 rejects, and one
+    // into a place with a written type, whose contract is that type)
+    "let a={f:[[1]]}\nlet b={s:[[1]]}\nb.q=[[1]]\nb.q=a\na.q=b\na=hostValue\nexit",
+    "let t:object={x:1}\nlet a={f:[[1]]}\na.q={s:[[1]]}\nt=a\na.q.q=t\na=hostValue\nexit",
   ];
   for (const source of sources) {
     const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;

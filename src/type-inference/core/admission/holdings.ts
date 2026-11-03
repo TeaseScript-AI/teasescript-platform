@@ -83,8 +83,6 @@ class Holdings {
 
   /** A copy of `source` landing at `landing` (`holdingsOf`). */
   public land(landing: Position, source: Position): void {
-    // (a copy of a position into itself, `b=b`, adds nothing it does not read)
-    if (source === landing) return;
     (landing.sources ??= []).push(source);
     this.#deepen(landing);
   }
@@ -307,8 +305,10 @@ class Holdings {
         continue;
       }
       const reads = this.#reads(at, top.needs);
+      // (complete only where its parent's reads, which it carries, and every one it reads were complete: a parent still
+      // being made, `a=a.q`, carried nothing yet)
       at.whole =
-        (at.parent === null || at.parent.whole) &&
+        (at.parent === null || (at.parent.held !== null && at.parent.whole)) &&
         top.needs.every((need) => need.held !== null && need.whole);
       // (one that read a holding still being made gets its state once its ring is closed, `#close`)
       at.state = at.whole ? this.#state(at, reads) : null;
@@ -345,7 +345,8 @@ class Holdings {
    * position its parent reads that a copy lands strictly below (the parent's own step below is `position` itself).
    */
   #needs(position: Position): Position[] {
-    // (each source past the rings that made it one with another, none the position itself)
+    // (each source past the rings that made it one with another, none the position itself: a copy into itself, `b=b`,
+    // adds nothing it does not read)
     const found = new Set<Position>();
     for (const source of position.sources ?? []) {
       const at = this.canonical(source);
