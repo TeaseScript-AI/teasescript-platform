@@ -127,7 +127,7 @@ export interface CheapDecision {
  * inferred places the stores' syntax follows from a key (`consumers/syntax.ts`, #1604): past it the key is not told by
  * syntax, so a read answers its later sources or `STOPPED`, never a dropped check. Chains past it occur only in generated
  * or constructed families (the areas: 339 of 45,796 measured sources, to 1,025; the 15,406-source set: 9, to 17), and
- * following them whole grows as the square of the chain.
+ * the walk recurses once a link, so a chain of a thousand copies followed whole overflows the native stack (#1664).
  */
 export const FRONTIER_DEPTH = 2;
 export const FRONTIER_COPIES = 8;
