@@ -426,9 +426,70 @@ function holdingsOf(admission: Admission): Holdings {
   return holdings;
 }
 
+/** Each program's answer to `copiesCycle`. */
+const CYCLES = new WeakMap<CoreProgram, boolean>();
+
+/**
+ * Whether the program's copies can make a contract hold itself: whether the places, each linked to every binding a live
+ * whole store, add or transfer into it copies (`copySources`), make a cycle, a copy of a place into a path below
+ * itself (`a.q=a`, `b.q.q=b.q`) one. Without one no level reads a level above it, so no walk builds or reads a
+ * holding, and every walk is exactly main's, its work included. Uncharged: it reads the copies the admission pass
+ * already found and charged (its constructor's A4 pass asks `copySources` of each such store), once each.
+ */
+function copiesCycle(admission: Admission): boolean {
+  const { definitions, lists, program } = admission.pass;
+  const known = CYCLES.get(program);
+  if (known !== undefined) return known;
+  const edges = new Map<PlaceId, Set<PlaceId>>();
+  for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
+    if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
+    if (writtenOf(program.place(d.place).kind) !== null) continue;
+    if (!lists.live(d) || !program.live(d.node)) continue;
+    for (const { path, binding, strip } of copySources(admission, d.value)) {
+      // (a copy of a place into itself at its own path, `b=b`, holds nothing new)
+      if (binding === d.place && d.path.length === 0 && path.length === 0 && strip.length === 0)
+        continue;
+      let out = edges.get(d.place);
+      if (out === undefined) edges.set(d.place, (out = new Set()));
+      out.add(binding);
+    }
+  }
+  // (a depth-first search on an explicit stack: a place reached again while open closes a cycle)
+  const state = new Map<PlaceId, "open" | "done">();
+  let cycle = false;
+  for (const start of edges.keys()) {
+    if (cycle) break;
+    if (state.has(start)) continue;
+    const frames: { readonly place: PlaceId; readonly next: Iterator<PlaceId> }[] = [
+      { place: start, next: (edges.get(start) ?? new Set<PlaceId>()).values() },
+    ];
+    state.set(start, "open");
+    while (frames.length > 0 && !cycle) {
+      const frame = frames.at(-1)!;
+      const step = frame.next.next();
+      if (step.done === true) {
+        state.set(frame.place, "done");
+        frames.pop();
+        continue;
+      }
+      const seen = state.get(step.value);
+      if (seen === "open") cycle = true;
+      else if (seen === undefined) {
+        state.set(step.value, "open");
+        frames.push({
+          place: step.value,
+          next: (edges.get(step.value) ?? new Set<PlaceId>()).values(),
+        });
+      }
+    }
+  }
+  CYCLES.set(program, cycle);
+  return cycle;
+}
+
 /** The holding of `place` at `path` (#1646): the position a contract walk's cycle certificate reads. */
 export function holdingAt(admission: Admission, place: PlaceId, path: readonly string[]): Holding {
-  if (!certificate) return NO_HOLDING;
+  if (!certificate || !copiesCycle(admission)) return NO_HOLDING;
   return admission.pass.program.work.shared(() => {
     const holdings = holdingsOf(admission);
     return holdings.made(holdings.at(place, path));
