@@ -2580,7 +2580,8 @@ test("a long copied key's store check grows with its copy chain in every mode (#
  * is main's (`slice-syntax.ts`). On `3d052bf43`
  * the store at the long key's check charged 3,266 and 2,197 units; the store at its element's analysis asked its
  * element levels through every wrapper (10,329 and 8,632), its check 1,101 and 889; the store at a property of its
- * element's 12,448 and 10,225, its check 2,353 and 1,880.
+ * element's 12,448 and 10,225, its check 2,353 and 1,880. Since #1221 the analyses charge the event searches by
+ * comparison (8,257 / 7,346, 8,971 / 8,098 and 10,707 / 9,617 (10,709 reversed) before).
  */
 test("a long copied key's store check charges its positions' work, in every mode (#1605)", () => {
   const measured = COPY_CHAIN_FAMILIES.map((family) => {
@@ -2595,21 +2596,21 @@ test("a long copied key's store check charges its positions' work, in every mode
   assert.deepEqual(measured, [
     [
       [8257, 60],
-      [7346, 60],
+      [7344, 60],
       [8257, 60],
-      [7346, 60],
+      [7344, 60],
     ],
     [
-      [8971, 274],
-      [8098, 236],
-      [8971, 274],
-      [8098, 236],
+      [8963, 274],
+      [8088, 236],
+      [8963, 274],
+      [8088, 236],
     ],
     [
-      [10707, 64],
-      [9617, 64],
-      [10709, 64],
-      [9617, 64],
+      [10690, 64],
+      [9598, 64],
+      [10692, 64],
+      [9598, 64],
     ],
   ]);
 });
