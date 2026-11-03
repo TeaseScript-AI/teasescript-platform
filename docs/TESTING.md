@@ -143,9 +143,9 @@ CI's `check` job is meant to stay at least 3 minutes under its 15-minute limit a
 listed, costliest first, in `tools/costly-test-files.mjs`, and the full suite starts them first. Their costliest sweeps
 that claim something at every member of a list of settled stops or allowances (`testedStops`, the stops before admission
 settled in `type-core-stop`, `completionAllowances`) visit of each list the first, the last and two evenly between
-(`sampled`, `tests/helpers/sweep.ts`), as `type-core-sharing`'s differential does of the fixture's single-file records
-and of each written-domain matrix's sources, in both orders; a search for a member where something happens keeps its
-list.
+(`sampled`, `tests/helpers/sweep.ts`), as `type-core-sharing`'s differential does of each fixture cell's records (its
+records of several files whole) and of each written-domain matrix's sources, in both orders; a search for a member
+where something happens keeps its list.
 `TEASESCRIPT_SWEEP=full` makes every sampled list whole: `TEASESCRIPT_SWEEP=full npm run test:compiled`, after
 `npm run build`, is the sweeps' queue evidence, which the builder of a change that can move a stop runs on a worker
 before a type-core review round, beside the generator areas above.

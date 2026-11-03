@@ -68,9 +68,10 @@ import {
  * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
  * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered
  * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`; `type-core-oracles.ts`).
- * Any difference fails the test. Of the fixture's single-file records and of each written-domain matrix's sources
- * (whose own tests check each source, though of the union rule only the first error and control at each placement in
- * both orders) the test takes a sample (`sampled`: the first, the last and two between), every other program whole; `TEASESCRIPT_SWEEP=full` takes them all, the sweep's queue evidence (`docs/TESTING.md`, "Sampled
+ * Any difference fails the test. Of each fixture cell's records (its records of several files whole) and of each
+ * written-domain matrix's sources (whose own tests check each source in both sharing modes, though of the union rule
+ * only the first error and control at each placement in both orders) the test takes a sample (`sampled`: the first,
+ * the last and two between), every other program whole; `TEASESCRIPT_SWEEP=full` takes them all, the sweep's queue evidence (`docs/TESTING.md`, "Sampled
  * sweeps"; the lead's decision on #1638). `type-core-written.test.ts` compares the sources of the matrices it checks in three
  * layers (`WRITTEN_DOMAIN_MATRIX`, `V30_TYPE_MATRIX`, `INFERRED_COPY_MATRIX`, `DEFAULT_CHAIN_MATRIX`) on the analyses
  * and plans its own tests observe.
@@ -352,11 +353,17 @@ function programs(): Program[] {
       'let raw = hostValue\nraw = 1\nlet out = [[raw].get(9, default: null), raw, "tail"]\nrepeat out[0] {}\nexit\n',
     ),
   );
-  // the fixture's records: every one of several files whole (a startup global another file declares, which no
-  // single-file record stands for), the single-file ones sampled (every one in the sweep)
-  const records = readFixture().map(({ name, files }) => ({ name, files }));
-  out.push(...records.filter(({ files }) => files.length > 1));
-  out.push(...sampled(records.filter(({ files }) => files.length === 1)));
+  // the fixture's records by its own coverage model: of each cell's records (`cells`) a sample, so every cell keeps a
+  // record, and every record of several files whole (a startup global another file declares, which no single-file record
+  // stands for); every record in the sweep
+  const records = readFixture();
+  const kept = new Set(records.filter(({ files }) => files.length > 1));
+  const byCell = new Map<string, (typeof records)[number][]>();
+  for (const record of records)
+    for (const cell of record.cells) byCell.set(cell, [...(byCell.get(cell) ?? []), record]);
+  for (const list of byCell.values()) for (const record of sampled(list)) kept.add(record);
+  for (const { name, files } of records.filter((record) => kept.has(record)))
+    out.push({ name, files });
   return out;
 }
 
@@ -432,8 +439,7 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   assert.deepEqual(differing, []);
   assert.deepEqual(reordered, []);
   assert.deepEqual(unsited, []);
-  // (the corpus is there: 6,393 programs whole, 1,569 with the fixture's single-file records and the matrices sampled,
-  // on #1638's head)
+  // (the corpus is there: 6,393 programs whole, fewer with each fixture cell's records and the matrices sampled)
   assert.ok(all.length > (SWEEP ? 6_000 : 1_400), `${all.length} programs`);
 });
 
