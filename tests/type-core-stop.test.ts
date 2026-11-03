@@ -3503,6 +3503,39 @@ test("a copy of an inferred place stored into below its root is not told by synt
 });
 
 /**
+ * #1604's retained `null` follows the contract at a binding's root only: below it a decision admitting `null` keeps it,
+ * since a read there may find no such member (`w1.q = {h: 2}` replaces the object holding `g`), which the conservative
+ * null's check stands for. No place lets through more than the natural run at `w1.q.g` (`widerThan`), at every settled
+ * stop of the program alone, four modes. The receiver `w1.q` itself is #1654's (a presence check `main` drops there).
+ */
+test("a retained member below its root keeps admission's null (#1604)", () => {
+  const source = [
+    "let root = {g: 1}",
+    "let w1 = {q: root, spare: {k: 1}}",
+    "w1.q = {h: 2}",
+    'say "BEFORE"',
+    'repeat w1.q.g {say "ok"}',
+    'say "AFTER"',
+    "exit",
+    "",
+  ].join("\n");
+  const c: HeldCase = { name: "a member replaced below the root", source, slice: true, values: [] };
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!;
+  for (const mode of HELD_MODES) {
+    const natural = mode.run(() => analyseCore(request));
+    for (const { allowance } of heldStops(c, mode, 2))
+      assert.deepEqual(
+        widerThan(
+          natural.checks,
+          mode.run(() => withTestAllowance(allowance, () => analyseCore(request))),
+        ).filter((place) => !place.includes('\\"w1.q\\",')),
+        [],
+        `${mode.name} @${allowance}`,
+      );
+  }
+});
+
+/**
  * TABLE r4.299: the coarse (a) reading's counted class, never a pass. Where a read of the check's reference unit that the
  * demand stop left `unknown` is not answered at its key by the stopped analysis's run of that unit, (a) takes nothing
  * and the check is counted with that read's key:
