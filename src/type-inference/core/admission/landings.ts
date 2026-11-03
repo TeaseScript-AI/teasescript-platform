@@ -31,6 +31,7 @@ import type {
   CopyForest,
   Inheritance,
   InheritedCopy,
+  Listing,
   Storing,
   WholeCycle,
 } from "./model.js";
@@ -778,19 +779,77 @@ function landedOwn(admission: Admission, place: PlaceId, path: Steps): boolean {
   return memo.get(key)!;
 }
 
+/** Test-only: what `withLandingComparison` gives each `landedBelow` call, the listings' result beside the walk's. */
+let comparison:
+  | ((
+      place: PlaceId,
+      prefix: readonly string[],
+      listed: readonly string[],
+      walked: readonly string[],
+    ) => void)
+  | null = null;
+
+/**
+ * Test-only: runs `callback` with every `landedBelow` call also walked without the pass's listings (as before #1547),
+ * that walk's work counted apart, and both results given to `onCall`: the oracle that a listing taken gives the paths,
+ * in their order, that the walk finds.
+ */
+export function withLandingComparison<T>(
+  onCall: (
+    place: PlaceId,
+    prefix: readonly string[],
+    listed: readonly string[],
+    walked: readonly string[],
+  ) => void,
+  callback: () => T,
+): T {
+  if (comparison !== null) throw new Error("Landings are already compared.");
+  comparison = onCall;
+  try {
+    return callback();
+  } finally {
+    comparison = null;
+  }
+}
+
 /**
  * The paths copies land in a place at or below `prefix` (`Inheritance`), each once: its own landings and, through each
  * copy, its source's at or below the copy's strip, written where the copy lands them; on an explicit stack, each
- * source, prefix and way of writing its paths once.
+ * source, prefix and way of writing its paths once. A source and prefix an earlier call of the pass asked give that
+ * call's listing instead of their walk (#1547, #1428): the stack ends a task's walk before anything under it, so the
+ * listing is what the walk would add there, in order, written where the task writes its paths; a longer prefix of a
+ * place whose listing started at the place itself takes that listing's paths below it. Every call runs at the pass's
+ * own level, before any decision, so no demand counts the work a listing saves.
  */
 export function landedBelow(
   admission: Admission,
   place: PlaceId,
   prefix: readonly string[],
 ): string[] {
+  const listing = walkLandings(admission, place, prefix, true);
+  let byPrefix = admission.listings.get(place);
+  if (byPrefix === undefined) admission.listings.set(place, (byPrefix = new Map()));
+  byPrefix.set(pathText(prefix), listing);
+  if (comparison !== null) {
+    const walked = admission.pass.program.work.apart(
+      () => walkLandings(admission, place, prefix, false).texts,
+    );
+    comparison(place, prefix, listing.texts, walked);
+  }
+  return [...listing.texts];
+}
+
+/** `landedBelow`'s walk, taking the pass's listings where `listed`. */
+function walkLandings(
+  admission: Admission,
+  place: PlaceId,
+  prefix: readonly string[],
+  listed: boolean,
+): Listing {
   const { cycleOf, fed, wholes } = inheritance(admission);
   const work = admission.pass.program.work;
   const out = new Set<string>();
+  const paths: (readonly string[])[] = [];
   const seen = new Set<string>();
   // a task: a place, the prefix its paths are taken at or below, and how its path is written in the place asked:
   // its first `drop` steps replaced by `prepend`
@@ -800,22 +859,76 @@ export function landedBelow(
     readonly drop: number;
     readonly prepend: readonly string[];
   }[] = [{ place, below: prefix, drop: 0, prepend: [] }];
+  // (whether the walk starts at the place itself; the listings this call took, each with the prefix and writing it took
+  // them with; and while the paths so far are one listing's, written as there, that listing, which is then the result)
+  let own = true;
+  const taken = new Set<string>();
+  const one: { same: Listing | null | undefined } = { same: null };
+  let taking = false;
+  const put = (steps: readonly string[], text: string): void => {
+    if (out.has(text)) return;
+    out.add(text);
+    paths.push(steps);
+    if (!taking && one.same !== null) one.same = undefined;
+  };
   while (tasks.length > 0) {
     const task = tasks.pop()!;
     const id = keptParts(admission.work, task.place, task.below, task.drop, task.prepend);
     if (seen.has(id)) continue;
+    const root = seen.size === 0;
     seen.add(id);
     const add = (path: readonly string[]): void => {
-      if (isPrefix(task.below, path))
-        out.add(keptText(admission.work, joinSteps(task.prepend, path.slice(task.drop))));
+      if (!isPrefix(task.below, path)) return;
+      const steps = joinSteps(task.prepend, path.slice(task.drop));
+      put(steps, keptText(admission.work, steps));
     };
     const emit = (path: readonly string[]): void => {
       work.charge("indexSteps");
       add(path);
     };
+    // (a listing's paths, each charged as its emit; with a longer prefix, every one tested. One listing, prefix and
+    // writing taken again brings only paths it brought)
+    const take = (from: Listing, below: boolean): void => {
+      const key = joinParts(from.id, below ? task.below : "", task.drop, task.prepend);
+      if (taken.has(key)) return;
+      taken.add(key);
+      const before = out.size;
+      // (compared once per call, before its first listing: each text compared rides on the emit that made it)
+      let matches = one.same === null && before <= from.texts.length;
+      if (matches) {
+        let index = 0;
+        for (const text of out) {
+          if (text !== from.texts[index++]) {
+            matches = false;
+            break;
+          }
+        }
+      }
+      taking = true;
+      for (const [index, path] of from.paths.entries()) {
+        work.charge("indexSteps");
+        if (!isPrefix(task.below, path)) {
+          matches = false;
+          continue;
+        }
+        const steps = joinSteps(task.prepend, path.slice(task.drop));
+        const text = keptText(admission.work, steps);
+        if (text !== from.texts[index] || out.has(text) !== index < before) matches = false;
+        put(steps, text);
+      }
+      taking = false;
+      one.same = matches && out.size === from.texts.length ? from : undefined;
+    };
+    const lists = listed && !root ? admission.listings.get(task.place) : undefined;
+    const known = lists?.get(pathText(task.below));
+    if (known !== undefined) {
+      take(known, false);
+      continue;
+    }
     // (a place that lands through its parent lands its root and what the copy it lands through does, `landsThrough`)
     const through = landsThrough(admission, task.place, task.below);
     if (through !== task.place) {
+      if (root) own = false;
       emit([]);
       tasks.push({ ...task, place: through });
       continue;
@@ -823,8 +936,15 @@ export function landedBelow(
     // (a cycle's landed paths, and the copies at, above or below the prefix, from indexes by path: never every one
     // for each prefix, Astra's review r2 B2)
     if (cycleOf.has(task.place) && !fed.has(task.place) && !wholes.has(task.place)) {
+      if (root) own = false;
       const landing = cycleLanding(admission, task.place);
       for (const path of landing.under.get(keptText(admission.work, task.below)) ?? []) emit(path);
+      continue;
+    }
+    // (the place's own listing at its root, its paths below the prefix: Sol's completed-root prefix view)
+    const whole = task.below.length > 0 ? lists?.get("") : undefined;
+    if (whole?.own === true) {
+      take(whole, true);
       continue;
     }
     // (a cycle of whole copies lands its root)
@@ -856,7 +976,10 @@ export function landedBelow(
       );
     }
   }
-  return [...out];
+  // (a result that is one listing's paths, written as there, is that listing: equal listings are one)
+  if (one.same !== null && one.same !== undefined && out.size === one.same.texts.length)
+    return one.same.own === own ? one.same : { ...one.same, own };
+  return { id: (admission.listingCount += 1), paths, texts: [...out], own };
 }
 
 /** The members of a place's cycle of copies (`Inheritance.order`), once per pass. */

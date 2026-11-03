@@ -6927,3 +6927,230 @@ export const COPY_CHAIN_SOURCES: readonly { readonly name: string; readonly sour
       })),
   ),
 ];
+
+/** #1547, #1428: `typed` and k properties of it, the landing families' leaves. */
+const LANDING_TYPED = "let typed: integer | string = 1";
+const typedFields = (k: number): string => fields(k, () => "typed");
+
+/** #1547: k links, each `link` of the one before, after `first`, the last read at `read`. */
+function landingChain(
+  k: number,
+  first: string,
+  link: (before: string, i: number) => string,
+  read = "out.p",
+): string {
+  return lines(
+    LANDING_TYPED,
+    `let c0 = ${first}`,
+    rows(k, (i) => `let c${i + 1} = ${link(`c${i}`, i + 1)}`),
+    `let out = c${k}`,
+    `say "\${${read}}"`,
+    "exit",
+  );
+}
+
+/**
+ * #1547, #1428: chains whose every link copies the one before into a selection between two levels (whole, through its
+ * property, through an object's property), the level inside first or last. Each link's landed paths are asked once,
+ * sources first, so each call reaches the listing of the link below instead of walking the chain again
+ * (`landedBelow`); the join-reach families' kept and copied chains are #1428's.
+ */
+export const LANDING_FAMILIES: readonly WorkFamily[] = (["first", "last"] as const).flatMap(
+  (order) => {
+    const pick = (x: string, other: string): string =>
+      order === "first" ? `[${x}, ${other}][0]` : `[${other}, ${x}][1]`;
+    return (
+      [
+        ["copy", "a copy", (x: string) => pick(x, "{p: typed}")],
+        ["property-copy", "a property read", (x: string) => pick(`{p: ${x}.p}`, "{p: typed}")],
+        [
+          "object",
+          "an object's property",
+          (x: string) => `{p: ${pick(x, "{p: typed}")}.p, q: ${x}}.q`,
+        ],
+      ] as const
+    ).map(([name, between, link]): WorkFamily => ({
+      name: `landing-${name}-between-${order}`,
+      measures: `#1547: k levels, ${between} between each two, the level inside ${order}`,
+      program: (k) => main(landingChain(k, "{p: typed}", link)),
+    }));
+  },
+);
+
+/**
+ * #1547, #1428: the shapes the landings' listings must answer as their walk does (each call's paths in order): chains
+ * asked at every link, through a selection, a property, an object and a growing listing; two and three routes meeting
+ * at every link, and a link skipping one; translations below wrappers; cold chains and aliases asked at their ends,
+ * at a prefix or at every link; seeds overlapping a listing; copies of a whole cycle, a fed cycle and a cycle that takes
+ * steps; and a cycle split by its rejected copies, landed again in the pass after (Sol's design rounds r1–r3).
+ */
+export const LANDING_SHAPES: readonly WorkFamily[] = (
+  [
+    ["copy-between", (k: number) => landingChain(k, "{p: typed}", (x) => `[${x}, {p: typed}][0]`)],
+    [
+      "distinct-between",
+      (k: number) =>
+        landingChain(k, "{p0: typed}", (x, i) => `[${x}, {p${i}: typed}][0]`, "out.p0"),
+    ],
+    [
+      "routes",
+      (k: number) =>
+        lines(
+          LANDING_TYPED,
+          `let c0 = {p: {${typedFields(k)}}}`,
+          rows(k, (i) =>
+            lines(
+              ...[0, 1, 2].map((j) => `let r${i + 1}n${j} = {v${j}: c${i}.p}`),
+              `let c${i + 1} = [${[0, 1, 2].map((j) => `{p: r${i + 1}n${j}.v${j}}`).join(", ")}][0]`,
+            ),
+          ),
+          `say "\${c${k}.p.f0}"`,
+          "exit",
+        ),
+    ],
+    [
+      "skip",
+      (k: number) =>
+        landingChain(
+          k,
+          `{p: {${typedFields(k)}}}`,
+          (x, i) => `[{p: ${x}.p}, {p: c${Math.max(0, i - 2)}.p}][0]`,
+          "out.p.f0",
+        ),
+    ],
+    [
+      "translations",
+      (k: number) =>
+        lines(
+          LANDING_TYPED,
+          `let c0 = {p: {${typedFields(k)}}}`,
+          rows(k, (i) =>
+            lines(
+              `let l${i + 1} = {x: c${i}.p}`,
+              `let r${i + 1} = {y: c${i}.p}`,
+              `let c${i + 1} = [{p: l${i + 1}.x}, {p: r${i + 1}.y}][0]`,
+            ),
+          ),
+          `let x = [{a: c${k}.p}, {a: {f0: typed}}][0]`,
+          `say "\${x.a.f0}"`,
+          "exit",
+        ),
+    ],
+    [
+      "cold-prefix",
+      (k: number) =>
+        lines(
+          LANDING_TYPED,
+          `let c0 = {p: {${typedFields(k + 1)}}}`,
+          rows(k, (i) => lines(`let c${i + 1} = c${i}`, `c${i + 1}.p.f${i + 1} = typed`)),
+          `let x = [{q: c${k}.p}, {q: {f0: typed}}][0]`,
+          `let y = [{q: c${k}.p}, {q: {f0: typed}}][0]`,
+          'say "${x.q.f0} ${y.q.f0}"',
+          "exit",
+        ),
+    ],
+    [
+      "cold-every-link",
+      (k: number) =>
+        lines(
+          LANDING_TYPED,
+          "let c0 = {p: {f0: typed, f1: typed, f2: typed, f3: typed}}",
+          rows(k, (i) =>
+            lines(
+              `let t${i + 1} = {wrap: c${i}.p}`,
+              `let c${i + 1} = {p: t${i + 1}.wrap}`,
+              `c${i + 1}.p.f${(i + 1) % 4} = typed`,
+            ),
+          ),
+          rows(k + 1, (i) =>
+            lines(`let a${i} = [{q: c${i}.p}, {q: {f0: typed}}][0]`, `say "\${a${i}.q.f0}"`),
+          ),
+          "exit",
+        ),
+    ],
+    [
+      "aliases",
+      (k: number) =>
+        lines(
+          LANDING_TYPED,
+          `let base = {${typedFields(k)}}`,
+          rows(k, (i) => `let c${i} = base`),
+          rows(4, (i) =>
+            lines(`let v${i} = [{q: c${i}}, {q: {f0: typed}}][0]`, `say "\${v${i}.q.f0}"`),
+          ),
+          `let a = [${Array.from({ length: k }, (_, i) => `{q: c${i}}`).join(", ")}][0]`,
+          'say "${a.q.f0}"',
+          "exit",
+        ),
+    ],
+    [
+      "overlapping-seeds",
+      (k: number) =>
+        landingChain(
+          k,
+          "{p: {f0: typed}}",
+          (x, i) => `[{p: ${x}.p, q: typed}, {p: {f0: typed, f${i}: typed}, q: typed}][${i % 2}]`,
+          "out.p.f0",
+        ),
+    ],
+    [
+      "sibling-prefixes",
+      (k: number) =>
+        landingChain(
+          k,
+          "{p: {f0: typed, f1: typed}, q: {f0: typed, f1: typed}}",
+          (x) =>
+            `[{p: ${x}.q, q: ${x}.p}, {p: {f0: typed, f1: typed}, q: {f0: typed, f1: typed}}][0]`,
+          "out.p.f0",
+        ),
+    ],
+    [
+      "cycles",
+      (k: number) =>
+        lines(
+          LANDING_TYPED,
+          `let a = {p: {${typedFields(k)}}}`,
+          "let b = a",
+          "a = b",
+          "let seed = {p: {f0: typed}}",
+          "let d = seed",
+          "let e = d",
+          "d = e",
+          "let g = {p: {f0: typed}}",
+          "let h = {q: g.p}",
+          "g = {p: h.q}",
+          rows(k, (i) =>
+            lines(
+              `let x${i} = [{q: a.p}, {q: {f0: typed}}][0]`,
+              `let y${i} = [e, {p: {f0: typed}}][0]`,
+              `let z${i} = [{v: h.q}, {v: {f0: typed}}][0]`,
+            ),
+          ),
+          'say "${x0.q.f0} ${y0.p.f0} ${z0.v.f0}"',
+          "exit",
+        ),
+    ],
+    [
+      "split-cycle",
+      () =>
+        lines(
+          "let t: integer = 7",
+          'let w: string = "w"',
+          "let a = {f: 1, nest: {g: 1}}",
+          'let b = {f: "s", nest: {g: "s"}}',
+          "b = a",
+          "a = b",
+          "let before = a",
+          "let peer = b",
+          "a.f = t",
+          "b.nest.g = w",
+          "let final = [before, peer]",
+          "exit",
+        ),
+    ],
+  ] as const
+).map(([name, source]): WorkFamily => ({
+  name: `landing-shape-${name}`,
+  measures: `#1547: the listings answer as the walk on ${name}`,
+  program: (k) => main(source(k)),
+}));

@@ -26,6 +26,18 @@ export interface InheritedCopy {
 }
 
 /**
+ * The paths copies land in a place at or below a prefix a caller asked (`landedBelow`), in order, as steps and as texts;
+ * `own` where its walk started at the place itself (no parent it lands through, no cycle of copies), so its paths below a
+ * longer prefix are those that prefix's walk finds. Equal listings are one (`id`).
+ */
+export interface Listing {
+  readonly id: number;
+  readonly paths: readonly (readonly string[])[];
+  readonly texts: readonly string[];
+  readonly own: boolean;
+}
+
+/**
  * A cycle of whole copies, by reference (#1188, Astra's B3): every member lands what the cycle's copies from outside
  * land where they land, the members' written copies (`seeds`, all members') and its root; once per cycle.
  */

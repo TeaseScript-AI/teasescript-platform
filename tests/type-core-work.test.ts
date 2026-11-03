@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { compileProject, createFreshRuntimeSession } from "../src/index.js";
 import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
+import { withLandingComparison } from "../src/type-inference/core/admission/landings.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import {
   withTestDemandAllowance,
@@ -38,6 +39,8 @@ import {
   HOT_CANDIDATE_FAMILIES,
   INHERITED_FIELD_FAMILIES,
   JOIN_REACH_FAMILIES,
+  LANDING_FAMILIES,
+  LANDING_SHAPES,
   LAYER_FAMILIES,
   OUTPUT_BOUND_FAMILIES,
   MIXED_ADD_PRODUCTS,
@@ -58,6 +61,7 @@ import {
   type WorkFamily,
 } from "./helpers/type-core-families.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
+import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import { askEveryRead, narrowingPass, narrowingPassIn } from "./helpers/type-core-narrowing.js";
 
 /**
@@ -1392,17 +1396,8 @@ test("each product a repair removed grows with the program in either order (#119
  * an `otherwise`'s side, a kept variable or a copy, takes that join's composed type, so the join check composes each
  * tree once (beside #1357's prefixes each in an object above): each family's total and its counters grow with the
  * program in either order, the sharing on and off. The kept variables and copies of a written union without a conflicting
- * leaf are reported, not gated: admission's landings walk the chain once per link on `main` too (#1428), the copies'
- * charged work (`landedBelow`'s `copiesAlong`, `landsThrough` and `emit` from `hotSets`) and both forms' ids, made
- * there below the charged length (`keptParts` in `landedBelow`, 14,470 → 57,510 code units kept, 28,974 → 115,217
- * copied, as on `main`); at k = 64 → 128 total and `indexSteps`:
- *
- * | copies of a written union | `main` | this head |
- * | joined at each link | 2.18, 2.47 | 2.16, 2.45 |
- * | only copied | 2.02, 2.04 | 2.02, 2.04 |
- * | joined, from an unwritten list | 2.01, 2.03 | 2.01, 2.02 |
- *
- * Each link an object of its own property, the composed type grows with the chain (Codex r15's and r16's B1): the
+ * leaf are gated too since #1428: each link's landed paths reach the listing of the link below instead of walking the
+ * chain again (`landedBelow`). Each link an object of its own property, the composed type grows with the chain (Codex r15's and r16's B1): the
  * projections' members are gated at 64 → 128 and 128 → 256, the growing join an operand's first part (an `otherwise`'s
  * first side); a kept variable's and a copy's are reported, a variable read beside each join of distinct properties
  * growing on `main` too (#1384: about 3.4 total, `exactValues` 3.9). An `otherwise` holding the earlier join on its
@@ -1412,10 +1407,10 @@ test("each product a repair removed grows with the program in either order (#119
 test("a join's operand reaching an earlier join takes its composed type, its work linear either way (#1310)", () => {
   const gated = JOIN_REACH_FAMILIES.filter(
     (family) =>
-      !/^join-reach-(kept|copy)-(left|right)(-width)?$/.test(family.name) &&
+      !/^join-reach-(kept|copy)-(left|right)-width$/.test(family.name) &&
       !family.name.startsWith("join-reach-choice-later-"),
   );
-  assert.equal(gated.length, 22);
+  assert.equal(gated.length, 26);
   // (a composed type growing with the chain: its second doubling too, where a walk of a growing part first crosses the
   // total's gate, Codex r16's B1)
   const growing = gated.filter((family) => family.name.endsWith("-width"));
@@ -1428,6 +1423,49 @@ test("a join's operand reaching an earlier join takes its composed type, its wor
     ],
     [],
   );
+});
+
+/**
+ * #1547, #1428: a chain whose every link copies the one before into a selection between two levels, whole, through its
+ * property or through an object's property, the level inside first or last: `hotSets` asks each link's landed paths,
+ * sources first, and each call takes the listing of the link below instead of walking the chain again (`landedBelow`),
+ * so the work grows with the chain in either order, the sharing on and off (`main` walked it once per link: the copies'
+ * `indexSteps` 2.47 per doubling, k² calls of `joinSteps`, `splitPath` and `pathText`).
+ */
+test("a chain of copies between selection levels lands its paths once per link, its work linear either way (#1547)", () => {
+  assert.equal(LANDING_FAMILIES.length, 6);
+  assert.deepEqual(
+    [...steepCounters(LANDING_FAMILIES), ...steepCounters(LANDING_FAMILIES, true)],
+    [],
+  );
+});
+
+/**
+ * #1547, #1428: each call's landed paths, taking the pass's listings, are those its walk finds without them, in their
+ * order (`withLandingComparison`), on every landing shape in the four modes: chains, meeting routes, skipping links,
+ * translations, cold chains and aliases asked at their ends or at every link, overlapping seeds, sibling prefixes,
+ * cycles of copies, and a cycle split by its rejected copies, whose next pass lands without them (its listings that
+ * pass's own).
+ */
+test("the landings' listings give each call the paths its walk finds, in order, in the four modes (#1547)", () => {
+  const differing: string[] = [];
+  let calls = 0;
+  for (const family of LANDING_SHAPES) {
+    const { request } = sized(family, 6);
+    for (const mode of MODES)
+      withLandingComparison(
+        (place, prefix, listed, walked) => {
+          calls += 1;
+          if (JSON.stringify(listed) !== JSON.stringify(walked))
+            differing.push(
+              `${family.name} ${JSON.stringify(mode)} ${place}|${prefix.join(".")}: ${listed.join(" ")} / ${walked.join(" ")}`,
+            );
+        },
+        () => inMode(mode, () => analyseCore(request)),
+      );
+  }
+  assert.deepEqual(differing, []);
+  assert.ok(calls >= 1000, `${calls} calls compared`);
 });
 
 /**
