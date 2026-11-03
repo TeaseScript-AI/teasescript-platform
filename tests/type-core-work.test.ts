@@ -201,6 +201,143 @@ test("every W34, W44 and W45 variant's work and each of its counters grow with t
 });
 
 /**
+ * #1573: two choices of k reads of one host global's properties, one class mixed by their leaves, read in k lists in
+ * both orders: each list's contract reads one choice and names the other's leaves (`othersLeaves`) from one walk of
+ * each choice's options and one check of the read choice's answer, where `main` walked and checked them again for
+ * each list (2.52 total, 3.40 `invSteps` at k = 64 → 128). With the sharing on, in either order.
+ */
+test("two choices read in k lists grow with the program in either order, each counter too (#1573)", () => {
+  const family: WorkFamily = {
+    name: "choices-read-in-lists",
+    measures:
+      "#1573: each choice's leaves walked and its answer checked once, whichever list reads it",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          many(
+            2,
+            (j) =>
+              `let p${j} = askChoice ${many(k, (r) => `{text: "${r}", value: hostValue.p${r}}`, ", ")}`,
+          ),
+          many(
+            k,
+            (i) =>
+              `let xs${i} = [${i % 2 === 0 ? "p0, p1" : "p1, p0"}]\nlet n${i}: integer = xs${i}[hostValue.i]`,
+          ),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  };
+  assert.deepEqual(steepCounters([family]), []);
+});
+
+/**
+ * #1573 (Codex r1's B2 on #1628): a third list of m loads of one class, the members of the first two lists in their order
+ * or in another, names their leaves through one node per sequence of its other members (`setNode`), shared with an
+ * earlier list of that sequence and else folded anew, one step per member, never by sorting them: the contract's steps
+ * (`invSteps`) the third list adds at 16, 32 and 64 members are linear in its members, the second doubling adding at
+ * most 2.1 times what the first added, in either order of the analysis (with a sort per list, 2.18 times).
+ */
+test("a further list of a set's members, in any order, adds contract steps linear in its members (#1573)", () => {
+  const steps = (m: number, lists: readonly (readonly number[])[], reversed: boolean): number => {
+    const source = [
+      many(
+        m,
+        (j) => `let p${j} = load("same", default: ${j % 2 === 1 ? "hostOther" : "hostValue"})`,
+      ),
+      ...lists.map(
+        (list, i) =>
+          `let xs${i} = [${list.map((j) => `p${j}`).join(", ")}]\nlet n${i}: integer = xs${i}[hostValue.i].p`,
+      ),
+      "exit",
+    ].join("\n");
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null, source);
+    const run = (): Answers => analyseCore(request);
+    const answers = reversed
+      ? withConsumerOrder(
+          (list) => [...list].reverse(),
+          () => withSolverSeam({ reverseWorklist: true }, run),
+        )
+      : run();
+    return answers.budget.counts.get("invSteps") ?? 0;
+  };
+  for (const reversed of [false, true])
+    for (const turned of [false, true]) {
+      // (what the third list adds at 16, 32 and 64 members)
+      const [small, middle, large] = [16, 32, 64].map((m) => {
+        const order = Array.from({ length: m }, (_, j) => j);
+        const third = turned ? order.map((j) => (j * (m - 1) + 1) % m) : order;
+        return steps(m, [order, order, third], reversed) - steps(m, [order, order], reversed);
+      });
+      assert.ok(
+        large! - middle! <= 2.1 * (middle! - small!),
+        `reversed: ${reversed}, turned: ${turned}: ${small} → ${middle} → ${large}`,
+      );
+    }
+});
+
+/**
+ * #1573 (Codex r2 on #1628): 33 choices of one class, the k-th list leaving out the choices k and 33 - k, whose ids sum
+ * alike in every list: a list's other members are found by their sequence (`setNode`), one step per member, never by
+ * comparing them with other lists' members, so the contract's steps the fifth list adds are those the ninth adds, in
+ * either order (a search among the sets of equal sums added 30 steps more for each list before); and those steps, one
+ * per other member, are charged to the analysis as a shared build, never to a demand (`WorkLedger.shared`): the
+ * contract steps a further list adds in shared builds are its 30 other members.
+ */
+test("a list's other members are found in steps of their own, whatever lists came before (#1573)", () => {
+  let shared = 0;
+  const original = WorkLedger.prototype.charge;
+  WorkLedger.prototype.charge = function (this: WorkLedger, counter: WorkCounter, units = 1) {
+    if (this.sharing && this.stopped === null && counter === "invSteps") shared += units;
+    original.call(this, counter, units);
+  };
+  const steps = (lists: number, reversed: boolean): readonly [number, number] => {
+    const source = [
+      many(
+        33,
+        (j) =>
+          `let p${j} = askChoice {text: "0", value: hostValue.p0}, {text: "1", value: hostValue.p1}`,
+      ),
+      many(lists, (i) => {
+        const left = Array.from({ length: 33 }, (_, j) => j).filter(
+          (j) => j !== i + 1 && j !== 32 - i,
+        );
+        return `let xs${i} = [${left.map((j) => `p${j}`).join(", ")}]\nlet v${i}: integer = xs${i}[hostValue.i]`;
+      }),
+      "exit",
+    ].join("\n");
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    const run = (): Answers => analyseCore(request);
+    const answers = reversed
+      ? withConsumerOrder(
+          (list) => [...list].reverse(),
+          () => withSolverSeam({ reverseWorklist: true }, run),
+        )
+      : run();
+    return [answers.budget.counts.get("invSteps") ?? 0, shared] as const;
+  };
+  try {
+    for (const reversed of [false, true]) {
+      const [fifth, ninth] = [4, 8].map((before) => {
+        shared = 0;
+        const [steps0, shared0] = steps(before, reversed);
+        shared = 0;
+        const [steps1, shared1] = steps(before + 1, reversed);
+        return [steps1 - steps0, shared1 - shared0] as const;
+      });
+      assert.deepEqual(ninth, fifth, `reversed: ${reversed}`);
+      assert.equal(fifth![1], 30, `reversed: ${reversed}: the lookup's shared steps`);
+    }
+  } finally {
+    WorkLedger.prototype.charge = original;
+  }
+});
+
+/**
  * #1466: a stack of k diamonds of copies, its siblings, wide and nested joins and chains of listing layers read at
  * sparse paths (`LAYER_FAMILIES`), each read answered once per layer and path from the layers below it that hold its
  * property, at one small doubling, in either order and with the sharing off too: the total and the contract's own

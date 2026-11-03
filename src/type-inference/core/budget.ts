@@ -274,6 +274,8 @@ export class WorkLedger {
   /** Units charged while building an index the program shares (`shared`), outermost builds only. */
   #shared = 0;
   #sharing = false;
+  /** Units a demand counts for work the program did once for every reader (`repeat`). */
+  #repeated = 0;
   readonly #spent: number[] = [0];
   #spender = 0;
 
@@ -321,13 +323,14 @@ export class WorkLedger {
    */
   public shared<T>(callback: () => T): T {
     if (this.#sharing) return callback();
-    const before = this.#total;
+    const [before, repeated] = [this.#total, this.#repeated];
     this.#sharing = true;
     try {
       return callback();
     } finally {
       this.#sharing = false;
       this.#shared += this.#total - before;
+      this.#repeated = repeated;
     }
   }
 
@@ -336,9 +339,25 @@ export class WorkLedger {
     return this.#sharing;
   }
 
-  /** The analysis's units outside `shared` builds: what a demand's allowance measures (S3 §5). */
+  /**
+   * The analysis's units outside `shared` builds, with what its readers repeat (`repeat`): what a demand's allowance
+   * measures (S3 §5).
+   */
   public get own(): number {
-    return this.#total - this.#shared;
+    return this.#total - this.#shared + this.#repeated;
+  }
+
+  /**
+   * #1573: `units` of work a reader would charge to make again what the program made once for every reader of it (a
+   * shared class's leaves walked from one value), counted to the reader's demand and spender as that charge would be,
+   * but to no counter and not to the total, which count the work once: so where each reader made it, each demand stops
+   * where it stopped then, and the analysis's work is what it does. Nothing after the stop or apart, as `charge`
+   * counts finishing work there; inside a `shared` build, to its spender alone.
+   */
+  public repeat(units: number): void {
+    if (this.#stopped !== null || this.#apart) return;
+    this.#repeated += units;
+    this.#spent[this.#spender] = (this.#spent[this.#spender] ?? 0) + units;
   }
 
   /**

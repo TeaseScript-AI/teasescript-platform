@@ -280,7 +280,6 @@ function othersLeaves(
   answers: readonly (readonly Item[])[],
   exact: boolean,
 ): IngressNode | null {
-  const { program } = contract.pass;
   if (group.mixed !== MIXED_LEAF) return null;
   let roles = -1;
   for (const [at, entry] of group.read.entries()) {
@@ -288,22 +287,73 @@ function othersLeaves(
     if (own === null || (roles >= 0 && own.length !== roles)) return null;
     roles = own.length;
     for (const item of answers[at]!)
-      if (differsIn(item, group.mixed) && !holdsLeaves(item.ingress, own, program.scope))
-        return null;
+      if (differsIn(item, group.mixed) && !heldLeaves(contract, item.ingress, own)) return null;
   }
   if (contract.othersLeavesOf.has(group)) return contract.othersLeavesOf.get(group)!;
-  let leaves: IngressNode | undefined;
+  // (#1573: each other member's leaves as one node (`rolesNode`), and those nodes, each once, as one node per sequence
+  // of them (`setNode`))
+  const nodes = new Set<IngressNode>();
+  let complete = true;
   for (const entry of group.rest) {
     const own = leafRoles(contract, entry.value, exact);
-    if (own === null || own.length !== roles) {
-      leaves = undefined;
-      break;
-    }
-    for (const leaf of own) leaves = program.scope.ingress.union(leaves, leaf);
+    complete = own !== null && own.length === roles;
+    if (!complete) break;
+    nodes.add(rolesNode(contract, own!));
   }
+  const leaves = complete ? setNode(contract, nodes) : null;
   contract.keep(1);
-  contract.othersLeavesOf.set(group, leaves ?? null);
-  return leaves ?? null;
+  contract.othersLeavesOf.set(group, leaves);
+  return leaves;
+}
+
+/**
+ * #1573: whether `node` holds every one of a member's leaves by role (`holdsLeaves`), once per node and roles, the read
+ * members of k lists sharing their answers' nodes: each further check counts to its demand what the check charged
+ * (`WorkLedger.repeat`), as when each list checked its own.
+ */
+function heldLeaves(
+  contract: Contract,
+  node: IngressNode | undefined,
+  roles: readonly IngressNode[],
+): boolean {
+  const { scope, work } = contract.pass.program;
+  if (node === undefined) return holdsLeaves(node, roles, scope);
+  let known = contract.heldLeaves.get(node);
+  if (known === undefined) contract.heldLeaves.set(node, (known = new WeakMap()));
+  const checked = known.get(roles);
+  if (checked !== undefined) {
+    work.repeat(checked.units);
+    return checked.held;
+  }
+  const before = work.total + work.finishing;
+  const held = holdsLeaves(node, roles, scope);
+  known.set(roles, { held, units: work.total + work.finishing - before });
+  return held;
+}
+
+/** A member's leaves by role (`leafRoles`) as one node, unioned in their roles' order once per roles. */
+function rolesNode(contract: Contract, roles: readonly IngressNode[]): IngressNode {
+  let node = contract.rolesNodes.get(roles);
+  if (node === undefined) {
+    for (const leaf of roles) node = contract.pass.program.scope.ingress.union(node, leaf);
+    contract.rolesNodes.set(roles, node!);
+  }
+  return node!;
+}
+
+/**
+ * #1573: one node per sequence of the other members' nodes as a list holds them (`othersLeaves`): their fold in that
+ * order, each step found by the ingress graph's own pair of the nodes so far and the next, so the lists of one sequence
+ * share one node and no list makes more than the unshared route's merge of its members makes (Codex r2 on #1628: a
+ * set found by a sum of its members' ids scanned other sets' members). Each step charged to the analysis as a shared
+ * build, never to the demand that asks (`WorkLedger.shared`), which charged no such step before.
+ */
+function setNode(contract: Contract, members: ReadonlySet<IngressNode>): IngressNode {
+  const { scope, work } = contract.pass.program;
+  work.shared(() => work.charge("invSteps", members.size));
+  let node: IngressNode | undefined;
+  for (const member of members) node = scope.ingress.union(node, member);
+  return node!;
 }
 
 /**
@@ -313,7 +363,8 @@ function othersLeaves(
  * binding its value's (`boundOf`, #1313); a literal's read entry of host data each read's it stands for (its
  * unioned leaves, `indexWork`), so literals of one and of two reads of one global differ by their roles' count;
  * `null` where a mixed part is mixed by more than its leaves, a leaf lies in a fixpoint's cell, or none names one.
- * Once per value and side, on an explicit walk.
+ * Once per value and side, on an explicit walk once per value it starts from (#1573: the reads of one binding in k
+ * lists walk its value once, each further one counting to its demand what the walk charged, `WorkLedger.repeat`).
  */
 function leafRoles(
   contract: Contract,
@@ -322,14 +373,31 @@ function leafRoles(
 ): readonly IngressNode[] | null {
   const memo = contract.leafRolesOf[exact ? 1 : 0]!;
   if (memo.has(value)) return memo.get(value)!;
+  const start = boundOf(contract, value, exact)?.value ?? value;
+  const walked = contract.leafRolesFrom[exact ? 1 : 0]!;
   const { definitions, program } = contract.pass;
+  const { work } = program;
+  const known = walked.get(start);
+  if (known !== undefined) {
+    // (its own entry kept, and to its demand the rest of what its own walk charged: `WorkLedger.repeat`)
+    contract.keep(1);
+    work.repeat(known.units - 1);
+    memo.set(value, known.roles);
+    return known.roles;
+  }
+  // (the walk's units but its classes' (a class is made once, so a later walk would find it): what any walk charges)
+  const spent = (): number => work.total + work.finishing;
+  const before = spent();
+  let classes = 0;
   const out: IngressNode[] = [];
   const seen = new Set<PlaceId>();
-  const pending = [boundOf(contract, value, exact)?.value ?? value];
+  const pending = [start];
   let found = true;
   while (found && pending.length > 0) {
     const at = pending.pop()!;
+    const ahead = spent();
     const mixed = contract.classMixed(at, exact);
+    classes += spent() - ahead;
     if (mixed === 0 || seen.has(at)) continue;
     seen.add(at);
     const leaf = definitions.ingress.has(at) ? ingressLeafOf(contract, at) : null;
@@ -352,6 +420,7 @@ function leafRoles(
   }
   const roles = found && out.length > 0 ? out : null;
   contract.keep(1 + out.length);
+  walked.set(start, { roles, units: spent() - before - classes });
   memo.set(value, roles);
   return roles;
 }
