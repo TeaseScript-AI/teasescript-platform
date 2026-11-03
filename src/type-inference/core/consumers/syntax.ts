@@ -193,7 +193,7 @@ export function cheapDecided(
       : {
           kinds: summary.tags.has("null") ? [...kinds, "null"] : kinds,
           ...(spelled === undefined ? {} : { spelling: spelled }),
-          names: new Set([...summary.names.values()].flatMap((names) => [...names])),
+          names: summary.names,
           decider: summary.decider,
           inherited: !summary.byShape,
         };
@@ -210,14 +210,12 @@ function syntaxDecides(walk: Consumers): boolean {
 }
 
 /**
- * Each walk's following of copies of inferred places (`linkedFrontier`): the levels being made, each with the chain's
- * depth it is made at (a copy reaching one again closes a cycle of copies); the chain's depth now; the least depth a
- * cycle closed at while the running level was made (`back`); and how often a chain was cut at `FRONTIER_COPIES`.
+ * Each walk's following of copies of inferred places (`linkedFrontier`): the levels being made (a copy reaching one
+ * again is a cycle of copies, not told); the chain's depth now; and how often a chain was cut at `FRONTIER_COPIES`.
  */
 interface Following {
-  readonly making: Map<Key, number>;
+  readonly making: Set<Key>;
   depth: number;
-  back: number;
   cuts: number;
 }
 
@@ -225,13 +223,9 @@ const following = new WeakMap<Consumers, Following>();
 
 function followingOf(walk: Consumers): Following {
   let state = following.get(walk);
-  if (state === undefined)
-    following.set(walk, (state = { making: new Map(), depth: 0, back: Infinity, cuts: 0 }));
+  if (state === undefined) following.set(walk, (state = { making: new Set(), depth: 0, cuts: 0 }));
   return state;
 }
-
-/** A copy closing a cycle of copies brings nothing of its own: its source's values are the cycle's, which its first level unites. */
-const CLOSED: CheapFrontier = { shapes: [], written: [], links: [], told: true, reach: 0 };
 
 /**
  * What reaches `path` of `root` by syntax (`CheapFrontier`): made from its owner path's by one step (`levelBelow`), so
@@ -251,16 +245,13 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
   // (a prefix whose chain reaches past the bound from here is cut, as its levels below are)
   let cut = frontier !== undefined && state.depth + frontier.reach > FRONTIER_COPIES;
   if (cut) state.cuts += 1;
-  let partial = false;
   for (let at = made + 1; at <= path.length; at += 1) {
     const level = levelBelow(walk, root, path.slice(0, at), frontier, cut);
     [frontier, cut] = [level.frontier, level.cut];
-    // (a level whose copies closed a cycle at a level made before it, further up the chain, holds that cycle's values
-    // only in part, and so does each level below it: made again where it is asked, never kept; the cycle's first level
-    // unites them and is kept; a level a cut chain left untold is kept only where its chain started, where the cut is
-    // the key's own: past the bound from it, so never told there whatever was made before; elsewhere it is made again)
-    partial ||= level.partial;
-    if ((!cut || state.depth === 0) && !partial)
+    // (a level a cut chain left untold is kept only where its chain started, where the cut is the key's own: past the
+    // bound from it, so never told there whatever was made before; elsewhere it is made again; a level a cycle of
+    // copies reaches is untold wherever it is made, and kept)
+    if (!cut || state.depth === 0)
       walk.cheapFrontiers.set(keptKey(walk.pass.program.work, root, path.slice(0, at)), frontier);
   }
   return frontier!;
@@ -268,8 +259,7 @@ function cheapFrontier(walk: Consumers, root: PlaceId, path: readonly string[]):
 
 /**
  * One level of a frontier (`cheapFrontier`): at `path` of `root`, below the owner's frontier `above` (none at the root),
- * whether a chain was cut on the way (`cut`); with whether a cycle of copies closed above it while it was made
- * (`partial`) and whether a chain was cut by now.
+ * whether a chain was cut on the way (`cut`); with whether a chain was cut by now.
  */
 function levelBelow(
   walk: Consumers,
@@ -277,7 +267,7 @@ function levelBelow(
   path: readonly string[],
   above: CheapFrontier | undefined,
   cutAbove: boolean,
-): { readonly frontier: CheapFrontier; readonly cut: boolean; readonly partial: boolean } {
+): { readonly frontier: CheapFrontier; readonly cut: boolean } {
   const { program } = walk.pass;
   const state = followingOf(walk);
   program.work.charge("checks");
@@ -359,9 +349,8 @@ function levelBelow(
   const again = state.making.has(key);
   if (again) told = false;
   if (told) enter(cheapShapeOf(walk, key));
-  const [cuts, back] = [state.cuts, state.back];
-  state.back = Infinity;
-  if (!again) state.making.set(key, state.depth);
+  const cuts = state.cuts;
+  if (!again) state.making.add(key);
   try {
     // (a copied source's frontier one step down: its own next level, by the store that copied it)
     if (above !== undefined && step !== undefined && told)
@@ -397,19 +386,15 @@ function levelBelow(
     if (properties === CONFLICT) told = false;
   }
   const cut = cutAbove || state.cuts !== cuts;
-  const partial = state.back < state.depth;
-  state.back = Math.min(back, state.back);
   return {
     frontier: { shapes, written, links, told: told && !cut, reach: cut ? Infinity : reach },
     cut,
-    partial,
   };
 }
 
 /**
  * A linked source's next level (`levelBelow`) below the frontier `parent` it was linked at one step above, one link
- * further along the chain, as `linkedFrontier` takes a level: kept where it is whole and its parent was kept, `CLOSED`
- * where the chain reaches it while it is being made, `null` past `FRONTIER_COPIES`.
+ * further along the chain, as `linkedFrontier` takes a level.
  */
 function linkedBelow(
   walk: Consumers,
@@ -419,11 +404,8 @@ function linkedBelow(
 ): CheapFrontier | null {
   const state = followingOf(walk);
   const key = keptKey(walk.pass.program.work, root, path);
-  const closing = state.making.get(key);
-  if (closing !== undefined) {
-    state.back = Math.min(state.back, closing);
-    return CLOSED;
-  }
+  // (a cycle of copies: what it holds only the analysis tells, whatever order its keys are asked in, #1604)
+  if (state.making.has(key)) return null;
   const known = walk.cheapFrontiers.get(key);
   if (known !== undefined && state.depth + 1 + known.reach <= FRONTIER_COPIES) return known;
   if (state.depth + 1 > FRONTIER_COPIES || known !== undefined) {
@@ -433,14 +415,27 @@ function linkedBelow(
   state.depth += 1;
   try {
     const level = levelBelow(walk, root, path, parent, false);
-    // (a level made from a parent no frontier keeps, one a cycle of copies made in part, is that cycle's part too)
-    const kept =
-      walk.cheapFrontiers.get(keptKey(walk.pass.program.work, root, path.slice(0, -1))) === parent;
-    if (kept && !level.cut && !level.partial) walk.cheapFrontiers.set(key, level.frontier);
+    if (!level.cut) walk.cheapFrontiers.set(key, level.frontier);
     return level.frontier;
   } finally {
     state.depth -= 1;
   }
+}
+
+/** No property names (`summaryOf`). */
+const NO_NAMES: ReadonlySet<string> = new Set();
+
+/** Each written type's property names as one set, made once a type (`termNameSet`). */
+const termNameSets = new WeakMap<TypeTerm, ReadonlySet<string>>();
+
+function termNameSet(term: TypeTerm): ReadonlySet<string> {
+  let names = termNameSets.get(term);
+  if (names === undefined) {
+    const found = termNames(term);
+    names = found.length === 0 ? NO_NAMES : new Set(found);
+    termNameSets.set(term, names);
+  }
+  return names;
 }
 
 /** Two object literals' property sets that differ (`joinProperties`). */
@@ -453,14 +448,14 @@ function joinProperties(a: number | null, b: number | null): number | null {
 
 /**
  * What a frontier's syntax decides, its linked sources' included, each source's contribution given by the store that
- * copied it (`summaryOf`): whether every written type there is told; the kinds; the property names, one set a property
- * token or written type; the written spelling; the property sets' token; the earliest store giving a kind other than
+ * copied it (`summaryOf`): whether every written type there is told; the kinds; the property names, one set shared by
+ * reference where one is met; the written spelling; the property sets' token; the earliest store giving a kind other than
  * `null` and whether it gave a shape's (else only a written type's); whether a shape, or only a written type, gives one.
  */
 interface Summary {
   readonly told: boolean;
   readonly tags: ReadonlySet<ItemTag>;
-  readonly names: ReadonlyMap<unknown, Iterable<string>>;
+  readonly names: ReadonlySet<string>;
   readonly spelling: Spelling | undefined;
   readonly properties: number | null;
   readonly decider: Definition | null;
@@ -480,7 +475,8 @@ function summaryOf(walk: Consumers, frontier: CheapFrontier): Summary {
   const known = summaries.get(frontier);
   if (known !== undefined) return known;
   const tags = new Set<ItemTag>();
-  const names = new Map<unknown, Iterable<string>>();
+  // (the name sets met, each once by identity: a frontier's own, written types' and its links' summaries' sets)
+  const named = new Set<ReadonlySet<string>>();
   const stores = new Map<Definition, boolean>();
   let told = true;
   let spelling: Spelling | undefined;
@@ -502,7 +498,7 @@ function summaryOf(walk: Consumers, frontier: CheapFrontier): Summary {
     }
     const token = propertyToken(walk, shape);
     properties = joinProperties(properties, token);
-    if (shape.names.size > 0) names.set(token ?? shape, shape.names);
+    if (shape.names.size > 0) named.add(shape.names);
   }
   for (const { term, by } of frontier.written) {
     const kinds = typeTags(term);
@@ -512,15 +508,16 @@ function summaryOf(walk: Consumers, frontier: CheapFrontier): Summary {
       tags.add(tag);
       if (tag !== "null") give(by, false);
     }
-    names.set(term, termNames(term));
+    const own = termNameSet(term);
+    if (own.size > 0) named.add(own);
   }
   for (const { by, frontier: source } of frontier.links) {
     const other = summaryOf(walk, source);
     // (its kinds, names and stores looked at once here, charged)
-    walk.pass.program.work.charge("checks", other.tags.size + other.names.size);
+    walk.pass.program.work.charge("checks", other.tags.size);
     told &&= other.told;
     for (const tag of other.tags) tags.add(tag);
-    for (const [key, each] of other.names) names.set(key, each);
+    if (other.names.size > 0) named.add(other.names);
     spelling = joinSpelling(spelling, other.spelling);
     properties = joinProperties(properties, other.properties);
     if (other.shaped) give(by, true);
@@ -528,6 +525,18 @@ function summaryOf(walk: Consumers, frontier: CheapFrontier): Summary {
   }
   let decider: Definition | null = null;
   for (const by of stores.keys()) decider = earlierStore(decider, by);
+  // (one set where one is met, shared by reference with the frontier it came from: a link carries its source's names
+  // without copying them, Codex r3's B1 on #1653; a union made, charged, only where several distinct ones meet)
+  let names: ReadonlySet<string> = NO_NAMES;
+  if (named.size === 1) names = [...named][0]!;
+  else if (named.size > 1) {
+    const union = new Set<string>();
+    for (const each of named) {
+      walk.pass.program.work.charge("checks", each.size);
+      for (const name of each) union.add(name);
+    }
+    names = union;
+  }
   const summary: Summary = {
     told,
     tags,
@@ -570,10 +579,11 @@ function propertyToken(walk: Consumers, shape: CheapShape): number | null {
 }
 
 /**
- * A copy's source's frontier at its copied path (`cheapFrontier`), one link further along the chain: `CLOSED` where the
- * chain reaches that level while it is being made (a cycle of copies, whose first level unites its values); `null`
- * where it reaches past `FRONTIER_COPIES` from the key being decided (counted in `cuts`, so no level made on it is kept for
- * another chain).
+ * A copy's source's frontier at its copied path (`cheapFrontier`), one link further along the chain; `null` where the
+ * chain reaches a level still being made (a cycle of copies: a key it reaches is untold, whatever the order its keys are
+ * asked in, so a kept frontier's `reach` is the longest chain of copies from it, the same from wherever it is asked), or
+ * reaches past `FRONTIER_COPIES` from the key being decided (counted in `cuts`, so no level made on it is kept for another
+ * chain).
  */
 function linkedFrontier(
   walk: Consumers,
@@ -582,11 +592,8 @@ function linkedFrontier(
 ): CheapFrontier | null {
   const state = followingOf(walk);
   const key = keptKey(walk.pass.program.work, root, path);
-  const closing = state.making.get(key);
-  if (closing !== undefined) {
-    state.back = Math.min(state.back, closing);
-    return CLOSED;
-  }
+  // (a cycle of copies: what it holds only the analysis tells, whatever order its keys are asked in, #1604)
+  if (state.making.has(key)) return null;
   const known = walk.cheapFrontiers.get(key);
   if (known !== undefined && state.depth + 1 + known.reach <= FRONTIER_COPIES) return known;
   if (state.depth + 1 > FRONTIER_COPIES || known !== undefined) {
