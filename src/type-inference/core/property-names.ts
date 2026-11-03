@@ -161,6 +161,14 @@ function keptStepBelow(work: WorkLedger, key: Key, below: Key): string {
 }
 
 /**
+ * What a search does at a key task other than its first (#1526 phase C step 4, `propertyNames`' `completed`): takes a
+ * completed listing of that key whole (its names, its sources not followed), follows the key as any task, or defers it:
+ * its names are another listing's to find, and this search's own names are then incomplete (its caller lists that key
+ * first, and searches again).
+ */
+export type ListedKey = ReadonlySet<string> | "follow" | "defer";
+
+/**
  * A task to take up, the visit that scheduled it, how many of that visit's last steps it keeps untouched, where it was
  * scheduled among a listing's effective sources (`listed`), and, where the listing's classification made them for this
  * take-up, its identity and whether it pumps (`Contribution`).
@@ -720,6 +728,12 @@ export function propertyNames(
   start: PropertyNamesTask,
   /** Each object of a literal the value holds, with its names in the literal's order (a first property's question). */
   objects?: (literal: PlaceId, names: ReadonlySet<string>) => void,
+  /**
+   * #1526 phase C step 4: at each key task but the first, a completed listing of that key to take, or whether to follow
+   * or defer it (`ListedKey`); without it every key is followed. A key's listing holds every name its tasks reach, so
+   * taking it gives the names following it would (the pump bound cuts only a chain that never ends).
+   */
+  completed?: (key: CanonicalKey) => ListedKey,
 ): ReadonlySet<string> {
   const { program, contract } = pass;
   const work = program.work;
@@ -909,6 +923,17 @@ export function propertyNames(
     if (recording !== null) recording.tasks += 1;
     if (seen.has(id)) continue;
     seen.add(id);
+    if ("key" in task && from !== null && completed !== undefined) {
+      const known = completed(task.key);
+      if (known !== "follow") {
+        if (known !== "defer") {
+          // (each name taken, charged: the listing's output)
+          work.charge("checks", known.size);
+          for (const name of known) names.add(name);
+        }
+        continue;
+      }
+    }
     // (a key's path and place through its walk, `keptKeyWalk`: a text's kept, a cursor's steps through the charged
     // boundary and copied out once, G3 stage 1)
     // (or the parts of its step a listing's classification made, each taken once in place of its own: `Contribution`)

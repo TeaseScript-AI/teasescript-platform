@@ -2,7 +2,7 @@ import { CORE_RUNTIME_BUILTINS } from "../../src/compiler.js";
 import { parse } from "../../src/parser.js";
 import { compareProjectPaths } from "../../src/project-paths.js";
 import { validateProjectSemantics } from "../../src/semantic.js";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
+import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { checkedResult } from "../../src/type-inference/core/consumer.js";
 import type { CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
 import { coreRecord } from "../../src/type-inference/core/result.js";
@@ -52,6 +52,16 @@ export function coreRequest(
       speakers: new Map(names.flatMap((result) => [...result.speakers])),
     },
   };
+}
+
+/**
+ * Test-only: the core's analysis of a request with its receiving completion run after it (#1526 phase C), as `asked`
+ * runs it once the questions ran to their end, here with nothing asked again.
+ */
+export function completedCore(request: CoreAnalysisRequest): Answers {
+  const answers = analyseCore(request);
+  answers.completed(() => null);
+  return answers;
 }
 
 /**

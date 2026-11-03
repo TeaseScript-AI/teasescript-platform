@@ -101,6 +101,18 @@ export const READS = new Map([
     "admittedLevel",
     "the admitted type at a path as every answer reads a level: a decision's answer, recorded by `decide`",
   ],
+  [
+    "forgetDecision",
+    "the receiving closure clears a decision a transaction invalidated (#1526 phase C): it is made again where read",
+  ],
+  [
+    "receivingObligations",
+    "the receiving obligations of the settled pass (#1526 phase C): their sites, paths and extents, read; their checks are the walk's",
+  ],
+  [
+    "hearingRejections",
+    "hears the stores a receiving completion's own store check rejects (#1526 phase C): the checks are the consumer's own",
+  ],
   ["literalChildren", "a literal's children at a step: syntax"],
   ["namedExternalSite", "where a store's named external data enters: a site, read"],
   ["offendingAt", "the innermost offending expression of a contribution: a site, read"],
@@ -167,6 +179,18 @@ const LISTED_READS = [
     "the stores this pass rejected, compared before a finishing walk",
   ],
   ["newlyRejected", ".get", "fresh.ts", "whether a store was rejected: a test"],
+  [
+    "newlyRejected",
+    "for-of",
+    "consumers.ts",
+    "the stores a receiving completion's checks rejected, against the settled pass's (#1526 phase C): a test",
+  ],
+  [
+    "retaken",
+    ".get",
+    "consumers.ts",
+    "the stores the settled pass rejected at a key, against those a completion decision's check rejects (#1526 phase C): a test",
+  ],
   [
     "refused",
     ".has",

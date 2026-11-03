@@ -142,17 +142,22 @@ function writtenGroups(
  * offending kind, whatever its certainty, a copy made before its decider with context `later` (A7), and a
  * `null-check` for a possible null. The store's external data brings its boundary checks (C9). `writtenOnly`: the
  * places whose written type reaches the path alone, the finishing path's C1 before admission settled (TABLE r4.126: one
- * derivation, the written type final at every stop).
+ * derivation, the written type final at every stop). `completed`: one decision a receiving completion made (#1526 phase
+ * C), checked as admission makes it there, so its rejections are heard (`Admission.rejecting`).
  */
-export function admittedStores(walk: Consumers, writtenOnly = false): void {
+export function admittedStores(
+  walk: Consumers,
+  writtenOnly = false,
+  completed: DecidedAt | null = null,
+): void {
   const { program, definitions } = walk.pass;
   const admission = walk.admission;
-  for (const group of walk.order<DecidedAt>(
-    writtenOnly ? writtenGroups(walk) : admission.groups(),
-  )) {
-    const decision = decide(walk, group);
+  for (const group of completed !== null
+    ? [completed]
+    : walk.order<DecidedAt>(writtenOnly ? writtenGroups(walk) : admission.groups())) {
+    const decision = completed !== null ? admission.decide(group) : decide(walk, group);
     // (its decision ended: what a stop forgets by is kept for its place only while another can stop it, #1599)
-    if (!writtenOnly) walk.pass.contract.decided(group.root);
+    if (!writtenOnly && completed === null) walk.pass.contract.decided(group.root);
     if (decision === null) continue;
     // (a cursor's group's steps made only where a diagnostic or a check names its path: G3 stage 1)
     const { root } = group;
@@ -523,7 +528,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
     }
   }
   // (the stores above a decision that stopped, the pass's decisions taken: #1416)
-  walk.enclosingStores();
+  if (completed === null) walk.enclosingStores();
   // (the member-answer oracle's paths the copies land and no decision took)
   admission.compareLanded();
 }

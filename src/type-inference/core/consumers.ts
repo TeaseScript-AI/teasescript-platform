@@ -2,18 +2,42 @@ import type { Expression } from "../../ast.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { Admission } from "./admission.js";
 import { admittedLevel } from "./admission/admitted.js";
+import {
+  closureCounts,
+  LeftSlice,
+  Unlisted,
+  type Closure,
+  type ClosureCounts,
+} from "./admission/closure.js";
+import { forgetDecision } from "./admission/decision.js";
+import type { DecidedAt } from "./admission/model.js";
+import {
+  lostBy,
+  receivingObligations,
+  receivingRequirements,
+  shapeOf,
+  type ReceivingObligation,
+  type ReceivingRequirement,
+  type ReceivingResult,
+} from "./admission/receiving.js";
 import type { CorePass } from "./answers.js";
 import type { DecisionWork, ReadWork } from "./answers.js";
 import {
   BudgetExhausted,
+  CapReached,
   DemandExhausted,
   demandAllowanceFor,
+  joinParts,
   joinSteps,
+  keptParts,
   keptSlice,
   type BudgetLimit,
 } from "./budget.js";
 import {
+  isKeyId,
   keptKeyAt,
+  keyDepthIn,
+  keyIdPlace,
   restSteps,
   stepsArray,
   type CanonicalKey,
@@ -23,9 +47,12 @@ import type { Label } from "./contract/labels.js";
 import { termAt, writtenOf } from "./contract.js";
 import {
   captureContracts,
+  captureDescriptors,
   epochOf,
+  extractContract,
   levelProof,
   type CapturedContract,
+  type ContractDescriptors,
   type ContractReader,
   type ContractRequest,
 } from "./contract-descriptors.js";
@@ -48,7 +75,7 @@ import { receivers } from "./consumers/receivers.js";
 import { admittedStores, decide } from "./consumers/stores.js";
 import { cheapDecided } from "./consumers/syntax.js";
 import { speakers, uses } from "./consumers/uses.js";
-import { keptKey, keyOf, type Definition, type Key } from "./definitions.js";
+import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, STOPPED, type Item, type Writer } from "./items.js";
@@ -59,7 +86,12 @@ import { propertyNames } from "./property-names.js";
 import type { CoreDiagnostic, Obligation, SiteExpectation } from "./result.js";
 import type { Work } from "./solver.js";
 export { typedCall } from "./consumers/finishing.js";
-export { leftOutCheck, leftOutWarning, withoutRecords } from "./consumers/left-out.js";
+export {
+  leftOutCheck,
+  leftOutCompletion,
+  leftOutWarning,
+  withoutRecords,
+} from "./consumers/left-out.js";
 export type { Omission } from "./consumers/left-out.js";
 
 /*
@@ -110,6 +142,40 @@ function outsideSliceSyntax(program: CoreProgram): boolean {
   return outside;
 }
 
+/** A completion's results by their requirements' places and paths (`Consumers.#completeFor`). */
+interface Completed {
+  readonly index: ReadonlyMap<string, number>;
+  readonly results: readonly (ReceivingResult | null | undefined)[];
+}
+
+/**
+ * The selecting stores a completion's admission gives another target than the settled pass's (#1275, `retargeted` in
+ * `answers.ts`): their receivers' keys, and whether any moved.
+ */
+export interface Retargeted {
+  readonly receivers: readonly CanonicalKey[];
+  readonly moved: boolean;
+}
+
+/** A receiving completion pass (#1526 phase C): the pass, made from a settled pass's inputs without its frozen keys. */
+export interface CompletionPass {
+  readonly pass: CorePass;
+  readonly retargeted: (admission: Admission) => Retargeted;
+}
+
+/** A closure cell's name as the key it is (a decision's, a listing's: each named by its key). */
+function keyed(name: string): CanonicalKey {
+  // EVIDENCE: invariant: decisions and listings are named by their keys in their identities (`decidedOf`, `list`).
+  return name as CanonicalKey;
+}
+
+/** A decided path in its identity, from its key (`keyed`): a cursor's by its key alone. */
+function decidedAt(key: CanonicalKey): DecidedAt {
+  return isKeyId(key)
+    ? { root: keyIdPlace(key), key }
+    : { root: keyPlace(key), path: keyPath(key) };
+}
+
 /** The walk's stages after admission's, in order (D4: a stop keeps every unit before it). */
 const STAGES = 4;
 
@@ -157,6 +223,9 @@ export class Consumers {
   finishing = false;
   readonly #last: boolean;
   readonly #rejected: ReadonlyMap<number, ReadonlySet<Key>>;
+  readonly #cycling: ReadonlySet<number>;
+  /** A completion pass of this pass's inputs (`#completeFor`, #1526 phase C), `null` where none is made. */
+  readonly #completion: (() => CompletionPass) | null;
   /**
    * Whether the store targets the pass keys by are its admission's own (#1275), asked before the walk: each receiver's
    * decision a lazy one of this pass's own (`decide`), bounded by the demand allowance as every decision is.
@@ -231,8 +300,11 @@ export class Consumers {
       admission: Admission,
       decide: (root: PlaceId, path: readonly string[]) => void,
     ) => boolean = () => true,
+    completion: (() => CompletionPass) | null = null,
   ) {
+    this.#completion = completion;
     this.#rejected = rejected;
+    this.#cycling = cycling;
     this.#last = last;
     this.restarted = restarted;
     this.#ownTargets = ownTargets;
@@ -264,7 +336,9 @@ export class Consumers {
 
   public set reading(node: FlowNode | null) {
     this.#readingNode = node;
-    if (node !== null) this.pass.program.work.spender = this.pass.program.spenderOf(node);
+    // (a completion pass's work names no place: setup's, `#completeFor`)
+    if (node !== null && !this.pass.closure)
+      this.pass.program.work.spender = this.pass.program.spenderOf(node);
   }
 
   /**
@@ -556,9 +630,35 @@ export class Consumers {
    * into (its statement's first live store, else its first, as `Answers.at` reads one), each destination once, in the
    * consumers' order; its result is kept (`captured`). A program outside the candidate slice's syntax (`slice-syntax.ts`,
    * the rule the candidate route declines by before its analysis) gets no store check, so the capture makes no request
-   * and charges nothing there: its analysis is main's.
+   * and charges nothing there: its analysis is main's. Phase C: in a pass that starts with frozen keys, its receiving
+   * obligations are completed later, in a completion pass of their own after everything that can stop (`receive`, from
+   * `asked`), so this pass publishes what it would without them.
    */
   #capture(): void {
+    this.#capturePhaseB();
+    // (the receiving seed's store sites: admission's store warnings as they stand when the capture runs, #1526 phase C)
+    const storeSites: { site: SourceSite; stopped: boolean }[] = [];
+    for (const d of this.diagnostics)
+      if (
+        d.class === "warning-runtime-check" &&
+        d.kind === "written-target" &&
+        d.rule.rule === "store"
+      )
+        storeSites.push({ site: d.site, stopped: d.provenance.context === "budget" });
+    this.#storeSites = storeSites;
+  }
+
+  /** The receiving seed's store sites (`#capture`); `null` in a pass whose admission did not settle. */
+  #storeSites: readonly { readonly site: SourceSite; readonly stopped: boolean }[] | null = null;
+
+  /** Whether the receiving completion was asked for (`receive`), once. */
+  #received = false;
+
+  /** Whether the capture ended where the program left the slice's depth (`captureContracts`). */
+  #leftSlice = false;
+
+  /** Phase B's capture (`#capture`). */
+  #capturePhaseB(): void {
     const { program, definitions, lists, contract } = this.pass;
     const sites = new Map<string, SourceSite>();
     // (a stopped decision's own marks, the reason `budget`, stand for their stores' checks: the stop owes them, and a
@@ -627,7 +727,7 @@ export class Consumers {
     };
     // (its work is the capture's, no consumer read's)
     this.reading = null;
-    captureContracts(
+    this.#leftSlice = captureContracts(
       this.order(requests),
       reader,
       epochOf(this.pass),
@@ -636,6 +736,350 @@ export class Consumers {
       () => program.work.charge("checks", definitions.storeDefs.length + sites.size),
     );
   }
+
+  /**
+   * #1526 phase C: the pass's receiving obligations (`admission/receiving.ts`: the store checks the walk owes, a stopped
+   * decision's stores among them, every live store that brings external data), each completed in the completion pass
+   * (`#completeFor`) and kept with its result (`receiving`), in the stable source order, then `again` (the questions
+   * asked again with the completed contracts, `asked`), whose result it returns. It runs after everything of the analysis
+   * that can stop (the lead's ruling on #1637): once, on an analysis whose admission settled with a decision stopped and
+   * whose questions ran to their end, inside the slice (the capture's gate). It never makes or moves a stop: its
+   * allowance is the smaller of twice the work charged before it and what is left of the total, and reaching it (or a
+   * read past the read-depth limit) ends it with no result kept (`capped`), every obligation without one and nothing
+   * asked again, phase B's answers standing. Anywhere else it does nothing and returns `null`.
+   */
+  public receive<T>(again: () => T): T | null {
+    const work = this.pass.program.work;
+    if (
+      this.#received ||
+      this.#storeSites === null ||
+      this.stopped !== null ||
+      work.stopped !== null ||
+      !this.pass.contract.anyStopped ||
+      this.#completion === null ||
+      outsideSliceSyntax(this.pass.program) ||
+      this.#leftSlice
+    )
+      return null;
+    this.#received = true;
+    // (all its work counted to setup's, which names no place: the heaviest place a stop's warning names stays this
+    // pass's, D4)
+    const spender = work.spender;
+    work.spender = 0;
+    try {
+      return this.#receiveCounted(again);
+    } finally {
+      work.spender = spender;
+    }
+  }
+
+  /** `receive`, its work counted to setup's. */
+  #receiveCounted<T>(again: () => T): T | null {
+    const work = this.pass.program.work;
+    const since = work.total;
+    const storeSites = this.#storeSites!;
+    this.reading = null;
+    let obligations: readonly ReceivingObligation[] = [];
+    let value: T | null = null;
+    let ended = false;
+    try {
+      value = work.capped(Math.min(2 * since, work.allowance - since), () => {
+        obligations = receivingObligations(this.admission, {
+          epoch: epochOf(this.pass),
+          storeSites,
+          ingressSites: this.#ingressSites,
+          siteKey,
+        });
+        const { index, results } = this.#completeFor(obligations, since);
+        for (const obligation of obligations) {
+          const at = index.get(joinParts(obligation.place, obligation.path));
+          this.receiving.push({
+            obligation,
+            result: at === undefined ? null : (results[at] ?? null),
+          });
+        }
+        // (nothing completed, nothing to ask again)
+        return this.receiving.some(({ result }) => result !== null) ? again() : null;
+      });
+    } catch (error) {
+      if (!(error instanceof CapReached) && !(error instanceof BudgetExhausted)) throw error;
+      ended = true;
+    }
+    // (its units counted to its end: the decisions' records, the results' index and the questions asked again included)
+    const units = work.total - since;
+    if (!ended) {
+      if (this.completion !== null) this.completion = { ...this.completion, units };
+      return value;
+    }
+    // (past its allowance nothing of it is kept, wherever in it the allowance ended: every obligation without a result, no
+    // decision's record, no check's site)
+    this.receiving.length = 0;
+    for (const obligation of obligations) this.receiving.push({ obligation, result: null });
+    this.completedChecks.clear();
+    this.completion = {
+      units,
+      counts: { ...(this.completion?.counts ?? closureCounts()), capped: 1, cappedAt: units },
+      decisions: [],
+    };
+    return null;
+  }
+
+  /**
+   * #1526 phase C steps 1–4: the receiving closure's completion of `obligations` in a completion pass, made once from
+   * this pass's inputs (its rejections, its store targets) without its frozen keys, and thrown away after. Every
+   * obligation is extracted there through the same level reader; a decision a level asks for is made where it is first
+   * asked, a scoped decision from what is left of the total (r4.269), in that pass's own fresh `Admission`, so nothing
+   * is unfrozen and no cache holds a frozen key's answer; each listing is a cell the frontier schedules, taken whole by a
+   * search that reaches it (`Closure.run`). Nothing of it is this pass's: its answers, decisions and stops stand, and the
+   * results are kept as each obligation's (the publication and decision 2 are later steps). Its work is this
+   * analysis's, charged where made; its allowance's end (`CapReached`, `receive`) ends it with no result kept.
+   */
+  #completeFor(obligations: readonly ReceivingObligation[], since: number): Completed {
+    const { pass, retargeted } = this.#completion!();
+    const closure = pass.closure!;
+    // (#1599's records closed where the pass was made, `createPass`)
+    const completer = new Consumers(pass, this.#rejected, this.#cycling, this.#last, false, true);
+    const requirements = receivingRequirements(pass.program.work, obligations);
+    const results: (ReceivingResult | null | undefined)[] = requirements.map(() => undefined);
+    const work = pass.program.work;
+    try {
+      completer.#completeIn(closure, requirements, results, epochOf(this.pass), retargeted);
+    } finally {
+      // (its counters kept wherever it ended, its records only where it ran to its end: `receive` drops them past its
+      // allowance)
+      this.completion = { units: work.total - since, counts: { ...closure.counts }, decisions: [] };
+      closure.close();
+    }
+    for (const site of completer.completedChecks) this.completedChecks.add(site);
+    const local = demandAllowanceFor(pass.program.flow.nodes.length);
+    this.completion = {
+      ...this.completion,
+      decisions: closure.decisions.map(({ key, units, allowance }) => ({
+        ...completer.admission.decisionWork(decidedAt(keyed(key)), units, allowance, false),
+        completion: { local },
+      })),
+    };
+    const index = new Map<string, number>();
+    requirements.forEach((r, at) => index.set(keptParts(work, r.place, r.path), at));
+    return { index, results };
+  }
+
+  /** The completion pass's own run of the frontier over its requirements (`#completeFor`). */
+  #completeIn(
+    closure: Closure,
+    requirements: readonly ReceivingRequirement[],
+    results: (ReceivingResult | null | undefined)[],
+    epoch: number,
+    retargeted: CompletionPass["retargeted"],
+  ): void {
+    this.reading = null;
+    const { extract, dirty, descriptors, list } = this.#extraction(
+      requirements,
+      results,
+      epoch,
+      closure,
+    );
+    closure.handle("decision", (name) => forgetDecision(this.admission, keyed(name)));
+    closure.handle("listing", (name) => this.propertySets.delete(keyed(name)));
+    closure.handle("extent", (key) => descriptors.forget(key));
+    closure.handle("request", (name) => dirty.add(Number(name)));
+    // (a literal's element of another family is rejected outside every decision's check: the whole program's are
+    // checked first, as the walk checks them, so each decision they make is made before a request reads it; a store
+    // they reject that the settled pass did not is a rejection, below; a list join's check returns with joins to the
+    // slice's syntax, which has none)
+    this.admission.literalElements(this.order, () => {});
+    // (the first request that reaches the slice's depth ends the completion, as it ends phase B's capture: the program
+    // has left the slice, where main's lowering requests nothing more, so no result of it is kept or published)
+    try {
+      closure.run({
+        requests: requirements.length,
+        extract,
+        list,
+        listed: (key) => this.propertySets.has(keyed(key)),
+      });
+    } catch (error) {
+      if (!(error instanceof LeftSlice)) throw error;
+      closure.counts.leftSlice = 1;
+      results.fill(null);
+      return;
+    }
+    // A6, #1275: a completion decision that would reject a store or give a selecting store another target than the
+    // settled pass's inputs leaves every obligation whose proof read it lost with that cause: never a refusal, a
+    // widening or a changed settled answer (decision 2 is deferred). Each decision the frontier made is checked as C1
+    // checks it (`admittedStores`), its rejections heard against the stores the settled pass rejected there.
+    const made = closure.decisions.map(({ key }) => keyed(key));
+    const { receivers, moved } = retargeted(this.admission);
+    for (const key of receivers) closure.mark(key, "retarget");
+    const rejected = new Set<number>();
+    for (const key of made) {
+      rejected.clear();
+      this.admission.hearingRejections(
+        (d) => rejected.add(d.uid),
+        () => admittedStores(this, false, decidedAt(key)),
+      );
+      const before = this.admission.retaken.get(key) ?? [];
+      if (rejected.size !== before.length || before.some((d) => !rejected.has(d.uid)))
+        closure.mark(key, "rejection");
+    }
+    // (the stores rejected, by the decisions' checks and the literals' and joins', against the settled pass's)
+    let joined = false;
+    for (const [uid, keys] of this.admission.newlyRejected) {
+      const before = this.#rejected.get(uid);
+      if (before === undefined || [...keys].some((key) => !before.has(key))) joined = true;
+    }
+    // (where that check owes a store's runtime check, the unstopped analysis owes it too)
+    for (const d of this.diagnostics)
+      if (d.class === "warning-runtime-check" && d.kind === "written-target")
+        this.completedChecks.add(siteKey(d.site));
+    // (a rejected or retargeted store's value reaches other contracts through copies, projections and wrappers, which
+    // no cell of the closure records: once any completion decision would reject or retarget a store, every obligation
+    // is lost, with the cause of a marked decision its proof read, else the first mark's)
+    const beside = moved ? "retarget" : joined ? "rejection" : null;
+    for (const [index, cause] of closure.unsettled(requirements.length, beside)) {
+      if (results[index]?.state === "complete") closure.counts.forgone += 1;
+      results[index] = lostBy(requirements[index]!, cause);
+    }
+  }
+
+  /**
+   * The extraction of `requirements` into `results` over this pass, through the answers' own level reader: a complete
+   * extent's contract by the descriptor service, a shape by its level. With `closure` (a completion pass), each request,
+   * assembly, decision and listing is its cell; a listing's search takes the made listings it reaches whole, follows one
+   * the frontier has parked, and defers any other, so a request whose listing deferred a key waits on it (`Unlisted`).
+   */
+  #extraction(
+    requirements: readonly ReceivingRequirement[],
+    results: (ReceivingResult | null | undefined)[],
+    epoch: number,
+    closure: Closure | null,
+  ): {
+    readonly extract: (index: number) => void;
+    readonly dirty: Set<number>;
+    readonly descriptors: ContractDescriptors<null>;
+    readonly list: (key: string) => ReadonlySet<string> | { readonly deferred: readonly string[] };
+  } {
+    const { program, contract } = this.pass;
+    // (a listing's search in a completion pass: the made listings it reaches taken whole, a parked one followed, and so
+    // is a key deeper than its own: that search's pump bound ends a chain that deepens forever, #1493's feedback copy
+    // `w = r.z`, which listings deferring each deeper key to the next would never end; any other key deferred to its own
+    // cell, so every listing is of a key no deeper than a request's, finitely many)
+    const list = (
+      asked: string,
+    ): ReadonlySet<string> | { readonly deferred: readonly string[] } => {
+      const key = keyed(asked);
+      program.work.charge("checks");
+      const depth = keyDepthIn(contract, key);
+      const deferred = new Set<string>();
+      const names = closure!.alone("listing", key, () =>
+        propertyNames(
+          this.pass,
+          (work) => this.solve(work),
+          { key },
+          undefined,
+          (below) => {
+            const made = this.propertySets.get(below);
+            if (made !== undefined) {
+              closure!.took("listing", below);
+              return made;
+            }
+            program.work.charge("checks");
+            if (closure!.parked(below) || keyDepthIn(contract, below) > depth) return "follow";
+            deferred.add(below);
+            return "defer";
+          },
+        ),
+      );
+      if (deferred.size > 0) return { deferred: [...deferred] };
+      this.propertySets.set(key, names);
+      closure!.made("listing", key);
+      return names;
+    };
+    const reader: ContractReader = {
+      level: (place, path) => {
+        const written = writtenOf(program.place(place).kind);
+        const admitted = admittedLevel(
+          this.admission,
+          place,
+          path,
+          written === null ? null : termAt(written, path),
+          { stopped: false, settled: true, cheap: () => null },
+        );
+        return levelProof(admitted, () =>
+          withoutEmpty(this.solve(contract.contractOf(keyOf(place, path)))),
+        );
+      },
+      // (as `Answers.placeProperties` finds them: a key whose decision stopped names nothing; in a completion pass a
+      // listing is its cell, and one not yet made makes the request wait on it)
+      properties: (place, path) => {
+        // (kept with the names it finds: its text charged where it is text, `keptKeyAt`)
+        const key = keptKeyAt(contract, place, path);
+        const known = this.propertySets.get(key);
+        if (known !== undefined) {
+          closure?.took("listing", key);
+          return known;
+        }
+        if (closure === null) {
+          const names: ReadonlySet<string> =
+            contract.anyStopped && contract.keyStopped(key)
+              ? new Set()
+              : propertyNames(this.pass, (asked) => this.solve(asked), { key });
+          this.propertySets.set(key, names);
+          return names;
+        }
+        const found = list(key);
+        if ("deferred" in found) throw new Unlisted(key, found.deferred);
+        closure.took("listing", key);
+        return found;
+      },
+    };
+    const descriptors = captureDescriptors(reader, epoch, closure);
+    const dirty = new Set<number>();
+    const extract = (index: number): void => {
+      if (results[index] !== undefined && !dirty.has(index)) return;
+      dirty.delete(index);
+      const { place, path, extent } = requirements[index]!;
+      const make = (): ReceivingResult | null =>
+        extent === "complete"
+          ? extractContract(descriptors, place, path)
+          : shapeOf(reader.level(place, path));
+      results[index] =
+        closure === null
+          ? make()
+          : closure.within("request", String(index), () => {
+              // (a binding reads its pass's targets and rejections: another pass binds the slot anew)
+              closure.took("fact", `targets@${epoch}`);
+              closure.took("fact", `rejected@${epoch}`);
+              return make();
+            });
+      // (a contract that reaches the slice's depth: the program has left the slice, the completion ends)
+      if (closure !== null && extent === "complete" && results[index] === null)
+        throw new LeftSlice();
+    };
+    return { extract, dirty, descriptors, list };
+  }
+
+  /**
+   * The receiving closure's completion where one ran (`receive`): the units it charged to the total from its start (its
+   * obligations found, its completion pass and the questions asked again), its counters and decisions, else `null`.
+   */
+  completion: {
+    readonly units: number;
+    readonly counts: ClosureCounts;
+    readonly decisions: readonly DecisionWork[];
+  } | null = null;
+
+  /**
+   * The sites at which the receiving completion's own check of its decisions' stores (C1, `#completeIn`) owes a runtime
+   * check, by `siteKey`: where the unstopped analysis checks a store, which a store's check there takes from the
+   * completion (#1526 phase C step 5).
+   */
+  readonly completedChecks = new Set<string>();
+
+  /** Each receiving obligation with its result as the completion found it (`receive`), in the stable source order. */
+  readonly receiving: {
+    readonly obligation: ReceivingObligation;
+    readonly result: ReceivingResult | null;
+  }[] = [];
 
   /**
    * The property names the capture found for each decided object it filled, by the object's key in its identity: the

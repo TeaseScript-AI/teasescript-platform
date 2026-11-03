@@ -1040,10 +1040,9 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
   };
   try {
     const made = make();
-    consumerReads.set(
-      made.answers,
-      [...walks.values()].at(-1) ?? { reads: new Map(), emissions: [] },
-    );
+    // (the analysis's last walk: a receiving completion pass's store checks, #1526 phase C, are none of its walks)
+    const last = [...walks].filter(([consumers]) => !consumers.pass.closure).at(-1)?.[1];
+    consumerReads.set(made.answers, last ?? { reads: new Map(), emissions: [] });
     return made;
   } finally {
     Object.assign(prototype, { valueItems, runs, enter, check, finish, skip });

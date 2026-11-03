@@ -357,6 +357,8 @@ export class Admission {
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
   >();
   groupList: DecidedAt[] | null = null;
+  /** The groups' keys in their identities, once a pass (`admitted.ts`'s pull, #1526 phase C). */
+  groupKeys: Set<CanonicalKey> | null = null;
   /**
    * The cursors decision records name, as one packet of their paths made as each record is (`decisionWork`): Sol §4's
    * compact records, each path's node once, never a path per record, and no arena id past the pass.
@@ -521,10 +523,25 @@ export class Admission {
   /** The rejections made in this pass, counted (C1 asks whether a candidate left one). */
   public rejections = 0;
 
+  /** Hears each store rejected for the next pass while set (`hearingRejections`). */
+  #rejecting: ((d: Definition) => void) | null = null;
+
+  /** Runs `run`, hearing each store it rejects for the next pass (a receiving completion's own check, #1526 phase C). */
+  public hearingRejections<T>(hear: (d: Definition) => void, run: () => T): T {
+    const outer = this.#rejecting;
+    this.#rejecting = hear;
+    try {
+      return run();
+    } finally {
+      this.#rejecting = outer;
+    }
+  }
+
   public reject(d: Definition, root: PlaceId, path: readonly string[]): void {
     this.rejections += 1;
     this.refused.add(d.uid);
     if (d.how === "argument") return;
+    this.#rejecting?.(d);
     let keys = this.newlyRejected.get(d.uid);
     if (keys === undefined) this.newlyRejected.set(d.uid, (keys = new Set()));
     keys.add(keptKey(this.work, root, path));

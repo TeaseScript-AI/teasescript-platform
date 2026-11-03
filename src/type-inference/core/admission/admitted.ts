@@ -21,16 +21,47 @@ import { inputsAt, scanAt } from "./scan.js";
  * its contents fit, so its decision owes nothing, and its answer is the one deciding it with the copy gives.
  */
 function lazily(admission: Admission, place: PlaceId, path: readonly string[]): void {
-  if (
-    admission.attempted.has(keyAt(admission.pass.contract, place, path)) ||
-    !landed(admission, place, path)
-  )
-    return;
+  const key = keyAt(admission.pass.contract, place, path);
+  if (admission.attempted.has(key) || !landed(admission, place, path)) return;
   // (after a stop admission decides nothing more: such a path is answered from what it retained, `retainedSource`;
   // nor below a decision that stopped, S3 §5)
   if (admission.pass.program.work.stopped !== null || admission.decisionStopped(place, path))
     return;
-  admission.decide({ root: place, path }, true);
+  // (in a completion pass a decision of the completion's own, recorded with its work, #1526 phase C)
+  const closure = admission.pass.closure;
+  const decide = (): void => void admission.decide({ root: place, path }, true);
+  if (closure !== undefined && closure !== null && closure.open) closure.decide(key, decide);
+  else decide();
+}
+
+/**
+ * #1526 phase C: a read of the decision at a path in a completion pass (`Consumers.#completeFor`, the receiving
+ * closure's, which carries no frozen key): no admission walk runs there, so a decision admission makes at all (one of
+ * its groups; a landed copy path is `lazily`'s) is made, as a lazily decided path, where a level first asks for it, a
+ * scoped decision from what is left of the total (r4.269, `Closure.decide`); then the reader reads its cell.
+ */
+function pull(
+  admission: Admission,
+  place: PlaceId,
+  path: readonly string[],
+  key: CanonicalKey,
+): void {
+  const closure = admission.pass.closure;
+  if (closure === undefined || closure === null || !closure.open) return;
+  if (!admission.attempted.has(key) && groupKeys(admission).has(key))
+    closure.decide(key, () => admission.decide({ root: place, path }, true));
+  closure.took("decision", key);
+}
+
+/** The keys of admission's groups (`Admission.groups`), each in its identity, once a pass. */
+function groupKeys(admission: Admission): ReadonlySet<CanonicalKey> {
+  if (admission.groupKeys !== null) return admission.groupKeys;
+  const { contract } = admission.pass;
+  const groups = admission.groups();
+  admission.pass.program.work.charge("checks", groups.length);
+  const keys = new Set(groups.map((at) => at.key ?? keyAt(contract, at.root, at.path)));
+  admission.groupKeys = keys;
+  return keys;
 }
 
 /**
@@ -53,6 +84,7 @@ export function admitted(admission: Admission, place: PlaceId, path: readonly st
     return retainedSource(admission, place, path)?.tags ?? [];
   lazily(admission, place, path);
   const key = keyAt(contract, place, path);
+  pull(admission, place, path, key);
   // (an unrestricted written part, or a copy's, admits every kind at and below it: never what is stored)
   if (admission.unrestricted.has(key) || openBelow(admission, place, path)) return ["unknown"];
   const kinds = withoutEmpty(admission.run(contract.contractOf(key)));
@@ -177,8 +209,10 @@ export function inheritsWritten(
   if (undecidedCopy(admission, place, path))
     return retainedSource(admission, place, path)?.inherited ?? false;
   lazily(admission, place, path);
+  const key = keyAt(admission.pass.contract, place, path);
+  pull(admission, place, path, key);
   return (
-    admission.inheritsWrittenKeys.has(keyAt(admission.pass.contract, place, path)) ||
+    admission.inheritsWrittenKeys.has(key) ||
     (writtenOf(admission.pass.program.place(place).kind) === null &&
       openBelow(admission, place, path))
   );
@@ -212,6 +246,7 @@ export function deciderAt(
 ): SourceSite | null {
   lazily(admission, place, path);
   const key = keyAt(admission.pass.contract, place, path);
+  pull(admission, place, path, key);
   if (!admission.deciderSites.has(key)) {
     const inputs = inputsAt(admission, isKeyId(key) ? { root: place, key } : { root: place, path });
     const below = path.length > 0 && admission.run(admission.pass.contract.refReceiver(key));

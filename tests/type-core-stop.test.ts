@@ -44,7 +44,7 @@ import {
 import { REASON, STOPPED, type Item } from "../src/type-inference/core/items.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
+import { completedCore, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   combinedAnalyses,
   combinedStop,
@@ -3212,7 +3212,8 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
     ) > 0,
   );
   // (the runtime predicate on a real stopped plan: a written list's `get` default, its check's mark left out of the
-  // compile, lets `bad` through to `AFTER`, which the predicate reports; with its check the plan rejects it)
+  // compile, lets `bad` through to `AFTER`, which the predicate reports; with its check the plan rejects it; the check a
+  // receiving completion gives the stopped store, #1526 phase C step 5, is left out too: it rejects `bad` as well)
   const written = storedGet("written list", ["let xs: integer[] = [4]"], "xs", [
     [2, true],
     ["bad", false],
@@ -3235,6 +3236,7 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
           d.site.start === owner.site.start &&
           d.site.end === owner.site.end,
         check: () => false,
+        completion: true,
       },
       `default ${owner.code}`,
     );
@@ -3832,7 +3834,7 @@ test("an admission decision past its allowance stops: its key undecided, its rea
       const allowance = Math.floor(0.5 * own[0]!.units);
       const where = `reversed: ${reversed}, count: ${count}`;
       const answers: Answers = withTestDemandAllowance(allowance, () =>
-        inOrder(() => analyseCore(request)),
+        inOrder(() => completedCore(request)),
       );
       assert.deepEqual(
         answers.budget.decisions.filter((d) => d.stopped).map((d) => [d.place, d.path]),
@@ -3852,13 +3854,15 @@ test("an admission decision past its allowance stops: its key undecided, its rea
       assert.deepEqual(at(read), ["warning-runtime-check budget"], where);
       if (count) assert.deepEqual(at(text.indexOf("count {}")), ["compile-error -"], where);
       else {
-        // the read's moved check stops a fraction before the next effect
+        // the read's moved check stops a fraction before the next effect; where the receiving completion completed `b`'s
+        // contract (#1526 phase C step 5), the store of host data checks it first, as unstopped
         const plan = withTestDemandAllowance(allowance, () =>
           inOrder(() => compileSourceWithBackend(text, OPTIONS, CORE_BACKEND).plan),
         );
         assert.ok(plan !== null, where);
         assert.deepEqual(ran(plan, 5), { said: ["AFTER"], failure: null }, where);
-        assert.match(ran(plan, 1.5).failure ?? "", new RegExp(`^TSR\\d+@${read}:`, "u"), where);
+        const checked = answers.budget.closure === null ? read : text.indexOf("hostValue\nlet n");
+        assert.match(ran(plan, 1.5).failure ?? "", new RegExp(`^TSR\\d+@${checked}:`, "u"), where);
       }
     }
   }
