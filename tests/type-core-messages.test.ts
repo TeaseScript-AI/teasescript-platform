@@ -5,7 +5,12 @@ import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { jsonFieldMismatch, jsonKindMismatch } from "../src/runtime/values/value-types.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
-import { checkedResult, reportedDiagnostics } from "../src/type-inference/core/consumer.js";
+import {
+  checkedResult,
+  coreCheckResult,
+  reportedDiagnostics,
+  SliceIndex,
+} from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -2217,17 +2222,19 @@ test("a kept value's variable takes a name free in the project, and the fix comp
         `${name}: ${pasted}`,
       );
     }
-  // (a host global the script never names is reserved too, through the compile's own message source)
-  const reserved = compileSourceWithBackend(
-    "let groups: integer[][] = [[], [21]]\nsay groups.random.last\nexit\n",
-    { globals: ["hostValue", "value"] },
-    CORE_BACKEND,
+  // (a host global the script never names is reserved too, as the compile reads the analysis: `coreCheckResult`, the
+  // one that forwards the request's globals and built-ins to its message source)
+  const source = "let xs = [7, null]\nsay xs[0] + 1\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "value"])!;
+  const checked = coreCheckResult(
+    analyseCore(request),
+    new SliceIndex(request.files.map((file) => file.program)),
+    request,
   );
+  const messages = checked.diagnostics.flat().map((diagnostic) => diagnostic.message);
   assert.ok(
-    reserved.diagnostics.some((diagnostic) =>
-      diagnostic.message.includes("as in 'let value2 = groups.random'"),
-    ),
-    JSON.stringify(reserved.diagnostics.map((diagnostic) => diagnostic.message)),
+    messages.some((message) => message.includes("as in 'let value2 = xs[0]'")),
+    JSON.stringify(messages),
   );
 });
 
