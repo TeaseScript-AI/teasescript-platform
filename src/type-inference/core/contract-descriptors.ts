@@ -163,7 +163,7 @@ export function levelWalk(
 }
 
 /** A place's collections nested deeper than the slice's facts follow (`levelWalk`). */
-class SliceDepth extends Error {
+export class SliceDepth extends Error {
   public constructor() {
     super("A place of the slice holds collections deeper than its facts follow.");
   }
@@ -298,16 +298,24 @@ export class ContractDescriptors<R> {
     try {
       const lost: ContractLevel[] = [];
       let by: LevelProof["by"] | null = null;
-      const levels = levelWalk(
-        (at) => {
-          const proof = this.reader.level(place, at);
-          by ??= proof.by;
-          if (proof.unfinished) lost.push({ place, path: at });
-          return proof.tags;
-        },
-        path,
-        this.limit,
-      );
+      let levels: (readonly ItemTag[])[];
+      try {
+        levels = levelWalk(
+          (at) => {
+            const proof = this.reader.level(place, at);
+            by ??= proof.by;
+            if (proof.unfinished) lost.push({ place, path: at });
+            return proof.tags;
+          },
+          path,
+          this.limit,
+        );
+      } catch (error) {
+        // (collections nested deeper than the slice follows: the program leaves the slice there, as at an object's or a
+        // collection's depth below, never with the walk's own error; `a.f=[a.f]` failed the compile so, #1646)
+        if (!(error instanceof SliceDepth)) throw error;
+        outside();
+      }
       const admitted = typePlan(typeOfLevels(levels));
       const plan =
         admitted === null

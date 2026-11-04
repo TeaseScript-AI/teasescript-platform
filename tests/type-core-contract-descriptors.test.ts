@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileSourceWithBackend } from "../src/compiler.js";
 import type { InstructionPlan, TypePlan } from "../src/plan/model.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { storeContracts } from "../src/type-inference/core/consumer.js";
 import {
@@ -166,4 +166,40 @@ test("a written contract deeper than the native stack is one node, made on an ex
   }
   assert.equal(levels, depth);
   assert.deepEqual(at, { kind: "integer" });
+});
+
+/** The compile's exit from the slice (its message), or `null` where it compiles. */
+function sliceExit(source: string): string | null {
+  try {
+    compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND);
+    return null;
+  } catch (error) {
+    if (!(error instanceof CandidateOutsideSlice)) throw error;
+    return error.message;
+  }
+}
+
+test("lists that hold themselves leave the slice at its depth instead of failing the compile (#1646)", () => {
+  // (found on main: each nests its lists without end, and the facts' walk threw past the slice's depth and failed the
+  // compile. The facts' walk now leaves the slice at its depth cut, at the read it types, with the sentence the
+  // lowering's depth cut gives and no plan: `l` read in `[l]`, `a.f` read in `[a.f]`)
+  assert.equal(
+    sliceExit('let l=[[1]]\nl=[l]\nl=hostValue\nsay "AFTER"\nexit\n'),
+    "The candidate type analysis does not cover a value whose structure the slice does not follow yet (main.tease, offset 15).",
+  );
+  assert.equal(
+    sliceExit("let a={f:[[1]]}\na.f=[a.f]\na.f=hostValue\nexit\n"),
+    "The candidate type analysis does not cover a value whose structure the slice does not follow yet (main.tease, offset 21).",
+  );
+});
+
+test("a store whose contract's lists nest past the slice's depth leaves the slice at the lowering's depth cut (#1646)", () => {
+  // (found on main by #1652's generated family, 57 of its first 1,300 seeds: `a.q=[a]` nests the lists below `a.q`
+  // without end, and the lowering's walk of the store `a=a.q` threw past the slice's depth from its own `levelWalk`,
+  // failing the compile; it now leaves the slice at that store's value, as its depth cut below an object or a collection
+  // does)
+  assert.equal(
+    sliceExit("let a={}\na=a.q\na.q=[a]\na.f=hostValue\nexit\n"),
+    "The candidate type analysis does not cover a value whose structure the slice does not follow yet (main.tease, offset 11).",
+  );
 });
