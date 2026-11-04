@@ -215,6 +215,27 @@ sx-job submit --commit base=<base> --commit head=<head> --items seeds.txt --targ
   -- bash -c 'bash "$SX_TREE_head/tests/families/seeded.sh" pair'
 ```
 
+## Plans
+
+`plans.mjs` (#1526 phase A's kit, landed from #1678's copy) compiles each source of a set through the core backend on
+two built trees in one worker, in the four modes, and compares the plan, the diagnostics, the trace of every unit the
+compile charges and the questions it asks its answers, exactly; `--demands 16,64` also at those demand allowances,
+`--stops` the held family's settled stops and questions phase. A set is `corpus` (the cases file `CASES_JSON` names),
+`fixture`, `held`, or an area by its name or folder. A run (one compile of a source in a mode on one tree) stalls by the
+runner's rule above: its units past `--units` (4) times its program's allowance, the allowance of the source's natural
+compile for a run at a test allowance; a source past the safety net, `--timeout` (1,800 s), is `uncharged`, never a
+stall. One JSON line per source goes to `--out`, a summary to stdout; `plans.mjs summary <records>...` classifies the
+records (identical, work only, questions, publication, stops) and lists each difference, stall and uncharged source. A
+builder runs the head tree's copy instead of copying a kit, and extends it here where a comparison needs more:
+
+```sh
+sx-job submit --commit base=<base> --commit head=<head> --shards 16 --mem 3G --timeout 1h --campaign <T> \
+  -- bash -c 'node "$SX_TREE_head/tests/families/plans.mjs" "$SX_TREE_base" "$SX_TREE_head" <set> --shard {i}/{n} \
+  --out "$SX_OUT/plans.jsonl" > "$SX_OUT/plans.log"'
+```
+
+For `corpus`, add `--data ~/work/o4-m4-g3/cases.json` and `CASES_JSON=$HOME/work/o4-m4-g3/cases.json` before `node`.
+
 ## The unit limit and the safety net (#1647)
 
 The rule is orchestrator 2's, on the owner's delegation of its threshold (#1647, 2026-11-03). It was measured with this
