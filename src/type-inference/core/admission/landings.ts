@@ -1110,9 +1110,8 @@ function writtenTask(
  * it brings is one range of the call's tape: a record (the call's root, and each longer prefix of a place with
  * listings) keeps its range, its own paths' and each child's, as a listing, where nothing in it was skipped as walked
  * before it opened (`least` against `mark`, both task orders). A task with a listing takes it: its own range, then each
- * child neither walked nor covered, its range; each child it brings is then covered at the taking task's order, and a
- * later step skips it where that order is not before the innermost open record's (R3: what such a record holds
- * already has its paths, so no record is broken).
+ * child neither walked nor covered, its range; each child it brings is then covered at the taking task's order (R3): a
+ * later step skips it as it skips a walked task, at that order, so a cover from before a record opened breaks it.
  */
 function walkLandings(
   admission: Admission,
@@ -1123,7 +1122,7 @@ function walkLandings(
   const { cycleOf, fed, wholes } = inheritance(admission);
   const work = admission.pass.program.work;
   const tape = new LandingTape(work);
-  // (per text its path's index; per task id its order, and per task a take brought its stamp, the taker's order)
+  // (per text its path's index; per task id its order, and per task a take brought its taker's order)
   const out = new Map<string, number>();
   const seen = new Map<string, number>();
   const covered = new Map<string, number>();
@@ -1170,17 +1169,14 @@ function walkLandings(
     // (a path whose last event lies before the innermost record is that record's too: R2)
     else if (tape.last[index]! < records.at(-1)!.start.events) tape.repeat(index);
   };
-  // whether a task is to be skipped here: walked in this call (a skip inside the innermost record, at its order), or
-  // brought by a take inside it
+  // whether a task is to be skipped here: walked in this call, or brought by a take (its paths are all brought), a
+  // skip at its order or its taker's; one before the innermost record opened breaks that record (`least`)
   const skipped = (id: string): boolean => {
+    const at = seen.get(id) ?? covered.get(id);
+    if (at === undefined) return false;
     const record = records.at(-1)!;
-    const at = seen.get(id);
-    if (at !== undefined) {
-      record.least = Math.min(record.least, at);
-      return true;
-    }
-    const stamp = covered.get(id);
-    return stamp !== undefined && stamp >= record.mark;
+    record.least = Math.min(record.least, at);
+    return true;
   };
   // a listing's paths written where `task` writes, each report and child step debited before anything is suppressed
   const take = (listing: Listing, task: LandingTask): void => {
