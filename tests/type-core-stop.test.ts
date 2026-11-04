@@ -99,7 +99,12 @@ import {
   stopSet,
 } from "./helpers/type-core-oracles.js";
 import { plannedContent, runGlobals } from "./helpers/type-core-route.js";
-import { stopProblems, type Globals, type StopRun } from "./helpers/type-core-stop-oracle.js";
+import {
+  operandStandsForNullCheck,
+  stopProblems,
+  type Globals,
+  type StopRun,
+} from "./helpers/type-core-stop-oracle.js";
 
 /*
  * The program stop through the candidate route, in its three layers (the owner's D4, option a′, TABLE r4.54; the
@@ -6306,4 +6311,166 @@ test("a combined stop's label after a call's result is one precise form, made wh
     }
   assert.deepEqual([...new Set(problems)], []);
   assert.ok(relabelled > 0);
+});
+
+/**
+ * A stopped operand check stands for a lost null check only as the lead's ruling (A) on #1688 allows
+ * (`operandStandsForNullCheck`). `null-divisors@4` (`tests/families/messages/1268-astra-r4-growth.mjs`, k = 4) under
+ * demand allowance 32, both reversed modes, at the settled decision stop of `xs`'s element: the natural analysis owes
+ * at each divisor "check that xs.element is not null before /" against `integer` and `number`; the stopped run owes an
+ * operand check there instead, against the same two kinds at the first three divisors, and also against `duration`,
+ * `calendarDuration` and `angle` at the last, where the chain on its left is unknown too. The first three stand for
+ * their null checks, reported apart (`standing check`); the last is a weaker check and stays lost; every operand check
+ * is still its own content, so the extras are unchanged. The predicate's clauses each refuse alone.
+ */
+test("a stopped operand check stands for a lost null check only at its site, excluding null, within its kinds (#1688)", () => {
+  const source = `let xs = [4, null]\nsay 1${" / xs[1]".repeat(4)}\nexit\n`;
+  const c: HeldCase = { name: "null-divisors@4", source, slice: true, values: [] };
+  for (const mode of HELD_MODES.filter((each) => each.name.startsWith("reversed"))) {
+    const stopped = heldRun(c, mode, undefined, 32);
+    assert.ok(stopped.answers.budget.settled, mode.name);
+    const problems = stopProblems({
+      unstopped: heldRun(c, mode),
+      stopped,
+      fitting: [],
+      violating: [],
+    });
+    const of = (prefix: string) =>
+      problems.filter((problem) => problem.startsWith(`${prefix} check `));
+    // (the check a problem names first: a lost check's, or the null check a standing one stands for)
+    const site = (problem: string) => {
+      const text = problem.replace(/^(lost|standing) check /, "").split(" by ")[0]!;
+      const check: Obligation = JSON.parse(text);
+      return `${check.kind} ${check.site.start}-${check.site.end}`;
+    };
+    assert.deepEqual(
+      of("standing").map(site),
+      ["null-check 27-32", "null-check 35-40", "null-check 43-48"],
+      mode.name,
+    );
+    assert.deepEqual(of("lost").map(site), ["null-check 51-56"], mode.name);
+    // (each standing copy names its operand check, which stays an extra)
+    for (const problem of of("standing")) {
+      const operand = problem.slice(problem.indexOf(" by ") + 4);
+      assert.ok(problems.includes(`extra check ${operand}`), problem);
+    }
+  }
+  const nullCheck: Obligation = {
+    kind: "null-check",
+    target: "xs.element",
+    against: ["integer", "number"],
+    on: "check that xs.element is not null before /",
+    site: { file: 0, start: 27, end: 32 },
+    boundary: false,
+  };
+  const operand: Obligation = {
+    kind: "operand",
+    target: "xs[1]",
+    against: ["integer", "number"],
+    on: "check the operand of / when it runs",
+    site: nullCheck.site,
+    boundary: false,
+  };
+  assert.equal(operandStandsForNullCheck(operand, nullCheck), true);
+  assert.equal(operandStandsForNullCheck({ ...operand, against: ["integer"] }, nullCheck), true);
+  const others: Obligation[] = [
+    { ...operand, against: ["integer", "number", "null"] },
+    { ...operand, against: ["integer", "number", "duration"] },
+    { ...operand, site: { file: 0, start: 35, end: 40 } },
+    { ...operand, site: { file: 1, start: 27, end: 32 } },
+    { ...operand, boundary: true },
+    { ...operand, kind: "null-check" },
+  ];
+  for (const other of others)
+    assert.equal(operandStandsForNullCheck(other, nullCheck), false, JSON.stringify(other));
+  assert.equal(operandStandsForNullCheck(operand, { ...nullCheck, kind: "integer-check" }), false);
+  // (the ledger: a standing pair is accounted for, the other checks still compared in order; each operand check stands
+  // for one lost copy: a divisor whose null check and operand check both publish, the null check left out of the
+  // stopped side, its other checks reversed, or its null check published twice on the unstopped side)
+  {
+    const source = "let xs = [4, null, hostValue]\nsay 1 / xs[1]\nrepeat hostOther {}\nexit\n";
+    const run = heldRun({ name: "divisor", source, slice: true, values: [] }, HELD_MODES[0]!);
+    const checks = run.answers.checks;
+    const lost = checks.find(
+      (check) => check.kind === "null-check" && check.on.endsWith(" before /"),
+    )!;
+    assert.ok(checks.some((check) => operandStandsForNullCheck(check, lost)));
+    const publishing = (each: StopRun, list: readonly Obligation[]): StopRun => ({
+      ...each,
+      answers: Object.defineProperty(Object.create(each.answers), "checks", { value: list }),
+    });
+    const others = checks.filter((check) => check !== lost);
+    assert.ok(others.length >= 2);
+    const judged = (unstopped: StopRun, stopped: StopRun) =>
+      stopProblems({ unstopped, stopped, fitting: [], violating: [] }).map((problem) =>
+        problem.replace(/ \{.*$/, ""),
+      );
+    assert.deepEqual(judged(run, publishing(run, others)), ["standing check"]);
+    assert.deepEqual(judged(run, publishing(run, [...others].reverse())), [
+      "standing check",
+      "checks order",
+    ]);
+    assert.deepEqual(judged(publishing(run, [...checks, lost]), publishing(run, others)), [
+      "standing check",
+      "lost check",
+    ]);
+  }
+  // (the same on a divisor whose own text spans two lines: Codex r2 on #1725)
+  {
+    const source = "say 1 / [4,\n null, hostValue][1]\nexit\n";
+    const run = heldRun({ name: "multiline", source, slice: true, values: [] }, HELD_MODES[0]!);
+    const checks = run.answers.checks;
+    const lost = checks.find(
+      (check) => check.kind === "null-check" && check.on.endsWith(" before /"),
+    )!;
+    assert.ok(lost.target.includes("\n"), lost.target);
+    const others = checks.filter((check) => check !== lost);
+    const stopped: StopRun = {
+      ...run,
+      answers: Object.defineProperty(Object.create(run.answers), "checks", { value: others }),
+    };
+    assert.deepEqual(
+      stopProblems({ unstopped: run, stopped, fitting: [], violating: [] }).map((problem) =>
+        problem.replace(/ \{[\s\S]*$/, ""),
+      ),
+      ["standing check"],
+    );
+  }
+  // (its whole site: another end; the operator consumer's own two checks for one operator, never a receiver's check at
+  // the operand's span, another operator's, or a null check whose words name another value; a domain admitting null,
+  // `unknown` too, or one a name cannot compare: Codex r1 on #1725)
+  const unmatched: (readonly [Obligation, Obligation])[] = [
+    [{ ...operand, site: { file: 0, start: 27, end: 33 } }, nullCheck],
+    [
+      operand,
+      { ...nullCheck, on: "check that xs is a list or a dict with .index before the read" },
+    ],
+    [{ ...operand, on: "check the operand of * when it runs" }, nullCheck],
+    [operand, { ...nullCheck, target: "xs" }],
+    [operand, { ...nullCheck, on: "check that xs.element is not null before *" }],
+    [
+      { ...operand, against: ["unknown"] },
+      { ...nullCheck, against: ["unknown"] },
+    ],
+    [operand, { ...nullCheck, against: ["non-null"] }],
+  ];
+  for (const [other, check] of unmatched)
+    assert.equal(operandStandsForNullCheck(other, check), false, JSON.stringify([other, check]));
+  // (a target that is a value's own text over several lines, its words whole)
+  const multiline = "[4,\n null][1]";
+  assert.equal(
+    operandStandsForNullCheck(
+      { ...operand, target: multiline },
+      { ...nullCheck, target: multiline, on: `check that ${multiline} is not null before /` },
+    ),
+    true,
+  );
+  // (a domain holding null stands for nothing, even where the null check's own kinds would hold it: the clause alone)
+  assert.equal(
+    operandStandsForNullCheck(
+      { ...operand, against: ["integer", "null"] },
+      { ...nullCheck, against: ["integer", "number", "null"] },
+    ),
+    false,
+  );
 });
