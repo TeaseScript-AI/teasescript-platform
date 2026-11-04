@@ -337,6 +337,51 @@ test("the classes without a recorded witness, and what no class takes or two wou
     C.classifyRecords(entries([partial])).problems.map((p: { why: string }) => p.why),
     ["a compared row without its four delta components"],
   );
+  // (a completed run without its diagnostics or plan hash beside a failed one, and a plan delta without its paths,
+  // are refused: every field a class, a signature or the duplicate check reads is checked first)
+  const bare = { outcome: "plan", decisionCounts: { ordinary: [1], completion: [1] } };
+  const unfinished = record("unfinished", () => ({
+    legacy: { outcome: "failed", failure: "heap", phase: "analysis" },
+    core: bare,
+    delta: undefined,
+  }));
+  const pathless = record(
+    "pathless",
+    at(0, { delta: { ...SAME, plan: true }, planDelta: { diffs: [{ path: 3 }] } }),
+  );
+  assert.deepEqual(
+    C.classifyRecords(entries([unfinished, pathless])).problems.map((p: { why: string }) => p.why),
+    ["a completed core run without its diagnostics or plan hash", "a plan delta without its paths"],
+  );
+  // (two records of one reading, a check value's members and the plan paths in another order: one result, the same
+  // signatures in either order)
+  const checked = (value: unknown) => ({ ...planned(), checks: { runtimeChecks: [value] } });
+  const variant = (members: Record<string, number>, paths: string[]) =>
+    record(
+      "variant",
+      at(0, {
+        core: checked(members),
+        delta: { ...SAME, checks: true, plan: true },
+        planDelta: { diffs: paths.map((path) => ({ path })) },
+      }),
+    );
+  const first = variant({ a: 1, b: 2 }, ["/a", "/b"]);
+  const second = variant({ b: 2, a: 1 }, ["/b", "/a"]);
+  const inventory = (pair: unknown[]) => {
+    const r = C.classifyRecords(entries(pair));
+    return [
+      r.problems,
+      r.signatures.map((x: { signature: string; pairs: number }) => [x.signature, x.pairs]),
+    ];
+  };
+  assert.deepEqual(inventory([first, second]), [
+    [],
+    [
+      ["CHECKS runtimeChecks", 1],
+      ["PLAN /a,/b", 1],
+    ],
+  ]);
+  assert.deepEqual(inventory([second, first]), inventory([first, second]));
   // (the sharing column: one sharing mode outside its slice, the other planning)
   const mixed = record(
     "mixed",

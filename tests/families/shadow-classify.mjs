@@ -1,10 +1,13 @@
 // node tests/families/shadow-classify.mjs <records.jsonl>... [--expect keys.jsonl]... [--out DIR] [--gate]
 // The S11 classification of the shadow comparison (`shadow.mjs`'s `--out` records, and the S11 readiness research's
 // `results.jsonl`, whose aborted records have no rows). Every route pair (a source in one mode, legacy against core)
-// gets exactly one class of `PAIR_CLASSES`, and every source in each order one class of `SHARING_CLASSES`, the sharing column (#1711: the
-// core with sharing on against off). Every class's rule is tested on every pair: none (unclassified) or two
-// (ambiguous) fail the run. `--expect` names the sources the campaign owes (one JSON object with `key` a line, as
-// `shadow.mjs --manifest` writes them): one without a record is `unavailable`, a record outside them fails the run. A key recorded twice counts once where both records publish the same, else the run fails.
+// gets exactly one class of `PAIR_CLASSES`, and every source in each order one class of `SHARING_CLASSES`, the sharing
+// column (#1711: the core with sharing on against off). A record is read whole first (`readRecord`): one it cannot
+// read (a field a class, a signature, coverage or the duplicate check needs missing or malformed) fails the run.
+// Every class's rule is tested on every pair: none (unclassified) or two (ambiguous) fail the run. `--expect` names
+// the sources the campaign owes (one JSON object with `key` a line, as `shadow.mjs --manifest` writes them): one
+// without a record is `unavailable`, a record outside them, or a line without its key, fails the run. A key recorded
+// twice counts once where both readings are the same, else the run fails. Records are classified as they stream.
 // `--out` gets `pairs.jsonl`, `sharing.jsonl`, `signatures.tsv`, `gate.json` and `gate.md`. Prints the gate table's
 // summary as one JSON line and a verdict line (`gate: green` only where no row is `open` and nothing failed to
 // classify). Exit 1 for unclassified or ambiguous pairs, invalid input or conflicting duplicates; with `--gate`
@@ -319,9 +322,8 @@ export function classify(classes, facts) {
   return { error: ids.length === 0 ? "unclassified" : "ambiguous", ids };
 }
 
-const identityOf = (d) =>
-  JSON.stringify([d.path ?? null, d.code, d.severity, d.span?.start?.offset, d.span?.end?.offset]);
-const stops = (summary) => (summary.diagnostics ?? []).some((d) => d.code === "TSV076");
+const identityOf = (d) => JSON.stringify([d.path ?? null, d.code, d.severity, d.start, d.end]);
+const stops = (route) => (route.diagnostics ?? []).some((d) => d.code === "TSV076");
 
 /** The codes of the diagnostics one route has more often than the other, by identity. */
 function changedCodes(left, right) {
@@ -333,7 +335,7 @@ function changedCodes(left, right) {
   return codes;
 }
 
-/** What a route pair's class reads: its kind, and for a compared pair its delta and changed codes. */
+/** What a route pair's class reads (a row of `readRecord`'s reading): its kind, and for a compared pair its delta and changed codes. */
 export function pairFacts(row) {
   const { legacy: l, core: c } = row;
   if (l.outcome === "failed" || c.outcome === "failed")
@@ -348,19 +350,15 @@ export function pairFacts(row) {
   if (l.outcome === "exception" || c.outcome === "exception") return { kind: "exception" };
   if (c.outcome === "outside" && COMPLETED.has(l.outcome))
     return { kind: "outside", outside: c.outside };
-  if (!COMPLETED.has(l.outcome) || !COMPLETED.has(c.outcome) || row.delta === undefined)
-    return { kind: "unknown" };
+  if (!COMPLETED.has(l.outcome) || !COMPLETED.has(c.outcome)) return { kind: "unknown" };
   const delta = row.delta;
   const differs = Object.values(delta).some(Boolean);
-  const changed = delta.diagnosticIdentity
-    ? changedCodes(l.diagnostics ?? [], c.diagnostics ?? [])
-    : new Set();
-  return { kind: "compared", delta, differs, diag: delta.diagnosticIdentity === true, changed };
+  const changed = delta.diagnosticIdentity ? changedCodes(l.diagnostics, c.diagnostics) : new Set();
+  return { kind: "compared", delta, differs, diag: delta.diagnosticIdentity, changed };
 }
 
 /** The core's publication in one mode as the sharing column compares it. */
-const publication = (c) =>
-  canonical([c.outcome, c.diagnostics ?? null, c.checks ?? null, c.planHash ?? null]);
+const publication = (c) => canonical([c.outcome, c.diagnostics, c.checks, c.planHash]);
 
 /** What the sharing column reads for one order: the core in its shared and its unshared mode. */
 export function sharingFacts(shared, unshared) {
@@ -385,7 +383,7 @@ function components(row, facts) {
     checks: facts.delta.checks,
     plan: facts.delta.plan,
     outcomes: l.outcome === c.outcome ? null : `${l.outcome} -> ${c.outcome}`,
-    frontEnd: c.checks === null || c.checks === undefined,
+    frontEnd: c.checks === null,
   };
 }
 
@@ -406,36 +404,27 @@ function signatures(row, facts) {
   };
   if (facts.delta.diagnosticIdentity) {
     const count = new Map();
-    for (const d of l.diagnostics ?? [])
-      count.set(identityOf(d), (count.get(identityOf(d)) ?? 0) + 1);
-    for (const d of c.diagnostics ?? [])
-      count.set(identityOf(d), (count.get(identityOf(d)) ?? 0) - 1);
-    const removed = (l.diagnostics ?? []).filter((d) => count.get(identityOf(d)) > 0);
-    const added = (c.diagnostics ?? []).filter((d) => count.get(identityOf(d)) < 0);
+    for (const d of l.diagnostics) count.set(identityOf(d), (count.get(identityOf(d)) ?? 0) + 1);
+    for (const d of c.diagnostics) count.set(identityOf(d), (count.get(identityOf(d)) ?? 0) - 1);
+    const removed = l.diagnostics.filter((d) => count.get(identityOf(d)) > 0);
+    const added = c.diagnostics.filter((d) => count.get(identityOf(d)) < 0);
     out.push(`DIAG remove ${codeText(removed)}; add ${codeText(added)}`);
-  } else if (facts.delta.diagnosticText) out.push(`WORDING ${codeText(c.diagnostics ?? [])}`);
+  } else if (facts.delta.diagnosticText) out.push(`WORDING ${codeText(c.diagnostics)}`);
   if (facts.delta.checks) {
     const lc = l.checks ?? {};
     const cc = c.checks ?? {};
     const keys = [...new Set([...Object.keys(lc), ...Object.keys(cc)])]
       .sort()
-      .filter((k) => JSON.stringify(lc[k]) !== JSON.stringify(cc[k]));
+      .filter((k) => lc[k] !== cc[k]);
     out.push(`CHECKS ${keys.join(",")}`);
   }
-  if (facts.delta.plan) {
-    const paths = new Set(
-      (row.planDelta?.diffs ?? []).map((d) => d.path.replace(/\/\d+(?=\/|$)/g, "/[]")),
-    );
-    out.push(
-      `PLAN ${l.outcome !== c.outcome ? "outcome" : [...paths].sort().join(",").slice(0, 700)}`,
-    );
-  }
+  if (facts.delta.plan)
+    out.push(`PLAN ${l.outcome !== c.outcome ? "outcome" : row.planPaths.join(",").slice(0, 700)}`);
   return out;
 }
 
 const MODE = (m) =>
   `${m.reversed ? "reversed" : "source order"}, sharing ${m.unshared ? "off" : "on"}`;
-const sha = (text) => createHash("sha256").update(text).digest("hex");
 
 /** A value as JSON with every object's members in name order, so member order never makes two values differ. */
 const canonical = (value) =>
@@ -445,107 +434,122 @@ const canonical = (value) =>
       : v,
   );
 
-/**
- * What the classification reads of a record (`invalid` checks these fields; nothing else is read), in mode order:
- * two records of one key must agree on it, whatever their timings, origins or member order.
- */
-function readOf(record) {
-  if (record.rows === undefined) return canonical({ aborted: true });
-  const route = (x) => ({
-    outcome: x.outcome,
-    diagnostics: x.diagnostics ?? null,
-    checks: x.checks ?? null,
-    planHash: x.planHash ?? null,
-    outside: x.outside ?? null,
-    failure: x.failure ?? null,
-    phase: x.phase ?? null,
-    decisionCounts: x.decisionCounts ?? null,
-  });
-  const rank = (m) => Number(m.reversed) * 2 + Number(m.unshared);
-  return canonical(
-    [...record.rows]
-      .sort((a, b) => rank(a.mode) - rank(b.mode))
-      .map((r) => [
-        rank(r.mode),
-        route(r.legacy),
-        route(r.core),
-        r.delta ?? null,
-        (r.planDelta?.diffs ?? []).map((d) => d.path),
-      ]),
-  );
-}
-
 const OUTCOMES = new Set(["plan", "rejected", "outside", "exception", "failed"]);
 const DELTA = ["diagnosticIdentity", "diagnosticText", "checks", "plan"];
-const offset = (end) => typeof end?.offset === "number";
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const counts = (list) =>
   list === undefined || (Array.isArray(list) && list.every((n) => Number.isInteger(n)));
 
+/** A route's run as the classification reads it, or the reason it cannot be read (a string). */
+function readRoute(x, route) {
+  if (!isObject(x) || !OUTCOMES.has(x.outcome)) return `a row without a known ${route} outcome`;
+  if (x.decisionCounts !== undefined && !isObject(x.decisionCounts))
+    return `${route} decision counts that are no object`;
+  if (!counts(x.decisionCounts?.ordinary) || !counts(x.decisionCounts?.completion))
+    return `${route} decision counts that are no list of counts`;
+  const read = {
+    outcome: x.outcome,
+    ordinary: (x.decisionCounts?.ordinary ?? []).some(Boolean),
+    completion: (x.decisionCounts?.completion ?? []).some(Boolean),
+  };
+  if (x.outcome === "outside") {
+    if (route === "legacy" || typeof x.outside !== "string")
+      return `an outside ${route} run without its text`;
+    return { ...read, outside: x.outside };
+  }
+  if (x.outcome === "failed") {
+    if (
+      typeof x.failure !== "string" ||
+      !(x.phase === null || x.phase === undefined || typeof x.phase === "string")
+    )
+      return `a failed ${route} run without its failure or phase`;
+    return { ...read, failure: x.failure, phase: x.phase ?? null };
+  }
+  if (x.outcome === "exception") return read;
+  // (a completed run: the whole of each diagnostic as the sharing column compares it, its identity's parts checked)
+  if (!Array.isArray(x.diagnostics) || typeof x.planHash !== "string")
+    return `a completed ${route} run without its diagnostics or plan hash`;
+  const diagnostics = [];
+  for (const d of x.diagnostics) {
+    if (
+      !isObject(d) ||
+      typeof d.code !== "string" ||
+      typeof d.severity !== "string" ||
+      typeof d.span?.start?.offset !== "number" ||
+      typeof d.span?.end?.offset !== "number" ||
+      !(d.path === undefined || d.path === null || typeof d.path === "string")
+    )
+      return `a ${route} diagnostic without its code, severity or offsets`;
+    diagnostics.push({ ...d, start: d.span.start.offset, end: d.span.end.offset });
+  }
+  if (!(x.checks === null || x.checks === undefined || isObject(x.checks)))
+    return `${route} checks that are no object`;
+  return {
+    ...read,
+    diagnostics,
+    // (each check list as canonical text: compared only for equality, whatever its members' order)
+    checks: isObject(x.checks)
+      ? Object.fromEntries(
+          Object.keys(x.checks)
+            .sort()
+            .map((k) => [k, canonical(x.checks[k])]),
+        )
+      : null,
+    planHash: x.planHash,
+  };
+}
+
 /**
- * Why the classifier cannot read a record, or null: every field it reads is checked here, so a record it accepts
- * is classified from complete facts (a missing delta component never reads as equal).
+ * A record as the classification reads it, `{ reading }`, or why it cannot, `{ why }`. Every consumer (the classes,
+ * the sharing column, the components, the signatures, coverage and the duplicate check) reads only the reading, so a
+ * record it accepts is classified from complete facts, and two records with the same reading (`text`) give the same
+ * result whatever their timings, origins, row order or member order.
  */
-function invalid(record) {
-  if (record === null || typeof record !== "object") return "not an object";
-  if (typeof record.key !== "string") return "no key";
-  if (record.rows === undefined) return record.incomplete === true ? null : "no rows";
-  if (!Array.isArray(record.rows) || record.rows.length !== 4) return "not four rows";
-  const modes = new Set();
+export function readRecord(record) {
+  if (!isObject(record)) return { why: "not an object" };
+  if (typeof record.key !== "string") return { why: "no key" };
+  const name = record.name ?? record.origins?.[0]?.name ?? null;
+  if (record.rows === undefined)
+    return record.incomplete === true
+      ? { reading: { key: record.key, name, rows: undefined }, text: canonical({ aborted: true }) }
+      : { why: "no rows" };
+  if (!Array.isArray(record.rows) || record.rows.length !== 4) return { why: "not four rows" };
+  const rows = [];
   for (const row of record.rows) {
     const m = row?.mode;
     if (typeof m?.reversed !== "boolean" || typeof m?.unshared !== "boolean")
-      return "a row without its mode";
-    modes.add(`${m.reversed}/${m.unshared}`);
-    for (const route of ["legacy", "core"]) {
-      const x = row[route];
-      if (!OUTCOMES.has(x?.outcome)) return `a row without a known ${route} outcome`;
-      if (x.outcome === "outside" && (route === "legacy" || typeof x.outside !== "string"))
-        return `an outside ${route} run without its text`;
-      if (x.outcome === "failed" && typeof x.failure !== "string")
-        return `a failed ${route} run without its failure`;
-      if (x.diagnostics !== undefined && !Array.isArray(x.diagnostics))
-        return `${route} diagnostics that are no list`;
-      for (const d of x.diagnostics ?? [])
-        if (typeof d?.code !== "string" || !offset(d.span?.start) || !offset(d.span?.end))
-          return `a ${route} diagnostic without its code or offsets`;
-      if (!counts(x.decisionCounts?.ordinary) || !counts(x.decisionCounts?.completion))
-        return `${route} decision counts that are no list of counts`;
+      return { why: "a row without its mode" };
+    const legacy = readRoute(row.legacy, "legacy");
+    const core = readRoute(row.core, "core");
+    for (const read of [legacy, core]) if (typeof read === "string") return { why: read };
+    const read = { mode: { reversed: m.reversed, unshared: m.unshared }, legacy, core };
+    if (COMPLETED.has(legacy.outcome) && COMPLETED.has(core.outcome)) {
+      if (!isObject(row.delta) || DELTA.some((k) => typeof row.delta[k] !== "boolean"))
+        return { why: "a compared row without its four delta components" };
+      read.delta = Object.fromEntries(DELTA.map((k) => [k, row.delta[k]]));
+      const diffs = row.planDelta?.diffs ?? [];
+      if (!Array.isArray(diffs) || diffs.some((d) => typeof d?.path !== "string"))
+        return { why: "a plan delta without its paths" };
+      read.planPaths = [
+        ...new Set(diffs.map((d) => d.path.replace(/\/\d+(?=\/|$)/g, "/[]"))),
+      ].sort();
     }
-    const compared = COMPLETED.has(row.legacy.outcome) && COMPLETED.has(row.core.outcome);
-    if (compared) {
-      if (DELTA.some((k) => typeof row.delta?.[k] !== "boolean"))
-        return "a compared row without its four delta components";
-      for (const route of ["legacy", "core"])
-        if (!Array.isArray(row[route].diagnostics) || typeof row[route].planHash !== "string")
-          return `a compared ${route} run without its diagnostics or plan hash`;
-    }
+    rows.push(read);
   }
-  return modes.size === 4 ? null : "a mode twice";
+  const rank = ({ mode }) => Number(mode.reversed) * 2 + Number(mode.unshared);
+  rows.sort((a, b) => rank(a) - rank(b));
+  if (rows.some((r, i) => rank(r) !== i)) return { why: "a mode twice" };
+  return { reading: { key: record.key, name, rows }, text: canonical(rows) };
 }
 
-/** The classification of records (each `{ record, bytes }`) against the expected keys (null: not checked). */
-export function classifyRecords(entries, expected = null) {
+/**
+ * A classification that takes records one at a time (`add({ record, bytes, where })`: a source is classified when its
+ * first record arrives, and only its reading's hash is kept, so a campaign of any size streams) and ends with
+ * `finish(expected keys, or null where not checked)`.
+ */
+export function classifier() {
   const problems = [];
   const byKey = new Map();
-  let duplicates = 0;
-  for (const { record, bytes, where } of entries) {
-    const why = invalid(record);
-    if (why !== null) {
-      problems.push({ problem: "invalid", where, why });
-      continue;
-    }
-    const seen = byKey.get(record.key);
-    if (seen === undefined) byKey.set(record.key, { record, bytes, read: readOf(record) });
-    else {
-      duplicates += 1;
-      if (seen.read !== readOf(record))
-        problems.push({ problem: "conflicting duplicate", key: record.key, where });
-    }
-  }
-  if (expected !== null)
-    for (const key of byKey.keys())
-      if (!expected.has(key)) problems.push({ problem: "outside the manifest", key });
-
   const rows = new Map();
   const row = (classes, id) => {
     if (!rows.has(id)) {
@@ -573,10 +577,10 @@ export function classifyRecords(entries, expected = null) {
   const sharing = [];
   const sigs = new Map();
   const totals = {
-    sources: byKey.size,
+    sources: 0,
     pairs: 0,
     compared: 0,
-    duplicates,
+    duplicates: 0,
     identity: 0,
     wording: 0,
     text: 0,
@@ -590,7 +594,7 @@ export function classifyRecords(entries, expected = null) {
   };
   const place = (record, facts, classes, list, extra) => {
     const result = classify(classes, facts);
-    const name = record.name ?? record.origins?.[0]?.name ?? null;
+    const name = record.name ?? null;
     if (result.error !== undefined) {
       problems.push({ problem: result.error, key: record.key, name, ...extra, ids: result.ids });
       return null;
@@ -599,8 +603,9 @@ export function classifyRecords(entries, expected = null) {
     return result.id;
   };
 
-  for (const { record, bytes } of byKey.values()) {
-    const name = record.name ?? record.origins?.[0]?.name ?? null;
+  /** One source's classes, from its reading. */
+  const classifyOne = (record, bytes) => {
+    const { name } = record;
     if (record.rows === undefined) {
       for (let mode = 0; mode < 4; mode += 1) {
         const id = place(record, { kind: "aborted" }, PAIR_CLASSES, pairs, { mode });
@@ -621,14 +626,13 @@ export function classifyRecords(entries, expected = null) {
           witness(r, record.key, name, bytes, null);
         }
       totals.pairs += 4;
-      continue;
+      return;
     }
     const published = [];
     for (const each of record.rows) {
       totals.pairs += 1;
-      const decisions = each.core.decisionCounts;
-      if ((decisions?.ordinary ?? []).some(Boolean)) totals.ordinaryRecordRuns += 1;
-      if ((decisions?.completion ?? []).some(Boolean)) totals.completionRecordRuns += 1;
+      if (each.core.ordinary) totals.ordinaryRecordRuns += 1;
+      if (each.core.completion) totals.completionRecordRuns += 1;
       const facts = pairFacts(each);
       const mode = MODE(each.mode);
       const id = place(record, facts, PAIR_CLASSES, pairs, {
@@ -686,71 +690,106 @@ export function classifyRecords(entries, expected = null) {
       r.sources.add(record.key);
       witness(r, record.key, name, bytes, reversed ? "reversed" : "source order");
     }
-  }
-  if (expected !== null)
-    for (const key of expected)
-      if (!byKey.has(key)) {
-        const record = { key };
-        for (let mode = 0; mode < 4; mode += 1)
-          if (place(record, { kind: "unavailable" }, PAIR_CLASSES, pairs, { mode }) !== null) {
-            const r = row(PAIR_CLASSES, "unavailable");
-            r.pairs += 1;
-            r.sources.add(key);
-            witness(r, key, null, 0, null);
-          }
-        for (const reversed of [false, true])
-          if (
-            place(record, { kind: "uncompared" }, SHARING_CLASSES, sharing, { reversed }) !== null
-          ) {
-            const r = row(SHARING_CLASSES, "uncompared");
-            r.pairs += 1;
-            r.sources.add(key);
-          }
-        totals.pairs += 4;
-        totals.unavailableSources = (totals.unavailableSources ?? 0) + 1;
-      }
+  };
 
-  const table = (classes) =>
-    classes.map((each) => {
-      const r = rows.get(each.id);
-      return {
-        id: each.id,
-        state: each.state,
-        pairs: r?.pairs ?? 0,
-        sources: r?.sources.size ?? 0,
-        witnesses: r?.witnesses ?? [],
-        ...(r !== undefined && r.texts.size > 0 ? { texts: Object.fromEntries(r.texts) } : {}),
-        rule: each.rule,
-        authority: each.authority,
-      };
-    });
-  const pairTable = table(PAIR_CLASSES);
-  const sharingTable = table(SHARING_CLASSES);
-  const coverage = {
-    state: totals.ordinaryRecordRuns > 0 && totals.completionRecordRuns > 0 ? "pass" : "open",
-    ordinaryRecordRuns: totals.ordinaryRecordRuns,
-    completionRecordRuns: totals.completionRecordRuns,
+  const add = ({ record: given, bytes, where }) => {
+    const { why, reading: record, text } = readRecord(given);
+    if (why !== undefined) {
+      problems.push({ problem: "invalid", where, why });
+      return;
+    }
+    const hash = createHash("sha256").update(text).digest("hex");
+    const seen = byKey.get(record.key);
+    if (seen !== undefined) {
+      totals.duplicates += 1;
+      if (seen !== hash)
+        problems.push({ problem: "conflicting duplicate", key: record.key, where });
+      return;
+    }
+    byKey.set(record.key, hash);
+    totals.sources += 1;
+    classifyOne(record, bytes);
   };
-  const open = [
-    ...pairTable.filter((r) => r.state === "open" && r.pairs > 0).map((r) => r.id),
-    ...sharingTable.filter((r) => r.state === "open" && r.pairs > 0).map((r) => `sharing ${r.id}`),
-    ...(coverage.state === "open" ? ["coverage"] : []),
-    ...(expected === null ? ["unavailable (no --expect)"] : []),
-  ];
-  const failed = problems.length > 0;
-  return {
-    version: VERSION,
-    verdict: failed ? "failed" : open.length === 0 ? "green" : "open",
-    open,
-    problems,
-    totals,
-    coverage,
-    pairs: pairTable,
-    sharing: sharingTable,
-    signatures: [...sigs.values()].map((s) => ({ ...s, sources: s.sources.size })),
-    perPair: pairs,
-    perOrder: sharing,
+
+  const finish = (expected = null) => {
+    if (expected !== null)
+      for (const key of byKey.keys())
+        if (!expected.has(key)) problems.push({ problem: "outside the manifest", key });
+    if (expected !== null)
+      for (const key of expected)
+        if (!byKey.has(key)) {
+          const record = { key };
+          for (let mode = 0; mode < 4; mode += 1)
+            if (place(record, { kind: "unavailable" }, PAIR_CLASSES, pairs, { mode }) !== null) {
+              const r = row(PAIR_CLASSES, "unavailable");
+              r.pairs += 1;
+              r.sources.add(key);
+              witness(r, key, null, 0, null);
+            }
+          for (const reversed of [false, true])
+            if (
+              place(record, { kind: "uncompared" }, SHARING_CLASSES, sharing, { reversed }) !== null
+            ) {
+              const r = row(SHARING_CLASSES, "uncompared");
+              r.pairs += 1;
+              r.sources.add(key);
+            }
+          totals.pairs += 4;
+          totals.unavailableSources = (totals.unavailableSources ?? 0) + 1;
+        }
+
+    const table = (classes) =>
+      classes.map((each) => {
+        const r = rows.get(each.id);
+        return {
+          id: each.id,
+          state: each.state,
+          pairs: r?.pairs ?? 0,
+          sources: r?.sources.size ?? 0,
+          witnesses: r?.witnesses ?? [],
+          ...(r !== undefined && r.texts.size > 0 ? { texts: Object.fromEntries(r.texts) } : {}),
+          rule: each.rule,
+          authority: each.authority,
+        };
+      });
+    const pairTable = table(PAIR_CLASSES);
+    const sharingTable = table(SHARING_CLASSES);
+    const coverage = {
+      state: totals.ordinaryRecordRuns > 0 && totals.completionRecordRuns > 0 ? "pass" : "open",
+      ordinaryRecordRuns: totals.ordinaryRecordRuns,
+      completionRecordRuns: totals.completionRecordRuns,
+    };
+    const open = [
+      ...pairTable.filter((r) => r.state === "open" && r.pairs > 0).map((r) => r.id),
+      ...sharingTable
+        .filter((r) => r.state === "open" && r.pairs > 0)
+        .map((r) => `sharing ${r.id}`),
+      ...(coverage.state === "open" ? ["coverage"] : []),
+      ...(expected === null ? ["unavailable (no --expect)"] : []),
+    ];
+    const failed = problems.length > 0;
+    return {
+      version: VERSION,
+      verdict: failed ? "failed" : open.length === 0 ? "green" : "open",
+      open,
+      problems,
+      totals,
+      coverage,
+      pairs: pairTable,
+      sharing: sharingTable,
+      signatures: [...sigs.values()].map((s) => ({ ...s, sources: s.sources.size })),
+      perPair: pairs,
+      perOrder: sharing,
+    };
   };
+  return { add, finish };
+}
+
+/** The classification of records (each `{ record, bytes, where }`) against the expected keys (null: not checked). */
+export function classifyRecords(entries, expected = null) {
+  const c = classifier();
+  for (const entry of entries) c.add(entry);
+  return c.finish(expected);
 }
 
 /** The gate table as markdown: one line a class with pairs, sources, state and its first witness. */
@@ -813,15 +852,19 @@ async function main(argv) {
     );
   if (gate && expects.length === 0)
     refused("--gate needs --expect: the gate counts unavailable sources");
-  const entries = [];
+  const classes = classifier();
   const unreadable = [];
   for (const file of files)
-    for await (const { line, where } of jsonLines(file))
+    for await (const { line, where } of jsonLines(file)) {
+      let record;
       try {
-        entries.push({ record: JSON.parse(line), bytes: line.length, where });
+        record = JSON.parse(line);
       } catch (error) {
         unreadable.push({ problem: "invalid", where, why: error.message });
+        continue;
       }
+      classes.add({ record, bytes: line.length, where });
+    }
   let expected = null;
   if (expects.length > 0) {
     expected = new Set();
@@ -836,7 +879,7 @@ async function main(argv) {
           unreadable.push({ problem: "invalid", where, why: error.message });
         }
   }
-  const result = classifyRecords(entries, expected);
+  const result = classes.finish(expected);
   result.problems.unshift(...unreadable);
   if (unreadable.length > 0) result.verdict = "failed";
   const { perPair, perOrder, signatures: sigs, ...gateTable } = result;
