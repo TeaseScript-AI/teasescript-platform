@@ -267,19 +267,32 @@ test("a declined summary includes none of its sources; a taken one includes them
     }
 });
 
-test("a snapshot charges each edge it follows", () => {
-  for (const mode of MODES) {
-    const costs: number[] = [];
+test("a snapshot charges each slot it visits, each inclusion it follows and each edge's qualifiers", () => {
+  // (the charge counted from the published flows the snapshot walks: a slot visited one step, an inclusion followed
+  // one unit and one per qualifier of its own, an edge kept one per qualifier of its list; each slot of these
+  // sources reached once)
+  for (const mode of MODES)
     for (const n of [8, 32]) {
       const source = `${Array.from({ length: n }, (_, at) => `let a${at} = hostValue`).join("\n")}\nlet b = a0\n${Array.from({ length: n - 1 }, (_, at) => `b = a${at + 1}`).join("\n")}\nsay "\${b}"\nexit\n`;
       const { pass } = analysed(source, mode, true);
+      const place = pass.program.places.findIndex((at) => at?.label === "b");
+      const start = `c|${keyOf(place, [])}`;
+      let expected = 0;
+      const todo = [{ slot: start, depth: 0 }];
+      for (let next = todo.pop(); next !== undefined; next = todo.pop()) {
+        expected += 1;
+        for (const inclusion of pass.solver.flowOf(next.slot) ?? []) {
+          expected += 1 + inclusion.qualifiers.length;
+          const depth = next.depth + inclusion.qualifiers.length;
+          if (inclusion.slot!.startsWith("c|")) expected += depth;
+          else todo.push({ slot: inclusion.slot!, depth });
+        }
+      }
       const before = pass.program.work.total;
       const found = edges(pass, "b");
       assert.ok(typeof found !== "string" && found.length === n, `${String(found)}`);
-      costs.push(pass.program.work.total - before);
+      assert.equal(pass.program.work.total - before, expected, source);
     }
-    assert.ok(costs[1]! - costs[0]! >= 24, `${costs.join(" ")}`);
-  }
 });
 
 test("a cycle of copies publishes each member's edges once its component is solved", () => {
