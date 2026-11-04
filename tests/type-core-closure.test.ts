@@ -24,6 +24,7 @@ import {
   stopCensus,
   type StopRecord,
 } from "./helpers/type-core-intervals.js";
+import { decisionRecords, inMode, MODES } from "./helpers/type-core-oracles.js";
 
 /*
  * The receiving closure (#1526 phase C steps 1–5, TABLE r4.308; Sol's round 2 §1 and §5): a settled pass that started
@@ -772,4 +773,60 @@ test("a decision made after a cell read it unmade invalidates that cell and what
   closure.close();
   assert.ok(!closure.open);
   assert.deepEqual(closure.made("decision", "v"), []);
+});
+
+test("the public route's receiving completion makes the decisions the analysis's own completion makes (#1685's debit probe)", () => {
+  // (Astra's witness on #1685: at demand allowance 16 a second pass settles and its receiving completion decides)
+  const source = [
+    "let t:integer=1",
+    "let r0={same:t,nest:{same:t}}",
+    "let r1={same:t,nest:{same:t}}",
+    "let raw={same:1,nest:{same:hostValue}}",
+    "let a=[r0,r1,r0,r1,raw]",
+    "let b=[raw,r1,r0]",
+    "repeat a[0].nest.same {}",
+    "repeat b[0].nest.same {}",
+    "exit",
+    "",
+  ].join("\n");
+  const files = [{ path: "main.tease", source }];
+  const request = coreRequest(files, GLOBALS);
+  assert.ok(request !== null);
+  const own = ({ allowance: _, ...rest }: { readonly allowance: number }) => rest;
+  for (const mode of MODES) {
+    const at = JSON.stringify(mode);
+    const routed = decisionRecords(files, GLOBALS, {
+      mode,
+      demand: 16,
+      require: ["ordinary", "completion"],
+    });
+    const answers: Answers = inMode(mode, () =>
+      withTestDemandAllowance(16, () => completedCore(request)),
+    );
+    assert.deepEqual(routed.ordinary.at(-1), answers.budget.decisions, at);
+    // (the same decisions, units and stops; what was left of the program's allowance is less after the route's questions)
+    assert.equal(routed.completion.length, 1, at);
+    assert.deepEqual(
+      routed.completion[0]!.map(own),
+      answers.budget.closure!.decisions.map(own),
+      at,
+    );
+  }
+  // (a compile inside one, as a source's getter can start, is refused: its records would be the outer compile's too)
+  const nested = {
+    path: "main.tease",
+    get source() {
+      decisionRecords(files, GLOBALS, { demand: 16 });
+      return "let x = 1\nexit\n";
+    },
+  };
+  assert.throws(() => decisionRecords([nested], GLOBALS), /already recording a compile/);
+  // (a compile with no completion reads no completion record: required, it fails rather than compare nothing)
+  assert.throws(
+    () =>
+      decisionRecords([{ path: "main.tease", source: "let x = 1\nexit\n" }], GLOBALS, {
+        require: ["completion"],
+      }),
+    /No completion decision record was read/,
+  );
 });
