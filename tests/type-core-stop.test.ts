@@ -5607,44 +5607,62 @@ test("a read its one holder's source answers stops where main's does at a small 
 
 /**
  * The owner's one accepted relabel at a combined stop (TABLE r4.322, #1595), each of its three conditions alone refusing
- * it: a stopped check under the natural analysis's more precise label is accepted for the reference's under the generic
- * one; refused where the natural analysis does not owe it (1), where the check, its location or its expected types differ
- * (2), and where anything but the label differs, in the words or elsewhere (3).
+ * it: a stopped check under a more precise key step than the reference's (a dict's `entry`, a derived list's index text)
+ * is accepted for the reference's under the generic `element`, where the natural analysis names the key so, at the key or
+ * below it, though it owes another check there; refused where the natural analysis names the key otherwise (1), where the
+ * check, its location or its expected types differ (2), and where anything but the key step differs: the words, or
+ * another step of the label such as a parameter's prefix (3).
  */
 test("a combined stop's more precise label is accepted only as the owner's three conditions allow (#1595)", () => {
   const site = { file: 0, start: 40, end: 49 };
   const u: Obligation = {
-    kind: "copy-type",
+    kind: "integer-check",
     target: "build.result.element",
     against: ["integer"],
-    on: "validate external data entering build.result.element against integer",
+    on: "check that the repeat count is a whole number when it runs",
     site,
-    boundary: true,
+    boundary: false,
   };
-  const x: Obligation = {
+  const x: Obligation = { ...u, target: "build.result.entry" };
+  // (the natural analysis's own check there is another: it validates the key's external data)
+  assert.equal(provenRelabel(u, [x], ["build.result.entry"]), x);
+  assert.equal(provenRelabel(u, [x], ["build.result.entry.f"]), x);
+  const derived: Obligation = {
     ...u,
-    target: "build.result.entry",
-    on: "validate external data entering build.result.entry against integer",
+    target: "xs.element.values",
+    on: "check that xs.element.values is a list or a dict with .index before the read",
   };
-  const natural = (...checks: Obligation[]) =>
-    new Set(checks.map((check) => JSON.stringify(check)));
-  assert.equal(provenRelabel(u, [x], natural(x)), x);
-  // (1) the natural analysis spells it otherwise, or not at all: no proven type behind the label
-  assert.equal(provenRelabel(u, [x], natural(u)), undefined);
+  const indexed: Obligation = {
+    ...derived,
+    target: "xs[0].values",
+    on: "check that xs[0].values is a list or a dict with .index before the read",
+  };
+  assert.equal(provenRelabel(derived, [indexed], ["xs[0].values[0]"]), indexed);
+  // (1) the natural analysis names the key otherwise, or not at all: no proven type behind the label
+  for (const natural of [["build.result.element"], ["build.resultant.entry"], []])
+    assert.equal(provenRelabel(u, [x], natural), undefined, JSON.stringify(natural));
   // (2) another check, location or expected types under the label
   for (const other of [
-    { ...x, kind: "integer-check" as const },
+    { ...x, kind: "null-check" as const },
     { ...x, site: { ...site, end: 50 } },
-    { ...x, boundary: false },
+    { ...x, boundary: true },
     { ...x, against: ["number" as const] },
   ])
-    assert.equal(provenRelabel(u, [other], natural(other)), undefined, JSON.stringify(other));
-  // (3) words that differ beyond the label
-  const worded = {
-    ...x,
-    on: "validate external data entering build.result.entry against a whole number",
+    assert.equal(provenRelabel(u, [other], [other.target]), undefined, JSON.stringify(other));
+  // (3) words that differ beyond the label, or a label that differs beyond its key step
+  const worded = { ...x, on: "check that the repeat count is a whole number" };
+  assert.equal(provenRelabel(u, [worded], [worded.target]), undefined);
+  const prefixed: Obligation = {
+    ...u,
+    target: "show.xs.values",
+    on: "check that show.xs.values is a list or a dict with .index before the read",
   };
-  assert.equal(provenRelabel(u, [worded], natural(worded)), undefined);
+  const unprefixed: Obligation = {
+    ...prefixed,
+    target: "xs.values",
+    on: "check that xs.values is a list or a dict with .index before the read",
+  };
+  assert.equal(provenRelabel(prefixed, [unprefixed], ["xs.values"]), undefined);
 });
 
 /**

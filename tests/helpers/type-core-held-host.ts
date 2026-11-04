@@ -1088,31 +1088,59 @@ export function combinedAnalyses(
   };
 }
 
+/** A check's target as its steps: names, and an index's own text (`xs[0].values` is `xs`, `[0]`, `values`). */
+const targetSteps = (target: string): string[] => target.match(/\[[^\]]*\]|[^.[]+/g) ?? [];
+
 /**
- * The owner's one accepted difference at a combined stop (TABLE r4.322, #1595): the stopped analysis owes the
- * reference's check `u` under a more precise label than the reference's, which ran out of demand reading the key, where
- * all three hold for the stopped check `x`:
- * 1. the label follows from a proven type: the natural analysis (no demand, no stop) owes `x` exactly, label included;
+ * Whether `x` names what `u` names by key steps alone (#1595): the same steps but where `u`'s generic `element` is a
+ * dictionary's `entry` or a derived list's own index text, at least one so; never a prefix or any other step changed.
+ */
+function keyStepsAlone(u: string, x: string): boolean {
+  const [from, to] = [targetSteps(u), targetSteps(x)];
+  return (
+    from.length === to.length &&
+    from.some((step, i) => step !== to[i]) &&
+    from.every(
+      (step, i) =>
+        step === to[i] || (step === "element" && (to[i] === "entry" || to[i]!.startsWith("["))),
+    )
+  );
+}
+
+/**
+ * The owner's one accepted difference at a combined stop (TABLE r4.322, #1595, the lead's rulings on its HEAD 0): the
+ * stopped analysis owes the reference's check `u` under a more precise label than the reference's, which ran out of
+ * demand reading the key, where all three hold for the stopped check `x`:
+ * 1. the label follows from a proven type: the natural analysis (no demand, no stop) names the key with that label, a
+ *    check of its own targeting it or a path below it. It need not owe `x` itself: knowing more, it owes another check
+ *    at the key;
  * 2. the check, its location and its expected types are identical: kind, whole site, boundary and `against`;
- * 3. no other difference is ignored: every other part equal, and the words `u`'s with only its label replaced by `x`'s.
- * The stopped check accepted, else `undefined`.
+ * 3. no other difference is ignored: the label differs by key steps alone (`keyStepsAlone`), the words are `u`'s with
+ *    only the label replaced, and every other part is equal.
+ * The stopped check accepted, else `undefined`. `natural` is the natural analysis's check targets.
  */
 export function provenRelabel(
   u: Obligation,
   owed: readonly Obligation[],
-  natural: ReadonlySet<string>,
+  natural: readonly string[],
 ): Obligation | undefined {
   return owed.find(
     (x) =>
       x.target !== u.target &&
       // (1)
-      natural.has(JSON.stringify(x)) &&
+      natural.some(
+        (target) =>
+          target === x.target ||
+          target.startsWith(`${x.target}.`) ||
+          target.startsWith(`${x.target}[`),
+      ) &&
       // (2)
       x.kind === u.kind &&
       siteKey(x.site) === siteKey(u.site) &&
       x.boundary === u.boundary &&
       JSON.stringify(x.against) === JSON.stringify(u.against) &&
       // (3) (beside (2)'s parts, every other part equal: the words with only the label replaced)
+      keyStepsAlone(u.target, x.target) &&
       x.on === u.on.split(u.target).join(x.target) &&
       JSON.stringify({
         ...u,
@@ -1157,6 +1185,7 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
   const owed = [...stopped.checks, ...marks.map((mark) => mark.obligation)];
   const owedTexts = new Set(owed.map((check) => JSON.stringify(check)));
   const naturalTexts = new Set(natural.checks.map((check) => JSON.stringify(check)));
+  const naturalTargets = natural.checks.map((check) => check.target);
   let parsed: ReturnType<typeof syntaxOf> | undefined;
   const syntax = (): ReturnType<typeof syntaxOf> => (parsed ??= syntaxOf(reference));
   const classOf = (u: Obligation): "a" | "w" | "z" | "relabelled" | readonly string[] | null => {
@@ -1221,7 +1250,7 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
       )
     )
       return "z";
-    return provenRelabel(u, owed, naturalTexts) === undefined ? unanswered : "relabelled";
+    return provenRelabel(u, owed, naturalTargets) === undefined ? unanswered : "relabelled";
   };
   const checks = new Map<string, "a" | "w" | "z">();
   const coarse = { checks: new Map<string, readonly string[]>(), records: new Set<string>() };
