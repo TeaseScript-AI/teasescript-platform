@@ -5649,11 +5649,13 @@ test("a combined stop's more precise label is accepted only as the owner's three
 
 /**
  * After a program stop a label's step is spelled from a proof the stopped analysis holds (`labelDomain`, the lead's ruling
- * on #1595's HEAD 0): never from an open retained answer. A host value's binding, whose admitted type every kind fits,
- * read at every settled stop of a real run where its contract asked then is unsettled, four modes: no label domain.
+ * on #1595's HEAD 0): never from an open retained answer. A copy of an element of a list written without its element's
+ * type, which every kind fits, read at every settled stop of a real run where its contract asked then is unsettled,
+ * four modes: no label domain there.
  */
 test("a label's step after a stop never rests on an open retained answer (#1595)", () => {
-  const source = 'let x = hostValue\nsay "BEFORE"\nsay "${x}"\nsay "AFTER"\nexit\n';
+  const source =
+    'let a: list = [hostValue]\nlet b = a[0]\nsay "BEFORE"\nsay "${b}"\nsay "AFTER"\nexit\n';
   const c: HeldCase = { name: "an open retained answer", source, slice: true, values: [] };
   const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!;
   let open = 0;
@@ -5672,19 +5674,21 @@ test("a label's step after a stop never rests on an open retained answer (#1595)
       }
       if (!walk!.settled) continue;
       const place = walk!.pass.program.places.find(
-        (each) => each.kind.kind === "binding" && each.kind.name === "x",
+        (each) => each.kind.kind === "binding" && each.kind.name === "b",
       )!.id;
       const { work } = walk!.pass.program;
       work.apart(() => {
         const contract = walk!.run(walk!.pass.contract.contractOf(keyOf(place, [])));
         const retained = walk!.admission.retained(place, []);
-        if (contract.some((item) => item.tag === "unknown") && retained?.tags.includes("unknown"))
-          open += 1;
-        const found = labelDomain(walk!, keyOf(place, []));
-        assert.ok(
-          found === null || !found.kinds.some((item) => item.tag === "unknown"),
-          `${mode.name} @${allowance}: ${JSON.stringify(found)}`,
-        );
+        if (
+          !contract.some(
+            (item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0,
+          ) ||
+          retained?.tags.includes("unknown") !== true
+        )
+          return;
+        open += 1;
+        assert.equal(labelDomain(walk!, keyOf(place, [])), null, `${mode.name} @${allowance}`);
       });
     }
   // (the source reaches the open answer: the test is not vacuous)
