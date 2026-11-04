@@ -2024,6 +2024,28 @@ test("an askChoice of more than one type errs where its type would be inferred, 
         `${JSON.stringify(mode)} ${unrelated}`,
       );
     }
+  // (where no read of a non-mixed choice settles, the stage's and the publication's both stopped, the fact is the honest
+  // unproved, its message the same; at the first allowance where a read settles, no fact: the lead's amendment of ruling
+  // A on #1660)
+  const unsettled = "let xs = []\nrepeat xs.get(0, default: askChoice 1, 2) {}\nexit\n";
+  for (const mode of MODES) {
+    const request = coreRequest(main(unsettled));
+    assert.ok(request !== null);
+    const stopped = inMode(mode, () => withTestDemandAllowance(1, () => analyseCore(request)));
+    const text = messageSource([unsettled], stopped.diagnostics);
+    const facts = stopped.diagnostics.filter((d) => "keeps" in d && d.keeps === "unproved");
+    assert.ok(facts.length > 0, JSON.stringify(mode));
+    for (const diagnostic of facts) {
+      if (!("keeps" in diagnostic)) continue;
+      const { keeps: _, ...without } = diagnostic;
+      assert.equal(coreMessage(diagnostic, text), coreMessage(without, text), JSON.stringify(mode));
+    }
+    const settled = inMode(mode, () => withTestDemandAllowance(4, () => analyseCore(request)));
+    assert.ok(
+      settled.diagnostics.every((d) => !("keeps" in d)),
+      `${JSON.stringify(mode)} settles at 4`,
+    );
+  }
   // (and where the warned text holds the mixed choice, the subject not found is unproved: the published fact says so)
   const holding = `let xs = []\nrepeat xs.get(0, default: ${S}) {}\nexit\n`;
   for (const mode of MODES) {
