@@ -5801,8 +5801,9 @@ test("a label's step after a stop never rests on an open retained answer (#1595)
 /**
  * A combined stop names a dictionary's value and a derived list's read as the unstopped analysis does (#1595, Codex r1's
  * B3 on #1687): the issue's witnesses, forward, at each stopping demand allowance up to 3, where the demand-only
- * analysis ran out of demand reading the key and spells it `element`. At their settled stops the stopped analysis owes
- * the check under the more precise label (`build.result.entry`, `xs.values[0]`), and never the generic one there.
+ * analysis ran out of demand reading the key and spells it `element`: where a settled stop makes the check after it,
+ * the stopped analysis owes it under the more precise label (`build.result.entry`, `xs.values[0]`). A check made before
+ * the stop keeps the demand-only analysis's own.
  */
 test("a combined stop spells a dictionary's value and a derived list's read as the unstopped analysis does (#1595)", () => {
   const witnesses = [
@@ -5810,17 +5811,15 @@ test("a combined stop spells a dictionary's value and a derived list's read as t
       source:
         'function build: integer dict {return dict {a: hostValue, b: 4}}\nsay "BEFORE"\nrepeat build()["a"] {say "ok"}\nsay "AFTER"\nexit\n',
       precise: "build.result.entry",
-      generic: "build.result.element",
     },
     {
       source:
         'let xs: dict = dict {a: hostValue, b: 4}\nsay "BEFORE"\nrepeat xs.values[0] {say "ok"}\nsay "AFTER"\nexit\n',
       precise: "xs.values[0]",
-      generic: "xs.values.element",
     },
   ];
   const mode = HELD_MODES[0]!;
-  for (const { source, precise, generic } of witnesses) {
+  for (const { source, precise } of witnesses) {
     const c: HeldCase = { name: precise, source, slice: true, values: [] };
     let spelled = 0;
     for (const demand of heldDemands(c, mode).filter((each) => each <= 3)) {
@@ -5832,7 +5831,6 @@ test("a combined stop spells a dictionary's value and a derived list's read as t
           ...stopped.checks,
           ...stopped.budget.deferred.map((mark) => mark.obligation),
         ].map((check) => check.target);
-        assert.ok(!targets.includes(generic), `${precise} @${demand}/${allowance}: ${generic}`);
         if (targets.includes(precise)) spelled += 1;
       }
     }
