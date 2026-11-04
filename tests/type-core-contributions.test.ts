@@ -530,8 +530,9 @@ test("every producing read in the contract layer passes a flow, follows an inclu
   const files = project.addSourceFilesAtPaths(
     join(process.cwd(), "src/type-inference/core/contract/*.ts"),
   );
-  // (a fixture beside the layer, in memory: Astra r1's optional callback (a read with no sink, which the check must
-  // report) and its control with a sink (which it must accept))
+  // (a fixture beside the layer, in memory: Astra r1's optional callback and Codex r9's whose `Work` is an
+  // intersection inside the union (reads with no sink, which the check must report), each with its control with a
+  // sink (which it must accept))
   const fixture = project.createSourceFile(
     join(process.cwd(), "src/type-inference/core/contract/gate-fixture.ts"),
     [
@@ -546,6 +547,12 @@ test("every producing read in the contract layer passes a flow, follows an inclu
       "  if (pending) return yield* pending;",
       "  const passed = read?.(place, flow);",
       "  if (passed) return yield* passed;",
+      "  type Tagged = (value: PlaceId, sink?: FlowSink | null) => Work<readonly Item[]> & { tag?: string };",
+      "  const tagged: Tagged | undefined = host ? contract.contractOfValue.bind(contract) : undefined;",
+      "  const mixed = tagged?.(place);",
+      "  if (mixed) return yield* mixed;",
+      "  const sunk = tagged?.(place, flow);",
+      "  if (sunk) return yield* sunk;",
       "  return [];",
       "}",
     ].join("\n"),
@@ -593,9 +600,10 @@ test("every producing read in the contract layer passes a flow, follows an inclu
     for (let at = node.parent; at !== undefined; at = at.parent) if (functionLike(at)) return at;
     return null;
   };
-  // (a type's constituents: a union's or an intersection's, as an optional call's `Work | undefined`)
+  // (a type's constituents, through nested unions and intersections: an optional call's `Work | undefined`, a
+  // `Work & {…}` inside one)
   const parts = (type: ts.Type): readonly ts.Type[] =>
-    type.isUnion() || type.isIntersection() ? type.types : [type];
+    type.isUnion() || type.isIntersection() ? type.types.flatMap(parts) : [type];
   const original = (symbol: ts.Symbol | undefined): ts.Symbol | undefined =>
     symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0
       ? checker.getAliasedSymbol(symbol)
@@ -785,7 +793,10 @@ test("every producing read in the contract layer passes a flow, follows an inclu
     visit(tree);
   }
   assert.ok(reads > 150, `${reads} reads`);
-  assert.deepEqual(unclassified, ["gate-fixture.ts:8: read?.(place)"]);
+  assert.deepEqual(unclassified, [
+    "gate-fixture.ts:8: read?.(place)",
+    "gate-fixture.ts:14: tagged?.(place)",
+  ]);
 });
 
 test("a stop's forgotten answers take their flows with them; a flow stands only beside its answer", () => {
