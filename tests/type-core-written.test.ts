@@ -1423,3 +1423,29 @@ test("a literal's elements are compared at every field copies land, decided or n
     assert.deepEqual(record(source), errors(source, ...texts), name);
   }
 });
+
+/**
+ * #1709 (ADR 0021 1.3, `joinedDomain`): a list join's written operand keeps its written element type, so a written
+ * `integer?[]` joined with a list of text mixes `integer | null` and `string` (TSV044), whichever operand comes first,
+ * in the four modes: `null` among a type's kinds decides by those kinds, only a type of `null` alone decides nothing.
+ * The controls join it with what its type holds, and give nothing.
+ */
+test("a join of a written nullable list with a list of another type errs, in either order (#1709)", () => {
+  const joins: readonly (readonly [string, readonly string[]])[] = [
+    ['a + ["x"]', ["TSV044"]],
+    ['["x"] + a', ["TSV044"]],
+    ["a + [2]", []],
+    ["[2, null] + a", []],
+    ["a + [null]", []],
+  ];
+  for (const [join, expected] of joins)
+    for (const mode of MODES) {
+      const source = `let a: integer?[] = [1]\nlet b = ${join}\nsay b.length\nexit\n`;
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, source);
+      const errors = inMode(mode, () => analyseCore(request))
+        .diagnostics.filter((diagnostic) => diagnostic.class === "compile-error")
+        .map((diagnostic) => diagnostic.code);
+      assert.deepEqual(errors, expected, `${join}, ${JSON.stringify(mode)}`);
+    }
+});
