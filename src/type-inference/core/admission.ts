@@ -68,7 +68,7 @@ import type {
 import { levelsOf, permittedAt } from "./admission/permitted.js";
 import { storeRequirement } from "./admission/requirements.js";
 import type { Composed } from "./admission/structure.js";
-import type { DeciderGroup, HeldInput } from "./admission/transfers.js";
+import type { DeciderCaches, DeciderGroup, HeldInput } from "./admission/transfers.js";
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
 import { joinSteps, keptSteps, type WorkLedger } from "./budget.js";
@@ -273,6 +273,19 @@ export class Admission {
   readonly deciders = new Map<string, DeciderGroup>();
   readonly linkTests = new Map<string, boolean>();
   readonly linkKinds = new Map<string, Set<ItemTag>>();
+  /** These maps as the decider's groups take them (`DeciderCaches`). */
+  readonly deciderCaches: DeciderCaches;
+  /**
+   * #1444(b,c): the decisions running (`decide`): the written-decider summary answers outside them only, so each
+   * decision's scan is its own (`writtenDecider`).
+   */
+  deciding = 0;
+  /** The solver's `forgets` when admission began, and the summary's maps for the count they were made at. */
+  readonly forgetsAtStart: number;
+  summary: { readonly forgets: number; readonly caches: DeciderCaches } | null = null;
+  /** The summary's maps made and its groups' answers made in this admission (counted, never charged: evidence). */
+  summaryEpochs = 0;
+  summaryStates = 0;
   /** The ids of decided paths' rests (`restIds`), by the id of the rest one step shorter and the step. */
   readonly restIds = new Map<string, number>();
   /**
@@ -422,6 +435,13 @@ export class Admission {
     readonly cycling: ReadonlySet<number>,
   ) {
     const { definitions, program } = pass;
+    this.deciderCaches = {
+      deciders: this.deciders,
+      linkTests: this.linkTests,
+      linkKinds: this.linkKinds,
+      summaries: new WeakMap(),
+    };
+    this.forgetsAtStart = pass.solver.forgets;
     for (const list of definitions.byKey.values()) {
       program.work.charge("indexSteps", list.length);
       for (const d of list) {
@@ -689,7 +709,12 @@ export class Admission {
 
   /** The decision of a decided path in its identity (`DecidedAt`: a cursor's key alone, its steps never made). */
   public decide(at: DecidedAt, lazily?: boolean): Decision | null {
-    return decide(this, at, lazily);
+    this.deciding += 1;
+    try {
+      return decide(this, at, lazily);
+    } finally {
+      this.deciding -= 1;
+    }
   }
 
   /**
