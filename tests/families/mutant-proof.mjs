@@ -1,127 +1,113 @@
 // node tests/families/mutant-proof.mjs <checkout> <patch>
-// The proof that a mutant's checkout is its head with the patch applied as written (#1684), read from the patch the
-// queue applied (`--patch`: the job's `$SX_IN/patch-main.diff`), the head's objects and the checkout's files at the
-// patch's paths, never the checkout's status or ignores. Every git call reads paths literally (`GIT_LITERAL_PATHSPECS`).
-// - Admission, from the patch's text: at least one path, each a text change of a regular file (100644, 100755) at the
-//   head, and no path created, deleted, renamed, copied or re-moded (`git apply --summary` prints nothing), so the
-//   queue's `git apply` of it changes those files and nothing else.
-// - Equality: the patch applied again to the head in a private index gives each path's expected blob without the
-//   checkout; each path's file in the checkout must hold that blob's bytes exactly. A path any conversion may touch
-//   (`core.autocrlf`, or a `text`, `eol`, `crlf`, `ident`, `filter` or `working-tree-encoding` attribute from any
-//   attributes file) is refused, as is a patch of a `.gitattributes`: no conversion is proved alike for `git apply`,
-//   which converts its preimage, and a checkout.
-// Prints the proof as one JSON object: the patch's sha256 and, per path, its blob at the head, the expected blob and
-// the sha256 of the expected file's bytes and the checkout's file's; exits 2 for a patch it refuses, 1 where the checkout is not the head with the patch applied.
+// The proof that a mutant's checkout is its head with the patch applied as the queue applies it (#1684), by doing it
+// again: in the checkout's own repository (its config and attributes), a fresh detached worktree of the head, the
+// queue's command on the same patch bytes (`git apply --whitespace=nowarn`), and the paths that application touched
+// (`git status --porcelain -z --ignored --untracked-files=all` in the fresh tree, every path whole). Whatever git
+// converts on the way it converts alike on both sides, so nothing is decoded: for each touched path the checkout must
+// hold what the fresh tree holds, the same kind (file, link or none), executable bit and raw bytes. A path the
+// checkout changed that the application did not touch is outside the proof's claim (a mutant is its patch's paths),
+// reported, not refused.
+// Prints the proof as one JSON object (the patch's sha256, each touched path with its kind, mode and sha256, and the
+// paths outside); exits 2 where the fresh application fails (an empty or broken patch, a filter driver the worker
+// lacks), 1 where the checkout differs at a touched path, naming it.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, readlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const [checkout, patchFile] = process.argv.slice(2);
+const [checkoutArgument, patchFile] = process.argv.slice(2);
 if (patchFile === undefined) {
   process.stderr.write("usage: node tests/families/mutant-proof.mjs <checkout> <patch>\n");
   process.exit(2);
 }
-const patch = resolve(patchFile);
-const refuse = (status, why) => {
-  process.stderr.write(`mutant-proof: ${why}\n`);
-  process.exit(status);
-};
-
-/** A git command's standard output in the checkout, paths literal; a failing command ends the proof. */
-function git(args, extra = {}) {
-  const ran = spawnSync("git", ["-C", checkout, ...args], {
-    env: { ...process.env, GIT_LITERAL_PATHSPECS: "1", ...extra },
-    encoding: "buffer",
-    maxBuffer: 1 << 28,
-  });
-  if (ran.status !== 0) refuse(2, `git ${args[0]} failed: ${ran.stderr.toString().trim()}`);
-  return ran.stdout;
-}
-
-// (admission: the patch's own text)
-if (git(["apply", "--summary", patch]).length > 0)
-  refuse(
-    2,
-    "the patch creates, deletes, renames, copies or re-modes a path; a mutant changes files' text only",
-  );
-const records = git(["apply", "--numstat", "-z", patch]).toString("utf8").split("\0");
-const paths = [];
-for (let index = 0; index < records.length - 1; index += 1) {
-  // (a record is `added<TAB>deleted<TAB>path`, the path whole after the second tab: it may hold tabs itself)
-  const [added = "", deleted = ""] = records[index].split("\t", 2);
-  const path = records[index].slice(added.length + deleted.length + 2);
-  if (added === "-" || deleted === "-") refuse(2, `${JSON.stringify(path)} is a binary change`);
-  if (path === "") refuse(2, "the patch renames or copies a path");
-  if (path.split("/").at(-1) === ".gitattributes")
-    refuse(
-      2,
-      `${JSON.stringify(path)} changes how files convert; a mutant changes source text only`,
-    );
-  paths.push(path);
-}
-if (paths.length === 0) refuse(2, "the patch changes nothing");
-const head = new Map();
-for (const path of paths) {
-  const entry = git(["ls-tree", "-z", "HEAD", "--", path]).toString("utf8").split("\0")[0];
-  const found = /^(100644|100755) blob ([0-9a-f]+)\t/.exec(entry);
-  if (found === null) refuse(2, `${JSON.stringify(path)} is no regular file at the head`);
-  head.set(path, found[2]);
-}
-
-// (no conversion between a file's bytes and its blob at any path: none is proved alike for `git apply`, which converts
-// its preimage, and a checkout, so a path a conversion may touch is refused, and the bytes are compared as they are)
-const autocrlf = spawnSync("git", ["-C", checkout, "config", "--get", "core.autocrlf"], {
-  encoding: "utf8",
-});
-if (["true", "input"].includes(autocrlf.stdout.trim()))
-  refuse(2, `core.autocrlf is ${autocrlf.stdout.trim()}; a mutant's files must convert in no way`);
-const CONVERTING = ["text", "eol", "crlf", "ident", "filter", "working-tree-encoding"];
-for (const path of paths) {
-  const fields = git(["check-attr", "-z", ...CONVERTING, "--", path])
-    .toString("utf8")
-    .split("\0");
-  for (let index = 0; index + 2 < fields.length; index += 3) {
-    const [attribute, value] = [fields[index + 1], fields[index + 2]];
-    if (value === "unspecified" || (value === "unset" && attribute !== "eol")) continue;
-    refuse(
-      2,
-      `${JSON.stringify(path)} has '${attribute}: ${value}'; a mutant's files must convert in no way`,
-    );
-  }
-}
-
-// (equality: the patch applied again to the head in a private index, against the checkout's files)
-const scratch = mkdtempSync(join(tmpdir(), "mutant-proof-"));
-const expected = new Map();
-try {
-  const index = { GIT_INDEX_FILE: join(scratch, "index") };
-  git(["read-tree", "HEAD"], index);
-  git(["apply", "--cached", "--whitespace=nowarn", patch], index);
-  for (const path of paths) {
-    const entry = git(["ls-files", "-s", "-z", "--", path], index).toString("utf8").split("\0")[0];
-    expected.set(path, /^\d+ ([0-9a-f]+) /.exec(entry)?.[1] ?? "");
-  }
-} finally {
-  rmSync(scratch, { recursive: true, force: true });
-}
-// (the file's bytes as the build reads them, against the expected blob's bytes: no conversion lies between them)
+const [checkout, patch] = [resolve(checkoutArgument), resolve(patchFile)];
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const proof = {
-  patch: sha256(readFileSync(patch)),
-  paths: paths.map((path) => ({
-    path,
-    head: head.get(path),
-    expected: expected.get(path),
-    expectedFile: sha256(git(["cat-file", "blob", expected.get(path)])),
-    checkoutFile: sha256(readFileSync(join(checkout, path))),
-  })),
+
+/** A git command's run in `cwd`. */
+const git = (cwd, args) =>
+  spawnSync("git", ["-C", cwd, ...args], { encoding: "buffer", maxBuffer: 1 << 28 });
+
+/** The paths `git status` lists in `cwd`, whole (`-z`: `XY path`, a rename's or copy's source after it). */
+function changed(cwd, extra) {
+  const ran = git(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all", ...extra]);
+  if (ran.status !== 0) throw new Error(`git status: ${ran.stderr.toString().trim()}`);
+  const fields = ran.stdout.toString("utf8").split("\0");
+  const paths = [];
+  for (let index = 0; index < fields.length - 1; index += 1) {
+    const entry = fields[index];
+    paths.push(entry.slice(3));
+    if (entry[0] === "R" || entry[0] === "C") paths.push(fields[++index]);
+  }
+  return paths;
+}
+
+/** A path's state in a tree: its kind, executable bit and the sha256 of its bytes (a link's target). */
+function state(root, path) {
+  const full = join(root, path);
+  let stat;
+  try {
+    stat = lstatSync(full);
+  } catch {
+    return { kind: "none" };
+  }
+  if (stat.isSymbolicLink()) return { kind: "link", sha256: sha256(readlinkSync(full)) };
+  if (!stat.isFile()) return { kind: "other" };
+  return {
+    kind: "file",
+    executable: (stat.mode & 0o111) !== 0,
+    sha256: sha256(readFileSync(full)),
+  };
+}
+
+const scratch = mkdtempSync(join(tmpdir(), "mutant-proof-"));
+const fresh = join(scratch, "fresh");
+let added = false;
+const cleanup = () => {
+  if (added) git(checkout, ["worktree", "remove", "--force", fresh]);
+  rmSync(scratch, { recursive: true, force: true });
 };
-process.stdout.write(`${JSON.stringify(proof)}\n`);
-const differing = proof.paths.filter((each) => each.checkoutFile !== each.expectedFile);
-if (differing.length > 0)
-  refuse(
-    1,
-    `the checkout is not the head with the patch applied at ${differing.map((each) => JSON.stringify(each.path)).join(", ")}`,
-  );
+for (const signal of ["SIGINT", "SIGTERM"])
+  process.once(signal, () => {
+    cleanup();
+    process.exit(2);
+  });
+let status = 0;
+let message = "";
+try {
+  const add = git(checkout, ["worktree", "add", "--quiet", "--detach", fresh, "HEAD"]);
+  if (add.status !== 0) throw new Error(`git worktree add: ${add.stderr.toString().trim()}`);
+  added = true;
+  const applied = git(fresh, ["apply", "--whitespace=nowarn", patch]);
+  if (applied.status !== 0) {
+    status = 2;
+    message = `the patch does not apply to the head as the queue applies it: ${applied.stderr.toString().trim()}`;
+  } else {
+    const touched = [...new Set(changed(fresh, ["--ignored"]))].sort();
+    const paths = touched.map((path) => ({ path, ...state(fresh, path) }));
+    const differing = paths.filter(
+      ({ path, ...expected }) => JSON.stringify(state(checkout, path)) !== JSON.stringify(expected),
+    );
+    const outside = changed(checkout, []).filter((path) => !touched.includes(path));
+    process.stdout.write(
+      `${JSON.stringify({ patch: sha256(readFileSync(patch)), paths, outside })}\n`,
+    );
+    if (touched.length === 0) {
+      status = 2;
+      message = "the patch touches no path";
+    } else if (differing.length > 0) {
+      status = 1;
+      message = `the checkout is not the head with the patch applied at ${differing.map((each) => JSON.stringify(each.path)).join(", ")}`;
+    } else if (outside.length > 0)
+      process.stderr.write(
+        `mutant-proof: changed outside the patch's paths, not part of the proof: ${outside.map((path) => JSON.stringify(path)).join(", ")}\n`,
+      );
+  }
+} catch (error) {
+  status = 2;
+  message = error instanceof Error ? error.message : String(error);
+} finally {
+  cleanup();
+}
+if (status !== 0) process.stderr.write(`mutant-proof: ${message}\n`);
+process.exit(status);

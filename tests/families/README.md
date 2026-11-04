@@ -219,15 +219,13 @@ sx-job submit --checkout <head> --patch mutant.diff --commit head=<head> --items
 ```
 
 `pair` compares the base tree with the head tree; `mutant` the head tree with the head's checkout under the patch,
-which it builds after `mutant-proof.mjs` proved that checkout the head with the patch applied as written (#1684). The
-proof reads the patch the queue applied (the job's `$SX_IN/patch-main.diff`), the head's objects and the checkout's
-files at the patch's paths, every path literally: it refuses a patch that is not a text change of regular files at the
-head (one that creates, deletes, renames, copies or re-modes a path, or a binary change), applies it again to the head
-in a private index, and requires each path's file in the checkout to hold that blob's bytes exactly; a path any
-conversion may touch (`core.autocrlf`, a `text`, `eol`, `crlf`, `ident`, `filter` or `working-tree-encoding`
-attribute) is refused, as is a patch of a `.gitattributes`. `mutant.json` holds the patch's hash and each path's blobs
-at the head and expected, and the expected and the checkout's file bytes' hashes: a seed whose outcome differs reaches the
-mutated code, and a mutant no seed tells apart survives the family.
+which it builds after `mutant-proof.mjs` proved that checkout the head with the patch applied as the queue applies it
+(#1684), by doing it again: in the checkout's own repository, a fresh detached worktree of the head, `git apply
+--whitespace=nowarn` of the same patch bytes, and the paths it touched (`git status -z --ignored`, every path whole).
+Whatever git converts it converts alike on both sides, so for each touched path the checkout must hold the same kind
+(file, link or none), executable bit and raw bytes; a path the checkout changed that the application did not touch is
+reported, not part of the proof. `mutant.json` holds the patch's hash and each touched path's state: a seed whose
+outcome differs reaches the mutated code, and a mutant no seed tells apart survives the family.
 
 ## The unit limit and the safety net (#1647)
 
