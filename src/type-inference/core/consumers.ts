@@ -123,6 +123,12 @@ export function withConsumerOrder<T>(order: <U>(list: readonly U[]) => U[], call
   }
 }
 
+/** Whether a method's result is the element it removed (F7: `fromList: "element"`). */
+function removesElement(name: string): boolean {
+  const gives = methodCategory(name)?.gives;
+  return gives?.kind === "removed" && gives.fromList === "element";
+}
+
 /** A stopped demand's answer (S3 §5): its key's contract, each item with the reason and the word `budget`. */
 function withBudget(items: readonly Item[]): readonly Item[] {
   return items.map((item) =>
@@ -260,7 +266,10 @@ export class Consumers {
   #callableNodes: Map<unknown, number> | null = null;
   readonly order: <T>(list: readonly T[]) => T[];
   readonly getOf = new Map<PlaceId, PlaceId>();
-  /** F7: a removing method's result (`removeFirst()`, `removeAt(i)`), by its receiver: the element it removed. */
+  /**
+   * F7: a removing method's result that is the element it removed (`removeFirst()`, `removeAt(i)`), by its receiver; a
+   * set's or list's `remove` gives `null` and is none (its category by name, so a dict's `remove` is none either).
+   */
   readonly removedOf = new Map<PlaceId, PlaceId>();
   readonly resultOfCall = new Map<PlaceId, PlaceId>();
   /** Each value's label's recipe (`keyLabel`), made once from its owner's. */
@@ -332,11 +341,7 @@ export class Consumers {
     const program = pass.program;
     for (const c of program.constraints) {
       if (c.kind === "get") this.getOf.set(c.result, c.receiver);
-      if (
-        c.kind === "operation" &&
-        c.receiver !== null &&
-        methodCategory(c.contract.name)?.gives.kind === "removed"
-      )
+      if (c.kind === "operation" && c.receiver !== null && removesElement(c.contract.name))
         this.removedOf.set(c.result, c.receiver);
       if (c.kind === "call") this.resultOfCall.set(c.result, program.functionOf(c.fn).result);
     }

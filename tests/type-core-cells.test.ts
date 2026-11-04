@@ -245,13 +245,9 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
     ],
   ];
   // a parameter's and a result's marks come from their calls' bindings, which a dead call does not make: a guarded dead
-  // call's result is no error where its live form warns
+  // call's result is no error where its live form warns (a written `number` result is an intrinsic error, #1173:
+  // `writtenNumbers`)
   const guardedResults: readonly (readonly [string, string, string])[] = [
-    [
-      "a written result",
-      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
-      "if n is integer { repeat f(n) {} }",
-    ],
     [
       "an inferred result",
       "global n = 2.0\nfunction f(x: number) {\n  return x\n}",
@@ -317,6 +313,11 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
   ];
   // a written `number` destination: an intrinsic error at the use whatever it holds (#1173), the same in dead code
   const writtenNumbers: readonly (readonly [string, string, string])[] = [
+    [
+      "a written result",
+      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+      "if n is integer { repeat f(n) {} }",
+    ],
     ["a written copy", written, "if n is integer { let v: number = f(n)\nrepeat v {} }"],
     ["a written list", written, "if n is integer { let v: number[] = [f(n)]\nrepeat v.first {} }"],
     [

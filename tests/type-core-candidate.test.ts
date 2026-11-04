@@ -1590,6 +1590,12 @@ test("an integer-only use of a written number place is the current checker's err
     `let ps: number[][] = [[1]]\n${use("ps.get(0, default: [0])[0]")}`,
     `let ps: number[][] = [[1]]\n${use("ps.get(0, default: [0]).get(0, default: 0)")}`,
     `let ps: integer[][] = [[1]]\n${use("ps.get(0, default: [0])[0]")}`,
+    // (a call's result reads its function's written result type, through `analyseCore`: functions are outside the
+    // candidate route's slice)
+    `function f: number {\n  return 1\n}\n${use("f()")}`,
+    `function f: integer {\n  return 1\n}\n${use("f()")}`,
+    `function f: number[] {\n  return [1]\n}\n${use("f().get(0, default: 0)")}`,
+    `function f: integer[] {\n  return [1]\n}\n${use("f().get(0, default: 0)")}`,
     ...["removeFirst()", "removeLast()", "removeAt(0)"].flatMap((removal) => [
       `let ps: number[] = [1, 2]\n${use(`ps.${removal}`)}`,
       `let ps: integer[] = [1, 2]\n${use(`ps.${removal}`)}`,
@@ -1633,6 +1639,20 @@ test("an integer-only use of a written number place is the current checker's err
         `${source} (unshared)`,
       );
     }
+  // (a set's `remove` gives `null`, no element: its error names the null, not a number, Codex r3)
+  const removed = coreRequest([
+    {
+      path: "main.tease",
+      source: 'let ps: number set = set[1]\nrepeat ps.remove(1) { say "X" }\nexit\n',
+    },
+  ]);
+  assert.ok(removed !== null);
+  assert.deepEqual(
+    analyseCore(removed)
+      .diagnostics.filter((d) => d.kind === "integer-use")
+      .map((d) => ("kinds" in d ? d.kinds : null)),
+    [["null"]],
+  );
   // (a written type without `number` asks no key for the rule: main's counters, so no stop moves, Codex r1 B2)
   const integer = coreRequest([
     { path: "main.tease", source: 'let p: integer = 1\nrepeat p { say "X" }\nexit\n' },

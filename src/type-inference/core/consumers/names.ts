@@ -256,19 +256,34 @@ function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[])
  */
 export function writtenNumber(walk: Consumers, value: PlaceId): boolean {
   const term = writtenTermOf(walk, value);
-  const number = (at: TypeTerm): boolean =>
-    at.kind === "union" ? at.members.some(number) : at.kind === "atom" && at.name === "number";
-  return term !== null && number(term);
+  return term !== null && isNumber(term);
+}
+
+/** Whether a written term is `number` or a union with it, once per term (a written type is read at every use). */
+const IS_NUMBER = new WeakMap<TypeTerm, boolean>();
+function isNumber(term: TypeTerm): boolean {
+  let found = IS_NUMBER.get(term);
+  if (found === undefined) {
+    found =
+      term.kind === "union"
+        ? term.members.some(isNumber)
+        : term.kind === "atom" && term.name === "number";
+    IS_NUMBER.set(term, found);
+  }
+  return found;
 }
 
 /**
  * The written type a value carries, through every read form that gives a part of a written place: a read of a
- * binding, parameter or result its written type; a property, element or selection its owner's at that step; a `get`
+ * binding or parameter, and a call's result, its written type; a property, element or selection its owner's at that step; a `get`
  * result, and what a removing method removed, its receiver's element. `null` where no written type reaches it (a call,
  * an operation, a literal, a written type's reference to another place).
  */
 function writtenTermOf(walk: Consumers, value: PlaceId): TypeTerm | null {
   const { program } = walk.pass;
+  // (a call's result reads its function's written result type, as a binding read its binding's)
+  const result = walk.resultOfCall.get(value);
+  if (result !== undefined) return writtenOf(program.place(result).kind);
   const element = walk.getOf.get(value) ?? walk.removedOf.get(value);
   if (element !== undefined) return below(writtenTermOf(walk, element), "element");
   const projection = program.projOf.get(value);
