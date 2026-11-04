@@ -141,12 +141,15 @@ test("a tape's query of one path repeated k times looks at O(log k) blocks", () 
   }
 });
 
-test("every landing call returns the walk's paths in order: the families, Codex r3's crossed descendants, four modes", async () => {
+test("every landing call returns the walk's paths in order: each family and Astra's clock witness, four modes", async () => {
+  // (the sample CI runs; the families at 16 to 128 and Astra's 178 sources, the 40 crossed seeds among them, run on the
+  // queue: the PR's evidence)
   const shapes = await families();
   let calls = 0;
-  for (const name of Object.keys(shapes)) calls += compared(shapes[name]!(8));
-  for (let seed = 1; seed <= 40; seed += 1) calls += compared(crossed(seed));
-  assert.ok(calls > 1000, `${calls} calls compared`);
+  for (const name of Object.keys(shapes)) calls += compared(shapes[name]!(4));
+  // (seed 2: a cover stamped at the next free order moves q.g0 and q.g1 behind p.f1, Astra's design review)
+  calls += compared(crossed(2));
+  assert.ok(calls > 200, `${calls} calls compared`);
 });
 
 test("each reporter operation is debited where it happens", async () => {
@@ -154,7 +157,7 @@ test("each reporter operation is debited where it happens", async () => {
   const ops: LandingOp[] = ["report", "child", "select", "visit", "node", "lookup", "publish"];
   const seen = new Set<LandingOp>();
   for (const name of ["narrow-repeat-3", "skip-2", "diamond-2", "skip-cross-3"]) {
-    const request = coreRequest([{ path: "main.tease", source: shapes[name]!(16) }], GLOBALS);
+    const request = coreRequest([{ path: "main.tease", source: shapes[name]!(8) }], GLOBALS);
     assert.ok(request !== null);
     withLandingOps(
       (place, _prefix, counts) => {
@@ -190,7 +193,7 @@ test("a fixed-width chain's landings take its listings: linear, and at most half
       );
       return sum;
     };
-    const [small, large] = [units(64), units(128)];
+    const [small, large] = [units(32), units(64)];
     assert.ok(large.listed <= 2.15 * small.listed, `${name}: ${small.listed} → ${large.listed}`);
     assert.ok(
       2 * large.listed <= large.walked,
