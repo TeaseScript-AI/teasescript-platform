@@ -513,6 +513,11 @@ export interface Answers {
    */
   completed<T>(again: () => T): T | null;
   at(node: FlowNode): OccurrenceAnswer | null;
+  /**
+   * The place and path a statement that stores stores into, as `at` reads them there (its node's first live store, else
+   * its first), with no value read: `null` for a node that stores nothing.
+   */
+  storedPlace(node: FlowNode): { readonly id: PlaceId; readonly path: readonly string[] } | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
   /**
    * The complete type a store into a place at a path is checked against where a decision below the path stopped (S3 §5,
@@ -1540,6 +1545,13 @@ class CoreAnswers implements Answers {
   }
 
   /** The store a statement makes, by its node: its first live store definition there, else its first rejected one (A6). */
+  public storedPlace(
+    node: FlowNode,
+  ): { readonly id: PlaceId; readonly path: readonly string[] } | null {
+    const d = this.#storeAt(node);
+    return d === null ? null : { id: d.place, path: d.path };
+  }
+
   #storeAt(node: FlowNode): Definition | null {
     if (this.#stores === null) {
       this.#stores = new Map();

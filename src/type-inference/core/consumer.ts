@@ -1471,11 +1471,12 @@ class Contracts {
 
   /**
    * The label of the place a store stores into (its variable, then the core's steps), as `stored` reads it, once per
-   * store; `undefined` where the answers name no place there. It asks for no contract.
+   * store; `undefined` where the answers name no place there. It reads no value and asks for no contract, so a store
+   * whose only owed checks are the receiving completion's is asked nothing (#1682).
    */
   public destination(store: Store): string | undefined {
     if (this.#destinations.has(store)) return this.#destinations.get(store);
-    const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
+    const place = this.answers.storedPlace(nodeOf(this.answers, this.index, store));
     const declaration =
       store.kind === "letStatement" ? store : place === null ? undefined : this.lets.get(place.id);
     const label =
