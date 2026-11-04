@@ -277,15 +277,22 @@ function isNumber(term: TypeTerm): boolean {
  * The written type a value carries, through every read form that gives a part of a written place: a read of a
  * binding or parameter, and a call's result, its written type; a property, element or selection its owner's at that step; a `get`
  * result, and what a removing method removed, its receiver's element. `null` where no written type reaches it (a call,
- * an operation, a literal, a written type's reference to another place).
+ * an operation, a literal, a written type's reference to another place). Each term's projection at a step is made once
+ * (`below`) and the `number` test once per term (`isNumber`), so a use costs a walk of its own read's steps.
  */
 function writtenTermOf(walk: Consumers, value: PlaceId): TypeTerm | null {
   const { program } = walk.pass;
   // (a call's result reads its function's written result type, as a binding read its binding's)
   const result = walk.resultOfCall.get(value);
   if (result !== undefined) return writtenOf(program.place(result).kind);
-  const element = walk.getOf.get(value) ?? walk.removedOf.get(value);
+  const element = walk.getOf.get(value);
   if (element !== undefined) return below(writtenTermOf(walk, element), "element");
+  // (a removal gives the element it removed, a `remove` only from a dict, its value: a list's or set's gives `null`)
+  const removal = walk.removedOf.get(value);
+  if (removal !== undefined) {
+    const receiver = writtenTermOf(walk, removal.receiver);
+    return removal.always || receiver?.kind === "dict" ? below(receiver, "element") : null;
+  }
   const projection = program.projOf.get(value);
   if (projection !== undefined)
     return projection.step === "iteration"
@@ -295,9 +302,15 @@ function writtenTermOf(walk: Consumers, value: PlaceId): TypeTerm | null {
   return binding === undefined ? null : writtenOf(program.place(binding).kind);
 }
 
-/** A written type's term one step below, or `null`. */
+/** A written type's term one step below, or `null`: once per term and step, so a projected union keeps its identity. */
+const BELOW = new WeakMap<TypeTerm, Map<string, TypeTerm | null>>();
 function below(term: TypeTerm | null, step: string): TypeTerm | null {
-  return term === null ? null : termAt(term, [step]);
+  if (term === null) return null;
+  let steps = BELOW.get(term);
+  if (steps === undefined) BELOW.set(term, (steps = new Map()));
+  let found = steps.get(step);
+  if (found === undefined) steps.set(step, (found = termAt(term, [step])));
+  return found;
 }
 
 /** §3.3, the quiet path: a value's contract kinds, asked before any read is evaluated; `null` with an unknown. */

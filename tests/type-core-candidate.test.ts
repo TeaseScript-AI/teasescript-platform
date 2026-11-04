@@ -1596,6 +1596,12 @@ test("an integer-only use of a written number place is the current checker's err
     `function f: integer {\n  return 1\n}\n${use("f()")}`,
     `function f: number[] {\n  return [1]\n}\n${use("f().get(0, default: 0)")}`,
     `function f: integer[] {\n  return [1]\n}\n${use("f().get(0, default: 0)")}`,
+    // (a `remove` gives a dict's value, a list's `null`; composed with an index and from a call's result: Codex r4)
+    `let ps: number dict = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: integer dict = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: number[] = [1, 2]\n${use("ps.remove(1)")}`,
+    `let ps: number[][] = [[1], [2]]\n${use("ps.removeFirst()[0]")}`,
+    `function f: number dict {\n  return dict{a: 1}\n}\n${use('f().remove("a")')}`,
     ...["removeFirst()", "removeLast()", "removeAt(0)"].flatMap((removal) => [
       `let ps: number[] = [1, 2]\n${use(`ps.${removal}`)}`,
       `let ps: integer[] = [1, 2]\n${use(`ps.${removal}`)}`,
