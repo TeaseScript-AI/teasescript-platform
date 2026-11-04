@@ -750,8 +750,8 @@ test("a settled stop finishes the host data of every copy-graph topology in line
  * per site it serves, observed at the site (`chargesBySite`), not as a total. `integerOnly` charges one `checks` unit for
  * each count it checks, before it reads the count's items: `repeat []` once, twice, three times. The expected-site
  * question (`expectedTask`, which a fix's code form asks of the site its value lands at) charges one for each site it
- * answers, before it walks that site's consumers, and none for a site it has answered: an operator's two operands, each
- * once. Each source holds its own error or warning, so its message asks.
+ * answers, before it walks that site's consumers, and none for a site it has answered: in `say true - 1`, the operand
+ * `true` and the operation it lands in, each once. Each source holds its own error or warning, so its message asks.
  */
 test("a count's check and an expected site's question each charge their own site once (#1710)", () => {
   const checks = (source: string, site: string): number => {
