@@ -1,10 +1,15 @@
+import { writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
+import { basename, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { run } from "node:test";
 import { spec } from "node:test/reporters";
 
 // Runs the test files given as arguments in that order, each in its own process, with the concurrency, reporter and
 // exit status of `node --test`, whose command line sorts the files instead. A signal cancels the run as it cancels
-// `node --test`, which stops the files' processes instead of leaving them running.
+// `node --test`, which stops the files' processes instead of leaving them running. Where `TEST_FILE_SECONDS` names a
+// file, it receives each file's seconds from its process's start to its end, as CI's test jobs keep them for
+// `tools/measure-test-files.mjs`.
 const controller = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => controller.abort());
 
@@ -14,6 +19,12 @@ const tests = run({
   isolation: "process",
   signal: controller.signal,
 });
+const seconds = {};
+tests.on("test:complete", (data) => {
+  // (a file's own entry is named by its path as given)
+  if (data.nesting === 0 && data.file !== undefined && resolve(data.name) === data.file)
+    seconds[basename(data.file)] = data.details.duration_ms / 1000;
+});
 tests.on("test:summary", (summary) => {
   if (!summary.success) process.exitCode = 1;
 });
@@ -22,3 +33,8 @@ tests.on("test:summary", (summary) => {
 await pipeline(tests, spec(), process.stdout).catch((error) => {
   if (!controller.signal.aborted || error.code !== "EPIPE") throw error;
 });
+if (process.env.TEST_FILE_SECONDS)
+  writeFileSync(
+    process.env.TEST_FILE_SECONDS,
+    `${JSON.stringify({ filesAtOnce: availableParallelism() - 1, seconds })}\n`,
+  );

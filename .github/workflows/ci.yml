@@ -39,7 +39,16 @@ jobs:
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
           BUILD_SOURCEMAPS: "0"
+          TEST_FILE_SECONDS: ${{ runner.temp }}/test-file-seconds.json
         run: npm test -- --shard=1/2
+      # each test file's seconds, which `tools/measure-test-files.mjs --from-ci` makes the shards' weights from
+      - name: Keep each test file's seconds
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: test-file-seconds-${{ github.run_attempt }}-1
+          path: ${{ runner.temp }}/test-file-seconds.json
+          if-no-files-found: error
+          retention-days: 7
   check-2:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -74,7 +83,16 @@ jobs:
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
           BUILD_SOURCEMAPS: "0"
+          TEST_FILE_SECONDS: ${{ runner.temp }}/test-file-seconds.json
         run: npm test -- --shard=2/2
+      # each test file's seconds, which `tools/measure-test-files.mjs --from-ci` makes the shards' weights from
+      - name: Keep each test file's seconds
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: test-file-seconds-${{ github.run_attempt }}-2
+          path: ${{ runner.temp }}/test-file-seconds.json
+          if-no-files-found: error
+          retention-days: 7
   check:
     needs: [check-1, check-2]
     if: ${{ always() }}
