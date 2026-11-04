@@ -3,6 +3,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
+import { ts } from "ts-morph";
+
 import type { CorePass } from "../src/type-inference/core/answers.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { Consumers } from "../src/type-inference/core/consumers.js";
@@ -205,6 +207,42 @@ test("each key's edges are the keys its contract includes: copies, written place
       'let a = dict {"k": hostValue}\nlet b = a.remove("k")\nsay "${b}"\nexit\n',
       [["b", [], ["a.element"]]],
     ],
+    // (filters below a composition: a slot whose answer the path's filters remove whole is no edge, with all below it;
+    // one they remove in part stays)
+    [
+      'let n = null\nlet v = 1\nlet b = [v].get(0, default: n) otherwise 2\nsay "${b}"\nexit\n',
+      [["b", [], ["v"]]],
+    ],
+    [
+      'let e = []\nlet v = [hostValue]\nfor b in [e.first, v.first] {\n  say "${b}"\n}\nexit\n',
+      [["b", [], ["v.element"]]],
+    ],
+    [
+      'let e = []\nlet v = [hostValue]\nlet b = [e.first, v.first].get(0, default: 0)\nsay "${b}"\nexit\n',
+      [["b", [], ["v.element"]]],
+    ],
+    [
+      'let e = []\nlet v = [hostValue]\nlet b = dict {"e": e.first, "v": v.first}.remove("v")\nsay "${b}"\nexit\n',
+      [["b", [], ["v.element"]]],
+    ],
+    [
+      'let a = []\nlet b = []\nb.add(a.first)\nfor x in b {\n  say "${x}"\n}\nexit\n',
+      [["b", ["element"], []]],
+    ],
+    [
+      'let a = [hostValue]\nlet b = []\nb.add(a.first)\nfor x in b {\n  say "${x}"\n}\nexit\n',
+      [["b", ["element"], ["a.element"]]],
+    ],
+    // (two filters deep: the element's `empty` and the `otherwise` side's null each drop their own slot)
+    [
+      'let n = null\nlet e = []\nlet v = 1\nlet b = [e.first, v, n].get(0, default: 3) otherwise 2\nsay "${b}"\nexit\n',
+      [["b", [], ["v"]]],
+    ],
+    // (a slot the filters remove in part: its surviving items its own)
+    [
+      'let x = 1\nif hostValue is integer {\n  x = null\n}\nlet b = [x].get(0, default: 3) otherwise 2\nsay "${b}"\nexit\n',
+      [["b", [], ["x"]]],
+    ],
     // (below an unknown, its unknown: the unknown's key)
     ['let a = hostValue\nlet b = a.f\nsay "${b}"\nexit\n', [["a", ["f"], ["a"]]]],
   ];
@@ -385,75 +423,181 @@ test("every slot a run includes is one its run read", () => {
 });
 
 test("every producing read in the contract layer passes a flow, follows an inclusion or is classified", () => {
-  // (the inclusion matrix in code: every read of another slot's answer — a producing method, an inline producing helper
-  // (a generator of items defined in the layer), a raw demand or a proof — either passes a flow as an argument,
-  // follows the slot's `include` in its function, or carries its class on the line before (`// #1668: <class>`), so a
-  // new read cannot go unclassified)
+  // (the inclusion matrix in code, read from the syntax tree: in every solver generator (typed `Work<…>`, or an untyped
+  // one that is no iterator's own method), every read of another slot's answer (a producing method, a producing
+  // helper the layer defines, a demand it yields, a proof) passes a flow as an argument, follows the slot's `include`
+  // in its function, or carries its class (`// #1668: <class>`) on the line before or leading its statement, so a new
+  // read cannot go unclassified, however it is written)
   const folder = join(process.cwd(), "src/type-inference/core/contract");
-  const files = readdirSync(folder).filter((name) => name.endsWith(".ts"));
-  const sources = new Map(files.map((file) => [file, readFileSync(join(folder, file), "utf8")]));
+  const parsed = readdirSync(folder)
+    .filter((name) => name.endsWith(".ts"))
+    .sort()
+    .map((file) => {
+      const text = readFileSync(join(folder, file), "utf8");
+      return { file, text, tree: ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true) };
+    });
+  const methods = new Set([
+    "contractOf",
+    "contractOfValueAt",
+    "contractOfValue",
+    "subAt",
+    "contractOfLiteral",
+    "entryAt",
+    "receiverKinds",
+    "valueReceiver",
+    "severalElements",
+    "keyThrough",
+    "indexItems",
+    "gathered",
+    "defaultKinds",
+    "onlyNull",
+    "expectedOf",
+    "contractRead",
+    "proven",
+  ]);
+  const flows = new Set([
+    "flow",
+    "staged",
+    "read",
+    "lead",
+    "source",
+    "literal",
+    "whole",
+    "element",
+    "stored",
+    "below",
+    "through",
+    "kept",
+    "frontier",
+    "fallback",
+    "given",
+    "kinds",
+  ]);
+  type Generator = ts.FunctionDeclaration | ts.FunctionExpression | ts.MethodDeclaration;
+  const generator = (node: ts.Node): node is Generator =>
+    (ts.isFunctionDeclaration(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isMethodDeclaration(node)) &&
+    node.asteriskToken !== undefined;
+  const walk = (node: ts.Node, visit: (node: ts.Node) => void): void => {
+    visit(node);
+    ts.forEachChild(node, (child) => walk(child, visit));
+  };
+  // (the layer's producing helpers: generators of items or proven items)
   const helpers = new Set<string>();
-  for (const text of sources.values())
-    for (const found of text.matchAll(
-      /function\*\s+(\w+)\s*(?:<[^>]*>)?\s*\([^)]*\)\s*:\s*Work<\s*(?:readonly Item\[\]|Item\[\]|Proven<)/g,
-    ))
-      helpers.add(found[1]!);
-  const method =
-    /\b(?:contract|self|this|c)\.(contractOf|contractOfValueAt|contractOfValue|subAt|contractOfLiteral|entryAt|receiverKinds|valueReceiver|severalElements|keyThrough|indexItems|gathered|defaultKinds|onlyNull|expectedOf|contractRead)\(|\.proven\(|yield (?:positioned|projected)\(/;
-  const helper = /yield\*\s+(?:inline\()?(\w+)\(/;
-  const raw = /(?<![\w*])yield\s+(?!\*)\S/;
-  const argument =
-    /[(,]\s*(?:flow|staged|read|lead|source|literal|whole|element|stored|below|through|kept|frontier|fallback|given|kinds|"run"|contract\.pass\.solver\.sink\(\))\s*[,)]/;
-  const unclassified: string[] = [];
-  for (const [file, text] of sources) {
-    const lines = text.split("\n");
-    lines.forEach((line, at) => {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) return;
-      const named = helper.exec(line)?.[1];
-      // (the function the line is in: a raw yield produces only in a solver generator, `Work<…>`)
-      let start = at;
-      while (
-        start > 0 &&
-        !/^(?:export )?(?:async )?function|^\s*(?:public|private) /.test(lines[start]!)
+  for (const { tree } of parsed)
+    walk(tree, (node) => {
+      if (
+        generator(node) &&
+        node.name !== undefined &&
+        node.type !== undefined &&
+        /^Work<\s*(?:readonly Item\[\]|Item\[\]|Proven<)/.test(node.type.getText(tree))
       )
-        start -= 1;
-      const header = lines.slice(start, at + 1).join(" ");
-      const solving = /\)\s*:\s*Work</.test(header.slice(0, header.indexOf("{") + 1 || undefined));
-      const producing =
-        method.test(line) ||
-        (solving && raw.test(line)) ||
-        (named !== undefined && helpers.has(named));
-      if (!producing) return;
-      // (the statement from the read to its end)
-      const end = lines.findIndex((next, from) => from >= at && /[;{]\s*$/.test(next));
-      const call = lines.slice(at, end < 0 ? at + 1 : Math.min(end + 1, at + 10)).join(" ");
-      const tagged = /^\s*(?:[?:]\s*)?\/\/ #1668:/.test(lines[at - 1] ?? "");
-      // (a raw demand or a proof read by its key: its `include` earlier in the same function)
-      // (the demand's key, by its name: a raw demand's `key: <name>`, a proof's demand variable's `<name>.key`)
-      const body = lines.slice(start, at).join(" ");
-      // (a demand made by a factory and yielded by its variable: `<variable>.key`; a raw one: `key: <name>`, or `key`)
-      const variable = /yield\s+(\w+)\s*[;)]/.exec(line)?.[1];
-      const literal = /\bkey(?::\s*(\w+))?\s*[,}]/.exec(
-        // (a raw demand's object from its `yield {` on; a yielded variable's made in the lines before)
-        /yield\s+\{/.test(line)
-          ? lines.slice(at, at + 3).join(" ")
-          : lines.slice(Math.max(start, at - 12), at).join(" "),
-      );
-      const keyName = raw.test(line)
-        ? /yield\s+\{/.test(line)
-          ? literal === null
-            ? undefined
-            : (literal[1] ?? "key")
-          : (literal?.[1] ?? variable)
-        : /\.proven\(\s*(\w+)\s*\)/.exec(line)?.[1];
-      const included =
-        keyName !== undefined && new RegExp(`\\.include\\(\\s*${keyName}(?:\\.key)?\\b`).test(body);
-      if (argument.test(call) || tagged || included) return;
-      unclassified.push(`${file}:${at + 1}: ${trimmed}`);
+        helpers.add(node.name.getText(tree));
+    });
+  const unclassified: string[] = [];
+  let reads = 0;
+  for (const { file, text, tree } of parsed) {
+    const lines = text.split("\n");
+    const lineOf = (node: ts.Node) => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line;
+    const tagged = (node: ts.Node): boolean => {
+      if (/^\s*(?:[?:]\s*)?\/\/ #1668:/.test(lines[lineOf(node) - 1] ?? "")) return true;
+      for (let at: ts.Node = node; !ts.isBlock(at) && !ts.isSourceFile(at); at = at.parent) {
+        const comments = ts.getLeadingCommentRanges(text, at.getFullStart()) ?? [];
+        if (comments.some((range) => text.slice(range.pos, range.end).includes("#1668:")))
+          return true;
+        if (ts.isStatement(at)) return false;
+      }
+      return false;
+    };
+    const keyOfObject = (object: ts.ObjectLiteralExpression): string[] => {
+      for (const property of object.properties) {
+        if (ts.isShorthandPropertyAssignment(property) && property.name.text === "key")
+          return ["key"];
+        if (ts.isPropertyAssignment(property) && property.name.getText(tree) === "key")
+          return ts.isIdentifier(property.initializer) ? [property.initializer.text] : [];
+      }
+      return [];
+    };
+    // (the names a yielded demand's key goes by: its object's `key`, or a variable's `<name>.key` and its object's)
+    const keyNames = (yielded: ts.Expression, body: ts.Node): string[] => {
+      if (ts.isObjectLiteralExpression(yielded)) return keyOfObject(yielded);
+      if (!ts.isIdentifier(yielded)) return [];
+      const names = [`${yielded.text}.key`];
+      walk(body, (node) => {
+        if (
+          ts.isVariableDeclaration(node) &&
+          node.name.getText(tree) === yielded.text &&
+          node.initializer !== undefined &&
+          ts.isObjectLiteralExpression(node.initializer)
+        )
+          names.push(...keyOfObject(node.initializer));
+      });
+      return names;
+    };
+    walk(tree, (scope) => {
+      if (!generator(scope) || scope.body === undefined) return;
+      const solving =
+        scope.type === undefined
+          ? !(ts.isMethodDeclaration(scope) && ts.isComputedPropertyName(scope.name))
+          : /^Work</.test(scope.type.getText(tree));
+      if (!solving) return;
+      const body = scope.body;
+      const visit = (node: ts.Node): void => {
+        // (a generator inside is a scope of its own)
+        if (generator(node)) return;
+        let read: ts.Node | null = null;
+        let call: ts.CallExpression | null = null;
+        let names: string[] = [];
+        if (
+          ts.isYieldExpression(node) &&
+          node.asteriskToken === undefined &&
+          node.expression !== undefined
+        ) {
+          read = node;
+          names = keyNames(node.expression, body);
+        } else if (ts.isCallExpression(node)) {
+          const callee = node.expression;
+          const method = ts.isPropertyAccessExpression(callee) && methods.has(callee.name.text);
+          const helper =
+            ts.isIdentifier(callee) &&
+            helpers.has(callee.text) &&
+            ts.isYieldExpression(node.parent) &&
+            node.parent.asteriskToken !== undefined;
+          if (method || helper) {
+            read = node;
+            call = node;
+            const proved = node.arguments[0];
+            if (
+              ts.isPropertyAccessExpression(callee) &&
+              callee.name.text === "proven" &&
+              proved !== undefined
+            )
+              names = [`${proved.getText(tree)}.key`];
+          }
+        }
+        if (read !== null) {
+          reads += 1;
+          const passed =
+            call?.arguments.some(
+              (argument) =>
+                (ts.isIdentifier(argument) && flows.has(argument.text)) ||
+                (ts.isStringLiteral(argument) && argument.text === "run") ||
+                argument.getText(tree) === "contract.pass.solver.sink()",
+            ) ?? false;
+          const before = text.slice(scope.getStart(tree), read.getStart(tree));
+          const included = names.some((name) =>
+            new RegExp(`\\.include\\(\\s*${name.replace(".", "\\.")}\\b`).test(before),
+          );
+          if (!passed && !included && !tagged(read))
+            unclassified.push(`${file}:${lineOf(read) + 1}: ${read.getText(tree).split("\n")[0]}`);
+        }
+        ts.forEachChild(node, visit);
+      };
+      ts.forEachChild(body, visit);
     });
   }
-  assert.ok(helpers.size > 20, `${helpers.size} producing helpers`);
+  assert.ok(helpers.size > 20 && reads > 100, `${helpers.size} producing helpers, ${reads} reads`);
   assert.deepEqual(unclassified, []);
 });
 

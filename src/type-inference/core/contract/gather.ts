@@ -50,6 +50,7 @@ function* belowRead(contract: Contract, read: PlaceId, below: Steps): Work<reado
   }
   const copied = contract.copiedKey(read)!;
   const node = program.occNode.get(root);
+  // #1668: the value side's copies below an element step: its includer records `opaque`
   const items = contract.entered(
     root,
     node === undefined || node === null
@@ -189,7 +190,8 @@ export function* gatherAt(
       function* (entry) {
         const read = flow?.child() ?? null;
         const items = copies
-          ? yield* belowRead(self, entry.value, restSteps(rest))
+          ? // #1668: the value side's copies: its includer records `opaque`
+            yield* belowRead(self, entry.value, restSteps(rest))
           : yield* self.contractOfValueAt(entry.value, rest, read);
         if (read !== null) flow!.attach(read, "annotated");
         return annotated(self, entry, rest, items);
@@ -261,6 +263,7 @@ export function* gatherAt(
   if (group === null)
     // #1668: the value side's loads: its includer records `opaque`
     return yield* loadsBelow(contract, othersAt(contract, here?.others, true), rest, true, node);
+  // #1668: the value side's groups: its includer records `opaque`
   return yield* groupItems(contract, group, true, (entry) =>
     values.valueItems(entry.value, entry.g?.node ?? node, rest),
   );

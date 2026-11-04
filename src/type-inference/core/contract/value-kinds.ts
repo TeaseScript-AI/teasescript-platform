@@ -123,13 +123,15 @@ function* listsAt(
   if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
     return yield* through(contract, value, stepsRest(rest), at + 1, flow);
   let unknowns = false;
+  // #1668: I, each member read it makes takes the flow (`through`)
   const items = yield* members(
     contract,
     rest,
     at,
     receiver,
-    (path, start) => through(contract, value, stepsRest(path), start, flow),
+    (path, start, sink) => through(contract, value, stepsRest(path), start, sink),
     () => (unknowns = true),
+    flow,
   );
   if (kinds !== null && unknowns) flow!.attach(kinds, "unknown");
   return items;
@@ -145,9 +147,11 @@ export function* members(
   path: Steps,
   at: number,
   receiver: readonly Item[],
-  read: (path: Steps, from: number) => Work<readonly Item[]>,
+  read: (path: Steps, from: number, flow: FlowSink | null) => Work<readonly Item[]>,
   // (#1668: told where the answer holds a receiver's unknown as it is)
   onUnknown?: () => void,
+  // (#1668: the flow each read takes, a dict's values staged, kept where their items survive its filter)
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   // (the steps after the member read by position; the path without it made only where a dict's values ask: a
   // record's joined, `stepsJoin`)
@@ -162,8 +166,16 @@ export function* members(
       else if (path.at(at + 1) === "element") {
         // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
         if (dictList(step) === "values") {
-          const below = yield* read(stepsJoin(stepsTo(path, at), stepsFrom(path, at + 1)), at);
-          out.push(...(after === 1 ? withoutEmpty(below) : below));
+          const values = flow?.child() ?? null;
+          const below = yield* read(
+            stepsJoin(stepsTo(path, at), stepsFrom(path, at + 1)),
+            at,
+            values,
+          );
+          const kept = after === 1 ? withoutEmpty(below) : below;
+          if (values !== null && kept.length > 0)
+            flow!.attach(values, ...(after === 1 ? (["withoutEmpty"] as const) : []));
+          out.push(...kept);
         } else if (after === 1)
           // a key is text, possible: no literal holds a derived list's element (r4.47, P3)
           out.push(carried(makeItem("string", item.writer, { cert: "pos" }), [item]));
@@ -178,7 +190,7 @@ export function* members(
       out.push(item);
     }
   }
-  if (own) out.push(...(yield* read(path, at + 1)));
+  if (own) out.push(...(yield* read(path, at + 1, flow)));
   return mergeItems(out, contract.pass.program.scope);
 }
 
@@ -421,7 +433,8 @@ function* contractIteration(
         yield* contract.contractOfValueAt(owner, joinSteps(["element"], rest), element),
         rest,
       );
-      if (element !== null && selected.length > 0) flow!.attach(element);
+      if (element !== null && selected.length > 0)
+        flow!.attach(element, ...(rest.length === 0 ? (["withoutEmpty"] as const) : []));
       out.push(...selected);
     } else if ((item.tag === "dict" || kindElement(item.tag) !== undefined) && rest.length === 0)
       out.push(

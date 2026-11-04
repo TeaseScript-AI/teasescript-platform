@@ -1,4 +1,6 @@
 import { keep, type WorkLedger } from "../budget.js";
+import { withoutEmpty } from "../exact-path.js";
+import type { Item } from "../items.js";
 
 /*
  * #1668: which slots' answers each settled slot's answer includes (its contribution provenance), recorded where its
@@ -27,6 +29,26 @@ export type Qualifier =
   | "operandFilter"
   | "default"
   | "unknown";
+
+/** `otherwise`'s filter on its left side's items at the value itself: what it keeps (`operandFilter`). */
+export function otherwiseKeeps(item: Item): boolean {
+  return item.tag !== "null";
+}
+
+/** The filters a qualifier stands for, as `edgesOf` applies them to a slot's answer: none, nulls, `empty`. */
+const NULLS = 1;
+const EMPTY = 2;
+function filtersOf(qualifier: Qualifier): number {
+  if (qualifier === "operandFilter") return NULLS;
+  if (qualifier === "withoutEmpty") return EMPTY;
+  return 0;
+}
+
+/** What survives of `items` under `filters`, by the consumers' own filters (`otherwiseKeeps`, `withoutEmpty`). */
+function surviving(items: readonly Item[], filters: number): readonly Item[] {
+  const kept = (filters & EMPTY) !== 0 ? withoutEmpty(items) : items;
+  return (filters & NULLS) !== 0 ? kept.filter(otherwiseKeeps) : kept;
+}
 
 /** One slot's answer included in a run's: its demand key, `null` for a route that records no flow (`opaque`). */
 export interface Inclusion {
@@ -144,12 +166,15 @@ export type Contributions =
  * The contract slots a slot's answer includes, through the non-contract slots it includes (each by its own published
  * flow), from the published flows `flowOf` gives: `unavailable` where a slot on the way has none (unfinished, stopped,
  * forgotten or not recorded) or an included route recorded none (`opaque`). A contract slot reached ends that branch:
- * its own edges are its own (`edges` of it). Each slot visited, each inclusion followed and each edge's qualifiers
- * are charged to the analysis's total.
+ * its own edges are its own (`edges` of it). Below a filter (`operandFilter`, `withoutEmpty`), a slot whose settled
+ * answer (`answerOf`) the path's filters remove whole contributes none of its items: it is dropped with everything
+ * below it; one they remove in part stays, its surviving items its own. Each slot visited, each inclusion followed,
+ * each filter checked and each edge's qualifiers are charged to the analysis's total.
  */
 export function edgesOf(
   start: string,
   flowOf: (slot: string) => readonly Inclusion[] | undefined,
+  answerOf: (slot: string) => readonly Item[] | undefined,
   work: WorkLedger,
 ): Contributions {
   const out: Inclusion[] = [];
@@ -160,7 +185,9 @@ export function edgesOf(
     readonly before: number;
     readonly qualifier: Qualifier | null;
     readonly next: Map<Qualifier, number>;
-  }[] = [{ before: -1, qualifier: null, next: new Map() }];
+    /** The filters on the path to it (`filtersOf`). */
+    readonly filters: number;
+  }[] = [{ before: -1, qualifier: null, next: new Map(), filters: 0 }];
   const extended = (before: number, qualifiers: readonly Qualifier[]): number => {
     let at = before;
     for (const qualifier of qualifiers) {
@@ -168,7 +195,12 @@ export function edgesOf(
       let next = from.get(qualifier);
       if (next === undefined) {
         next = links.length;
-        links.push({ before: at, qualifier, next: new Map() });
+        links.push({
+          before: at,
+          qualifier,
+          next: new Map(),
+          filters: links[at]!.filters | filtersOf(qualifier),
+        });
         from.set(qualifier, next);
       }
       at = next;
@@ -195,6 +227,15 @@ export function edgesOf(
       // (each inclusion followed charged with the links it adds, an edge with the qualifier list it keeps)
       work.shared(() => keep(work, 1 + inclusion.qualifiers.length));
       const qualifiers = extended(next.qualifiers, inclusion.qualifiers);
+      const filters = links[qualifiers]!.filters;
+      if (filters !== 0) {
+        // (the slot's answer under the path's filters, charged as it is read)
+        const answer = answerOf(inclusion.slot);
+        if (answer === undefined)
+          return { state: "unavailable", reason: `no answer for ${inclusion.slot}` };
+        work.shared(() => work.charge("structureSteps", 1 + answer.length));
+        if (surviving(answer, filters).length === 0) continue;
+      }
       if (inclusion.slot.startsWith("c|")) {
         const list = listOf(qualifiers);
         work.shared(() => keep(work, list.length));

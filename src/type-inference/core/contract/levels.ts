@@ -55,14 +55,16 @@ export function* entryAt(
       at,
       withWriter(yield* contract.contractOfValueAt(entry.elem, at, element), entry.w),
     );
-    if (element !== null)
+    const kept = ref.length === 1 ? withoutEmpty(items) : items;
+    // (#1668: an element whose items the filter removes whole, an empty collection's, puts none in)
+    if (element !== null && kept.length > 0)
       flow!.attach(
         element,
         ...(ref.length === 1 ? (["withoutEmpty"] as const) : []),
         "annotated",
         "writer",
       );
-    return ref.length === 1 ? withoutEmpty(items) : items;
+    return kept;
   }
   // §3.2: a copy read under a guard; a tested child's mark by the entry's holder at the path (r4.15)
   if (entry.key !== undefined) {

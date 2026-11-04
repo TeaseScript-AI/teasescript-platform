@@ -720,6 +720,7 @@ export class Contract {
     return edgesOf(
       joinParts("c", this.canonicalKey(key)),
       (slot) => solver.flowOf(slot),
+      (slot) => solver.answer(slot),
       this.work,
     );
   }

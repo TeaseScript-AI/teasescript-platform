@@ -230,6 +230,7 @@ function* selectedAt(
   const pieces = selectionPieces(contract, selection, after);
   // (on the value side past `WIDE` parts as a tree of demands, `gathered`)
   if (exact && pieces.length > WIDE)
+    // #1668: the value side's selection: its includer records `opaque`
     for (const item of yield* contract.gathered(
       { kind: "selected", literal, path, byValue, below },
       node,

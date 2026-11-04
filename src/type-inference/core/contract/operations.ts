@@ -19,7 +19,7 @@ import { operationItems, type Operator } from "../operator-table.js";
 import { indexedPlus } from "../plus-index.js";
 import type { ValueConstraint } from "../program.js";
 import type { Work } from "../solver.js";
-import type { FlowSink } from "./contributions.js";
+import { otherwiseKeeps, type FlowSink } from "./contributions.js";
 import { choiceItems } from "./choices.js";
 import {
   carried,
@@ -63,7 +63,7 @@ export function* contractOfOp(
   if (c.kind === "fallback") {
     const kept = flow?.child() ?? null;
     const left = (yield* contract.contractOfValueAt(c.left, rest, kept)).filter(
-      (item) => rest.length > 0 || item.tag !== "null",
+      (item) => rest.length > 0 || otherwiseKeeps(item),
     );
     // (#1668: a side whose items the filter removes whole puts none into the answer)
     if (kept !== null && left.length > 0)
@@ -89,7 +89,8 @@ export function* contractOfOp(
       scope,
     );
     // (#1668: an element read whose items the selection removes whole, an empty collection's, puts none in)
-    if (element !== null && selected.length > 0) flow!.attach(element, "selected");
+    if (element !== null && selected.length > 0)
+      flow!.attach(element, "selected", ...(rest.length === 0 ? (["withoutEmpty"] as const) : []));
     if (fallback !== null) flow!.attach(fallback, "default");
     return items;
   }
@@ -169,7 +170,8 @@ export function* contractOfOp(
           yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest), element),
           rest,
         );
-        if (element !== null && selected.length > 0) flow!.attach(element);
+        if (element !== null && selected.length > 0)
+          flow!.attach(element, ...(rest.length === 0 ? (["withoutEmpty"] as const) : []));
         out.push(...selected);
       }
     }
@@ -254,6 +256,7 @@ export function* contractOfOp(
   if (interaction?.kind === "options") flow?.opaque("choice");
   if (interaction?.kind === "options")
     return mergeItems(
+      // #1668: a choice's options: its includer records `opaque`
       yield* choiceItems(
         c,
         rest,

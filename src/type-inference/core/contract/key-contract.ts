@@ -180,18 +180,20 @@ export function* keyListsAt(
   if (heldReference(receiver)) return yield* keyContract(contract, key, flow);
   const path = keyStepsIn(contract, key);
   let unknowns = false;
+  // #1668: I, each member read it makes takes the flow (`keyThrough`)
   const items = yield* members(
     contract,
     path,
     at,
     receiver,
-    (along, start) =>
+    (along, start, sink) =>
       contract.keyThrough(
         along === path ? key : keyBelowIn(contract, prefix, stepsFrom(along, at)),
         start,
-        flow,
+        sink,
       ),
     () => (unknowns = true),
+    flow,
   );
   if (kinds !== null && unknowns) flow!.attach(kinds, "unknown");
   return items;
@@ -307,6 +309,7 @@ function* elementsOf(contract: Contract, entry: PrefixEntry, below: Rest): Work<
   program.work.charge("invSteps");
   if (withoutEmpty(yield* contract.entryAt(entry, below)).length === 0) return 0;
   if (entry.key !== undefined)
+    // #1668: N, a count
     return (yield* contract.severalElements(keyBelowRef(contract, entry.key, below))) ? 2 : 1;
   if (entry.value === undefined || entry.elem !== undefined || !program.hasOf.has(entry.value))
     return 1;
