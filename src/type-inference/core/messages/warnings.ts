@@ -537,12 +537,14 @@ export function warningFix(
   }
   // (no test where the read itself stops, a property an object may lack, nor of a literal, whose type is its own)
   if (isLiteral(text) || context === "missing") return "";
-  // (a store's place below a value part of which fits, a property of what it holds: that property's fix, #1495)
-  if (rule.rule === "store" && kinds.includes("unknown")) {
+  const test = typeTest(fits);
+  // (a store's place below a value part of which fits, a property of what it holds: that property's fix, #1495; but a
+  // declared place with no test of what fits keeps the store's own advice, a separate property: the type is the
+  // author's declaration, the lead's ruling on #1730)
+  if (rule.rule === "store" && kinds.includes("unknown") && !(rule.written && test === null)) {
     const property = propertyFix(rule, site, source);
     if (property !== null) return property;
   }
-  const test = typeTest(fits);
   if (test !== null)
     return inPlace(test) ?? checkFix(subject, test, null, { source, site, diagnosed });
   return errorFix(rule, text, kinds, site, source, diagnosed).trimStart();

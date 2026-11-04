@@ -2355,7 +2355,8 @@ test("a kept value's name survey charges the host's names and every file (#1274)
  * (`MessageSource.owner`), never the whole literal; also where a part of the value already fits, and for a value an
  * element selection of a list literal gives (`[a, b].random`) or either operand of `otherwise` (a value the set's
  * collision family gives, where the check named a whole number for an element that holds an object). A value whose
- * place is its own keeps its own check.
+ * place is its own keeps its own check, and a declared place with no test of what fits keeps its own advice, a
+ * separate property, beside the same place's type inferred from a value (the lead's ruling on #1730).
  */
 test("TSV041's advice names the property an object literal types and its narrowest owner (#1495)", () => {
   const other = 'let other = fromJson("{\\"volume\\": \\"loud\\"}", default: null)';
@@ -2395,6 +2396,18 @@ test("TSV041's advice names the property an object literal types and its narrowe
       "hostValue",
       "Check that 'hostValue' is a whole number (integer) first.",
       "",
+    ],
+    [
+      "let typed: list = [1]\nlet root = {f: typed}\nlet holder = [root, hostValue]\nexit\n",
+      "hostValue",
+      "Use a separate property for a value of another type.",
+      "Check that 'hostValue' is an object first.",
+    ],
+    [
+      "let holder = [{f: [1]}, hostValue]\nexit\n",
+      "hostValue",
+      "Give 'f' of an element of 'holder' a list where 'hostValue' gets its value.",
+      "Check that 'hostValue' is an object first.",
     ],
   ];
   for (const [source, at, advice, own] of cases) {
