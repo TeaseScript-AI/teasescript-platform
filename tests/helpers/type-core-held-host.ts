@@ -6,6 +6,7 @@ import {
 import { analyseCore, type Answers, type CorePass } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import {
+  pathText,
   withTestAllowance,
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
@@ -23,7 +24,9 @@ import type { Expression, TypeAnnotation } from "../../src/ast.js";
 import { expressionChildren, unwrap } from "../../src/expression-children.js";
 import type { FlowGraph } from "../../src/type-inference/core/flow-graph/model.js";
 import { REASON, type Item } from "../../src/type-inference/core/items.js";
-import type { FunctionId, PlaceId, SourceSite } from "../../src/type-inference/graph.js";
+import type { PlaceId, SourceSite } from "../../src/type-inference/graph.js";
+import type { Label } from "../../src/type-inference/core/contract/labels.js";
+import { propertyName, stepName } from "../../src/type-inference/core/program.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
 import { sampled } from "./sweep.js";
@@ -782,6 +785,11 @@ export interface CombinedStop {
   /** The stopped analysis's checks at the accepted slots, which the reference does not have. */
   readonly owing: ReadonlySet<string>;
   /**
+   * The checks a candidate relabel needed whose label the recorder did not capture (`LabelIdentities.missing`): each
+   * refused, never inferred; a finding wherever it is not empty.
+   */
+  readonly unidentified: ReadonlySet<string>;
+  /**
    * The coarse (a) reading's counted class, never a pass (TABLE r4.299): the reference's consumer checks (a) would take
    * but for open reads of their unit the stopped analysis did not answer, each with those reads' keys; and their records.
    */
@@ -872,83 +880,26 @@ interface Emission {
 interface Recorded {
   readonly reads: ReadonlyMap<string, readonly RecordedRead[]>;
   readonly emissions: readonly Emission[];
-  /** The source text at a site, as the analysis's own program reads it (`CoreProgram.textAt`, a label's own text). */
-  readonly textAt?: (site: SourceSite) => string;
-  /** A label's roots as the analysis's own program identifies the value at a site (`rootIn`). */
-  readonly rootsAt?: (site: SourceSite) => readonly (RootPlace | null)[];
-}
-
-/** A label's root as the compiler identifies it (`labelRoot`): the root place's label and its own site. */
-export interface RootPlace {
-  readonly label: string;
-  readonly site: SourceSite | null;
+  /** The labels the last walk made for the checks it emitted, with what places them (`labelIdentities`). */
+  readonly labels?: RecordedLabels;
 }
 
 /**
- * The roots of the value at a site, by the program's own identity (`keyLabel`'s walk): the place at the site's whole
- * span (`placeBySite`); first its read's root, up its projections to the binding an occurrence reads (`occurrenceOf`) or
- * the function result a call gives (its `call` constraint, as `Consumers.resultOfCall` maps it), `null` for any other
- * start; then the root of each place the value is stored, passed or returned into (`consumersOf`: a store's place, an
- * argument's parameter, a return's result; through a literal's cell or property, its literal's), where a check at a
- * store, a call, a return or a literal's element names that place's path.
+ * A check's label as the compiler made it (#1595, the lead's ruling on Codex r6): its recipe's root, a place's own label
+ * (`labelRoot`, `"path"`) or a value's own text (`ownLabel`, `"own"`), that place, and the steps its recipe takes below.
  */
-function rootIn(program: CorePass["program"]): (site: SourceSite) => readonly (RootPlace | null)[] {
-  let calls: Map<PlaceId, FunctionId> | undefined;
-  const rootOf = (start: PlaceId | undefined): RootPlace | null => {
-    if (calls === undefined) {
-      calls = new Map();
-      for (const each of program.constraints)
-        if (each.kind === "call") calls.set(each.result, each.fn);
-    }
-    for (let at = start, depth = 0; at !== undefined && depth < 256; depth += 1) {
-      const fn = calls.get(at);
-      const own = ["binding", "parameter", "result"].includes(program.place(at).kind.kind);
-      const root =
-        program.occurrenceOf.get(at) ??
-        (fn === undefined ? (own ? at : undefined) : program.functionOf(fn).result);
-      if (root !== undefined) {
-        const place = program.place(root);
-        return { label: place.label, site: place.site };
-      }
-      at = program.projOf.get(at)?.owner;
-    }
-    return null;
-  };
-  // (the places a value goes into: through a literal's cell or property, the literal's own, as a literal's elements
-  // land, `literalLanding`)
-  const into = (value: PlaceId): RootPlace[] => {
-    const roots: RootPlace[] = [];
-    const seen = new Set<PlaceId>();
-    for (let pending = [value], next = pending.pop(); next !== undefined; next = pending.pop()) {
-      if (seen.has(next) || seen.size > 256) continue;
-      seen.add(next);
-      for (const use of program.consumersOf.get(next) ?? []) {
-        const fn =
-          use.kind === "return" || use.kind === "argument" ? program.functionOf(use.fn) : null;
-        const place =
-          use.kind === "store"
-            ? use.into
-            : use.kind === "return"
-              ? fn?.result
-              : use.kind === "argument"
-                ? typeof use.parameter === "number"
-                  ? fn?.parameters[use.parameter]
-                  : program.parameterPlace(use.fn, use.parameter)
-                : undefined;
-        const cell = place === undefined ? undefined : program.cellOwner.get(place);
-        if (cell !== undefined) pending.push(cell.owner);
-        else {
-          const root = rootOf(place);
-          if (root !== null) roots.push(root);
-        }
-      }
-    }
-    return roots;
-  };
-  return (site) => {
-    const value = program.placeBySite.get(siteKey(site));
-    return value === undefined ? [null] : [rootOf(value), ...into(value)];
-  };
+export interface LabelIdentity {
+  readonly kind: "path" | "own";
+  readonly place: PlaceId;
+  readonly steps: readonly string[];
+}
+
+/** A walk's labels as recorded (`recordingReads`): each emitted check's, by its text, and its program's places. */
+interface RecordedLabels {
+  readonly labelled: ReadonlyMap<string, LabelIdentity | null>;
+  readonly program: CorePass["program"];
+  readonly getOf: ReadonlyMap<PlaceId, PlaceId>;
+  readonly resultOfCall: ReadonlyMap<PlaceId, PlaceId>;
 }
 
 /**
@@ -983,7 +934,7 @@ export function withReadsChanged(
   const reads = new Map(recorded?.reads ?? []);
   const key = readKey(site, steps);
   reads.set(key, change(reads.get(key) ?? []));
-  consumerReads.set(shadow, { reads, emissions: recorded?.emissions ?? [] });
+  consumerReads.set(shadow, { ...recorded, reads, emissions: recorded?.emissions ?? [] });
   return shadow;
 }
 
@@ -1030,6 +981,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
   interface Walk {
     readonly reads: Map<string, RecordedRead[]>;
     readonly emissions: Emission[];
+    readonly labelled: Map<string, LabelIdentity | null>;
     unit: number;
     stage: string;
     unitSite: string;
@@ -1040,18 +992,169 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     if (walk === undefined)
       walks.set(
         consumers,
-        (walk = { reads: new Map(), emissions: [], unit: 0, stage: "", unitSite: "" }),
+        (walk = {
+          reads: new Map(),
+          emissions: [],
+          labelled: new Map(),
+          unit: 0,
+          stage: "",
+          unitSite: "",
+        }),
       );
     return walk;
   };
   // (each walk's warnings as `warning` and `error` record them, whatever map the walk began with, for the run alone)
   const maps: EmissionsOf[] = [];
+  // (each check's label as the compiler made it, #1595, the lead's ruling on Codex r6: every recipe a place's label
+  // roots (`Contract.labelRoots`) or a walk's label memo holds (`Consumers.labels`: a value's own text at its place), and
+  // every recipe below them as it is made, keeps its text in place, observed as it is shown; a check takes the recipe
+  // last shown with its target's text, where no recipe of another identity showed that text since the check before;
+  // else no label, which the oracle refuses and counts. The maps and recipes stay the compiler's own objects, observed
+  // through their own properties, so nothing the analysis computes changes.)
+  let live = true;
+  let shown = 0;
+  let emittedAt = 0;
+  const hooked = new WeakSet<object>();
+  const rootPlaces = new WeakMap<Label, PlaceId>();
+  const ownPlaces = new WeakMap<Label, PlaceId>();
+  const touched = new Map<string, Map<Label, number>>();
+  // (a recipe's own text slot, read without showing it; a recipe's text where it is shown, made or plain: its nearest
+  // made text above it and its steps below, as `labelText` and `labelPlainText` join them, `pathText`)
+  const slots = new WeakMap<Label, () => string | null>();
+  const slotText = (recipe: Label): string | null => {
+    const slot = slots.get(recipe);
+    return slot === undefined ? recipe.text : slot();
+  };
+  const plain = (recipe: Label): string | null => {
+    const parts: string[] = [];
+    let at: Label | null = recipe;
+    for (; at !== null && slotText(at) === null; at = at.parent) parts.push(at.step);
+    const made = at === null ? null : slotText(at);
+    return made === null ? null : pathText([made, ...parts.reverse()]);
+  };
+  const touch = (recipe: Label, text: string): void => {
+    if (!live) return;
+    let recipes = touched.get(text);
+    if (recipes === undefined) touched.set(text, (recipes = new Map()));
+    recipes.set(recipe, (shown += 1));
+  };
+  const onSet = <K, V>(map: Map<K, V>, each: (key: K, value: V) => void): void => {
+    if (hooked.has(map)) return;
+    hooked.add(map);
+    for (const [key, value] of map) each(key, value);
+    Object.defineProperty(map, "set", {
+      configurable: true,
+      writable: true,
+      value(this: Map<K, V>, key: K, value: V) {
+        if (live) each(key, value);
+        return Map.prototype.set.call(this, key, value);
+      },
+    });
+  };
+  const onPush = (list: Obligation[], each: (check: Obligation) => void): void => {
+    if (hooked.has(list)) return;
+    hooked.add(list);
+    Object.defineProperty(list, "push", {
+      configurable: true,
+      writable: true,
+      value(this: Obligation[], ...checks: Obligation[]) {
+        if (live) for (const check of checks) each(check);
+        return Array.prototype.push.apply(this, checks);
+      },
+    });
+  };
+  const observe = (recipe: Label): void => {
+    if (hooked.has(recipe)) return;
+    hooked.add(recipe);
+    let text = recipe.text;
+    let below = recipe.below;
+    slots.set(recipe, () => text);
+    if (below !== null) onSet(below, (_, child) => observe(child));
+    Object.defineProperties(recipe, {
+      text: {
+        configurable: true,
+        enumerable: true,
+        get: () => {
+          const shownText = text ?? plain(recipe);
+          if (shownText !== null) touch(recipe, shownText);
+          return text;
+        },
+        set: (value: string | null) => {
+          text = value;
+          if (value !== null) touch(recipe, value);
+        },
+      },
+      below: {
+        configurable: true,
+        enumerable: true,
+        get: () => below,
+        set: (value: Map<string, Label> | null) => {
+          below = value;
+          if (value !== null) onSet(value, (_, child) => observe(child));
+        },
+      },
+    });
+  };
+  const identityOf = (recipe: Label): LabelIdentity | null => {
+    const steps: string[] = [];
+    let root = recipe;
+    for (; root.parent !== null; root = root.parent) steps.push(root.step);
+    steps.reverse();
+    const path = rootPlaces.get(root);
+    if (path !== undefined) return { kind: "path", place: path, steps };
+    const own = ownPlaces.get(root);
+    return own === undefined ? null : { kind: "own", place: own, steps };
+  };
+  const identityText = (identity: LabelIdentity | null | undefined): string =>
+    JSON.stringify(identity ?? null);
+  const emitted = (walk: Walk, check: Obligation): void => {
+    const recipes = [...(touched.get(check.target) ?? [])].sort((a, b) => b[1] - a[1]);
+    const since = new Set(
+      recipes
+        .filter(([, at]) => at > emittedAt)
+        .map(([recipe]) => identityText(identityOf(recipe))),
+    );
+    const found = recipes[0] === undefined || since.size > 1 ? null : identityOf(recipes[0][0]);
+    emittedAt = shown;
+    const key = JSON.stringify(check);
+    walk.labelled.set(
+      key,
+      walk.labelled.has(key) && identityText(walk.labelled.get(key)) !== identityText(found)
+        ? null
+        : found,
+    );
+  };
+  const labelling = (consumers: Consumers): void => {
+    const walk = walkOf(consumers);
+    onSet(consumers.pass.contract.labelRoots, (place, recipe) => {
+      rootPlaces.set(recipe, place);
+      observe(recipe);
+    });
+    onSet(consumers.labels, (place, recipe) => {
+      observe(recipe);
+      if (recipe.parent === null && !rootPlaces.has(recipe) && !ownPlaces.has(recipe))
+        ownPlaces.set(recipe, place);
+    });
+    const { admission } = consumers;
+    onPush(admission.readChecks, (check) => emitted(walk, check));
+    if (!hooked.has(admission.boundaries)) {
+      for (const list of admission.boundaries.values())
+        onPush(list, (check) => emitted(walk, check));
+      onSet(admission.boundaries, (_, list) => {
+        for (const check of list) emitted(walk, check);
+        onPush(list, (check) => emitted(walk, check));
+      });
+    }
+  };
   const recording = (consumers: Consumers): void => {
+    labelling(consumers);
     if (consumers.rules instanceof EmissionsOf) return;
     const walk = walkOf(consumers);
     const map = new EmissionsOf(consumers.rules, (diagnostic) => {
-      if ("obligation" in diagnostic)
+      if ("obligation" in diagnostic) {
         walk.emissions.push({ obligation: JSON.stringify(diagnostic.obligation), unit: walk.unit });
+        emitted(walk, diagnostic.obligation);
+      }
     });
     maps.push(map);
     Object.defineProperty(consumers, "rules", {
@@ -1070,6 +1173,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     return finish.apply(this, args);
   };
   prototype.enter = function (this: Consumers, ...args: Parameters<Consumers["enter"]>) {
+    labelling(this);
     const walk = walkOf(this);
     walk.unit += 1;
     walk.stage = String(args[0]);
@@ -1077,6 +1181,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     return enter.apply(this, args);
   };
   prototype.runs = function (this: Consumers, ...args: Parameters<Consumers["runs"]>) {
+    labelling(this);
     const walk = walkOf(this);
     walk.unit += 1;
     walk.unitSite = `stage ${walk.stage} ${siteKey(args[0])}`;
@@ -1124,15 +1229,22 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     const made = make();
     // (the analysis's last walk: a receiving completion pass's store checks, #1526 phase C, are none of its walks)
     const last = [...walks].filter(([consumers]) => !consumers.pass.closure).at(-1);
-    const program = last?.[0].pass.program;
     consumerReads.set(made.answers, {
       ...(last?.[1] ?? { reads: new Map(), emissions: [] }),
-      ...(program === undefined
+      ...(last === undefined
         ? {}
-        : { textAt: (site: SourceSite) => program.textAt(site), rootsAt: rootIn(program) }),
+        : {
+            labels: {
+              labelled: last[1].labelled,
+              program: last[0].pass.program,
+              getOf: last[0].getOf,
+              resultOfCall: last[0].resultOfCall,
+            },
+          }),
     });
     return made;
   } finally {
+    live = false;
     Object.assign(prototype, { valueItems, runs, enter, check, finish, skip });
     for (const map of maps) map.into = undefined;
   }
@@ -1179,14 +1291,8 @@ export function combinedAnalyses(
   };
 }
 
-/** A check's target as its steps: names, and an index's own text (`xs[0].values` is `xs`, `[0]`, `values`). */
-const targetSteps = (target: string): string[] => target.match(/\[[^\]]*\]|[^.[]+/g) ?? [];
-
 /** A dictionary's derived lists (`dictList`): a read through one is named by its own text (`keyLabel`, §10.5). */
 const DERIVED = new Set(["values", "keys"]);
-
-/** The selections a key path spells `element` (`selectsElement`), as a value's own text spells them. */
-const SELECTIONS = new Set(["first", "last", "random"]);
 
 /**
  * The written types a program declares, by the whole site (file and offsets) of the place that holds them, as the
@@ -1213,153 +1319,119 @@ function declaredIn(graph: FlowGraph): ReadonlyMap<string, TypeAnnotation | null
   return types;
 }
 
-/** What a label is read from: the expression at a site, the source text there (`ownLabel`) and its roots (`rootIn`). */
-export interface LabelSource {
-  readonly expressionAt: (site: SourceSite) => Expression | undefined;
-  readonly textAt: (site: SourceSite) => string;
-  readonly rootsAt: (site: SourceSite) => readonly (RootPlace | null)[];
-}
-
-/** A label's root, the program's place (`rootIn`): its steps and the written type its declaration holds (`declaredIn`). */
-interface Root {
-  readonly steps: readonly string[];
-  readonly written: TypeAnnotation | null;
-}
-
-const rootFrom = (graph: FlowGraph, root: RootPlace | null | undefined): Root | null =>
-  root === null || root === undefined
-    ? null
-    : {
-        steps: targetSteps(root.label),
-        written: root.site === null ? null : (declaredIn(graph).get(siteKey(root.site)) ?? null),
-      };
-
-/** An analysis's label source: its syntax (`syntaxOf`) and its program's text and roots (`recordingReads`). */
-export function labelSource(answers: Answers): LabelSource | null {
-  const recorded = readsOf(answers);
-  if (recorded?.textAt === undefined || recorded.rootsAt === undefined) return null;
-  let parsed: ReturnType<typeof syntaxOf> | undefined;
-  return {
-    expressionAt: (site) => (parsed ??= syntaxOf(answers)).at.get(siteKey(site)),
-    textAt: recorded.textAt,
-    rootsAt: recorded.rootsAt,
-  };
+/**
+ * An analysis's labels as the compiler made them (`recordingReads`): each emitted check's (`of`, `null` where none was
+ * recorded, which the oracle refuses and counts in `missing`), its program's places and the path its projections give a
+ * place up to its root (`climb`: `keyLabel`'s walk, its element steps spelled `element`).
+ */
+export interface LabelIdentities {
+  readonly of: (check: Obligation) => LabelIdentity | null;
+  readonly site: (place: PlaceId) => SourceSite | null;
+  readonly climb: (
+    place: PlaceId,
+  ) => { readonly root: PlaceId; readonly steps: readonly string[] } | null;
+  readonly missing: Set<string>;
+  /** The number of the program's places (ids `0` to it). */
+  readonly places: number;
 }
 
 /**
- * The read chain at a check's site, every part identified by the compiler's own identity, never by a name or a text
- * alone (the recognition family's rule, the lead's ruling on Codex r5): from the expression at the site's whole span
- * (file and offsets) down to its start, each step below it with the spellings a label may give it (a property's name;
- * `element` for an index or a `get`; a selection, `first`, `last` or `random`, either `element` or, an object's property
- * of that name, its name) and the site of its expression, outermost last; then the start's root, the place the program
- * reads there (`rootIn`: a binding, a parameter, a call's result), with the written type its declaration holds
- * (`declaredIn`, by the root place's own site), `null` where the program names none. Where no expression stands at the
- * site, the root of the place there and no steps. One walk down the read, linear in its length: one list of spellings a
- * step, never their combinations (Codex r5's B1 on #1687).
+ * Test-only: `labels` with the given checks' labels (`LabelIdentity`) in place of the recorded ones, for a unit case of
+ * the predicate on a label the compiler never made.
  */
-function readChain(
-  graph: FlowGraph,
-  source: LabelSource,
-  site: SourceSite,
-): {
-  readonly root: Root | null;
-  readonly steps: readonly (readonly string[])[];
-  readonly sites: readonly SourceSite[];
-} {
-  const below: { expression: Expression; steps: readonly string[] }[] = [];
-  const at = source.expressionAt(site);
-  let start = at;
-  while (start !== undefined) {
-    const inner = unwrap(start);
-    if (inner.kind === "propertyAccessExpression") {
-      const name = inner.property.name;
-      below.push({ expression: inner, steps: SELECTIONS.has(name) ? ["element", name] : [name] });
-      start = inner.object;
-    } else if (inner.kind === "indexExpression") {
-      below.push({ expression: inner, steps: ["element"] });
-      start = inner.object;
-    } else if (
-      inner.kind === "callExpression" &&
-      inner.callee.kind === "propertyAccessExpression" &&
-      inner.callee.property.name === "get"
-    ) {
-      below.push({ expression: inner, steps: ["element"] });
-      start = inner.callee.object;
-    } else break;
-  }
-  below.reverse();
+export function withLabels(
+  labels: LabelIdentities,
+  given: readonly (readonly [Obligation, LabelIdentity])[],
+): LabelIdentities {
+  const set = new Map(given.map(([check, identity]) => [JSON.stringify(check), identity]));
+  return { ...labels, of: (check) => set.get(JSON.stringify(check)) ?? labels.of(check) };
+}
+
+/** An analysis's recorded labels (`LabelIdentities`), `null` where it was made without them. */
+export function labelIdentities(answers: Answers): LabelIdentities | null {
+  const labels = readsOf(answers)?.labels;
+  if (labels === undefined) return null;
+  const { labelled, program, getOf, resultOfCall } = labels;
+  const missing = new Set<string>();
   return {
-    root: rootFrom(
-      graph,
-      source.rootsAt(start === undefined ? site : siteOf(site.file, unwrap(start)))[0],
-    ),
-    steps: below.map(({ steps }) => steps),
-    sites: below.map(({ expression }) => siteOf(site.file, expression)),
+    of: (check) => {
+      const text = JSON.stringify(check);
+      const found = labelled.get(text) ?? null;
+      if (found === null) missing.add(text);
+      return found;
+    },
+    site: (place) => program.places[place]?.site ?? null,
+    climb: (place) => {
+      const steps: string[] = [];
+      let at = place;
+      for (let depth = 0; depth < 256; depth += 1) {
+        const binding = program.occurrenceOf.get(at);
+        if (binding !== undefined) return { root: binding, steps: steps.reverse() };
+        const owner = getOf.get(at);
+        const projection: { readonly owner: PlaceId; readonly step: string } | undefined =
+          program.projOf.get(at) ?? (owner === undefined ? undefined : { owner, step: "index" });
+        if (projection === undefined) {
+          const result = resultOfCall.get(at);
+          return result === undefined ? null : { root: result, steps: steps.reverse() };
+        }
+        steps.push(
+          stepName(projection.step) === "element" && projection.step !== "element"
+            ? "element"
+            : propertyName(projection.step),
+        );
+        at = projection.owner;
+      }
+      return null;
+    },
+    missing,
+    places: program.places.length,
   };
 }
 
 /**
  * The precise label forms a stopped check carries where the demand-only reference spells the generic one (#1595,
- * TABLE r4.322). The compiler's label grammar (`keyLabel` in `consumers/names.ts`):
- * - a root: a binding's name, a parameter `F.P`, a result `F.result`; else the value's own text (an anonymous start,
- *   the same in both runs, never a relabel);
+ * TABLE r4.322), compared as the compiler made both labels (`LabelIdentity`), never read back from a site, an expression
+ * or a name (the lead's ruling on Codex r6). The compiler's label grammar (`keyLabel` in `consumers/names.ts`):
+ * - a root: a place's label, a binding's name, a parameter `F.P`, a result `F.result`; else the value's own text;
  * - each step below it: a property's name; a selection, an index or a `get`, spelled `element`, or `entry` where every
  *   kind of its owner is a dictionary (`elementStepOf`); a dictionary's `values` or `keys`;
  * - and where the chain passes a `values` or `keys` step with a dictionary among its owner's kinds (`derivedChain`), the
- *   whole label is the value's own text instead (`ownLabel`): the source text of the expression the label names.
+ *   whole label is the value's own text instead (`ownLabel`).
  * After a stop the stopped analysis may prove more of an owner's kinds than the reference (`labelDomain`), which gives
- * exactly two precise forms, never mixed, each on a root the program identifies at the check's site:
- * - `"entry"`: the reference's path with some `element` steps below its root spelled `entry`, the root and every other
- *   step unchanged (a root or parameter named like a step stays the root, Codex r4's B1 on #1687); its root the read's
- *   (`readChain`) or a place the value there is stored, passed or returned into (`rootIn`);
- * - `"own"`: the source text of the very expression the reference's path names, along the read's chain from its root,
- *   its path the reference's with at least one `values` or `keys` step below its root: never another expression's text
- *   nor an altered operand (Codex r4's B2), and whatever the expression's operands are (N1).
- * The form of `x` beside `u` with its root, else `null`.
+ * exactly two precise forms of the reference's path label, never mixed:
+ * - `"entry"`: the same root place and some `element` steps below it spelled `entry`, every other step the same;
+ * - `"own"`: a place's own text with no step below it, the place whose path up the compiler's projections (`climb`) is
+ *   the reference's, root and steps, with at least one `values` or `keys` step.
+ * The form of the stopped label `x` beside the reference's `u`, else `null`. A place is one in both runs where its id
+ * and its whole site are.
  */
 function relabelForm(
-  graph: FlowGraph,
-  source: LabelSource,
-  u: Obligation,
-  x: Obligation,
-): { readonly form: "entry" | "own"; readonly root: Root } | null {
-  const [from, to] = [targetSteps(u.target), targetSteps(x.target)];
-  const below = (root: Root | null): root is Root =>
-    root !== null &&
-    root.steps.length <= from.length &&
-    root.steps.every((step, i) => step === from[i]);
-  const { root, steps, sites } = readChain(graph, source, x.site);
-  if (from.length === to.length && from.some((step, i) => step !== to[i])) {
-    const entry = [
-      root,
-      ...source
-        .rootsAt(x.site)
-        .slice(1)
-        .map((each) => rootFrom(graph, each)),
-    ].find(
-      (each): each is Root =>
-        below(each) &&
-        from.every(
-          (step, i) =>
-            step === to[i] || (i >= each.steps.length && step === "element" && to[i] === "entry"),
-        ),
-    );
-    if (entry !== undefined) return { form: "entry", root: entry };
-  }
-  if (!below(root)) return null;
-  // (the expression on the read's chain whose text the label is, and whose path is the reference's: each step one of
-  // its spellings, an element step the reference spells `entry` already being an element step)
-  const length = root.steps.length;
-  const depth = from.length - length;
-  return depth >= 1 &&
-    depth <= steps.length &&
-    source.textAt(sites[depth - 1]!) === x.target &&
-    steps.slice(0, depth).every((spellings, i) => {
-      const step = from[length + i]!;
-      return spellings.includes(step) || (step === "entry" && spellings.includes("element"));
-    }) &&
-    from.slice(length).some((step) => DERIVED.has(step))
-    ? { form: "own", root }
+  u: LabelIdentity,
+  x: LabelIdentity,
+  reference: LabelIdentities,
+  stopped: LabelIdentities,
+): "entry" | "own" | null {
+  if (u.kind !== "path") return null;
+  const same = (place: PlaceId): boolean => {
+    const [a, b] = [reference.site(u.place), stopped.site(place)];
+    return place === u.place && a !== null && b !== null && siteKey(a) === siteKey(b);
+  };
+  // (an element step the reference spells `entry` already, as a reference that read part of its key settled does)
+  const spells = (path: readonly string[], each: readonly string[]): boolean =>
+    path.length === each.length &&
+    path.every((step, i) => step === each[i] || (step === "element" && each[i] === "entry"));
+  if (x.kind === "path")
+    return same(x.place) &&
+      spells(u.steps, x.steps) &&
+      u.steps.some((step, i) => step !== x.steps[i])
+      ? "entry"
+      : null;
+  const path = x.steps.length === 0 ? stopped.climb(x.place) : null;
+  return path !== null &&
+    same(path.root) &&
+    spells(path.steps, u.steps) &&
+    u.steps.some((step) => DERIVED.has(step))
+    ? "own"
     : null;
 }
 
@@ -1402,25 +1474,26 @@ const elementsOf = (members: readonly (TypeAnnotation | null)[]): (TypeAnnotatio
 
 /**
  * Whether a written type at the key proves `x`'s form (#1595, the lead's ruling on Q4: the author's own proof, as the
- * compiler reads it). The root's written type (`readChain`'s, the program's root place's declaration) is followed along
- * `u`'s element steps (an `entry` it already spells among them) through its elements, optionals and unions as `termAt`
- * follows them; a step it cannot follow proves nothing past it. One clause per form:
+ * compiler reads it). The root's written type (`written`: the declaration at the reference label's root place's whole site)
+ * is followed along `u`'s steps below the root, element steps (an `entry` it already spells among them) through its
+ * elements, optionals and unions as `termAt` follows them; a step it cannot follow proves nothing past it. `x` is the
+ * stopped label's steps below the root (none for own text). One clause per form:
  * - `"entry"`: every step `x` spells `entry` has a written dictionary as its owner, every kind of it
  *   (`elementStepOf`), and no `values` or `keys` step on the way has a dictionary among its owner's kinds, where the
  *   compiler names the value by its own text instead (`derivedChain`);
  * - `"own"`: a `values` or `keys` step on the way has a dictionary among its owner's written kinds (`derivedChain`).
  */
 function writtenProves(
-  root: Root,
+  written: TypeAnnotation | null,
   u: readonly string[],
   x: readonly string[],
   form: "entry" | "own",
 ): boolean {
-  if (root.written === null) return false;
-  let members = membersOf(root.written);
+  if (written === null) return false;
+  let members = membersOf(written);
   // (the last step `x` spells `entry`: past it a step the type cannot follow leaves nothing to prove)
   const last = Math.max(...u.flatMap((step, i) => (form === "entry" && step !== x[i] ? [i] : [])));
-  for (let at = root.steps.length; at < u.length; at += 1) {
+  for (let at = 0; at < u.length; at += 1) {
     const step = u[at]!;
     if (form === "entry" && x[at] === "entry" && !writtenDict(members)) return false;
     // (a derived list: its own text, never an `entry` path, the two forms exclusive as `keyLabel` makes them)
@@ -1440,46 +1513,33 @@ function writtenProves(
  *    its own at `x`'s whole site, the value read there, targeting the label or a path below it (it need not owe `x`
  *    itself: knowing more, it may owe another check there; the value, never a label's text alone nor a read beside it
  *    in the same walk unit: Codex r1's and r2's B1 on #1687), or a written type at the key proves its form
- *    (`writtenProves`);
+ *    (`writtenProves`, the written type the reference label's root place declares);
  * 2. the check, its location and its expected types are identical: kind, whole site, boundary and `against`;
  * 3. no other difference is ignored: the label is one of the compiler's two precise forms of the reference's
  *    (`relabelForm`), the words are `u`'s with only the label replaced, and every other part is equal.
- * The stopped check accepted, else `undefined`. `natural` is the natural analysis's checks; `graph` the program's;
- * `source` the reference's (`labelSource`), without which no label is recognized: every value is identified by its
- * whole site and the program's place, never by a name or a text alone.
+ * Both labels are the compiler's own as recorded (`labelIdentities`: `reference` the reference's, `stopped` the stopped
+ * analysis's): a check of these whose label was not recorded is refused and counted (`LabelIdentities.missing`), never
+ * read back from its site, its expression or a name. The stopped check accepted, else `undefined`. `natural` is the
+ * natural analysis's checks; `graph` the program's.
  */
 export function provenRelabel(
   u: Obligation,
   owed: readonly Obligation[],
   natural: readonly Obligation[],
   graph: FlowGraph,
-  source: LabelSource | null,
+  reference: LabelIdentities | null,
+  stopped: LabelIdentities | null,
 ): Obligation | undefined {
-  if (source === null) return undefined;
-  const from = targetSteps(u.target);
   return owed.find((x) => {
-    if (x.target === u.target) return false;
-    const to = targetSteps(x.target);
-    // (3)'s form, on the read chain at the check's site (each candidate's own: (2) compares the sites after)
-    const found = relabelForm(graph, source, u, x);
-    return (
-      found !== null &&
-      // (1)
-      (natural.some(
-        (n) =>
-          siteKey(n.site) === siteKey(x.site) &&
-          (n.target === x.target ||
-            n.target.startsWith(`${x.target}.`) ||
-            n.target.startsWith(`${x.target}[`)),
-      ) ||
-        writtenProves(found.root, from, to, found.form)) &&
+    if (
+      x.target === u.target ||
       // (2)
-      x.kind === u.kind &&
-      siteKey(x.site) === siteKey(u.site) &&
-      x.boundary === u.boundary &&
-      JSON.stringify(x.against) === JSON.stringify(u.against) &&
+      x.kind !== u.kind ||
+      siteKey(x.site) !== siteKey(u.site) ||
+      x.boundary !== u.boundary ||
+      JSON.stringify(x.against) !== JSON.stringify(u.against) ||
       // (3) (beside (2)'s parts, every other part equal: the words with only the label replaced)
-      x.on === u.on.split(u.target).join(x.target) &&
+      x.on !== u.on.split(u.target).join(x.target) ||
       JSON.stringify({
         ...u,
         kind: x.kind,
@@ -1488,7 +1548,32 @@ export function provenRelabel(
         against: x.against,
         target: x.target,
         on: x.on,
-      }) === JSON.stringify(x)
+      }) !== JSON.stringify(x) ||
+      reference === null ||
+      stopped === null
+    )
+      return false;
+    // (3)'s form, of the two labels as the compiler made them
+    const [from, to] = [reference.of(u), stopped.of(x)];
+    if (from === null || to === null) return false;
+    const form = relabelForm(from, to, reference, stopped);
+    if (form === null) return false;
+    const site = reference.site(from.place);
+    // (1)
+    return (
+      natural.some(
+        (n) =>
+          siteKey(n.site) === siteKey(x.site) &&
+          (n.target === x.target ||
+            n.target.startsWith(`${x.target}.`) ||
+            n.target.startsWith(`${x.target}[`)),
+      ) ||
+      writtenProves(
+        site === null ? null : (declaredIn(graph).get(siteKey(site)) ?? null),
+        from.steps,
+        to.kind === "path" ? to.steps : [],
+        form,
+      )
     );
   });
 }
@@ -1524,7 +1609,7 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
   const owed = [...stopped.checks, ...marks.map((mark) => mark.obligation)];
   const owedTexts = new Set(owed.map((check) => JSON.stringify(check)));
   const naturalTexts = new Set(natural.checks.map((check) => JSON.stringify(check)));
-  const labels = labelSource(reference);
+  const [referenceLabels, stoppedLabels] = [labelIdentities(reference), labelIdentities(stopped)];
   let parsed: ReturnType<typeof syntaxOf> | undefined;
   const syntax = (): ReturnType<typeof syntaxOf> => (parsed ??= syntaxOf(reference));
   const classOf = (u: Obligation): "a" | "w" | "z" | "relabelled" | readonly string[] | null => {
@@ -1589,7 +1674,14 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
       )
     )
       return "z";
-    return provenRelabel(u, owed, natural.checks, reference.graph, labels) === undefined
+    return provenRelabel(
+      u,
+      owed,
+      natural.checks,
+      reference.graph,
+      referenceLabels,
+      stoppedLabels,
+    ) === undefined
       ? unanswered
       : "relabelled";
   };
@@ -1640,7 +1732,11 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
     )
       coarse.records.add(record);
   }
-  return { checks, records, relabelled, owing, coarse };
+  const unidentified = new Set([
+    ...(referenceLabels?.missing ?? []),
+    ...(stoppedLabels?.missing ?? []),
+  ]);
+  return { checks, records, relabelled, owing, coarse, unidentified };
 }
 
 /**
