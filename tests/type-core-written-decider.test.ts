@@ -4,6 +4,7 @@ import test from "node:test";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { Admission } from "../src/type-inference/core/admission.js";
 import { drive } from "../src/type-inference/core/admission/inherited.js";
+import { spanRef } from "../src/type-inference/core/contract/key-ids.js";
 import { earliestDecider } from "../src/type-inference/core/admission/scan.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withEveryRecord } from "../src/type-inference/core/solver.js";
@@ -29,11 +30,12 @@ const shown = (answer: Answer): string =>
       ]);
 
 /** `value`'s decider at `path` asked as `literalElements` asks it: the summary, outside every decision. */
-const routed = (admission: Admission, d: Definition, path: readonly string[]): Answer =>
+type Asked = Parameters<typeof earliestDecider>[3];
+const routed = (admission: Admission, d: Definition, path: Asked): Answer =>
   drive(admission, earliestDecider(admission, d.value!, d.node, path, null));
 
 /** The same question as a decision asks it: the scan of its stops. */
-const scanned = (admission: Admission, d: Definition, path: readonly string[]): Answer => {
+const scanned = (admission: Admission, d: Definition, path: Asked): Answer => {
   admission.deciding += 1;
   try {
     return routed(admission, d, path);
@@ -58,7 +60,7 @@ const COLD = [
   "stops",
   "everyStop",
 ] as const;
-const cold = (admission: Admission, d: Definition, path: readonly string[]): Answer => {
+const cold = (admission: Admission, d: Definition, path: Asked): Answer => {
   const saved = COLD.map((name) => ({ name, kept: admission[name] }));
   for (const { name, kept } of saved)
     Object.defineProperty(admission, name, {
@@ -68,10 +70,21 @@ const cold = (admission: Admission, d: Definition, path: readonly string[]): Ans
           ? new Map()
           : new WeakMap(),
     });
+  // (the transfers read their maps through the bundle: it takes the empty ones too, Codex r1's F1 on #1685)
+  const bundle = admission.deciderCaches;
+  Object.defineProperty(admission, "deciderCaches", {
+    value: {
+      deciders: admission.deciders,
+      linkTests: admission.linkTests,
+      linkKinds: admission.linkKinds,
+      summaries: new WeakMap(),
+    },
+  });
   try {
     return scanned(admission, d, path);
   } finally {
     for (const { name, kept } of saved) Object.defineProperty(admission, name, { value: kept });
+    Object.defineProperty(admission, "deciderCaches", { value: bundle });
   }
 };
 
@@ -109,6 +122,7 @@ const valued = (admission: Admission): Definition[] => {
 const PATHS: readonly (readonly string[])[] = [
   [],
   ["p"],
+  ["q"],
   ["element"],
   ["element", "p"],
   ["p", "q"],
@@ -176,22 +190,39 @@ function sources(k: number): string[] {
   return out;
 }
 
+/**
+ * Codex r1's dimensions on #1685, one witness each: a join whose written operand leaves the path open, the rows of a
+ * choice's options interleaved by rank, two snapshots of one binding, a written copy two steps down (asked as a cursor's
+ * span too, as every question below), a copy cycle whose decision waits on itself.
+ */
+const WITNESSES: readonly string[] = [
+  "let typed: list = [1]\nlet other: integer[] = [2]\nlet out = other + typed\nsay out.length\nexit\n",
+  'let typed: integer | string = 1\nlet other: boolean | null = true\nlet out = askChoice [{text: "A", value: {p: typed, q: other}}, {text: "B", value: {p: 2, q: true}}]\nsay "${out.p}"\nexit\n',
+  'let typed: integer | string = 1\nlet a = {p: typed}\nlet before = a.p\na.p = "s"\nlet out = [[{p: before}, {p: a.p}][0], {p: typed}][0]\nsay "${out.p}"\nexit\n',
+  'let typed: integer | string = 1\nlet out = [{p: {q: typed}}, {p: {q: 2}}][0]\nsay "${out.p.q}"\nexit\n',
+  'let typed: integer | string = 1\nlet a = {p: typed}\nlet b = a\na = b\nlet out = [a, b][0]\nsay "${out.p}"\nexit\n',
+];
+
 test("outside a decision the written decider's summary answers each question as the scan of the stops does (#1444)", () => {
   const differ: string[] = [];
   let asked = 0;
   for (const k of [1, 2, 3])
-    for (const source of sources(k))
+    for (const source of k === 1 ? [...sources(k), ...WITNESSES] : sources(k))
       for (const mode of MODES)
         atElements(source, mode, (admission) => {
           for (const d of valued(admission))
-            for (const path of PATHS) {
-              const [summary, scan] = [routed(admission, d, path), scanned(admission, d, path)];
-              asked += 1;
-              if (shown(summary) !== shown(scan))
-                differ.push(
-                  `k ${k} ${JSON.stringify(mode)} ${d.uid} ${path.join(".")}: ${shown(summary)} ≠ ${shown(scan)}\n${source}`,
-                );
-            }
+            for (const steps of PATHS)
+              for (const path of [
+                steps,
+                spanRef(admission.pass.contract, admission.pass.contract.pathIdOf(steps)),
+              ]) {
+                const [summary, scan] = [routed(admission, d, path), scanned(admission, d, path)];
+                asked += 1;
+                if (shown(summary) !== shown(scan))
+                  differ.push(
+                    `k ${k} ${JSON.stringify(mode)} ${d.uid} ${steps.join(".")}${path === steps ? "" : " (span)"}: ${shown(summary)} ≠ ${shown(scan)}\n${source}`,
+                  );
+              }
         });
   assert.ok(asked > 1_000);
   assert.deepEqual(differ.slice(0, 5), []);
