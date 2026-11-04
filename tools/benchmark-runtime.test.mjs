@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import {
   UsageError,
   formatBaseline,
@@ -26,10 +27,13 @@ const steps = (plan) => {
   if (mutation.append) list = [...list.slice(0, -1), mutation.append, list.at(-1)];
   return list;
 };
+export const calls = { created: 0 };
 class Session {
   constructor(plan, index, dropped = null) {
     this.plan = plan;
     this.steps = steps(plan);
+    if (mutation.differentFrom !== undefined && calls.created > mutation.differentFrom)
+      this.steps[0].events = [{ kind: "notice" }];
     this.index = index;
     this.dropped = dropped;
   }
@@ -40,18 +44,6 @@ class Session {
   }
   stepToEvent() { return this.operate("step"); }
   observeTime() { return this.operate("observe"); }
-  run() {
-    let instructionsExecuted = 0;
-    const events = [];
-    for (;;) {
-      const step = this.steps[this.index + 1];
-      if (step?.op !== "step") return { instructionsExecuted, events };
-      const one = this.operate("step");
-      instructionsExecuted += one.instructionsExecuted;
-      events.push(...one.events);
-      if (step.status !== "running") return { instructionsExecuted: instructionsExecuted + (mutation.runExtra ?? 0), events };
-    }
-  }
   exportSnapshot() {
     const step = this.steps[this.index] ?? { status: "running", rng: { state: 1 }, state: {} };
     const state = { ...step.state };
@@ -62,7 +54,10 @@ class Session {
   exportCheckpoint() { return { plan: this.plan, index: this.index }; }
 }
 export const compileSource = (source) => ({ plan: JSON.parse(source), diagnostics: [] });
-export const createFreshRuntimeSession = (plan) => new Session(plan, -1);
+export const createFreshRuntimeSession = (plan) => {
+  calls.created++;
+  return new Session(plan, -1);
+};
 export const deserializeRuntimeSession = (json) => {
   const { plan, index } = JSON.parse(json);
   return new Session(plan, index, mutation.restoreDrops ?? null);
@@ -226,6 +221,18 @@ test("a format revision alone does not move the state digest", async (t) => {
   assert.notEqual(stateDigest({ x: [1] }), stateDigest({ x: [2] }));
 });
 
+test("a baseline case the manifest no longer has fails until --update removes it", async (t) => {
+  const { directory, dists, run } = await withBaseline(t);
+  const shorter = manifest();
+  shorter.cases = shorter.cases.filter((entry) => entry.name !== "probe");
+  fs.writeFileSync(path.join(directory, "manifest.json"), JSON.stringify(shorter));
+  const result = await run("--count-only", "--dist", dists.clean);
+  assert.equal(result.status, 1);
+  assert.match(result.output, /probe: in the baseline but not in the manifest/);
+  assert.equal((await run("--count-only", "--update", "--dist", dists.clean)).status, 0);
+  assert.equal((await run("--count-only", "--dist", dists.clean)).status, 0);
+});
+
 test("a changed source fails with both hashes", async (t) => {
   const { directory, dists, run } = await withBaseline(t);
   fs.writeFileSync(path.join(directory, "work.tease"), `${source}\n`);
@@ -308,6 +315,12 @@ test("--cpu times nothing when the candidate differs from the base at a cut", as
   assert.match(result.output, /work \(candidate against base\): cut 2 \(step\) rng/);
   assert.equal(fs.readFileSync(path.join(out, "samples.jsonl"), "utf8"), "");
   assert.equal(fs.existsSync(path.join(out, "summary.json")), false);
+  const stub = await import(pathToFileURL(path.join(dists.changed, "src", "index.js")).href);
+  assert.equal(
+    stub.calls.created,
+    1,
+    "the candidate ran once, untimed, before the difference stopped it",
+  );
 });
 
 test("--cpu accepts a candidate whose instruction counts differ", async (t) => {
@@ -332,24 +345,21 @@ test("--cpu accepts a candidate whose instruction counts differ", async (t) => {
   assert.equal(result.status, 0, result.output);
 });
 
-test("--cpu checks a timed run's count against an untimed run of the same operations", async (t) => {
-  const { directory, dists, run } = setUp(t, { mutations: { sliced: { runExtra: 1 } } });
+test("--cpu checks every timed run against its build's untimed record", async (t) => {
+  const { directory, dists, run } = setUp(t, { mutations: { later: { differentFrom: 1 } } });
+  const out = path.join(directory, "cpu");
   const result = await run(
     "--cpu",
     "--base",
     dists.clean,
     "--candidate",
-    dists.sliced,
+    dists.later,
     "--out",
-    path.join(directory, "cpu"),
-    "--rounds",
-    "1",
-    "--warmups",
-    "0",
-    "--batch",
-    "1",
+    out,
   );
-  assert.equal(result.status, 0, result.output);
+  assert.equal(result.status, 1, result.output);
+  assert.match(result.output, /work \(candidate, timed round -3\): cut 1 \(step\) eventsDigest/);
+  assert.equal(fs.existsSync(path.join(out, "summary.json")), false);
 });
 
 test("the CPU summary pairs matching rounds and takes the suite's geometric mean of their medians", () => {

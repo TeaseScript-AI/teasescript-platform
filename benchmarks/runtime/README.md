@@ -32,7 +32,8 @@ diff shows one line per cut. A manifest text or a restored run that differs fail
 
 `--cpu --base <dist> --candidate <dist> --out <dir>` loads both builds in one process, requires the candidate to give
 the base's results at every cut (counts may differ), then runs them interleaved, the builds' order alternating per
-round, after tagged warmup rounds. `<dir>` gets `samples.jsonl` (raw CPU microseconds per sample) and `summary.json`:
+round, after tagged warmup rounds. The timed part is the `stepToEvent` and `observeTime` calls; every timed run is
+recorded outside those calls and must equal its build's untimed record. `<dir>` gets `samples.jsonl` (raw CPU microseconds per sample) and `summary.json`:
 per case and build the instructions per unit, CPU per unit and per instruction, the paired `base / candidate` speed in
 matching rounds as median [min–max], and the suite's geometric mean of those medians. CPU is reported, never checked.
 

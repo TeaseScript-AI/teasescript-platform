@@ -12,8 +12,8 @@
 // A probe also runs restored from checkpoint JSON at every cut, where it must give the same cuts. `--update` rewrites
 // the baseline entries of the cases it ran.
 // `--cpu` loads both builds in one process, requires the candidate to equal the base at every cut (instruction counts
-// may differ), then times them interleaved and writes raw samples and a summary under `--out`. CPU never decides the
-// exit status. Exit 0: equal; 1: a difference; 2: a usage or run failure.
+// may differ), then times them interleaved, checking every timed run the same way, and writes raw samples and a
+// summary under `--out`. CPU never decides the exit status. Exit 0: equal; 1: a difference; 2: a usage or run failure.
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -48,6 +48,12 @@ export function stateDigest(snapshot) {
 }
 
 export const eventsDigest = (events) => sha256(canonicalJson(events));
+
+/** The names of every case in the manifest, on-demand ones included. */
+export const manifestNames = (directory = benchmarkDirectory) =>
+  JSON.parse(fs.readFileSync(path.join(directory, "manifest.json"), "utf8")).cases.map(
+    (entry) => entry.name,
+  );
 
 /** The manifest's cases, each with its source text and hash; `select` picks by name, `all` adds the on-demand ones. */
 export function loadCases(directory = benchmarkDirectory, { all = false, select = null } = {}) {
@@ -91,16 +97,34 @@ export function compileCase(api, testCase) {
   return compiled.plan;
 }
 
+const cpuUs = (start) => {
+  const used = process.cpuUsage(start);
+  return used.user + used.system;
+};
+
 /**
  * Runs a case to its end and records every cut. With `restore`, the session is replaced at every cut by one restored
- * from its checkpoint's JSON text, which must export the same snapshot.
+ * from its checkpoint's JSON text, which must export the same snapshot. With `timed`, the record also has `cpuUs`,
+ * the CPU of the `stepToEvent` and `observeTime` calls alone, and `setupCpuUs`, that of the session's creation; the
+ * cut records are made outside those segments, so a timed run is checked like any other.
  */
 export function recordCase(
   api,
   testCase,
-  { plan = compileCase(api, testCase), restore = false } = {},
+  { plan = compileCase(api, testCase), restore = false, timed = false } = {},
 ) {
-  let session = api.createFreshRuntimeSession(plan, testCase.fresh);
+  let cpu = 0;
+  const time = timed
+    ? (operation) => {
+        const start = process.cpuUsage();
+        const result = operation();
+        cpu += cpuUs(start);
+        return result;
+      }
+    : (operation) => operation();
+  let session = time(() => api.createFreshRuntimeSession(plan, testCase.fresh));
+  const setupCpuUs = cpu;
+  cpu = 0;
   let instructions = 0;
   const cuts = [];
   const said = [];
@@ -130,7 +154,7 @@ export function recordCase(
     return snapshot;
   };
   while (cuts.length < maximumCuts) {
-    const result = session.stepToEvent({ instructionBudget: budget });
+    const result = time(() => session.stepToEvent({ instructionBudget: budget }));
     const snapshot = cut("step", result);
     if (snapshot.status === "running") {
       if (result.events.length === 0)
@@ -147,14 +171,21 @@ export function recordCase(
         said,
         cuts,
       };
-      return restore ? { ...record, restoreProblems } : record;
+      return {
+        ...record,
+        ...(restore ? { restoreProblems } : {}),
+        ...(timed ? { cpuUs: cpu, setupCpuUs } : {}),
+      };
     }
     const deadline = snapshot.foregroundAction?.deadlineMs;
     if (typeof deadline !== "number")
       throw new Error(
         `${testCase.name}: waits for something other than time at cut ${cuts.length}`,
       );
-    cut("observe", session.observeTime(deadline));
+    cut(
+      "observe",
+      time(() => session.observeTime(deadline)),
+    );
   }
   throw new Error(`${testCase.name}: more than ${maximumCuts} cuts`);
 }
@@ -261,36 +292,12 @@ export function formatBaseline(baseline) {
   return `{\n  "cases": {\n${entries.join(",\n")}\n  }\n}\n`;
 }
 
-const cpuUs = (start) => {
-  const used = process.cpuUsage(start);
-  return used.user + used.system;
-};
-
-/** One timed execution: session creation is setup, the run and wait operations are the timed part. */
-export function timeExecution(api, plan, testCase) {
-  const setup = process.cpuUsage();
-  const session = api.createFreshRuntimeSession(plan, testCase.fresh);
-  const setupCpuUs = cpuUs(setup);
-  let instructions = 0;
-  let timed = 0;
-  for (let cuts = 0; cuts < maximumCuts; cuts++) {
-    let start = process.cpuUsage();
-    instructions += session.run({ instructionBudget: budget }).instructionsExecuted;
-    timed += cpuUs(start);
-    const snapshot = session.exportSnapshot();
-    if (snapshot.status !== "waiting") return { instructions, cpuUs: timed, setupCpuUs };
-    start = process.cpuUsage();
-    instructions += session.observeTime(snapshot.foregroundAction.deadlineMs).instructionsExecuted;
-    timed += cpuUs(start);
-  }
-  throw new Error(`${testCase.name}: more than ${maximumCuts} cuts`);
-}
-
 /**
  * The base and candidate builds on every case: first equal results at every cut (instruction counts may differ),
  * then `warmups` tagged rounds (negative) and `rounds` measured ones, the builds' order alternating per round, each
- * sample `batch` executions (one for a case whose manifest entry has `cpuBatch`). Returns the samples, or the
- * differences when the builds disagree, in which case nothing is timed.
+ * sample `batch` executions (one for a case whose manifest entry has `cpuBatch`). Every timed execution is recorded
+ * too and must equal its build's untimed record. Returns the samples, or the differences: when the builds disagree
+ * nothing is timed; when a timed execution differs, the measurement stops there.
  */
 export function measureCpu(
   builds,
@@ -299,7 +306,7 @@ export function measureCpu(
 ) {
   const names = Object.keys(builds);
   const plans = {};
-  const counts = {};
+  const expected = {};
   const problems = [];
   for (const testCase of cases) {
     const records = {};
@@ -308,12 +315,7 @@ export function measureCpu(
       records[name] = recordCase(builds[name], testCase, {
         plan: plans[`${testCase.name}\0${name}`],
       });
-      // The timed runs use `run`, so their count is checked against an untimed run of the same driver.
-      counts[`${testCase.name}\0${name}`] = timeExecution(
-        builds[name],
-        plans[`${testCase.name}\0${name}`],
-        testCase,
-      ).instructions;
+      expected[`${testCase.name}\0${name}`] = records[name];
     }
     for (const name of names.slice(1))
       problems.push(
@@ -344,11 +346,11 @@ export function measureCpu(
         let timed = 0;
         let setupCpuUs = 0;
         for (let repeat = 0; repeat < executions; repeat++) {
-          const one = timeExecution(builds[name], plan, testCase);
-          if (one.instructions !== counts[`${testCase.name}\0${name}`])
-            throw new Error(
-              `${testCase.name} (${name}): a timed run executed ${one.instructions} instructions`,
-            );
+          const one = recordCase(builds[name], testCase, { plan, timed: true });
+          const differences = compareRecords(expected[`${testCase.name}\0${name}`], one, {
+            label: `${testCase.name} (${name}, timed round ${round})`,
+          });
+          if (differences.length) return { problems: differences, samples };
           instructions += one.instructions;
           timed += one.cpuUs;
           setupCpuUs += one.setupCpuUs;
@@ -478,6 +480,10 @@ export async function main(argv, { directory = benchmarkDirectory, log = console
       ? JSON.parse(fs.readFileSync(baselineFile, "utf8"))
       : { cases: {} };
     const { records, problems, invariants } = checkCounts(api, cases, baseline);
+    const names = manifestNames(directory);
+    for (const name of Object.keys(baseline.cases))
+      if (!names.includes(name))
+        problems.push(`${name}: in the baseline but not in the manifest (--update removes it)`);
     for (const record of records) {
       const testCase = cases.find((entry) => entry.name === record.name);
       const last = record.cuts.at(-1);
@@ -497,7 +503,6 @@ export async function main(argv, { directory = benchmarkDirectory, log = console
         log("baseline not updated: the differences above hold whatever the baseline says");
         return 1;
       }
-      const names = loadCases(directory, { all: true }).map((entry) => entry.name);
       fs.writeFileSync(baselineFile, formatBaseline(updatedBaseline(baseline, records, names)));
       log(`updated ${records.length} cases in ${baselineFile}`);
       return 0;
