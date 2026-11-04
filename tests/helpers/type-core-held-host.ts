@@ -1112,7 +1112,8 @@ const DERIVED = new Set(["values", "keys"]);
 
 /**
  * Whether `x` names a read through a dictionary's derived list by its own text where `u` names it by its key path (#1595,
- * the lead's ruling on Q3): the steps from the derived `values` or `keys` on equal, and before it `u`'s label root, a
+ * the lead's ruling on Q3): the steps from the derived `values` or `keys` on equal, or equal by key steps alone (an
+ * element read through the list by its index's text, both forms together), and before it `u`'s label root, a
  * declared function's result or parameter (`build.result`, `show.xs`), spelled as the chain's own text (`build()`, `xs`).
  */
 function derivedOwnText(graph: FlowGraph, u: readonly string[], x: readonly string[]): boolean {
@@ -1121,7 +1122,9 @@ function derivedOwnText(graph: FlowGraph, u: readonly string[], x: readonly stri
     x.findIndex((step) => DERIVED.has(step)),
   ];
   if (at !== 2 || from !== 1 || u.length - at !== x.length - from) return false;
-  if (u.slice(at).some((step, i) => step !== x[from + i])) return false;
+  // (from the derived list on, the same steps, or the same but by key steps alone: `values.element`, `values[0]`)
+  const [tail, own] = [u.slice(at), x.slice(from)];
+  if (tail.some((step, i) => step !== own[i]) && !keyStepsAlone(tail, own)) return false;
   const declared = functionsOf(graph).find((f) => f.name.name === u[0]);
   if (declared === undefined) return false;
   return u[1] === "result"

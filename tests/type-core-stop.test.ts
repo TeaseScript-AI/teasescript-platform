@@ -5644,6 +5644,11 @@ test("a combined stop's more precise label is accepted only as the owner's three
     indexed,
   );
   assert.equal(provenRelabel(param, [own], ["xs.values[0]"], typed), own);
+  const element = check("xs.values[0]");
+  assert.equal(
+    provenRelabel(check("show.xs.values.element"), [element], ["xs.values[0]"], typed),
+    element,
+  );
   const called = check("build().values");
   assert.equal(
     provenRelabel(check("build.result.values"), [called], ["build().values[0]"], typed),
