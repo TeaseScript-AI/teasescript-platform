@@ -6,7 +6,9 @@ import type { Answers } from "../../src/type-inference/core/answers.js";
 import { withMessagesInWords } from "../../src/type-inference/core/consumer.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
+import type { SourceSite } from "../../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
+import { siteKey } from "./site-keys.js";
 
 /*
  * The stop oracle (D4 a′, TABLE r4.99, r4.100, r4.108): a compile stopped at some unit against the unstopped compile,
@@ -118,26 +120,31 @@ function ranWith(
   };
 }
 
-/** A record's code and site, `code start:end`. */
-function recordOf(code: string, site: Span): string {
-  return `${code} ${site.start}:${site.end}`;
+/** A record's code and site, `code file:start:end` (`siteKey`: a site's offsets are its file's, #1700). */
+function recordOf(code: string, site: SourceSite): string {
+  return `${code} ${siteKey(site)}`;
+}
+
+/** Whether `inner` lies within `outer` in the same file. */
+function inSite(inner: SourceSite, outer: SourceSite): boolean {
+  return inner.file === outer.file && within(inner, outer);
 }
 
 /**
  * What to leave out of a compile (`StopRun.without`): the warnings and marks with the records `records` names (each
- * `code start:end`), and the boundary checks within `spans`, with its key.
+ * `code file:start:end`), and the boundary checks within `spans`, with its key.
  */
 function omission(
   records: ReadonlySet<string>,
-  spans: readonly Span[] = [],
+  spans: readonly SourceSite[] = [],
 ): readonly [Omission, string] {
   return [
     {
       diagnostic: (d: CoreDiagnostic) => records.has(recordOf(d.code, d.site)),
       check: (check: Obligation) =>
-        check.boundary && spans.some((span) => within(check.site, span)),
+        check.boundary && spans.some((span) => inSite(check.site, span)),
     },
-    `${[...records].sort().join("|")}#${spans.map((span) => `${span.start}:${span.end}`).join("|")}`,
+    `${[...records].sort().join("|")}#${spans.map(siteKey).join("|")}`,
   ];
 }
 
@@ -186,9 +193,14 @@ function rerun(
   return again;
 }
 
-/** A diagnostic's offsets. */
-function offsets(d: Compiled["diagnostics"][number]): Span {
-  return { start: d.span.start.offset, end: d.span.end.offset };
+/**
+ * A compiled diagnostic's site: its file by the path a project's compile gives it, as the run's analysis counts its files
+ * (a source's compile names none: its one file, 0; a path the analysis has no file of, -1, which no record excuses).
+ */
+function compiledSite(d: Compiled["diagnostics"][number], answers: Answers): SourceSite {
+  const path = "path" in d && typeof d.path === "string" ? d.path : null;
+  const file = path === null ? 0 : answers.graph.files.findIndex((each) => each.path === path);
+  return { file, start: d.span.start.offset, end: d.span.end.offset };
 }
 
 /** A diagnostic's message with every fix in words, which a compile under `withMessagesInWords` gives it, or none. */
@@ -240,14 +252,11 @@ export function stopProblems(c: StopCase): string[] {
       ];
       if (a !== b) problems.push(`fitting ${b} against ${a}`);
     });
-  // (a compile's diagnostics name no file, the entry file's: a record the rule accepts excuses them there alone, its own
-  // whole site kept apart, so a record of another file at the same offsets excuses nothing)
+  // (a record the rule accepts excuses the entry file's diagnostics alone, its own whole site kept apart, so a record of
+  // another file at the same offsets excuses nothing)
   const excused = new Set([
     ...marks.map((mark) => recordOf(mark.code, mark.site)),
-    ...[...(c.excused?.records ?? [])].flatMap((record) => {
-      const found = /^(\S+) 0:(\d+):(\d+)$/.exec(record);
-      return found === null ? [] : [`${found[1]} ${found[2]}:${found[3]}`];
-    }),
+    ...[...(c.excused?.records ?? [])].filter((record) => /^\S+ 0:\d+:\d+$/.test(record)),
   ]);
   const accepted = c.excused?.checks ?? new Set<string>();
   // before admission settled no decision is read (r4.110 (3)): each store marked with its type undecided stands for its
@@ -264,7 +273,7 @@ export function stopProblems(c: StopCase): string[] {
   const values = storeMarks
     .filter((mark) => undecided(mark) || (mark.rule.rule === "store" && mark.rule.written))
     .map((mark) => mark.site);
-  const ofStore = (site: Span): boolean => values.some((span) => within(site, span));
+  const ofStore = (site: SourceSite): boolean => values.some((span) => inSite(site, span));
   const storeRecords = new Set<string>();
   if (!stopped.answers.budget.settled)
     for (const d of unstopped.answers.diagnostics) {
@@ -274,9 +283,7 @@ export function stopProblems(c: StopCase): string[] {
         ofStore(d.site) ||
         (rule.rule === "store" &&
           rule.brought !== null &&
-          stores.some(
-            (span) => span.start === rule.brought!.start && span.end === rule.brought!.end,
-          )) ||
+          stores.some((span) => siteKey(span) === siteKey(rule.brought!))) ||
         (d.class === "compile-error" &&
           rule.rule === "absent" &&
           rule.store !== null &&
@@ -287,9 +294,9 @@ export function stopProblems(c: StopCase): string[] {
   for (const record of storeRecords) excused.add(record);
   // the diagnostics, in their published order, each whole but for its fix in words (r4.162): the unstopped ones in words
   // compiled once, where a message alone differs
-  const shown = (each: Pick<StopRun, "result">) =>
+  const shown = (each: Pick<StopRun, "result" | "answers">) =>
     each.result.diagnostics.filter(
-      (d) => d.code !== "TSV076" && !excused.has(recordOf(d.code, offsets(d))),
+      (d) => d.code !== "TSV076" && !excused.has(recordOf(d.code, compiledSite(d, each.answers))),
     );
   const [before, after] = [shown(unstopped), shown(stopped)];
   let words: readonly (string | undefined)[] | undefined;
