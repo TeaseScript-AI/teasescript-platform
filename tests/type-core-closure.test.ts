@@ -238,16 +238,16 @@ test("the copied and direct nested stores owe their checks at every mode's stop"
  * the unmarked function result (her M2), a checked argument and return, an `add`, a list join, a compound assignment and
  * an interpolation. The candidate route declines them, and the analysis is main's: no receiving obligation, no
  * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221
- * (a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
+ * and no narrowing index made for a program without a test since #1251 (a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
  * then 64's).
  */
 const frozen = `let a = {f: [[1]]}\nlet b = a\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\nb.f = hostValue`;
 const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
-  ["the C-R1 chain", chain(16), [11837, 12196, 11837, 12196, 18842, 14876, 18863, 14876]],
+  ["the C-R1 chain", chain(16), [11837, 12196, 11837, 12196, 17556, 13621, 17577, 13621]],
   [
     "the unmarked function result",
     'function make {\n  let r = {nest: {n: [[1]]}}\n  return r\n}\nlet out = make()\nsay "BEFORE"\nout.nest.n = hostValue',
-    [1694, 1772, 1694, 1772, 2583, 2308, 2448, 2308],
+    [1539, 1617, 1539, 1617, 2424, 2149, 2289, 2149],
   ],
   [
     "a checked argument",
@@ -263,17 +263,17 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
   [
     "a list join",
     `${frozen}\nlet xs = [1]\nlet ys = ["s"]\nb.f = [xs + ys]`,
-    [20599, 21807, 20377, 21568, 33459, 34928, 32614, 33992],
+    [20040, 21248, 19818, 21009, 32897, 34365, 32052, 33430],
   ],
   [
     "a compound assignment",
     `${frozen}\nlet n = 1\nn += 1`,
-    [18994, 19136, 18864, 19006, 20720, 22708, 20460, 21814],
+    [18994, 19136, 18864, 19006, 20720, 22180, 20460, 21814],
   ],
   [
     "an interpolation",
     `${frozen}\nsay "n \${b.f}"`,
-    [19752, 19868, 19622, 19738, 21477, 22904, 21217, 22544],
+    [19238, 19354, 19108, 19224, 20963, 22389, 20703, 22030],
   ],
 ];
 

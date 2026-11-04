@@ -17,6 +17,7 @@ import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingAt, narrowingPass, nodeAt, routeAt } from "./helpers/type-core-narrowing.js";
+import { readFixture } from "./helpers/type-core-fixture.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import type { CompactRecord } from "./helpers/type-core-records.js";
 
@@ -1817,4 +1818,72 @@ test("N3 certifies seeds, a certified `otherwise` and scalar copies; refuses def
     ];
   for (const [name, lines, marker, delta, tag, expected] of cases)
     assert.equal(route(pass(...lines), marker, delta, tag), expected, name);
+});
+
+/*
+ * #1251: a program without a condition, a `switch` or an `and`/`or` builds no narrowing index (`GuardIndex.testless`,
+ * read by `Values.#narrowingOf`): those are the only places the index makes a narrowing definition, so it would list
+ * none. Over the fixture, every such program's index is empty.
+ */
+test("a program without a test lists no narrowing (#1251)", () => {
+  let testless = 0;
+  for (const record of readFixture()) {
+    const request = coreRequest(record.files);
+    if (request === null) continue;
+    const { guards } = narrowingPass(request);
+    if (!guards.testless) continue;
+    testless += 1;
+    assert.deepEqual(guards.narrowing.all, [], record.name);
+  }
+  assert.ok(testless > 0, "the fixture has programs without a test");
+});
+
+/**
+ * #1251, Astra r1's witness: a root tested only in an `or`'s right operand keeps its narrowing for a stored read after
+ * the early exit (an integer), with no warning or check.
+ */
+test("a root tested in an or's right operand keeps its narrowing for a stored read (#1251)", () => {
+  const source = [
+    "let a = hostValue",
+    "let b = hostOther",
+    "if a is not integer or b is not integer { exit }",
+    "let n = b + 1",
+    "say n",
+    "exit",
+  ].join("\n");
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!;
+  for (const mode of MODES) {
+    const answers = inMode(mode, () => analyseCore(request));
+    assert.deepEqual(answers.diagnostics, [], JSON.stringify(mode));
+    assert.deepEqual(answers.checks, [], JSON.stringify(mode));
+  }
+});
+
+test("a program without a test does not pay for the narrowing index; the same with a test does (#1251)", () => {
+  // (k copies in a chain and a read, with or without one condition testing another variable)
+  const chain = (k: number, test: boolean): string =>
+    [
+      "let v0 = 1",
+      ...Array.from({ length: k }, (_, i) => `let v${i + 1} = v${i} + 1`),
+      `say v${k}`,
+      ...(test ? ["let t = hostValue", "if t is integer { say 1 }"] : []),
+      "exit",
+    ].join("\n");
+  const request = (source: string) => coreRequest([{ path: "main.tease", source }])!;
+  const total = (source: string): number => analyseCore(request(source)).budget.total;
+  for (const k of [16, 64]) {
+    // the index's build for the program without the test, measured apart: its first ask, charged then
+    const { guards, program } = narrowingPass(request(chain(k, false)));
+    assert.ok(guards.testless, `k = ${k}: no test`);
+    const before = program.work.total;
+    assert.deepEqual(guards.narrowing.all, [], `k = ${k}: no narrowing definition`);
+    const index = program.work.total - before;
+    assert.ok(index > 0, `k = ${k}: the index's build is charged`);
+    // the program with the condition pays that build on top of its three more statements
+    const [without, withTest] = [total(chain(k, false)), total(chain(k, true))];
+    assert.ok(
+      withTest - without >= index,
+      `k = ${k}: ${without} without the test, ${withTest} with it, index ${index}`,
+    );
+  }
 });

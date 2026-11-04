@@ -505,7 +505,8 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   // `55bade020` with these globals, Codex r4), and the capture's own reads of the walk's levels (5,067), 6 fewer since
   // #1221 charges its event searches by comparison, 34 fewer since #1444 answers a literal's written decider from its
   // groups' summaries, 4 more since #1428's landing reporter (a later call takes one listing: 4 reports, 2 lookup and 2
-  // publication units in place of the 4 units of the walk it replaces). A regression oracle of this construction. In the first mode alone in CI: each mode walks one cyclic contract of about 23 million
+  // publication units in place of the 4 units of the walk it replaces), 295 fewer since #1251 makes no narrowing index for
+  // it. A regression oracle of this construction. In the first mode alone in CI: each mode walks one cyclic contract of about 23 million
   // units, seconds; every mode is #1606's queue evidence)
   const source =
     'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nb.q=a\nc=[a,b][0]\nc=a\nlet out={p:c}\nexit\n';
@@ -514,7 +515,7 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   assert.equal(budget.exhausted, null);
   assert.equal(budget.stoppedIn, null);
   assert.deepEqual(contracts, []);
-  assert.equal(budget.total, 22_962_781);
+  assert.equal(budget.total, 22_962_486);
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {

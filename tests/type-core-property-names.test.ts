@@ -192,7 +192,7 @@ test("a demand stop with a question stop after it ends the search, its names wit
   for (const mode of MODES) {
     const found = inMode(mode, () =>
       withTestDemandAllowance(16, () =>
-        withTestAllowance(4000, () => {
+        withTestAllowance(3870, () => {
           let answers = analyseCore(request);
           assert.ok(answers.budget.decisions.some((decision) => decision.stopped));
           const node = answers.graph.nodes.find(

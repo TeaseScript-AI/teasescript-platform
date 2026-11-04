@@ -4117,10 +4117,12 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
     // A gated known limit by the owner's decision (TABLE r4.71, option A): each copy reads the global after one more
     // call that stores it, so each has its own snapshot (r4.68 (1)), k entries of the literal, each read at each of the k
     // fields (S6-CARRIERS §4.7's second unmerged shape, copies separated by calls while the source is owned away; a rule
-    // beyond the class rule, or S6c's normalization, merges them). 194,553 / 669,322 units at k = 64, 128 in both orders
-    // (3.4908; `main` 1.99, the output linear), X6's searches of the global's events charged by comparison since #1221
-    // (132,548 / 453,830 and 3.4742 before); 29,950,712 units at k = 910, the allowance reached at k = 911 (1,129 before)
-    measured: 3.5,
+    // beyond the class rule, or S6c's normalization, merges them). 190,319 / 660,474 units at k = 64, 128 in both orders
+    // (3.5213; `main` 1.99, the output linear), without the narrowing index since #1251 (194,553 / 669,322 and 3.4908
+    // before), X6's searches of the global's events charged by comparison since #1221 (132,548 / 453,830 and 3.4742).
+    // Under #1221's charges the allowance was reached at k = 911 (1,129 before); since #1251 k = 911 completes
+    // (29,943,385 units)
+    measured: 3.53,
     program: (k) =>
       main(
         lines(
@@ -6726,7 +6728,8 @@ export interface OutputBoundFamily {
   readonly outputBound: boolean;
   /**
    * `main`'s total, `checks` and `invSteps` at k = 16 and 32 in the four modes (source order, sharing on and off, then
-   * reversed), measured on `main` 7d6c4d3d4: a regression oracle of this family's comparison, not a bound elsewhere.
+   * reversed), measured on `main` 7d6c4d3d4, the totals less the narrowing index these programs without a test no longer
+   * make since #1251: a regression oracle of this family's comparison, not a bound elsewhere.
    */
   readonly main: Readonly<Record<16 | 32, readonly (readonly [number, number, number])[]>>;
 }
@@ -6742,16 +6745,16 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
     outputBound: true,
     main: {
       16: [
-        [54436, 4782, 6799],
-        [48544, 4782, 7113],
-        [54467, 4782, 6815],
-        [48560, 4782, 7129],
+        [51209, 4782, 6799],
+        [45317, 4782, 7113],
+        [51240, 4782, 6815],
+        [45333, 4782, 7129],
       ],
       32: [
-        [128526, 10598, 19143],
-        [110535, 10598, 20281],
-        [128558, 10598, 19175],
-        [110567, 10598, 20313],
+        [121911, 10598, 19143],
+        [103920, 10598, 20281],
+        [121943, 10598, 19175],
+        [103952, 10598, 20313],
       ],
     },
   },
@@ -6764,16 +6767,16 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
     outputBound: true,
     main: {
       16: [
-        [54455, 4782, 6796],
-        [48564, 4782, 7110],
-        [54486, 4782, 6812],
-        [48580, 4782, 7126],
+        [51228, 4782, 6796],
+        [45337, 4782, 7110],
+        [51259, 4782, 6812],
+        [45353, 4782, 7126],
       ],
       32: [
-        [128577, 10598, 19140],
-        [110587, 10598, 20278],
-        [128609, 10598, 19172],
-        [110619, 10598, 20310],
+        [121962, 10598, 19140],
+        [103972, 10598, 20278],
+        [121994, 10598, 19172],
+        [104004, 10598, 20310],
       ],
     },
   },
@@ -6786,16 +6789,16 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
     outputBound: true,
     main: {
       16: [
-        [65429, 5821, 9406],
-        [58691, 5821, 9776],
-        [65526, 5821, 9486],
-        [58771, 5821, 9856],
+        [61786, 5821, 9406],
+        [55048, 5821, 9776],
+        [61883, 5821, 9486],
+        [55128, 5821, 9856],
       ],
       32: [
-        [153196, 12677, 26926],
-        [133514, 12677, 28176],
-        [153356, 12677, 27086],
-        [133674, 12677, 28336],
+        [145717, 12677, 26926],
+        [126035, 12677, 28176],
+        [145877, 12677, 27086],
+        [126195, 12677, 28336],
       ],
     },
   },
@@ -6808,16 +6811,16 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [
     outputBound: false,
     main: {
       16: [
-        [47359, 4576, 4148],
-        [43886, 4576, 4238],
-        [47361, 4576, 4150],
-        [43888, 4576, 4240],
+        [43857, 4576, 4148],
+        [40384, 4576, 4238],
+        [43859, 4576, 4150],
+        [40386, 4576, 4240],
       ],
       32: [
-        [95303, 10088, 8164],
-        [88409, 10088, 8342],
-        [95305, 10088, 8166],
-        [88411, 10088, 8344],
+        [88063, 10088, 8164],
+        [81169, 10088, 8342],
+        [88065, 10088, 8166],
+        [81171, 10088, 8344],
       ],
     },
   },
