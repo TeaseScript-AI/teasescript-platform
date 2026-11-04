@@ -184,18 +184,33 @@ export const testFilesAtOnce = ${measured.filesAtOnce};
 export const costlyTestFiles = Object.keys(costlyTestSeconds);
 `;
 
+// Every way out before the end, a signal or a failed write included, leaves the module as it was.
 const previous = existsSync(target) ? readFileSync(target, "utf8") : null;
-if (measured.pretestSeconds === null) {
-  // (the local path's pre-test checks, with the new seconds written)
-  if (write) writeFileSync(target, moduleText(0));
-  measured.pretestSeconds = timed("npm", ["run", "check:pretest"]);
-  if (measured.pretestSeconds === null) {
-    if (write && previous !== null) writeFileSync(target, previous);
+const restore = () => {
+  if (write && previous !== null) writeFileSync(target, previous);
+};
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+  process.once(signal, () => {
+    restore();
     process.exit(1);
+  });
+try {
+  if (measured.pretestSeconds === null) {
+    // (the local path's pre-test checks, with the new seconds written beside the previous pre-test seconds)
+    const before = Number(/pretestSeconds = (\d+)/.exec(previous ?? "")?.[1] ?? 0);
+    if (write) writeFileSync(target, moduleText(before));
+    measured.pretestSeconds = timed("npm", ["run", "check:pretest"]);
+    if (measured.pretestSeconds === null) {
+      restore();
+      process.exit(1);
+    }
   }
+  if (raw !== null) writeFileSync(raw, `${JSON.stringify(measured, null, 1)}\n`);
+  if (write) writeFileSync(target, moduleText(measured.pretestSeconds));
+} catch (error) {
+  restore();
+  throw error;
 }
-if (write) writeFileSync(target, moduleText(measured.pretestSeconds));
-if (raw !== null) writeFileSync(raw, `${JSON.stringify(measured, null, 1)}\n`);
 process.stdout.write(
   `measure-test-files: ${sorted.length} files, ${sorted.reduce((sum, [, s]) => sum + s, 0).toFixed(0)} s summed, ` +
     `pre-test checks ${measured.pretestSeconds.toFixed(0)} s, ${measured.filesAtOnce} files at once, from ${measured.from}\n`,
