@@ -8,7 +8,7 @@ import { selectsElement } from "../method-categories.js";
 import { siteKey } from "../program.js";
 import type { CoreDiagnostic, DiagnosticKind, DiagnosticRule, Presence } from "../result.js";
 import { expected } from "./expected.js";
-import { keptTypes } from "./kinds.js";
+import { anyCarried, keptTypes } from "./kinds.js";
 
 // The consumers' diagnostics: an error at its site, and the facts a fix's code forms read (TABLE r4.151).
 
@@ -113,7 +113,8 @@ export function withFacts(walk: Consumers, diagnostic: CoreDiagnostic): CoreDiag
 
 /**
  * What a new variable keeping a warning's subject declares (`keeps`, `keptTypes`): its subject, a member's receiver, a
- * selection's collection or the value at `site`; `null` where the subject's value is not found, which proves no plain
+ * selection's collection or the value at `site`; `null` where the subject's value is not found while a mixed answer
+ * reaches some value of the pass, which proves no plain
  * `let` and gives the kept-value fix in words (#1352).
  */
 function keptChoice(
@@ -125,9 +126,11 @@ function keptChoice(
   const expression = program.exprAt(site)?.expression;
   const receiver = rule.rule === "member" || rule.rule === "selection";
   // (a site with no expression of its own, a default's: its value where the core places one)
+  // (a value not found proves a plain `let` only where no mixed answer reaches any value of the pass)
+  const unfound = anyCarried(walk) ? null : [];
   if (expression === undefined) {
     const place = receiver ? undefined : program.placeBySite.get(siteKey(site));
-    return place === undefined ? null : keptTypes(walk, place);
+    return place === undefined ? unfound : keptTypes(walk, place);
   }
   let subject = !receiver
     ? expression
@@ -140,7 +143,7 @@ function keptChoice(
   const place = program.placeBySite.get(
     siteKey({ file: site.file, start: subject.span.start.offset, end: subject.span.end.offset }),
   );
-  return place === undefined ? null : keptTypes(walk, place);
+  return place === undefined ? unfound : keptTypes(walk, place);
 }
 
 /**

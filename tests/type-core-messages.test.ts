@@ -3,6 +3,7 @@ import test from "node:test";
 import { compileProject } from "../src/compiler.js";
 import { jsonFieldMismatch, jsonKindMismatch } from "../src/runtime/values/value-types.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
+import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { checkedResult, reportedDiagnostics } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
@@ -1913,6 +1914,44 @@ test("an askChoice of more than one type errs where its type would be inferred, 
     if (!getDefault(pasted))
       assert.deepEqual(v1Errors(pasted), [], `the current checker: ${pasted}`);
   }
+  // (a program that holds no mixed askChoice gets nothing of this rule: no kept-value field, also where a stopped
+  // decision leaves a subject unfound, and a warning whose facts a stop did not ask keeps main's plain kept `let`)
+  const box =
+    "let box = {branch: {branch: {n: 1}}}\n" +
+    Array.from({ length: 12 }, (_, i) => `box.branch.branch.n = ${i + 2} + ${i + 3}\n`).join("") +
+    "box = {branch: {branch: {n: 4}}}\nrepeat box.branch.branch.n {}\nexit\n";
+  const plain = "repeat hostValue.count {}\nexit\n";
+  for (const [source, allowance] of [
+    [box, 16],
+    ["let xs = []\nrepeat xs.get(0, default: hostValue) {}\nexit\n", 16],
+    [plain, null],
+  ] as const) {
+    const nonChoice = coreRequest(main(source));
+    assert.ok(nonChoice !== null);
+    const analysed =
+      allowance === null
+        ? analyseCore(nonChoice)
+        : withTestDemandAllowance(allowance, () => analyseCore(nonChoice));
+    assert.ok(
+      analysed.diagnostics.length > 0 && analysed.diagnostics.every((d) => !("keeps" in d)),
+      source,
+    );
+  }
+  const plainRequest = coreRequest(main(plain));
+  assert.ok(plainRequest !== null);
+  const plainDiagnostics = analyseCore(plainRequest).diagnostics;
+  const plainText = messageSource([plain], plainDiagnostics);
+  const unasked = plainDiagnostics.map((diagnostic) => {
+    if (!("present" in diagnostic)) return coreMessage(diagnostic, plainText);
+    const { present: _, ...rest } = diagnostic;
+    return coreMessage(rest, plainText);
+  });
+  assert.ok(
+    unasked.some((message) =>
+      message.includes("in a new variable, as in 'let value = hostValue.count'"),
+    ),
+    JSON.stringify(unasked),
+  );
   // (a warning no fact proves a plain `let` for keeps its value in words: Codex r2 on #1660)
   const direct = `repeat ${C} {}\nexit\n`;
   const request = coreRequest(main(direct));
