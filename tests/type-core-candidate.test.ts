@@ -1417,12 +1417,16 @@ test("a known text argument a method's domain rejects is a compile error with th
       'let t: string = hostValue\nsay t.padStart(5, "")\nexit\n',
       ["warning TSV041@16", "error TSV043@44"],
     ],
-    // (Codex r2: a checked fallback and host data are text to a method only text has; `count`, which lists share, not)
+    // (Codex r3: an admitted text element is text, `empty` ignored; a receiver that may be null keeps its own check
+    // first, the fill unread; host data unwritten is no proof of text, for `count` as for any method)
     [
-      'let t: string? = hostValue\nsay (t otherwise "abc").padStart(5, "")\nexit\n',
-      ["warning TSV041@17", "error TSV043@63"],
+      'let xs: string[] = hostValue\nsay xs[0].padStart(5, "")\nexit\n',
+      ["warning TSV041@19", "warning TSV041@19", "error TSV043@51"],
     ],
-    ['say hostValue.padStart(5, "")\nexit\n', ["warning TSV043@4", "error TSV043@26"]],
+    [
+      'let t: string? = hostValue\nsay t.padStart(5, "")\nexit\n',
+      ["warning TSV041@17", "warning TSV043@31"],
+    ],
     ['say hostValue.count("")\nexit\n', ["warning TSV043@4"]],
     ['say "abc".substring(1.5, 1)\nexit\n', ["error TSV043@20"]],
     ['say "abc".substring((4.5))\nexit\n', ["error TSV043@21"]],

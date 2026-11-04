@@ -17,7 +17,6 @@ import { isRepeatCount } from "../../loop-rules.js";
 import { isRegex } from "../../runtime/values/value-predicates.js";
 import {
   isTextMethod,
-  isTextOnlyMethod,
   stringLength,
   takesRegex,
   takesText,
@@ -863,9 +862,8 @@ function staticDiagnostics(
  * argument domain of the method (`TextDomain`) whose values are all known, the receiver's text where it reads its
  * length, is checked in the method's order with the runtime's sentence, and reported at the last argument it reads (its
  * content, inside parentheses, §3.4); an argument the analysis or an earlier domain found a problem with is not read,
- * as the current checker does (`operation-checks.ts`). Every argument positional; for a method only text has, the
- * receiver text or unknown (host data, a checked fallback); for one lists share (`count`), text as the core answers or
- * admits it.
+ * as the current checker does (`operation-checks.ts`). Every argument positional, and the receiver text as the core
+ * answers it or as the place it reads is admitted (the invariant below).
  */
 function knownTextArguments(
   answers: Answers,
@@ -884,18 +882,20 @@ function knownTextArguments(
     return [];
   const receiver = answers.at(nodeOf(answers, index, callee.object));
   if (receiver === null) return [];
-  const tags = receiver.items.map((item) => item.tag);
-  const text = (kinds: readonly ItemTag[]): boolean =>
-    kinds.length > 0 && kinds.every((tag) => tag === "string");
-  // (a method only text has fails, its arguments known invalid, on every run that reaches it whatever the receiver,
-  // unless the receiver may be a value of another known kind, whose own check comes first; a method lists share takes
-  // the receiver as text only where the core answers or admits it as text, as the current checker does)
+  // (the invariant: a method's argument domains apply only where the receiver is answered text, or the place it reads
+  // is admitted text, `empty`, an element read's own concern, ignored; nothing else, so a receiver that may be null or
+  // of another kind keeps its own check first, and one that only a fallback or a call proves text is #1727's)
+  const text = (kinds: readonly ItemTag[]): boolean => {
+    const present = kinds.filter((tag) => tag !== "empty");
+    return present.length > 0 && present.every((tag) => tag === "string");
+  };
   const admitted =
     receiver.place === null ? null : answers.place(receiver.place.id, receiver.place.path).admitted;
-  const eligible = isTextOnlyMethod(callee.property.name)
-    ? tags.length > 0 && tags.every((tag) => tag === "string" || tag === "unknown")
-    : text(tags) || (admitted !== null && "kinds" in admitted && text(admitted.kinds));
-  if (!eligible) return [];
+  if (
+    !text(receiver.items.map((item) => item.tag)) &&
+    !(admitted !== null && "kinds" in admitted && text(admitted.kinds))
+  )
+    return [];
   const receiverText = known(callee.object);
   const values: (DomainValue | undefined | null)[] = call.arguments.map((argument, position) => {
     if (diagnosed(argument.value)) return null;
