@@ -8,6 +8,15 @@ import {
   withTestDemandAllowance,
 } from "../src/type-inference/core/budget.js";
 import { prefixChains } from "../src/type-inference/core/admission/eligibility.js";
+import type { Admission } from "../src/type-inference/core/admission.js";
+import { Consumers } from "../src/type-inference/core/consumers.js";
+import {
+  keyAt,
+  keyWalk,
+  stepsFrom,
+  stepsText,
+  stepsTo,
+} from "../src/type-inference/core/contract/key-ids.js";
 import { prefixesOf } from "../src/type-inference/core/definitions.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import { ingressLeaves, type Item } from "../src/type-inference/core/items.js";
@@ -1426,6 +1435,48 @@ test("the eligibility index makes each prefix key once, its shared build quadrat
       assert.ok(units[index]! <= 4.5 * units[index - 1]!, `${JSON.stringify(mode)}: ${units}`);
   }
   assert.ok(rebuilt > 0, "a restarted pass builds its index again");
+  // (the demands are today's, every split of every decided path: its prefix's key as `keptKeyAt` makes it, its rest
+  // from that step on, in the groups' order; each walk's that made them, the sharing on, in both orders)
+  for (const mode of MODES) {
+    const admissions: Admission[] = [];
+    const check = Consumers.prototype.check;
+    Consumers.prototype.check = function (this: Consumers) {
+      admissions.push(this.admission);
+      return check.call(this);
+    };
+    try {
+      inMode(mode, () =>
+        analyseCore(coreRequest([{ path: "main.tease", source: source(16) }], GLOBALS)!),
+      );
+    } finally {
+      Consumers.prototype.check = check;
+    }
+    const built = admissions.filter((admission) => admission.demands !== null);
+    // (the index, and the demands it reads, a structure only the sharing makes, #1703)
+    assert.equal(built.length > 0, !mode.unshared, JSON.stringify(mode));
+    for (const admission of built) {
+      const { contract } = admission.pass;
+      const want = new Map<string, string[]>();
+      for (const group of admission.groups()) {
+        const path = admission.stepsAt(group);
+        const walk = group.key === undefined ? null : keyWalk(contract, group.key);
+        for (let length = 0; length < path.length; length += 1) {
+          const key =
+            walk === null
+              ? keyAt(contract, group.root, stepsTo(path, length))
+              : walk.prefix(length);
+          want.set(key, [...(want.get(key) ?? []), stepsText(stepsFrom(path, length))]);
+        }
+      }
+      const got = new Map(
+        [...admission.demands!].map(([key, list]) => [
+          key,
+          list.map(({ path, from }) => stepsText(stepsFrom(path, from))),
+        ]),
+      );
+      assert.deepEqual(got, want, JSON.stringify(mode));
+    }
+  }
   // (a class's prefixes, `keptPrefixes`' list, each prefix's text charged once as it is first made, nearest first)
   const work = new WorkLedger(1_000_000);
   const charged: number[] = [];
@@ -1435,6 +1486,17 @@ test("the eligibility index makes each prefix key once, its shared build quadrat
     charge(counter, units);
   };
   const prefixes = prefixChains(work);
+  // (another index's prefixes are its own: made and charged again, no memo shared between indexes)
+  const fresh = `7|${"z".repeat(16)}.${"y".repeat(16)}.${"x".repeat(16)}`;
+  const chargedBy = (): number => {
+    const before = charged.length;
+    prefixChains(work)(fresh);
+    return charged.length - before;
+  };
+  const once = chargedBy();
+  assert.ok(once > 0);
+  assert.equal(chargedBy(), once);
+  charged.length = 0;
   const [a, b, c, d, e] = ["a", "b", "c", "d", "e"].map((step) => step.repeat(16));
   const first = `7|${a}.${b}.${c}.${d}`;
   const second = `7|${a}.${b}.${c}.${e}`;
