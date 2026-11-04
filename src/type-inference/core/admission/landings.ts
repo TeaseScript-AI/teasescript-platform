@@ -25,13 +25,18 @@ import {
   splitPath,
 } from "../budget.js";
 import { writtenOf } from "../contract.js";
+import type { WorkLedger } from "../budget.js";
 import { keptKey, keyOf, keyPath, keyPlace, sortCost, type Key } from "../definitions.js";
 import type {
   ByPath,
   CopyForest,
   Inheritance,
   InheritedCopy,
+  LandingTask,
+  Listing,
+  ListingNode,
   Storing,
+  TapePoint,
   WholeCycle,
 } from "./model.js";
 import { levelsOf } from "./permitted.js";
@@ -779,45 +784,519 @@ function landedOwn(admission: Admission, place: PlaceId, path: Steps): boolean {
 }
 
 /**
+ * The reporter's operations (#1428): each growing one debited `indexSteps` through `debit`, and, under
+ * `withLandingOps`, counted apart where it happens, so a debit missing at one site shows against its own count.
+ */
+export type LandingOp = "report" | "child" | "select" | "visit" | "node" | "lookup" | "publish";
+
+/** Test-only: per `landedBelow` call, each operation's count where it happens and its units debited. */
+export interface LandingOps {
+  readonly ops: Record<LandingOp, number>;
+  readonly debited: Record<LandingOp, number>;
+  /** The units the call charged the pass's work. */
+  units: number;
+  /**
+   * The slots the call left retained (`census`): its tape and each listing it kept or left pending, every object once,
+   * and the trie nodes it made.
+   */
+  retained: number;
+  /** The listings the call kept or left pending (`census`). */
+  readonly kept: Listing[];
+  /** The trie nodes the call made (`Admission.listings`), roots and prefixes. */
+  trieNodes: number;
+}
+
+/**
+ * The slots a call's retained state holds, every object counted once: its tape (per path its steps and four, per
+ * repeat three, each index node one), and per listing one, three per point, one per child, and per task (a frame, a
+ * child's or one a `parent` reaches) four and its steps.
+ */
+function census(tape: LandingTape, listings: readonly Listing[]): number {
+  const counted = new Set<object>();
+  let slots =
+    tape.paths.reduce((sum, path) => sum + path.length + 4, 0) +
+    3 * tape.at.length +
+    tape.levels.slice(1).reduce((sum, level) => sum + level.length, 0);
+  const point = (at: TapePoint): void => {
+    if (counted.has(at)) return;
+    counted.add(at);
+    slots += 3;
+  };
+  const task = (start: LandingTask): void => {
+    for (
+      let at: LandingTask | undefined = start;
+      at !== undefined && !counted.has(at);
+      at = at.parent
+    ) {
+      counted.add(at);
+      slots += 4 + at.below.length + at.prepend.length;
+    }
+  };
+  for (const listing of listings) {
+    slots += 1;
+    point(listing.from);
+    point(listing.own);
+    point(listing.to);
+    task(listing.frame);
+    for (const child of listing.children) {
+      slots += 1;
+      point(child.from);
+      task(child.task);
+    }
+  }
+  return slots;
+}
+
+/** Each operation at 0. */
+function noOps(): Record<LandingOp, number> {
+  return { report: 0, child: 0, select: 0, visit: 0, node: 0, lookup: 0, publish: 0 };
+}
+let opsHook: ((place: PlaceId, prefix: readonly string[], ops: LandingOps) => void) | null = null;
+let currentOps: LandingOps | null = null;
+
+/** Counts `units` of `op` where it happens (test-only, `withLandingOps`). */
+function happened(op: LandingOp, units = 1): void {
+  if (currentOps !== null) currentOps.ops[op] += units;
+}
+
+/** Debits `units` of `op` to the pass's work. */
+function debit(work: WorkLedger, op: LandingOp, units = 1): void {
+  work.charge("indexSteps", units);
+  if (currentOps !== null) currentOps.debited[op] += units;
+}
+
+/**
+ * Test-only: runs `callback` with each `landedBelow` call's operations, counted where they happen and as debited, given
+ * to `onCall` (calls made inside another, as `inheritance`'s, counted apart).
+ */
+export function withLandingOps<T>(
+  onCall: (place: PlaceId, prefix: readonly string[], ops: LandingOps) => void,
+  callback: () => T,
+): T {
+  if (opsHook !== null) throw new Error("Landing operations are already counted.");
+  opsHook = onCall;
+  try {
+    return callback();
+  } finally {
+    opsHook = null;
+  }
+}
+
+/** Test-only: what `withLandingComparison` gives each `landedBelow` call, the listings' result beside the walk's. */
+let comparison:
+  | ((
+      place: PlaceId,
+      prefix: readonly string[],
+      listed: readonly string[],
+      walked: readonly string[],
+      units: { readonly listed: number; readonly walked: number },
+    ) => void)
+  | null = null;
+
+/**
+ * Test-only: runs `callback` with every `landedBelow` call also walked without the pass's listings (as `main` walks),
+ * that walk's work counted apart, and both results given to `onCall`: the oracle that a taken listing gives the paths,
+ * in their order, that the walk finds.
+ */
+export function withLandingComparison<T>(
+  onCall: (
+    place: PlaceId,
+    prefix: readonly string[],
+    listed: readonly string[],
+    walked: readonly string[],
+    units: { readonly listed: number; readonly walked: number },
+  ) => void,
+  callback: () => T,
+): T {
+  if (comparison !== null) throw new Error("Landings are already compared.");
+  comparison = onCall;
+  try {
+    return callback();
+  } finally {
+    comparison = null;
+  }
+}
+
+/**
+ * One `landedBelow` call's tape (#1428): the paths it brought, each by its index in the order first brought, and the
+ * order its walk met them as events, one per first bring and one per repeat (a path met again where its last event
+ * lies before the innermost open record). A listing is two points of it; nothing of it is copied. First brings are
+ * never indexed: in any range they are its new paths, one run of indexes. Repeats keep the position of their path's
+ * event before them (`prev`), and a min index over those (`levels`: level h the least `prev` of each complete aligned
+ * block of 2^h repeats) answers which repeats in a range are their path's first event there.
+ */
+export class LandingTape {
+  readonly paths: (readonly string[])[] = [];
+  readonly texts: string[] = [];
+  /** Per path, the position of its first event and of the last one appended. */
+  readonly first: number[] = [];
+  readonly last: number[] = [];
+  events = 0;
+  /** Per repeat, its position, its path and its path's event before it. */
+  readonly at: number[] = [];
+  readonly path: number[] = [];
+  readonly prev: number[] = [];
+  readonly levels: number[][] = [this.prev];
+
+  private readonly work: WorkLedger;
+
+  public constructor(work: WorkLedger) {
+    this.work = work;
+  }
+
+  /** The tape's point now. */
+  public point(): TapePoint {
+    return { events: this.events, paths: this.texts.length, repeats: this.at.length };
+  }
+
+  /** A path first brought: its index. */
+  public bring(steps: readonly string[], text: string): number {
+    const index = this.texts.length;
+    this.paths.push(steps);
+    this.texts.push(text);
+    this.first.push(this.events);
+    this.last.push(this.events);
+    this.events += 1;
+    return index;
+  }
+
+  /** A path met again: a repeat event, each block it completes a node of the min index. */
+  public repeat(index: number): void {
+    this.at.push(this.events);
+    this.path.push(index);
+    this.prev.push(this.last[index]!);
+    this.last[index] = this.events;
+    this.events += 1;
+    for (let h = 1; this.levels[h - 1]!.length % 2 === 0; h += 1) {
+      const below = this.levels[h - 1]!;
+      if (this.levels.length === h) this.levels.push([]);
+      happened("node");
+      debit(this.work, "node");
+      this.levels[h]!.push(Math.min(below.at(-2)!, below.at(-1)!));
+    }
+  }
+
+  /**
+   * The paths whose first event within `from` to `to` lies there, in the order of those events: the range's new paths
+   * merged with its repeats whose path's event before them lies before the range. The repeats' side walks the range's
+   * complete aligned blocks left to right and descends only where a block's least `prev` lies before the range.
+   */
+  public reports(from: TapePoint, to: TapePoint): number[] {
+    const start = from.events;
+    const found: number[] = [];
+    const descend = (h: number, block: number, selected: boolean): void => {
+      const least = this.levels[h]![block]!;
+      // (a reported repeat rides its report's debit; every other node looked at is debited)
+      if (!selected && !(h === 0 && least < start)) {
+        happened("visit");
+        debit(this.work, "visit");
+      }
+      if (least >= start) return;
+      if (h === 0) found.push(block);
+      else {
+        descend(h - 1, 2 * block, false);
+        descend(h - 1, 2 * block + 1, false);
+      }
+    };
+    for (let low = from.repeats; low < to.repeats;) {
+      // (the largest block aligned at `low` within the range, at once: its trailing zeros, the range's length's log)
+      const aligned = low === 0 ? 31 : 31 - Math.clz32(low & -low);
+      const h = Math.min(aligned, 31 - Math.clz32(to.repeats - low));
+      happened("select");
+      debit(this.work, "select");
+      descend(h, low >> h, true);
+      low += 1 << h;
+    }
+    const out: number[] = [];
+    let next = from.paths;
+    let taken = 0;
+    while (next < to.paths || taken < found.length) {
+      if (taken >= found.length || (next < to.paths && this.first[next]! < this.at[found[taken]!]!))
+        out.push(next++);
+      else out.push(this.path[found[taken++]!]!);
+    }
+    return out;
+  }
+}
+
+/**
  * The paths copies land in a place at or below `prefix` (`Inheritance`), each once: its own landings and, through each
  * copy, its source's at or below the copy's strip, written where the copy lands them; on an explicit stack, each
- * source, prefix and way of writing its paths once.
+ * source, prefix and way of writing its paths once. Where an earlier call of the pass listed a place and prefix the walk
+ * reaches, it takes that listing as the walk would bring it (`walkLandings`, #1428, #1547).
  */
 export function landedBelow(
   admission: Admission,
   place: PlaceId,
   prefix: readonly string[],
 ): string[] {
+  const work = admission.pass.program.work;
+  const outer = currentOps;
+  currentOps =
+    opsHook === null
+      ? null
+      : { ops: noOps(), debited: noOps(), units: 0, retained: 0, kept: [], trieNodes: 0 };
+  const counts = currentOps;
+  const before = work.total;
+  try {
+    const listing = walkLandings(admission, place, prefix, true);
+    // (kept when a later walk first looks at its place, so a place no walk reaches costs nothing more: #1670's chain)
+    const pending = admission.pendingListings.get(place);
+    if (pending === undefined) admission.pendingListings.set(place, [listing]);
+    else pending.push(listing);
+    const texts = [...listing.tape.texts];
+    if (counts !== null) {
+      counts.units = work.total - before;
+      counts.retained += census(listing.tape, [listing, ...counts.kept]);
+    }
+    if (comparison !== null) {
+      currentOps = null;
+      const apart = (): number => [...work.apartCounts().values()].reduce((a, b) => a + b, 0);
+      const from = apart();
+      const walked = work.apart(() => [
+        ...walkLandings(admission, place, prefix, false).tape.texts,
+      ]);
+      comparison(place, prefix, texts, walked, {
+        listed: work.total - before,
+        walked: apart() - from,
+      });
+    }
+    if (opsHook !== null && counts !== null) opsHook(place, prefix, counts);
+    return texts;
+  } finally {
+    currentOps = outer;
+  }
+}
+
+/** A listing kept for its place and prefix, for the pass (`Admission.listings`): each trie node walked or made debited. */
+function keepListing(admission: Admission, listing: Listing): void {
+  const work = admission.pass.program.work;
+  happened("publish");
+  debit(work, "publish");
+  let node: ListingNode | undefined = admission.listings.get(listing.frame.place);
+  if (node === undefined) {
+    admission.listings.set(listing.frame.place, (node = { listing: null, next: new Map() }));
+    madeNode();
+  }
+  for (const step of listing.frame.below) {
+    happened("publish");
+    debit(work, "publish");
+    let next: ListingNode | undefined = node.next.get(step);
+    if (next === undefined) {
+      node.next.set(step, (next = { listing: null, next: new Map() }));
+      madeNode();
+    }
+    node = next;
+  }
+  node.listing = listing;
+}
+
+/**
+ * A place's listings (`Admission.listings`), the calls' results asked of it kept first, in the order they were made
+ * (`landedBelow`), each debited as its keeping; `undefined` where it has none.
+ */
+function trieOf(admission: Admission, place: PlaceId): ListingNode | undefined {
+  const pending = admission.pendingListings.get(place);
+  if (pending !== undefined) {
+    admission.pendingListings.delete(place);
+    for (const listing of pending) keepListing(admission, listing);
+  }
+  return admission.listings.get(place);
+}
+
+/** A trie node made, a place's root or a prefix's (test-only, `withLandingOps`: one retained slot each). */
+function madeNode(): void {
+  if (currentOps === null) return;
+  currentOps.retained += 1;
+  currentOps.trieNodes += 1;
+}
+
+/** The listing of a place's node at `below`, or `null`: each trie node walked debited. */
+function lookup(work: WorkLedger, node: ListingNode, below: readonly string[]): Listing | null {
+  let at: ListingNode | undefined = node;
+  happened("lookup");
+  debit(work, "lookup");
+  for (const step of below) {
+    happened("lookup");
+    debit(work, "lookup");
+    at = at.next.get(step);
+    if (at === undefined) return null;
+  }
+  return at.listing;
+}
+
+/**
+ * How a listing's path is written where `task` writes: `prepend`, then the path from `cut` (the listing's frame and the
+ * task's composed, as a task's push composes them).
+ */
+function writing(
+  admission: Admission,
+  from: Listing,
+  task: LandingTask,
+): { readonly prepend: readonly string[]; readonly cut: number } {
+  const { below, drop, prepend } = from.frame;
+  return task.drop <= drop
+    ? {
+        prepend: keptSteps(admission.work, task.prepend, below.slice(task.drop, drop)),
+        cut: prepend.length,
+      }
+    : { prepend: task.prepend, cut: prepend.length + task.drop - drop };
+}
+
+/** A task of a listing written where `written` writes, as the walk taking it writes it. */
+function writtenTask(
+  admission: Admission,
+  written: { readonly prepend: readonly string[]; readonly cut: number },
+  task: LandingTask,
+): LandingTask {
+  return written.cut <= task.prepend.length
+    ? {
+        ...task,
+        prepend: keptSteps(admission.work, written.prepend, task.prepend.slice(written.cut)),
+      }
+    : { ...task, drop: task.drop + written.cut - task.prepend.length, prepend: written.prepend };
+}
+
+/**
+ * `landedBelow`'s walk, taking the pass's listings where `listed`. A task's walk ends before anything under it, so what
+ * it brings is one range of the call's tape: a record (the call's root, and each longer prefix of a place with
+ * listings) keeps its range, its own paths' and each child's, as a listing, where nothing in it was skipped as walked
+ * before it opened (`least` against `mark`, both task orders). A task with a listing takes it: its own range, then each
+ * child neither walked nor covered, its range; each child it brings is then covered at the taking task's order (R3): a
+ * later step skips it as it skips a walked task, at that order, so a cover from before a record opened breaks it.
+ */
+function walkLandings(
+  admission: Admission,
+  place: PlaceId,
+  prefix: readonly string[],
+  listed: boolean,
+): Listing {
   const { cycleOf, fed, wholes } = inheritance(admission);
   const work = admission.pass.program.work;
-  const out = new Set<string>();
-  const seen = new Set<string>();
-  // a task: a place, the prefix its paths are taken at or below, and how its path is written in the place asked:
-  // its first `drop` steps replaced by `prepend`
-  const tasks: {
-    readonly place: PlaceId;
-    readonly below: readonly string[];
-    readonly drop: number;
-    readonly prepend: readonly string[];
-  }[] = [{ place, below: prefix, drop: 0, prepend: [] }];
+  const tape = new LandingTape(work);
+  // (per text its path's index; per task id its order, and per task a take brought its taker's order)
+  const out = new Map<string, number>();
+  const seen = new Map<string, number>();
+  const covered = new Map<string, number>();
+  const root: LandingTask = { place, below: prefix, drop: 0, prepend: [] };
+  const tasks: (LandingTask | null)[] = [root];
+  interface Record {
+    readonly task: LandingTask;
+    readonly start: TapePoint;
+    readonly mark: number;
+    least: number;
+    own: TapePoint | null;
+    readonly children: { readonly task: LandingTask; readonly from: TapePoint }[];
+  }
+  // the open records, innermost last, and each by its task
+  const records: Record[] = [];
+  const recordOf = new Map<LandingTask, Record>();
+  const open = (task: LandingTask): void => {
+    const record: Record = {
+      task,
+      start: tape.point(),
+      mark: seen.size - 1,
+      least: Infinity,
+      own: null,
+      children: [],
+    };
+    records.push(record);
+    recordOf.set(task, record);
+  };
+  const close = (record: Record): Listing => {
+    recordOf.delete(record.task);
+    const to = tape.point();
+    return {
+      tape,
+      frame: record.task,
+      from: record.start,
+      own: record.own ?? to,
+      children: record.children,
+      to,
+    };
+  };
+  const put = (steps: readonly string[], text: string): void => {
+    const index = out.get(text);
+    if (index === undefined) out.set(text, tape.bring(steps, text));
+    // (a path whose last event lies before the innermost record is that record's too: R2)
+    else if (tape.last[index]! < records.at(-1)!.start.events) tape.repeat(index);
+  };
+  // whether a task is to be skipped here: walked in this call, or brought by a take (its paths are all brought), a
+  // skip at its order or its taker's; one before the innermost record opened breaks that record (`least`)
+  const skipped = (id: string): boolean => {
+    const at = seen.get(id) ?? covered.get(id);
+    if (at === undefined) return false;
+    const record = records.at(-1)!;
+    record.least = Math.min(record.least, at);
+    return true;
+  };
+  // a listing's paths written where `task` writes, each report and child step debited before anything is suppressed
+  const take = (listing: Listing, task: LandingTask): void => {
+    const written = writing(admission, listing, task);
+    const report = (from: TapePoint, to: TapePoint): void => {
+      for (const index of listing.tape.reports(from, to)) {
+        happened("report");
+        debit(work, "report");
+        const steps = joinSteps(written.prepend, listing.tape.paths[index]!.slice(written.cut));
+        put(steps, keptText(admission.work, steps));
+      }
+    };
+    report(listing.from, listing.own);
+    listing.children.forEach((child, position) => {
+      happened("child");
+      debit(work, "child");
+      const moved = writtenTask(admission, written, child.task);
+      const id = keptParts(admission.work, moved.place, moved.below, moved.drop, moved.prepend);
+      if (skipped(id)) return;
+      report(child.from, listing.children[position + 1]?.from ?? listing.to);
+      covered.set(id, seen.size - 1);
+    });
+  };
+  open(root);
   while (tasks.length > 0) {
     const task = tasks.pop()!;
+    if (task === null) {
+      const record = records.pop()!;
+      // (a skip inside it is a skip inside the record around it)
+      const outer = records.at(-1);
+      if (outer !== undefined) outer.least = Math.min(outer.least, record.least);
+      if (record.least >= record.mark) {
+        const listing = close(record);
+        keepListing(admission, listing);
+        currentOps?.kept.push(listing);
+      } else recordOf.delete(record.task);
+      continue;
+    }
+    // (a child of an open record's root: its paths and tasks start here)
+    const parent = task.parent === undefined ? undefined : recordOf.get(task.parent);
+    if (parent !== undefined) {
+      parent.own ??= tape.point();
+      parent.children.push({ task, from: tape.point() });
+    }
     const id = keptParts(admission.work, task.place, task.below, task.drop, task.prepend);
-    if (seen.has(id)) continue;
-    seen.add(id);
+    if (skipped(id)) continue;
+    seen.set(id, seen.size);
     const add = (path: readonly string[]): void => {
-      if (isPrefix(task.below, path))
-        out.add(keptText(admission.work, joinSteps(task.prepend, path.slice(task.drop))));
+      if (!isPrefix(task.below, path)) return;
+      const steps = joinSteps(task.prepend, path.slice(task.drop));
+      put(steps, keptText(admission.work, steps));
     };
     const emit = (path: readonly string[]): void => {
       work.charge("indexSteps");
       add(path);
     };
+    // (a place without listings walks as before: no trie is looked at, #1670's chain)
+    const node = listed && task !== root ? trieOf(admission, task.place) : undefined;
+    const known = node === undefined ? null : lookup(work, node, task.below);
+    if (known !== null) {
+      take(known, task);
+      continue;
+    }
     // (a place that lands through its parent lands its root and what the copy it lands through does, `landsThrough`)
     const through = landsThrough(admission, task.place, task.below);
     if (through !== task.place) {
       emit([]);
-      tasks.push({ ...task, place: through });
+      tasks.push({ ...task, place: through, parent: task });
       continue;
     }
     // (a cycle's landed paths, and the copies at, above or below the prefix, from indexes by path: never every one
@@ -826,6 +1305,11 @@ export function landedBelow(
       const landing = cycleLanding(admission, task.place);
       for (const path of landing.under.get(keptText(admission.work, task.below)) ?? []) emit(path);
       continue;
+    }
+    // (a longer prefix of a place a call asked: this walk kept as its listing)
+    if (node !== undefined && task.below.length > 0) {
+      open(task);
+      tasks.push(null);
     }
     // (a cycle of whole copies lands its root)
     if (wholes.has(task.place) && task.below.length === 0) emit([]);
@@ -846,17 +1330,19 @@ export function landedBelow(
               below,
               drop: copy.strip.length,
               prepend: keptSteps(admission.work, task.prepend, copy.path.slice(task.drop)),
+              parent: task,
             }
           : {
               place: copy.from,
               below,
               drop: copy.strip.length + task.drop - copy.path.length,
               prepend: task.prepend,
+              parent: task,
             },
       );
     }
   }
-  return [...out];
+  return close(records.pop()!);
 }
 
 /** The members of a place's cycle of copies (`Inheritance.order`), once per pass. */

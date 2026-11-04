@@ -55,6 +55,8 @@ import type {
   KeyStops,
   LandingIndex,
   Level,
+  Listing,
+  ListingNode,
   LiveGroup,
   OpenStep,
   OwnStructure,
@@ -382,6 +384,13 @@ export class Admission {
   /** A4 through copies' landings (`inheritance`), and per place and path whether its copies land it (`landed`). */
   inherits: Inheritance | null = null;
   readonly landedPaths = new Map<string, boolean>();
+  /**
+   * Per place and prefix, the paths copies land there as an earlier `landedBelow` call of this pass brought them
+   * (#1428, #1547): each a pair of ranges of that call's tape, which charged emits and reports made.
+   */
+  readonly listings = new Map<PlaceId, ListingNode>();
+  /** Per place, the calls' results asked of it not yet kept in `listings` (`trieOf` keeps them at the first look). */
+  readonly pendingListings = new Map<PlaceId, Listing[]>();
   /** Per place copies land in, the landed paths whose contents may not fit (`hotSets`). */
   hots: ReadonlyMap<PlaceId, readonly (readonly string[])[]> | null = null;
   /** The copies places answer through (`passThrough`), once per pass. */
