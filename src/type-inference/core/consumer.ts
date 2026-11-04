@@ -994,8 +994,10 @@ function runtimeChecks(
       core.expected.set(call, type);
     }
   const stopped = answers.budget.exhausted !== null;
-  // each store's owed obligations, for the parts below its destination its own check does not reach (#1224)
+  // each store's owed obligations, for the parts below its destination its own check does not reach (#1224); each
+  // stopped store whose completed check leaves its destination open, for the completed contracts below it
   const atStore = new Map<Store, Obligation[]>();
+  const completedOpen = new Map<Store, Obligation>();
   for (const { obligation, kinds } of owed) {
     // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
     // every plan: no plan content (S3 §4); where a stopped decision left a store's own check against `unknown` (no
@@ -1007,7 +1009,11 @@ function runtimeChecks(
           ? index.findExpressionAt(obligation.site)
           : undefined;
       const owner = at === undefined ? undefined : index.storeOf(at);
-      if (owner === undefined || !contracts.completes(owner)) continue;
+      if (owner === undefined) continue;
+      if (!contracts.completes(owner)) {
+        if (!completedOpen.has(owner)) completedOpen.set(owner, obligation);
+        continue;
+      }
     }
     const expression = index.expressionAt(obligation.site);
     const store = index.storeOf(expression);
@@ -1018,7 +1024,9 @@ function runtimeChecks(
         if (index.iterates(at)) throw new OutsideContract(at, "a check of a loop variable");
       throw new Error("A check of the slice belongs to no store.");
     }
-    atStore.set(store, [...(atStore.get(store) ?? []), obligation]);
+    const held = atStore.get(store);
+    if (held === undefined) atStore.set(store, [obligation]);
+    else held.push(obligation);
     if (checks.has(store)) continue;
     const type = contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null);
     if (type !== null) checks.set(store, type);
@@ -1031,6 +1039,13 @@ function runtimeChecks(
     const parts = partChecksOf(destination, obligations).filter(
       (part) => whole === null || !reaches(whole, part.path),
     );
+    if (parts.length > 0) core.partChecks.set(store, parts);
+  }
+  // a stopped store's check the receiving completion completed (#1526 phase C step 5) where its destination stays open:
+  // the completion's complete contracts below the destination, as the unstopped analysis owes them there
+  for (const [store, own] of completedOpen) {
+    if (checks.has(store) || core.partChecks.has(store)) continue;
+    const parts = completedBelow(answers, own);
     if (parts.length > 0) core.partChecks.set(store, parts);
   }
   return { checks, core, contracts: contracts.results };
@@ -1049,31 +1064,88 @@ function partChecksOf(destination: string, obligations: readonly Obligation[]): 
   const made = new Set<string>();
   for (const obligation of obligations) {
     if (!obligation.target.startsWith(`${destination}.`)) continue;
-    const steps = obligation.target.slice(destination.length + 1).split(".");
-    const path: PartStep[] = [];
-    for (const step of steps)
-      if (step === "element" || step === "entry" || step === "index") path.push({ element: true });
-      else if (step.startsWith("'") || /^[\p{L}_][\p{L}\p{N}_]*$/u.test(step))
-        if (step === "iteration") break;
-        else path.push({ property: propertyName(step) });
-      else break;
     const type = kindsPlan(obligation.against);
-    if (path.length < steps.length || type === null) continue;
-    const key = JSON.stringify([path, type]);
+    const part =
+      type === null
+        ? null
+        : partOf(destination, obligation.target.slice(destination.length + 1).split("."), type);
+    if (part === null) continue;
+    const key = JSON.stringify([part.path, part.type]);
     if (made.has(key)) continue;
     made.add(key);
-    // (the place as messages name a path below one in words: `'copy.open'`, `an element of 'copy.xs'`)
-    const [root, ...above] = destination.split(".");
-    out.push({
-      path,
-      type,
-      place: pathPhrase({ code: root! }, [
-        ...above,
-        ...steps.map((step) => (step === "index" ? "element" : step)),
-      ]),
-    });
+    out.push(part);
   }
   return out;
+}
+
+/**
+ * The part checks of a stopped store whose completed check leaves its destination open (#1224): each complete contract
+ * the receiving completion (#1526 phase C) holds at a path below the destination, one per path. The destination is the
+ * one the store's own obligation (`own`) names, its place the one the completion's slot at the store's site receives at,
+ * so nothing more is asked of the analysis.
+ */
+function completedBelow(answers: Answers, own: Obligation): PartCheckPlan[] {
+  const above = own.target.split(".").length - 1;
+  const slot = answers.receiving.find(
+    ({ obligation }) =>
+      obligation.slot.site.file === own.site.file &&
+      obligation.slot.site.start === own.site.start &&
+      obligation.slot.site.end === own.site.end &&
+      obligation.path.length === above,
+  )?.obligation;
+  if (slot === undefined) return [];
+  const out: PartCheckPlan[] = [];
+  const made = new Set<string>();
+  for (const { obligation, result } of answers.receiving) {
+    if (
+      obligation.place !== slot.place ||
+      obligation.extent !== "complete" ||
+      obligation.path.length <= above ||
+      !slot.path.every((step, at) => obligation.path[at] === step) ||
+      result === null ||
+      "shape" in result ||
+      result.state !== "complete"
+    )
+      continue;
+    const part = partOf(own.target, obligation.path.slice(above), result.ref);
+    if (part === null) continue;
+    const key = JSON.stringify(part.path);
+    if (made.has(key)) continue;
+    made.add(key);
+    out.push(part);
+  }
+  return out;
+}
+
+/**
+ * A part check of `type` at `steps` below a destination (`pathText`'s steps: a property's name, quoted for an internal
+ * one, `element`, `entry` or `index` for an element), its place the path as messages name one (`pathPhrase`); `null` for
+ * a step of another form, which makes no part.
+ */
+function partOf(
+  destination: string,
+  steps: readonly string[],
+  type: TypePlan,
+): PartCheckPlan | null {
+  const path: PartStep[] = [];
+  for (const step of steps)
+    if (step === "element" || step === "entry" || step === "index") path.push({ element: true });
+    else if (
+      step !== "iteration" &&
+      (step.startsWith("'") || /^[\p{L}_][\p{L}\p{N}_]*$/u.test(step))
+    )
+      path.push({ property: propertyName(step) });
+    else return null;
+  // (the place as messages name a path below one in words: `'copy.open'`, `an element of 'copy.xs'`)
+  const [root, ...above] = destination.split(".");
+  return {
+    path,
+    type,
+    place: pathPhrase({ code: root! }, [
+      ...above,
+      ...steps.map((step) => (step === "index" ? "element" : step)),
+    ]),
+  };
 }
 
 /**

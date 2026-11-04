@@ -16,6 +16,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
+import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
@@ -223,6 +224,36 @@ test("a store of host data checks each typed part below it that the analysis owe
       /^TSR058@/u,
       source,
     );
+  }
+});
+
+test("after a demand stop a store whose completed check leaves its variable open checks the completed parts below it, as unstopped (#1224, #1526 phase C step 5)", () => {
+  for (const [source, init, misfits, sentence] of [
+    [
+      'let seed: object = {payload: 7}\nlet copy = hostInit\ncopy.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n',
+      { open: {} },
+      { open: 3 },
+      "'copy.open' holds an object, so it cannot take 3.",
+    ],
+    [
+      'let seed: integer = 7\nlet copy = hostInit\ncopy.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n',
+      { open: 1 },
+      { open: "bad" },
+      `'copy.open' holds a whole number (integer), so it cannot take text (string) "bad".`,
+    ],
+  ] as const) {
+    const store = source.lastIndexOf("hostValue");
+    const site = `${store}:${store + "hostValue".length}`;
+    for (const mode of HELD_MODES)
+      for (const demand of [1, 16])
+        withTestDemandAllowance(demand, () => {
+          const stopped = mode.run(() => plan(source));
+          assert.deepEqual(
+            ran(stopped, { hostInit: init, hostValue: misfits }),
+            { said: [], failure: `TSR058@${site} ${sentence}` },
+            `${source} (${mode.name}, demand ${demand})`,
+          );
+        });
   }
 });
 

@@ -56,6 +56,8 @@ export function assertPartChecks(
   checks: readonly PartCheckPlan[],
   span: SourceSpan | PlanSourceLocation,
 ): void {
+  // (each object's properties by name, made once for every part that steps into it: no search per part)
+  const named = new Map<object, Map<string, SerializableRuntimeValue>>();
   for (const check of checks) {
     let reached: SerializableRuntimeValue[] = [value];
     for (const step of check.path) {
@@ -63,8 +65,15 @@ export function assertPartChecks(
       for (const at of reached)
         if ("property" in step) {
           if (!isObject(at)) continue;
-          const property = at.properties.find((each) => each.name === step.property);
-          if (property !== undefined) next.push(property.value);
+          let properties = named.get(at);
+          if (properties === undefined) {
+            properties = new Map();
+            for (const property of at.properties)
+              if (!properties.has(property.name)) properties.set(property.name, property.value);
+            named.set(at, properties);
+          }
+          const found = properties.get(step.property);
+          if (found !== undefined) next.push(found);
         } else if (isList(at) || isSet(at)) for (const item of at.items) next.push(item);
         else if (isDict(at)) for (const entry of at.entries) next.push(entry.value);
       reached = next;
