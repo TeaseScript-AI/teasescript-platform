@@ -5691,6 +5691,35 @@ test("a combined stop's more precise label is accepted only as the owner's three
     provenRelabel(check("show.xs.values.element"), [element], named([]), listsDict),
     element,
   );
+  // (each changed step by its own structure, through every derived list, Codex r3's B1 and N1: an index's text names a
+  // derived list's element, never an ordinary list's, nor one a root named `values` holds)
+  const ordinary = graphOf('let xs: integer[] = [hostValue]\nsay "${xs}"\nexit\n');
+  assert.equal(
+    provenRelabel(check("xs.element"), [check("xs[0]")], named([]), ordinary),
+    undefined,
+  );
+  const rootNamed = graphOf('let values: integer[] = [hostValue]\nsay "${values}"\nexit\n');
+  assert.equal(
+    provenRelabel(check("values.element"), [check("values[0]")], named([]), rootNamed),
+    undefined,
+  );
+  const dictOfDicts = graphOf(
+    'function show(xs: integer dict dict) {repeat xs.values[0].values[0] {say "a"}}\nshow(dict {a: dict {b: hostValue}})\nexit\n',
+  );
+  const chained = check("xs.values[0].values[0]");
+  assert.equal(
+    provenRelabel(
+      check("show.xs.values.element.values.element"),
+      [chained],
+      named([]),
+      dictOfDicts,
+    ),
+    chained,
+  );
+  assert.equal(
+    provenRelabel(check("show.xs.values.element.values.element"), [chained], named([]), listsDict),
+    undefined,
+  );
   const optional = graphOf('let xs: integer dict? = dict {a: hostValue}\nsay "${xs}"\nexit\n');
   assert.equal(
     provenRelabel(check("xs.element"), [check("xs.entry")], named([]), optional),
