@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compileProject } from "../src/compiler.js";
+import { compileProject, compileSourceWithBackend } from "../src/compiler.js";
+import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { jsonFieldMismatch, jsonKindMismatch } from "../src/runtime/values/value-types.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
@@ -2216,14 +2217,30 @@ test("a kept value's variable takes a name free in the project, and the fix comp
         `${name}: ${pasted}`,
       );
     }
-  // (a host global or a built-in the script never names is reserved too)
-  const source = "let xs = [7, null]\nsay xs[0] + 1\nexit\n";
-  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "value"])!;
-  const { diagnostics } = analyseCore(request);
-  const text = messageSource([source], diagnostics, ["hostValue", "value"]);
+  // (a host global the script never names is reserved too, through the compile's own message source)
+  const reserved = compileSourceWithBackend(
+    "let groups: integer[][] = [[], [21]]\nsay groups.random.last\nexit\n",
+    { globals: ["hostValue", "value"] },
+    CORE_BACKEND,
+  );
   assert.ok(
-    diagnostics.some((diagnostic) =>
-      coreMessage(diagnostic, text).includes("as in 'let value2 = xs[0]'"),
+    reserved.diagnostics.some((diagnostic) =>
+      diagnostic.message.includes("as in 'let value2 = groups.random'"),
     ),
+    JSON.stringify(reserved.diagnostics.map((diagnostic) => diagnostic.message)),
+  );
+});
+
+/**
+ * #1274, Codex r1's B1: the names a fix may not declare are surveyed without a native call per level, so a warning's
+ * message beside an expression of any depth still compiles (12,800 nested parentheses).
+ */
+test("a warning's fix beside a deeply nested expression still compiles (#1274)", () => {
+  const source = `let n = ${"(".repeat(12800)}1${")".repeat(12800)}\nrepeat hostValue {}\nexit\n`;
+  const result = compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);
+  assert.ok(result.plan !== null);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV011"],
   );
 });

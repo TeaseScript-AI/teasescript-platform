@@ -220,22 +220,27 @@ export function messageSource(
     namedArgument: "name",
     formArgument: "name",
   };
-  const collect = (node: Readonly<Record<string, unknown>>, into: Set<string>): void => {
-    const kind = node["kind"];
-    for (const [key, value] of Object.entries(node)) {
-      if (value === null || typeof value !== "object") continue;
-      // EVIDENCE: invariant: the parser builds its nodes, their lists and their spans of plain objects and arrays.
-      const items: readonly unknown[] = Array.isArray(value) ? value : [value];
-      for (const item of items) {
-        if (item === null || typeof item !== "object") continue;
-        // EVIDENCE: invariant: an object the parser built is a plain record of its fields.
-        const fields = item as Readonly<Record<string, unknown>>;
-        if (fields["kind"] !== "identifier") collect(fields, into);
-        else if (
-          typeof fields["name"] === "string" &&
-          !(typeof kind === "string" && PROPERTY_NAMES[kind] === key)
-        )
-          into.add(fields["name"]);
+  // (an explicit worklist of each node with its kind: a nesting of any depth is no native call depth, Codex r1)
+  const collect = (root: Readonly<Record<string, unknown>>, into: Set<string>): void => {
+    const pending: Readonly<Record<string, unknown>>[] = [root];
+    while (pending.length > 0) {
+      const node = pending.pop()!;
+      const kind = node["kind"];
+      for (const [key, value] of Object.entries(node)) {
+        if (value === null || typeof value !== "object") continue;
+        // EVIDENCE: invariant: the parser builds its nodes, their lists and their spans of plain objects and arrays.
+        const items: readonly unknown[] = Array.isArray(value) ? value : [value];
+        for (const item of items) {
+          if (item === null || typeof item !== "object") continue;
+          // EVIDENCE: invariant: an object the parser built is a plain record of its fields.
+          const fields = item as Readonly<Record<string, unknown>>;
+          if (fields["kind"] !== "identifier") pending.push(fields);
+          else if (
+            typeof fields["name"] === "string" &&
+            !(typeof kind === "string" && PROPERTY_NAMES[kind] === key)
+          )
+            into.add(fields["name"]);
+        }
       }
     }
   };
