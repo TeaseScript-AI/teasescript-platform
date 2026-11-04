@@ -10,6 +10,7 @@ import { Consumers } from "../src/type-inference/core/consumers.js";
 import {
   heldAsIs,
   otherwiseKeeps,
+  qualifiersOf,
   withContributions,
   withFlowCheck,
   type Contributions,
@@ -301,7 +302,9 @@ test("an inclusion keeps the transforms its answer went through: a default's cho
     const place = pass.program.places.findIndex((at) => at?.label === name);
     const found = pass.contract.contributions(keyOf(place, []));
     assert.equal(found.state, "complete");
-    return found.state === "complete" ? found.edges.flatMap((edge) => edge.qualifiers) : [];
+    return found.state === "complete"
+      ? found.edges.flatMap((edge) => qualifiersOf(edge.qualifiers))
+      : [];
   };
   for (const mode of MODES) {
     const loaded = analysed(
@@ -327,7 +330,7 @@ test("an inclusion keeps the transforms its answer went through: a default's cho
     const found = selected.contract.contributions(keyOf(place, ["q"]));
     assert.ok(
       found.state === "complete" &&
-        found.edges.some((edge) => edge.qualifiers.includes("groupFirst")),
+        found.edges.some((edge) => qualifiersOf(edge.qualifiers).includes("groupFirst")),
       JSON.stringify(found),
     );
   }
@@ -356,10 +359,10 @@ test("a declined summary includes none of its sources; a taken one includes them
     }
 });
 
-test("a snapshot charges each slot it visits, each inclusion it follows, each filter it checks and each edge's qualifiers", () => {
+test("a snapshot charges each slot it visits, each inclusion it follows and each filter it checks", () => {
   // (the charge counted from the published flows and answers the snapshot walks: a slot visited one step, an inclusion
   // followed one unit and one per qualifier of its own, a filter on its path one unit and one per item of the slot's
-  // answer it checks, an edge kept one per qualifier of its list)
+  // answer it checks; an edge keeps its path's last link, shared, for nothing more)
   const filtered = (qualifiers: readonly Qualifier[], items: readonly Item[]): readonly Item[] => {
     let kept = qualifiers.includes("withoutEmpty") ? withoutEmpty(items) : items;
     if (qualifiers.includes("operandFilter")) kept = kept.filter(otherwiseKeeps);
@@ -403,8 +406,8 @@ test("a snapshot charges each slot it visits, each inclusion it follows, each fi
             checks += 1;
             if (filtered(qualifiers, answer).length === 0) continue;
           }
-          if (inclusion.slot!.startsWith("c|")) expected += qualifiers.length;
-          else if (!seen.has(`${inclusion.slot} ${qualifiers.join(",")}`)) {
+          if (inclusion.slot!.startsWith("c|")) continue;
+          if (!seen.has(`${inclusion.slot} ${qualifiers.join(",")}`)) {
             seen.add(`${inclusion.slot} ${qualifiers.join(",")}`);
             todo.push({ slot: inclusion.slot!, qualifiers });
           }
@@ -415,6 +418,27 @@ test("a snapshot charges each slot it visits, each inclusion it follows, each fi
       assert.equal(pass.program.work.total - before, expected, source);
     }
   assert.ok(checks > 0, `${checks} filter checks`);
+});
+
+test("a snapshot's cost grows with its edges, not with their paths' lengths", () => {
+  // (Astra r1 on #1723: a chain of `otherwise` over one key reaches it once per level, the level's path one
+  // `operandFilter` longer than the one above, so a snapshot copying each edge's path costs the square of the chain's
+  // length; one sharing the paths costs as many units per level at 128 levels as at 16, give or take the fixed part)
+  const cost = (n: number) => {
+    let chain = "v0";
+    for (let at = 1; at < n; at += 1) chain = `(${chain} otherwise v0)`;
+    const { pass } = analysed(
+      `let v0 = hostValue\nlet b = ${chain}\nsay "\${b}"\nexit\n`,
+      MODES[0]!,
+      true,
+    );
+    const before = pass.program.work.total;
+    const found = edges(pass, "b");
+    assert.ok(typeof found !== "string" && found.length === n, String(found));
+    return pass.program.work.total - before;
+  };
+  const [short, long] = [cost(16), cost(128)];
+  assert.ok(long / 128 < (short / 16) * 1.25, `${short} units at 16, ${long} at 128`);
 });
 
 test("a decision's copy of its run's flow is charged with its qualifiers", () => {
@@ -506,6 +530,28 @@ test("every producing read in the contract layer passes a flow, follows an inclu
   const files = project.addSourceFilesAtPaths(
     join(process.cwd(), "src/type-inference/core/contract/*.ts"),
   );
+  // (a fixture beside the layer, in memory: Astra r1's optional callback (a read with no sink, which the check must
+  // report) and its control with a sink (which it must accept))
+  const fixture = project.createSourceFile(
+    join(process.cwd(), "src/type-inference/core/contract/gate-fixture.ts"),
+    [
+      'import type { PlaceId } from "../../graph.js";',
+      'import type { Contract } from "../contract.js";',
+      'import type { Item } from "../items.js";',
+      'import type { Work } from "../solver.js";',
+      'import type { FlowSink } from "./contributions.js";',
+      "export function* optional(contract: Contract, place: PlaceId, host: boolean, flow: FlowSink | null): Work<readonly Item[]> {",
+      "  const read = host ? contract.contractOfValue.bind(contract) : undefined;",
+      "  const pending = read?.(place);",
+      "  if (pending) return yield* pending;",
+      "  const passed = read?.(place, flow);",
+      "  if (passed) return yield* passed;",
+      "  return [];",
+      "}",
+    ].join("\n"),
+    { overwrite: true },
+  );
+  files.push(fixture);
   project.resolveSourceFileDependencies();
   const program = project.getProgram().compilerObject;
   const checker = program.getTypeChecker();
@@ -547,7 +593,9 @@ test("every producing read in the contract layer passes a flow, follows an inclu
     for (let at = node.parent; at !== undefined; at = at.parent) if (functionLike(at)) return at;
     return null;
   };
-  const parts = (type: ts.Type): readonly ts.Type[] => (type.isUnion() ? type.types : [type]);
+  // (a type's constituents: a union's or an intersection's, as an optional call's `Work | undefined`)
+  const parts = (type: ts.Type): readonly ts.Type[] =>
+    type.isUnion() || type.isIntersection() ? type.types : [type];
   const original = (symbol: ts.Symbol | undefined): ts.Symbol | undefined =>
     symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0
       ? checker.getAliasedSymbol(symbol)
@@ -574,8 +622,16 @@ test("every producing read in the contract layer passes a flow, follows an inclu
   };
   const producing = (call: ts.CallExpression): ts.Signature | undefined => {
     const signature = checker.getResolvedSignature(call);
-    const result = signature && resultOf(checker.getReturnTypeOfSignature(signature));
-    return result !== undefined && items(result) ? signature : undefined;
+    if (signature === undefined) return undefined;
+    const returned = [checker.getReturnTypeOfSignature(signature), checker.getTypeAtLocation(call)];
+    return returned.some((type) =>
+      parts(type).some((part) => {
+        const result = resultOf(part);
+        return result !== undefined && items(result);
+      }),
+    )
+      ? signature
+      : undefined;
   };
   // (the layer's sink, by its class's symbol, or the run's `"run"`)
   const sink = (type: ts.Type): boolean =>
@@ -729,7 +785,7 @@ test("every producing read in the contract layer passes a flow, follows an inclu
     visit(tree);
   }
   assert.ok(reads > 150, `${reads} reads`);
-  assert.deepEqual(unclassified, []);
+  assert.deepEqual(unclassified, ["gate-fixture.ts:8: read?.(place)"]);
 });
 
 test("a stop's forgotten answers take their flows with them; a flow stands only beside its answer", () => {

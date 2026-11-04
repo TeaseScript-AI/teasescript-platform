@@ -168,9 +168,33 @@ export class FlowSink {
   }
 }
 
+/**
+ * A path's qualifiers, outermost first, as a chain of links shared between the edges that reach through it: each link
+ * adds one qualifier to the path before it (`null`, none). A snapshot returns each edge's path as one link, never a
+ * copy, so its output is linear in its edges; `qualifiersOf` lists one where a reader needs it.
+ */
+export interface QualifierPath {
+  readonly qualifier: Qualifier;
+  readonly before: QualifierPath | null;
+}
+
+/** A path's qualifiers as a list, outermost first. */
+export function qualifiersOf(path: QualifierPath | null): Qualifier[] {
+  const list: Qualifier[] = [];
+  for (let link = path; link !== null; link = link.before) list.push(link.qualifier);
+  return list.reverse();
+}
+
+/** One contribution edge: the contract slot reached, the route it was included through, and its path's qualifiers. */
+export interface Edge {
+  readonly slot: string;
+  readonly route: string;
+  readonly qualifiers: QualifierPath | null;
+}
+
 /** A key's contribution edges in a settled pass, or why there are none to read. */
 export type Contributions =
-  | { readonly state: "complete"; readonly edges: readonly Inclusion[] }
+  | { readonly state: "complete"; readonly edges: readonly Edge[] }
   | { readonly state: "unavailable"; readonly reason: string };
 
 /**
@@ -178,10 +202,13 @@ export type Contributions =
  * flow), from the published flows `flowOf` gives: `unavailable` where a slot on the way has none (unfinished, stopped,
  * forgotten or not recorded) or an included route recorded none (`opaque`). A contract slot reached ends that branch:
  * its own edges are its own (`edges` of it). Below a filter (`operandFilter`, `withoutEmpty`, `unknown`,
- * `belowReceiver`), a slot whose settled
- * answer (`answerOf`) the path's filters remove whole contributes none of its items: it is dropped with everything
- * below it; one they remove in part stays, its surviving items its own. Each slot visited, each inclusion followed,
- * each filter checked and each edge's qualifiers are charged to the analysis's total.
+ * `belowReceiver`), a slot whose settled answer (`answerOf`) the path's filters remove whole contributes none of its
+ * items: it is dropped with everything below it; one they remove in part stays, its surviving items its own. Each slot
+ * visited, each inclusion followed (with the links it adds) and each filter checked is charged to the analysis's total;
+ * an edge's path is its last link, shared.
+ *
+ * The result is a fresh walk of the pass's published flows: a caller that keeps it past a later settlement or forget
+ * of the pass keeps it at its own risk (the lease, `(pass, its forgets)`, is the caller's to hold).
  */
 export function edgesOf(
   start: string,
@@ -189,45 +216,38 @@ export function edgesOf(
   answerOf: (slot: string) => readonly Item[] | undefined,
   work: WorkLedger,
 ): Contributions {
-  const out: Inclusion[] = [];
-  // (a path's qualifiers as interned links, each to the list before it: a step adds only its inclusion's own, so a
-  // deep path is never copied per step, and equal lists are one link. A slot reached under other qualifiers is
-  // followed again under them: bounded by the qualifier lists the code makes. No text is made for either)
-  const links: {
-    readonly before: number;
-    readonly qualifier: Qualifier | null;
-    readonly next: Map<Qualifier, number>;
+  const out: Edge[] = [];
+  // (a path's qualifiers as interned links, each to the path before it: a step adds only its inclusion's own, so a
+  // path is never copied, and equal paths are one link. A slot reached under other qualifiers is followed again under
+  // them: bounded by the qualifier paths the code makes. No text is made for either)
+  interface Link extends QualifierPath {
+    readonly next: Map<Qualifier, Link>;
     /** The filters on the path to it (`filtersOf`). */
     readonly filters: number;
-  }[] = [{ before: -1, qualifier: null, next: new Map(), filters: 0 }];
-  const extended = (before: number, qualifiers: readonly Qualifier[]): number => {
+  }
+  const root = new Map<Qualifier, Link>();
+  const extended = (before: Link | null, qualifiers: readonly Qualifier[]): Link | null => {
     let at = before;
     for (const qualifier of qualifiers) {
-      const from = links[at]!.next;
+      const from = at === null ? root : at.next;
       let next = from.get(qualifier);
       if (next === undefined) {
-        next = links.length;
-        links.push({
-          before: at,
+        next = {
           qualifier,
+          before: at,
           next: new Map(),
-          filters: links[at]!.filters | filtersOf(qualifier),
-        });
+          filters: (at?.filters ?? 0) | filtersOf(qualifier),
+        };
         from.set(qualifier, next);
       }
       at = next;
     }
     return at;
   };
-  const listOf = (at: number): Qualifier[] => {
-    const list: Qualifier[] = [];
-    for (let link = at; link > 0; link = links[link]!.before) list.push(links[link]!.qualifier!);
-    return list.reverse();
-  };
   // (each slot followed, with the links it was followed under)
-  const seen = new Map<string, Set<number>>([[start, new Set([0])]]);
-  const todo: { readonly slot: string; readonly qualifiers: number }[] = [
-    { slot: start, qualifiers: 0 },
+  const seen = new Map<string, Set<Link | null>>([[start, new Set([null])]]);
+  const todo: { readonly slot: string; readonly qualifiers: Link | null }[] = [
+    { slot: start, qualifiers: null },
   ];
   for (let next = todo.pop(); next !== undefined; next = todo.pop()) {
     work.shared(() => work.charge("structureSteps"));
@@ -236,10 +256,10 @@ export function edgesOf(
     for (const inclusion of flow) {
       if (inclusion.slot === null)
         return { state: "unavailable", reason: `${inclusion.route} records no flow` };
-      // (each inclusion followed charged with the links it adds, an edge with the qualifier list it keeps)
+      // (each inclusion followed charged with the links it adds; an edge keeps its last link, shared)
       work.shared(() => keep(work, 1 + inclusion.qualifiers.length));
       const qualifiers = extended(next.qualifiers, inclusion.qualifiers);
-      const filters = links[qualifiers]!.filters;
+      const filters = qualifiers?.filters ?? 0;
       if (filters !== 0) {
         // (the slot's answer under the path's filters, charged as it is read)
         const answer = answerOf(inclusion.slot);
@@ -249,12 +269,10 @@ export function edgesOf(
         if (surviving(answer, filters).length === 0) continue;
       }
       if (inclusion.slot.startsWith("c|")) {
-        const list = listOf(qualifiers);
-        work.shared(() => keep(work, list.length));
-        out.push({ ...inclusion, qualifiers: list });
+        out.push({ slot: inclusion.slot, route: inclusion.route, qualifiers });
         continue;
       }
-      const under = seen.get(inclusion.slot) ?? new Set<number>();
+      const under = seen.get(inclusion.slot) ?? new Set<Link | null>();
       if (under.has(qualifiers)) continue;
       under.add(qualifiers);
       seen.set(inclusion.slot, under);
