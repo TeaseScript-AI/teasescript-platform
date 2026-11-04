@@ -50,12 +50,22 @@ exception: the runner writes it to `--out` and counts it apart (`unanswered`). I
 a total (sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, uncharged, modes, runs,
 differences, the unit limit's multiple and the safety net in seconds), and exits 1 when any run differs, throws, leaves
 nodes unanswered other than alike, is uncompared or reaches the safety net, or any source stalls. Run large sizes as one
-capped job per area or shard on a worker. A pool of shards on the central queue (`sx-job submit --items`) takes its items from
-`node tests/families/items.mjs make <N> <prefix words…>` (`<prefix> 0/N` to `<prefix> N-1/N`, the runner's 0-based
-shards; one call a group, appended to one file), and `node tests/families/items.mjs check <file>` refuses a list whose
-group misses a shard, repeats one or names one past the last (a 1-based list skipped shard 0 twice in #1652's
-campaigns). Report stalls, uncharged runs and publication exceptions separately; none
+capped job per area or shard on a worker. Report stalls, uncharged runs and publication exceptions separately; none
 establishes agreement.
+
+A pool of shards on the central queue goes through `tests/families/items.mjs`, which writes its items the way the
+runners read them and refuses a list that misses a shard, repeats one, names one past the last or holds another form
+(a 1-based list skipped shard 0 twice in #1652's campaigns):
+
+```sh
+for area in copies joins; do node tests/families/items.mjs make 128 area "$area"; done > replay.txt
+node tests/families/items.mjs make 8 held > held.txt
+node tests/families/items.mjs submit replay.txt --target 10m --campaign <T> … -- bash -c '…'
+```
+
+`make <N> <words…>` prints `<words> 0/N` to `<words> N-1/N` (the runners' 0-based shards), `check <file>` checks a
+whole list, and `submit <file> <options…> -- <command>` checks it, then runs `sx-job submit --items <file>` with the
+rest; a job reads its batch from `$SX_ITEMS`, one item a line, its shard last.
 
 With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the stored
 result of the same source (its generator, name and key, so an edited source is new), mode and check (unanswered alike
