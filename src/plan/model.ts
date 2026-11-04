@@ -1266,7 +1266,8 @@ export interface TypeCheckPlan {
  * outside the script, a property or an element below it may still have a type, such as one a store into it gave. After
  * the store's own check, the runtime follows `path` through the stored value, a property where an object has it and
  * every element of a list or set or value of a dict, and checks each value it reaches against `type` as
- * {@link TypeCheckPlan} does; a value without the part passes. Only the coarse core emits it.
+ * {@link TypeCheckPlan} does; a value without the part passes. A store's part checks are executed in order, and none
+ * repeats another's path and type. Only the coarse core emits it.
  */
 export interface PartCheckPlan {
   readonly path: readonly PartStep[];

@@ -1030,8 +1030,10 @@ function runtimeChecks(
     const destination = contracts.destinations.get(store);
     if (destination === undefined) continue;
     const whole = checks.get(store)?.type ?? null;
+    // (each object type's properties by name, made once for every part the store's check is read at: no search per part)
+    const named = new Map<TypePlan, ReadonlyMap<string, TypePlan>>();
     const parts = partChecksOf(destination, obligations).filter(
-      (part) => whole === null || !reaches(whole, part.path),
+      (part) => whole === null || !reaches(whole, part.path, named),
     );
     if (parts.length > 0) core.partChecks.set(store, parts);
   }
@@ -1097,11 +1099,16 @@ function partOf(
 }
 
 /**
- * Whether a store's check of `type` checks every value at `path` below it: each member that can hold the next step (an
+ * Whether a store's check of `type` checks every value at `path` below it (`named`: each object type's properties by
+ * name, shared by the store's parts): each member that can hold the next step (an
  * object, or a collection for an element) lists it and checks below it; a member that cannot hold it leaves no value
  * there. An open level (an object without the property, a collection whose elements are open) reaches nothing below.
  */
-function reaches(type: TypePlan, path: readonly PartStep[]): boolean {
+function reaches(
+  type: TypePlan,
+  path: readonly PartStep[],
+  named: Map<TypePlan, ReadonlyMap<string, TypePlan>>,
+): boolean {
   const pending: [TypePlan, number][] = [[type, 0]];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     const [at, depth] = next;
@@ -1113,9 +1120,16 @@ function reaches(type: TypePlan, path: readonly PartStep[]): boolean {
     }
     if ("property" in step) {
       if (at.kind !== "object") continue;
-      const property = at.properties.find((each) => each.name === step.property);
-      if (property === undefined) return false;
-      pending.push([property.type, depth + 1]);
+      let properties = named.get(at);
+      if (properties === undefined) {
+        const byName = new Map<string, TypePlan>();
+        for (const property of at.properties)
+          if (!byName.has(property.name)) byName.set(property.name, property.type);
+        named.set(at, (properties = byName));
+      }
+      const found = properties.get(step.property);
+      if (found === undefined) return false;
+      pending.push([found, depth + 1]);
     } else if (at.kind === "list" || at.kind === "set" || at.kind === "dict") {
       if (at.element === null) return false;
       pending.push([at.element, depth + 1]);

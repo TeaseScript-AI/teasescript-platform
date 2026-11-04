@@ -45,6 +45,7 @@ export function validateOptionalPartChecks(
     errors.push(planError("TSC002", "Part checks must be a non-empty array.", checksPath));
     return;
   }
+  const made = new Set<string>();
   for (const [index, check] of checks.entries()) {
     const checkPath = `${checksPath}[${index}]`;
     if (!isRecord(check)) {
@@ -73,7 +74,34 @@ export function validateOptionalPartChecks(
           planError("TSC002", "A part step must be a property name or the elements.", stepPath),
         );
     }
+    // (the compiler makes a part check once per path and type; a repeated one is no plan it makes)
+    const key = partKey(check.path, check.type);
+    if (made.has(key))
+      errors.push(planError("TSC002", "A part check repeats another's path and type.", checkPath));
+    made.add(key);
   }
+}
+
+/** A part check's identity: its path and its type, written out without native recursion (a type may be deep). */
+function partKey(path: unknown, type: unknown): string {
+  const parts: string[] = [];
+  const pending: unknown[] = [type, path];
+  for (let at = pending.pop(); pending.length > 0 || at !== undefined; at = pending.pop()) {
+    if (at === null || typeof at !== "object") {
+      parts.push(JSON.stringify(at) ?? "~");
+      continue;
+    }
+    if (Array.isArray(at)) {
+      parts.push(`[${at.length}`);
+      for (let i = at.length - 1; i >= 0; i -= 1) pending.push(at[i]);
+      continue;
+    }
+    if (!isRecord(at)) continue;
+    const keys = Object.keys(at).sort();
+    parts.push(`{${keys.join(",")}`);
+    for (let i = keys.length - 1; i >= 0; i -= 1) pending.push(at[keys[i]!]);
+  }
+  return parts.join("|");
 }
 
 /** Validates a type of a runtime type check or a type test, iteratively for deep types. */
