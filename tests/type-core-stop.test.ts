@@ -5781,6 +5781,40 @@ test("a combined stop's more precise label is accepted only as the owner's three
     operand.relabel("build.result.element.values", "build(box.n)[0].values"),
     "build(box.n)[0].values",
   );
+  // (a long chain of selections, each either spelling, compared step by step, never combined: Codex r5's B1)
+  const selections = `xs.values${".first".repeat(23)}`;
+  const selected = real(
+    `let xs: dict = dict {a: hostValue}\nrepeat ${selections} {say "a"}\nexit\n`,
+    selections,
+  );
+  assert.equal(selected.relabel(`xs.values${".element".repeat(23)}`, selections), selections);
+  // (a parameter of a function in another file, over the same offsets, is not the read's root: Codex r5's N1)
+  {
+    const main = 'let xs: dict = dict {a: hostValue}\nrepeat xs.values[0] {say "a"}\nexit\n';
+    // (its function's span covers the read's offsets in main)
+    const other = `function shadow(xs: dict) {\n${"say 1\n".repeat(30)}say "\${xs}"}\nexit\n`;
+    const answers = analyseCore(
+      coreRequest(
+        [
+          { path: "main.tease", source: main },
+          { path: "other.tease", source: other },
+        ],
+        ["hostValue", "hostOther"],
+      )!,
+    );
+    const start = main.indexOf("xs.values[0]");
+    const at = { file: 0, start, end: start + "xs.values[0]".length };
+    assert.equal(
+      provenRelabel(
+        check("xs.values.element", at),
+        [check("xs.values[0]", at)],
+        [],
+        answers.graph,
+        ownTextOf(answers, [main, other]),
+      )?.target,
+      "xs.values[0]",
+    );
+  }
   const nestedIndex = real(
     'let ns = [0]\nlet xs: dict[] = [dict {a: hostValue}]\nrepeat xs[ns[0]].values[0] {say "a"}\nexit\n',
     "xs[ns[0]].values",

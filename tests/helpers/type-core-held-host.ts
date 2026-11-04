@@ -1161,17 +1161,23 @@ function ownTextIn(answers: Answers, textAt: (site: SourceSite) => string): OwnT
 }
 
 /**
- * The read chains a value's own text names, from the expression at a check's site down to its start (`keyLabel`'s walk
- * up the projections, read from the syntax): each expression on the way with its site and the path a label spells for
- * it, the start's root as `labelRoot` spells it (a binding's name, the enclosing function's parameter `F.P`, a call's
- * result `F.result`) and each step below: a property's name, `element` for an index, a `get` or a selection (`first`,
- * `last`, `random`, which an object's property of that name spells by its name instead, so either is the step).
+ * The read chain a value's own text names, from the expression at a check's site down to its start (`keyLabel`'s walk
+ * up the projections, read from the syntax): the start's root as `labelRoot` spells it (a binding's name, the enclosing
+ * function's parameter `F.P`, in the check's own file, a call's result `F.result`), each step below it with the
+ * spellings a label may give it (a property's name; `element` for an index or a `get`; a selection, `first`, `last` or
+ * `random`, either `element` or, an object's property of that name, its name), and the site of each step's
+ * expression, outermost last. One list of spellings a step, never their combinations (Codex r5's B1 on #1687); `null`
+ * for any other start.
  */
 function readChain(
   graph: FlowGraph,
   file: number,
   at: Expression,
-): { readonly site: SourceSite; readonly path: readonly (readonly string[])[] }[] {
+): {
+  readonly root: readonly string[];
+  readonly steps: readonly (readonly string[])[];
+  readonly sites: readonly SourceSite[];
+} | null {
   const below: { expression: Expression; steps: readonly string[] }[] = [];
   let start = at;
   for (let depth = 0; depth < 256; depth += 1) {
@@ -1192,32 +1198,34 @@ function readChain(
       start = inner.callee.object;
     } else break;
   }
-  const root = unwrap(start);
-  const offset = siteOf(file, root).start;
-  const functions = functionsOf(graph);
-  // (a call's result, a parameter of the function the read stands in, else a binding)
-  let rootPath: readonly string[] | null = null;
-  if (root.kind === "callExpression" && root.callee.kind === "identifier") {
-    const name = root.callee.name;
-    if (functions.some((f) => f.name.name === name)) rootPath = [name, "result"];
-  } else if (root.kind === "identifier") {
-    const enclosing = functions.find(
-      (f) =>
-        f.span.start.offset <= offset &&
-        offset < f.span.end.offset &&
-        f.parameters.some((each) => each.name.name === root.name),
+  const origin = unwrap(start);
+  const offset = siteOf(file, origin).start;
+  // (a call's result, a parameter of the function in this file the read stands in, else a binding)
+  let root: readonly string[] | null = null;
+  if (origin.kind === "callExpression" && origin.callee.kind === "identifier") {
+    const name = origin.callee.name;
+    if (functionsOf(graph).some((f) => f.name.name === name)) root = [name, "result"];
+  } else if (origin.kind === "identifier") {
+    const enclosing = graph.regions.find(
+      (region) =>
+        region.kind === "function" &&
+        region.file === file &&
+        region.declaration.span.start.offset <= offset &&
+        offset < region.declaration.span.end.offset &&
+        region.declaration.parameters.some((each) => each.name.name === origin.name),
     );
-    rootPath = enclosing === undefined ? [root.name] : [enclosing.name.name, root.name];
+    root =
+      enclosing?.kind === "function"
+        ? [enclosing.declaration.name.name, origin.name]
+        : [origin.name];
   }
-  if (rootPath === null) return [];
-  // (each expression's paths: the root's, then each step's alternatives in turn)
-  const out: { site: SourceSite; path: readonly (readonly string[])[] }[] = [];
-  let paths: (readonly string[])[] = [rootPath];
-  for (const { expression, steps } of below.reverse()) {
-    paths = paths.flatMap((path) => steps.map((step) => [...path, step]));
-    out.push({ site: siteOf(file, expression), path: paths });
-  }
-  return out;
+  if (root === null) return null;
+  below.reverse();
+  return {
+    root,
+    steps: below.map(({ steps }) => steps),
+    sites: below.map(({ expression }) => siteOf(file, expression)),
+  };
 }
 
 /**
@@ -1258,14 +1266,23 @@ function relabelForm(
     return "entry";
   const at = source?.expressionAt(x.site);
   if (source === null || at === undefined) return null;
-  // (the reference's path, an element step it spells `entry` already being an element step)
-  const matches = (path: readonly string[]) =>
-    path.length === from.length &&
-    path.every((step, i) => step === from[i] || (step === "element" && from[i] === "entry"));
-  const own = readChain(graph, x.site.file, at).find(
-    ({ site, path }) => source.textAt(site) === x.target && path.some(matches),
-  );
-  if (own === undefined) return null;
+  // (the expression on the read's chain whose text the label is, and whose path is the reference's: its root, then each
+  // step one of its spellings, an element step the reference spells `entry` already being an element step)
+  const chain = readChain(graph, x.site.file, at);
+  if (chain === null) return null;
+  const { root: start, steps, sites } = chain;
+  const depth = from.length - start.length;
+  if (
+    depth < 1 ||
+    depth > steps.length ||
+    start.some((step, i) => step !== from[i]) ||
+    source.textAt(sites[depth - 1]!) !== x.target ||
+    !steps.slice(0, depth).every((spellings, i) => {
+      const step = from[start.length + i]!;
+      return spellings.includes(step) || (step === "entry" && spellings.includes("element"));
+    })
+  )
+    return null;
   const rootLength = labelRootOf(graph, from)?.from ?? from.length;
   return from.slice(rootLength).some((step) => DERIVED.has(step)) ? "own" : null;
 }
