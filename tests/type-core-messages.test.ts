@@ -2069,19 +2069,27 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       `${JSON.stringify(mode)} settles at 4`,
     );
   }
-  // (and where the warned text holds the mixed choice, the subject not found is unproved: the published fact says so)
-  const holding = `let xs = []\nrepeat xs.get(0, default: ${S}) {}\nexit\n`;
+  // (an unfound subject is unproved where its own span holds the recorded choice: the receiver of the outer `get`;
+  // the inner `get`'s receiver `xs` holds none, Codex r11 on #1660)
+  const holding = `let xs = []\nrepeat (xs.get(0, default: ${S})).get(0, default: 1) {}\nexit\n`;
   for (const mode of MODES) {
     const request = coreRequest(main(holding));
     assert.ok(request !== null);
     const { diagnostics } = inMode(mode, () =>
       withTestDemandAllowance(1, () => analyseCore(request)),
     );
-    const atGet = diagnostics.filter(
+    const outer = diagnostics.filter(
+      (d) => d.code === "TSV043" && d.site.start === holding.indexOf("(xs.get"),
+    );
+    assert.ok(
+      outer.length > 0 && outer.every((d) => "keeps" in d && d.keeps === "unproved"),
+      JSON.stringify(mode),
+    );
+    const inner = diagnostics.filter(
       (d) => d.code === "TSV043" && d.site.start === holding.indexOf("xs.get"),
     );
     assert.ok(
-      atGet.length > 0 && atGet.every((d) => "keeps" in d && d.keeps === "unproved"),
+      inner.every((d) => !("keeps" in d)),
       JSON.stringify(mode),
     );
   }

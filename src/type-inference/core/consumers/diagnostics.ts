@@ -125,13 +125,20 @@ function keptChoice(
   const { program } = walk.pass;
   const expression = program.exprAt(site)?.expression;
   const receiver = rule.rule === "member" || rule.rule === "selection";
-  // (a value not found, asked only then: unproved where a value the stage recorded lies within the warned site, its
-  // operands; else a plain `let` is proved, Codex r8 to r10 on #1660)
-  const unfound = (): readonly ItemTag[] | null => (heldWithin(walk, site) ? null : []);
-  // (a site with no expression of its own, a default's: its value where the core places one)
+  // (a value not found, asked only then: unproved where a value the stage recorded lies within the subject's own span,
+  // its operands; else a plain `let` is proved, Codex r8 to r11 on #1660)
+  const unfound = (span: SourceSite): readonly ItemTag[] | null =>
+    heldWithin(walk, span) ? null : [];
+  // (a site with no expression of its own, a default's: its value where the core places one; a member's or a
+  // selection's receiver there is the site's start, its own text, else the whole site)
   if (expression === undefined) {
     const place = receiver ? undefined : program.placeBySite.get(siteKey(site));
-    return place === undefined ? unfound() : keptTypes(walk, place);
+    if (place !== undefined) return keptTypes(walk, place);
+    const own =
+      rule.rule === "member" ? rule.receiver : rule.rule === "selection" ? rule.collection : null;
+    const span =
+      own === null ? site : { file: site.file, start: site.start, end: site.start + own.length };
+    return unfound(own !== null && program.textAt(span) === own ? span : site);
   }
   let subject = !receiver
     ? expression
@@ -141,10 +148,9 @@ function keptChoice(
         ? expression.object
         : expression;
   while (subject.kind === "parenthesizedExpression") subject = subject.expression;
-  const place = program.placeBySite.get(
-    siteKey({ file: site.file, start: subject.span.start.offset, end: subject.span.end.offset }),
-  );
-  return place === undefined ? unfound() : keptTypes(walk, place);
+  const span = { file: site.file, start: subject.span.start.offset, end: subject.span.end.offset };
+  const place = program.placeBySite.get(siteKey(span));
+  return place === undefined ? unfound(span) : keptTypes(walk, place);
 }
 
 /**
