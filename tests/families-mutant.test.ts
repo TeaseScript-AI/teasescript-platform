@@ -90,7 +90,10 @@ function proved(c: Case) {
     c.setup?.(cwd);
     c.change(cwd);
     git(cwd, "add", "-A", "-f");
-    writeFileSync(patch, git(cwd, "diff", "--binary", "--cached", "-M", "HEAD"));
+    // (the patch as bytes: a path or link target that is no UTF-8 must reach it unchanged)
+    const diff = spawnSync("git", ["diff", "--binary", "--cached", "-M", "HEAD"], { cwd, env });
+    assert.equal(diff.status, 0, String(diff.stderr));
+    writeFileSync(patch, diff.stdout);
     git(cwd, "reset", "-q", "--hard");
     git(cwd, "clean", "-qfdx");
     if (c.instead !== undefined) c.instead(cwd);
@@ -286,18 +289,6 @@ test("a mutant's proof refuses a repository with user code in the conversion pat
       /core\.attributesFile/,
     ],
     [
-      "the default global attributes file",
-      {
-        setup: () => {
-          mkdirSync(join(home, "git"), { recursive: true });
-          writeFileSync(join(home, "git", "attributes"), "");
-        },
-        change: ident,
-        after: () => rmSync(join(home, "git"), { recursive: true }),
-      },
-      /git\/attributes/,
-    ],
-    [
       "filter config without attributes",
       {
         setup: (cwd: string) => git(cwd, "config", "filter.zero.clean", "sed s/1/0/g"),
@@ -342,6 +333,16 @@ test("a mutant's proof refuses a repository with user code in the conversion pat
     assert.match(ran.stderr, /outside the proof's domain/, name);
     assert.match(ran.stderr, found, name);
     assert.equal(ran.worktrees, 1, name);
+  }
+  // (the default global attributes file, `$XDG_CONFIG_HOME/git/attributes`, present while the proof runs)
+  mkdirSync(join(home, "git"), { recursive: true });
+  writeFileSync(join(home, "git", "attributes"), "");
+  try {
+    const global = proved({ change: ident });
+    assert.deepEqual([global.status, global.stdout], [2, ""], global.stderr);
+    assert.match(global.stderr, /outside the proof's domain[^\n]*git\/attributes/);
+  } finally {
+    rmSync(join(home, "git"), { recursive: true, force: true });
   }
 });
 
