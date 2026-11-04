@@ -903,10 +903,9 @@ function walkLandings(
     paths: [],
     texts: [],
   };
-  // (per text, per task id and per listing taken with its writing, the order it was first brought in)
+  // (per text and per task id, the order it was first brought in)
   const out = new Map<string, number>();
   const seen = new Map<string, number>();
-  const taken = new Map<string, number>();
   const root: LandingTask = { place, below: prefix, drop: 0, prepend: [] };
   const tasks: (LandingTask | null)[] = [root];
   interface Child {
@@ -923,8 +922,8 @@ function walkLandings(
     own: number | null;
     readonly children: Child[];
     readonly tasks: LandingTask[];
-    readonly marks: { readonly seen: number; readonly taken: number };
-    readonly least: { seen: number; taken: number };
+    readonly mark: number;
+    least: number;
   }
   // the open records, innermost last
   const records: Record[] = [];
@@ -937,16 +936,16 @@ function walkLandings(
       own: null,
       children: [],
       tasks: [task],
-      marks: { seen: seen.size - 1, taken: taken.size },
-      least: { seen: Infinity, taken: Infinity },
+      mark: seen.size - 1,
+      least: Infinity,
     });
   };
-  // (a task or a listing skipped as brought: each record open since then is no longer whole)
-  const skipped = (kind: "seen" | "taken", order: number): void => {
+  // (a task skipped as brought: each record open since then is no longer whole)
+  const skipped = (order: number): void => {
     for (let at = records.length - 1; at >= 0; at -= 1) {
       const record = records[at]!;
-      record.least[kind] = Math.min(record.least[kind], order);
-      if (order >= record.marks[kind]) break;
+      record.least = Math.min(record.least, order);
+      if (order >= record.mark) break;
     }
   };
   const close = (record: Record): Listing => {
@@ -986,8 +985,7 @@ function walkLandings(
     const task = tasks.pop()!;
     if (task === null) {
       const record = records.pop()!;
-      if (record.least.seen >= record.marks.seen && record.least.taken >= record.marks.taken)
-        keepListing(admission, close(record));
+      if (record.least >= record.mark) keepListing(admission, close(record));
       continue;
     }
     // (a child of an open record's root: its paths and tasks start here)
@@ -1001,7 +999,7 @@ function walkLandings(
     const id = keptParts(admission.work, task.place, task.below, task.drop, task.prepend);
     const at = seen.get(id);
     if (at !== undefined) {
-      skipped("seen", at);
+      skipped(at);
       continue;
     }
     seen.set(id, seen.size);
@@ -1019,25 +1017,9 @@ function walkLandings(
       add(path);
     };
     // (a listing's paths written where this task writes, each charged as its emit: its root's own, then each child of
-    // its root not brought before, its paths and its tasks. One listing taken again with the same writing brings
-    // nothing new)
+    // its root not brought before, its paths and its tasks)
     const take = (from: Listing): void => {
       const written = writing(from, task);
-      const key = keptParts(
-        admission.work,
-        from.data.id,
-        from.frame.below,
-        from.frame.drop,
-        from.frame.prepend,
-        written.prepend,
-        written.cut,
-      );
-      const was = taken.get(key);
-      if (was !== undefined) {
-        skipped("taken", was);
-        return;
-      }
-      taken.set(key, taken.size);
       const bring = (start: number, end: number): void => {
         for (let at = start; at < end; at += 1) {
           work.charge("indexSteps");
@@ -1053,7 +1035,7 @@ function walkLandings(
         const childId = writtenId(admission, written, child.task);
         const brought = seen.get(childId);
         if (brought !== undefined) {
-          skipped("seen", brought);
+          skipped(brought);
           continue;
         }
         for (const sub of child.tasks) {
