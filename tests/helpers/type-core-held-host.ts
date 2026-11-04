@@ -19,8 +19,9 @@ import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./type-core-analysis.js";
 import { runGlobals } from "./type-core-route.js";
 import { VALUE_KINDS } from "../../src/value-kinds.js";
-import type { Expression } from "../../src/ast.js";
+import type { Expression, TypeAnnotation } from "../../src/ast.js";
 import { expressionChildren, unwrap } from "../../src/expression-children.js";
+import type { FlowGraph } from "../../src/type-inference/core/flow-graph/model.js";
 import { REASON, type Item } from "../../src/type-inference/core/items.js";
 import type { SourceSite } from "../../src/type-inference/graph.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
@@ -1095,52 +1096,115 @@ const targetSteps = (target: string): string[] => target.match(/\[[^\]]*\]|[^.[]
  * Whether `x` names what `u` names by key steps alone (#1595): the same steps but where `u`'s generic `element` is a
  * dictionary's `entry` or a derived list's own index text, at least one so; never a prefix or any other step changed.
  */
-function keyStepsAlone(u: string, x: string): boolean {
-  const [from, to] = [targetSteps(u), targetSteps(x)];
+function keyStepsAlone(u: readonly string[], x: readonly string[]): boolean {
   return (
-    from.length === to.length &&
-    from.some((step, i) => step !== to[i]) &&
-    from.every(
+    u.length === x.length &&
+    u.some((step, i) => step !== x[i]) &&
+    u.every(
       (step, i) =>
-        step === to[i] || (step === "element" && (to[i] === "entry" || to[i]!.startsWith("["))),
+        step === x[i] || (step === "element" && (x[i] === "entry" || x[i]!.startsWith("["))),
     )
   );
 }
 
+/** A dictionary's derived lists, a read through which is named by its own text (`xs.values`, `build().values`). */
+const DERIVED = new Set(["values", "keys"]);
+
 /**
- * The owner's one accepted difference at a combined stop (TABLE r4.322, #1595, the lead's rulings on its HEAD 0): the
- * stopped analysis owes the reference's check `u` under a more precise label than the reference's, which ran out of
- * demand reading the key, where all three hold for the stopped check `x`:
+ * Whether `x` names a read through a dictionary's derived list by its own text where `u` names it by its key path (#1595,
+ * the lead's ruling on Q3): the steps from the derived `values` or `keys` on equal, and before it `u`'s label root, a
+ * declared function's result or parameter (`build.result`, `show.xs`), spelled as the chain's own text (`build()`, `xs`).
+ */
+function derivedOwnText(graph: FlowGraph, u: readonly string[], x: readonly string[]): boolean {
+  const [at, from] = [
+    u.findIndex((step) => DERIVED.has(step)),
+    x.findIndex((step) => DERIVED.has(step)),
+  ];
+  if (at !== 2 || from !== 1 || u.length - at !== x.length - from) return false;
+  if (u.slice(at).some((step, i) => step !== x[from + i])) return false;
+  const declared = functionsOf(graph).find((f) => f.name.name === u[0]);
+  if (declared === undefined) return false;
+  return u[1] === "result"
+    ? x[0] === `${u[0]}()`
+    : x[0] === u[1] && declared.parameters.some((each) => each.name.name === u[1]);
+}
+
+/** The program's declared functions. */
+const functionsOf = (graph: FlowGraph) =>
+  graph.regions.flatMap((region) => (region.kind === "function" ? [region.declaration] : []));
+
+/** A written type's own kind where every value it admits is a dictionary: `dict`, `T dict`. */
+const writtenDict = (type: TypeAnnotation | null): boolean =>
+  type !== null &&
+  (type.kind === "dictType" || (type.kind === "namedType" && type.name === "dict"));
+
+/**
+ * Whether a written type at the key spells `x`'s more precise step (#1595, the lead's ruling on Q4: the author's own
+ * proof, as the compiler reads it): the key's root declared with a written type (a `let` or `global`, a function's
+ * parameter, or its result), followed through its written elements to the step that changes, a dictionary there.
+ */
+function writtenSpells(graph: FlowGraph, u: readonly string[], x: readonly string[]): boolean {
+  const lets = graph.nodes.flatMap(({ statement }) =>
+    statement?.kind === "letStatement" || statement?.kind === "globalStatement" ? [statement] : [],
+  );
+  const declared = functionsOf(graph).find((f) => f.name.name === u[0]);
+  let [type, at]: [TypeAnnotation | null, number] =
+    declared === undefined
+      ? [lets.find((each) => each.name.name === u[0])?.typeAnnotation ?? null, 1]
+      : u[1] === "result"
+        ? [declared.returnTypeAnnotation, 2]
+        : [declared.parameters.find((each) => each.name.name === u[1])?.typeAnnotation ?? null, 2];
+  // (the step that changes: the first key step, or the derived list's)
+  const changes = keyStepsAlone(u, x)
+    ? u.findIndex((step, i) => step !== x[i])
+    : u.findIndex((step) => DERIVED.has(step));
+  for (; type !== null && at < changes; at += 1)
+    type =
+      u[at] === "element" &&
+      (type.kind === "listType" || type.kind === "setType" || type.kind === "dictType")
+        ? type.element
+        : null;
+  return at === changes && writtenDict(type);
+}
+
+/**
+ * The owner's one accepted difference at a combined stop (TABLE r4.322, #1595, the lead's rulings on its HEAD 0 and on
+ * Q3/Q4): the stopped analysis owes the reference's check `u` under a more precise label than the reference's, which ran
+ * out of demand reading the key, where all three hold for the stopped check `x`:
  * 1. the label follows from a proven type: the natural analysis (no demand, no stop) names the key with that label, a
- *    check of its own targeting it or a path below it. It need not owe `x` itself: knowing more, it owes another check
- *    at the key;
+ *    check of its own targeting it or a path below it (it need not owe `x` itself: knowing more, it owes another check
+ *    at the key), or a written type at the key spells it (`writtenSpells`);
  * 2. the check, its location and its expected types are identical: kind, whole site, boundary and `against`;
- * 3. no other difference is ignored: the label differs by key steps alone (`keyStepsAlone`), the words are `u`'s with
- *    only the label replaced, and every other part is equal.
- * The stopped check accepted, else `undefined`. `natural` is the natural analysis's check targets.
+ * 3. no other difference is ignored: the label differs by key steps alone (`keyStepsAlone`) or names a derived list by
+ *    its own text (`derivedOwnText`), the words are `u`'s with only the label replaced, and every other part is equal.
+ * The stopped check accepted, else `undefined`. `natural` is the natural analysis's check targets; `graph` the program's.
  */
 export function provenRelabel(
   u: Obligation,
   owed: readonly Obligation[],
   natural: readonly string[],
+  graph: FlowGraph,
 ): Obligation | undefined {
-  return owed.find(
-    (x) =>
-      x.target !== u.target &&
+  const from = targetSteps(u.target);
+  return owed.find((x) => {
+    if (x.target === u.target) return false;
+    const to = targetSteps(x.target);
+    return (
       // (1)
-      natural.some(
+      (natural.some(
         (target) =>
           target === x.target ||
           target.startsWith(`${x.target}.`) ||
           target.startsWith(`${x.target}[`),
-      ) &&
+      ) ||
+        writtenSpells(graph, from, to)) &&
       // (2)
       x.kind === u.kind &&
       siteKey(x.site) === siteKey(u.site) &&
       x.boundary === u.boundary &&
       JSON.stringify(x.against) === JSON.stringify(u.against) &&
       // (3) (beside (2)'s parts, every other part equal: the words with only the label replaced)
-      keyStepsAlone(u.target, x.target) &&
+      (keyStepsAlone(from, to) || derivedOwnText(graph, from, to)) &&
       x.on === u.on.split(u.target).join(x.target) &&
       JSON.stringify({
         ...u,
@@ -1150,8 +1214,9 @@ export function provenRelabel(
         against: x.against,
         target: x.target,
         on: x.on,
-      }) === JSON.stringify(x),
-  );
+      }) === JSON.stringify(x)
+    );
+  });
 }
 
 /**
@@ -1250,7 +1315,9 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
       )
     )
       return "z";
-    return provenRelabel(u, owed, naturalTargets) === undefined ? unanswered : "relabelled";
+    return provenRelabel(u, owed, naturalTargets, reference.graph) === undefined
+      ? unanswered
+      : "relabelled";
   };
   const checks = new Map<string, "a" | "w" | "z">();
   const coarse = { checks: new Map<string, readonly string[]>(), records: new Set<string>() };

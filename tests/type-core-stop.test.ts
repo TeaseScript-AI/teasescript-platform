@@ -5606,63 +5606,85 @@ test("a read its one holder's source answers stops where main's does at a small 
 });
 
 /**
- * The owner's one accepted relabel at a combined stop (TABLE r4.322, #1595), each of its three conditions alone refusing
- * it: a stopped check under a more precise key step than the reference's (a dict's `entry`, a derived list's index text)
- * is accepted for the reference's under the generic `element`, where the natural analysis names the key so, at the key or
- * below it, though it owes another check there; refused where the natural analysis names the key otherwise (1), where the
- * check, its location or its expected types differ (2), and where anything but the key step differs: the words, or
- * another step of the label such as a parameter's prefix (3).
+ * The owner's one accepted relabel at a combined stop (TABLE r4.322, #1595, the lead's rulings), each form accepted
+ * alone and each condition alone refusing it. A stopped check under a more precise label than the reference's generic
+ * one: a key step (a dict's `entry`, a derived list's index text) or a derived list named by its own text (`xs.values`
+ * for a parameter's `show.xs.values`, `build().values` for a result's). Proved where the natural analysis names the key
+ * so, at the key or below it, though it owes another check there, or where a written type at the key spells it (1);
+ * refused where neither proves it (1), where the check, its location or its expected types differ (2), and where
+ * anything else differs: the words, or a label that differs beyond those forms (3).
  */
 test("a combined stop's more precise label is accepted only as the owner's three conditions allow (#1595)", () => {
+  const graphOf = (source: string) =>
+    analyseCore(coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!).graph;
+  const untyped = graphOf("let a = 1\nexit\n");
+  const typed = graphOf(
+    'function build: integer dict {return dict {a: hostValue}}\nfunction show(xs: dict) {say "${xs}"}\nshow(build())\nexit\n',
+  );
+  const listed = graphOf(
+    'function build: integer[] {return [hostValue]}\nsay "${build()}"\nexit\n',
+  );
   const site = { file: 0, start: 40, end: 49 };
-  const u: Obligation = {
-    kind: "integer-check",
-    target: "build.result.element",
+  const check = (target: string, kind: Obligation["kind"] = "integer-check"): Obligation => ({
+    kind,
+    target,
     against: ["integer"],
-    on: "check that the repeat count is a whole number when it runs",
+    on: `check that ${target} is a whole number before the read`,
     site,
     boundary: false,
-  };
-  const x: Obligation = { ...u, target: "build.result.entry" };
-  // (the natural analysis's own check there is another: it validates the key's external data)
-  assert.equal(provenRelabel(u, [x], ["build.result.entry"]), x);
-  assert.equal(provenRelabel(u, [x], ["build.result.entry.f"]), x);
-  const derived: Obligation = {
-    ...u,
-    target: "xs.element.values",
-    on: "check that xs.element.values is a list or a dict with .index before the read",
-  };
-  const indexed: Obligation = {
-    ...derived,
-    target: "xs[0].values",
-    on: "check that xs[0].values is a list or a dict with .index before the read",
-  };
-  assert.equal(provenRelabel(derived, [indexed], ["xs[0].values[0]"]), indexed);
-  // (1) the natural analysis names the key otherwise, or not at all: no proven type behind the label
-  for (const natural of [["build.result.element"], ["build.resultant.entry"], []])
-    assert.equal(provenRelabel(u, [x], natural), undefined, JSON.stringify(natural));
+  });
+  const [u, x] = [check("build.result.element"), check("build.result.entry")];
+  const [param, own] = [check("show.xs.values"), check("xs.values")];
+  // (the forms, each proved by the natural analysis's naming, at the key or below it)
+  assert.equal(provenRelabel(u, [x], ["build.result.entry"], untyped), x);
+  assert.equal(provenRelabel(u, [x], ["build.result.entry.f"], untyped), x);
+  const indexed = check("xs[0].values");
+  assert.equal(
+    provenRelabel(check("xs.element.values"), [indexed], ["xs[0].values[0]"], untyped),
+    indexed,
+  );
+  assert.equal(provenRelabel(param, [own], ["xs.values[0]"], typed), own);
+  const called = check("build().values");
+  assert.equal(
+    provenRelabel(check("build.result.values"), [called], ["build().values[0]"], typed),
+    called,
+  );
+  // (1)'s second proof: a written type at the key spells it, where the natural analysis names the key nowhere
+  assert.equal(provenRelabel(u, [x], [], typed), x);
+  assert.equal(provenRelabel(param, [own], [], typed), own);
+  // (1) neither proves it: named otherwise, or not at all, and no written dictionary there
+  for (const [natural, graph] of [
+    [["build.result.element"], untyped],
+    [["build.resultant.entry"], untyped],
+    [[], untyped],
+    [[], listed],
+  ] as const)
+    assert.equal(provenRelabel(u, [x], natural, graph), undefined, JSON.stringify(natural));
   // (2) another check, location or expected types under the label
   for (const other of [
-    { ...x, kind: "null-check" as const },
+    check("build.result.entry", "null-check"),
     { ...x, site: { ...site, end: 50 } },
     { ...x, boundary: true },
     { ...x, against: ["number" as const] },
   ])
-    assert.equal(provenRelabel(u, [other], [other.target]), undefined, JSON.stringify(other));
-  // (3) words that differ beyond the label, or a label that differs beyond its key step
-  const worded = { ...x, on: "check that the repeat count is a whole number" };
-  assert.equal(provenRelabel(u, [worded], [worded.target]), undefined);
-  const prefixed: Obligation = {
-    ...u,
-    target: "show.xs.values",
-    on: "check that show.xs.values is a list or a dict with .index before the read",
-  };
-  const unprefixed: Obligation = {
-    ...prefixed,
-    target: "xs.values",
-    on: "check that xs.values is a list or a dict with .index before the read",
-  };
-  assert.equal(provenRelabel(prefixed, [unprefixed], ["xs.values"]), undefined);
+    assert.equal(
+      provenRelabel(u, [other], [other.target], untyped),
+      undefined,
+      JSON.stringify(other),
+    );
+  // (3) words that differ beyond the label, or a label that differs beyond its forms
+  const worded = { ...x, on: "check that the count is a whole number" };
+  assert.equal(provenRelabel(u, [worded], [x.target], untyped), undefined);
+  for (const [from, to] of [
+    ["show.ys.values", "xs.values"],
+    ["a.xs.values", "xs.values"],
+    ["show.xs.values", "show.values"],
+  ] as const)
+    assert.equal(
+      provenRelabel(check(from), [check(to)], [to], typed),
+      undefined,
+      `${from} -> ${to}`,
+    );
 });
 
 /**
