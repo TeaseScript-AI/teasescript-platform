@@ -5,7 +5,7 @@ import * as handles from "../../adapters/handles.js";
 import type { OperandView, OperationInputs } from "../../adapters/relation.js";
 import * as text from "../../adapters/text.js";
 import type { MemberRules } from "../../adapters/views.js";
-import type { PlaceId } from "../../graph.js";
+import type { PlaceId, SourceSite } from "../../graph.js";
 import { concrete, requiredKind } from "../admission.js";
 import { family } from "../admission/kinds.js";
 import type { Consumers } from "../consumers.js";
@@ -185,6 +185,25 @@ export function recordAnswer(
   let answered = ANSWERED.get(walk);
   if (answered === undefined) ANSWERED.set(walk, (answered = new Map()));
   answered.set(value, types);
+}
+
+/**
+ * Whether a value the stage recorded (`recordAnswer`: a mixed answer, one it reaches unchanged, or a stopped read of
+ * either) lies within `site`: what a warning whose subject the walk did not find may hold there, since an answer
+ * reaches a subject only through its own operands, which lie within its warned site (Codex r9 on #1660: by the stage's
+ * record and the program's sites, never by text). Each record once.
+ */
+export function heldWithin(walk: Consumers, site: SourceSite): boolean {
+  const answered = ANSWERED.get(walk);
+  if (answered === undefined) return false;
+  const { program } = walk.pass;
+  program.work.charge("checks", answered.size);
+  for (const value of answered.keys()) {
+    const at = program.places[value]?.site ?? null;
+    if (at !== null && at.file === site.file && at.start >= site.start && at.end <= site.end)
+      return true;
+  }
+  return false;
 }
 
 /**

@@ -397,7 +397,7 @@ function reachedUnion(walk: Consumers, start: PlaceId): Stored | null {
  * choice where its answer, as it stands or through what passes it on unchanged (`passedOperands`), lands in a place
  * whose type would be their union (`storedUnion`), at its first such store (`reachedUnion`); once per choice.
  */
-export function mixedChoice(
+function mixedChoice(
   walk: Consumers,
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
 ): void {
@@ -414,4 +414,25 @@ export function mixedChoice(
   // the answer reaches is still recorded)
   if (stored !== null && !holdsMixed(walk, c.site))
     error(walk, "written-target", c.site, { rule: "mixed-choice", ...stored }, answer);
+}
+
+/**
+ * #1352's stage (`Consumers.check`): `mixedChoice` of every `askChoice` outside the units past the nesting limit, in
+ * the consumers' order, each read with its choice's demand allowance; run after every other consumer's read and the
+ * publication, so no read of the pass that can stop at its demand allowance comes after its reads (Codex r9 on #1660).
+ * A choice past the nesting limit has no published warning that reads its record (TSV076 defers them).
+ */
+export function mixedChoices(walk: Consumers): void {
+  const { program } = walk.pass;
+  const choices = program.constraints.filter(
+    (c): c is Extract<ValueConstraint, { readonly kind: "operation" }> =>
+      c.kind === "operation" && c.evidence?.kind === "choice",
+  );
+  for (const c of walk.order(choices)) {
+    const node = program.isDeep(c.site) ? null : program.exprAt(c.site);
+    if (node === null) continue;
+    walk.reading = node;
+    mixedChoice(walk, c);
+  }
+  walk.reading = null;
 }

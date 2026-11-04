@@ -8,7 +8,7 @@ import { selectsElement } from "../method-categories.js";
 import { siteKey } from "../program.js";
 import type { CoreDiagnostic, DiagnosticKind, DiagnosticRule, Presence } from "../result.js";
 import { expected } from "./expected.js";
-import { keptTypes } from "./kinds.js";
+import { heldWithin, keptTypes } from "./kinds.js";
 
 // The consumers' diagnostics: an error at its site, and the facts a fix's code forms read (TABLE r4.151).
 
@@ -125,9 +125,9 @@ function keptChoice(
   const { program } = walk.pass;
   const expression = program.exprAt(site)?.expression;
   const receiver = rule.rule === "member" || rule.rule === "selection";
-  // (a value not found: an answer reaches a subject only through its own operands, so where the warned text holds no
-  // askChoice none reaches it and a plain `let` is proved; else unproved, Codex r8 on #1660)
-  const unfound = program.textAt(site).includes("askChoice") ? null : [];
+  // (a value not found: unproved where a choice the stage recorded with a kept proof other than the plain `let` lies
+  // within the warned site, its operands; else a plain `let` is proved, Codex r8 and r9 on #1660)
+  const unfound = heldWithin(walk, site) ? null : [];
   // (a site with no expression of its own, a default's: its value where the core places one)
   if (expression === undefined) {
     const place = receiver ? undefined : program.placeBySite.get(siteKey(site));

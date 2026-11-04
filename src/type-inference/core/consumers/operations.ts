@@ -20,7 +20,6 @@ import { jsonArgument, methodArguments, methodElements } from "./signatures.js";
 import { fallbackFits } from "./fallbacks.js";
 import { BOOLEAN, hasMethod, operandDomain, SHOWN, TEXT } from "./kinds.js";
 import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel } from "./names.js";
-import { mixedChoice } from "./mixed.js";
 import { consume, indexUse, integerOnly } from "./operands.js";
 import { projection, selection } from "./projections.js";
 import { methodReceiver } from "./receivers.js";
@@ -161,11 +160,8 @@ function operation(
   node: FlowNode,
 ): void {
   const { family, name } = c.contract;
-  // TSV029: what a choice's buttons return; TSV044: an answer of more than one type where its type would be inferred
-  if (family === "interaction" && c.evidence?.kind === "choice") {
-    choiceValues(walk, c, node);
-    mixedChoice(walk, c);
-  }
+  // TSV029: what a choice's buttons return (TSV044's mixed answer is its own last stage, `mixedChoices`)
+  if (family === "interaction" && c.evidence?.kind === "choice") choiceValues(walk, c, node);
   if (c.receiver !== null && family !== "operator") {
     // C2: a position or a count, where the receiver may have the method (any other's is its member check's, C5b)
     if (

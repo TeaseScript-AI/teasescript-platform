@@ -2005,17 +2005,25 @@ test("an askChoice of more than one type errs where its type would be inferred, 
   }
   // (a stopped read of a non-mixed choice leaves an unrelated warning's subject, not found, its plain `let`: an
   // answer reaches a subject only through its own operands, Codex r8 on #1660)
-  const unrelated =
-    "let xs = []\nrepeat xs.get(0, default: hostValue) {}\nrepeat (askChoice 1, null) {}\nexit\n";
-  for (const mode of MODES) {
-    const request = coreRequest(main(unrelated));
-    assert.ok(request !== null);
-    const { diagnostics } = inMode(mode, () =>
-      withTestDemandAllowance(16, () => analyseCore(request)),
-    );
-    const atGet = diagnostics.filter((d) => d.site.start === unrelated.indexOf("xs.get"));
-    assert.ok(atGet.length > 0 && atGet.every((d) => !("keeps" in d)), JSON.stringify(mode));
-  }
+  // (nor does an askChoice that is only a name in the text: a string, a comment, a property, Codex r9 on #1660)
+  for (const unrelated of [
+    "let xs = []\nrepeat xs.get(0, default: hostValue) {}\nrepeat (askChoice 1, null) {}\nexit\n",
+    'let xs = []\nrepeat xs.get(0, default: "askChoice") {}\nexit\n',
+    "let xs = []\nrepeat xs.get(0, /* askChoice */ default: hostValue) {}\nexit\n",
+    "let box = {askChoice: hostValue}\nlet xs = []\nrepeat xs.get(0, default: box.askChoice) {}\nexit\n",
+  ])
+    for (const mode of MODES) {
+      const request = coreRequest(main(unrelated));
+      assert.ok(request !== null);
+      const { diagnostics } = inMode(mode, () =>
+        withTestDemandAllowance(16, () => analyseCore(request)),
+      );
+      const atGet = diagnostics.filter((d) => d.site.start === unrelated.indexOf("xs.get"));
+      assert.ok(
+        atGet.length > 0 && atGet.every((d) => !("keeps" in d)),
+        `${JSON.stringify(mode)} ${unrelated}`,
+      );
+    }
   // (and where the warned text holds the mixed choice, the subject not found is unproved: the published fact says so)
   const holding = `let xs = []\nrepeat xs.get(0, default: ${S}) {}\nexit\n`;
   for (const mode of MODES) {
