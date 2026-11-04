@@ -251,22 +251,49 @@ function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[])
 
 /**
  * #1173 (the owner's option C): whether the place a read reads is written `number` at the read's path, a member of a
- * written union included (`number?`). Its written type alone decides it, no decision.
+ * written union included (`number?`); a `get` result reads its receiver's element. Its written type alone decides it,
+ * no decision, and a written type that holds no `number` anywhere asks no charged key (so no counter or stop moves).
  */
 export function writtenNumber(walk: Consumers, value: PlaceId): boolean {
+  const owner = walk.getOf.get(value);
+  return owner === undefined ? numberAt(walk, value, []) : numberAt(walk, owner, ["element"]);
+}
+
+function numberAt(walk: Consumers, value: PlaceId, below: readonly string[]): boolean {
   const { program } = walk.pass;
-  // (the root the read reads, as `readKey` finds it, without its charged key: a root with no written type has none)
+  // (the root the read reads, as `readKey` finds it, without its charged key)
   const root = program.projOf.has(value)
     ? program.targetRoot(value).root
     : program.occurrenceOf.get(value);
-  if (root === undefined || writtenOf(program.place(root).kind) === null) return false;
+  const rootWritten = root === undefined ? null : writtenOf(program.place(root).kind);
+  if (rootWritten === null || !holdsNumber(rootWritten)) return false;
   const key = readKey(walk, value);
   if (key === null) return false;
   const written = writtenOf(program.place(keyPlace(key)).kind);
-  const term = written === null ? null : termAt(written, keyPath(key));
+  const term = written === null ? null : termAt(written, [...keyPath(key), ...below]);
   const number = (at: TypeTerm): boolean =>
     at.kind === "union" ? at.members.some(number) : at.kind === "atom" && at.name === "number";
   return term !== null && number(term);
+}
+
+/** Whether a written type holds `number` at any path, once per term. */
+const HOLDS_NUMBER = new WeakMap<TypeTerm, boolean>();
+function holdsNumber(term: TypeTerm): boolean {
+  let holds = HOLDS_NUMBER.get(term);
+  if (holds === undefined) {
+    holds =
+      term.kind === "atom"
+        ? term.name === "number"
+        : term.kind === "union"
+          ? term.members.some(holdsNumber)
+          : term.kind === "list" || term.kind === "set" || term.kind === "dict"
+            ? holdsNumber(term.element)
+            : term.kind === "object"
+              ? (term.properties ?? []).some((property) => holdsNumber(property.type))
+              : false;
+    HOLDS_NUMBER.set(term, holds);
+  }
+  return holds;
 }
 
 /** §3.3, the quiet path: a value's contract kinds, asked before any read is evaluated; `null` with an unknown. */

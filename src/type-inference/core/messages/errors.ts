@@ -890,8 +890,9 @@ export function errorSentence(
       );
     }
     case "count":
+      // (where a whole number is required, a `number` is "a number that can have decimals": DIAGNOSTICS.md)
       return (
-        `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.` +
+        `${operandRule(rule, text)}, but '${text}' is ${described(kinds).replace(/\ba number\b/, "a number that can have decimals")}.` +
         (kinds.includes("number") ? ROUND_COUNT_FIX : " Use a whole number here.")
       );
     case "boolean":

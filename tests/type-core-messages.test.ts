@@ -162,17 +162,20 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       ],
     ],
     // C2
-    ["repeat 2.5 {}\nexit\n", [`E TSV011 '2.5': ${COUNT}, but '2.5' is a number. ${ROUND}`]],
+    [
+      "repeat 2.5 {}\nexit\n",
+      [`E TSV011 '2.5': ${COUNT}, but '2.5' is a number that can have decimals. ${ROUND}`],
+    ],
     [
       "let xs = [1, 2]\nlet y = xs[0.5]\nexit\n",
       [
-        `E TSV043 '0.5': A list index must be a whole number (integer), but '0.5' is a number. ${ROUND}`,
+        `E TSV043 '0.5': A list index must be a whole number (integer), but '0.5' is a number that can have decimals. ${ROUND}`,
       ],
     ],
     [
       "let xs = [1, 2]\nxs.removeAt(1.5)\nexit\n",
       [
-        `E TSV043 '1.5': removeAt() needs a whole number (integer), but '1.5' is a number. ${ROUND}`,
+        `E TSV043 '1.5': removeAt() needs a whole number (integer), but '1.5' is a number that can have decimals. ${ROUND}`,
       ],
     ],
     [

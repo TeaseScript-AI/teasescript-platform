@@ -65,6 +65,7 @@ import {
   type PredictedRun,
 } from "./helpers/type-core-derived.js";
 import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
+import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import {
   assignments,
   derivedContent,
@@ -1517,17 +1518,17 @@ test("a for loop's range bound that is a number or text is an error at the bound
     [
       "for i in 1..2.0 { say i }\nexit\n",
       12,
-      "'2.0' is a number. Round the number with the floor, round or ceil function first.",
+      "'2.0' is a number that can have decimals. Round the number with the floor, round or ceil function first.",
     ],
     [
       "for i in 1.0..2 { say i }\nexit\n",
       9,
-      "'1.0' is a number. Round the number with the floor, round or ceil function first.",
+      "'1.0' is a number that can have decimals. Round the number with the floor, round or ceil function first.",
     ],
     [
       "let x = 2.5\nfor i in 1..x { say i }\nexit\n",
       24,
-      "'x' is a number. Round the number with the floor, round or ceil function first.",
+      "'x' is a number that can have decimals. Round the number with the floor, round or ceil function first.",
     ],
     [
       'let t = "a"\nfor i in 1..t.trim() { say i }\nexit\n',
@@ -1577,10 +1578,14 @@ test("an integer-only use of a written number place is the current checker's err
     (read: string) => `let xs = [1, 2]\nsay xs[${read}]`,
     (read: string) => `for i in ${read}..3 { say i }`,
     (read: string) => `for i in 1..${read} { say i }`,
+    (read: string) => `let ys = [1, 2, 3]\nsay ys.take(${read})`,
   ];
   const programs = (use: (read: string) => string): readonly string[] => [
     use("1"),
     use("1.5"),
+    // (a `get` result reads its receiver's element: Codex r1 B1)
+    `let ps: number[] = [1]\n${use("ps.get(0, default: 0)")}`,
+    `let ps: integer[] = [1]\n${use("ps.get(0, default: 0)")}`,
     ...[
       "let p: number = 1",
       "let p: number = 1.5",
@@ -1591,23 +1596,47 @@ test("an integer-only use of a written number place is the current checker's err
       "let p: number = hostValue",
     ].map((declaration) => `${declaration}\n${use("p")}`),
   ];
+  // (the candidate's errors, or, for a use the candidate route does not lower yet (`take`), the core analysis's)
   const errors = (result: CompilationResult) =>
-    sited(result).filter((diagnostic) => diagnostic.startsWith("error"));
+    result.diagnostics
+      .filter((d) => d.severity === "error")
+      .map((d) => `${d.code}@${d.span.start.offset}`);
+  const coreErrors = (source: string): string[] => {
+    const inside = insideSlice(() => errors(candidate(source)));
+    if (inside !== null) return inside;
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    return analyseCore(request)
+      .diagnostics.filter((d) => d.class === "compile-error")
+      .map((d) => `${d.code}@${d.site.start}`);
+  };
   for (const use of uses)
     for (const program of programs(use)) {
       const source = `${program}\nexit\n`;
       const current = errors(compileSource(source, OPTIONS));
       assert.deepEqual(
-        inBothOrders(() => errors(candidate(source))),
+        inBothOrders(() => coreErrors(source)),
         current,
         source,
       );
       assert.deepEqual(
-        inBothOrders(() => withoutSharing(() => errors(candidate(source)))),
+        inBothOrders(() => withoutSharing(() => coreErrors(source))),
         current,
         `${source} (unshared)`,
       );
     }
+  // (a written type without `number` asks no key for the rule: main's counters, so no stop moves, Codex r1 B2)
+  const integer = coreRequest([
+    { path: "main.tease", source: 'let p: integer = 1\nrepeat p { say "X" }\nexit\n' },
+  ]);
+  assert.ok(integer !== null);
+  for (const mode of MODES) {
+    const units = inMode(mode, (): [number, number | undefined] => {
+      const { budget } = analyseCore(integer);
+      return [budget.total, budget.counts.get("checks")];
+    });
+    assert.deepEqual(units, [194, 17], JSON.stringify(mode));
+  }
 });
 
 /**
@@ -1664,7 +1693,7 @@ test("parentheses answer for their content: a parenthesised count and index read
   assert.deepEqual(sited({ diagnostics: count }), ["error TSV011@9"]);
   assert.equal(
     count[0]!.message,
-    "A repeat count must be a whole number (integer) of at least 0, but '2.5' is a number. Round the number with " +
+    "A repeat count must be a whole number (integer) of at least 0, but '2.5' is a number that can have decimals. Round the number with " +
       "the floor, round or ceil function first.",
   );
   const listed = inBothOrders(
@@ -1673,7 +1702,7 @@ test("parentheses answer for their content: a parenthesised count and index read
   assert.deepEqual(sited({ diagnostics: listed }), ["error TSV043@28"]);
   assert.equal(
     listed[0]!.message,
-    "A list index must be a whole number (integer), but '0.5' is a number. Round the number with the floor, round " +
+    "A list index must be a whole number (integer), but '0.5' is a number that can have decimals. Round the number with the floor, round " +
       "or ceil function first.",
   );
   const host = candidate("repeat ((hostValue)) {}\nexit\n");
