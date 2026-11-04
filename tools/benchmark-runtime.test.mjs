@@ -49,7 +49,7 @@ class Session {
       const one = this.operate("step");
       instructionsExecuted += one.instructionsExecuted;
       events.push(...one.events);
-      if (step.status !== "running") return { instructionsExecuted, events };
+      if (step.status !== "running") return { instructionsExecuted: instructionsExecuted + (mutation.runExtra ?? 0), events };
     }
   }
   exportSnapshot() {
@@ -320,6 +320,26 @@ test("--cpu accepts a candidate whose instruction counts differ", async (t) => {
     dists.clean,
     "--candidate",
     dists.fewer,
+    "--out",
+    path.join(directory, "cpu"),
+    "--rounds",
+    "1",
+    "--warmups",
+    "0",
+    "--batch",
+    "1",
+  );
+  assert.equal(result.status, 0, result.output);
+});
+
+test("--cpu checks a timed run's count against an untimed run of the same operations", async (t) => {
+  const { directory, dists, run } = setUp(t, { mutations: { sliced: { runExtra: 1 } } });
+  const result = await run(
+    "--cpu",
+    "--base",
+    dists.clean,
+    "--candidate",
+    dists.sliced,
     "--out",
     path.join(directory, "cpu"),
     "--rounds",

@@ -308,7 +308,12 @@ export function measureCpu(
       records[name] = recordCase(builds[name], testCase, {
         plan: plans[`${testCase.name}\0${name}`],
       });
-      counts[`${testCase.name}\0${name}`] = records[name].instructions;
+      // The timed runs use `run`, so their count is checked against an untimed run of the same driver.
+      counts[`${testCase.name}\0${name}`] = timeExecution(
+        builds[name],
+        plans[`${testCase.name}\0${name}`],
+        testCase,
+      ).instructions;
     }
     for (const name of names.slice(1))
       problems.push(
