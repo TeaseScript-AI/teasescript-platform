@@ -144,8 +144,8 @@ export type Contributions =
  * The contract slots a slot's answer includes, through the non-contract slots it includes (each by its own published
  * flow), from the published flows `flowOf` gives: `unavailable` where a slot on the way has none (unfinished, stopped,
  * forgotten or not recorded) or an included route recorded none (`opaque`). A contract slot reached ends that branch:
- * its own edges are its own (`edges` of it). Each slot visited and each inclusion followed is charged to the analysis's
- * total.
+ * its own edges are its own (`edges` of it). Each slot visited, each inclusion followed and each edge's qualifiers
+ * are charged to the analysis's total.
  */
 export function edgesOf(
   start: string,
@@ -153,10 +153,33 @@ export function edgesOf(
   work: WorkLedger,
 ): Contributions {
   const out: Inclusion[] = [];
-  // (a slot reached under other qualifiers is followed again under them: bounded by the qualifier lists the code makes)
-  const seen = new Set<string>([start]);
-  const todo: { readonly slot: string; readonly qualifiers: readonly Qualifier[] }[] = [
-    { slot: start, qualifiers: [] },
+  // (a path's qualifiers as interned links, each to the list before it: a step adds only its inclusion's own, so a
+  // deep path is never copied per step, and equal lists are one link. A slot reached under other qualifiers is
+  // followed again under them: bounded by the qualifier lists the code makes)
+  const links: { readonly before: number; readonly qualifier: Qualifier }[] = [];
+  const linkOf = new Map<string, number>();
+  const extended = (before: number, qualifiers: readonly Qualifier[]): number => {
+    let at = before;
+    for (const qualifier of qualifiers) {
+      const name = `${at} ${qualifier}`;
+      let next = linkOf.get(name);
+      if (next === undefined) {
+        next = links.length;
+        links.push({ before: at, qualifier });
+        linkOf.set(name, next);
+      }
+      at = next;
+    }
+    return at;
+  };
+  const listOf = (at: number): Qualifier[] => {
+    const list: Qualifier[] = [];
+    for (let link = at; link >= 0; link = links[link]!.before) list.push(links[link]!.qualifier);
+    return list.reverse();
+  };
+  const seen = new Set<string>([`${start}\u0000-1`]);
+  const todo: { readonly slot: string; readonly qualifiers: number }[] = [
+    { slot: start, qualifiers: -1 },
   ];
   for (let next = todo.pop(); next !== undefined; next = todo.pop()) {
     work.shared(() => work.charge("structureSteps"));
@@ -165,14 +188,16 @@ export function edgesOf(
     for (const inclusion of flow) {
       if (inclusion.slot === null)
         return { state: "unavailable", reason: `${inclusion.route} records no flow` };
-      const qualifiers = [...next.qualifiers, ...inclusion.qualifiers];
-      // (each inclusion followed, and the qualifier list it makes, charged as it is kept)
-      work.shared(() => keep(work, 1 + qualifiers.length));
+      // (each inclusion followed charged with the links it adds, an edge with the qualifier list it keeps)
+      work.shared(() => keep(work, 1 + inclusion.qualifiers.length));
+      const qualifiers = extended(next.qualifiers, inclusion.qualifiers);
       if (inclusion.slot.startsWith("c|")) {
-        out.push({ ...inclusion, qualifiers });
+        const list = listOf(qualifiers);
+        work.shared(() => keep(work, list.length));
+        out.push({ ...inclusion, qualifiers: list });
         continue;
       }
-      const visit = `${inclusion.slot}\u0000${qualifiers.join(",")}`;
+      const visit = `${inclusion.slot}\u0000${qualifiers}`;
       if (seen.has(visit)) continue;
       seen.add(visit);
       todo.push({ slot: inclusion.slot, qualifiers });
