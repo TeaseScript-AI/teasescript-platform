@@ -1566,9 +1566,9 @@ test("a for loop's range bound that is a number or text is an error at the bound
  * type `number` (written, or copied from one) an error whatever value it holds. The current checker is the reference
  * here: over every integer-only use the candidate route reaches (a repeat count, a list index, a `for` range's start
  * and end) and the places a use reads (written `number`, `integer` or none, a whole or fractional start value, a copy of
- * a `number` place, host data into a `number`), the candidate's errors are the current checker's, in both orders.
+ * a `number` place, host data into a `number`), the candidate's errors are the current checker's, in the four modes.
  */
-test("an integer-only use of a number place is the current checker's error at every use (#1173)", () => {
+test("an integer-only use of a number place is the current checker's error at every use, in the four modes (#1173)", () => {
   const uses = [
     (read: string) => `repeat ${read} { say "x" }`,
     (read: string) => `let xs = [1, 2]\nsay xs[${read}]`,
@@ -1596,6 +1596,11 @@ test("an integer-only use of a number place is the current checker's error at ev
         inBothOrders(() => errors(candidate(source))),
         current,
         source,
+      );
+      assert.deepEqual(
+        inBothOrders(() => withoutSharing(() => errors(candidate(source)))),
+        current,
+        `${source} (unshared)`,
       );
     }
 });
