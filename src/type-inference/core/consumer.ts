@@ -14,6 +14,15 @@ import type {
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "../../diagnostics.js";
 import { isRepeatCount } from "../../loop-rules.js";
+import { isRegex } from "../../runtime/values/value-predicates.js";
+import {
+  isTextMethod,
+  stringLength,
+  takesRegex,
+  takesText,
+  TEXT_METHODS,
+  type DomainValue,
+} from "../../text-operations.js";
 import { literalRange } from "../../switch-cases.js";
 import {
   repairedObject,
@@ -753,6 +762,9 @@ function staticDiagnostics(
   for (const call of index.calls) {
     const conversion = knownConversionError(answers, index, call);
     if (conversion !== null) report(index.site(conversion.value), conversion.rule);
+    for (const found of knownTextArguments(answers, index, call, known))
+      if (!sited.has(siteKey(index.fileOf(found.at), found.at.span)))
+        report(index.site(found.at), { rule: "text-argument", message: found.message });
   }
   // V30 §6: a written range that holds no number, an ordinary warning where a loop or `toList()` reads it
   const empty = (range: Expression, use: "loop" | "list"): void => {
@@ -840,6 +852,70 @@ function staticDiagnostics(
   for (const call of index.calls)
     if (call.callee.kind === "propertyAccessExpression" && call.callee.property.name === "toList")
       empty(call.callee.object, "list");
+  return found;
+}
+
+/**
+ * V30 §8 (#1701): "a visibly negative, out-of-range, or empty argument" of a method of text is a compile error. Each
+ * argument domain of the method (`TextDomain`) whose values are all known, the receiver's text where it reads its
+ * length, is checked in the method's order with the runtime's sentence, and reported at the last argument it reads; an
+ * argument a domain found a problem with is no longer read, as the current checker does (`operation-checks.ts`). Only
+ * where the core answers the receiver as text and every argument is positional.
+ */
+function knownTextArguments(
+  answers: Answers,
+  index: SliceIndex,
+  call: CallExpression,
+  known: (expression: Expression) => KnownValue | undefined,
+): { readonly at: Expression; readonly message: string }[] {
+  const callee = call.callee;
+  if (callee.kind !== "propertyAccessExpression" || !isTextMethod(callee.property.name)) return [];
+  const method = TEXT_METHODS[callee.property.name];
+  if (
+    call.arguments.length > method.parameters.length ||
+    call.arguments.some((argument) => argument.kind !== "positionalArgument")
+  )
+    return [];
+  const receiver = answers.at(nodeOf(answers, index, callee.object));
+  if (
+    receiver === null ||
+    receiver.items.length === 0 ||
+    receiver.items.some((item) => item.tag !== "string")
+  )
+    return [];
+  const text = known(callee.object);
+  const values: (DomainValue | undefined | null)[] = call.arguments.map((argument, position) => {
+    const parameter = method.parameters[position]!;
+    const value = known(argument.value);
+    if (!takesText(parameter) && !takesRegex(parameter))
+      return typeof value === "number" ? value : undefined;
+    return (takesText(parameter) && typeof value === "string") ||
+      (takesRegex(parameter) && value !== undefined && isRegex(value))
+      ? value
+      : undefined;
+  });
+  const found: { at: Expression; message: string }[] = [];
+  for (const domain of method.domains) {
+    const read: DomainValue[] = [];
+    for (const position of domain.reads) {
+      const value =
+        position === "length"
+          ? typeof text === "string"
+            ? stringLength(text)
+            : undefined
+          : values[position];
+      if (value === undefined || value === null) break;
+      read.push(value);
+    }
+    if (read.length !== domain.reads.length) continue;
+    const message = domain.problem(read, method);
+    if (message === undefined) continue;
+    for (const position of domain.reads) if (position !== "length") values[position] = null;
+    const last = Math.max(
+      ...domain.reads.map((position) => (position === "length" ? -1 : position)),
+    );
+    found.push({ at: call.arguments[last]!.value, message });
+  }
   return found;
 }
 

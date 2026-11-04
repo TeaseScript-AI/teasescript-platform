@@ -332,6 +332,11 @@ export interface StaticDiagnostic {
 
 /** The rule of a `StaticDiagnostic`, with the facts its sentence names. */
 export type StaticRule =
+  /**
+   * V30 §8 (#1701): a text method's argument domain (`TextDomain`) broken by known values, the receiver's text where it
+   * reads its length: the runtime's sentence.
+   */
+  | { readonly rule: "text-argument"; readonly message: string }
   /** A `repeat` count whose known value is no whole number of at least 0 (`loop-rules.ts`). */
   | { readonly rule: "repeat-count"; readonly value: number }
   /** A conversion of known text it cannot convert (V30 §13, #1105), `default:` or not. */

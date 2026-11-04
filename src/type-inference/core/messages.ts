@@ -283,6 +283,7 @@ export function staticCode(rule: StaticRule): CoreCode {
     case "repeat-count":
       return "TSV011";
     case "conversion":
+    case "text-argument":
       return "TSV043";
     case "empty-range":
       return "TSV046";
@@ -303,6 +304,8 @@ function staticMessage(rule: StaticRule): string {
     }
     case "calendar-offset":
       return localCalendarOffsetMessage(rule.target, rule.duration);
+    case "text-argument":
+      return rule.message;
     case "empty-range": {
       // (the current checker's sentence, V30 §6)
       const { start, end, inclusive } = rule;
