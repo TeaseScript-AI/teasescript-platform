@@ -163,6 +163,16 @@ test("a store of host data checks each typed part below it that the analysis owe
       sentence: `An element of 'copy.xs' holds a whole number (integer), so it cannot take text (string) "x".`,
     },
     {
+      // a property of the elements of a list below the variable, named in words as messages name such a path
+      source:
+        'let seed: integer = 7\nlet copy = hostInit\ncopy.xs = [{n: seed}]\ncopy = hostValue\nsay "REACHED"\nexit\n',
+      root: "copy",
+      init: { xs: [{ n: 1 }] },
+      fits: { xs: [{ n: 2 }, {}] },
+      misfits: { xs: [{ n: 2 }, { n: "x" }] },
+      sentence: `'n' of an element of 'copy.xs' holds a whole number (integer), so it cannot take text (string) "x".`,
+    },
+    {
       // an open level below a checked root: its initializer's check does not reach the part, its store's has none
       source:
         'let seed: integer = 7\nlet copy = {inner: hostInit}\ncopy.inner.open = seed\ncopy.inner = hostValue\nsay "REACHED"\nexit\n',

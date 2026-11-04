@@ -81,6 +81,7 @@ import {
   coreMessage,
   coreMessageInWords,
   messageSource,
+  pathPhrase,
   staticCode,
   type MessageSource,
 } from "./messages.js";
@@ -1061,7 +1062,16 @@ function partChecksOf(destination: string, obligations: readonly Obligation[]): 
     const key = JSON.stringify([path, type]);
     if (made.has(key)) continue;
     made.add(key);
-    out.push({ path, type, place: partPlace(destination, path) });
+    // (the place as messages name a path below one in words: `'copy.open'`, `an element of 'copy.xs'`)
+    const [root, ...above] = destination.split(".");
+    out.push({
+      path,
+      type,
+      place: pathPhrase({ code: root! }, [
+        ...above,
+        ...steps.map((step) => (step === "index" ? "element" : step)),
+      ]),
+    });
   }
   return out;
 }
@@ -1092,17 +1102,6 @@ function reaches(type: TypePlan, path: readonly PartStep[]): boolean {
     }
   }
   return true;
-}
-
-/** A part as a message names it: `'copy.a.b'` for properties, `an element of 'copy.xs'` below them, else of its root. */
-function partPlace(destination: string, path: readonly PartStep[]): string {
-  const names: string[] = [];
-  for (const step of path) if ("property" in step) names.push(step.property);
-  const written = [destination, ...names].join(".");
-  if (names.length === path.length) return `'${written}'`;
-  return names.length === path.length - 1 && !("property" in path.at(-1)!)
-    ? `an element of '${written}'`
-    : `a part of '${destination}'`;
 }
 
 /**
