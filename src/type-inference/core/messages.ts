@@ -451,9 +451,10 @@ const PROPERTY_NAMES: Readonly<Record<string, string>> = {
 /**
  * A name a fix may declare anywhere in a project (#1274): `base`, else `base2`, `base3`, …, the first no identifier of
  * the programs spells (a property's name aside) and `reserved` (the host globals and built-ins) does not hold. One
- * walk of every node, by an explicit worklist (no native call depth, Codex r1), and one selection, each syntax node and
- * each name tried charged one `indexSteps` unit to `work` where it is given (Astra r1 on #1715: the survey grows with
- * the program; a node's spans and field lists, a bounded constant per node, take no charge of their own, TABLE r4.261).
+ * walk of every node, by an explicit worklist (no native call depth, Codex r1), and one selection. Each reserved name,
+ * each syntax node (a file's root among them) and each name tried is charged one `indexSteps` unit to `work` where it
+ * is given (Astra r1 and Codex r3 on #1715: the survey grows with the program and its host names). A node's spans and
+ * field lists, a bounded constant per node, take no charge of their own (TABLE r4.261).
  */
 export function keptVariableName(
   programs: readonly Program[],
@@ -461,8 +462,14 @@ export function keptVariableName(
   base: string,
   work: WorkLedger | null,
 ): string {
-  const taken = new Set(reserved);
+  // (each reserved name and each file's root, as each node below it, one unit: Codex r3 B1 on #1715)
+  const taken = new Set<string>();
+  for (const name of reserved) {
+    work?.charge("indexSteps");
+    taken.add(name);
+  }
   for (const program of programs) {
+    work?.charge("indexSteps");
     const pending: Readonly<Record<string, unknown>>[] = [{ statements: program.statements }];
     while (pending.length > 0) {
       const node = pending.pop()!;

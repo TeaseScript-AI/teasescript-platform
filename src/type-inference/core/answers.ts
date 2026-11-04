@@ -1535,7 +1535,13 @@ class CoreAnswers implements Answers {
         work.spender = spender;
       }
       names.set(base, name);
-      this.budget = { ...this.budget, total: work.total, counts: work.counts(), finishing: work.finishing };
+      this.budget = {
+        ...this.budget,
+        total: work.total,
+        counts: work.counts(),
+        finishing: work.finishing,
+        apart: work.apartCounts(),
+      };
     }
     return name;
   }

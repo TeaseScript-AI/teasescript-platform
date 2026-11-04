@@ -2287,3 +2287,43 @@ test("a kept value's name is surveyed once, charged to the analysis and no deman
     assert.ok(doubling <= 2.15, `${JSON.stringify(measured)}: ${doubling.toFixed(3)} per doubling`);
   }
 });
+
+/**
+ * #1274, Codex r3 on #1715: the kept name's survey charges each name the host reserves and each file's root too, so its
+ * charge grows with unused host globals and with empty files (16 and 256 of each). After a stop, its units are
+ * finishing work, counted in the finishing breakdown as in the total.
+ */
+test("a kept value's name survey charges the host's names and every file (#1274)", () => {
+  const source = "let value = 1\nlet xs = [7, null]\nsay xs[0] + 1\nexit\n";
+  for (const [globals, empty] of [
+    [16, 0],
+    [256, 0],
+    [0, 16],
+    [0, 256],
+  ] as const) {
+    const files = [
+      { path: "main.tease", source },
+      ...Array.from({ length: empty }, (_, at) => ({ path: `empty${at}.tease`, source: "" })),
+    ];
+    const hosts = ["hostValue", ...Array.from({ length: globals }, (_, at) => `host${at}`)];
+    const request = coreRequest(files, hosts)!;
+    const answers = analyseCore(request);
+    const before = answers.budget;
+    assert.equal(answers.keptName("value"), "value2");
+    const nodes = before.counts.get("syntaxNodes")!;
+    const surveyed =
+      (answers.budget.counts.get("indexSteps") ?? 0) - (before.counts.get("indexSteps") ?? 0);
+    assert.ok(
+      surveyed >= nodes + hosts.length,
+      `${globals} globals, ${empty} empty files: ${surveyed} units for ${nodes} nodes and ${hosts.length} names`,
+    );
+  }
+  const request = coreRequest([{ path: "main.tease", source }])!;
+  const stopped = analyseCore(request).stoppedAt("work");
+  stopped.keptName("value");
+  const { finishing, apart } = stopped.budget;
+  assert.equal(
+    [...apart.values()].reduce((sum, units) => sum + units, 0),
+    finishing,
+  );
+});
