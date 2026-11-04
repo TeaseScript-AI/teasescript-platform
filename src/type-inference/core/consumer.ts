@@ -893,8 +893,7 @@ function runtimeChecks(
     const file = index.fileOf(node);
     return request.files[file]!.source.slice(node.span.start.offset, node.span.end.offset);
   };
-  const lets = declarations(answers, index);
-  const contracts = new Contracts(answers, index, lets);
+  const contracts = new Contracts(answers, index, declarations(answers, index));
   const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
   const core = {
     requireExisting: new Set<AssignmentStatement>(),
@@ -1024,12 +1023,9 @@ function runtimeChecks(
     if (type !== null) checks.set(store, type);
   }
   for (const [store, obligations] of atStore) {
-    // (the label of the place it stores into, as its obligations' targets name it: its variable, then the core's steps)
-    const place = answers.at(nodeOf(answers, index, store))?.place;
-    if (place === undefined || place === null) continue;
-    const destination = [declarationOf(answers, index, lets, store).name.name, ...place.path].join(
-      ".",
-    );
+    // (the label of the place it stores into, as `stored` found it: no question beyond the store's own check's)
+    const destination = contracts.destinations.get(store);
+    if (destination === undefined) continue;
     const whole = checks.get(store)?.type ?? null;
     const parts = partChecksOf(destination, obligations).filter(
       (part) => whole === null || !reaches(whole, part.path),
@@ -1328,6 +1324,8 @@ class Contracts {
   readonly #descriptors: ContractDescriptors<readonly Expression[]>;
   /** Each checked store's contract result, as `stored` made it. */
   readonly results = new Map<Store, ContractResult>();
+  /** Each store `stored` was asked for, by the label of the place it stores into (its variable, then the core's steps). */
+  readonly destinations = new Map<Store, string>();
 
   public constructor(
     private readonly answers: Answers,
@@ -1367,6 +1365,8 @@ class Contracts {
     const whole = store.kind === "letStatement" || store.target.kind === "identifier";
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
+    if (place !== null)
+      this.destinations.set(store, [declaration.name.name, ...place.path].join("."));
     const result =
       whole && declaration.typeAnnotation !== null
         ? this.#descriptors.written(
