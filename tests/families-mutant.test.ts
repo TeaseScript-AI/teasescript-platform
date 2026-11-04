@@ -15,11 +15,24 @@ import test from "node:test";
 
 const tool = resolve("tests/families/mutant-proof.mjs");
 
+// (git's global and system config and attributes left out, here and in the proof: a runner's own, such as git-lfs's
+// filter, would put every repository outside the proof's domain; the queue's workers carry none)
+const home = mkdtempSync(join(tmpdir(), "mutant-proof-home-"));
+writeFileSync(join(home, "gitconfig"), "");
+const env = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: join(home, "gitconfig"),
+  GIT_CONFIG_NOSYSTEM: "1",
+  XDG_CONFIG_HOME: home,
+};
+test.after(() => rmSync(home, { recursive: true, force: true }));
+
 /** A git command in `cwd`, which must succeed. */
 function git(cwd: string, ...args: string[]): string {
   const ran = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], {
     cwd,
     encoding: "utf8",
+    env,
   });
   assert.equal(ran.status, 0, `git ${args.join(" ")}: ${ran.stderr}`);
   return ran.stdout;
@@ -28,15 +41,18 @@ function git(cwd: string, ...args: string[]): string {
 const newline = "line\nname.ts";
 const tabbed = "kept.ts\textra.ts";
 const magic = ":(exclude)never";
+/** A path and a link target whose bytes are no UTF-8 (`\xff`, `\xfe`). */
+const raw = (cwd: string, name: string) =>
+  Buffer.concat([Buffer.from(`${cwd}/`), Buffer.from(name, "latin1")]);
 /** A file whose last line ends in CRLF, eight lines from its first. */
 const mixed = `export const v = 1;\n${"// context\n".repeat(8)}// CRLF far from the hunk\r\n`;
 
 interface Case {
   /** The mutation, made in the head's checkout; the patch is its whole change. */
   readonly change: (cwd: string) => void;
-  /** The head's `.gitattributes`, where it has one. */
-  readonly attributes?: string;
-  /** Run after the head's commit, before the change (config, `.git/info/attributes`). */
+  /** Run before the head's commit (its tracked files). */
+  readonly head?: (cwd: string) => void;
+  /** Run after the head's commit, before the change (config, hooks, `.git/info/attributes`). */
   readonly setup?: (cwd: string) => void;
   /** Run in place of the queue's `git apply` of the patch. */
   readonly instead?: (cwd: string) => void;
@@ -45,9 +61,9 @@ interface Case {
 }
 
 /**
- * A head (files, a path with a newline, one with a tab, one like pathspec magic, a symlink named like it, an
- * executable, a file of mixed line endings, an ignored `dist/`), the case's patch against it, that patch applied as
- * the queue applies it (`git apply --whitespace=nowarn`), and the proof's status and output.
+ * A head (files, paths with a newline, a tab, bytes that are no UTF-8, one like pathspec magic, symlinks, an executable,
+ * a file of mixed line endings, an ignored `dist/`), the case's patch against it, that patch applied as the queue
+ * applies it (`git apply --whitespace=nowarn`), the proof's status and output, and the worktrees registered after it.
  */
 function proved(c: Case) {
   const cwd = mkdtempSync(join(tmpdir(), "mutant-proof-"));
@@ -63,10 +79,12 @@ function proved(c: Case) {
       [":literal.ts", "l\n"],
       ["exec.ts", "e\n"],
       ["mixed.ts", mixed],
-      ...(c.attributes === undefined ? [] : [[".gitattributes", c.attributes]]),
     ])
       writeFileSync(join(cwd, path!), text!);
+    writeFileSync(raw(cwd, "raw-\xff.ts"), "r\n");
     symlinkSync("kept.ts", join(cwd, magic));
+    symlinkSync(Buffer.from("target-\xff", "latin1"), join(cwd, "link"));
+    c.head?.(cwd);
     git(cwd, "add", "-A");
     git(cwd, "commit", "-qm", "head");
     c.setup?.(cwd);
@@ -78,8 +96,9 @@ function proved(c: Case) {
     if (c.instead !== undefined) c.instead(cwd);
     else git(cwd, "apply", "--whitespace=nowarn", patch);
     c.after?.(cwd);
-    const ran = spawnSync(process.execPath, [tool, cwd, patch], { encoding: "utf8" });
-    return { status: ran.status, stdout: ran.stdout, stderr: ran.stderr };
+    const ran = spawnSync(process.execPath, [tool, cwd, patch], { encoding: "utf8", env });
+    const worktrees = git(cwd, "worktree", "list", "--porcelain").match(/^worktree /gm)?.length;
+    return { status: ran.status, stdout: ran.stdout, stderr: ran.stderr, worktrees };
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(patch, { force: true });
@@ -104,6 +123,16 @@ const SHAPES: readonly (readonly [string, Case])[] = [
   ["a newline in a path", { change: write(newline, "y\n") }],
   ["a tab in a path", { change: write(tabbed, "after\n") }],
   ["a path like pathspec magic", { change: write(":literal.ts", "l2\n") }],
+  [
+    "a path and a link target of bytes that are no UTF-8",
+    {
+      change: (cwd) => {
+        writeFileSync(raw(cwd, "raw-\xff.ts"), "r2\n");
+        unlinkSync(join(cwd, "link"));
+        symlinkSync(Buffer.from("target-\xfe", "latin1"), join(cwd, "link"));
+      },
+    },
+  ],
   [
     "a symlink named like pathspec magic, retargeted",
     {
@@ -135,18 +164,13 @@ const SHAPES: readonly (readonly [string, Case])[] = [
     },
   ],
   ["a removed file", { change: (cwd) => unlinkSync(join(cwd, "two.ts")) }],
-  ["a renamed file", { change: (cwd) => spawnSync("git", ["mv", "two.ts", "moved.ts"], { cwd }) }],
+  [
+    "a renamed file",
+    { change: (cwd) => spawnSync("git", ["mv", "two.ts", "moved.ts"], { cwd, env }) },
+  ],
   ["a mode change", { change: (cwd) => chmodSync(join(cwd, "exec.ts"), 0o755) }],
   ["a binary change", { change: write("two.ts", Buffer.from([0, 1, 2, 0])) }],
-  // (conversions: both sides convert alike, Codex r1-r3 on #1686)
-  ["ident", { attributes: "*.ts ident\n", change: write("kept.ts", 'export const v = "$Id$";\n') }],
-  [
-    "text=auto in .git/info/attributes",
-    {
-      setup: write(".git/info/attributes", "*.ts text=auto\n"),
-      change: write("mixed.ts", mixed.replace("v = 1", "v = 2")),
-    },
-  ],
+  // (core.autocrlf is git's own conversion, in config: the replay converts alike, Codex r2-r3 on #1686)
   [
     "core.autocrlf=1",
     {
@@ -154,29 +178,21 @@ const SHAPES: readonly (readonly [string, Case])[] = [
       change: write("mixed.ts", mixed.replace("v = 1", "v = 2")),
     },
   ],
-  [
-    "a filter driver named 'unspecified'",
-    {
-      attributes: "*.ts filter=unspecified\n",
-      setup: (cwd) => {
-        git(cwd, "config", "filter.unspecified.clean", "sed s/SMUDGED/CANONICAL/g");
-        git(cwd, "config", "filter.unspecified.smudge", "sed s/CANONICAL/SMUDGED/g");
-      },
-      change: write("kept.ts", 'export const v = "CANONICAL";\n'),
-    },
-  ],
 ];
 
-test("a mutant's proof accepts every patch the queue applied as written, its conversions alike on both sides (#1684)", () => {
+test("a mutant's proof accepts every patch the queue applied as written, and leaves no worktree behind (#1684)", () => {
   for (const [name, c] of SHAPES) {
     const ran = proved(c);
     assert.equal(ran.status, 0, `${name}: ${ran.stderr}`);
+    assert.equal(ran.worktrees, 1, name);
     // EVIDENCE: mutant-proof.mjs prints this object as its one line of output; its fields are asserted below.
     const proof = JSON.parse(ran.stdout) as {
+      domain: string;
       patch: string;
       paths: { path: string; kind: string }[];
       outside: string[];
     };
+    assert.match(proof.domain, /no user code in the conversion path/, name);
     assert.match(proof.patch, /^[0-9a-f]{64}$/, name);
     assert.ok(proof.paths.length > 0, name);
     assert.deepEqual(proof.outside, [], name);
@@ -199,6 +215,19 @@ test("a mutant's proof refuses a checkout the patch did not make at any path it 
       "a tab path's patch unapplied",
       { change: write(tabbed, "after\n"), instead: () => {} },
       tabbed,
+    ],
+    [
+      // (Codex r4 on #1686: paths and link targets compared as bytes, never decoded)
+      "a path and a link target of bytes that are no UTF-8, unapplied",
+      {
+        change: (cwd: string) => {
+          writeFileSync(raw(cwd, "raw-\xff.ts"), "r2\n");
+          unlinkSync(join(cwd, "link"));
+          symlinkSync(Buffer.from("target-\xfe", "latin1"), join(cwd, "link"));
+        },
+        instead: () => {},
+      },
+      "link",
     ],
     [
       "an ignored path the checkout lacks",
@@ -225,20 +254,94 @@ test("a mutant's proof refuses a checkout the patch did not make at any path it 
       },
       "exec.ts",
     ],
-    [
-      // (the head with the literal hunk, its far CRLF kept, against the queue's normalized file: Codex r2 on #1686)
-      "text=auto's normalization undone",
-      {
-        setup: write(".git/info/attributes", "*.ts text=auto\n"),
-        change: write("mixed.ts", mixed.replace("v = 1", "v = 2")),
-        after: write("mixed.ts", mixed.replace("v = 1", "v = 2")),
-      },
-      "mixed.ts",
-    ],
   ] as const) {
     const ran = proved(c);
     assert.equal(ran.status, 1, `${name}: ${ran.stderr}`);
     assert.ok(ran.stderr.includes(JSON.stringify(path)), `${name}: ${ran.stderr}`);
+    assert.equal(ran.worktrees, 1, name);
+  }
+});
+
+test("a mutant's proof refuses a repository with user code in the conversion path, by presence alone (#1684)", () => {
+  // (Codex r1-r4 on #1686: attributes, filters and hooks are code a replay cannot prove alike; the queue's checkouts
+  // carry none of them)
+  const ident = write("kept.ts", 'export const v = "$Id$";\n');
+  for (const [name, c, found] of [
+    [
+      "a tracked .gitattributes",
+      { head: write(".gitattributes", "*.ts ident\n"), change: ident },
+      /".gitattributes"/,
+    ],
+    [
+      ".git/info/attributes",
+      { setup: write(".git/info/attributes", "*.ts text=auto\n"), change: ident },
+      /\.git\/info\/attributes/,
+    ],
+    [
+      "core.attributesFile",
+      {
+        setup: (cwd: string) => git(cwd, "config", "core.attributesFile", "/nonexistent"),
+        change: ident,
+      },
+      /core\.attributesFile/,
+    ],
+    [
+      "the default global attributes file",
+      {
+        setup: () => {
+          mkdirSync(join(home, "git"), { recursive: true });
+          writeFileSync(join(home, "git", "attributes"), "");
+        },
+        change: ident,
+        after: () => rmSync(join(home, "git"), { recursive: true }),
+      },
+      /git\/attributes/,
+    ],
+    [
+      "filter config without attributes",
+      {
+        setup: (cwd: string) => git(cwd, "config", "filter.zero.clean", "sed s/1/0/g"),
+        change: ident,
+      },
+      /filter config/,
+    ],
+    [
+      "an executable hook",
+      {
+        setup: (cwd: string) => {
+          writeFileSync(join(cwd, ".git", "hooks", "post-checkout"), "#!/bin/sh\nexit 19\n", {
+            mode: 0o755,
+          });
+        },
+        change: ident,
+      },
+      /the hook "post-checkout"/,
+    ],
+    [
+      "core.fileMode=false",
+      { setup: (cwd: string) => git(cwd, "config", "core.fileMode", "off"), change: ident },
+      /core\.fileMode=false/,
+    ],
+    [
+      "a gitlink",
+      {
+        head: (cwd: string) => {
+          git(cwd, "add", "-A");
+          git(cwd, "commit", "-qm", "base");
+          const head = git(cwd, "rev-parse", "HEAD").trim();
+          mkdirSync(join(cwd, "sub"));
+          git(cwd, "update-index", "--add", "--cacheinfo", `160000,${head},sub`);
+        },
+        change: ident,
+      },
+      /the gitlink "sub"/,
+    ],
+  ] as const) {
+    const ran = proved(c);
+    assert.deepEqual([ran.status, ran.stdout], [2, ""], `${name}: ${ran.stderr}`);
+    assert.match(ran.stderr, /outside the proof's domain/, name);
+    assert.match(ran.stderr, found, name);
+    assert.equal(ran.worktrees, 1, name);
   }
 });
 
@@ -249,11 +352,5 @@ test("a mutant's proof reports a change outside the patch's paths and refuses a 
   assert.deepEqual(JSON.parse(outside.stdout).outside, ["two.ts"]);
   const empty = proved({ change: () => {}, instead: () => {} });
   assert.equal(empty.status, 2, empty.stderr);
-  // (a filter driver the worker lacks, required: the fresh application fails, as the queue's would)
-  const missing = proved({
-    attributes: "*.ts filter=absent\n",
-    change: write("kept.ts", "a2\n"),
-    instead: (cwd) => git(cwd, "config", "filter.absent.required", "true"),
-  });
-  assert.equal(missing.status, 2, missing.stderr);
+  assert.equal(empty.worktrees, 1);
 });

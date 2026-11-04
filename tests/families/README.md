@@ -220,12 +220,16 @@ sx-job submit --checkout <head> --patch mutant.diff --commit head=<head> --items
 
 `pair` compares the base tree with the head tree; `mutant` the head tree with the head's checkout under the patch,
 which it builds after `mutant-proof.mjs` proved that checkout the head with the patch applied as the queue applies it
-(#1684), by doing it again: in the checkout's own repository, a fresh detached worktree of the head, `git apply
---whitespace=nowarn` of the same patch bytes, and the paths it touched (`git status -z --ignored`, every path whole).
-Whatever git converts it converts alike on both sides, so for each touched path the checkout must hold the same kind
-(file, link or none), executable bit and raw bytes; a path the checkout changed that the application did not touch is
-reported, not part of the proof. `mutant.json` holds the patch's hash and each touched path's state: a seed whose
-outcome differs reaches the mutated code, and a mutant no seed tells apart survives the family.
+(#1684), by doing it again: in the checkout's own repository, a fresh detached worktree of the head and `git apply
+--whitespace=nowarn` of the same patch bytes. For each path it touched (the patch's own paths, whole, and every path
+`git status -z --ignored` lists in the fresh tree) the checkout must hold the same kind (file, link or none),
+executable bit and raw bytes, paths and link targets compared as bytes; a path the checkout changed that the
+application did not touch is reported, not part of the proof. Its domain is a repository with no user code in the
+conversion path, which the queue's checkouts are: it refuses (exit 2), by presence alone, any `filter.*` config, an
+executable hook, any attributes source (a tracked `.gitattributes`, `.git/info/attributes`, `core.attributesFile`, the
+default global attributes file), `core.fileMode=false` and a gitlink or `.gitmodules`, since a filter or hook is code a
+replay cannot prove runs alike. `mutant.json` holds the domain, the patch's hash and each touched path's state: a seed
+whose outcome differs reaches the mutated code, and a mutant no seed tells apart survives the family.
 
 ## The unit limit and the safety net (#1647)
 
