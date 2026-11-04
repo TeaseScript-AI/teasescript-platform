@@ -1,4 +1,10 @@
-import type { Expression, ListLiteral, ObjectProperty, Statement } from "../../../ast.js";
+import type {
+  Expression,
+  ListLiteral,
+  ObjectLiteral,
+  ObjectProperty,
+  Statement,
+} from "../../../ast.js";
 import { selectsElement } from "../method-categories.js";
 import {
   changesAnything,
@@ -295,51 +301,78 @@ export function givenBy(statement: Statement): Given | null {
   return target === null ? null : { value: statement.value, ...target };
 }
 
-/**
- * Where the expression at `site` lands among the values statements give (`MessageSource.landing`, in their start order):
- * in the last value that starts at or before it, the statement's variable and steps, then each list literal's element
- * and object literal's property down to it, through parentheses, a list literal's selected element and either operand
- * of `otherwise`; `null` inside any other expression, or outside that value (a site after a statement in a handler
- * block that a value holds).
- */
-export function landingOf(given: readonly Given[], site: SourceSite): Landing | null {
+/** The last of `items`, in source order, whose span starts at or before `start` (a binary search), else `undefined`. */
+function lastStartingBy<T>(
+  items: readonly T[],
+  start: number,
+  spanOf: (item: T) => SourceSpan,
+): T | undefined {
   let low = 0;
-  let high = given.length;
+  let high = items.length;
   while (low < high) {
     const middle = (low + high) >> 1;
-    if (given[middle]!.value.span.start.offset <= site.start) low = middle + 1;
+    if (spanOf(items[middle]!).start.offset <= start) low = middle + 1;
     else high = middle;
   }
-  const found = given[low - 1];
+  return items[low - 1];
+}
+
+/**
+ * The value at `site` among the values statements give (in their start order), with the statement's variable and the
+ * steps down to it: in the last value that starts at or before it, each list literal's element and object literal's
+ * property down to it, through parentheses, a list literal's selected element and either operand of `otherwise`, each
+ * found by its start (#1730 Codex r1 B1: no warning scans the values or a literal's parts before it); `null` inside any
+ * other expression, or outside that value (a site after a statement in a handler block that a value holds).
+ */
+function valueAt(
+  given: readonly Given[],
+  site: SourceSite,
+): { readonly found: Given; readonly at: Expression; readonly steps: StoreStep[] } | null {
+  const found = lastStartingBy(given, site.start, (entry) => entry.value.span);
   if (found === undefined) return null;
-  const holds = (expression: Expression): boolean =>
-    expression.span.start.offset <= site.start && site.end <= expression.span.end.offset;
+  const holds = (expression: Expression | undefined): expression is Expression =>
+    expression !== undefined &&
+    expression.span.start.offset <= site.start &&
+    site.end <= expression.span.end.offset;
+  const within = (expressions: readonly Expression[]): Expression | undefined => {
+    const part = lastStartingBy(expressions, site.start, (expression) => expression.span);
+    return holds(part) ? part : undefined;
+  };
   const steps = [...found.steps];
   let at: Expression | undefined = found.value;
-  while (at !== undefined && holds(at)) {
+  while (holds(at)) {
     if (at.span.start.offset === site.start && at.span.end.offset === site.end)
-      return { root: found.root, steps };
+      return { found, at, steps };
     if (at.kind === "parenthesizedExpression") at = at.expression;
     else if (at.kind === "listLiteral") {
       steps.push({ collection: "list" });
-      at = at.elements.find(holds);
+      at = within(at.elements);
     } else if (at.kind === "objectLiteral") {
-      const property: ObjectProperty | undefined = at.properties.find((entry) =>
-        holds(entry.value),
+      const property: ObjectProperty | undefined = lastStartingBy(
+        at.properties,
+        site.start,
+        (entry) => entry.value.span,
       );
-      if (property !== undefined) steps.push({ property: property.name.name });
-      at = property?.value;
+      if (property === undefined || !holds(property.value)) return null;
+      steps.push({ property: property.name.name });
+      at = property.value;
     } else if (at.kind === "binaryExpression" && at.operator === "otherwise")
       // (either operand of `otherwise` is the value there, no step more)
-      at = [at.left, at.right].find(holds);
+      at = within([at.left, at.right]);
     else {
       // (a list literal's selected element, `[a, b].random` or `[a, b][0]`: that element is the place, no step more)
       const list = selectedList(at);
       if (list === null) return null;
-      at = list.elements.find(holds);
+      at = within(list.elements);
     }
   }
   return null;
+}
+
+/** Where the expression at `site` lands among the values statements give (`MessageSource.landing`, `valueAt`). */
+export function landingOf(given: readonly Given[], site: SourceSite): Landing | null {
+  const value = valueAt(given, site);
+  return value === null ? null : { root: value.found.root, steps: value.steps };
 }
 
 /** The list literal a selection of one element reads (`.random`, `.first`, `.last`, an index), through parentheses. */
@@ -356,41 +389,28 @@ function selectedList(expression: Expression): ListLiteral | null {
   return inner.kind === "listLiteral" ? inner : null;
 }
 
+/** Each object literal's properties by name, made on its first lookup (`ownerOf`), one pass over its properties. */
+const PROPERTIES = new WeakMap<ObjectLiteral, ReadonlyMap<string, ObjectProperty>>();
+
 /**
- * The narrowest expression that owns the property `steps` lead to below the value at `site` (#1495): from the value,
- * each property step taken into an object literal's property of that name, through parentheses, while one is there;
- * the value itself where none is, or where `site` lies in no value a statement gives.
+ * The narrowest expression that owns the property `steps` lead to below the value at `site` (#1495): from the value
+ * (`valueAt`), each property step taken into an object literal's property of that name, through parentheses, while one
+ * is there; the value itself where none is, or where `site` lies in no value a statement gives.
  */
 export function ownerOf(
   given: readonly Given[],
   site: SourceSite,
   steps: readonly StoreStep[],
 ): SourceSite {
-  const holds = (expression: Expression): boolean =>
-    expression.span.start.offset <= site.start && site.end <= expression.span.end.offset;
-  const found = given.findLast((entry) => entry.value.span.start.offset <= site.start);
-  // (the value at `site`, by the walk `landingOf` takes)
-  let at: Expression | undefined = found?.value;
-  while (
-    at !== undefined &&
-    holds(at) &&
-    !(at.span.start.offset === site.start && at.span.end.offset === site.end)
-  ) {
-    if (at.kind === "parenthesizedExpression") at = at.expression;
-    else if (at.kind === "listLiteral") at = at.elements.find(holds);
-    else if (at.kind === "objectLiteral")
-      at = at.properties.find((entry) => holds(entry.value))?.value;
-    else if (at.kind === "binaryExpression" && at.operator === "otherwise")
-      at = [at.left, at.right].find(holds);
-    else at = selectedList(at)?.elements.find(holds);
-  }
-  if (at === undefined || !holds(at)) return site;
+  let at = valueAt(given, site)?.at;
+  if (at === undefined) return site;
   for (const step of steps) {
     while (at.kind === "parenthesizedExpression") at = at.expression;
     if (!("property" in step) || at.kind !== "objectLiteral") break;
-    const property: ObjectProperty | undefined = at.properties.find(
-      (entry) => entry.name.name === step.property,
-    );
+    let named = PROPERTIES.get(at);
+    if (named === undefined)
+      PROPERTIES.set(at, (named = new Map(at.properties.map((entry) => [entry.name.name, entry]))));
+    const property = named.get(step.property);
     if (property === undefined) break;
     at = property.value;
   }

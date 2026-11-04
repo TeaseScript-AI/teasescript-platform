@@ -13,6 +13,13 @@ import {
 } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
+import {
+  type Given,
+  givenBy,
+  landingOf,
+  ownerOf,
+} from "../src/type-inference/core/messages/site.js";
+import { parse } from "../src/parser.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
@@ -2355,8 +2362,9 @@ test("a kept value's name survey charges the host's names and every file (#1274)
  * (`MessageSource.owner`), never the whole literal; also where a part of the value already fits, and for a value an
  * element selection of a list literal gives (`[a, b].random`) or either operand of `otherwise` (a value the set's
  * collision family gives, where the check named a whole number for an element that holds an object). A value whose
- * place is its own keeps its own check, and a declared place with no test of what fits keeps its own advice, a
- * separate property, beside the same place's type inferred from a value (the lead's ruling on #1730).
+ * place is its own keeps its own check, also where its landing is unknown (`boxes[0].x`, Codex r1 N1 on #1730), and a
+ * declared place with no test of what fits keeps its own advice, a separate property, beside the same place's type
+ * inferred from a value (the lead's ruling on #1730).
  */
 test("TSV041's advice names the property an object literal types and its narrowest owner (#1495)", () => {
   const other = 'let other = fromJson("{\\"volume\\": \\"loud\\"}", default: null)';
@@ -2398,6 +2406,12 @@ test("TSV041's advice names the property an object literal types and its narrowe
       "",
     ],
     [
+      "let t: integer = 1\nlet box = {x: t}\nlet boxes = [box]\nboxes[0].x = hostValue otherwise 1\nexit\n",
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer { boxes[0].x=hostValue otherwise 1 }'.",
+      "",
+    ],
+    [
       "let typed: list = [1]\nlet root = {f: typed}\nlet holder = [root, hostValue]\nexit\n",
       "hostValue",
       "Use a separate property for a value of another type.",
@@ -2427,5 +2441,57 @@ test("TSV041's advice names the property an object literal types and its narrowe
       .map((d) => coreMessage(d, text))
       .join(" | ");
     if (own !== "") assert.ok(all.includes(own), all);
+  }
+});
+
+/**
+ * #1730 Codex r1 B1: a warning's landing and owner (`landingOf`, `ownerOf`) find the value a statement gives and a
+ * literal's part by their start, so k warnings, each in its own statement or each an element of one list, read the
+ * statements' values and the list's elements O(k log k) times, not once per earlier one (k = 64 to 256, at most ×2.5
+ * per doubling; a scan per warning grows by ×4).
+ */
+test("a warning's landing and owner read the program's values by their start (#1495)", () => {
+  const counted = <T extends object>(items: readonly T[], count: { reads: number }): T[] =>
+    new Proxy([...items], {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^\d+$/.test(key)) count.reads += 1;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+  const reads = (k: number, list: boolean): number => {
+    const source = list
+      ? `let holder = [${Array.from({ length: k }, () => "{inner: hostValue}").join(", ")}]\nexit\n`
+      : `${Array.from({ length: k }, (_, at) => `let w${at} = {inner: {volume: 5}}\nw${at}.inner = hostValue\n`).join("")}exit\n`;
+    const count = { reads: 0 };
+    const statements = parse(source).program.statements;
+    let given: Given[] = statements.flatMap((statement) => givenBy(statement) ?? []);
+    const sites = source
+      .split("hostValue")
+      .slice(0, -1)
+      .map((_, at, parts) => {
+        const start = parts.slice(0, at + 1).join("hostValue").length;
+        return { file: 0, start, end: start + "hostValue".length };
+      });
+    assert.equal(sites.length, k);
+    if (list) {
+      const [holder] = given;
+      assert.ok(holder !== undefined && holder.value.kind === "listLiteral");
+      given = [
+        { ...holder, value: { ...holder.value, elements: counted(holder.value.elements, count) } },
+      ];
+    } else given = counted(given, count);
+    for (const site of sites) {
+      assert.notEqual(landingOf(given, site), null);
+      ownerOf(given, site, [{ property: "volume" }]);
+    }
+    return count.reads;
+  };
+  for (const list of [false, true]) {
+    const measured = [64, 128, 256].map((k) => reads(k, list));
+    for (let at = 1; at < measured.length; at += 1)
+      assert.ok(
+        measured[at]! <= 2.5 * measured[at - 1]!,
+        `${list ? "elements" : "values"}: ${measured.join(", ")}`,
+      );
   }
 });
