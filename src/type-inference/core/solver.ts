@@ -396,6 +396,12 @@ export class Solver {
   readonly #forgettable = new Set<string>();
   /** Whether a decision of the pass can still stop, so `forget` may still be asked (#1599). */
   #forgetting = true;
+  /**
+   * How many times `forget` ran: within a pass a finished answer changes only there (`#finish` and `#solved` add keys
+   * not yet kept), so a value derived outside the solver from its answers is current while this count is unchanged
+   * (#1444: the written-decider summary, `admission/transfers.ts`).
+   */
+  #forgets = 0;
   readonly #active = new Map<string, DemandNode>();
   /** Tarjan's stack of unfinished demands outside the components being solved. */
   readonly #stack: DemandNode[] = [];
@@ -655,6 +661,7 @@ export class Solver {
     // budget stopped it, #1599)
     if (!this.#forgetting)
       throw new Error("The solver cannot forget an answer after the pass's last decision.");
+    this.#forgets += 1;
     const todo = [...keys];
     const seen = new Set(todo);
     for (let key = todo.pop(); key !== undefined; key = todo.pop()) {
@@ -669,6 +676,11 @@ export class Solver {
         }
       this.#readers.delete(key);
     }
+  }
+
+  /** How many times `forget` ran in this pass (`#forgets`). */
+  public get forgets(): number {
+    return this.#forgets;
   }
 
   /**

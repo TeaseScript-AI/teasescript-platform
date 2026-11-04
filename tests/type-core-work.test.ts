@@ -1930,6 +1930,56 @@ test("nested selections of objects merge each level's items once, in either orde
 });
 
 /**
+ * #1444(b,c): the same nests with a written union at the property, its copy in the level inside (`[x, {p: typed}][0]`),
+ * directly and through a copy of the written binding: each literal's elements asked their earliest decider outside
+ * every decision are answered from the groups' summaries, each level once (`writtenDecider`), not each level's walk of
+ * the nest inside it again (`checks` 4.11 to 4.29 per doubling before). With the leaf an object of another type, each
+ * level's list mixes the property's types and each rejection shows only in the next pass, k passes (A6's chain, gated
+ * as its own known limit): each pass's work grows with the program (2.69 per doubling before at k = 32 → 64). The
+ * series to k = 128 in the four modes and the siblings are the step's evidence, outside CI.
+ */
+const WRITTEN_NESTS: readonly WorkFamily[] = (
+  [
+    ["a written union", "", "{p: typed}"],
+    ["a copy of a written union", "let copied = typed\n", "{p: copied}"],
+    ["a written option of another type", "", '{p: "origin"}'],
+  ] as const
+).map(([shape, setup, leaf]) => ({
+  name: `written nest ${shape}`,
+  measures: `#1444: k selections of objects nested, ${shape} at the property`,
+  program: (k: number) => {
+    const other = setup === "" ? "{p: typed}" : "{p: copied}";
+    let value: string = leaf;
+    for (let i = 0; i < k; i += 1) value = `[${value}, ${other}][0]`;
+    const source = `let typed: integer | string = 1\n${setup}let out = ${value}\nsay "\${out.p}"\nexit\n`;
+    return [{ path: "main.tease", source }];
+  },
+}));
+
+test("a written decider in nested selections is answered once per level, each pass in proportion (#1444)", () => {
+  const steep: string[] = [];
+  for (const family of WRITTEN_NESTS) {
+    // (the option's k passes, A6's, are its known limit: the work of each pass is gated)
+    const passes = family.name.includes("option");
+    const [small, large] = (passes ? [16, 32] : [32, 64]).map((k) => sized(family, k));
+    for (const reversed of [false, true]) {
+      const [a, b] = [small!, large!].map((at) => analysed(at, reversed).budget);
+      const scale = (b!.counts.get("syntaxNodes") ?? 0) / (a!.counts.get("syntaxNodes") ?? 1);
+      const per = (budget: typeof a, units: number): number =>
+        passes ? units / ((budget!.counts.get("rejectPasses") ?? 0) + 1) : units;
+      const doubling = (before: number, after: number): number =>
+        (2 * (per(b, after) / Math.max(1, per(a, before)))) / scale;
+      const name = `${family.name}${reversed ? " reversed" : ""}`;
+      if (doubling(a!.total, b!.total) > DOUBLING)
+        steep.push(`${name}: ${doubling(a!.total, b!.total).toFixed(3)}`);
+      const checks = doubling(a!.counts.get("checks") ?? 0, b!.counts.get("checks") ?? 0);
+      if (checks > COUNTER_DOUBLING) steep.push(`${name} checks: ${checks.toFixed(3)}`);
+    }
+  }
+  assert.deepEqual(steep, []);
+});
+
+/**
  * A4 through copies (the owner's reviewer's F1 on #1049, TABLE r4.80): the inherited-field families, gated above with
  * the admission families, are gated with the sharing off too, so what a copy costs never hangs on equivalent answers
  * being shared; and his budget witness, a chain of 1,024 whole copies of a root of 1,024 written-typed fields (a source

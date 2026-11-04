@@ -37,7 +37,7 @@ import type {
   ViaChain,
 } from "./model.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
-import { transferredDecider } from "./transfers.js";
+import { transferredDecider, writtenDecider } from "./transfers.js";
 import { inheritedInto } from "./waiting.js";
 import { compareKeys, expand, stopsOf, viaSignature } from "./walk.js";
 
@@ -224,7 +224,8 @@ export function* scanAt(
  * written operands count by `joinedDomain`, each whatever came before or after it: an open one leaves the path open,
  * and one holding `null` makes the copy's type optional (`joinedNull`). `null` where nothing on the path decides.
  * Where no written copy on the path asks a type, the value's carriers' transfers answer (`transferredDecider`), each
- * carrier once; else its stops are scanned here.
+ * carrier once; else, outside every decision and into no decision's place, their written-decider summary
+ * (`writtenDecider`); else its stops are scanned here.
  */
 export function* earliestDecider(
   admission: Admission,
@@ -244,7 +245,13 @@ export function* earliestDecider(
   const { program, values, contract } = admission.pass;
   // (a cursor's span read one step at a time and by its path's id, never made: G3 stage 1)
   const at = restRef(contract, asked);
-  const transferred = transferredDecider(admission, expand(admission, value, node, []), asked);
+  const task = expand(admission, value, node, []);
+  const written = { root: null, ids: null };
+  const transferred = transferredDecider(admission, task, asked, written);
+  // #1444(b,c): outside every decision and into no decision's place, the groups' written-decider summary answers; a
+  // decision's scan stays its stops', so each decision charges what it charged before
+  if (transferred === undefined && into === null && admission.deciding === 0)
+    return yield* writtenDecider(admission, task, asked, written);
   if (transferred !== undefined)
     return transferred === null
       ? null
