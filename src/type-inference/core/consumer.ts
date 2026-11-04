@@ -1027,24 +1027,27 @@ function runtimeChecks(
   }
   // after a demand stop, the obligations the receiving completion's own store checks owe (#1682): the natural walk's of
   // the decisions it made on the settled pass's inputs, each at its store as the unstopped one is, for that store's
-  // parts only (its own check stays step 5's), merged into its owed ones in source order of their sites
+  // parts only (its own check stays step 5's), merged into its owed ones in the published order (none where the
+  // completion's records are left out: no completion runs, `asked`)
   const completed = new Map<Store, Obligation[]>();
-  if (!leftOutCompletion())
-    for (const warning of answers.completedWarnings()) {
-      if (
-        leftOutWarning(warning) ||
-        index.fallbackOf(index.expressionAt(warning.site)) !== undefined
-      )
-        continue;
-      const store = index.storeOf(index.expressionAt(warning.obligation.site));
-      if (store === undefined) continue;
-      const held = completed.get(store);
-      if (held === undefined) completed.set(store, [warning.obligation]);
-      else held.push(warning.obligation);
-    }
-  for (const [store, more] of completed) {
-    const held = atStore.get(store);
-    atStore.set(store, held === undefined ? more : bySiteMerged(held, more));
+  for (const warning of answers.completedWarnings()) {
+    if (leftOutWarning(warning) || index.fallbackOf(index.expressionAt(warning.site)) !== undefined)
+      continue;
+    const store = index.storeOf(index.expressionAt(warning.obligation.site));
+    if (store === undefined) continue;
+    const held = completed.get(store);
+    if (held === undefined) completed.set(store, [warning.obligation]);
+    else held.push(warning.obligation);
+  }
+  if (completed.size > 0) {
+    // (an obligation no warning owns, a boundary, after every warning's, in its own order: the sort is stable)
+    const order = answers.publishedOrder();
+    const at = (obligation: Obligation): number => order.get(obligation) ?? Number.MAX_SAFE_INTEGER;
+    for (const [store, more] of completed)
+      atStore.set(
+        store,
+        [...(atStore.get(store) ?? []), ...more].sort((a, b) => at(a) - at(b)),
+      );
   }
   for (const [store, obligations] of atStore) {
     // (the label of the place it stores into, as `stored` finds it: no question beyond the store's own check's)
@@ -1059,23 +1062,6 @@ function runtimeChecks(
     if (parts.length > 0) core.partChecks.set(store, parts);
   }
   return { checks, core, contracts: contracts.results };
-}
-
-/**
- * Two lists of a store's obligations as one, in source order of their sites (file, start, end), each list's own order kept
- * and the first's before the second's at one site.
- */
-function bySiteMerged(first: readonly Obligation[], second: readonly Obligation[]): Obligation[] {
-  const before = (a: Obligation, b: Obligation): boolean =>
-    (a.site.file - b.site.file || a.site.start - b.site.start || a.site.end - b.site.end) < 0;
-  const out: Obligation[] = [];
-  let at = 0;
-  for (const obligation of first) {
-    while (at < second.length && before(second[at]!, obligation)) out.push(second[at++]!);
-    out.push(obligation);
-  }
-  while (at < second.length) out.push(second[at++]!);
-  return out;
 }
 
 /**

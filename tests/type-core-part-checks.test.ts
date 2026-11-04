@@ -369,6 +369,26 @@ test("at every stop a store's parts are the natural store's or fewer, never unco
   );
 });
 
+test("a stopped store's parts from the settled pass and the completion come in the natural order (#1682)", () => {
+  // (at demand 32 `copy.b.y`'s decision is the settled pass's and `copy.a.x`'s the completion's, at one site: the
+  // natural order is the published one, `copy.a.x` first)
+  const rows = (k: number, row: (i: number) => string): string =>
+    Array.from({ length: k }, (_, i) => row(i)).join("\n");
+  const source = `let s: integer = 7\nlet t: string = "x"\nlet copy = {a: hostInit, b: hostInit}\n${rows(8, () => "copy.a.x = s")}\n${rows(8, (i) => `let w${i} = copy.a`)}\ncopy.b.y = t\ncopy = hostValue\nsay "REACHED"\nexit\n`;
+  const store = `assign@${source.indexOf("copy = hostValue")}`;
+  const of = (planned: InstructionPlan): string[] =>
+    partChecks(planned).filter((part) => part.startsWith(`${store} `));
+  const natural = of(plan(source));
+  assert.equal(natural.length, 2);
+  for (const mode of HELD_MODES)
+    for (const demand of [16, 32, 64])
+      assert.deepEqual(
+        of(mode.run(() => withTestDemandAllowance(demand, () => plan(source)))),
+        natural,
+        `${mode.name}, demand ${demand}`,
+      );
+});
+
 test("plan validation refuses part checks of another shape and a plan of an older revision (#1224)", () => {
   const source =
     'let seed: object = {payload: 7}\nlet copy = hostInit\ncopy.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n';

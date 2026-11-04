@@ -506,6 +506,12 @@ export interface Answers {
    */
   completedWarnings(): readonly CompletedWarning[];
   /**
+   * Each warning's obligation, the analysis's own and the completion's (`completedWarnings`), by its place in one published
+   * order: `bySite` over both, each at its consumer's rank, the completion's at the stores consumer's, so where the
+   * warnings are the natural walk's they come in its order (#1682).
+   */
+  publishedOrder(): ReadonlyMap<Obligation, number>;
+  /**
    * The receiving completion (#1526 phase C, `Consumers.receive`), asked for once everything of the analysis that can
    * stop has run, its questions included (`asked`): `again`'s result, the questions asked again with the completed
    * contracts within the completion's own allowance, or `null` where no completion ran or it kept no result. It never
@@ -1608,6 +1614,19 @@ class CoreAnswers implements Answers {
   public completedWarnings(): readonly CompletedWarning[] {
     // (each the stores consumer's, ranked as the walk ranks it: `Consumers.check`)
     return bySite(this.#consumers.completedWarnings.map((item) => ({ item, rule: 1 })));
+  }
+
+  public publishedOrder(): ReadonlyMap<Obligation, number> {
+    const consumers = this.#consumers;
+    const ranked: { readonly item: CompletedWarning; readonly rule: number }[] = [];
+    for (const item of consumers.diagnostics)
+      if (item.class === "warning-runtime-check" && item.kind !== "budget")
+        ranked.push({ item, rule: consumers.rules.get(item) ?? 0 });
+    for (const item of consumers.completedWarnings) ranked.push({ item, rule: 1 });
+    const order = new Map<Obligation, number>();
+    for (const item of bySite(ranked))
+      if (!order.has(item.obligation)) order.set(item.obligation, order.size);
+    return order;
   }
 
   public completed<T>(again: () => T): T | null {
