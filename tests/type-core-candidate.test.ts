@@ -1449,7 +1449,9 @@ test("every method of text's known-argument errors are the current checker's (#1
     count: ["0", "2"],
   };
   let compared = 0;
-  for (const [name, method] of Object.entries(TEXT_METHODS) as [string, TextSignature][]) {
+  for (const entry of Object.values(TEXT_METHODS)) {
+    const method: TextSignature = entry;
+    const name = method.name;
     let calls: string[][] = [[]];
     for (const parameter of method.parameters) {
       const next = calls.flatMap((call) => byKind[parameter.kind].map((value) => [...call, value]));
