@@ -63,7 +63,7 @@ test("the costliest files fill shard 1's slots, and the next starts in shard 2 a
   assert.deepEqual(shardFiles([costliest[0], ...small], 2, 2), []);
 });
 
-test("every type-core test file has measured seconds, and every file with seconds exists", () => {
+test("every type-core test file has measured seconds, costliest first, and every file with seconds exists", () => {
   const suite = readdirSync(new URL("../tests/", import.meta.url))
     .filter((file) => file.endsWith(".test.ts"))
     .map((file) => file.replace(/\.ts$/, ".js"));
@@ -77,6 +77,11 @@ test("every type-core test file has measured seconds, and every file with second
   assert.deepEqual(
     costlyTestFiles.filter((file) => !suite.includes(file)),
     [],
+  );
+  // (costliest first, the order the full suite starts them in)
+  assert.deepEqual(
+    costlyTestFiles,
+    [...costlyTestFiles].sort((a, b) => costlyTestSeconds[b] - costlyTestSeconds[a]),
   );
 });
 
