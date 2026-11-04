@@ -1107,6 +1107,35 @@ function isStopped(item: Item): boolean {
   return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0;
 }
 
+/**
+ * After a stop, what a literal's own syntax proves at a step it writes nothing for, as the unstopped read answers it: an
+ * object, which has no member steps, lacks it (`missing`, F11, its writer the literal's); `null` holds nothing below
+ * any step; an empty collection holds no element (`EMPTY` where the path ends at its element step, nothing below it).
+ * Any other step stays `STOPPED`: a scalar's or a collection's named step may be a member its kind declares (a dict's
+ * `keys`, a calendar duration's parts), which the syntax does not answer. A typed load's default read by its own syntax
+ * so keeps the type the unstopped read gives it, a `null` sibling's included (#1460).
+ */
+function absentAt(
+  program: CoreProgram,
+  value: PlaceId,
+  own: "atom" | "list" | "set" | "dict" | "object",
+  node: string,
+  path: readonly string[],
+): readonly Item[] {
+  if (own === "atom") return node === "nullLiteral" ? [] : STOPPED;
+  if (own !== "object") {
+    if (path[0] !== "element") return STOPPED;
+    return path.length === 1 ? [EMPTY] : [];
+  }
+  const site = program.hasOf.get(value)?.[0]?.site;
+  return [
+    makeItem("unknown", site === undefined ? null : program.writer("literal", site), {
+      reasons: REASON.missing,
+      context: "missing",
+    }),
+  ];
+}
+
 /** The property names a type term gives, through its unions. */
 function termProperties(term: TypeTerm): string[] {
   if (term.kind === "union") return term.members.flatMap(termProperties);
@@ -1404,11 +1433,14 @@ class CoreAnswers implements Answers {
     const { program } = this.#pass;
     program.work.charge("checks");
     const kind = program.places[value]?.kind;
-    const own = kind?.kind === "value" ? OWN_KINDS.get(kind.node) : undefined;
-    if (own === undefined) return { items: STOPPED, names: NO_NAMES };
+    const node = kind?.kind === "value" ? kind.node : null;
+    const own = node === null ? undefined : OWN_KINDS.get(node);
+    if (node === null || own === undefined) return { items: STOPPED, names: NO_NAMES };
     if (own === "atom") {
       const has = program.hasOf.get(value);
-      return path.length === 0 && has?.length === 1 && has[0]!.type.kind === "atom"
+      if (path.length > 0)
+        return { items: absentAt(program, value, own, node, path), names: NO_NAMES };
+      return has?.length === 1 && has[0]!.type.kind === "atom"
         ? { items: [makeItem(has[0]!.type.name, null, { cert: "def" })], names: NO_NAMES }
         : { items: STOPPED, names: NO_NAMES };
     }
@@ -1422,16 +1454,25 @@ class CoreAnswers implements Answers {
     // each child at the path's own step (`literalChildren` keys a collection's elements and a dict's values alike): its
     // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question,
     // TABLE r4.158), beside its known siblings, the composition in its one order (#1398); its names its own
-    // syntax's alone
+    // syntax's alone; no item at all is an answer where every child's own syntax proves its own (`absentAt`)
     const items: Item[] = [];
     const names = new Set<string>();
     const rest = path.slice(1);
-    for (const child of this.#consumers.admission.literalChildren(value, path[0]!)) {
-      if (child.value === undefined) continue;
-      for (const name of this.#stoppedShape(child.value, rest).names) names.add(name);
+    const step = path[0]!;
+    const children = this.#consumers.admission.literalChildren(value, step);
+    if (children.length === 0) return { items: absentAt(program, value, own, node, path), names };
+    let proved = true;
+    for (const child of children) {
+      if (child.value === undefined) {
+        proved = false;
+        continue;
+      }
+      const shape = this.#stoppedShape(child.value, rest);
+      if (shape.items === STOPPED) proved = false;
+      for (const name of shape.names) names.add(name);
       for (const item of this.#items(child.value, child.node, rest)) items.push(item);
     }
-    return { items: items.length === 0 ? STOPPED : inItsOrder(items), names };
+    return { items: items.length === 0 && !proved ? STOPPED : inItsOrder(items), names };
   }
 
   /** The value place of an expression node, the place a statement stores into, or `null`. */
