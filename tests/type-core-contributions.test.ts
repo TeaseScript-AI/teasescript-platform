@@ -11,6 +11,7 @@ import {
   withFlowCheck,
   type Contributions,
 } from "../src/type-inference/core/contract/contributions.js";
+import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { checkedResult } from "../src/type-inference/core/consumer.js";
@@ -142,6 +143,15 @@ test("each key's edges are the keys its contract includes: copies, written place
         ["g", ["f"], ["xs.element.f"]],
       ],
     ],
+    // (a load's default, its typed default decision's: the default's key, qualified by the choice; a `null` default none)
+    [
+      'let d = {f: 1}\nlet v = load("k", default: d)\nsay "${v.f}"\nexit\n',
+      [
+        ["v", [], ["d"]],
+        ["v", ["f"], ["d.f"]],
+      ],
+    ],
+    ['let v = load("k", default: null)\nsay "${v}"\nexit\n', [["v", [], []]]],
   ];
   for (const mode of MODES)
     for (const [source, asks] of cases) {
@@ -153,6 +163,29 @@ test("each key's edges are the keys its contract includes: copies, written place
           `${source}: ${name}.${path.join(".")}`,
         );
     }
+});
+
+test("an inclusion keeps the transforms its answer went through: a default's choice, an `otherwise` side's null filter", () => {
+  const qualifiers = (pass: CorePass, name: string): readonly string[] => {
+    const place = pass.program.places.findIndex((at) => at?.label === name);
+    const found = pass.contract.contributions(keyOf(place, []));
+    assert.equal(found.state, "complete");
+    return found.state === "complete" ? found.edges.flatMap((edge) => edge.qualifiers) : [];
+  };
+  for (const mode of MODES) {
+    const loaded = analysed(
+      'let d = {f: 1}\nlet v = load("k", default: d)\nsay "${v.f}"\nexit\n',
+      mode,
+      true,
+    ).pass;
+    assert.ok(qualifiers(loaded, "v").includes("defaultChoice"));
+    const otherwise = analysed(
+      'let a = {f: 1}\nlet b = hostValue otherwise a\nsay "${b.f}"\nexit\n',
+      mode,
+      true,
+    ).pass;
+    assert.ok(qualifiers(otherwise, "b").includes("operandFilter"));
+  }
 });
 
 test("a cycle of copies publishes each member's edges once its component is solved", () => {
@@ -208,4 +241,31 @@ test("every producing read in the contract layer passes a flow, follows an inclu
     });
   }
   assert.deepEqual(unclassified, []);
+});
+
+test("a stop's forgotten answers take their flows with them; a flow stands only beside its answer", () => {
+  // (decisions stopping at small demand allowances forget their keys and every reader: a flow left published for a
+  // forgotten slot would claim complete edges no answer stands behind)
+  const sources = [
+    'let a = {p: {f: 1}}\nlet b = a\nb.p.f = hostValue\nlet c = [b, {p: {f: 2}}][0]\nsay "${c.p.f}"\nexit\n',
+    'let typed: integer | string = 1\nlet y = {q: [typed]}\nlet x = [{q: [1]}, y][0]\nx.q.add(hostValue)\nsay "${x.q.length}"\nexit\n',
+  ];
+  let checked = 0;
+  for (const allowance of [1, 4, 16])
+    for (const mode of MODES)
+      for (const source of sources) {
+        const slots: string[] = [];
+        const { pass } = withTestDemandAllowance(allowance, () =>
+          withFlowCheck(
+            (slot) => slots.push(slot),
+            () => analysed(source, mode, true),
+          ),
+        );
+        for (const slot of slots) {
+          if (pass.solver.flowOf(slot) === undefined) continue;
+          checked += 1;
+          assert.ok(pass.solver.answer(slot) !== undefined, `${slot}: a flow without its answer`);
+        }
+      }
+  assert.ok(checked > 50, `${checked} flows checked`);
 });
