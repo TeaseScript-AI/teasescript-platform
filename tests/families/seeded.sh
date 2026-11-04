@@ -3,7 +3,7 @@
 # $SX_ITEMS, "<first seed> <count>", each item's lines in $SX_OUT/seeds-<first seed>.jsonl (README "A seeded family").
 # pair: the base tree against the head tree ($SX_TREE_base, $SX_TREE_head: `--commit base=… --commit head=…`).
 # mutant: the unmutated head tree ($SX_TREE_head) against the mutated checkout ($SX_CHECKOUT at the head with
-# `--patch`, built here); each path the patch adds, changes or removes, with its hash on both sides, goes to
+# `--patch`, built here), which may change tracked regular files only; each one's hash on both sides goes to
 # $SX_OUT/mutant.sha256, the mutant's proof. A seed whose outcome differs reaches the mutated code.
 mode=$1
 here=$(cd "$(dirname "$0")" && pwd)
@@ -13,18 +13,23 @@ pair) base=$SX_TREE_base head=$SX_TREE_head ;;
 mutant)
   base=$SX_TREE_head head=$SX_CHECKOUT
   cd "$SX_CHECKOUT" || exit 2
-  # (every path the patch adds, changes or removes, a rename as both, its hash at the head and in the checkout, `absent`
-  # where none: the checkout's whole change against HEAD, staged so new and removed files count alike)
-  git add -A
-  mapfile -t changed < <(git diff --cached --no-renames --name-only HEAD)
-  [ "${#changed[@]}" -gt 0 ] || { echo "seeded.sh mutant: the checkout has no change" >&2; exit 2; }
+  # (a mutant changes the content of tracked regular files and nothing else, as the README's mutants are: any other
+  # change of the checkout, an added, removed, renamed or untracked path, a link, a gitlink or a mode, is refused before
+  # it runs; each changed file's hash at HEAD and in the checkout, then its path, goes to the proof, and the whole change)
+  refuse() { echo "seeded.sh mutant: $1; a mutant changes tracked regular files only" >&2; exit 2; }
   hash() { sha256sum | cut -c1-64; }
-  for file in "${changed[@]}"; do
-    before=absent after=absent
-    git cat-file -e "HEAD:$file" 2> /dev/null && before=$(git show "HEAD:$file" | hash)
-    [ -f "$file" ] && after=$(hash < "$file")
-    printf '%s %s %s\n' "$file" "$before" "$after"
-  done > "$SX_OUT/mutant.sha256"
+  mapfile -d '' -t entries < <(git status --porcelain=v1 -z --untracked-files=all)
+  [ "${#entries[@]}" -gt 0 ] || refuse "the checkout has no change"
+  proof=""
+  for entry in "${entries[@]}"; do
+    file=${entry:3}
+    [ "${entry:0:3}" = " M " ] || refuse "$(printf '%q is %s' "$file" "${entry:0:2}")"
+    read -r modes < <(git diff --raw --no-renames -z -- "$file" | tr '\0' '\n' | sed -n 1p)
+    [[ "$modes" =~ ^:(100644|100755)\ (100644|100755)\  ]] && [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[2]}" ] ||
+      refuse "$(printf '%q changes its kind or mode (%s)' "$file" "${modes:1:13}")"
+    proof+=$(printf '%s %s %q' "$(git show "HEAD:$file" | hash)" "$(hash < "$file")" "$file")$'\n'
+  done
+  printf '%schange %s\n' "$proof" "$(git diff --binary HEAD | hash)" > "$SX_OUT/mutant.sha256"
   npm run -s build:typescript > "$SX_OUT/build.log" 2>&1 || {
     rc=$?
     echo "seeded.sh mutant: the build failed (exit $rc)" >&2
