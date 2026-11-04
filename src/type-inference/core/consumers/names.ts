@@ -139,7 +139,8 @@ function ownerKinds(walk: Consumers, owner: PlaceId): readonly Item[] {
   const items = walk.run(walk.pass.contract.contractOfValue(owner));
   if (walk.pass.program.work.stopped === null || !items.some(unsettledItem)) return items;
   const result = walk.resultOfCall.get(owner);
-  const key = result === undefined ? readKey(walk, owner) : keptKey(walk.pass.program.work, result, []);
+  const key =
+    result === undefined ? readKey(walk, owner) : keptKey(walk.pass.program.work, result, []);
   return (key === null ? null : walk.stoppedDomain(key)) ?? items;
 }
 
