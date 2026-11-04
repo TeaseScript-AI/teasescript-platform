@@ -246,19 +246,20 @@ For `corpus`, add `--data ~/work/o4-m4-g3/cases.json` and `CASES_JSON=$HOME/work
 compiles each source of a set (`corpus`, `fixture` or an area) through both public routes of one built tree, the
 legacy backend and the core (`decisionRecords`), in the four modes, and writes one JSON line per source to `--out` and
 the core's decision records to `--decisions`. Each route runs in its own worker with `--memory` MB of old generation
-(1,400; a heap size flag in `NODE_OPTIONS`, as the queue sets one, is dropped so that it holds), under the unit limit
-below (the legacy route charges no ledger) and the safety net. A run that fails (heap, units, safety net, worker exit)
-leaves the source's other runs and is recorded as `{ outcome: "failed", failure, phase, runsBeforeFailure, heapMiB }`
-(`heapMiB`: the worker's heap limit as V8 measured it) in its row and in the record's `failed` list, with
-`incomplete: true` and the first failure as `reason`; the next run starts in a fresh worker. A reused worker's heap failure or safety net is retried once in a fresh
-one, whose result is the run's (`retried` names the first). It classifies nothing. The S11 classification reads `key`,
-`index`, `origins`, `incomplete`/`reason`, and per row `mode`, `delta` (`diagnosticIdentity`, `diagnosticText`,
-`checks`, `plan`) and each route's `outcome`, `diagnostics`, `checks`, `planHash`, `outside`/`excluded`; and `ordinary`
-and `completion` from `--decisions`. An incomplete record is never agreement.
+(1,400; it refuses Node options and `NODE_OPTIONS`, whose heap flags would override that: the queue sets one, so the
+command clears it), under the unit limit below (the legacy route charges no ledger) and the safety net. A run that fails
+(heap, units, safety net, worker exit) leaves the source's other runs and is recorded as
+`{ outcome: "failed", failure, phase, runsBeforeFailure, heapMiB }` (`heapMiB`: the worker's heap limit as V8 measured
+it) in its row and in the record's `failed` list, with `incomplete: true` and the first failure as `reason`; the next
+run starts in a fresh worker. A reused worker's heap failure or safety net is retried once in a fresh one, whose
+result is the run's (`retried` names the first). It classifies nothing. The S11 classification reads `key`, `index`,
+`origins`, `incomplete`/`reason`, and per row `mode`, `delta` (`diagnosticIdentity`, `diagnosticText`, `checks`,
+`plan`) and each route's `outcome`, `diagnostics`, `checks`, `planHash`, `outside`/`excluded`; and `ordinary` and
+`completion` from `--decisions`. An incomplete record is never agreement.
 
 ```sh
-sx-job submit --commit <sha> --shards 16 --mem 2G --timeout 1h --campaign <T> -- bash -c 'node \
-  "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --out "$SX_OUT/shadow.jsonl" \
+sx-job submit --commit <sha> --shards 16 --mem 2G --timeout 1h --campaign <T> -- bash -c 'env -u NODE_OPTIONS \
+  node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --out "$SX_OUT/shadow.jsonl" \
   --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
 ```
 

@@ -7,9 +7,8 @@
 // where both have one, what differs. It classifies nothing: the S11 classification reads the records (README "Shadow").
 //   <set>: corpus (CASES_JSON=<cases.json>), fixture (the tree's tools/corpus/fixture), or an area of tests/families by
 //   its name or folder (its generators' sources at their own sizes, `sources.mjs`).
-// Each route runs in a worker of its own with `--memory` MB of old generation (a heap size flag in NODE_OPTIONS or the
-// command, which would override it, is dropped by running the command again without it), which takes its runs (one
-// route in one mode) in turn until one fails. A run fails where its heap is exhausted, where its charged units pass
+// Each route runs in a worker of its own with `--memory` MB of old generation, which takes its runs (one route in one
+// mode) in turn until one fails; the runner refuses Node options and NODE_OPTIONS, whose heap flags would override it. A run fails where its heap is exhausted, where its charged units pass
 // `--units` times the largest allowance of a ledger it charged (#1647's rule; the legacy route charges none), where it
 // passes the safety net of `--timeout` seconds, or where its worker ends. A failed run is recorded with its route, mode,
 // the phase it was in (`phase`: `parse and names`, `analysis`, `analysis pass k`, `completion`, `lowering`, the core's
@@ -21,7 +20,6 @@
 // its end reaches the next run before that run's first phase. A source with a failed run is `incomplete`, never
 // agreement. Resumes: a source already in `--out` is not run again, its record counted as it stands. Prints one JSON
 // summary line (`differing` counts sources); exit 0 when every run has an outcome, else 1.
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -92,32 +90,17 @@ function delta(a, b, limit = 80) {
   return { diffs, more };
 }
 
-/** A heap size flag of V8's, which overrides a worker's `resourceLimits` (Codex r1 on #1713). */
-const HEAP_FLAG =
-  /^--(max-old-space-size|max-semi-space-size|max-young-generation-size|max-heap-size)(=|$)/;
-const withoutHeapFlags = (flags) =>
-  flags.filter(
-    (flag, i) =>
-      !HEAP_FLAG.test(flag) &&
-      !(HEAP_FLAG.test(flags[i - 1] ?? "") && !flag.includes("=") && /^\d/.test(flag)),
+if (
+  isMainThread &&
+  (process.execArgv.length > 0 || (process.env.NODE_OPTIONS ?? "").trim() !== "")
+) {
+  // (a V8 heap flag there, in any of its spellings, would override every worker's --memory: Codex r1 and r2 on #1713;
+  // the queue sets one in NODE_OPTIONS)
+  process.stderr.write(
+    "shadow.mjs: run it without Node options and NODE_OPTIONS (env -u NODE_OPTIONS node tests/families/shadow.mjs …), " +
+      "so that --memory is each worker's heap\n",
   );
-const nodeOptions = (process.env.NODE_OPTIONS ?? "").split(/\s+/).filter(Boolean);
-
-if (isMainThread && [...process.execArgv, ...nodeOptions].some((flag) => HEAP_FLAG.test(flag))) {
-  // (the same command without them, so that `--memory` is each worker's heap: the queue sets one in NODE_OPTIONS)
-  const ran = spawnSync(
-    process.execPath,
-    [
-      ...withoutHeapFlags(process.execArgv),
-      fileURLToPath(import.meta.url),
-      ...process.argv.slice(2),
-    ],
-    {
-      stdio: "inherit",
-      env: { ...process.env, NODE_OPTIONS: withoutHeapFlags(nodeOptions).join(" ") },
-    },
-  );
-  process.exit(ran.status ?? 1);
+  process.exit(2);
 } else if (isMainThread) {
   const [root, given, ...rest] = process.argv.slice(2);
   const option = (name) => {

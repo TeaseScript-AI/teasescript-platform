@@ -97,14 +97,21 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
     `export const cases = ${JSON.stringify(["fine", "leak", "crash", "after", "outside", "idle", "late"].map((s) => [s, s]))};\n`,
   );
   const out = join(folder, "shadow.jsonl");
-  // (a heap flag in NODE_OPTIONS, as the queue sets one, overrides no worker's --memory)
   const decisions = join(folder, "decisions.jsonl");
-  const shadow = () =>
-    spawnSync(
+  const shadow = (nodeOptions?: string) => {
+    const env = { ...process.env };
+    delete env.NODE_OPTIONS;
+    if (nodeOptions !== undefined) env.NODE_OPTIONS = nodeOptions;
+    return spawnSync(
       process.execPath,
       [tool, folder, "area", "--memory", "16", "--out", out, "--decisions", decisions],
-      { encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=1024" } },
+      { encoding: "utf8", env },
     );
+  };
+  // (NODE_OPTIONS, where the queue sets a heap flag that would override every worker's --memory, is refused)
+  const refused = shadow("--max_old_space_size=256");
+  assert.equal(refused.status, 2, refused.stderr);
+  assert.match(refused.stderr, /without Node options and NODE_OPTIONS/);
   const ran = shadow();
   assert.equal(ran.status, 1, ran.stderr);
   const records = readFileSync(out, "utf8")
@@ -149,9 +156,9 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
     }
   }
   // (the reused worker's crash, retried in a fresh one: the fresh one's result, the first failure named, with the heap
-  // limit the worker measured (V8's, its 16 MB old generation with the other spaces), not NODE_OPTIONS' 1,024)
+  // limit the worker measured, V8's: its 16 MB old generation and the other spaces)
   const limit = leak.rows[0].legacy.retried.heapMiB;
-  assert.ok(limit >= 16 && limit < 1024, String(limit));
+  assert.ok(limit > 16, String(limit));
   assert.deepEqual(leak.rows[0].legacy.retried, {
     route: "legacy",
     mode: 0,
