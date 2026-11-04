@@ -410,6 +410,8 @@ test("a completion decision that would reject a store or retarget a selecting st
           at,
         );
         assert.ok(completion.counts.forgone > 0, `${at}: what the loss forgoes, counted`);
+        // (and none of its own store checks' obligations, which a store's part checks would read: #1682)
+        assert.deepEqual(answers.completedWarnings(), [], at);
         // (every obligation lost, the stores' own among them, never completed against a wider contract)
         assert.deepEqual(
           [...new Set(answers.receiving.map(({ result }) => shown(result).split("/")[0]))],
@@ -555,7 +557,39 @@ test("a completion past its allowance ends and keeps no result, the analysis at 
         answers.receiving.every(({ obligation }) => !answers.completedCheck(obligation.slot.site)),
         at,
       );
+      assert.deepEqual(answers.completedWarnings(), [], at);
     }
+  }
+});
+
+test("a completion that reaches its allowance in the questions asked again keeps none of its store warnings (#1682)", () => {
+  // (Codex r1's N3 on #1690: the warnings published, read by the questions asked again, then the allowance reached there)
+  const source =
+    'let seed: integer = 7\nlet copy = hostInit\ncopy.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostInit", "hostValue"]);
+  assert.ok(request !== null);
+  const charge = WorkLedger.prototype.charge;
+  let ledger: WorkLedger | null = null;
+  WorkLedger.prototype.charge = function (this: WorkLedger, ...args) {
+    ledger = this;
+    return charge.apply(this, args);
+  };
+  try {
+    withTestDemandAllowance(16, () => {
+      const answers = analyseCore(request);
+      let published = 0;
+      const again = answers.completed(() => {
+        published = answers.completedWarnings().length;
+        ledger!.charge("checks", 1e9);
+        return true;
+      });
+      assert.ok(published > 0);
+      assert.equal(again, null);
+      assert.equal(answers.budget.closure?.counts.capped, 1);
+      assert.deepEqual(answers.completedWarnings(), []);
+    });
+  } finally {
+    WorkLedger.prototype.charge = charge;
   }
 });
 

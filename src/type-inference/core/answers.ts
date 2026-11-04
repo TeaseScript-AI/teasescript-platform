@@ -17,6 +17,7 @@ import {
   Consumers,
   STOP_RULE,
   typedCall,
+  type CompletedWarning,
   type CompletionPass,
   type Retargeted,
 } from "./consumers.js";
@@ -499,6 +500,18 @@ export interface Answers {
   /** Whether the receiving completion's own store checks (C1) owe a runtime check at a site, as unstopped. */
   completedCheck(site: SourceSite): boolean;
   /**
+   * The store warnings the receiving completion's own store checks (C1) made, the natural walk's obligations of its
+   * decisions on the settled pass's inputs (#1682), in the published order (`bySite`, at the stores consumer's rank);
+   * none where the completion lost a result, reached its allowance or left the slice. A store's part checks read them.
+   */
+  completedWarnings(): readonly CompletedWarning[];
+  /**
+   * Each warning's obligation, the analysis's own and the completion's (`completedWarnings`), by its place in one published
+   * order: `bySite` over both, each at its consumer's rank, the completion's at the stores consumer's, so where the
+   * warnings are the natural walk's they come in its order (#1682).
+   */
+  publishedOrder(): ReadonlyMap<Obligation, number>;
+  /**
    * The receiving completion (#1526 phase C, `Consumers.receive`), asked for once everything of the analysis that can
    * stop has run, its questions included (`asked`): `again`'s result, the questions asked again with the completed
    * contracts within the completion's own allowance, or `null` where no completion ran or it kept no result. It never
@@ -506,6 +519,11 @@ export interface Answers {
    */
   completed<T>(again: () => T): T | null;
   at(node: FlowNode): OccurrenceAnswer | null;
+  /**
+   * The place and path a statement that stores stores into, as `at` reads them there (its node's first live store, else
+   * its first), with no value read: `null` for a node that stores nothing.
+   */
+  storedPlace(node: FlowNode): { readonly id: PlaceId; readonly path: readonly string[] } | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
   /**
    * The complete type a store into a place at a path is checked against where a decision below the path stopped (S3 §5,
@@ -1533,6 +1551,13 @@ class CoreAnswers implements Answers {
   }
 
   /** The store a statement makes, by its node: its first live store definition there, else its first rejected one (A6). */
+  public storedPlace(
+    node: FlowNode,
+  ): { readonly id: PlaceId; readonly path: readonly string[] } | null {
+    const d = this.#storeAt(node);
+    return d === null ? null : { id: d.place, path: d.path };
+  }
+
   #storeAt(node: FlowNode): Definition | null {
     if (this.#stores === null) {
       this.#stores = new Map();
@@ -1584,6 +1609,24 @@ class CoreAnswers implements Answers {
 
   public completedCheck(site: SourceSite): boolean {
     return this.#consumers.completedChecks.has(siteKey(site));
+  }
+
+  public completedWarnings(): readonly CompletedWarning[] {
+    // (each the stores consumer's, ranked as the walk ranks it: `Consumers.check`)
+    return bySite(this.#consumers.completedWarnings.map((item) => ({ item, rule: 1 })));
+  }
+
+  public publishedOrder(): ReadonlyMap<Obligation, number> {
+    const consumers = this.#consumers;
+    const ranked: { readonly item: CompletedWarning; readonly rule: number }[] = [];
+    for (const item of [...consumers.diagnostics])
+      if (item.class === "warning-runtime-check" && item.kind !== "budget")
+        ranked.push({ item, rule: consumers.rules.get(item) ?? 0 });
+    for (const item of consumers.completedWarnings) ranked.push({ item, rule: 1 });
+    const order = new Map<Obligation, number>();
+    for (const item of bySite(ranked))
+      if (!order.has(item.obligation)) order.set(item.obligation, order.size);
+    return order;
   }
 
   public completed<T>(again: () => T): T | null {

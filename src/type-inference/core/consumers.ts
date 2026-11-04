@@ -142,6 +142,9 @@ function outsideSliceSyntax(program: CoreProgram): boolean {
   return outside;
 }
 
+/** A store warning of the receiving completion's own check (C1, `Consumers.completedWarnings`). */
+export type CompletedWarning = Extract<CoreDiagnostic, { readonly obligation: Obligation }>;
+
 /** A completion's results by their requirements' places and paths (`Consumers.#completeFor`). */
 interface Completed {
   readonly index: ReadonlyMap<string, number>;
@@ -820,6 +823,7 @@ export class Consumers {
     this.receiving.length = 0;
     for (const obligation of obligations) this.receiving.push({ obligation, result: null });
     this.completedChecks.clear();
+    this.completedWarnings.length = 0;
     this.completion = {
       units,
       counts: { ...(this.completion?.counts ?? closureCounts()), capped: 1, cappedAt: units },
@@ -855,6 +859,7 @@ export class Consumers {
       closure.close();
     }
     for (const site of completer.completedChecks) this.completedChecks.add(site);
+    this.completedWarnings.push(...completer.completedWarnings);
     const local = demandAllowanceFor(pass.program.flow.nodes.length);
     this.completion = {
       ...this.completion,
@@ -932,17 +937,24 @@ export class Consumers {
       if (before === undefined || [...keys].some((key) => !before.has(key))) joined = true;
     }
     // (where that check owes a store's runtime check, the unstopped analysis owes it too)
+    const warnings: CompletedWarning[] = [];
     for (const d of this.diagnostics)
-      if (d.class === "warning-runtime-check" && d.kind === "written-target")
+      if (d.class === "warning-runtime-check" && d.kind === "written-target") {
         this.completedChecks.add(siteKey(d.site));
+        warnings.push(d);
+      }
     // (a rejected or retargeted store's value reaches other contracts through copies, projections and wrappers, which
     // no cell of the closure records: once any completion decision would reject or retarget a store, every obligation
     // is lost, with the cause of a marked decision its proof read, else the first mark's)
     const beside = moved ? "retarget" : joined ? "rejection" : null;
-    for (const [index, cause] of closure.unsettled(requirements.length, beside)) {
+    const lost = closure.unsettled(requirements.length, beside);
+    for (const [index, cause] of lost) {
       if (results[index]?.state === "complete") closure.counts.forgone += 1;
       results[index] = lostBy(requirements[index]!, cause);
     }
+    // (#1682: the obligations that check owes, the natural walk's own on the settled pass's inputs, kept only where the
+    // completion lost nothing: a part check below a store's destination reads them as it reads the unstopped ones)
+    if (lost.size === 0) this.completedWarnings.push(...warnings);
   }
 
   /**
@@ -1078,6 +1090,13 @@ export class Consumers {
    * completion (#1526 phase C step 5).
    */
   readonly completedChecks = new Set<string>();
+
+  /**
+   * The store warnings the receiving completion's own check of its decisions' stores made (C1, `#completeIn`), the
+   * natural walk's obligations of those decisions on the settled pass's inputs (#1682): none where the completion lost a
+   * result (the whole loss), reached its allowance or left the slice. Only a store's part checks read them.
+   */
+  readonly completedWarnings: CompletedWarning[] = [];
 
   /** Each receiving obligation with its result as the completion found it (`receive`), in the stable source order. */
   readonly receiving: {
