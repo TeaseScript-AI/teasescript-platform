@@ -187,11 +187,6 @@ export function recordAnswer(
   answered.set(value, types);
 }
 
-/** Whether a mixed answer, or a stopped read of one, reaches any value of the pass (`recordAnswer`). */
-export function anyCarried(walk: Consumers): boolean {
-  return ANSWERED.has(walk);
-}
-
 /**
  * What a new variable keeping a warning's subject declares (#1352, the kept-value fix of every warning), a proof in
  * three values whose only source of "no union" is a settled read (the lead's ruling on Codex r7): the union a settled
@@ -199,8 +194,8 @@ export function anyCarried(walk: Consumers): boolean {
  * answer reaches the subject; `null` (unproved, the fix in words, never a plain `let`) where every read on the path
  * stopped. The walk's record first (a read after the walk alone answers nothing where a finishing walk ran, Codex r6);
  * where it is `stopped`, the read made again at publication, the proof only where it settles (Codex r7: a local demand
- * stop leaves the facts asked). Asked only where the subject's value is found; where it is not, `anyCarried` says
- * whether a plain `let` is proved.
+ * stop leaves the facts asked). Asked only where the subject's value is found (`keptChoice` says what a subject not
+ * found proves).
  */
 export function keptTypes(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
   const recorded = ANSWERED.get(walk)?.get(value);

@@ -2003,6 +2003,35 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       source,
     );
   }
+  // (a stopped read of a non-mixed choice leaves an unrelated warning's subject, not found, its plain `let`: an
+  // answer reaches a subject only through its own operands, Codex r8 on #1660)
+  const unrelated =
+    "let xs = []\nrepeat xs.get(0, default: hostValue) {}\nrepeat (askChoice 1, null) {}\nexit\n";
+  for (const mode of MODES) {
+    const request = coreRequest(main(unrelated));
+    assert.ok(request !== null);
+    const { diagnostics } = inMode(mode, () =>
+      withTestDemandAllowance(16, () => analyseCore(request)),
+    );
+    const atGet = diagnostics.filter((d) => d.site.start === unrelated.indexOf("xs.get"));
+    assert.ok(atGet.length > 0 && atGet.every((d) => !("keeps" in d)), JSON.stringify(mode));
+  }
+  // (and where the warned text holds the mixed choice, the subject not found is unproved: the published fact says so)
+  const holding = `let xs = []\nrepeat xs.get(0, default: ${S}) {}\nexit\n`;
+  for (const mode of MODES) {
+    const request = coreRequest(main(holding));
+    assert.ok(request !== null);
+    const { diagnostics } = inMode(mode, () =>
+      withTestDemandAllowance(1, () => analyseCore(request)),
+    );
+    const atGet = diagnostics.filter(
+      (d) => d.code === "TSV043" && d.site.start === holding.indexOf("xs.get"),
+    );
+    assert.ok(
+      atGet.length > 0 && atGet.every((d) => "keeps" in d && d.keeps === "unproved"),
+      JSON.stringify(mode),
+    );
+  }
   const plainRequest = coreRequest(main(plain));
   assert.ok(plainRequest !== null);
   const plainDiagnostics = analyseCore(plainRequest).diagnostics;
