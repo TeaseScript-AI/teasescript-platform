@@ -561,6 +561,23 @@ test("coverage: the natural runs' ordinary decisions and a receiving completion 
     ),
   };
   assert.deepEqual([coverage([failed]).state, coverage([failed]).controlFailedRuns], ["pass", 1]);
+  // (a negative count is no decision count, natural or at the control)
+  const negative = (counts: number[]) => ({
+    ...planned(),
+    decisionCounts: { ordinary: counts, completion: counts },
+  });
+  assert.deepEqual(
+    C.classifyRecords(
+      entries([
+        record("negative-natural", () => ({ core: negative([-1]) })),
+        { ...record("negative-control", () => ({})), demands: [control(16, [-1])] },
+      ]),
+    ).problems.map((p: { why: string }) => p.why),
+    [
+      "core decision counts that are no list of counts",
+      "demand decision counts that are no list of counts",
+    ],
+  );
   // (a control row the classifier cannot read is refused)
   const short = { demand: 16, rows: control(16).rows.slice(1) };
   assert.deepEqual(

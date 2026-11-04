@@ -443,7 +443,7 @@ const OUTCOMES = new Set(["plan", "rejected", "outside", "exception", "failed"])
 const DELTA = ["diagnosticIdentity", "diagnosticText", "checks", "plan"];
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const counts = (list) =>
-  list === undefined || (Array.isArray(list) && list.every((n) => Number.isInteger(n)));
+  list === undefined || (Array.isArray(list) && list.every((n) => Number.isInteger(n) && n >= 0));
 
 /** A route's run as the classification reads it, or the reason it cannot be read (a string). */
 function readRoute(x, route) {
@@ -582,10 +582,7 @@ export function readRecord(record) {
     demands.push({ demand: each.demand, runs });
   }
   demands.sort((a, b) => a.demand - b.demand);
-  return {
-    reading: { key: record.key, name, rows, demands },
-    text: canonical([rows, demands]),
-  };
+  return { reading: { key: record.key, name, rows, demands }, text: canonical([rows, demands]) };
 }
 
 /**
