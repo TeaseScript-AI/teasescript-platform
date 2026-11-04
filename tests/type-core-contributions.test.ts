@@ -258,7 +258,7 @@ test("each key's edges are the keys its contract includes: copies, written place
       [["b", ["element"], ["v.element"]]],
     ],
     [
-      'let a = []\nlet c = []\nlet b = a + c\nsay "${b.length}"\nexit\n',
+      'let a = []\nlet c = []\nlet b = a + c\nsay "${b.first}"\nexit\n',
       [["b", ["element"], ["a.element", "c.element"]]],
     ],
     // (a reader that holds only its receiver's unknowns: a slot of the receiver without one is no edge)
@@ -544,6 +544,7 @@ test("every producing read in the contract layer passes a flow, follows an inclu
     "fallback",
     "given",
     "kinds",
+    "side",
   ]);
   type FunctionLike =
     ts.FunctionDeclaration | ts.FunctionExpression | ts.MethodDeclaration | ts.ArrowFunction;
