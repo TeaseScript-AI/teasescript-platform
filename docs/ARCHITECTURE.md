@@ -105,7 +105,8 @@ snapshot for comparing two analyses of the same sources.
   (`registry-view.ts`), and the solver's interned type table (`solver/types.ts`). The condition-shape recognizer
   (`narrowing-shapes.ts`) is shared: the visitor's branch rules and the collector read the same classification.
 - **The switch:** one change makes the constraint backend the compiler's backend in place of the legacy backend, and
-  a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's.
+  a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's. The
+  switch needs the [shadow gate](TESTING.md#the-switchs-shadow-gate) green.
 
 ## Performance boundary
 
