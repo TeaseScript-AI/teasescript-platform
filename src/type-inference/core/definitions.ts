@@ -346,11 +346,13 @@ export function sortCost(count: number): number {
   return count <= 1 ? count : count * Math.ceil(Math.log2(count));
 }
 
-/** The index of the first of the sorted positions at least `target`. */
-function lowerBound(positions: readonly number[], target: number): number {
+/** The index of the first of the sorted positions at least `target`: a binary search, each comparison charged. */
+function lowerBound(work: WorkLedger, positions: readonly number[], target: number): number {
+  work.charge("eventSteps");
   let low = 0;
   let high = positions.length;
   while (low < high) {
+    work.charge("eventSteps");
     const middle = (low + high) >> 1;
     if (positions[middle]! < target) low = middle + 1;
     else high = middle;
@@ -971,8 +973,7 @@ function positionsWithin(
   high: number,
   program: CoreProgram,
 ): number {
-  program.work.charge("eventSteps", 2);
-  return lowerBound(positions, high + 1) - lowerBound(positions, low);
+  return lowerBound(program.work, positions, high + 1) - lowerBound(program.work, positions, low);
 }
 
 /** A key's live definitions in dominator order, with their parents in the dominator tree and a lifting table (X2). */
@@ -1119,8 +1120,7 @@ export class DefinitionLists {
     const begin = program.position(node);
     const end = program.positionEnd(node) + 1;
     const cut = (positions: readonly number[]): string => {
-      work.charge("eventSteps", 2);
-      return `${lowerBound(positions, begin)},${lowerBound(positions, end)}`;
+      return `${lowerBound(work, positions, begin)},${lowerBound(work, positions, end)}`;
     };
     const lists = calls
       ? [this.#eventList(source), this.index.sitePositions]
@@ -1245,13 +1245,12 @@ export class DefinitionLists {
     return [[inA + 1, outA]];
   }
 
-  /** The first of the sorted positions in a span (its ranges in order), or `Infinity`. */
+  /** The first of the sorted positions in a span (its ranges in order), or `Infinity`: one search per range. */
   #firstIn(positions: readonly number[], span: readonly PositionRange[]): number {
     for (const [low, high] of span) {
       if (low > high) continue;
-      this.#program.work.charge("eventSteps", 2);
-      const first = lowerBound(positions, low);
-      if (first < lowerBound(positions, high + 1)) return positions[first]!;
+      const first = positions[lowerBound(this.#program.work, positions, low)];
+      if (first !== undefined && first <= high) return first;
     }
     return Infinity;
   }

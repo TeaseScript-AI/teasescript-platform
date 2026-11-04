@@ -4117,10 +4117,10 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
     // A gated known limit by the owner's decision (TABLE r4.71, option A): each copy reads the global after one more
     // call that stores it, so each has its own snapshot (r4.68 (1)), k entries of the literal, each read at each of the k
     // fields (S6-CARRIERS §4.7's second unmerged shape, copies separated by calls while the source is owned away; a rule
-    // beyond the class rule, or S6c's normalization, merges them). 132,548 / 453,830 units at k = 64, 128 in both orders
-    // (3.4742; `main` 1.99, the output linear); at k = 1,024 24,755,020 units, 82.5 % of its 30,000,000; the allowance
-    // reached at k = 1,129
-    measured: 3.48,
+    // beyond the class rule, or S6c's normalization, merges them). 194,553 / 669,322 units at k = 64, 128 in both orders
+    // (3.4908; `main` 1.99, the output linear), X6's searches of the global's events charged by comparison since #1221
+    // (132,548 / 453,830 and 3.4742 before); 29,950,712 units at k = 910, the allowance reached at k = 911 (1,129 before)
+    measured: 3.5,
     program: (k) =>
       main(
         lines(
@@ -4698,7 +4698,7 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
  * bound at larger sizes; reconsidered when a
  * realistic straight-line run of dozens of alternating adds of several sources into one list appears. A script writes
  * tens of such adds at most (a loop body is one add to the analysis); two alternating sources reach the allowance near
- * 660 adds (29,748,699 units at 656). The sound fix, an order-aware summary of a mixed run, is a redesign of the exact
+ * 650 adds (29,924,630 units at 647 since #1221 charges the event searches by comparison). The sound fix, an order-aware summary of a mixed run, is a redesign of the exact
  * add chain's representation that buys linear work only beyond those tens; the cheaper forms are unsound (a window of
  * several classes dropped a warning and its check, r2 B4) or share nothing (a prefix memo keyed by the class sequence
  * has k keys).

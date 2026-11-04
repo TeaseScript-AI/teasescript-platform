@@ -236,42 +236,43 @@ test("the copied and direct nested stores owe their checks at every mode's stop"
  * Programs outside the candidate slice's syntax, a decision of each freezing: a function's result chain (Astra's C-R1),
  * the unmarked function result (her M2), a checked argument and return, an `add`, a list join, a compound assignment and
  * an interpolation. The candidate route declines them, and the analysis is main's: no receiving obligation, no
- * completion, and every unit charged as on `main` at `92a970442` (a regression oracle of this gate only), at demand 16
- * and 64 in the four modes (each list: demand 16's four modes, then 64's).
+ * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221
+ * (a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
+ * then 64's).
  */
 const frozen = `let a = {f: [[1]]}\nlet b = a\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\nb.f = hostValue`;
 const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
-  ["the C-R1 chain", chain(16), [11837, 12194, 11837, 12194, 18874, 14874, 18895, 14874]],
+  ["the C-R1 chain", chain(16), [11837, 12196, 11837, 12196, 18842, 14876, 18863, 14876]],
   [
     "the unmarked function result",
     'function make {\n  let r = {nest: {n: [[1]]}}\n  return r\n}\nlet out = make()\nsay "BEFORE"\nout.nest.n = hostValue',
-    [1692, 1768, 1692, 1768, 2579, 2304, 2444, 2304],
+    [1694, 1772, 1694, 1772, 2583, 2308, 2448, 2308],
   ],
   [
     "a checked argument",
     `${chain(4)}\nfunction take(x: integer[]) { }\nlet maybe = null\nif hostValue { maybe = [1] }\ntake(maybe)`,
-    [4958, 5425, 4958, 5153, 7200, 6183, 7221, 5911],
+    [4958, 5428, 4958, 5156, 7190, 6187, 7211, 5915],
   ],
   [
     "a checked return",
     `${chain(4)}\nfunction give: integer[] {\n  let maybe = null\n  if hostValue { maybe = [1] }\n  return maybe\n}\nlet got = give()`,
-    [5090, 5525, 5090, 5252, 6973, 6346, 6875, 6073],
+    [5090, 5528, 5090, 5255, 6979, 6350, 6871, 6077],
   ],
   ["an add", "let b = [[1]]\nb.add(hostValue)", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],
   [
     "a list join",
     `${frozen}\nlet xs = [1]\nlet ys = ["s"]\nb.f = [xs + ys]`,
-    [20591, 21799, 20377, 21568, 33461, 34928, 32626, 34004],
+    [20599, 21807, 20377, 21568, 33459, 34928, 32614, 33992],
   ],
   [
     "a compound assignment",
     `${frozen}\nlet n = 1\nn += 1`,
-    [18994, 19136, 18864, 19006, 20720, 22706, 20460, 21814],
+    [18994, 19136, 18864, 19006, 20720, 22708, 20460, 21814],
   ],
   [
     "an interpolation",
     `${frozen}\nsay "n \${b.f}"`,
-    [19746, 19862, 19616, 19732, 21471, 22896, 21211, 22538],
+    [19752, 19868, 19622, 19738, 21477, 22904, 21217, 22544],
   ],
 ];
 
