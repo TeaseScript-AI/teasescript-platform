@@ -56,8 +56,8 @@ export function* entryAt(
       withWriter(yield* contract.contractOfValueAt(entry.elem, at, element), entry.w),
     );
     const kept = ref.length === 1 ? withoutEmpty(items) : items;
-    // (#1668: an element whose items the filter removes whole, an empty collection's, puts none in)
-    if (element !== null && kept.length > 0)
+    // (#1668: kept under its filter: the snapshot drops it where the filter removes its items whole)
+    if (element !== null)
       flow!.attach(
         element,
         ...(ref.length === 1 ? (["withoutEmpty"] as const) : []),

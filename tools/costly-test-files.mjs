@@ -47,6 +47,7 @@ export const costlyTestSeconds = {
   "type-core-answers.test.js": 4,
   "type-core-plus-index.test.js": 3,
   "type-core-operator-table.test.js": 3,
+  "type-core-contributions.test.js": 3,
   "type-core-members.test.js": 2,
   "type-core-kept.test.js": 2,
   "type-core-labels.test.js": 2,

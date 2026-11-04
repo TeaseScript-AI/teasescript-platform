@@ -35,19 +35,30 @@ export function otherwiseKeeps(item: Item): boolean {
   return item.tag !== "null";
 }
 
-/** The filters a qualifier stands for, as `edgesOf` applies them to a slot's answer: none, nulls, `empty`. */
+/**
+ * The items of a receiver or owner its reader's answer holds as they are, where it makes every other kind's anew (a
+ * length, an iteration, a method's result, a member below it): its unknowns (`unknown`, `belowReceiver`).
+ */
+export function heldAsIs(item: Item): boolean {
+  return item.tag === "unknown";
+}
+
+/** The filters a qualifier stands for, as `edgesOf` applies them to a slot's answer: none, nulls, `empty`, all but unknowns. */
 const NULLS = 1;
 const EMPTY = 2;
+const UNKNOWNS = 4;
 function filtersOf(qualifier: Qualifier): number {
   if (qualifier === "operandFilter") return NULLS;
   if (qualifier === "withoutEmpty") return EMPTY;
+  if (qualifier === "unknown" || qualifier === "belowReceiver") return UNKNOWNS;
   return 0;
 }
 
-/** What survives of `items` under `filters`, by the consumers' own filters (`otherwiseKeeps`, `withoutEmpty`). */
+/** What survives of `items` under `filters`, by the consumers' own (`otherwiseKeeps`, `withoutEmpty`, `heldAsIs`). */
 function surviving(items: readonly Item[], filters: number): readonly Item[] {
-  const kept = (filters & EMPTY) !== 0 ? withoutEmpty(items) : items;
-  return (filters & NULLS) !== 0 ? kept.filter(otherwiseKeeps) : kept;
+  let kept = (filters & EMPTY) !== 0 ? withoutEmpty(items) : items;
+  if ((filters & NULLS) !== 0) kept = kept.filter(otherwiseKeeps);
+  return (filters & UNKNOWNS) !== 0 ? kept.filter(heldAsIs) : kept;
 }
 
 /** One slot's answer included in a run's: its demand key, `null` for a route that records no flow (`opaque`). */
@@ -166,7 +177,8 @@ export type Contributions =
  * The contract slots a slot's answer includes, through the non-contract slots it includes (each by its own published
  * flow), from the published flows `flowOf` gives: `unavailable` where a slot on the way has none (unfinished, stopped,
  * forgotten or not recorded) or an included route recorded none (`opaque`). A contract slot reached ends that branch:
- * its own edges are its own (`edges` of it). Below a filter (`operandFilter`, `withoutEmpty`), a slot whose settled
+ * its own edges are its own (`edges` of it). Below a filter (`operandFilter`, `withoutEmpty`, `unknown`,
+ * `belowReceiver`), a slot whose settled
  * answer (`answerOf`) the path's filters remove whole contributes none of its items: it is dropped with everything
  * below it; one they remove in part stays, its surviving items its own. Each slot visited, each inclusion followed,
  * each filter checked and each edge's qualifiers are charged to the analysis's total.

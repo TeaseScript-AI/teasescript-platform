@@ -52,7 +52,7 @@ import {
   type Item,
 } from "../items.js";
 import type { Decision, Work } from "../solver.js";
-import type { FlowSink } from "./contributions.js";
+import { heldAsIs, type FlowSink } from "./contributions.js";
 import type { ReadRoute } from "../values.js";
 import {
   HELD_REFERENCE,
@@ -130,6 +130,7 @@ export function* contractOf(
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
+    // #1668: the demand's own run: its frame's flow, taken as it starts
     make: () => contractOfMade(contract, key),
   };
 }
@@ -471,10 +472,10 @@ function* receiverWalk(
     if (!items.some(holdsBelow)) {
       floor = length;
       below = [
-        ...items.filter((item) => item.tag === "unknown").map(belowUnknown),
+        ...items.filter(heldAsIs).map(belowUnknown),
         ...(items.some((item) => REFERENCE.has(item.tag)) ? [unknownItem(REASON.opaque)] : []),
       ];
-      kept = items.some((item) => item.tag === "unknown") ? staged : null;
+      kept = items.some(heldAsIs) ? staged : null;
     }
   }
   return { reference: false, floor, below, kept };
@@ -496,6 +497,7 @@ export function* receiverKinds(
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
+    // #1668: the demand's own run: its frame's flow, taken as it starts
     make: () => receiverRun(contract, key),
     decision: RECEIVER,
   };
@@ -665,6 +667,7 @@ export function* subAt(
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
+    // #1668: the demand's own run: its frame's flow, taken as it starts
     make: () => subAtMade(contract, sub, rest),
   };
 }

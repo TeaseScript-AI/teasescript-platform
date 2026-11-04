@@ -19,7 +19,7 @@ import { operationItems, type Operator } from "../operator-table.js";
 import { indexedPlus } from "../plus-index.js";
 import type { ValueConstraint } from "../program.js";
 import type { Work } from "../solver.js";
-import { otherwiseKeeps, type FlowSink } from "./contributions.js";
+import { heldAsIs, otherwiseKeeps, type FlowSink } from "./contributions.js";
 import { choiceItems } from "./choices.js";
 import {
   carried,
@@ -65,8 +65,8 @@ export function* contractOfOp(
     const left = (yield* contract.contractOfValueAt(c.left, rest, kept)).filter(
       (item) => rest.length > 0 || otherwiseKeeps(item),
     );
-    // (#1668: a side whose items the filter removes whole puts none into the answer)
-    if (kept !== null && left.length > 0)
+    // (#1668: kept under its filter: the snapshot drops it where the filter removes its items whole)
+    if (kept !== null)
       flow!.attach(kept, ...(rest.length === 0 ? (["operandFilter"] as const) : []));
     return mergeItems(
       [...left, ...(yield* contract.contractOfValueAt(c.right, rest, flow))],
@@ -88,8 +88,8 @@ export function* contractOfOp(
       [...selected, ...(yield* contract.contractOfValueAt(c.fallback, rest, fallback))],
       scope,
     );
-    // (#1668: an element read whose items the selection removes whole, an empty collection's, puts none in)
-    if (element !== null && selected.length > 0)
+    // (#1668: kept under its filter: the snapshot drops it where the filter removes its items whole)
+    if (element !== null)
       flow!.attach(element, "selected", ...(rest.length === 0 ? (["withoutEmpty"] as const) : []));
     if (fallback !== null) flow!.attach(fallback, "default");
     return items;
@@ -155,7 +155,7 @@ export function* contractOfOp(
               carried(makeItem(tag), [item]),
             ),
           );
-      } else if (item.tag === "unknown") {
+      } else if (heldAsIs(item)) {
         // a dict's removed value, or a list's or a set's `null` where it gives that
         unknowns = true;
         out.push(item);
@@ -164,13 +164,13 @@ export function* contractOfOp(
       } else if (gives.fromList === "null" && item.tag !== "dict") {
         if (rest.length === 0) out.push(carried(makeItem("null"), [item]));
       } else if (COLLECTIONS.has(item.tag)) {
-        // (#1668: included where its items survive the selection: an empty collection's element puts none in)
+        // (#1668: kept under its filter: the snapshot drops it where the filter removes its items whole)
         const element = flow?.child() ?? null;
         const selected = belowSelected(
           yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest), element),
           rest,
         );
-        if (element !== null && selected.length > 0)
+        if (element !== null)
           flow!.attach(element, ...(rest.length === 0 ? (["withoutEmpty"] as const) : []));
         out.push(...selected);
       }
@@ -294,11 +294,10 @@ export function* contractOfOp(
     // (#1668: a declared result per receiver kind is made anew; the receiver's unknowns the answer holds as they are)
     const kinds = flow?.child() ?? null;
     const receiver = withoutEmpty(yield* contract.contractOfValue(c.receiver, kinds));
-    if (kinds !== null && receiver.some((item) => item.tag === "unknown"))
-      flow!.attach(kinds, "unknown");
+    if (kinds !== null && receiver.some(heldAsIs)) flow!.attach(kinds, "unknown");
     return mergeItems(
       receiver.flatMap((item) => {
-        if (item.tag === "unknown") return [item];
+        if (heldAsIs(item)) return [item];
         const declared = declaredMethod(item.tag, name);
         return declared === undefined
           ? [unknownItem(REASON.opaque)]

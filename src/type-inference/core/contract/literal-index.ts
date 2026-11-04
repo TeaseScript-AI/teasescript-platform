@@ -636,9 +636,7 @@ export function* loadsBelow(
             ? // #1668: the value side's: its includer records `opaque`
               yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
             : withWriter(yield* contract.contractOfValueAt(entry.value, after, read), group.writer);
-          // (#1668: a member whose items the merge's filter removes whole, an empty collection's, puts none in)
-          if (read !== null && withoutEmpty(answer).length > 0)
-            staged!.attach(read, "writer", "withoutEmpty");
+          if (read !== null) staged!.attach(read, "writer", "withoutEmpty");
           for (const item of answer) items.push(item);
         }
     }

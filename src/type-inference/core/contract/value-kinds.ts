@@ -2,7 +2,7 @@ import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { CorePass } from "../answers.js";
 import { joinParts, joinSteps, keepText } from "../budget.js";
 import type { Contract } from "../contract.js";
-import type { FlowSink } from "./contributions.js";
+import { heldAsIs, type FlowSink } from "./contributions.js";
 import { keyOf } from "../definitions.js";
 import { belowSelected, withoutEmpty } from "../exact-path.js";
 import { marked } from "../guards.js";
@@ -173,7 +173,7 @@ export function* members(
             values,
           );
           const kept = after === 1 ? withoutEmpty(below) : below;
-          if (values !== null && kept.length > 0)
+          if (values !== null)
             flow!.attach(values, ...(after === 1 ? (["withoutEmpty"] as const) : []));
           out.push(...kept);
         } else if (after === 1)
@@ -185,7 +185,7 @@ export function* members(
       // a temporal field or a calendar duration's part: its declared result (V30 §35)
       if (after === 0) out.push(carried(makeItem(declared, item.writer), [item]));
     } else if (item.tag === "object") own = true;
-    else if (item.tag === "unknown") {
+    else if (heldAsIs(item)) {
       onUnknown?.();
       out.push(item);
     }
@@ -294,6 +294,7 @@ function* valueAt(
         file: site.file,
         offset: site.start,
         // (an operation's walk reads arrays: a span's steps copied out, `stepsArray`)
+        // #1668: the demand's own run: its frame's flow, taken as it starts
         make: () => contractOfOp(contract, operation, stepsArray(ref.steps())),
       };
       return contract.entered(value, yield demand);
@@ -357,6 +358,7 @@ export function* contractOfValue(
         kind: "contract",
         file: site?.file ?? -1,
         offset: site?.start ?? -1,
+        // #1668: the demand's own run: its frame's flow, taken as it starts
         make: () => selection(contract, projection),
       };
       return yield demand;
@@ -374,6 +376,7 @@ export function* contractOfValue(
         kind: "contract",
         file: site.file,
         offset: site.start,
+        // #1668: the demand's own run: its frame's flow, taken as it starts
         make: () => contractOfOp(contract, operation, []),
       };
       return contract.entered(value, yield demand);
@@ -427,13 +430,13 @@ function* contractIteration(
   let unknowns = false;
   for (const item of withoutEmpty(yield* contract.contractOfValue(owner, kinds))) {
     if (item.tag === "list" || item.tag === "set") {
-      // (#1668: included where its items survive the selection: an empty collection's element puts none in)
+      // (#1668: kept under its filter: the snapshot drops it where the filter removes its items whole)
       const element = flow?.child() ?? null;
       const selected = belowSelected(
         yield* contract.contractOfValueAt(owner, joinSteps(["element"], rest), element),
         rest,
       );
-      if (element !== null && selected.length > 0)
+      if (element !== null)
         flow!.attach(element, ...(rest.length === 0 ? (["withoutEmpty"] as const) : []));
       out.push(...selected);
     } else if ((item.tag === "dict" || kindElement(item.tag) !== undefined) && rest.length === 0)
@@ -443,7 +446,7 @@ function* contractIteration(
         ]),
       );
     // (an unknown's element: a collection below it may hold none)
-    else if (item.tag === "unknown") {
+    else if (heldAsIs(item)) {
       unknowns = true;
       out.push(item, ...emptyAt(rest));
     }
@@ -475,7 +478,7 @@ function* contractLength(
     } else if (item.tag === "object" || REFERENCE.has(item.tag))
       // an object's own `length` (F11), a reference's member (F19a)
       out.push(...(yield* contract.contractOfValueAt(owner, joinSteps([step], rest), flow)));
-    else if (item.tag === "unknown") {
+    else if (heldAsIs(item)) {
       unknowns = true;
       out.push(item);
     }

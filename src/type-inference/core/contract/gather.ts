@@ -111,6 +111,7 @@ export function* gathered(
         : "value",
     file: at?.file ?? -1,
     offset: at?.start ?? -1,
+    // #1668: the demand's own run: its frame's flow, taken as it starts
     make: () => gatheredMade(contract, site, node, rest, lo, hi),
   };
 }

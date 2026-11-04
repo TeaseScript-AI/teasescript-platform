@@ -9,10 +9,14 @@ import type { CorePass } from "../src/type-inference/core/answers.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { Consumers } from "../src/type-inference/core/consumers.js";
 import {
+  heldAsIs,
+  otherwiseKeeps,
   withContributions,
   withFlowCheck,
   type Contributions,
+  type Qualifier,
 } from "../src/type-inference/core/contract/contributions.js";
+import { withoutEmpty } from "../src/type-inference/core/exact-path.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
@@ -243,6 +247,27 @@ test("each key's edges are the keys its contract includes: copies, written place
       'let x = 1\nif hostValue is integer {\n  x = null\n}\nlet b = [x].get(0, default: 3) otherwise 2\nsay "${b}"\nexit\n',
       [["b", [], ["x"]]],
     ],
+    // (a reader that holds only its receiver's unknowns: a slot of the receiver without one is no edge)
+    [
+      'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).length\nsay "${b}"\nexit\n',
+      [["b", [], ["u"]]],
+    ],
+    [
+      'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).remove("k")\nsay "${b}"\nexit\n',
+      [["b", [], ["u"]]],
+    ],
+    [
+      'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).startsWith("k")\nsay "${b}"\nexit\n',
+      [["b", [], ["u"]]],
+    ],
+    [
+      'let n = 1\nlet u = hostValue\nfor b in [n, u].get(0, default: 0) {\n  say "${b}"\n}\nexit\n',
+      [["b", [], ["u"]]],
+    ],
+    [
+      'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).values.first\nsay "${b}"\nexit\n',
+      [["b", [], ["u"]]],
+    ],
     // (below an unknown, its unknown: the unknown's key)
     ['let a = hostValue\nlet b = a.f\nsay "${b}"\nexit\n', [["a", ["f"], ["a"]]]],
   ];
@@ -318,32 +343,65 @@ test("a declined summary includes none of its sources; a taken one includes them
     }
 });
 
-test("a snapshot charges each slot it visits, each inclusion it follows and each edge's qualifiers", () => {
-  // (the charge counted from the published flows the snapshot walks: a slot visited one step, an inclusion followed
-  // one unit and one per qualifier of its own, an edge kept one per qualifier of its list; each slot of these
-  // sources reached once)
+test("a snapshot charges each slot it visits, each inclusion it follows, each filter it checks and each edge's qualifiers", () => {
+  // (the charge counted from the published flows and answers the snapshot walks: a slot visited one step, an inclusion
+  // followed one unit and one per qualifier of its own, a filter on its path one unit and one per item of the slot's
+  // answer it checks, an edge kept one per qualifier of its list)
+  const filtered = (qualifiers: readonly Qualifier[], items: readonly Item[]): readonly Item[] => {
+    let kept = qualifiers.includes("withoutEmpty") ? withoutEmpty(items) : items;
+    if (qualifiers.includes("operandFilter")) kept = kept.filter(otherwiseKeeps);
+    if (qualifiers.includes("unknown") || qualifiers.includes("belowReceiver"))
+      kept = kept.filter(heldAsIs);
+    return kept;
+  };
+  const filtering: readonly Qualifier[] = [
+    "withoutEmpty",
+    "operandFilter",
+    "unknown",
+    "belowReceiver",
+  ];
+  const wide = (n: number) =>
+    `${Array.from({ length: n }, (_, at) => `let a${at} = hostValue`).join("\n")}\nlet b = a0\n${Array.from({ length: n - 1 }, (_, at) => `b = a${at + 1}`).join("\n")}\nsay "\${b}"\nexit\n`;
+  const sources = [
+    wide(8),
+    wide(32),
+    'let n = null\nlet v = 1\nlet b = [v].get(0, default: n) otherwise 2\nsay "${b}"\nexit\n',
+    'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).length\nsay "${b}"\nexit\n',
+  ];
+  let checks = 0;
   for (const mode of MODES)
-    for (const n of [8, 32]) {
-      const source = `${Array.from({ length: n }, (_, at) => `let a${at} = hostValue`).join("\n")}\nlet b = a0\n${Array.from({ length: n - 1 }, (_, at) => `b = a${at + 1}`).join("\n")}\nsay "\${b}"\nexit\n`;
+    for (const source of sources) {
       const { pass } = analysed(source, mode, true);
       const place = pass.program.places.findIndex((at) => at?.label === "b");
       const start = `c|${keyOf(place, [])}`;
       let expected = 0;
-      const todo = [{ slot: start, depth: 0 }];
+      const seen = new Set<string>();
+      const todo: { readonly slot: string; readonly qualifiers: readonly Qualifier[] }[] = [
+        { slot: start, qualifiers: [] },
+      ];
       for (let next = todo.pop(); next !== undefined; next = todo.pop()) {
         expected += 1;
         for (const inclusion of pass.solver.flowOf(next.slot) ?? []) {
           expected += 1 + inclusion.qualifiers.length;
-          const depth = next.depth + inclusion.qualifiers.length;
-          if (inclusion.slot!.startsWith("c|")) expected += depth;
-          else todo.push({ slot: inclusion.slot!, depth });
+          const qualifiers = [...next.qualifiers, ...inclusion.qualifiers];
+          if (qualifiers.some((qualifier) => filtering.includes(qualifier))) {
+            const answer = pass.solver.answer(inclusion.slot!)!;
+            expected += 1 + answer.length;
+            checks += 1;
+            if (filtered(qualifiers, answer).length === 0) continue;
+          }
+          if (inclusion.slot!.startsWith("c|")) expected += qualifiers.length;
+          else if (!seen.has(`${inclusion.slot} ${qualifiers.join(",")}`)) {
+            seen.add(`${inclusion.slot} ${qualifiers.join(",")}`);
+            todo.push({ slot: inclusion.slot!, qualifiers });
+          }
         }
       }
       const before = pass.program.work.total;
-      const found = edges(pass, "b");
-      assert.ok(typeof found !== "string" && found.length === n, `${String(found)}`);
+      assert.equal(typeof edges(pass, "b"), "object", source);
       assert.equal(pass.program.work.total - before, expected, source);
     }
+  assert.ok(checks > 0, `${checks} filter checks`);
 });
 
 test("a decision's copy of its run's flow is charged with its qualifiers", () => {
@@ -473,28 +531,45 @@ test("every producing read in the contract layer passes a flow, follows an inclu
     "given",
     "kinds",
   ]);
-  type Generator = ts.FunctionDeclaration | ts.FunctionExpression | ts.MethodDeclaration;
-  const generator = (node: ts.Node): node is Generator =>
-    (ts.isFunctionDeclaration(node) ||
-      ts.isFunctionExpression(node) ||
-      ts.isMethodDeclaration(node)) &&
-    node.asteriskToken !== undefined;
+  type FunctionLike =
+    ts.FunctionDeclaration | ts.FunctionExpression | ts.MethodDeclaration | ts.ArrowFunction;
+  const functionLike = (node: ts.Node): node is FunctionLike =>
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isArrowFunction(node);
+  // (an expression through its parentheses and assertions)
+  const bare = (expression: ts.Expression): ts.Expression => {
+    let at = expression;
+    while (
+      ts.isParenthesizedExpression(at) ||
+      ts.isNonNullExpression(at) ||
+      ts.isAsExpression(at) ||
+      ts.isSatisfiesExpression(at)
+    )
+      at = at.expression;
+    return at;
+  };
   const walk = (node: ts.Node, visit: (node: ts.Node) => void): void => {
     visit(node);
     ts.forEachChild(node, (child) => walk(child, visit));
   };
-  // (the layer's producing helpers: generators of items or proven items)
+  // (the layer's producing helpers: its module-level functions, a constant's too, typed `Work<…>` of items or proven
+  // items, generators or not)
+  const producing = /^Work<\s*(?:readonly Item\[\]|Item\[\]|Proven<)/;
   const helpers = new Set<string>();
   for (const { tree } of parsed)
-    walk(tree, (node) => {
-      if (
-        generator(node) &&
-        node.name !== undefined &&
-        node.type !== undefined &&
-        /^Work<\s*(?:readonly Item\[\]|Item\[\]|Proven<)/.test(node.type.getText(tree))
-      )
-        helpers.add(node.name.getText(tree));
-    });
+    for (const statement of tree.statements) {
+      const named: (readonly [string, FunctionLike])[] = [];
+      if (ts.isFunctionDeclaration(statement) && statement.name !== undefined)
+        named.push([statement.name.text, statement]);
+      if (ts.isVariableStatement(statement))
+        for (const declaration of statement.declarationList.declarations)
+          if (declaration.initializer !== undefined && functionLike(declaration.initializer))
+            named.push([declaration.name.getText(tree), declaration.initializer]);
+      for (const [name, fn] of named)
+        if (fn.type !== undefined && producing.test(fn.type.getText(tree))) helpers.add(name);
+    }
   const unclassified: string[] = [];
   let reads = 0;
   for (const { file, text, tree } of parsed) {
@@ -535,17 +610,19 @@ test("every producing read in the contract layer passes a flow, follows an inclu
       });
       return names;
     };
+    // (a scope: a function typed `Work<…>`, or an untyped generator that is no iterator's own method)
+    const solving = (node: ts.Node): node is FunctionLike =>
+      functionLike(node) &&
+      (node.type !== undefined
+        ? /^Work</.test(node.type.getText(tree))
+        : node.asteriskToken !== undefined &&
+          !(ts.isMethodDeclaration(node) && ts.isComputedPropertyName(node.name)));
     walk(tree, (scope) => {
-      if (!generator(scope) || scope.body === undefined) return;
-      const solving =
-        scope.type === undefined
-          ? !(ts.isMethodDeclaration(scope) && ts.isComputedPropertyName(scope.name))
-          : /^Work</.test(scope.type.getText(tree));
-      if (!solving) return;
+      if (!solving(scope) || scope.body === undefined) return;
       const body = scope.body;
       const visit = (node: ts.Node): void => {
-        // (a generator inside is a scope of its own)
-        if (generator(node)) return;
+        // (a scope inside is checked by itself)
+        if (solving(node)) return;
         let read: ts.Node | null = null;
         let call: ts.CallExpression | null = null;
         let names: string[] = [];
@@ -557,22 +634,23 @@ test("every producing read in the contract layer passes a flow, follows an inclu
           read = node;
           names = keyNames(node.expression, body);
         } else if (ts.isCallExpression(node)) {
-          const callee = node.expression;
-          const method = ts.isPropertyAccessExpression(callee) && methods.has(callee.name.text);
-          const helper =
-            ts.isIdentifier(callee) &&
-            helpers.has(callee.text) &&
-            ts.isYieldExpression(node.parent) &&
-            node.parent.asteriskToken !== undefined;
+          // (a method however it is accessed, `contract.m(…)` or `contract["m"](…)`; a helper by its name)
+          const callee = bare(node.expression);
+          const access = ts.isElementAccessExpression(callee)
+            ? bare(callee.argumentExpression)
+            : null;
+          const member = ts.isPropertyAccessExpression(callee)
+            ? callee.name.text
+            : access !== null && ts.isStringLiteralLike(access)
+              ? access.text
+              : null;
+          const method = member !== null && methods.has(member);
+          const helper = ts.isIdentifier(callee) && helpers.has(callee.text);
           if (method || helper) {
             read = node;
             call = node;
             const proved = node.arguments[0];
-            if (
-              ts.isPropertyAccessExpression(callee) &&
-              callee.name.text === "proven" &&
-              proved !== undefined
-            )
+            if (member === "proven" && proved !== undefined)
               names = [`${proved.getText(tree)}.key`];
           }
         }
