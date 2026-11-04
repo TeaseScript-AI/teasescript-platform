@@ -43,7 +43,7 @@ import {
   type FrontierRead,
 } from "../src/type-inference/core/consumers/finishing.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
-import { CoreProgram } from "../src/type-inference/core/program.js";
+import { CoreProgram, propertyStep } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import {
   withEveryRecord,
@@ -57,6 +57,7 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { completedCore, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   combinedAnalyses,
+  combinedMarkProblems,
   combinedStop,
   combinedStopRule,
   withReadsChanged,
@@ -76,6 +77,7 @@ import {
   searchedStops,
   type CombinedStop,
   type HeldCase,
+  widerThan,
 } from "./helpers/type-core-held-host.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { sampled } from "./helpers/sweep.js";
@@ -1844,8 +1846,20 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
     assert.deepEqual([budget.allowance, budget.stoppedIn, budget.settled], [2039, "walk", true]);
   assert.ok(stopped.answers.budget.decisions.some((d) => d.stopped));
   assert.ok(!uncapped.answers.budget.decisions.some((d) => d.stopped));
+  // (a combined stop, judged under its rule: its finishing read answers `first` from its stores' syntax through the copy
+  // of `root`, as the natural analysis does, where the demand-only run's read stopped, #1604)
+  const rule = combinedStopRule(c, mode, unstopped, stopped.answers);
+  const excused = {
+    records: new Set([...rule.records.keys(), ...rule.relabelled.records, ...rule.coarse.records]),
+    checks: new Set([
+      ...rule.checks.keys(),
+      ...rule.owing,
+      ...rule.relabelled.checks,
+      ...rule.coarse.checks.keys(),
+    ]),
+  };
   const judge = (run: StopRun): string[] =>
-    stopProblems({ unstopped, stopped: run, fitting: [], violating: [] });
+    stopProblems({ unstopped, stopped: run, fitting: [], violating: [], excused });
   assert.deepEqual(judge(stopped), []);
   assert.throws(
     () => judge({ ...stopped, without: uncapped.without }),
@@ -3408,6 +3422,210 @@ function coarseClass(problems: readonly string[]): {
   );
   return { entries, others };
 }
+
+/**
+ * #1604: at a combined stop the finishing read answers no kind that neither a finished contract nor a store gives, and a
+ * receiver keeps the structure its key's literal stores give through a copy of an inferred place, so the stop owes the
+ * demand-only run's checks, at most one for one in other words with their domain (`combinedMarkProblems`): two places
+ * copying each other (the issue's witness 1, whose retained decision admitted a `null` no store gives) and a member
+ * below a stopped decision, read through a wrapper of a copied object (witness 2's receiver, by a repeat count). The
+ * issue's witness 2 itself keeps the demand-only run's checks; what remains there is the interpolation's operand check
+ * on the operation's result, owed beyond the reference's (not this mechanism). Every eighth settled stop under each
+ * demand allowance that stops a decision, four modes; the held oracle finds nothing.
+ */
+test("a combined stop owes the demand-only run's checks through a copied place and a wrapped receiver (#1604)", () => {
+  const held = heldFamily(false);
+  for (const name of [
+    "twoWay-1-arithmetic-plain",
+    "wrappers-1-repeat-plain",
+    "wrappers-1-laterOperation-plain",
+  ]) {
+    const c = held.find((each) => each.name === name)!;
+    for (const mode of HELD_MODES) {
+      const demands = heldDemands(c, mode);
+      for (const which of demands.keys()) {
+        const { natural, reference, stoppedAt } = combinedAnalyses(
+          [{ path: "main.tease", source: c.source }],
+          mode,
+          demands[which]!,
+        );
+        combinedStops(
+          c,
+          mode,
+          (where, problems) => {
+            assert.deepEqual(problems, [], where);
+            const allowance = Number(where.slice(where.lastIndexOf("@") + 1));
+            const marks = combinedMarkProblems(reference, natural, stoppedAt(allowance));
+            assert.deepEqual(
+              name === "wrappers-1-laterOperation-plain"
+                ? marks.filter(
+                    (mark) => !mark.startsWith('beyond {"kind":"operand","target":"w1.q.f * 2"'),
+                  )
+                : marks,
+              [],
+              where,
+            );
+          },
+          which,
+        );
+      }
+    }
+  }
+});
+
+/**
+ * #1604's copy of an inferred place by syntax reads its source's stores below the source's root too, one step down a
+ * link (`root.f = {h: 2}` replacing `{g: 1}` in the copied `root`), so a copy's read there keeps the natural analysis's
+ * check that `w1.q.f` has `.g`, which the replacement lacks (`widerThan`: no place lets through more, words apart). At
+ * every settled stop of the program alone, four modes: the loss shows in a band of stops a sample (`testedStops`) misses,
+ * and the whole list takes about 3 s.
+ */
+test("a copy of an inferred place reads its source's stores below the source's root (#1604)", () => {
+  const source = [
+    "let root = {f: {g: 1}}",
+    "root.f = {h: 2}",
+    "let w1 = {q: root, spare: {k: 1}}",
+    'say "BEFORE"',
+    'repeat w1.q.f.g {say "ok"}',
+    'say "AFTER"',
+    "exit",
+    "",
+  ].join("\n");
+  const c: HeldCase = {
+    name: "wrapper of a place stored below its root",
+    source,
+    slice: true,
+    values: [],
+  };
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!;
+  for (const mode of HELD_MODES) {
+    const natural = mode.run(() => analyseCore(request));
+    for (const { allowance } of heldStops(c, mode))
+      assert.deepEqual(
+        widerThan(
+          natural.checks,
+          mode.run(() => withTestAllowance(allowance, () => analyseCore(request))),
+        ),
+        [],
+        `${mode.name} @${allowance}`,
+      );
+  }
+});
+
+/**
+ * #1604's retained `null` follows the contract at a binding's root only: below it a decision admitting `null` keeps it,
+ * since a read there may find no such member (`w1.q = {h: 2}` replaces the object holding `g`), which the conservative
+ * null's check stands for. No place lets through more than the natural run at `w1.q.g` (`widerThan`), at the sampled
+ * settled stops of the program alone (`testedStops`), four modes. The receiver `w1.q` itself is #1654's (a presence check `main` drops there).
+ */
+test("a retained member below its root keeps admission's null (#1604)", () => {
+  const source = [
+    "let root = {g: 1}",
+    "let w1 = {q: root, spare: {k: 1}}",
+    "w1.q = {h: 2}",
+    'say "BEFORE"',
+    'repeat w1.q.g {say "ok"}',
+    'say "AFTER"',
+    "exit",
+    "",
+  ].join("\n");
+  const c: HeldCase = { name: "a member replaced below the root", source, slice: true, values: [] };
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!;
+  for (const mode of HELD_MODES) {
+    const natural = mode.run(() => analyseCore(request));
+    for (const { allowance } of testedStops(heldStops(c, mode)))
+      assert.deepEqual(
+        widerThan(
+          natural.checks,
+          mode.run(() => withTestAllowance(allowance, () => analyseCore(request))),
+        ).filter((place) => !place.includes('\\"w1.q\\",')),
+        [],
+        `${mode.name} @${allowance}`,
+      );
+  }
+});
+
+/**
+ * #1604's syntax through copies of inferred places answers each key alike whatever order its reads ask it (Codex r1's N1
+ * and N2, r3's B4 on #1653): a key a cycle of copies reaches is untold from wherever it is asked (two places copying each
+ * other, each wrapped; joined cycles through a projected copy), and a level cut past the copy bound from a deeper caller
+ * is kept only where its chain started (a chain of eight copies of a literal, wrapped once). Every binding's own key and
+ * its `q`, `f` and `q.f` paths asked in their order and reversed, on fresh walks of the analysis's settled pass, four
+ * modes: the same decisions.
+ */
+test("the stores' syntax through copies answers alike in either order of reads (#1604)", () => {
+  const sources = [
+    ["let a = {f: 1}", "let b = a", "a = b", "let w = {q: a}", "let v = {q: b}"],
+    [
+      "let a0 = {f: 1}",
+      ...Array.from({ length: 8 }, (_, i) => `let a${i + 1} = a${i}`),
+      "let w = {q: a8}",
+    ],
+    [
+      "let a = {f: 1}",
+      "let b = {q: a}",
+      "let c = b.q",
+      "let d = {q: c}",
+      "d = b",
+      "b = d",
+      "a = c",
+      "let w = {q: d.q}",
+    ],
+  ].map((lines) => [...lines, 'say "${w.q.f}"', "exit", ""].join("\n"));
+  for (const source of sources)
+    for (const mode of HELD_MODES) {
+      let captured: Consumers | undefined;
+      const check = Consumers.prototype.check;
+      Consumers.prototype.check = function (this: Consumers) {
+        captured = this;
+        return check.call(this);
+      };
+      try {
+        mode.run(() =>
+          analyseCore(coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!),
+        );
+      } finally {
+        Consumers.prototype.check = check;
+      }
+      const pass = captured!.pass;
+      const asked = pass.program.places.flatMap((place) =>
+        place.kind.kind === "binding" && place.kind.declared === "let"
+          ? [[], ["q"], ["f"], ["q", "f"]].map((path) => ({
+              root: place.id,
+              path: path.map(propertyStep),
+            }))
+          : [],
+      );
+      const decisions = (order: typeof asked) => {
+        const walk = new Consumers(pass);
+        walk.finishing = true;
+        walk.settled = true;
+        const found = new Map<string, string>();
+        for (const { root, path } of order) {
+          const decided = walk.cheapDecided(root, path);
+          found.set(
+            `${root}:${path.join(".")}`,
+            JSON.stringify(
+              decided === null
+                ? null
+                : {
+                    kinds: decided.kinds,
+                    spelling: decided.spelling,
+                    decider: decided.decider.site,
+                    inherited: decided.inherited,
+                  },
+            ),
+          );
+        }
+        return [...found].sort(([a], [b]) => a.localeCompare(b));
+      };
+      assert.deepEqual(
+        decisions([...asked].reverse()),
+        decisions(asked),
+        `${mode.name}: ${source}`,
+      );
+    }
+});
 
 /**
  * TABLE r4.299: the coarse (a) reading's counted class, never a pass. Where a read of the check's reference unit that the

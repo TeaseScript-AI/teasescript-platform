@@ -19,12 +19,17 @@ import {
 } from "../src/type-inference/core/items.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withLabelRecords } from "../src/type-inference/core/contract/labels.js";
-import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { Consumers, withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { operationItems } from "../src/type-inference/core/operator-table.js";
+import { propertyStep } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { ItemSource } from "./helpers/type-core-items.js";
-import { frontierGrowthProblems } from "./helpers/type-core-held-host.js";
+import {
+  frontierGrowthProblems,
+  HELD_MODES,
+  type HeldMode,
+} from "./helpers/type-core-held-host.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 // The work budget (TABLE §8; the reference model's `budget-check.mjs`, checks 1 and 2): the counters sum to the charged
@@ -620,6 +625,85 @@ test("a linked record list stops at the allowance with its count checked when it
 });
 
 /**
+ * The stores' syntax at a settled stop looks at each source's level and each written type a bounded number of times,
+ * each look charged (Codex r5's and r6's B1 on #1653), k readers each asked at `q` on a fresh walk of the analysis's
+ * settled pass: a source given k written types and the tip of a chain of nine copies, which cuts it at
+ * `FRONTIER_COPIES` (its level made once a depth); a written union of k members beside that cut chain (no summary of an
+ * untold frontier); and that union read whole (its kinds made once a walk). Per doubling of the syntax nodes,
+ * k = 16 → 128, four modes, the walk's charged checks grow within the growth gate's 2.35.
+ */
+test("the stores' syntax looks at a cut source or a wide written type a bounded number of times (#1604)", () => {
+  const chain = [
+    "let a0 = {f: 1}",
+    ...Array.from({ length: 9 }, (_, i) => `let a${i + 1} = a${i}`),
+  ];
+  const union = (k: number) =>
+    `let typed: ${Array.from({ length: k }, () => "object").join(" | ")} = {f: 1}`;
+  const shapes: Record<string, (k: number) => string[]> = {
+    "cut-written-source": (k) => [
+      ...chain,
+      ...Array.from({ length: k }, (_, i) => `let t${i}: object = {f: 1}`),
+      "let source = a9",
+      ...Array.from({ length: k }, (_, i) => `source = t${i}`),
+      ...Array.from({ length: k }, (_, i) => `let c${i} = {q: source}`),
+    ],
+    "cut-wide-union": (k) => [
+      ...chain,
+      union(k),
+      ...Array.from({ length: k }, (_, i) => [`let c${i} = {q: typed}`, `c${i}.q = a9`]).flat(),
+    ],
+    "wide-union": (k) => [
+      union(k),
+      ...Array.from({ length: k }, (_, i) => `let c${i} = {q: typed}`),
+    ],
+  };
+  const measured = (lines: string[], k: number, mode: HeldMode) => {
+    const source = [
+      ...lines,
+      ...Array.from({ length: k }, (_, i) => `repeat c${i}.q.f {}`),
+      "exit",
+      "",
+    ].join("\n");
+    let captured: Consumers | undefined;
+    const check = Consumers.prototype.check;
+    Consumers.prototype.check = function (this: Consumers) {
+      captured = this;
+      return check.call(this);
+    };
+    let nodes: number;
+    try {
+      const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!;
+      nodes = mode.run(() => analyseCore(request)).budget.counts.get("syntaxNodes")!;
+    } finally {
+      Consumers.prototype.check = check;
+    }
+    const pass = captured!.pass;
+    const walk = new Consumers(pass);
+    walk.finishing = true;
+    walk.settled = true;
+    const before = pass.program.work.apartCounts().get("checks") ?? 0;
+    pass.program.work.apart(() => {
+      for (const place of pass.program.places)
+        if (place.kind.kind === "binding" && /^c\d+$/.test(place.kind.name))
+          walk.cheapDecided(place.id, [propertyStep("q")]);
+    });
+    return { checks: (pass.program.work.apartCounts().get("checks") ?? 0) - before, nodes };
+  };
+  const problems: string[] = [];
+  for (const [shape, make] of Object.entries(shapes))
+    for (const mode of HELD_MODES)
+      for (const k of [16, 32, 64]) {
+        const [small, large] = [measured(make(k), k, mode), measured(make(2 * k), 2 * k, mode)];
+        const doubling = (2 * (large.checks / small.checks)) / (large.nodes / small.nodes);
+        if (doubling > 2.35)
+          problems.push(
+            `${shape} ${mode.name} ${k} -> ${2 * k}: ${small.checks} -> ${large.checks}: ${doubling.toFixed(3)}`,
+          );
+      }
+  assert.deepEqual(problems, []);
+});
+
+/**
  * #1445, TABLE r4.208: after a settled program stop, the finishing read's host data (`heldIngress`) is followed by a walk
  * bounded by constants (`FRONTIER_DEPTH` copies deep, `FRONTIER_COPIES` copies met), past which the read answers its
  * place's component's host data, made once per component; so each read's work is bounded and the finishing work stays
@@ -640,13 +724,20 @@ test("a settled stop finishes the host data of every copy-graph topology in line
         : // (a chain's read follows up to `FRONTIER_COPIES` = 8 of its links, keeping the furthest found for the next
           // read: read deepest first, from 8 → 16 the reads' work ramps up toward that bound, which reads as growth
           // though each read's work is bounded; an `addAll` of k copies meets them all at one read, and a literal of k
-          // copies read k deep cuts every read, each from 9 on)
+          // copies read k deep cuts every read, each from 9 on; so does a ring of more than 8 copies, each read
+          // following its 8 links again, since a level cut below the read's own key is not kept, #1604: whole units
+          // per doubling forward/reversed at 8 → 16 are main's 2.021/2.021 and #1604's 2.154/2.032, at 16 → 32
+          // main's 2.010/2.010 and #1604's 2.035/2.005)
           shape === "chain" ||
+            shape === "ring" ||
             shape === "chain-own" ||
             shape === "addAll-copies" ||
             shape === "cut-chain"
           ? [16, 32]
-          : [8, 16],
+          : // (k sources copied k times or through k places: their square term shows only from 32 on, #1604)
+            shape === "wide-repeated-copies" || shape === "wide-reconverging-copies"
+            ? [32, 64]
+            : [8, 16],
     ),
     [],
   );

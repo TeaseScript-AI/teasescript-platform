@@ -22,7 +22,12 @@ import {
   type Globals,
   type Span,
 } from "./helpers/type-core-contract-knowledge.js";
-import { heldStops, HELD_MODES, type HeldMode } from "./helpers/type-core-held-host.js";
+import {
+  heldStops,
+  HELD_MODES,
+  testedStops,
+  type HeldMode,
+} from "./helpers/type-core-held-host.js";
 
 /*
  * The contracts of stable admission (#1526 phase B, TABLE r4.278; #1556): once admission settled, before the walk, the
@@ -313,8 +318,10 @@ test("a genuinely open part stays open past the capture, as unstopped", () => {
 });
 
 test("a property whose proof a stop cut leaves its complete sibling checked whole", () => {
+  // (`a.g` also stored from a loop's element, whose type the stores' syntax does not tell, so `b`'s copy of `a` is not
+  // decided by syntax after the stop: the capture rests on the proof the stop cut, #1604)
   const source =
-    'let a = {f: [[1]], g: [["s"]]}\nlet b = a\nsay "BEFORE"\nb = hostValue\nsay "AFTER"\nexit\n';
+    'let a = {f: [[1]], g: [["s"]]}\nfor x in [[["t"]]] {a.g = x}\nlet b = a\nsay "BEFORE"\nb = hostValue\nsay "AFTER"\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
   const g = propertyStep("g");
   let witnessed = 0;
@@ -343,10 +350,36 @@ test("a property whose proof a stop cut leaves its complete sibling checked whol
   assert.ok(witnessed > 0, "some stop leaves `g` alone unfinished");
 });
 
-test("a property whose proof a stop cut leaves its later complete sibling checked (Codex r1 on #1606)", () => {
-  // (`g` decided before the capture by its own store, `f` cut: the later sibling's check stands at the store)
+/**
+ * #1604: a copy of an inferred place the stores' syntax decides after a stop, its source's root stores telling its parts
+ * (`let b = a`, `a` stored into nowhere below its root), gives the capture the natural analysis's contract at every
+ * extraction stop the CI sample visits (`testedStops`): complete, the same type.
+ */
+test("a copy of an inferred place gives the capture its natural contract after a stop (#1604)", () => {
   const source =
-    'let a = {f: [[1]], g: 1}\nlet b = a\nb.g = 2\nsay "BEFORE"\nb = hostValue\nsay "AFTER"\nexit\n';
+    'let a = {f: [[1]], g: [["s"]]}\nlet b = a\nsay "BEFORE"\nb = hostValue\nsay "AFTER"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+  const [natural] = storeContracts(analyseCore(request), request).values();
+  assert.ok(natural?.state === "complete");
+  const stops = testedStops(
+    heldStops({ name: "copied", source, slice: true, values: [] }, HELD_MODES[0]!),
+  ).filter(({ phase }) => phase === "extraction");
+  assert.ok(stops.length > 0);
+  for (const { allowance } of stops) {
+    const [result] = storeContracts(
+      withTestAllowance(allowance, () => analyseCore(request)),
+      request,
+    ).values();
+    assert.ok(result?.state === "complete", `stop at ${allowance}`);
+    assert.deepEqual(result.ref, natural.ref, `stop at ${allowance}`);
+  }
+});
+
+test("a property whose proof a stop cut leaves its later complete sibling checked (Codex r1 on #1606)", () => {
+  // (`g` decided before the capture by its own store, `f` cut: the later sibling's check stands at the store; `a.f`
+  // stored from a loop's element, as above, #1604)
+  const source =
+    'let a = {f: [[1]], g: 1}\nfor x in [[[2]]] {a.f = x}\nlet b = a\nb.g = 2\nsay "BEFORE"\nb = hostValue\nsay "AFTER"\nexit\n';
   const store = spanOf(source, "b = hostValue");
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
   const f = propertyStep("f");

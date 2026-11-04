@@ -56,7 +56,7 @@ export type Offending = readonly [Item, string];
 
 /**
  * What the stores into one key give each path below it by their syntax alone (TABLE r4.89 (2)): the types literals
- * have there (`null` among them), the written types copies bring (each from its own path on), the property names, the
+ * have there (`null` among them), the written types copies bring (each from its own path on), the
  * earliest store that gives a type there, and whether a store gives it a value its syntax does not tell (`opaque`).
  */
 export interface CheapShape {
@@ -67,21 +67,39 @@ export interface CheapShape {
     readonly by: Definition;
   }[];
   readonly children: Map<string, CheapShape>;
-  readonly names: Set<string>;
   /** The properties of the first object literal given here: an object literal with others makes it opaque. */
   properties: ReadonlySet<string> | null;
   first: Definition | null;
   opaque: boolean;
+  /**
+   * The copies of inferred places stored here (#1604): each copies its source's own syntax there, from its path on,
+   * read through the source's frontier (`cheapFrontier`), its types given by the store that copies.
+   */
+  readonly copies: {
+    readonly root: PlaceId;
+    readonly path: readonly string[];
+    readonly by: Definition;
+  }[];
 }
 
 /**
- * What reaches one key and path by syntax: the shapes of the keys at and above it, there; the written types copies bring
- * there; whether every value there is told by syntax (`told`, which holds for each path below only while it holds).
+ * What reaches one key and path by syntax: the shapes of the key's own stores and of the keys above it, there; the
+ * written types copies of written places bring there; the frontiers of the inferred places copied there (`links`), each
+ * by reference with the earliest store that copies it, once a source, so no source's shapes are copied into another's
+ * (#1604); whether every value there is told by syntax (`told`, which holds for each path below only while it holds).
  */
 export interface CheapFrontier {
   readonly shapes: readonly CheapShape[];
   readonly written: readonly { readonly term: TypeTerm; readonly by: Definition }[];
+  readonly links: readonly {
+    readonly root: PlaceId;
+    readonly path: readonly string[];
+    readonly by: Definition;
+    readonly frontier: CheapFrontier;
+  }[];
   readonly told: boolean;
+  /** The longest chain of copies of inferred places it follows (`Infinity` where one passed the bound, #1604). */
+  readonly reach: number;
 }
 
 /** A cheap decider's decision of a place at a path (`Consumers.cheapDecided`). */
@@ -89,7 +107,25 @@ export interface CheapDecision {
   readonly kinds: readonly ItemTag[];
   /** The written spelling that orders the kinds, where one covers them (`covering`, #1398). */
   readonly spelling?: Spelling;
-  readonly names: ReadonlySet<string>;
   readonly decider: Definition;
   readonly inherited: boolean;
 }
+
+/**
+ * How deep in copies (`FRONTIER_DEPTH`) and how many copies met (`FRONTIER_COPIES`: each copy standing at a frontier's
+ * path, each time it is met, and each single copy a frontier is followed through, `sameOf`) a read's host data is followed
+ * before the read answers its place's component's (TABLE r4.208): each read's walk is then bounded by a constant, so the finishing reads' work stays linear
+ * in the program by construction, whatever the copy graph's shape. Where the walk is cut, the read answers the host
+ * data its place's component of the place-level copy graph reaches (`placeIngress`): every path, so a superset, never a
+ * dropped check. Measured with this walk over the stop corpus (170 sources), the repository's scripts (19) and the held
+ * family (480), at sampled settled stops in two orders: of 9,933 finishing reads, 9,722 end at their own frontier (depth
+ * 0), 179 one copy deep and 32 two; no read meets more than 7 copies (2,096 none, 4,304 one, 2,162 two, 694 three, 677
+ * four to seven). At 2 and 8, 15 reads are cut (the family's rings), each naming the same writers as its exact walk, so
+ * the cut adds no mark, warning, runtime check or boundary there. `FRONTIER_COPIES` also bounds the chain of copies of
+ * inferred places the stores' syntax follows from a key (`consumers/syntax.ts`, #1604): past it the key is not told by
+ * syntax, so a read answers its later sources or `STOPPED`, never a dropped check. Chains past it occur only in generated
+ * or constructed families (the areas: 339 of 45,796 measured sources, to 1,025; the 15,406-source set: 9, to 17), and
+ * the walk recurses once a link, so a chain of a thousand copies followed whole overflows the native stack (#1664).
+ */
+export const FRONTIER_DEPTH = 2;
+export const FRONTIER_COPIES = 8;

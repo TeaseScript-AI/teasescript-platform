@@ -27,6 +27,7 @@ import { conversionCategory, dictList } from "../method-categories.js";
 import { stepName } from "../program.js";
 import type { Work } from "../solver.js";
 import { stands } from "./fresh.js";
+import { FRONTIER_COPIES, FRONTIER_DEPTH } from "./model.js";
 import { LITERALS, unsettledItem } from "./kinds.js";
 import { readKey } from "./names.js";
 import { placelessCells, syntaxRead } from "./syntax.js";
@@ -401,20 +402,8 @@ interface HostFrontiers {
 
 const hostFrontiers = new WeakMap<Consumers, HostFrontiers>();
 
-/**
- * How deep in copies (`FRONTIER_DEPTH`) and how many copies met (`FRONTIER_COPIES`: each copy standing at a frontier's
- * path, each time it is met, and each single copy a frontier is followed through, `sameOf`) a read's host data is followed
- * before the read answers its place's component's (TABLE r4.208): each read's walk is then bounded by a constant, so the finishing reads' work stays linear
- * in the program by construction, whatever the copy graph's shape. Where the walk is cut, the read answers the host
- * data its place's component of the place-level copy graph reaches (`placeIngress`): every path, so a superset, never a
- * dropped check. Measured with this walk over the stop corpus (170 sources), the repository's scripts (19) and the held
- * family (480), at sampled settled stops in two orders: of 9,933 finishing reads, 9,722 end at their own frontier (depth
- * 0), 179 one copy deep and 32 two; no read meets more than 7 copies (2,096 none, 4,304 one, 2,162 two, 694 three, 677
- * four to seven). At 2 and 8, 15 reads are cut (the family's rings), each naming the same writers as its exact walk, so
- * the cut adds no mark, warning, runtime check or boundary there.
- */
-export const FRONTIER_DEPTH = 2;
-export const FRONTIER_COPIES = 8;
+// (the finishing read's copy bounds live in `model.ts`, which the stores' syntax shares, #1604)
+export { FRONTIER_COPIES, FRONTIER_DEPTH };
 
 /** The limits a read's walk follows (`withFrontierBound` in tests). */
 let frontierBound: { readonly depth: number; readonly copies: number } = {

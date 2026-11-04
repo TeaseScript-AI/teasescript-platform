@@ -1289,6 +1289,84 @@ export function isNamedException(problem: string): boolean {
   return problem.startsWith("exception #") || problem.startsWith("exception coarse(a) ");
 }
 
+/**
+ * Where a stop lets through more than a requirement (a run's checks): each place (whole site, target, boundary) and
+ * dimension the requirement checks where the stop's owed checks (kept and marks' obligations) are none, or together let
+ * through a kind the requirement's do not; with the requirement's first check there. Words apart: a check lost, never one
+ * said otherwise (#1604).
+ */
+export function widerThan(required: readonly Obligation[], stopped: Answers): string[] {
+  const owed = [...stopped.checks, ...stopped.budget.deferred.map((mark) => mark.obligation)];
+  const domains = (list: readonly Obligation[]) => {
+    const map = new Map<string, ReadonlySet<string>>();
+    for (const check of list) {
+      const place = JSON.stringify([placeOf(check), dimensionOf(check)]);
+      const known = map.get(place);
+      map.set(
+        place,
+        known === undefined ? domainOfCheck(check) : intersect(known, domainOfCheck(check)),
+      );
+    }
+    return map;
+  };
+  const [want, have] = [domains(required), domains(owed)];
+  return [...want]
+    .filter(([place, kinds]) => [...(have.get(place) ?? ["none"])].some((kind) => !kinds.has(kind)))
+    .map(([place]) => `wider ${place}`);
+}
+
+/**
+ * #1604's invariant at a combined stop, against the demand-only run R (TABLE r4.290's (w) made exact by count): at each
+ * place (whole site, target, boundary) and dimension, the checks the stop owes (kept and marks' obligations) are R's
+ * there, or replace R's one for one (no more of them than R has) letting through together exactly R's domain, or are
+ * none where the rule's (a) takes every check R owes there. Each other place is a problem: `missing` (R owes there, the
+ * stop nothing, not (a)), `beyond` (the stop owes where R owes nothing), `differs` (another domain), `excess` (R's
+ * domain by more marks than R's), with the stop's first check there.
+ */
+export function combinedMarkProblems(
+  reference: Answers,
+  natural: Answers,
+  stopped: Answers,
+): string[] {
+  const owed = [...stopped.checks, ...stopped.budget.deferred.map((mark) => mark.obligation)];
+  const rule = combinedStop(reference, natural, stopped);
+  const places = (list: readonly Obligation[]) => {
+    const map = new Map<string, Obligation[]>();
+    for (const check of list) {
+      const place = JSON.stringify([placeOf(check), dimensionOf(check)]);
+      map.set(place, [...(map.get(place) ?? []), check]);
+    }
+    return map;
+  };
+  const domain = (list: readonly Obligation[]): string =>
+    domainText(list.map(domainOfCheck).reduce(intersect));
+  const [mine, theirs] = [places(owed), places(reference.checks)];
+  const problems: string[] = [];
+  for (const place of new Set([...mine.keys(), ...theirs.keys()])) {
+    const [c, r] = [mine.get(place), theirs.get(place)];
+    const texts = (list: readonly Obligation[] | undefined) =>
+      new Set((list ?? []).map((check) => JSON.stringify(check)));
+    if (c !== undefined && r !== undefined) {
+      const [own, ref] = [texts(c), texts(r)];
+      if (own.size === ref.size && [...ref].every((text) => own.has(text))) continue;
+    }
+    const kind =
+      c === undefined
+        ? r!.every((check) => rule.checks.get(JSON.stringify(check)) === "a")
+          ? null
+          : "missing"
+        : r === undefined
+          ? "beyond"
+          : domain(c) !== domain(r)
+            ? "differs"
+            : texts(c).size > texts(r).size
+              ? "excess"
+              : null;
+    if (kind !== null) problems.push(`${kind} ${JSON.stringify((c ?? r)![0])}`);
+  }
+  return problems;
+}
+
 /** The natural analysis (no demand allowance, no stop) beside each demand-only reference run, made once per run. */
 const naturals = new WeakMap<StopRun, Answers>();
 
@@ -1614,8 +1692,9 @@ export function randomCopyGraph(
 }
 
 /**
- * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, and seven of
- * reads no place holds.
+ * The finishing growth gate's shapes: the copy graph's topologies, three shapes of a place's many stores, seven of
+ * reads no place holds, and three of copies of an inferred place repeated at two levels, wide or reconverging, read
+ * through wrappers (#1604).
  */
 function gateShapes(): Record<string, (k: number) => string> {
   const rows = (k: number, line: (i: number) => string) => lines(k, line).join("\n");
@@ -1648,6 +1727,15 @@ function gateShapes(): Record<string, (k: number) => string> {
       `repeat [[${"[".repeat(k)}hostValue${"]".repeat(k)}].toList()].toList()[0][0]${"[0]".repeat(k)} {}\nexit`,
     "nested-get-cells": (k) =>
       `repeat ${nest(k, "hostValue", (text) => `[1].get(5, default: [${text}][0])`)} {}\nexit`,
+    // (#1604, Codex r1's B1 on #1653: k stores copying `a` into `b` and k copying `b` into `c`, each wrapper's read
+    // through the stores' syntax meeting `a`'s shapes once a level, not once a store)
+    // (and k sources stored into one, copied k times into another, or through k places into a third: Codex r2's B1)
+    "wide-repeated-copies": (k) =>
+      `${rows(k, (i) => `let a${i} = {f: hostValue}`)}\nlet source = a0\n${rows(k - 1, (i) => `source = a${i + 1}`)}\nlet b = source\n${rows(k, () => "b = source")}\nlet w = {q: b}\nrepeat w.q.f {}\nexit`,
+    "wide-reconverging-copies": (k) =>
+      `${rows(k, (i) => `let a${i} = {f: hostValue}`)}\nlet source = a0\n${rows(k - 1, (i) => `source = a${i + 1}`)}\n${rows(k, (i) => `let b${i} = source`)}\nlet c = b0\n${rows(k - 1, (i) => `c = b${i + 1}`)}\n${rows(k, (i) => `let w${i} = {q: c}\nrepeat w${i}.q.f {}`)}\nexit`,
+    "repeated-copies": (k) =>
+      `let a = {f: hostValue}\nlet b = a\n${rows(k, () => "b = a")}\nlet c = b\n${rows(k, () => "c = b")}\n${rows(k, (i) => `let w${i} = {q: c}\nrepeat w${i}.q.f {}`)}\nexit`,
     // (a literal of k copies read k deep: past eight copies every read is cut, its root found once along the chain)
     "cut-chain": (k) =>
       `${rows(k, (i) => `let x${i} = hostValue`)}\nrepeat [${lines(k, (i) => `x${i}`).join(", ")}][0]${"[0]".repeat(k)} {}\nexit`,
