@@ -67,6 +67,10 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a node's path in the literal it is in, one per cell, as admission keeps (charged)",
   ],
+  "consumer.ts completedBelow split": [
+    1,
+    "the steps of a stopped store's destination counted from its obligation's text, not kept",
+  ],
   "consumer.ts coreFacts spread": [1, "a lookup of a place's element levels, not kept"],
   "consumer.ts expected spread": [1, "a lookup of a landing's level, not kept"],
   "consumer.ts fallbackSteps split": [
@@ -74,11 +78,24 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     "a C10 target's element steps read from its text, not kept",
   ],
   "consumer.ts fieldOrder spread": [1, "field names, no path"],
+  "consumer.ts partChecksOf split": [
+    1,
+    "a part's steps read from its obligation's target text, once per obligation, not kept",
+  ],
+  "consumer.ts partOf split": [1, "a destination's root and steps for a part's place in a message"],
+  "consumer.ts partOf spread": [1, "a part's steps for its place in a message, not kept"],
   "consumer.ts levelsOf spread": [
     2,
     "a type plan's levels: a written type's, or a plan cut at SLICE_DEPTH",
   ],
-  "consumer.ts stored join": [1, "a store's target name in a message"],
+  "consumer.ts stored join": [
+    2,
+    "a store's target name in a message; its destination's label, one per checked store, read by its part checks",
+  ],
+  "consumer.ts stored spread": [
+    1,
+    "a store's destination's label, one per checked store, read by its part checks",
+  ],
   "consumer.ts takesNull spread": [2, "lookups of a landing's levels, not kept"],
   "contract-descriptors.ts #contract composite": [
     1,
