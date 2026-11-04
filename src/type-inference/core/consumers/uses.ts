@@ -9,13 +9,14 @@ import { nullWarning, obligation, warning } from "./warnings.js";
 
 // The graph's uses (counts, indexes, conditions, dict keys: C2, C3, C12), and every access to a speaker's field (F19a).
 
-/** The counts, indexes, conditions and dict keys of the graph (C2, C3, C12). */
+/** The counts, indexes, range bounds, conditions and dict keys of the graph (C2, C3, C12; V30 §6). */
 export function uses(walk: Consumers): void {
   const { program } = walk.pass;
   const flow = program.flow;
   const uses = walk.order([
     ...flow.indexUses.map((use) => ({ use, what: "index" })),
     ...flow.countUses.map((use) => ({ use, what: "repeat count" })),
+    ...flow.rangeUses.map((use) => ({ use, what: "range bound" })),
     ...flow.conditionUses.map((use) => ({ use, what: "condition" })),
     ...flow.keyUses.map((use) => ({ use, what: "dict key" })),
   ]);
@@ -53,7 +54,10 @@ export function uses(walk: Consumers): void {
           ["integer"],
           `check that the ${what} is a whole number when it runs`,
         ),
-        { rule: "count", use: what === "index" ? "index" : "repeat" },
+        {
+          rule: "count",
+          use: what === "index" ? "index" : what === "range bound" ? "range" : "repeat",
+        },
         [],
       );
       continue;
@@ -75,7 +79,7 @@ export function uses(walk: Consumers): void {
       const projection = indexProjection(walk, use.span, use.file);
       if (projection !== undefined) indexUse(walk, projection, place, node, site, what);
       else integerOnly(walk, place, node, site, what, "index");
-    } else integerOnly(walk, place, node, site, what, "repeat");
+    } else integerOnly(walk, place, node, site, what, what === "range bound" ? "range" : "repeat");
   }
 }
 

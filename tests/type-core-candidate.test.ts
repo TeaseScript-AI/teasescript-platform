@@ -1505,6 +1505,62 @@ test("every method of text's known-argument errors are the current checker's (#1
   assert.ok(compared >= 75, `${compared} calls compared`);
 });
 
+/**
+ * V30 §6 (#1173): a range a `for` loop goes through as written has whole-number bounds. A bound the core knows to be a
+ * number or text is a compile error at the bound (TSV010, as the current checker gives); a whole one is quiet; one
+ * from outside the script warns and keeps the runtime's check of the range.
+ */
+test("a for loop's range bound that is a number or text is an error at the bound, its host bound checked when it runs (V30 §6, #1173)", () => {
+  const errors = [
+    [
+      "for i in 1..2.0 { say i }\nexit\n",
+      12,
+      "'2.0' is a number. Round the number with the floor, round or ceil function first.",
+    ],
+    [
+      "for i in 1.0..2 { say i }\nexit\n",
+      9,
+      "'1.0' is a number. Round the number with the floor, round or ceil function first.",
+    ],
+    [
+      "let x = 2.5\nfor i in 1..x { say i }\nexit\n",
+      24,
+      "'x' is a number. Round the number with the floor, round or ceil function first.",
+    ],
+    [
+      'let t = "a"\nfor i in 1..t.trim() { say i }\nexit\n',
+      24,
+      "'t.trim()' is text (string). Use a whole number here.",
+    ],
+  ] as const;
+  for (const [source, at, cause] of errors) {
+    const result = inBothOrders(() => candidate(source));
+    assert.deepEqual(sited(result), [`error TSV010@${at}`], source);
+    assert.equal(
+      result.diagnostics[0]!.message,
+      `A 'for' loop needs a range of whole numbers, but ${cause}`,
+      source,
+    );
+    assert.equal(result.plan, null, source);
+  }
+  const whole = candidate('let x: integer = 2\nfor i in x..=3 {\n  say "turn"\n}\nexit\n');
+  assert.deepEqual(sited(whole), []);
+  assert.ok(whole.plan !== null);
+  assertRuns(whole.plan, "a whole range", ["turn", "turn"], [[null, null]]);
+  const host = inBothOrders(() => candidate('for i in 1..=hostValue {\n  say "turn"\n}\nexit\n'));
+  assert.deepEqual(sited(host), ["warning TSV010@13"]);
+  assert.ok(host.plan !== null);
+  assertRuns(
+    host.plan,
+    "a host bound",
+    ["turn", "turn"],
+    [
+      [2, null],
+      [2.5, "TSR045@9:22"],
+    ],
+  );
+});
+
 test("parentheses answer for their content: a parenthesised count and index read as bare ones (S3 3.4)", () => {
   // the flow graph's node of a parenthesised expression is its content's, the value the parentheses hold
   const source = "let n = 2\nrepeat ((n)) {}\nlet xs = [1, 2]\nlet y = xs[(n)]\nexit\n";

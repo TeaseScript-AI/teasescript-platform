@@ -279,9 +279,11 @@ export function operandRule(rule: DiagnosticRule, text: string): string {
     case "count":
       return rule.use === "repeat"
         ? REPEAT_COUNT_RULE
-        : rule.use === "index" || rule.use === "get"
-          ? LIST_INDEX_RULE
-          : `${rule.use}() needs a whole number (integer)`;
+        : rule.use === "range"
+          ? "A 'for' loop needs a range of whole numbers"
+          : rule.use === "index" || rule.use === "get"
+            ? LIST_INDEX_RULE
+            : `${rule.use}() needs a whole number (integer)`;
     case "boolean":
       return rule.operator === null
         ? "A condition must be true or false (boolean)"

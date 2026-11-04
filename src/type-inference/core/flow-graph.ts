@@ -152,6 +152,7 @@ export class FlowGraphBuilder {
   /** The `end` statements of functions and blocks, which end whichever file is running. */
   public readonly ends: BuildNode[] = [];
   public readonly countUses: OperandUse[] = [];
+  public readonly rangeUses: OperandUse[] = [];
   public readonly indexUses: OperandUse[] = [];
   public readonly keyUses: OperandUse[] = [];
   public readonly conditionUses: GuardUse[] = [];
@@ -241,6 +242,7 @@ export class FlowGraphBuilder {
       startup,
       callables,
       countUses: this.countUses,
+      rangeUses: this.rangeUses,
       indexUses: this.indexUses,
       keyUses: this.keyUses,
       conditionUses: this.conditionUses,

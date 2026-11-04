@@ -279,7 +279,7 @@ export function codeOf(rule: DiagnosticRule): CoreCode {
     case "fallback":
       return "TSV041";
     case "count":
-      return rule.use === "repeat" ? "TSV011" : "TSV043";
+      return rule.use === "repeat" ? "TSV011" : rule.use === "range" ? "TSV010" : "TSV043";
     case "shown":
       return "TSV042";
     case "iterable":

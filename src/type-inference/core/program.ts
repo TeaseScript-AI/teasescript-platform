@@ -85,7 +85,7 @@ export type Consumption =
   | { readonly kind: "part"; readonly result: PlaceId }
   | {
       readonly kind: "use";
-      readonly what: "index" | "count" | "condition" | "key";
+      readonly what: "index" | "count" | "range" | "condition" | "key";
       readonly span: SourceSite;
     }
   | { readonly kind: "other" };
@@ -336,6 +336,7 @@ export class CoreProgram {
     const uses = [
       ["index", this.flow.indexUses],
       ["count", this.flow.countUses],
+      ["range", this.flow.rangeUses],
       ["condition", this.flow.conditionUses],
       ["key", this.flow.keyUses],
     ] as const;

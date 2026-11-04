@@ -152,7 +152,7 @@ export interface Jump {
 /** An operand that needs a kind: a `repeat` count, a list index or a dict key (C2, C12), by where it stands. */
 export interface OperandUse {
   readonly file: number;
-  /** The `repeat` statement, the index expression or assignment target, or the dict literal's key. */
+  /** The `repeat` statement, the index expression or assignment target, the dict literal's key, or a range's bound. */
   readonly span: SourceSpan;
   /** The operand without its parentheses. */
   readonly operand: Expression;
@@ -192,6 +192,8 @@ export interface FlowGraph {
   readonly startup: StartupRegion;
   readonly callables: readonly Callable[];
   readonly countUses: readonly OperandUse[];
+  /** The bounds of each range a `for` loop goes through as written (V30 §6: whole numbers). */
+  readonly rangeUses: readonly OperandUse[];
   readonly indexUses: readonly OperandUse[];
   readonly keyUses: readonly OperandUse[];
   readonly conditionUses: readonly GuardUse[];
