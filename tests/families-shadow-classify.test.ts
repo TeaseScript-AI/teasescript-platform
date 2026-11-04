@@ -205,6 +205,16 @@ test("the classes without a recorded witness, and what no class takes or two wou
       "exception",
     ],
     [
+      record(
+        "legacy-thrown",
+        at(1, {
+          legacy: { outcome: "exception", name: "Error", message: "broken" },
+          delta: undefined,
+        }),
+      ),
+      "exception",
+    ],
+    [
       record("plan-only", at(3, { core: planned([], "q"), delta: { ...SAME, plan: true } })),
       "differs/plan",
     ],
@@ -296,9 +306,46 @@ test("the classes without a recorded witness, and what no class takes or two wou
     refused.problems.map((p: { problem: string }) => p.problem),
     ["invalid", "conflicting duplicate", "outside the manifest"],
   );
-  // (the same publication twice, whatever its timings: counted once)
-  const twice = C.classifyRecords(entries([fine, { ...fine, index: 7 }]));
+  // (the same reading twice, whatever its timings, its rows' order or its members' order: counted once)
+  const shuffled = {
+    ...fine,
+    index: 7,
+    rows: [...fine.rows]
+      .reverse()
+      .map(({ mode, ...rest }) => ({
+        ...rest,
+        mode: { unshared: mode.unshared, reversed: mode.reversed },
+      })),
+  };
+  const twice = C.classifyRecords(entries([fine, shuffled]));
   assert.deepEqual([twice.problems, twice.totals.duplicates, twice.perPair.length], [[], 1, 4]);
+  // (two records of one key whose decision coverage differs conflict, in either order)
+  const uncovered = record("fine", () => ({
+    core: { ...planned(), decisionCounts: { ordinary: [], completion: [] } },
+  }));
+  for (const pair of [
+    [fine, uncovered],
+    [uncovered, fine],
+  ])
+    assert.deepEqual(
+      C.classifyRecords(entries(pair)).problems.map((p: { problem: string }) => p.problem),
+      ["conflicting duplicate"],
+    );
+  // (a compared row missing a delta component is refused, never read as equal)
+  const partial = record("partial", at(0, { delta: { checks: false, plan: false } }));
+  assert.deepEqual(
+    C.classifyRecords(entries([partial])).problems.map((p: { why: string }) => p.why),
+    ["a compared row without its four delta components"],
+  );
+  // (the sharing column: one sharing mode outside its slice, the other planning)
+  const mixed = record(
+    "mixed",
+    at(1, { core: { outcome: "outside", outside: "this assignment" }, delta: undefined }),
+  );
+  assert.deepEqual(
+    C.classifyRecords(entries([mixed])).perOrder.map((p: { class: string }) => p.class),
+    ["outside", "equal"],
+  );
 });
 
 test("every pair of a generated grid over the pair rule's axes takes exactly one class or none, as the rules say", async () => {
@@ -417,4 +464,18 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   assert.match(failed.stderr, /"problem":"unclassified"/);
   writeFileSync(join(folder, "broken.jsonl"), "{\n");
   assert.equal(run(join(folder, "broken.jsonl")).status, 1);
+  // (a manifest line without its key, and a record without its delta's identity and text, fail the plain run too)
+  const keyless = write("keyless.jsonl", [{ key: "fine" }, {}]);
+  const noKey = run(fine, "--expect", keyless);
+  assert.equal(noKey.status, 1);
+  assert.match(noKey.stderr, /a manifest line without its key/);
+  const half = write("half.jsonl", [
+    record("half", () => ({
+      core: planned([diagnostic("TSV999", 4)]),
+      delta: { checks: false, plan: false },
+    })),
+  ]);
+  const refused = run(half);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stdout, /^gate: failed/m);
 });

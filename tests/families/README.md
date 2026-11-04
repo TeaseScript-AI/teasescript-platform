@@ -272,14 +272,15 @@ differing parts are columns of the pair); `excluded/<text>`, the research's 53 e
 legacy-heap` (the legacy route's heap in its analysis with the core finished: legacy behaviour the switch resolves,
 #1075), `failed/other`, `exception`, `aborted-record`, `unavailable`. Sharing: `equal`, `one-mode-stop` and
 `both-stop-differ` (attributed, each row for the stop oracle's judgment), `neither-stops-differ`, `outside`,
-`uncompared`. Every rule is tested on every pair: none or two fail the run (exit 1), so an exclusion text or a
-changed code no version names fails until the next version adds it with a witness; so does invalid input, a record
-outside `--expect` or a key recorded twice with different results. The gate table (`gate.json`, `gate.md`) adds
+`uncompared`. Every rule is tested on every pair: a pair none takes, or two, fails the run (exit 1), so an exclusion
+text no version names, or changed codes that none of the rules' codes decide, fail until the next version adds them
+with a witness; so does input the classifier cannot read whole (a compared row without its four delta parts, a
+manifest line without its key), a record outside `--expect` or a key recorded twice with different readings. The gate table (`gate.json`, `gate.md`) adds
 the differing pairs' parts, the research's inventory signatures (`signatures.tsv`), decision coverage (ordinary and
 completion records, open at 0) and, as information only, the sources whose core differs across the four modes; the
 verdict line is `gate: green` only with no `open` row, and `--gate` (S11's final run, with `--expect`) exits 1
 otherwise.
-Over the research's records it reproduces its aggregate (`~/work/evidence/<pr>/` of the PR that landed it):
+Over the research's records it reproduces its aggregate (`~/work/evidence/1728/`):
 
 ```sh
 env -u NODE_OPTIONS node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --manifest > expect.jsonl

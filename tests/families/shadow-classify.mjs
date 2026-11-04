@@ -360,7 +360,7 @@ export function pairFacts(row) {
 
 /** The core's publication in one mode as the sharing column compares it. */
 const publication = (c) =>
-  JSON.stringify([c.outcome, c.diagnostics ?? null, c.checks ?? null, c.planHash ?? null]);
+  canonical([c.outcome, c.diagnostics ?? null, c.checks ?? null, c.planHash ?? null]);
 
 /** What the sharing column reads for one order: the core in its shared and its unshared mode. */
 export function sharingFacts(shared, unshared) {
@@ -437,39 +437,88 @@ const MODE = (m) =>
   `${m.reversed ? "reversed" : "source order"}, sharing ${m.unshared ? "off" : "on"}`;
 const sha = (text) => createHash("sha256").update(text).digest("hex");
 
-/** A record's publication, as two records of one key must agree on it. */
-function publicationOf(record) {
+/** A value as JSON with every object's members in name order, so member order never makes two values differ. */
+const canonical = (value) =>
+  JSON.stringify(value, (_, v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+
+/**
+ * What the classification reads of a record (`invalid` checks these fields; nothing else is read), in mode order:
+ * two records of one key must agree on it, whatever their timings, origins or member order.
+ */
+function readOf(record) {
+  if (record.rows === undefined) return canonical({ aborted: true });
   const route = (x) => ({
     outcome: x.outcome,
-    diagnostics: x.diagnostics,
-    checks: x.checks,
-    planHash: x.planHash,
-    outside: x.outside,
-    failure: x.failure,
-    phase: x.phase,
+    diagnostics: x.diagnostics ?? null,
+    checks: x.checks ?? null,
+    planHash: x.planHash ?? null,
+    outside: x.outside ?? null,
+    failure: x.failure ?? null,
+    phase: x.phase ?? null,
+    decisionCounts: x.decisionCounts ?? null,
   });
-  return sha(
-    JSON.stringify(
-      record.rows === undefined
-        ? { aborted: true }
-        : record.rows.map((r) => [r.mode, route(r.legacy), route(r.core), r.delta ?? null]),
-    ),
+  const rank = (m) => Number(m.reversed) * 2 + Number(m.unshared);
+  return canonical(
+    [...record.rows]
+      .sort((a, b) => rank(a.mode) - rank(b.mode))
+      .map((r) => [
+        rank(r.mode),
+        route(r.legacy),
+        route(r.core),
+        r.delta ?? null,
+        (r.planDelta?.diffs ?? []).map((d) => d.path),
+      ]),
   );
 }
 
-/** Problems with a record's shape, or null: the classifier refuses what it cannot read. */
+const OUTCOMES = new Set(["plan", "rejected", "outside", "exception", "failed"]);
+const DELTA = ["diagnosticIdentity", "diagnosticText", "checks", "plan"];
+const offset = (end) => typeof end?.offset === "number";
+const counts = (list) =>
+  list === undefined || (Array.isArray(list) && list.every((n) => Number.isInteger(n)));
+
+/**
+ * Why the classifier cannot read a record, or null: every field it reads is checked here, so a record it accepts
+ * is classified from complete facts (a missing delta component never reads as equal).
+ */
 function invalid(record) {
+  if (record === null || typeof record !== "object") return "not an object";
   if (typeof record.key !== "string") return "no key";
   if (record.rows === undefined) return record.incomplete === true ? null : "no rows";
   if (!Array.isArray(record.rows) || record.rows.length !== 4) return "not four rows";
   const modes = new Set();
   for (const row of record.rows) {
-    const m = row.mode;
+    const m = row?.mode;
     if (typeof m?.reversed !== "boolean" || typeof m?.unshared !== "boolean")
       return "a row without its mode";
     modes.add(`${m.reversed}/${m.unshared}`);
-    for (const route of ["legacy", "core"])
-      if (typeof row[route]?.outcome !== "string") return `a row without the ${route} outcome`;
+    for (const route of ["legacy", "core"]) {
+      const x = row[route];
+      if (!OUTCOMES.has(x?.outcome)) return `a row without a known ${route} outcome`;
+      if (x.outcome === "outside" && (route === "legacy" || typeof x.outside !== "string"))
+        return `an outside ${route} run without its text`;
+      if (x.outcome === "failed" && typeof x.failure !== "string")
+        return `a failed ${route} run without its failure`;
+      if (x.diagnostics !== undefined && !Array.isArray(x.diagnostics))
+        return `${route} diagnostics that are no list`;
+      for (const d of x.diagnostics ?? [])
+        if (typeof d?.code !== "string" || !offset(d.span?.start) || !offset(d.span?.end))
+          return `a ${route} diagnostic without its code or offsets`;
+      if (!counts(x.decisionCounts?.ordinary) || !counts(x.decisionCounts?.completion))
+        return `${route} decision counts that are no list of counts`;
+    }
+    const compared = COMPLETED.has(row.legacy.outcome) && COMPLETED.has(row.core.outcome);
+    if (compared) {
+      if (DELTA.some((k) => typeof row.delta?.[k] !== "boolean"))
+        return "a compared row without its four delta components";
+      for (const route of ["legacy", "core"])
+        if (!Array.isArray(row[route].diagnostics) || typeof row[route].planHash !== "string")
+          return `a compared ${route} run without its diagnostics or plan hash`;
+    }
   }
   return modes.size === 4 ? null : "a mode twice";
 }
@@ -486,10 +535,10 @@ export function classifyRecords(entries, expected = null) {
       continue;
     }
     const seen = byKey.get(record.key);
-    if (seen === undefined) byKey.set(record.key, { record, bytes, hash: publicationOf(record) });
+    if (seen === undefined) byKey.set(record.key, { record, bytes, read: readOf(record) });
     else {
       duplicates += 1;
-      if (seen.hash !== publicationOf(record))
+      if (seen.read !== readOf(record))
         problems.push({ problem: "conflicting duplicate", key: record.key, where });
     }
   }
@@ -779,7 +828,10 @@ async function main(argv) {
     for (const file of expects)
       for await (const { line, where } of jsonLines(file))
         try {
-          expected.add(JSON.parse(line).key);
+          const { key } = JSON.parse(line) ?? {};
+          if (typeof key === "string") expected.add(key);
+          else
+            unreadable.push({ problem: "invalid", where, why: "a manifest line without its key" });
         } catch (error) {
           unreadable.push({ problem: "invalid", where, why: error.message });
         }
