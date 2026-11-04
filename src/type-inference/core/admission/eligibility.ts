@@ -181,7 +181,10 @@ function eligibility(
     const full = recordKey(at);
     keptPath(admission.work, full);
     let parent = "";
-    for (const key of [...prefixes(full)].reverse().concat(full)) {
+    // (its prefixes farthest first, then the key: the chain read backwards, no list made)
+    const chain = prefixes(full);
+    for (let at = chain.length; at >= 0; at -= 1) {
+      const key = at === 0 ? full : chain[at - 1]!;
       admission.pass.program.work.charge("eligibility");
       if (!tested(guards, key)) continue;
       if (!children.has(key)) children.set(key, new Set());

@@ -1512,4 +1512,21 @@ test("the eligibility index makes each prefix key once, its shared build quadrat
   assert.deepEqual(prefixes(second), prefixesOf(second));
   assert.deepEqual(prefixes(`7|${a}.${b}`), prefixesOf(`7|${a}.${b}`));
   assert.deepEqual(charged, []);
+  // (at `SHORT`'s edge: a parent of 31 or 32 characters charges nothing, of 33 and 40 one unit, of 41 two; a sibling
+  // below the same parent charges nothing more)
+  for (const [length, expected] of [
+    [31, 0],
+    [32, 0],
+    [33, 1],
+    [40, 1],
+    [41, 2],
+  ] as const) {
+    const parent = `7|${"p".repeat(length - 2)}`;
+    const edge = prefixChains(work);
+    charged.length = 0;
+    assert.deepEqual(edge(`${parent}.leaf`), prefixesOf(`${parent}.leaf`));
+    assert.deepEqual(charged, expected === 0 ? [] : [expected], `${length}`);
+    edge(`${parent}.other`);
+    assert.deepEqual(charged, expected === 0 ? [] : [expected], `${length}`);
+  }
 });

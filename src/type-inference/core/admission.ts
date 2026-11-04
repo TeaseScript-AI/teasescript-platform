@@ -138,13 +138,13 @@ export type { Candidate, DecidedAt, Decision } from "./admission/model.js";
  * destination's own admitted type; host data no store brought is checked at the consumer that reads it).
  */
 
-/** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
 /** A demanded rest (`demandsOf`): a decided path and the step its rest starts at, kept where the index reads it. */
 export interface Demand {
   readonly path: Steps;
   readonly from: number;
 }
 
+/** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
 export interface AdmissionHost {
   run<T>(work: Work<T>): T;
   /**
