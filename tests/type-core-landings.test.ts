@@ -150,7 +150,8 @@ test("every landing call returns the walk's paths in order: each family and Astr
   // (seed 2: a cover stamped at the next free order moves q.g0 and q.g1 behind p.f1, Astra's design review; seed 1: a
   // listing's children taken out of their order)
   calls += compared(crossed(1)) + compared(crossed(2));
-  // (a path the walk brought before a record opened, which the record's take must bring again: #1669's Codex r1 prefix case)
+  // (a path the walk brought before a record opened, which the record's take must bring again: #1669's Codex r1
+  // prefix case)
   calls += compared(
     [
       "let typed: integer | string = 1",
