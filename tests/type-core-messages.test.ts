@@ -2251,3 +2251,39 @@ test("a warning's fix beside a deeply nested expression still compiles (#1274)",
     ["TSV011"],
   );
 });
+
+/**
+ * #1274, Astra r1 on #1715: the kept variable's name is chosen once per program, its survey charged to the analysis's
+ * total as a shared build and to no demand. k warnings beside a taken `value`, k = 16 to 256: each fix names `value2`,
+ * the survey's charge is at least one unit per syntax node, the demands' records stay as the analysis left them, and
+ * the total after the messages grows at most ×2.15 per doubling of the nodes (a survey per warning grows by ×4).
+ */
+test("a kept value's name is surveyed once, charged to the analysis and no demand (#1274)", () => {
+  const measured = [16, 32, 64, 128, 256].map((k) => {
+    const source = `let value = 1\nlet xs = [7, null]\n${"say xs[0] + 1\n".repeat(k)}exit\n`;
+    const request = coreRequest([{ path: "main.tease", source }])!;
+    const answers = analyseCore(request);
+    const before = answers.budget;
+    const checked = coreCheckResult(
+      answers,
+      new SliceIndex(request.files.map((file) => file.program)),
+      request,
+    );
+    const fixes = checked.diagnostics
+      .flat()
+      .filter((diagnostic) => diagnostic.message.includes("as in 'let value2 = xs[0]'"));
+    assert.equal(fixes.length, k, `k = ${k}`);
+    const nodes = before.counts.get("syntaxNodes")!;
+    const surveyed =
+      (answers.budget.counts.get("indexSteps") ?? 0) - (before.counts.get("indexSteps") ?? 0);
+    assert.ok(surveyed >= nodes, `k = ${k}: ${surveyed} survey units for ${nodes} nodes`);
+    assert.deepEqual(answers.budget.demands, before.demands, `k = ${k}`);
+    assert.deepEqual(answers.budget.decisions, before.decisions, `k = ${k}`);
+    return { total: answers.budget.total, nodes };
+  });
+  for (let at = 1; at < measured.length; at += 1) {
+    const [small, large] = [measured[at - 1]!, measured[at]!];
+    const doubling = (2 * (large.total / small.total)) / (large.nodes / small.nodes);
+    assert.ok(doubling <= 2.15, `${JSON.stringify(measured)}: ${doubling.toFixed(3)} per doubling`);
+  }
+});

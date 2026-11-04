@@ -592,7 +592,7 @@ export function coreCheckResult(
   const source = messageSource(
     request.files.map((file) => file.source),
     result.diagnostics,
-    [...(request.options.globals ?? []), ...(request.options.builtins ?? [])],
+    (base) => answers.keptName(base),
   );
   const shown = new Set(reportedDiagnostics(answers, result.diagnostics));
   for (const diagnostic of result.diagnostics)

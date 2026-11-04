@@ -195,6 +195,8 @@ export class CoreProgram {
   /** The request's files and host values, as the candidate slice's syntax reads them (`slice-syntax.ts`). */
   readonly files: readonly CoreFile[];
   readonly globals: ReadonlySet<string>;
+  /** The request's built-in names: none a fix may declare (`Answers.keptName`). */
+  readonly builtins: ReadonlySet<string>;
   /** The deepest nesting of the programs' blocks. */
   readonly nesting: number;
   /** The outermost blocks nested past the nesting limit, by file and start: their code is checked when it runs. */
@@ -232,6 +234,7 @@ export class CoreProgram {
     this.#sources = request.files.map((file) => file.source);
     this.files = request.files;
     this.globals = new Set(request.options.globals ?? []);
+    this.builtins = new Set(request.options.builtins ?? []);
     this.graph = collectGraph(request);
     this.flow = buildFlowGraph(request.files);
     this.dom = dominators(this.flow);

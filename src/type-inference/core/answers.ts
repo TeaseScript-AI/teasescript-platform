@@ -92,6 +92,7 @@ import {
 } from "./result.js";
 import { Solver, type DemandWork, type Work } from "./solver.js";
 import { narrowingKey, Values } from "./values.js";
+import { keptVariableName } from "./messages.js";
 import { writtenTypeErrors } from "./written.js";
 import {
   closedType,
@@ -535,6 +536,12 @@ export interface Answers {
    * findings and decisions stand, its warning says so, and what is asked from then on answers `STOPPED` (D4 a′).
    */
   stoppedAt(limit: BudgetLimit): Answers;
+  /**
+   * The name a fix's kept variable takes (#1274, `keptVariableName`): chosen once per program and base, its survey and
+   * selection charged as a shared build, to the analysis's total and to no demand (Astra r1 on #1715), its budget then
+   * counted again.
+   */
+  keptName(base: string): string;
   /** The occurrence answer at a path step below a value: a collection's `element`, a dict's `entry`, a property. */
   project(
     node: FlowNode,
@@ -1160,6 +1167,9 @@ function termProperties(term: TypeTerm): string[] {
   return term.kind === "object" ? (term.properties ?? []).map((property) => property.name) : [];
 }
 
+/** Each program's kept-variable names by base (`keptName`), one survey for all the answers asked of it. */
+const KEPT_NAMES = new WeakMap<CorePass["program"], Map<string, string>>();
+
 class CoreAnswers implements Answers {
   readonly outcome: CoreOutcome;
   readonly diagnostics: readonly CoreDiagnostic[];
@@ -1501,6 +1511,33 @@ class CoreAnswers implements Answers {
         siteKey({ file: node.file, start: node.span.start.offset, end: node.span.end.offset }),
       ) ?? null
     );
+  }
+
+  public keptName(base: string): string {
+    const { program } = this.#pass;
+    let names = KEPT_NAMES.get(program);
+    if (names === undefined) KEPT_NAMES.set(program, (names = new Map()));
+    let name = names.get(base);
+    if (name === undefined) {
+      const { work } = program;
+      const spender = work.spender;
+      work.spender = 0;
+      try {
+        name = work.shared(() =>
+          keptVariableName(
+            program.files.map((file) => file.program),
+            [...program.globals, ...program.builtins],
+            base,
+            work,
+          ),
+        );
+      } finally {
+        work.spender = spender;
+      }
+      names.set(base, name);
+      this.budget = { ...this.budget, total: work.total, counts: work.counts(), finishing: work.finishing };
+    }
+    return name;
   }
 
   public stoppedAt(limit: BudgetLimit): Answers {
