@@ -1072,7 +1072,7 @@ export function combinedAnalyses(
   const request = coreRequest([...files], GLOBALS);
   if (request === null) throw new Error("The files do not resolve.");
   return {
-    natural: mode.run(() => analyseCore(request)),
+    natural: mode.run(() => recordingReads(() => ({ answers: analyseCore(request) }))).answers,
     reference: mode.run(() =>
       withTestDemandAllowance(demand, () =>
         recordingReads(() => ({ answers: analyseCore(request) })),
@@ -1136,42 +1136,74 @@ function derivedOwnText(graph: FlowGraph, u: readonly string[], x: readonly stri
 const functionsOf = (graph: FlowGraph) =>
   graph.regions.flatMap((region) => (region.kind === "function" ? [region.declaration] : []));
 
-/** A written type's own kind where every value it admits is a dictionary: `dict`, `T dict`. */
-const writtenDict = (type: TypeAnnotation | null): boolean =>
-  type !== null &&
-  (type.kind === "dictType" || (type.kind === "namedType" && type.name === "dict"));
+/** A written type's members, an optional's `null` and a union's own members each one (`T?`, `A | B`). */
+const membersOf = (type: TypeAnnotation): (TypeAnnotation | null)[] =>
+  type.kind === "optionalType"
+    ? [...membersOf(type.value), null]
+    : type.kind === "unionType"
+      ? type.members.flatMap(membersOf)
+      : [type];
+
+/** Whether every value a written type's members admit is a dictionary (`dict`, `T dict`): never with a `null` among them. */
+const writtenDict = (members: readonly (TypeAnnotation | null)[]): boolean =>
+  members.length > 0 &&
+  members.every(
+    (type) =>
+      type !== null &&
+      (type.kind === "dictType" || (type.kind === "namedType" && type.name === "dict")),
+  );
 
 /**
- * Whether a written type at the key spells `x`'s more precise step (#1595, the lead's ruling on Q4: the author's own
- * proof, as the compiler reads it): the key's root declared with a written type (a `let` or `global`, a function's
- * parameter, or its result), followed through its written elements to the owner the more precise step reads, a
- * dictionary there.
+ * A written type's members one `element` step down, as the compiler's `termAt` takes one (`typeAtStep`): each member's
+ * element where it has one, the others left out (`null`, a scalar); none where no member has one.
+ */
+const elementsOf = (members: readonly (TypeAnnotation | null)[]): (TypeAnnotation | null)[] =>
+  members.flatMap((type) =>
+    type !== null &&
+    (type.kind === "listType" || type.kind === "setType" || type.kind === "dictType")
+      ? membersOf(type.element)
+      : [],
+  );
+
+/**
+ * Whether a written type at the key spells every more precise step of `x` (#1595, the lead's ruling on Q4: the author's
+ * own proof, as the compiler reads it; Codex r1's B2 and N1 on #1687): the key's root declared with a written type (a
+ * `let` or `global`, a function's parameter, or its result), followed through its written elements, optionals and
+ * unions included, step by step: every owner a dict's `entry` reads, and the owner of a derived list named by its own
+ * text or through an index's text, a dictionary there.
  */
 function writtenSpells(graph: FlowGraph, u: readonly string[], x: readonly string[]): boolean {
   const lets = graph.nodes.flatMap(({ statement }) =>
     statement?.kind === "letStatement" || statement?.kind === "globalStatement" ? [statement] : [],
   );
   const declared = functionsOf(graph).find((f) => f.name.name === u[0]);
-  let [type, at]: [TypeAnnotation | null, number] =
+  const [root, from]: [TypeAnnotation | null | undefined, number] =
     declared === undefined
-      ? [lets.find((each) => each.name.name === u[0])?.typeAnnotation ?? null, 1]
+      ? [lets.find((each) => each.name.name === u[0])?.typeAnnotation, 1]
       : u[1] === "result"
         ? [declared.returnTypeAnnotation, 2]
-        : [declared.parameters.find((each) => each.name.name === u[1])?.typeAnnotation ?? null, 2];
-  // (the owner the more precise step reads: a dict's `entry`'s, at the first changed step; a derived list's, at its
-  // `values` or `keys` step, named by its own text or through an index's text before it)
-  const changed = u.findIndex((step, i) => step !== x[i]);
-  const owner =
-    keyStepsAlone(u, x) && x[changed] === "entry"
-      ? changed
-      : u.findIndex((step, i) => DERIVED.has(step) && i >= Math.min(changed, at));
-  for (; type !== null && at < owner; at += 1)
-    type =
-      u[at] === "element" &&
-      (type.kind === "listType" || type.kind === "setType" || type.kind === "dictType")
-        ? type.element
-        : null;
-  return at === owner && writtenDict(type);
+        : [declared.parameters.find((each) => each.name.name === u[1])?.typeAnnotation, 2];
+  if (root === null || root === undefined) return false;
+  const keyed = keyStepsAlone(u, x);
+  // (the steps the more precise label changes, and the derived list's step where it is named by its own text)
+  const derived = u.findIndex((step) => DERIVED.has(step));
+  const changed = u.flatMap((step, i) => (keyed && step !== x[i] ? [i] : []));
+  const owners = new Set(changed.filter((i) => x[i] === "entry" && (derived < 0 || i < derived)));
+  const named =
+    !keyed || changed.some((i) => x[i]!.startsWith("[") && (derived < 0 || i < derived));
+  if (named) {
+    if (derived < 0) return false;
+    owners.add(derived);
+  }
+  if (owners.size === 0) return false;
+  let members = membersOf(root);
+  for (let at = from; at <= Math.max(...owners); at += 1) {
+    if (owners.has(at) && !writtenDict(members)) return false;
+    if (at === Math.max(...owners)) break;
+    if (u[at] !== "element") return false;
+    members = elementsOf(members);
+  }
+  return true;
 }
 
 /**
@@ -1179,17 +1211,21 @@ function writtenSpells(graph: FlowGraph, u: readonly string[], x: readonly strin
  * Q3/Q4): the stopped analysis owes the reference's check `u` under a more precise label than the reference's, which ran
  * out of demand reading the key, where all three hold for the stopped check `x`:
  * 1. the label follows from a proven type: the natural analysis (no demand, no stop) names the key with that label, a
- *    check of its own targeting it or a path below it (it need not owe `x` itself: knowing more, it owes another check
- *    at the key), or a written type at the key spells it (`writtenSpells`);
+ *    check of its own targeting it or a path below it emitted by a walk unit that read a key `x`'s own unit read (it
+ *    need not owe `x` itself: knowing more, it owes another check at the key; the key, never a label's text alone, so
+ *    a parameter of another function or a property spelled as a step proves nothing: Codex r1's B1 on #1687), or a
+ *    written type at the key spells it (`writtenSpells`);
  * 2. the check, its location and its expected types are identical: kind, whole site, boundary and `against`;
  * 3. no other difference is ignored: the label differs by key steps alone (`keyStepsAlone`) or names a derived list by
  *    its own text (`derivedOwnText`), the words are `u`'s with only the label replaced, and every other part is equal.
- * The stopped check accepted, else `undefined`. `natural` is the natural analysis's check targets; `graph` the program's.
+ * The stopped check accepted, else `undefined`. `natural` is the natural analysis's checks, each with the keys its
+ * emitting units read; `keysOf` gives a stopped check's; `graph` is the program's.
  */
 export function provenRelabel(
   u: Obligation,
   owed: readonly Obligation[],
-  natural: readonly string[],
+  natural: readonly { readonly target: string; readonly keys: ReadonlySet<string> }[],
+  keysOf: (check: Obligation) => ReadonlySet<string>,
   graph: FlowGraph,
 ): Obligation | undefined {
   const from = targetSteps(u.target);
@@ -1199,10 +1235,11 @@ export function provenRelabel(
     return (
       // (1)
       (natural.some(
-        (target) =>
-          target === x.target ||
-          target.startsWith(`${x.target}.`) ||
-          target.startsWith(`${x.target}[`),
+        ({ target, keys }) =>
+          (target === x.target ||
+            target.startsWith(`${x.target}.`) ||
+            target.startsWith(`${x.target}[`)) &&
+          [...keysOf(x)].some((key) => keys.has(key)),
       ) ||
         writtenSpells(graph, from, to)) &&
       // (2)
@@ -1257,7 +1294,25 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
   const owed = [...stopped.checks, ...marks.map((mark) => mark.obligation)];
   const owedTexts = new Set(owed.map((check) => JSON.stringify(check)));
   const naturalTexts = new Set(natural.checks.map((check) => JSON.stringify(check)));
-  const naturalTargets = natural.checks.map((check) => check.target);
+  // (each check's keys: those its emitting walk units read, the natural analysis recorded as the others are)
+  const keysIn = (recorded: Recorded | undefined, check: Obligation): ReadonlySet<string> => {
+    if (recorded === undefined) return new Set();
+    const text = JSON.stringify(check);
+    const units = new Set(
+      recorded.emissions.filter((e) => e.obligation === text).map((e) => e.unit),
+    );
+    return new Set(
+      [...recorded.reads.values()]
+        .flat()
+        .filter((read) => units.has(read.unit))
+        .map((read) => read.key),
+    );
+  };
+  const naturalReads = readsOf(natural);
+  const naturalChecks = natural.checks.map((check) => ({
+    target: check.target,
+    keys: keysIn(naturalReads, check),
+  }));
   let parsed: ReturnType<typeof syntaxOf> | undefined;
   const syntax = (): ReturnType<typeof syntaxOf> => (parsed ??= syntaxOf(reference));
   const classOf = (u: Obligation): "a" | "w" | "z" | "relabelled" | readonly string[] | null => {
@@ -1322,7 +1377,8 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
       )
     )
       return "z";
-    return provenRelabel(u, owed, naturalTargets, reference.graph) === undefined
+    return provenRelabel(u, owed, naturalChecks, (x) => keysIn(finished, x), reference.graph) ===
+      undefined
       ? unanswered
       : "relabelled";
   };
@@ -1521,7 +1577,7 @@ export function combinedStopRule(
   let natural = naturals.get(unstopped);
   if (natural === undefined) {
     const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS)!;
-    natural = mode.run(() => analyseCore(request));
+    natural = mode.run(() => recordingReads(() => ({ answers: analyseCore(request) }))).answers;
     naturals.set(unstopped, natural);
   }
   return combinedStop(unstopped.answers, natural, stopped);
