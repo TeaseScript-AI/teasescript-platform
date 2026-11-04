@@ -240,6 +240,31 @@ sx-job submit --commit base=<base> --commit head=<head> --shards 16 --mem 3G --t
 
 For `corpus`, add `--data ~/work/o4-m4-g3/cases.json` and `CASES_JSON=$HOME/work/o4-m4-g3/cases.json` before `node`.
 
+## Shadow
+
+`shadow.mjs` (S9b's interim and S11's final shadow comparison, landed by #1704 from the S11 readiness research's copy)
+compiles each source of a set (`corpus`, `fixture` or an area) through both public routes of one built tree, the
+legacy backend and the core (`decisionRecords`), in the four modes, and writes one JSON line per source to `--out` and
+the core's decision records to `--decisions`. Each route runs in its own worker with `--memory` MB of heap (1,400),
+under the unit limit below (the legacy route charges no ledger) and the safety net. A run that fails (heap, units,
+safety net, worker exit) leaves the source's other runs and is recorded as `{ outcome: "failed", failure, phase,
+runsBeforeFailure }` in its row and in the record's `failed` list, with `incomplete: true` and the first failure as
+`reason`; the next run starts in a fresh worker. A reused worker's heap failure or safety net is retried once in a fresh
+one, whose result is the run's (`retried` names the first). It classifies nothing. The S11 classification reads `key`,
+`index`, `origins`, `incomplete`/`reason`, and per row `mode`, `delta` (`diagnosticIdentity`, `diagnosticText`,
+`checks`, `plan`) and each route's `outcome`, `diagnostics`, `checks`, `planHash`, `outside`/`excluded`; and `ordinary`
+and `completion` from `--decisions`. An incomplete record is never agreement.
+
+```sh
+sx-job submit --commit <sha> --shards 16 --mem 2G --timeout 1h --campaign <T> -- bash -c 'node \
+  "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --out "$SX_OUT/shadow.jsonl" \
+  --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
+```
+
+The #1704 witnesses (`copies`, `--only` with `1188-sol-candidate-neighbours.mjs/node-graft@8`, `node-mixed@8`,
+`node-graft@64`, `node-mixed@64`, `construction/node-graft@64`): at 8 both routes plan in every mode; at 64 the legacy
+route's heap is exhausted in `analysis` in every mode, and the core plans.
+
 ## The unit limit and the safety net (#1647)
 
 The rule is orchestrator 2's, on the owner's delegation of its threshold (#1647, 2026-11-03). It was measured with this
