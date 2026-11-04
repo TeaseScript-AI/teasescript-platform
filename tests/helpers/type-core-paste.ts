@@ -13,6 +13,7 @@ import type { TypeAnalysisBackend } from "../../src/type-inference/backend.js";
 import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
 import { LEGACY_BACKEND } from "../../src/type-inference/legacy-rounds.js";
+import { siteKey } from "./site-keys.js";
 import { coreRequest } from "./type-core-analysis.js";
 
 /*
@@ -592,9 +593,9 @@ export function pastedForms(
 }
 
 /**
- * The joins whose value a pasted declaration's written type receives, by their offsets: its start value's `+`, and each
- * such join's operands that are joins, parentheses aside. A join anywhere else in its text (an element, an argument, a
- * member's receiver) lands elsewhere (Codex r13 on #1310).
+ * The joins whose value a pasted declaration's written type receives, by their sites in its one file (`siteKey`, file
+ * 0): its start value's `+`, and each such join's operands that are joins, parentheses aside. A join anywhere else in
+ * its text (an element, an argument, a member's receiver) lands elsewhere (Codex r13 on #1310).
  */
 function landingJoins(source: string, declared: { readonly start: number }): Set<string> {
   const joins = new Set<string>();
@@ -602,7 +603,7 @@ function landingJoins(source: string, declared: { readonly start: number }): Set
     if (expression === null) return;
     const join = unwrap(expression);
     if (join.kind !== "binaryExpression" || join.operator !== "+") return;
-    joins.add(`${join.span.start.offset},${join.span.end.offset}`);
+    joins.add(siteKey({ file: 0, start: join.span.start.offset, end: join.span.end.offset }));
     spine(join.left);
     spine(join.right);
   };
@@ -640,12 +641,13 @@ function recorded(landing: ReadonlySet<string>): TypeAnalysisBackend {
     name: "legacy",
     analyze(request) {
       const outcome = LEGACY_BACKEND.analyze(request);
-      const diagnostics = outcome.checked.diagnostics.map((file) =>
-        file.filter(
+      // (each file's diagnostics apart, a site by its file's index and offsets)
+      const diagnostics = outcome.checked.diagnostics.map((list, file) =>
+        list.filter(
           ({ code, message, span }) =>
             code !== "TSV044" ||
             !/^'\+=?' would mix /.test(message) ||
-            !landing.has(`${span.start.offset},${span.end.offset}`),
+            !landing.has(siteKey({ file, start: span.start.offset, end: span.end.offset })),
         ),
       );
       return { checked: { ...outcome.checked, diagnostics }, facts: () => outcome.facts() };

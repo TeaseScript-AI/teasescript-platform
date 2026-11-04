@@ -344,6 +344,12 @@ compile through the public route, its receiving completion included, each pass's
 With `require` (`requireRecords` over a campaign's runs) it fails where no record of a kind was read: #1685's first
 debit probe read properties the records are not under and compared empty lists.
 
+## Site keys
+
+An oracle or runner keys a site by its file and its offsets (`tests/helpers/site-keys.ts`: the compiler's `siteKey`, a
+plan instruction's `planSiteKey`, `enclosingFunction` in the site's own file); `npm run lint` refuses a map's or a set's
+key of offsets alone in `tests/helpers/` and `tests/families/` (`tools/oxlint/check-site-keys.mjs`, #1700).
+
 ## Kept outside the repository
 
 The desktop corpus's kits and data, and their known problems, are indexed per area in `corpus/<area>.md` (`tooling`,

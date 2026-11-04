@@ -20,9 +20,10 @@ import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { withoutRecords } from "../src/type-inference/core/consumers.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { planFileOf } from "./helpers/site-keys.js";
 import { completedCore, coreRequest } from "./helpers/type-core-analysis.js";
 import { HELD_MODES } from "./helpers/type-core-held-host.js";
-import { partProblems, storeFile } from "./helpers/type-core-oracles.js";
+import { partProblems } from "./helpers/type-core-oracles.js";
 
 /*
  * A typed part below a variable that holds host data (#1224, the lead's ruling (c)): the analysis owes the part's check
@@ -435,7 +436,7 @@ test("a store is known by its file and offset: a part changed in one of two file
       instruction.partChecks !== undefined
         ? instruction.partChecks.map(
             (part) =>
-              `${storeFile(planned, index)}:${instruction.kind}@${instruction.span.so} ${part.path.map((step) => ("property" in step ? `.${step.property}` : "[]")).join("")} ${JSON.stringify(part.type)}`,
+              `${planned.files[planFileOf(planned, index)]!.path}:${instruction.kind}@${instruction.span.so} ${part.path.map((step) => ("property" in step ? `.${step.property}` : "[]")).join("")} ${JSON.stringify(part.type)}`,
           )
         : [],
     );
@@ -459,7 +460,7 @@ test("a store is known by its file and offset: a part changed in one of two file
     (instruction, index) =>
       instruction["kind"] === "assign" &&
       Array.isArray(instruction["partChecks"]) &&
-      storeFile(natural, index) === "main.tease",
+      natural.files[planFileOf(natural, index)]!.path === "main.tease",
   );
   assert.ok(store >= 0);
   copy.instructions[store]!["partChecks"] = [

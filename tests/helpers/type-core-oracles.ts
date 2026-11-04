@@ -39,6 +39,7 @@ import {
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import type { PlaceId } from "../../src/type-inference/graph.js";
+import { planSiteKey } from "./site-keys.js";
 import { coreRequest, type SourceFile } from "./type-core-analysis.js";
 import { itemScope } from "./type-core-items.js";
 
@@ -930,22 +931,12 @@ function accepts(wide: TypePlan, narrow: TypePlan): boolean {
 }
 
 /**
- * The file a plan's instruction belongs to, by the files' instruction ranges (its path; `-` for one outside every file's):
- * a store's offset is its file's, so a store is known by its file and offset (Astra r1's B1 on #1690).
- */
-export function storeFile(plan: InstructionPlan, index: number): string {
-  return (
-    plan.files.find((file) => index >= file.startInstruction && index < file.endInstruction)
-      ?.path ?? "-"
-  );
-}
-
-/**
  * The invariant of a stopped plan's part checks (#1682, the lead's ruling on HEAD 0): each stopped store's parts are a
  * subsequence of the natural store's (path, type and place equal), except a part whose path the natural store's whole
  * check covers with that same projected type (`projectedType`), or one the part accepts all of (the part is then fewer);
  * never a part the natural plan neither has nor covers, never one narrower than what covers it. `problems`: each a line
- * naming the store (`file:kind@start`) and the part; `covered`: each covered part with `=` (the projected type itself) or
+ * naming the store (`kind@file:so:eo`, its site the compiler's, `planSiteKey`: a store's offsets are its file's,
+ * Astra r1's B1 on #1690) and the part; `covered`: each covered part with `=` (the projected type itself) or
  * `wider`.
  */
 export function partProblems(
@@ -957,7 +948,7 @@ export function partProblems(
     const out = new Map<string, Store>();
     plan.instructions.forEach((instruction, index) => {
       if (instruction.kind !== "declareBinding" && instruction.kind !== "assign") return;
-      const at = `${storeFile(plan, index)}:${instruction.kind}@${instruction.span.so}`;
+      const at = `${instruction.kind}@${planSiteKey(plan, index)}`;
       if (out.has(at)) throw new Error(`Two stores of one plan at ${at}.`);
       out.set(at, {
         parts: instruction.partChecks ?? [],

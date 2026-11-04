@@ -7,6 +7,7 @@ import { checkChargedIteration } from "./check-charged-iteration.mjs";
 import { checkEvidenceComments } from "./check-evidence.mjs";
 import { checkObligationInventory } from "./check-obligation-inventory.mjs";
 import { checkQuestionSources } from "./check-question-sources.mjs";
+import { checkSiteKeys } from "./check-site-keys.mjs";
 import { lintFiles, repositoryRoot } from "./files.mjs";
 
 const files = lintFiles();
@@ -26,6 +27,7 @@ for (const diagnostic of [
   ...checkChargedIteration(repositoryRoot),
   ...checkObligationInventory(repositoryRoot),
   ...checkQuestionSources(repositoryRoot),
+  ...checkSiteKeys(repositoryRoot),
 ]) {
   console.error(
     `${diagnostic.fileName}:${diagnostic.line}:${diagnostic.column}: ${diagnostic.message}`,
