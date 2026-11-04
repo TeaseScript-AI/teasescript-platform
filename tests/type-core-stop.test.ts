@@ -5691,8 +5691,8 @@ test("a combined stop's more precise label is accepted only as the owner's three
     provenRelabel(check("show.xs.values.element"), [element], named([]), listsDict),
     element,
   );
-  // (each changed step by its own structure, through every derived list, Codex r3's B1 and N1: an index's text names a
-  // derived list's element, never an ordinary list's, nor one a root named `values` holds)
+  // (an index's text names a derived list's element, never an ordinary list's, nor one a root named `values` holds;
+  // a derived chain is its own text whatever lies below its first derived list, Codex r3's B1 and N1)
   const ordinary = graphOf('let xs: integer[] = [hostValue]\nsay "${xs}"\nexit\n');
   assert.equal(
     provenRelabel(check("xs.element"), [check("xs[0]")], named([]), ordinary),
@@ -5718,7 +5718,7 @@ test("a combined stop's more precise label is accepted only as the owner's three
   );
   assert.equal(
     provenRelabel(check("show.xs.values.element.values.element"), [chained], named([]), listsDict),
-    undefined,
+    chained,
   );
   const optional = graphOf('let xs: integer dict? = dict {a: hostValue}\nsay "${xs}"\nexit\n');
   assert.equal(
@@ -5850,4 +5850,166 @@ test("a combined stop spells a dictionary's value and a derived list's read as t
     }
     assert.ok(spelled > 0, precise);
   }
+});
+
+/**
+ * The written proof of a combined stop's more precise label, total over the compiler's label grammar (#1595, the lead's
+ * ruling after Codex r3 on #1687). `keyLabel` (`consumers/names.ts`) makes every check's target:
+ * - a root: a binding's name `N`, a function's parameter `F.P` or result `F.result` (an anonymous start is its own text,
+ *   the same in both runs);
+ * - each step below: a property's name; a selection, an index or a `get` spelled `element`, or `entry` where every kind
+ *   of its owner is a dictionary (`elementStepOf`, whose kinds after a stop `labelDomain` gives); `values` or `keys`;
+ * - where a `values` or `keys` step's owner is a dictionary (`derivedChain`), the whole target is instead the value's
+ *   own text: `N`, `P` or `F(...)`, each element step as written (`[e]`, `get(e)`, `first`, `last`, `random`).
+ * So a stopped check's label is more precise than the demand-only reference's in exactly two productions, each with one
+ * clause of the predicate (`provenRelabel`'s (3) recognizes the form, `relabelForm`; its (1) proves it from a written
+ * type, `writtenProves`):
+ * - E (`"entry"`): the reference's path with some `element` steps spelled `entry`: each such step's owner a written
+ *   dictionary, and no `values` or `keys` step on the way with one (there the compiler spells E2 instead);
+ * - E2 (`"own"`): the value's own text where the reference spells the path, its root and steps as written: a `values` or
+ *   `keys` step on the way with a written dictionary as its owner.
+ * The family: written types over list, dict, dict of dicts, list of dicts, dict of lists and dict of lists of dicts, at
+ * a `let`, a parameter and a result, with an optional and a union container and a root named `values`; every chain down
+ * them, with and without a `values` or `keys` step at each dictionary; and for each chain every E label (each subset of
+ * its element steps), its E2 label, and the E2 labels that mix in a generic `element` or an `entry`. Each pair's answer
+ * is read a second time from the type's shape alone, by the grammar (`expected`), never by the predicate's walk, and the
+ * two agree on every pair. Codex r1's to r3's written shapes are members (a nested written dict, an optional and a union
+ * container, a composed tail, an ordinary list, a nested derived chain).
+ */
+test("a combined stop's more precise label is proved by its written type exactly as the label grammar allows (#1595)", () => {
+  type Level = "list" | "dict";
+  // (written types by their containers, outermost first; each with the annotation the source writes)
+  const shapes: { readonly levels: readonly Level[]; readonly written?: string }[] = [
+    { levels: ["list"] },
+    { levels: ["dict"] },
+    { levels: ["dict", "dict"] },
+    { levels: ["list", "dict"] },
+    { levels: ["dict", "list"] },
+    { levels: ["dict", "list", "dict"] },
+    { levels: ["list", "dict"], written: "integer dict[]?" },
+    { levels: ["list", "dict"], written: "integer dict[] | integer dict set" },
+  ];
+  const annotation = (levels: readonly Level[]) =>
+    [...levels]
+      .reverse()
+      .reduce((type, level) => (level === "list" ? `${type}[]` : `${type} dict`), "integer");
+  const empty = (levels: readonly Level[]) => (levels[0] === "list" ? "[]" : "dict {}");
+  const roots = [
+    {
+      name: "xs",
+      path: ["xs"],
+      own: "xs",
+      source: (t: string, e: string) => `let xs: ${t} = ${e}\nsay "\${xs}"\nexit\n`,
+    },
+    {
+      name: "values",
+      path: ["values"],
+      own: "values",
+      source: (t: string, e: string) => `let values: ${t} = ${e}\nsay "\${values}"\nexit\n`,
+    },
+    {
+      name: "parameter",
+      path: ["show", "xs"],
+      own: "xs",
+      source: (t: string) => `function show(xs: ${t}) {say "\${xs}"}\nexit\n`,
+    },
+    {
+      name: "result",
+      path: ["build", "result"],
+      own: "build()",
+      source: (t: string, e: string) =>
+        `function build: ${t} {return ${e}}\nsay "\${build()}"\nexit\n`,
+    },
+  ];
+  // (every chain down the levels: at a list its element; at a dictionary its element, or its `values` then an element,
+  // or, last, its `keys` then an element; each step with its owner's container, a derived list's being a list)
+  const chains = (levels: readonly Level[]): { step: string; owner: Level }[][] => {
+    const out: { step: string; owner: Level }[][] = [];
+    const down = (at: number, chain: { step: string; owner: Level }[]) => {
+      if (chain.length > 0) out.push(chain);
+      if (at === levels.length) return;
+      const level = levels[at]!;
+      down(at + 1, [...chain, { step: "element", owner: level }]);
+      if (level === "dict") {
+        down(at + 1, [
+          ...chain,
+          { step: "values", owner: "dict" },
+          { step: "element", owner: "list" },
+        ]);
+        if (at === levels.length - 1)
+          out.push([...chain, { step: "keys", owner: "dict" }, { step: "element", owner: "list" }]);
+      }
+    };
+    down(0, []);
+    return out;
+  };
+  // (the grammar's second reading: E where every `entry` has a dictionary owner on a chain no derived list passes; E2
+  // where one does, and only its own text exactly)
+  const expected = (
+    chain: readonly { step: string; owner: Level }[],
+    label: { form: string; entries?: readonly number[] },
+  ) => {
+    const derived = chain.some(({ step }) => step === "values" || step === "keys");
+    if (label.form === "E")
+      return !derived && label.entries!.every((i) => chain[i]!.owner === "dict");
+    return label.form === "E2" && derived;
+  };
+  const site = { file: 0, start: 40, end: 49 };
+  const check = (target: string): Obligation => ({
+    kind: "integer-check",
+    target,
+    against: ["integer"],
+    on: `check that ${target} is a whole number before the read`,
+    site,
+    boundary: false,
+  });
+  const disagree: string[] = [];
+  let pairs = 0;
+  for (const shape of shapes)
+    for (const root of roots) {
+      if (root.name === "values" && shape.levels.join() !== "list,dict") continue;
+      const written = shape.written ?? annotation(shape.levels);
+      const graph = analyseCore(
+        coreRequest(
+          [{ path: "main.tease", source: root.source(written, empty(shape.levels)) }],
+          ["hostValue", "hostOther"],
+        )!,
+      ).graph;
+      for (const chain of chains(shape.levels)) {
+        const u = [...root.path, ...chain.map(({ step }) => step)];
+        const elements = chain.flatMap(({ step }, i) => (step === "element" ? [i] : []));
+        const labels: { target: string; form: string; entries?: readonly number[] }[] = [];
+        for (let mask = 1; mask < 1 << elements.length; mask += 1) {
+          const entries = elements.filter((_, bit) => (mask >> bit) & 1);
+          labels.push({
+            target: [
+              ...root.path,
+              ...chain.map(({ step }, i) => (entries.includes(i) ? "entry" : step)),
+            ].join("."),
+            form: "E",
+            entries,
+          });
+        }
+        const ownText = (spell: (i: number) => string) =>
+          root.own +
+          chain.map(({ step }, i) => (step === "element" ? spell(i) : `.${step}`)).join("");
+        labels.push({ target: ownText(() => "[0]"), form: "E2" });
+        for (const i of elements) {
+          labels.push({ target: ownText((j) => (j === i ? ".element" : "[0]")), form: "mixed" });
+          labels.push({ target: ownText((j) => (j === i ? ".entry" : "[0]")), form: "mixed" });
+        }
+        for (const label of labels) {
+          if (label.target === u.join(".")) continue;
+          pairs += 1;
+          const accepted =
+            provenRelabel(check(u.join(".")), [check(label.target)], [], graph) !== undefined;
+          if (accepted !== expected(chain, label))
+            disagree.push(
+              `${written} ${root.name}: ${u.join(".")} -> ${label.target} (${label.form}): walk ${accepted}`,
+            );
+        }
+      }
+    }
+  assert.deepEqual(disagree, []);
+  assert.ok(pairs > 500, `${pairs} pairs`);
 });

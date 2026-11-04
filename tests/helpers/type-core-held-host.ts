@@ -1092,49 +1092,88 @@ export function combinedAnalyses(
 /** A check's target as its steps: names, and an index's own text (`xs[0].values` is `xs`, `[0]`, `values`). */
 const targetSteps = (target: string): string[] => target.match(/\[[^\]]*\]|[^.[]+/g) ?? [];
 
-/**
- * Whether `x` names what `u` names by key steps alone (#1595): the same steps but where `u`'s generic `element` is a
- * dictionary's `entry` or a derived list's own index text, at least one so; never a prefix or any other step changed.
- */
-function keyStepsAlone(u: readonly string[], x: readonly string[]): boolean {
-  return (
-    u.length === x.length &&
-    u.some((step, i) => step !== x[i]) &&
-    u.every(
-      (step, i) =>
-        step === x[i] || (step === "element" && (x[i] === "entry" || x[i]!.startsWith("["))),
-    )
-  );
-}
-
-/** A dictionary's derived lists, a read through which is named by its own text (`xs.values`, `build().values`). */
+/** A dictionary's derived lists (`dictList`): a read through one is named by its own text (`keyLabel`, §10.5). */
 const DERIVED = new Set(["values", "keys"]);
 
-/**
- * Whether `x` names a read through a dictionary's derived list by its own text where `u` names it by its key path (#1595,
- * the lead's ruling on Q3): the steps from the derived `values` or `keys` on equal, or equal by key steps alone (an
- * element read through the list by its index's text, both forms together), and before it `u`'s label root, a
- * declared function's result or parameter (`build.result`, `show.xs`), spelled as the chain's own text (`build()`, `xs`).
- */
-function derivedOwnText(graph: FlowGraph, u: readonly string[], x: readonly string[]): boolean {
-  const [at, from] = [
-    u.findIndex((step) => DERIVED.has(step)),
-    x.findIndex((step) => DERIVED.has(step)),
-  ];
-  if (at !== 2 || from !== 1 || u.length - at !== x.length - from) return false;
-  // (from the derived list on, the same steps, or the same but by key steps alone: `values.element`, `values[0]`)
-  const [tail, own] = [u.slice(at), x.slice(from)];
-  if (tail.some((step, i) => step !== own[i]) && !keyStepsAlone(tail, own)) return false;
-  const declared = functionsOf(graph).find((f) => f.name.name === u[0]);
-  if (declared === undefined) return false;
-  return u[1] === "result"
-    ? x[0] === `${u[0]}()`
-    : x[0] === u[1] && declared.parameters.some((each) => each.name.name === u[1]);
-}
+/** The selections a key path spells `element` (`selectsElement`), as a value's own text spells them. */
+const SELECTIONS = new Set(["first", "last", "random"]);
 
 /** The program's declared functions. */
 const functionsOf = (graph: FlowGraph) =>
   graph.regions.flatMap((region) => (region.kind === "function" ? [region.declaration] : []));
+
+/**
+ * A key path's root as `keyLabel` spells it (`labelRoot`): a binding's name, a function's parameter `F.P` or result
+ * `F.result`, with the written type declared there and the steps the root takes; `null` for any other start.
+ */
+function labelRootOf(
+  graph: FlowGraph,
+  steps: readonly string[],
+): {
+  readonly own: (text: string) => boolean;
+  readonly written: TypeAnnotation | null;
+  readonly from: number;
+} | null {
+  const declared = functionsOf(graph).find((f) => f.name.name === steps[0]);
+  if (declared !== undefined && steps[1] === "result")
+    return {
+      own: (text) => text.startsWith(`${steps[0]}(`) && text.endsWith(")"),
+      written: declared.returnTypeAnnotation,
+      from: 2,
+    };
+  const parameter = declared?.parameters.find((each) => each.name.name === steps[1]);
+  if (parameter !== undefined)
+    return { own: (text) => text === steps[1], written: parameter.typeAnnotation, from: 2 };
+  if (declared !== undefined || steps[0] === undefined) return null;
+  const lets = graph.nodes.flatMap(({ statement }) =>
+    statement?.kind === "letStatement" || statement?.kind === "globalStatement" ? [statement] : [],
+  );
+  const binding = lets.find((each) => each.name.name === steps[0]);
+  return { own: (text) => text === steps[0], written: binding?.typeAnnotation ?? null, from: 1 };
+}
+
+/**
+ * The precise label forms a stopped check carries where the demand-only reference spells the generic one (#1595,
+ * TABLE r4.322). The compiler's label grammar (`keyLabel` in `consumers/names.ts`):
+ * - a root: a binding's name, a parameter `F.P`, a result `F.result`; else the value's own text (an anonymous start,
+ *   the same in both runs, never a relabel);
+ * - each step below it: a property's name; a selection, an index or a `get`, spelled `element`, or `entry` where every
+ *   kind of its owner is a dictionary (`elementStepOf`); a dictionary's `values` or `keys`;
+ * - and where the chain passes a `values` or `keys` step whose owner is a dictionary (`derivedChain`), the whole label is
+ *   the value's own text instead (`ownLabel`): its root as written (`N`, `P`, `F(...)`) and each element step as written
+ *   (`[e]`, `get(e)`, `first`, `last`, `random`).
+ * After a stop the stopped analysis may prove more of an owner's kinds than the reference (`labelDomain`), which gives
+ * exactly two precise forms, never mixed:
+ * - `"entry"`: the reference's path with some `element` steps spelled `entry`, nothing else changed;
+ * - `"own"`: the value's own text where the reference spells the path, with at least one `values` or `keys` step.
+ * The form of `x` beside `u`, else `null`.
+ */
+function relabelForm(
+  graph: FlowGraph,
+  u: readonly string[],
+  x: readonly string[],
+): "entry" | "own" | null {
+  if (
+    u.length === x.length &&
+    u.some((step, i) => step !== x[i]) &&
+    u.every((step, i) => step === x[i] || (step === "element" && x[i] === "entry"))
+  )
+    return "entry";
+  const root = labelRootOf(graph, u);
+  if (root === null || x.length !== u.length - root.from + 1 || !root.own(x[0]!)) return null;
+  const below = u.slice(root.from);
+  if (!below.some((step) => DERIVED.has(step))) return null;
+  return below.every((step, i) => {
+    const spelled = x[i + 1]!;
+    return step === "element"
+      ? spelled.startsWith("[") ||
+          (spelled.startsWith("get(") && spelled.endsWith(")")) ||
+          SELECTIONS.has(spelled)
+      : step === spelled && step !== "entry";
+  })
+    ? "own"
+    : null;
+}
 
 /** A written type's members, an optional's `null` and a union's own members each one (`T?`, `A | B`). */
 const membersOf = (type: TypeAnnotation): (TypeAnnotation | null)[] =>
@@ -1166,63 +1205,33 @@ const elementsOf = (members: readonly (TypeAnnotation | null)[]): (TypeAnnotatio
   );
 
 /**
- * Whether a written type at the key spells every more precise step of `x` (#1595, the lead's ruling on Q4: the author's
- * own proof, as the compiler reads it; Codex r1's B2 and N1, r2's B2, r3's B1 and N1 on #1687). The key's root declared
- * with a written type (a `let` or `global`, a function's parameter, or its result) is followed step by step through
- * its written elements, optionals and unions included, and through every derived list, to the last step that needs
- * proof. Each changed step is proved by its own structure:
- * - a dictionary's `entry`: its owner a written dictionary;
- * - an index's text: an element of a derived list, right after a `values` or `keys` step walked, or the element whose
- *   own derived list the chain takes next;
- * and every derived step walked reads a written dictionary, its `values` listing the dictionary's values and its `keys`
- * text. A derived list's head named by its own text is its first derived step. Any other step proves nothing.
+ * Whether a written type at the key proves `x`'s form (#1595, the lead's ruling on Q4: the author's own proof, as the
+ * compiler reads it). The root's written type is followed along `u`'s element steps through its elements, optionals and
+ * unions as `termAt` follows them; a step it cannot follow proves nothing past it. One clause per form:
+ * - `"entry"`: every step `x` spells `entry` has a written dictionary as its owner (`elementStepOf`), and no `values` or
+ *   `keys` step on the way has one, where the compiler names the value by its own text instead (`derivedChain`);
+ * - `"own"`: a `values` or `keys` step on the way has a written dictionary as its owner (`derivedChain`).
  */
-function writtenSpells(graph: FlowGraph, u: readonly string[], x: readonly string[]): boolean {
-  const lets = graph.nodes.flatMap(({ statement }) =>
-    statement?.kind === "letStatement" || statement?.kind === "globalStatement" ? [statement] : [],
-  );
-  const declared = functionsOf(graph).find((f) => f.name.name === u[0]);
-  const [root, from]: [TypeAnnotation | null | undefined, number] =
-    declared === undefined
-      ? [lets.find((each) => each.name.name === u[0])?.typeAnnotation, 1]
-      : u[1] === "result"
-        ? [declared.returnTypeAnnotation, 2]
-        : [declared.parameters.find((each) => each.name.name === u[1])?.typeAnnotation, 2];
-  if (root === null || root === undefined) return false;
-  // (the derived steps walked, never the root's own name; and what `x` makes of each of `u`'s steps: the same position
-  // by key steps alone, else the same steps from the first derived step on, where the head is its own text)
-  const derived = u.flatMap((step, i) => (i >= from && DERIVED.has(step) ? [i] : []));
-  const keyed = keyStepsAlone(u, x);
-  if (!keyed && derived.length === 0) return false;
-  const offset = keyed ? 0 : x.findIndex((step) => DERIVED.has(step)) - derived[0]!;
-  const stepOf = (i: number): string | undefined =>
-    keyed || i >= derived[0]! ? x[i + offset] : u[i];
-  const changed = u.flatMap((step, i) => (i >= from && stepOf(i) !== step ? [i] : []));
-  // (the last step a proof needs: every changed one, the head's derived step, and the derived list an index's text
-  // before it names)
-  const needed = [...changed, ...(keyed ? [] : [derived[0]!])];
-  for (const i of changed)
-    if (stepOf(i)!.startsWith("[") && !derived.includes(i - 1)) {
-      const next = derived.find((d) => d > i);
-      if (next === undefined) return false;
-      needed.push(next);
-    }
-  if (needed.length === 0) return false;
-  const last = Math.max(...needed);
-  let members = membersOf(root);
-  // (a derived list's elements: a dictionary's values, its keys' text none)
-  let listed: (TypeAnnotation | null)[] | null = null;
-  for (let at = from; at <= last; at += 1) {
+function writtenProves(
+  graph: FlowGraph,
+  u: readonly string[],
+  x: readonly string[],
+  form: "entry" | "own",
+): boolean {
+  const root = labelRootOf(graph, u);
+  if (root === null || root.written === null) return false;
+  let members = membersOf(root.written);
+  // (the last step `x` spells `entry`: past it a step the type cannot follow leaves nothing to prove)
+  const last = Math.max(...u.flatMap((step, i) => (form === "entry" && step !== x[i] ? [i] : [])));
+  for (let at = root.from; at < u.length; at += 1) {
     const step = u[at]!;
-    if (stepOf(at) === "entry" && !writtenDict(members)) return false;
-    if (DERIVED.has(step) && derived.includes(at)) {
-      if (!writtenDict(members)) return false;
-      [listed, members] = [step === "values" ? elementsOf(members) : [], []];
-    } else if (step !== "element") return false;
-    else if (listed !== null) [members, listed] = [listed, null];
-    else members = elementsOf(members);
+    if (form === "entry" && x[at] === "entry" && !writtenDict(members)) return false;
+    // (a derived list: its own text, never an `entry` path, the two forms exclusive as `keyLabel` makes them)
+    if (DERIVED.has(step) && writtenDict(members)) return form === "own";
+    if (step !== "element") return form === "entry" && at > last;
+    members = elementsOf(members);
   }
-  return true;
+  return form === "entry";
 }
 
 /**
@@ -1232,10 +1241,11 @@ function writtenSpells(graph: FlowGraph, u: readonly string[], x: readonly strin
  * 1. the label follows from a proven type: the natural analysis (no demand, no stop) names that very value so, a check of
  *    its own at `x`'s whole site, the value read there, targeting the label or a path below it (it need not owe `x`
  *    itself: knowing more, it may owe another check there; the value, never a label's text alone nor a read beside it
- *    in the same walk unit: Codex r1's and r2's B1 on #1687), or a written type at the key spells it (`writtenSpells`);
+ *    in the same walk unit: Codex r1's and r2's B1 on #1687), or a written type at the key proves its form
+ *    (`writtenProves`);
  * 2. the check, its location and its expected types are identical: kind, whole site, boundary and `against`;
- * 3. no other difference is ignored: the label differs by key steps alone (`keyStepsAlone`) or names a derived list by
- *    its own text (`derivedOwnText`), the words are `u`'s with only the label replaced, and every other part is equal.
+ * 3. no other difference is ignored: the label is one of the compiler's two precise forms of the reference's
+ *    (`relabelForm`), the words are `u`'s with only the label replaced, and every other part is equal.
  * The stopped check accepted, else `undefined`. `natural` is the natural analysis's checks; `graph` the program's.
  */
 export function provenRelabel(
@@ -1248,7 +1258,10 @@ export function provenRelabel(
   return owed.find((x) => {
     if (x.target === u.target) return false;
     const to = targetSteps(x.target);
+    // (3)'s form
+    const form = relabelForm(graph, from, to);
     return (
+      form !== null &&
       // (1)
       (natural.some(
         (n) =>
@@ -1257,14 +1270,13 @@ export function provenRelabel(
             n.target.startsWith(`${x.target}.`) ||
             n.target.startsWith(`${x.target}[`)),
       ) ||
-        writtenSpells(graph, from, to)) &&
+        writtenProves(graph, from, to, form)) &&
       // (2)
       x.kind === u.kind &&
       siteKey(x.site) === siteKey(u.site) &&
       x.boundary === u.boundary &&
       JSON.stringify(x.against) === JSON.stringify(u.against) &&
       // (3) (beside (2)'s parts, every other part equal: the words with only the label replaced)
-      (keyStepsAlone(from, to) || derivedOwnText(graph, from, to)) &&
       x.on === u.on.split(u.target).join(x.target) &&
       JSON.stringify({
         ...u,
