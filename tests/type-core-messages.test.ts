@@ -3,7 +3,7 @@ import test from "node:test";
 import { compileProject } from "../src/compiler.js";
 import { jsonFieldMismatch, jsonKindMismatch } from "../src/runtime/values/value-types.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
+import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { checkedResult, reportedDiagnostics } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
@@ -2011,6 +2011,8 @@ test("an askChoice of more than one type errs where its type would be inferred, 
     'let xs = []\nrepeat xs.get(0, default: "askChoice") {}\nexit\n',
     "let xs = []\nrepeat xs.get(0, /* askChoice */ default: hostValue) {}\nexit\n",
     "let box = {askChoice: hostValue}\nlet xs = []\nrepeat xs.get(0, default: box.askChoice) {}\nexit\n",
+    // (a recorded choice in an expression that starts with the warned site but ends past it is not within it)
+    'let xs = []\nrepeat xs.get(0, default: hostValue) otherwise askChoice "None", [5, 10] {}\nexit\n',
   ])
     for (const mode of MODES) {
       const request = coreRequest(main(unrelated));
@@ -2018,15 +2020,36 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       const { diagnostics } = inMode(mode, () =>
         withTestDemandAllowance(16, () => analyseCore(request)),
       );
-      const atGet = diagnostics.filter((d) => d.site.start === unrelated.indexOf("xs.get"));
+      const atGet = diagnostics.filter(
+        (d) =>
+          d.site.start === unrelated.indexOf("xs.get") &&
+          d.site.end === unrelated.indexOf(") ", unrelated.indexOf("xs.get")) + 1,
+      );
       assert.ok(
         atGet.length > 0 && atGet.every((d) => !("keeps" in d)),
         `${JSON.stringify(mode)} ${unrelated}`,
       );
     }
-  // (where no read of a non-mixed choice settles, the stage's and the publication's both stopped, the fact is the honest
-  // unproved, its message the same; at the first allowance where a read settles, no fact: the lead's amendment of ruling
-  // A on #1660)
+  // (a stop inside the rule's stage takes back the running choice's unit alone: the choice completed before it keeps its
+  // error, Codex r10 on #1660; the stop is the second choice's read, so its own error is the one taken back)
+  const two = `let a = ${S}\nlet b = ${S}\nexit\n`;
+  for (const [mode, allowance] of MODES.map(
+    (mode) => [mode, mode.unshared ? 1149 : 1240] as const,
+  )) {
+    const request = coreRequest(main(two));
+    assert.ok(request !== null);
+    const stopped = inMode(mode, () => withTestAllowance(allowance, () => analyseCore(request)));
+    assert.equal(stopped.budget.exhausted, "work", JSON.stringify(mode));
+    assert.equal(
+      stopped.diagnostics.filter((d) => d.code === "TSV044").length,
+      1,
+      `${JSON.stringify(mode)} ${allowance}`,
+    );
+  }
+  // (a non-mixed choice's carried subject whose own publication read stops: the honest unproved fact, its message the
+  // same, though a later read of the choice itself settles, which never proves the carried subject (a second home for
+  // its types); at the first allowance where the subject's read settles, no fact: the lead's amendment of ruling A on
+  // #1660, worded after Codex r10)
   const unsettled = "let xs = []\nrepeat xs.get(0, default: askChoice 1, 2) {}\nexit\n";
   for (const mode of MODES) {
     const request = coreRequest(main(unsettled));
@@ -2097,4 +2120,22 @@ test("an askChoice of more than one type errs where its type would be inferred, 
     ),
     JSON.stringify(unproved),
   );
+});
+
+/**
+ * #1352 (Codex r10 on #1660): the kept-value fact's work, counted apart from the allowance, grows with the warnings and
+ * choices no faster than linearly: k warnings each holding its own mixed choice, k = 16 to 128, four modes, at most
+ * ×2.05 per doubling (a scan of every recorded choice per warning grows by more).
+ */
+test("the kept-value fact's work grows linearly with the warnings and the choices (#1352)", () => {
+  for (const mode of MODES) {
+    const work = [16, 32, 64, 128].map((k) => {
+      const source = `${'repeat (askChoice "None", [5, 10]) {}\n'.repeat(k)}exit\n`;
+      const request = coreRequest(main(source));
+      assert.ok(request !== null);
+      return inMode(mode, () => analyseCore(request)).budget.apart.get("checks") ?? 0;
+    });
+    for (let at = 1; at < work.length; at += 1)
+      assert.ok(work[at]! <= 2.05 * work[at - 1]!, `${JSON.stringify(mode)} ${work.join(", ")}`);
+  }
 });

@@ -418,8 +418,9 @@ function mixedChoice(
 
 /**
  * #1352's stage (`Consumers.check`): `mixedChoice` of every `askChoice` outside the units past the nesting limit, in
- * the consumers' order, each read with its choice's demand allowance; run after every other consumer's read and the
- * publication, so no read of the pass that can stop at its demand allowance comes after its reads (Codex r9 on #1660).
+ * the consumers' order, each read with its choice's demand allowance and each its own unit (`Consumers.runs`: a stop
+ * takes back the running choice's findings alone, Codex r10 on #1660); run after every other consumer's read and the
+ * publication, so no read of the pass that can stop at its demand allowance comes after its reads (Codex r9).
  * A choice past the nesting limit has no published warning that reads its record (TSV076 defers them).
  */
 export function mixedChoices(walk: Consumers): void {
@@ -429,7 +430,9 @@ export function mixedChoices(walk: Consumers): void {
       c.kind === "operation" && c.evidence?.kind === "choice",
   );
   for (const c of walk.order(choices)) {
-    const node = program.isDeep(c.site) ? null : program.exprAt(c.site);
+    // (each choice its own unit: a stop takes back the running choice's findings alone, Codex r10 on #1660)
+    if (!walk.runs(c.site)) continue;
+    const node = program.exprAt(c.site);
     if (node === null) continue;
     walk.reading = node;
     mixedChoice(walk, c);

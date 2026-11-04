@@ -187,21 +187,48 @@ export function recordAnswer(
   answered.set(value, types);
 }
 
+/** Per pass, the sites of the values the stage recorded, by start (`heldWithin`), made once where first asked. */
+const RECORDED_SITES = new WeakMap<Consumers, readonly SourceSite[]>();
+
 /**
  * Whether a value the stage recorded (`recordAnswer`: a mixed answer, one it reaches unchanged, or a stopped read of
  * either) lies within `site`: what a warning whose subject the walk did not find may hold there, since an answer
  * reaches a subject only through its own operands, which lie within its warned site (Codex r9 on #1660: by the stage's
- * record and the program's sites, never by text). Each record once.
+ * record and the program's sites, never by text). A search of the recorded sites by start, each step charged, the
+ * sites sorted once per pass (Codex r10: not a scan per warning).
  */
 export function heldWithin(walk: Consumers, site: SourceSite): boolean {
   const answered = ANSWERED.get(walk);
   if (answered === undefined) return false;
   const { program } = walk.pass;
-  program.work.charge("checks", answered.size);
-  for (const value of answered.keys()) {
-    const at = program.places[value]?.site ?? null;
-    if (at !== null && at.file === site.file && at.start >= site.start && at.end <= site.end)
-      return true;
+  let sites = RECORDED_SITES.get(walk);
+  if (sites === undefined) {
+    program.work.charge("checks", answered.size);
+    sites = [...answered.keys()]
+      .flatMap((value) => {
+        const at = program.places[value]?.site ?? null;
+        return at === null ? [] : [at];
+      })
+      .sort((a, b) => a.file - b.file || a.start - b.start);
+    RECORDED_SITES.set(walk, sites);
+  }
+  // (the first at or after the site's start; the sites from there that start within it, until one lies within it)
+  let low = 0;
+  let high = sites.length;
+  while (low < high) {
+    program.work.charge("checks");
+    const middle = (low + high) >> 1;
+    const at = sites[middle]!;
+    if (at.file < site.file || (at.file === site.file && at.start < site.start)) low = middle + 1;
+    else high = middle;
+  }
+  for (
+    let at = sites[low];
+    at !== undefined && at.file === site.file && at.start < site.end;
+    at = sites[++low]
+  ) {
+    program.work.charge("checks");
+    if (at.end <= site.end) return true;
   }
   return false;
 }

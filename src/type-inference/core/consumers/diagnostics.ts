@@ -125,13 +125,13 @@ function keptChoice(
   const { program } = walk.pass;
   const expression = program.exprAt(site)?.expression;
   const receiver = rule.rule === "member" || rule.rule === "selection";
-  // (a value not found: unproved where a choice the stage recorded with a kept proof other than the plain `let` lies
-  // within the warned site, its operands; else a plain `let` is proved, Codex r8 and r9 on #1660)
-  const unfound = heldWithin(walk, site) ? null : [];
+  // (a value not found, asked only then: unproved where a value the stage recorded lies within the warned site, its
+  // operands; else a plain `let` is proved, Codex r8 to r10 on #1660)
+  const unfound = (): readonly ItemTag[] | null => (heldWithin(walk, site) ? null : []);
   // (a site with no expression of its own, a default's: its value where the core places one)
   if (expression === undefined) {
     const place = receiver ? undefined : program.placeBySite.get(siteKey(site));
-    return place === undefined ? unfound : keptTypes(walk, place);
+    return place === undefined ? unfound() : keptTypes(walk, place);
   }
   let subject = !receiver
     ? expression
@@ -144,7 +144,7 @@ function keptChoice(
   const place = program.placeBySite.get(
     siteKey({ file: site.file, start: subject.span.start.offset, end: subject.span.end.offset }),
   );
-  return place === undefined ? unfound : keptTypes(walk, place);
+  return place === undefined ? unfound() : keptTypes(walk, place);
 }
 
 /**
