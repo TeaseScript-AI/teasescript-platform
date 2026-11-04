@@ -7,7 +7,7 @@ import { kindsInOrder, type ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
 import type { DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
-import { knownKinds, markCarried, mixedAnswer, oneType, passedOperands } from "./kinds.js";
+import { knownKinds, mixedAnswer, oneType, passedOperands, recordAnswer } from "./kinds.js";
 import type { Landing, LandingQuestion } from "./model.js";
 import { copiesOnly, firstDirect, valueReach } from "./reach.js";
 import { placeText, storeRoot, storeSteps } from "./warnings.js";
@@ -366,7 +366,9 @@ function reachedUnion(walk: Consumers, start: PlaceId): Stored | null {
     const { value, expanded } = stack.pop()!;
     if (memo.has(value)) continue;
     if (expanded) {
-      markCarried(walk, value);
+      // (what a warning keeping this value declares: its known types where more than one, read here in the walk)
+      const own = knownKinds(walk, value);
+      recordAnswer(walk, value, oneType(own) ? [] : own);
       let found = storedUnion(walk, value);
       for (const to of next.get(value)!) found ??= memo.get(to) ?? null;
       memo.set(value, found);
@@ -398,9 +400,10 @@ export function mixedChoice(
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
 ): void {
   const answer = mixedAnswer(walk, c.result);
-  // (a list or set option whose elements mix is that literal's error already, as the current checker gives it)
-  if (answer === null || holdsMixed(walk, c.site)) return;
+  if (answer === null) return;
   const stored = reachedUnion(walk, c.result);
-  if (stored !== null)
+  // (a list or set option whose elements mix is that literal's error already, as the current checker gives it; what
+  // the answer reaches is still recorded)
+  if (stored !== null && !holdsMixed(walk, c.site))
     error(walk, "written-target", c.site, { rule: "mixed-choice", ...stored }, answer);
 }

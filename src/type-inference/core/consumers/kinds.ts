@@ -173,31 +173,32 @@ export function passedOperands(c: ValueConstraint | undefined): readonly PlaceId
   return c?.kind === "fallback" ? [c.left, c.right] : c?.kind === "get" ? [c.fallback] : [];
 }
 
-/** Per pass, the values a mixed answer reaches unchanged (`passedOperands`), as `mixedChoice` found them. */
-const CARRIED = new WeakMap<Consumers, Set<PlaceId>>();
+/**
+ * Per pass, the walk's record of the values a mixed answer reaches unchanged (`passedOperands`), the choice's own result
+ * first, each with its known types where they are more than one, none where they are one (#1352). Only the walk records,
+ * where its reads answer: a choice in a unit past the nesting limit is decided only by the finishing walk, whose
+ * warnings are deferred into the stop's (TSV076) and never published, so no published warning reads its record.
+ */
+const ANSWERED = new WeakMap<Consumers, Map<PlaceId, readonly ItemTag[]>>();
 
-/** `mixedChoice`'s record of a value a mixed answer reaches unchanged, the choice's own result among them. */
-export function markCarried(walk: Consumers, value: PlaceId): void {
-  let carried = CARRIED.get(walk);
-  if (carried === undefined) CARRIED.set(walk, (carried = new Set()));
-  carried.add(value);
+/** `mixedChoice`'s record of a value a mixed answer reaches and its known types (none for one type). */
+export function recordAnswer(walk: Consumers, value: PlaceId, types: readonly ItemTag[]): void {
+  let answered = ANSWERED.get(walk);
+  if (answered === undefined) ANSWERED.set(walk, (answered = new Map()));
+  answered.set(value, types);
 }
 
-/** Whether a mixed answer reaches any value of the pass (`markCarried`). */
+/** Whether a mixed answer reaches any value of the pass (`recordAnswer`). */
 export function anyCarried(walk: Consumers): boolean {
-  return (CARRIED.get(walk)?.size ?? 0) > 0;
+  return ANSWERED.has(walk);
 }
 
 /**
- * What a new variable keeping a warning's subject declares (#1352, the kept-value fix of every warning): the known
- * types of a mixed answer the subject holds, a value the walk's reach from a mixed choice met (`markCarried`) or a
- * mixed choice itself; else none (`[]`: a `let` without a type infers no union there, at no cost). Asked only where
- * the subject's value is found; where it is not, `anyCarried` says whether a plain `let` is still proved.
+ * What a new variable keeping a warning's subject declares (#1352, the kept-value fix of every warning), from the
+ * walk's record alone, never a read after it (a finishing walk's reads answer nothing, Codex r6 on #1660): the types the
+ * walk recorded where a mixed answer reaches the subject; else none (`[]`: a `let` without a type infers no union there).
+ * Asked only where the subject's value is found; where it is not, `anyCarried` says whether a plain `let` is proved.
  */
 export function keptTypes(walk: Consumers, value: PlaceId): readonly ItemTag[] {
-  if (CARRIED.get(walk)?.has(value) === true) {
-    const own = knownKinds(walk, value);
-    return oneType(own) ? [] : own;
-  }
-  return mixedAnswer(walk, value) ?? [];
+  return ANSWERED.get(walk)?.get(value) ?? [];
 }

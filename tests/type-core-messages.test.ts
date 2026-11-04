@@ -1893,6 +1893,19 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       'let value: integer | string = askChoice "None", 1, hostValue\nif value is integer { repeat (value) {} }\nexit\n',
     ],
     [
+      // (a block past the nesting limit runs the finishing path, whose reads answer nothing: the walk's own record keeps
+      // the union, Codex r6 on #1660)
+      `repeat (${S}) {}\n${"if true {\n".repeat(257)}say "Done"\n${"}\n".repeat(257)}exit\n`,
+      `Keep '${S}' in a new variable, as in 'let value: integer | string = ${S}', and check it, as in 'if value is integer { repeat (value) {} }'`,
+      null,
+    ],
+    [
+      // (a list option whose elements mix: its own error, and what its answer reaches is still recorded)
+      'repeat ((askChoice ["A", 1]) otherwise 1) {}\nexit\n',
+      `Keep '(askChoice ["A", 1]) otherwise 1' in a new variable declared with the type 'integer | string' and check that it is a whole number (integer) first.`,
+      null,
+    ],
+    [
       `repeat ${C} {}\nexit\n`,
       `Keep '${C}' in a new variable, as in 'let value: integer | string = ${C}', and check it, as in 'if value is integer { repeat value {} }'.`,
       `let value: integer | string = ${C}\nif value is integer { repeat value {} }\nexit\n`,
