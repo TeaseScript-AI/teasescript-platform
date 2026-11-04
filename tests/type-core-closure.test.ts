@@ -41,7 +41,7 @@ const GLOBALS = ["hostValue", "hostOther"];
 /** A list of lists of whole numbers: what each witness's store receives. */
 const NESTED: TypePlan = { kind: "list", element: { kind: "list", element: { kind: "integer" } } };
 
-/** As `type-core-work`'s: linear work doubles; a product of two dimensions about quadruples. */
+/** As `tests/helpers/type-core-work.ts`'s: linear work doubles; a product of two dimensions about quadruples. */
 const DOUBLING = 2.15;
 
 const lines = (k: number, line: (i: number) => string): string =>

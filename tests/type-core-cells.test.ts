@@ -4070,7 +4070,7 @@ test("the copied-property check grows with the program, not with its copies time
       const from = name.includes("property cycles") ? 128 : 64;
       const small = work(from);
       const large = work(2 * from);
-      // per doubling of the source, against `type-core-work.test.ts`'s criteria (2 for linear work): the total, and
+      // per doubling of the source, against `tests/helpers/type-core-work.ts`'s criteria (2 for linear work): the total, and
       // each counter of at least 200 units
       const scale = (large.get("syntaxNodes") ?? 0) / (small.get("syntaxNodes") ?? 1);
       const doubling = (before: number, after: number): number =>
@@ -4156,7 +4156,7 @@ test("a mixed literal's conflicts are found once, under however many wrappers (A
     };
     const small = extra(32);
     const large = extra(64);
-    // the conflicts' checks per doubling of the source, against `type-core-work.test.ts`'s counter criterion
+    // the conflicts' checks per doubling of the source, against `tests/helpers/type-core-work.ts`'s counter criterion
     const doubling = (2 * (large.checks / small.checks)) / (large.nodes / small.nodes);
     assert.ok(doubling <= 2.35, `${siblings ? "siblings" : "copies"}: ${doubling.toFixed(3)}`);
   }
