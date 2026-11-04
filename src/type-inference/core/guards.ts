@@ -560,6 +560,17 @@ export class GuardIndex {
     return false;
   }
 
+  /**
+   * Whether the program has no condition, no `switch` and no `and`/`or` (#1251): the only places a narrowing definition
+   * is made (`NarrowingIndex`'s conditions, switch subjects and operand regions), so its narrowing index lists none.
+   */
+  public get testless(): boolean {
+    const flow = this.program.flow;
+    return (
+      flow.conditionUses.length === 0 && flow.switchUses.length === 0 && flow.logicals.length === 0
+    );
+  }
+
   /** Whether no test names a key of `place`, at any path (so `narrowed` answers no for every key of it). */
   public untested(place: PlaceId): boolean {
     const root = keyOf(place, []);

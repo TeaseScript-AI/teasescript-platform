@@ -271,8 +271,15 @@ export class Values {
       projection = program.projOf.get(at);
     }
     const binding = stable ? program.occurrenceOf.get(at) : undefined;
-    // (a root no test names is never narrowed: one lookup before the stored values and the tested paths)
-    if (binding !== undefined && guards.narrowing.tests(binding) && this.#inStoredValue(read!)) {
+    // (a root no test names is never narrowed: a program without a condition, a switch or an `and`/`or` makes no
+    // narrowing definition and builds no narrowing index (#1251); else the index's lookup, the stored values and the
+    // tested paths)
+    if (
+      binding !== undefined &&
+      !guards.testless &&
+      guards.narrowing.tests(binding) &&
+      this.#inStoredValue(read!)
+    ) {
       const g = guards.narrowing.nearestAt(read!);
       if (g !== null)
         found = {
