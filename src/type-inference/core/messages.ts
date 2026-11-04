@@ -467,7 +467,6 @@ export function keptVariableName(
     while (pending.length > 0) {
       const node = pending.pop()!;
       const kind = node["kind"];
-      if (typeof kind === "string") work?.charge("indexSteps");
       for (const [key, value] of Object.entries(node)) {
         if (value === null || typeof value !== "object") continue;
         // EVIDENCE: invariant: the parser builds its nodes, their lists and their spans of plain objects and arrays.
@@ -476,6 +475,7 @@ export function keptVariableName(
           if (item === null || typeof item !== "object") continue;
           // EVIDENCE: invariant: an object the parser built is a plain record of its fields.
           const fields = item as Readonly<Record<string, unknown>>;
+          if (typeof fields["kind"] === "string") work?.charge("indexSteps");
           if (fields["kind"] !== "identifier") pending.push(fields);
           else if (
             typeof fields["name"] === "string" &&
