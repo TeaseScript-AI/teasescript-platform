@@ -796,10 +796,53 @@ export interface LandingOps {
   /** The units the call charged the pass's work. */
   units: number;
   /**
-   * The slots the call left retained: its tape (four per path, three per repeat, its index nodes) where a listing keeps
-   * it, and per listing kept its frame, points and children (three per point, one per child task) and trie nodes made.
+   * The slots the call left retained (`census`): its tape and each listing it kept or left pending, every object once,
+   * and the trie nodes it made.
    */
   retained: number;
+  /** The listings the call kept or left pending (`census`). */
+  readonly kept: Listing[];
+}
+
+/**
+ * The slots a call's retained state holds, every object counted once: its tape (per path its steps and four, per
+ * repeat three, each index node one), and per listing one, three per point, one per child, and per task (a frame, a
+ * child's or one a `parent` reaches) four and its steps.
+ */
+function census(tape: LandingTape, listings: readonly Listing[]): number {
+  const counted = new Set<object>();
+  let slots =
+    tape.paths.reduce((sum, path) => sum + path.length + 4, 0) +
+    3 * tape.at.length +
+    tape.levels.slice(1).reduce((sum, level) => sum + level.length, 0);
+  const point = (at: TapePoint): void => {
+    if (counted.has(at)) return;
+    counted.add(at);
+    slots += 3;
+  };
+  const task = (start: LandingTask): void => {
+    for (
+      let at: LandingTask | undefined = start;
+      at !== undefined && !counted.has(at);
+      at = at.parent
+    ) {
+      counted.add(at);
+      slots += 4 + at.below.length + at.prepend.length;
+    }
+  };
+  for (const listing of listings) {
+    slots += 1;
+    point(listing.from);
+    point(listing.own);
+    point(listing.to);
+    task(listing.frame);
+    for (const child of listing.children) {
+      slots += 1;
+      point(child.from);
+      task(child.task);
+    }
+  }
+  return slots;
 }
 
 /** Each operation at 0. */
@@ -954,8 +997,9 @@ export class LandingTape {
       }
     };
     for (let low = from.repeats; low < to.repeats;) {
-      let h = 0;
-      while (low % (2 << h) === 0 && low + (2 << h) <= to.repeats) h += 1;
+      // (the largest block aligned at `low` within the range, at once: its trailing zeros, the range's length's log)
+      const aligned = low === 0 ? 31 : 31 - Math.clz32(low & -low);
+      const h = Math.min(aligned, 31 - Math.clz32(to.repeats - low));
       happened("select");
       debit(this.work, "select");
       descend(h, low >> h, true);
@@ -986,7 +1030,8 @@ export function landedBelow(
 ): string[] {
   const work = admission.pass.program.work;
   const outer = currentOps;
-  currentOps = opsHook === null ? null : { ops: noOps(), debited: noOps(), units: 0, retained: 0 };
+  currentOps =
+    opsHook === null ? null : { ops: noOps(), debited: noOps(), units: 0, retained: 0, kept: [] };
   const counts = currentOps;
   const before = work.total;
   try {
@@ -998,11 +1043,7 @@ export function landedBelow(
     const texts = [...listing.tape.texts];
     if (counts !== null) {
       counts.units = work.total - before;
-      const { tape } = listing;
-      counts.retained +=
-        4 * tape.texts.length +
-        3 * tape.at.length +
-        tape.levels.slice(1).reduce((sum, level) => sum + level.length, 0);
+      counts.retained += census(listing.tape, [listing, ...counts.kept]);
     }
     if (comparison !== null) {
       currentOps = null;
@@ -1042,8 +1083,6 @@ function keepListing(admission: Admission, listing: Listing): void {
     node = next;
   }
   node.listing = listing;
-  if (currentOps !== null)
-    currentOps.retained += 1 + 3 * (3 + listing.children.length) + listing.children.length;
 }
 
 /**
@@ -1208,8 +1247,11 @@ function walkLandings(
       // (a skip inside it is a skip inside the record around it)
       const outer = records.at(-1);
       if (outer !== undefined) outer.least = Math.min(outer.least, record.least);
-      if (record.least >= record.mark) keepListing(admission, close(record));
-      else recordOf.delete(record.task);
+      if (record.least >= record.mark) {
+        const listing = close(record);
+        keepListing(admission, listing);
+        currentOps?.kept.push(listing);
+      } else recordOf.delete(record.task);
       continue;
     }
     // (a child of an open record's root: its paths and tasks start here)
