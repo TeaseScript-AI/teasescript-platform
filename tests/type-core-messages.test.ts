@@ -2165,3 +2165,65 @@ test("the kept-value fact's work grows linearly with the warnings and the choice
       assert.ok(work[at]! <= 2.05 * work[at - 1]!, `${JSON.stringify(mode)} ${work.join(", ")}`);
   }
 });
+
+/**
+ * #1274: a fix that keeps a value in a new variable names one free in the whole project (`MessageSource.freeName`):
+ * `value`, else `value2`, `value3`, …, the first no identifier of any file's code spells (a property's name aside) and
+ * no host global or built-in reserves, and its check reads that name. Each of the sentence's three forms (a null check,
+ * a type check of a kept union, a selection's length) beside each way a name is or is not taken (declared before the
+ * use or after it, as a function, a parameter, two names at once; only in a text or as a property's name; a host
+ * global): the `let` and the check pasted in place of the use's line compile.
+ */
+test("a kept value's variable takes a name free in the project, and the fix compiles where pasted (#1274)", () => {
+  const uses = [
+    { setup: "let xs = [7, null]", use: "say xs[0] + 1" },
+    { setup: "let v = 1", use: 'v = askChoice "None", [5, 10]' },
+    { setup: "let groups: integer[][] = [[], [21]]", use: "say groups.random.last" },
+  ];
+  const taken: readonly (readonly [string, readonly string[], readonly string[], string])[] = [
+    ["free", [], [], "value"],
+    ["declared before", ["let value = 2"], ["say value"], "value2"],
+    ["declared after", [], ["let value = 2", "say value"], "value2"],
+    ["a function", ["function value { return 1 }"], [], "value2"],
+    ["a parameter", ["function f(value) { return value }"], [], "value2"],
+    ["two names", ["let value = 2", "let value2 = 3"], ["say value + value2"], "value3"],
+    ["only in a text", ['say "value"'], [], "value"],
+    ["only a property's name", ["let o = {value: 1}", "say o.value"], [], "value"],
+  ];
+  for (const { setup, use } of uses)
+    for (const [name, before, after, expected] of taken) {
+      const source = [setup, ...before, use, ...after, "exit", ""].join("\n");
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, source);
+      const { diagnostics } = analyseCore(request);
+      const text = messageSource([source], diagnostics);
+      const fix = diagnostics
+        .map((diagnostic) => coreMessage(diagnostic, text))
+        .map((message) =>
+          /as in '(let [^']*)', and check (?:it|its length), as in '(if [^']*)'/.exec(message),
+        )
+        .find((found) => found !== null);
+      assert.ok(fix !== undefined && fix !== null, `${name}: ${source}`);
+      const [, keep, check] = fix;
+      assert.ok(keep!.startsWith(`let ${expected}`), `${name}: ${keep}`);
+      assert.ok(new RegExp(`\\b${expected}\\b`).test(check!), `${name}: ${check}`);
+      const pasted = source.replace(`${use}\n`, `${keep}\n${check}\n`);
+      const fixed = coreRequest([{ path: "main.tease", source: pasted }]);
+      assert.ok(fixed !== null, `${name}: the pasted names resolve: ${pasted}`);
+      assert.deepEqual(
+        analyseCore(fixed).diagnostics.filter((d) => d.class === "compile-error"),
+        [],
+        `${name}: ${pasted}`,
+      );
+    }
+  // (a host global or a built-in the script never names is reserved too)
+  const source = "let xs = [7, null]\nsay xs[0] + 1\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "value"])!;
+  const { diagnostics } = analyseCore(request);
+  const text = messageSource([source], diagnostics, ["hostValue", "value"]);
+  assert.ok(
+    diagnostics.some((diagnostic) =>
+      coreMessage(diagnostic, text).includes("as in 'let value2 = xs[0]'"),
+    ),
+  );
+});

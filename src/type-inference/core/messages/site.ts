@@ -49,6 +49,12 @@ export interface MessageSource {
     held: SourceSite,
     rulesOut: ((kind: ItemTag) => boolean) | null,
   ) => boolean;
+  /**
+   * A name a fix may declare anywhere in the project (#1274): `base`, else `base2`, `base3`, …, the first that no
+   * identifier of any file's code spells (a property's name aside) and no host global or built-in name reserves. A
+   * declaration of the name anywhere would spell it, so it duplicates no visible name wherever the fix is pasted.
+   */
+  readonly freeName: (base: string) => string;
 }
 
 /**

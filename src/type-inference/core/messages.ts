@@ -40,11 +40,12 @@ export { described, pathPhrase } from "./messages/words.js";
 /**
  * The message source of a project's files and of their analysis's diagnostics: each file's text, its lines counted
  * once, its statements on one line by their line, each parsed once, and its diagnostics' sites in start order, each
- * on first need.
+ * on first need; `reserved`, the host globals and built-in names a fix may not declare (`freeName`).
  */
 export function messageSource(
   sources: readonly string[],
   diagnostics: readonly CheckedDiagnostic[],
+  reserved: readonly string[] = [],
 ): MessageSource {
   const starts = new Map<number, number[]>();
   const programs = new Map<number, Program>();
@@ -209,7 +210,48 @@ export function messageSource(
     return found;
   };
   const landing = (site: SourceSite): Landing | null => landingOf(givensOf(site.file), site);
+  // (every name a project's code spells: its identifiers but the property names of objects, speakers, reads and
+  // arguments, which no variable can clash with; with the host globals and built-ins, `freeName`'s taken names)
+  let taken: Set<string> | null = null;
+  const PROPERTY_NAMES: Readonly<Record<string, string>> = {
+    objectProperty: "name",
+    speakerProperty: "name",
+    propertyAccessExpression: "property",
+    namedArgument: "name",
+    formArgument: "name",
+  };
+  const collect = (node: Readonly<Record<string, unknown>>, into: Set<string>): void => {
+    const kind = node["kind"];
+    for (const [key, value] of Object.entries(node)) {
+      if (value === null || typeof value !== "object") continue;
+      // EVIDENCE: invariant: the parser builds its nodes, their lists and their spans of plain objects and arrays.
+      const items: readonly unknown[] = Array.isArray(value) ? value : [value];
+      for (const item of items) {
+        if (item === null || typeof item !== "object") continue;
+        // EVIDENCE: invariant: an object the parser built is a plain record of its fields.
+        const fields = item as Readonly<Record<string, unknown>>;
+        if (fields["kind"] !== "identifier") collect(fields, into);
+        else if (
+          typeof fields["name"] === "string" &&
+          !(typeof kind === "string" && PROPERTY_NAMES[kind] === key)
+        )
+          into.add(fields["name"]);
+      }
+    }
+  };
+  const freeName = (base: string): string => {
+    if (taken === null) {
+      taken = new Set(reserved);
+      for (let file = 0; file < sources.length; file += 1)
+        collect({ statements: programOf(file).statements }, taken);
+    }
+    if (!taken.has(base)) return base;
+    let suffix = 2;
+    while (taken.has(`${base}${suffix}`)) suffix += 1;
+    return `${base}${suffix}`;
+  };
   return {
+    freeName,
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
     landing,
     target: (site) =>
