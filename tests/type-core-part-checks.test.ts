@@ -281,6 +281,28 @@ test("plan validation refuses part checks of another shape and a plan of an olde
   for (const [edit, path] of [
     [(i: Record<string, unknown>) => (i["partChecks"] = []), ".partChecks"],
     [
+      (i: Record<string, unknown>) =>
+        (i["partChecks"] = [{ path: [], type: { kind: "integer" }, place: "'x'" }]),
+      ".partChecks[0].path",
+    ],
+    [
+      (i: Record<string, unknown>) =>
+        (i["partChecks"] = [{ path: [{ index: 0 }], type: { kind: "integer" }, place: "'x'" }]),
+      ".partChecks[0].path[0]",
+    ],
+    [
+      (i: Record<string, unknown>) =>
+        (i["partChecks"] = [
+          { path: [{ element: true }], type: { kind: "nothing" }, place: "'x'" },
+        ]),
+      ".partChecks[0].type",
+    ],
+    [
+      (i: Record<string, unknown>) =>
+        (i["partChecks"] = [{ path: [{ element: true }], type: { kind: "integer" } }]),
+      ".partChecks[0].place",
+    ],
+    [
       (i: Record<string, unknown>) => {
         const parts = Array.isArray(i["partChecks"]) ? i["partChecks"] : [];
         i["partChecks"] = [...parts, ...parts];
