@@ -1139,9 +1139,9 @@ function labelRootOf(
  *   the same in both runs, never a relabel);
  * - each step below it: a property's name; a selection, an index or a `get`, spelled `element`, or `entry` where every
  *   kind of its owner is a dictionary (`elementStepOf`); a dictionary's `values` or `keys`;
- * - and where the chain passes a `values` or `keys` step whose owner is a dictionary (`derivedChain`), the whole label is
- *   the value's own text instead (`ownLabel`): its root as written (`N`, `P`, `F(...)`) and each element step as written
- *   (`[e]`, `get(e)`, `first`, `last`, `random`).
+ * - and where the chain passes a `values` or `keys` step with a dictionary among its owner's kinds (`derivedChain`), the
+ *   whole label is the value's own text instead (`ownLabel`): its root as written (`N`, `P`, `F(...)`) and each
+ *   element step as written (`[e]`, `get(e)`, `first`, `last`, `random`).
  * After a stop the stopped analysis may prove more of an owner's kinds than the reference (`labelDomain`), which gives
  * exactly two precise forms, never mixed:
  * - `"entry"`: the reference's path with some `element` steps spelled `entry`, nothing else changed;
@@ -1192,6 +1192,14 @@ const writtenDict = (members: readonly (TypeAnnotation | null)[]): boolean =>
       (type.kind === "dictType" || (type.kind === "namedType" && type.name === "dict")),
   );
 
+/** Whether some value a written type's members admit is a dictionary: a derived list's owner (`derivedChain`). */
+const writtenSomeDict = (members: readonly (TypeAnnotation | null)[]): boolean =>
+  members.some(
+    (type) =>
+      type !== null &&
+      (type.kind === "dictType" || (type.kind === "namedType" && type.name === "dict")),
+  );
+
 /**
  * A written type's members one `element` step down, as the compiler's `termAt` takes one (`typeAtStep`): each member's
  * element where it has one, the others left out (`null`, a scalar); none where no member has one.
@@ -1208,9 +1216,10 @@ const elementsOf = (members: readonly (TypeAnnotation | null)[]): (TypeAnnotatio
  * Whether a written type at the key proves `x`'s form (#1595, the lead's ruling on Q4: the author's own proof, as the
  * compiler reads it). The root's written type is followed along `u`'s element steps through its elements, optionals and
  * unions as `termAt` follows them; a step it cannot follow proves nothing past it. One clause per form:
- * - `"entry"`: every step `x` spells `entry` has a written dictionary as its owner (`elementStepOf`), and no `values` or
- *   `keys` step on the way has one, where the compiler names the value by its own text instead (`derivedChain`);
- * - `"own"`: a `values` or `keys` step on the way has a written dictionary as its owner (`derivedChain`).
+ * - `"entry"`: every step `x` spells `entry` has a written dictionary as its owner, every kind of it
+ *   (`elementStepOf`), and no `values` or `keys` step on the way has a dictionary among its owner's kinds, where the
+ *   compiler names the value by its own text instead (`derivedChain`);
+ * - `"own"`: a `values` or `keys` step on the way has a dictionary among its owner's written kinds (`derivedChain`).
  */
 function writtenProves(
   graph: FlowGraph,
@@ -1227,7 +1236,7 @@ function writtenProves(
     const step = u[at]!;
     if (form === "entry" && x[at] === "entry" && !writtenDict(members)) return false;
     // (a derived list: its own text, never an `entry` path, the two forms exclusive as `keyLabel` makes them)
-    if (DERIVED.has(step) && writtenDict(members)) return form === "own";
+    if (DERIVED.has(step) && writtenSomeDict(members)) return form === "own";
     if (step !== "element") return form === "entry" && at > last;
     members = elementsOf(members);
   }
