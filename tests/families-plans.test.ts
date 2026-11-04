@@ -11,8 +11,10 @@ const tool = resolve("tests/families/plans.mjs");
  * A built tree's modules as the plans comparison loads them: a ledger whose allowance is 1,000 or a test's, and a compile
  * that charges it by its source: `over` 5,000 units (past 4 times the allowance), `slow` 300 after waiting 100 ms in
  * every run (its eight runs together past a 0.5 s safety net, each within it), `hang` 1 after waiting 1 s, any other 300;
- * the held family's stop search, at a test allowance of 10, 300 for `stopped` (30 times that allowance, within 4 times
- * its natural one) and 5,000 for `searched` (past 4 times its natural one), and `stopped` at its one settled stop 300.
+ * the held family's stop search, one analysis at a test allowance of 10, 300 for `stopped` (30 times that allowance,
+ * within 4 times its natural one) and 5,000 for `searched` (past 4 times its natural one), each at its one settled stop
+ * 300; `settling` waits 300 ms in the head's first compile and as the base's next search starts (each within a 0.5 s
+ * net, together past it), `lost` 1 s as its search starts.
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": `let test = null;
@@ -35,8 +37,10 @@ export const withTestDemandAllowance = (_, run) => run();
 `,
   "src/compiler.js": `import { ledger } from "./type-inference/core/budget.js";
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+let settling = import.meta.url.includes("/head/");
 export function compileProjectWithBackend(files) {
   const source = files[0].source;
+  if (source === "settling" && settling) (settling = false), wait(300);
   if (source === "slow") wait(100);
   if (source === "hang") wait(1000);
   ledger().charge("frames", source === "over" ? 5000 : source === "hang" ? 1 : 300);
@@ -54,11 +58,15 @@ export function analyseCore(request) {
 `,
   "tests/helpers/type-core-analysis.js": `export const coreRequest = (files) => ({ source: files[0].source });\n`,
   "tests/helpers/type-core-held-host.js": `import { WorkLedger } from "../../src/type-inference/core/budget.js";
+const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 export const HELD_MODES = [0, 1, 2, 3].map(() => ({ run: (f) => f() }));
 export const heldFamily = () =>
-  ["stopped", "searched"].map((name) => ({ name, source: name, slice: true }));
-export function heldStops(c) {
-  new WorkLedger(10).charge("frames", c.name === "searched" ? 5000 : 300);
+  ["stopped", "searched", "settling", "lost"].map((name) => ({ name, source: name, slice: true }));
+let settling = import.meta.url.includes("/base/");
+export function heldStops(c, mode) {
+  if (c.name === "settling" && settling) (settling = false), wait(300);
+  if (c.name === "lost") wait(1000);
+  mode.run(() => new WorkLedger(10).charge("frames", c.name === "searched" ? 5000 : 300));
   return [{ allowance: 10, phase: "admission" }];
 }
 `,
@@ -144,25 +152,21 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
   assert.deepEqual(counted(again), { ...recorded, resumed: 4 });
   assert.equal(again.records.length, 4);
   // (at a test allowance of 10, 300 units are within 4 times the source's natural allowance, in the stop search and at
-  // the stop; the search's own analysis past it is a stall, named by its run)
+  // the stop; the search's own analysis past it is a stall, named by its run; the search's own work is a run of its
+  // own for the safety net: after a slow compile it is no safety net reached, and lost, it is named)
   const held = plans("held", join(folder, "held.jsonl"), "--stops");
   assert.equal(held.ran.status, 1, held.ran.stderr);
   assert.deepEqual(
-    held.records.map(({ name, stalled, run, work, allowance }) => ({
+    held.records.map(({ name, stalled, uncharged, run, work, allowance }) => ({
       name,
       stalled,
+      uncharged,
       run,
       work,
       allowance,
     })),
     [
-      {
-        name: "stopped",
-        stalled: undefined,
-        run: undefined,
-        work: undefined,
-        allowance: undefined,
-      },
+      { name: "stopped" },
       {
         name: "searched",
         stalled: "units",
@@ -170,7 +174,20 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
         work: 5000,
         allowance: 1000,
       },
-    ],
+      { name: "settling" },
+      {
+        name: "lost",
+        uncharged: "safety net 0.5 s",
+        run: { tree: "base", mode: 0, at: "stop search, between", analysis: 0 },
+      },
+    ].map((record) => ({
+      stalled: undefined,
+      uncharged: undefined,
+      run: undefined,
+      work: undefined,
+      allowance: undefined,
+      ...record,
+    })),
   );
-  assert.equal(held.summary.runs, 8);
+  assert.equal(held.summary.runs, 16);
 });

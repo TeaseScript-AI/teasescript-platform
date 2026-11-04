@@ -13,16 +13,17 @@
 //   <set>: corpus (CASES_JSON=<cases.json>), fixture (the base tree's tools/corpus/fixture), held (the base tree's
 //   `heldFamily()`), or an area of tests/families by its name (the head tree's) or folder (its generators' sources at
 //   their own sizes, by the head tree's `sources.mjs`).
-// A run is one compile of a source in a mode on one tree, or one analysis of the held family's (each of its stop
-// search's, `heldStops`, apart). It stalls where its charged units (every `WorkLedger.charge` of its tree while it runs)
-// pass `--units` times its program's allowance, as in `run.mjs` (#1647): the largest allowance of a ledger it charged,
-// max(30 M, 256 × syntax nodes), and for a run at a test allowance (a stop, the questions phase, the stop search) the
-// allowance of the same source's natural compile on that tree, so the limit is the same on every machine; a source past
-// `--memory` MB of heap, or whose worker ends, stalls too. The wall clock is only a safety net, `--timeout` seconds a run:
-// a run that reaches it does work no ledger charges, and its source is recorded as `uncharged` with that run, never as a
-// stall. Either way a fresh worker takes the next source. A stalled or uncharged source is never agreement. Resumes: a
-// source already in `--out` is not run again, its record counted as it stands. Prints one JSON summary line; exit 0 when
-// every compared run is equal and nothing stalled or reached the safety net, else 1.
+// A run is one compile of a source in a mode on one tree, one analysis of the held family's (each of its stop search's,
+// `heldStops`, through the mode's `run`, apart), or the search's own work between them. It stalls where its charged
+// units (every `WorkLedger.charge` of its tree while it runs) pass `--units` times its program's allowance, as in
+// `run.mjs` (#1647): the largest allowance of a ledger it charged, max(30 M, 256 × syntax nodes), and for a run at a
+// test allowance (a stop, the questions phase, the stop search) the allowance of the same source's natural compile on
+// that tree, so the limit is the same on every machine; a source past `--memory` MB of heap, or whose worker ends,
+// stalls too. The wall clock is only a safety net, `--timeout` seconds a run: a run that reaches it does work no ledger
+// charges, and its source is recorded as `uncharged` with that run, never as a stall. Either way a fresh worker takes
+// the next source. A stalled or uncharged source is never agreement. Resumes: a source already in `--out` is not run
+// again, its record counted as it stands. Prints one JSON summary line; exit 0 when every compared run is equal and
+// nothing stalled or reached the safety net, else 1.
 // `summary` classifies the records per set, source and mode (`modes`, each with its demand, stop and questions runs):
 // identical; work only (the plan, the diagnostics, the error and the questions equal, the charge trace not); a question
 // sequence apart; a publication difference; at a demand allowance apart; for the held family, a stop set or a stopped
@@ -339,21 +340,40 @@ if (isMainThread && process.argv[2] === "summary") {
   /**
    * The run going on (`run`): the units its tree's ledgers charged (`spent`) and the largest allowance of a ledger it
    * charged, or for a run at a test allowance its source's natural one on that tree (`floor`). Past `units` times that,
-   * the worker posts the run and ends (`OVER_EXIT`). In a stop search (`search`, `heldStops`, whose analyses run at the
-   * natural and at test allowances) each analysis is a run of its own, told apart by its ledger (`ledger`), numbered.
+   * the worker posts the run and ends (`OVER_EXIT`). Each start is posted, so that the safety net is a run's.
    */
-  const meter = { run: null, spent: 0, allowance: 0, floor: 0, search: null, ledger: null };
+  const meter = { run: null, spent: 0, allowance: 0, floor: 0 };
   const start = (run, floor = 0) => {
-    Object.assign(meter, { run, spent: 0, allowance: 0, floor, search: null, ledger: null });
+    Object.assign(meter, { run, spent: 0, allowance: 0, floor });
     parentPort.postMessage({ running: run });
   };
-  /** `heldStops` of `tree` in `mode`, each analysis it makes metered as one run (`meter`). */
+  /**
+   * `heldStops` of `tree` in `mode`: each analysis it makes, through the mode's `run`, is a run (`stop search`, numbered),
+   * and its own work before, between and after them another (`stop search, between`), each metered at the natural
+   * floor and posted as it starts, so neither counts to the run before it.
+   */
   const searched = (tree, c, mode) => {
-    meter.search = { tree: tree.name, mode, at: "stop search", analysis: 0 };
+    const held = tree.held.HELD_MODES[mode];
+    let analysis = 0;
+    const between = () =>
+      start({ tree: tree.name, mode, at: "stop search, between", analysis }, tree.natural);
+    const metered = {
+      ...held,
+      run: (make) => {
+        analysis += 1;
+        start({ tree: tree.name, mode, at: "stop search", analysis }, tree.natural);
+        try {
+          return held.run(make);
+        } finally {
+          between();
+        }
+      },
+    };
+    between();
     try {
-      return tree.held.heldStops(c, tree.held.HELD_MODES[mode], 1);
+      return tree.held.heldStops(c, metered, 1);
     } finally {
-      Object.assign(meter, { run: null, search: null, ledger: null });
+      meter.run = null;
     }
   };
 
@@ -421,17 +441,6 @@ if (isMainThread && process.argv[2] === "summary") {
     }
     const { charge } = tree.budget.WorkLedger.prototype;
     tree.budget.WorkLedger.prototype.charge = function (counter, units = 1) {
-      if (meter.search !== null && this !== meter.ledger) {
-        meter.search.analysis += 1;
-        meter.ledger = this;
-        Object.assign(meter, {
-          run: { ...meter.search },
-          spent: 0,
-          allowance: 0,
-          floor: tree.natural,
-        });
-        parentPort.postMessage({ running: meter.run });
-      }
       if (meter.run !== null) {
         meter.spent += units;
         if (Number.isInteger(this.allowance) && this.allowance > meter.allowance)

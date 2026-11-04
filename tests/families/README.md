@@ -224,13 +224,13 @@ two built trees in one worker, in the four modes, and compares the plan, the dia
 compile charges and the questions it asks its answers, exactly; `--demands 16,64` also at those demand allowances,
 `--stops` the held family's settled stops and questions phase. A set is `corpus` (the cases file `CASES_JSON` names),
 `fixture`, `held`, or an area by its name or folder. A run (one compile of a source in a mode on one tree, or one
-analysis of the held family's stop search) stalls by the runner's rule above: its units past `--units` (4) times its
-program's allowance, the allowance of the source's natural compile for a run at a test allowance; a run past the safety
-net, `--timeout` (1,800 s), makes its source `uncharged`, never a stall. One JSON line per source goes to `--out`, whose
-sources a rerun with it counts as recorded without running them again, and a summary to stdout; `plans.mjs summary
-<records>...` classifies the records (identical, work only, questions, publication, stops) and lists each difference,
-stall and uncharged source. A builder runs the head tree's copy instead of copying a kit, and extends it here where a
-comparison needs more:
+analysis of the held family's stop search, or that search's work between them) stalls by the runner's rule above: its
+units past `--units` (4) times its program's allowance, the allowance of the source's natural compile for a run at a
+test allowance; a run past the safety net, `--timeout` (1,800 s), makes its source `uncharged`, never a stall. One JSON
+line per source goes to `--out`, whose sources a rerun with it counts as recorded without running them again, and a
+summary to stdout; `plans.mjs summary <records>...` classifies the records (identical, work only, questions,
+publication, stops) and lists each difference, stall and uncharged source. A builder runs the head tree's copy instead
+of copying a kit, and extends it here where a comparison needs more:
 
 ```sh
 sx-job submit --commit base=<base> --commit head=<head> --shards 16 --mem 3G --timeout 1h --campaign <T> \
