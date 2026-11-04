@@ -433,8 +433,12 @@ function regionOf(
             deep,
             single,
             typed: above.typed || (linked && TYPED_ROLES.has(part.role!)),
-            chosen: above.chosen && (!linked || linkTest(admission, item.task, index, part, false, caches)),
-            surely: above.surely && (!linked || linkTest(admission, item.task, index, part, true, caches)),
+            chosen:
+              above.chosen &&
+              (!linked || linkTest(admission, item.task, index, part, false, caches)),
+            surely:
+              above.surely &&
+              (!linked || linkTest(admission, item.task, index, part, true, caches)),
             joined: above.joined || part.role === "concatenation/operand",
           });
           at.from.push(item.member);
@@ -984,7 +988,15 @@ export function transferredDecider(
 
 /** The decider's root group's one member: the stored value's own task, chosen, not below an operation. */
 function rootMember(task: Expansion): Member {
-  return { task, deep: false, single: true, typed: false, chosen: true, surely: true, joined: false };
+  return {
+    task,
+    deep: false,
+    single: true,
+    typed: false,
+    chosen: true,
+    surely: true,
+    joined: false,
+  };
 }
 
 /**
@@ -1003,7 +1015,15 @@ function writtenAt(admission: Admission, path: RegionPath): readonly Entry[] {
     if (read !== null) {
       const inherited = entry.call !== true && entry.task.inherits !== null;
       const strip = inherited ? entry.task.inherits!.strip : entry.task.stop!.strip;
-      const name = keptParts(admission.work, entry.member, strip, entry.deep, entry.single, read, inherited);
+      const name = keptParts(
+        admission.work,
+        entry.member,
+        strip,
+        entry.deep,
+        entry.single,
+        read,
+        inherited,
+      );
       if (seen.has(name)) continue;
       seen.add(name);
     }
@@ -1050,8 +1070,18 @@ function summaryCaches(admission: Admission): DeciderCaches {
   const own = admission.deciderCaches;
   const caches: DeciderCaches =
     forgets === admission.forgetsAtStart
-      ? { deciders: own.deciders, linkTests: own.linkTests, linkKinds: own.linkKinds, summaries: new WeakMap() }
-      : { deciders: new Map(), linkTests: new Map(), linkKinds: new Map(), summaries: new WeakMap() };
+      ? {
+          deciders: own.deciders,
+          linkTests: own.linkTests,
+          linkKinds: own.linkKinds,
+          summaries: new WeakMap(),
+        }
+      : {
+          deciders: new Map(),
+          linkTests: new Map(),
+          linkKinds: new Map(),
+          summaries: new WeakMap(),
+        };
   admission.summary = { forgets, caches };
   admission.summaryEpochs += 1;
   return caches;
@@ -1136,8 +1166,7 @@ export function* writtenDecider(
     f.open === null ||
     a.depth < f.open.depth ||
     (a.depth === f.open.depth &&
-      (Number(a.call) < Number(f.open.call) ||
-        (a.call === f.open.call && rank < f.openRank)));
+      (Number(a.call) < Number(f.open.call) || (a.call === f.open.call && rank < f.openRank)));
   const merge = (f: Frame, s: WrittenSummary, rank: number, length: number): void => {
     if (s.copy !== null && rank < f.copyRank) {
       f.copy = { ...s.copy, depth: length + s.copy.depth };
@@ -1158,7 +1187,15 @@ export function* writtenDecider(
     if (f.copyRank !== f.firstRank) f.copyFirst = f.copyRank < f.firstRank;
     else if (rank === f.copyRank) f.copyFirst = s.copyFirst;
   };
-  const stack: Frame[] = [frame(root, 0, root.members.map(() => null), root.members.map(() => false), null)];
+  const stack: Frame[] = [
+    frame(
+      root,
+      0,
+      root.members.map(() => null),
+      root.members.map(() => false),
+      null,
+    ),
+  ];
   let answer: WrittenSummary | null = null;
   while (stack.length > 0) {
     const f = stack.at(-1)!;
@@ -1172,7 +1209,8 @@ export function* writtenDecider(
       const entries: { entry: Entry; length: number; kind: Kind }[] = [];
       forEachPath(regionOf(admission, f.group, caches), at, f.rest, (path, length) => {
         if (path === null) return;
-        for (const entry of writtenAt(admission, path)) entries.push({ entry, length, kind: "written" });
+        for (const entry of writtenAt(admission, path))
+          entries.push({ entry, length, kind: "written" });
         const end = f.rest + length === at.length;
         for (const entry of distinctAt(admission, path, end))
           if (!end || entry.bound === null)
@@ -1203,7 +1241,10 @@ export function* writtenDecider(
         let byName = caches.summaries.get(f.group);
         if (byName === undefined) caches.summaries.set(f.group, (byName = new Map()));
         byName.set(f.name, done);
-        keep(work, 1 + Number(f.copy !== null) + Number(f.first !== null) + Number(f.open !== null));
+        keep(
+          work,
+          1 + Number(f.copy !== null) + Number(f.first !== null) + Number(f.open !== null),
+        );
       }
       stack.pop();
       answer = done;
@@ -1220,7 +1261,16 @@ export function* writtenDecider(
         entry.rank <= Math.min(f.copyRank, f.firstRank);
       const masks = inner.members.map((each, index) =>
         values
-          ? narrowed(admission, f.masks[from[index]!]!, each, through[index]!, at, rest, ids(rest), caches)
+          ? narrowed(
+              admission,
+              f.masks[from[index]!]!,
+              each,
+              through[index]!,
+              at,
+              rest,
+              ids(rest),
+              caches,
+            )
           : EMPTY,
       );
       const linked = inner.members.map(
@@ -1246,7 +1296,13 @@ export function* writtenDecider(
       if (tags !== null)
         merge(
           f,
-          { copy: null, first: { value: entry.task.value, tags }, copyFirst: false, open: null, joinedNull: false },
+          {
+            copy: null,
+            first: { value: entry.task.value, tags },
+            copyFirst: false,
+            open: null,
+            joinedNull: false,
+          },
           entry.rank,
           length,
         );
@@ -1262,7 +1318,10 @@ export function* writtenDecider(
       term =
         result === null || !member.chosen || !live(admission, entry.task.value)
           ? null
-          : permittedAt(result, stepsAfter(keyPath(key!), restSteps(restAfter(entry.task.stop!.strip, at, rest))));
+          : permittedAt(
+              result,
+              stepsAfter(keyPath(key!), restSteps(restAfter(entry.task.stop!.strip, at, rest))),
+            );
     } else if (entry.task.inherits !== null)
       term = yield* inheritedInto(
         admission,
@@ -1305,6 +1364,11 @@ export function* writtenDecider(
   const siteOf = (value: PlaceId): SourceSite | null => program.places[value]?.site ?? null;
   if (s.open !== null) return { term: s.open.term, site: siteOf(s.open.value) };
   if (s.copy !== null && s.copyFirst)
-    return { term: s.copy.term, site: siteOf(s.copy.value), joined: s.copy.joined, joinedNull: s.joinedNull };
+    return {
+      term: s.copy.term,
+      site: siteOf(s.copy.value),
+      joined: s.copy.joined,
+      joinedNull: s.joinedNull,
+    };
   return s.first === null ? null : { term: null, site: siteOf(s.first.value), tags: s.first.tags };
 }
