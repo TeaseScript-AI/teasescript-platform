@@ -6,9 +6,11 @@
 // shard `i/N` last, written as the runners read it (no leading zeros, N at most 10,000); `check` refuses (exit 1) a list
 // that is empty, holds an item of another form, or has a group whose shards are not exactly 0 to N-1 once with one N, so
 // a 1-based list, which skips shard 0 (twice in #1652's campaigns), never reaches the queue. `make` checks what it
-// prints; `submit` checks the whole list, then runs `sx-job submit --items <file>` with the rest of its arguments.
+// prints; `submit` checks the whole list, then runs `sx-job submit` with the rest of its arguments and the list as
+// its one items option.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const MAX_SHARDS = 10_000;
 const SHARD = /^(0|[1-9]\d*)\/([1-9]\d*)$/;
@@ -87,10 +89,25 @@ if (command === "make" && rest.length > 1 && SHARD.test(`0/${rest[0]}`)) {
   checked(lines);
   process.stdout.write(`items: ${lines.length} items, every group's shards 0 to N-1 once\n`);
 } else if (command === "submit" && rest.length > 1 && rest.includes("--")) {
-  checked(itemsOf(rest[0]));
-  const submitted = spawnSync("sx-job", ["submit", "--items", rest[0], ...rest.slice(1)], {
-    stdio: "inherit",
+  // (the pool is the checked file and no other: an items option among the rest, in any form the queue's parser takes,
+  // `--items`, `--items=…` or a prefix of it, is refused, and the checked file goes last among the options, its absolute
+  // path attached, so no option replaces it and no file name reads as one)
+  const split = rest.indexOf("--");
+  const [file, options, command] = [rest[0], rest.slice(1, split), rest.slice(split)];
+  const items = options.find((option) => {
+    const name = option.split("=")[0];
+    return name.length > 3 && "--items".startsWith(name);
   });
+  if (items !== undefined) {
+    process.stderr.write(`items: '${items}' would replace the checked list; give it as the file\n`);
+    process.exit(2);
+  }
+  checked(itemsOf(file));
+  const submitted = spawnSync(
+    "sx-job",
+    ["submit", ...options, `--items=${resolve(file)}`, ...command],
+    { stdio: "inherit" },
+  );
   if (submitted.error !== undefined) {
     process.stderr.write(`items: sx-job submit could not run: ${submitted.error.message}\n`);
     process.exit(2);

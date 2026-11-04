@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
-const items = (args: readonly string[], env: NodeJS.ProcessEnv = process.env) =>
-  spawnSync(process.execPath, ["tests/families/items.mjs", ...args], { encoding: "utf8", env });
+const tool = resolve("tests/families/items.mjs");
+const items = (args: readonly string[], env: NodeJS.ProcessEnv = process.env, cwd?: string) =>
+  spawnSync(process.execPath, [tool, ...args], { encoding: "utf8", env, cwd });
 
 test("a pool's shard items are 0 to N-1 once in every group, and a 1-based list is refused before the queue (#1652)", (t) => {
   const made = items(["make", "3", "area", "copies"]);
@@ -50,7 +51,18 @@ test("a pool's shard items are 0 to N-1 once in every group, and a 1-based list 
   writeFileSync(list, made.stdout);
   const submitted = items(["submit", list, "--campaign", "T", "--", "bash", "-c", "true"], env);
   assert.equal(submitted.status, 0, submitted.stderr);
-  assert.equal(submitted.stdout, `sx-job submit --items ${list} --campaign T -- bash -c true\n`);
+  assert.equal(submitted.stdout, `sx-job submit --campaign T --items=${list} -- bash -c true\n`);
+  // (no option replaces the checked list, and a list named like an option is still the list, Codex r2 on #1681)
+  const bad = join(folder, "bad.txt");
+  writeFileSync(bad, "held 1/2\nheld 2/2\n");
+  for (const option of [["--items", bad], [`--items=${bad}`], ["--item", bad]]) {
+    const replaced = items(["submit", list, ...option, "--", "true"], env);
+    assert.deepEqual([replaced.status, replaced.stdout], [2, ""], option.join(" "));
+  }
+  const dashed = join(folder, "--pool.txt");
+  writeFileSync(dashed, made.stdout);
+  const named = items(["submit", "--pool.txt", "--", "true"], env, folder);
+  assert.equal(named.stdout, `sx-job submit --items=${dashed} -- true\n`);
   writeFileSync(list, "area copies 1/3\narea copies 2/3\narea copies 3/3\n");
   const refused = items(["submit", list, "--campaign", "T", "--", "true"], env);
   assert.deepEqual([refused.status, refused.stdout], [1, ""]);
