@@ -12,7 +12,12 @@ import {
 import { Admission } from "../src/type-inference/core/admission.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { WorkLedger } from "../src/type-inference/core/budget.js";
-import type { ListingNode, TapePoint } from "../src/type-inference/core/admission/model.js";
+import type {
+  LandingTask,
+  Listing,
+  ListingNode,
+  TapePoint,
+} from "../src/type-inference/core/admission/model.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { MODES, inMode } from "./helpers/type-core-oracles.js";
 
@@ -217,11 +222,10 @@ test("a fixed-width chain's landings take its listings: linear, and at most half
   }
 });
 
-test("the census counts every trie node a pass's listings hold, each place's root among them", async () => {
-  // (the admissions a pass makes, seen at their decisions; their tries counted apart from the calls' own count)
+test("the census is the state a pass's admissions retain: tapes, listings, their tasks and every trie node", async () => {
+  // (the admissions a pass makes, seen at their decisions; what their tries and pending listings hold, counted here
+  // apart from the calls' own census, every object once)
   const shapes = await families();
-  const nodes = (node: ListingNode): number =>
-    1 + [...node.next.values()].reduce((sum, next) => sum + nodes(next), 0);
   const decide = Admission.prototype.decide;
   for (const name of ["narrow-repeat-3", "diamond-2", "skip-cross-3"]) {
     const request = coreRequest([{ path: "main.tease", source: shapes[name]!(8) }], GLOBALS);
@@ -234,10 +238,12 @@ test("the census counts every trie node a pass's listings hold, each place's roo
       admissions.add(this);
       return decide.apply(this, args);
     };
+    let reported = 0;
     let made = 0;
     try {
       withLandingOps(
         (_place, _prefix, counts) => {
+          reported += counts.retained;
           made += counts.trieNodes;
         },
         () => analyseCore(request),
@@ -245,12 +251,49 @@ test("the census counts every trie node a pass's listings hold, each place's roo
     } finally {
       Admission.prototype.decide = decide;
     }
-    const held = [...admissions].reduce(
-      (sum, admission) =>
-        sum + [...admission.listings.values()].reduce((all, root) => all + nodes(root), 0),
-      0,
-    );
-    assert.ok(held > 0, name);
-    assert.equal(made, held, name);
+    type Held = Listing | LandingTape | TapePoint | LandingTask;
+    const counted = new Set<Held>();
+    let held = 0;
+    let trie = 0;
+    const once = (owner: Held, slots: number): void => {
+      if (counted.has(owner)) return;
+      counted.add(owner);
+      held += slots;
+    };
+    const listing = (kept: Listing): void => {
+      if (counted.has(kept)) return;
+      once(kept, 1);
+      const { tape } = kept;
+      once(
+        tape,
+        tape.paths.reduce((sum, path) => sum + path.length + 4, 0) +
+          3 * tape.at.length +
+          tape.levels.slice(1).reduce((sum, level) => sum + level.length, 0),
+      );
+      for (const point of [kept.from, kept.own, kept.to]) once(point, 3);
+      const task = (start: LandingTask): void => {
+        for (let at: LandingTask | undefined = start; at !== undefined; at = at.parent)
+          once(at, 4 + at.below.length + at.prepend.length);
+      };
+      task(kept.frame);
+      for (const child of kept.children) {
+        held += 1;
+        once(child.from, 3);
+        task(child.task);
+      }
+    };
+    const node = (at: ListingNode): void => {
+      held += 1;
+      trie += 1;
+      if (at.listing !== null) listing(at.listing);
+      for (const next of at.next.values()) node(next);
+    };
+    for (const admission of admissions) {
+      for (const root of admission.listings.values()) node(root);
+      for (const pending of admission.pendingListings.values()) pending.forEach(listing);
+    }
+    assert.ok(trie > 0, name);
+    assert.equal(made, trie, name);
+    assert.equal(reported, held, name);
   }
 });
