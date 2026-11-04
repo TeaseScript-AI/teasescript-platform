@@ -9,10 +9,10 @@ import { shardFiles } from "./test-shards.mjs";
 // end, and the seconds of the checks CI's `check-2` job runs before its tests (`npm run check:pretest`). `--write`
 // rewrites `tools/costly-test-files.mjs`; `--raw FILE` keeps the measurement.
 //
-// `--from-ci RUN[:ATTEMPT] ...` (with `gh`) takes them from CI's own runs of the suite, the machines the shards balance:
-// each test job keeps its files' seconds as an artifact (`TEST_FILE_SECONDS`, `.github/workflows/ci.yml`), the jobs API
-// gives the pre-test step's seconds, and each file counts its median over the runs, at least three since CI's runners
-// vary. Re-running a workflow run adds an attempt, which counts as a run of its own.
+// `--from-ci RUN ...` (with `gh`) takes them from CI's own runs of the suite, the machines the shards balance: each test
+// job keeps its files' seconds as an artifact for 7 days (`TEST_FILE_SECONDS`, `.github/workflows/ci.yml`), the jobs
+// API gives the pre-test step's seconds, and each file counts its median over the runs, at least three since CI's
+// runners vary. A run counts its last attempt (re-running a run removes its earlier attempts' artifacts).
 //
 // Without it, the build, the full suite in `npm test`'s order and concurrency, and then `check:pretest` (after the
 // suite, with the new seconds written: `test:verification` refuses weights that miss a type-core file) run here, for a
@@ -20,7 +20,7 @@ import { shardFiles } from "./test-shards.mjs";
 // with a Node compile cache as in CI, a fresh one unless `NODE_COMPILE_CACHE` names one. Such seconds do not predict
 // CI's (#1719). A failed step or test leaves the module as it was.
 const usage =
-  "Usage: node tools/measure-test-files.mjs [--write] [--raw FILE] [--from-ci RUN[:ATTEMPT] ...]\n";
+  "Usage: node tools/measure-test-files.mjs [--write] [--raw FILE] [--from-ci RUN ...]\n";
 const argv = process.argv.slice(2);
 const write = argv[0] === "--write";
 if (write) argv.shift();
@@ -31,8 +31,12 @@ if (argv[0] === "--raw" && argv.length >= 2)
     .slice(1)
     .map((p) => resolve(p));
 const fromCi = argv[0] === "--from-ci" ? argv.slice(1) : null;
-if ((fromCi === null && argv.length > 0) || (fromCi !== null && fromCi.length < 3)) {
-  process.stderr.write(`${usage}(--from-ci takes three runs or more)\n`);
+if (
+  (fromCi === null && argv.length > 0) ||
+  (fromCi !== null && new Set(fromCi).size !== fromCi.length) ||
+  (fromCi !== null && fromCi.length < 3)
+) {
+  process.stderr.write(`${usage}(--from-ci takes three distinct runs or more)\n`);
   process.exit(1);
 }
 
@@ -65,30 +69,27 @@ const median = (values) => {
 
 /** CI's runs: each run's files' seconds (both test jobs' artifacts), its pre-test step's seconds and its commit. */
 function ciRuns(ids) {
-  return ids.map((id) => {
-    const [runId, given] = id.split(":");
-    const attempt =
-      given ?? gh("api", `repos/{owner}/{repo}/actions/runs/${runId}`, "-q", ".run_attempt");
-    const where = `repos/{owner}/{repo}/actions/runs/${runId}/attempts/${attempt}`;
+  return ids.map((runId) => {
+    // (a run's last attempt: re-running a run removes the artifacts of its earlier attempts)
+    const where = `repos/{owner}/{repo}/actions/runs/${runId}`;
     const commit = gh("api", where, "-q", ".head_sha");
     const jobs = JSON.parse(gh("api", `${where}/jobs`, "-q", ".jobs"));
     const step = jobs
       .flatMap((job) => job.steps ?? [])
       .find((found) => found.name === "Check source before the tests");
-    if (step?.conclusion !== "success")
-      fail([`run ${runId}:${attempt} has no passed pre-test step`]);
+    if (step?.conclusion !== "success") fail([`run ${runId} has no passed pre-test step`]);
     const pretest = (Date.parse(step.completed_at) - Date.parse(step.started_at)) / 1000;
     const folder = mkdtempSync(join(tmpdir(), "measure-test-files-ci-"));
-    const seconds = {};
-    let filesAtOnce;
-    for (const shard of [1, 2]) {
-      const name = `test-file-seconds-${attempt}-${shard}`;
-      gh("run", "download", runId, "--name", name, "--dir", join(folder, name));
-      const kept = JSON.parse(readFileSync(join(folder, name, "test-file-seconds.json"), "utf8"));
-      Object.assign(seconds, kept.seconds);
-      filesAtOnce = kept.filesAtOnce;
-    }
-    return { run: `${runId}:${attempt}`, commit, pretest, filesAtOnce, seconds };
+    gh("run", "download", runId, "--pattern", "test-file-seconds-*", "--dir", folder);
+    const kept = readdirSync(folder).map((name) =>
+      JSON.parse(readFileSync(join(folder, name, "test-file-seconds.json"), "utf8")),
+    );
+    if (kept.length !== 2) fail([`run ${runId} kept ${kept.length} test jobs' seconds, not 2`]);
+    const atOnce = new Set(kept.map((found) => found.filesAtOnce));
+    if (atOnce.size !== 1)
+      fail([`run ${runId}'s test jobs ran ${[...atOnce].join(" and ")} files at once`]);
+    const seconds = Object.assign({}, ...kept.map((found) => found.seconds));
+    return { run: runId, commit, pretest, filesAtOnce: [...atOnce][0], seconds };
   });
 }
 
