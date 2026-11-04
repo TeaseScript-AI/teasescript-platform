@@ -19,6 +19,7 @@ import { operationItems, type Operator } from "../operator-table.js";
 import { indexedPlus } from "../plus-index.js";
 import type { ValueConstraint } from "../program.js";
 import type { Work } from "../solver.js";
+import type { FlowSink } from "./contributions.js";
 import { choiceItems } from "./choices.js";
 import {
   carried,
@@ -52,42 +53,60 @@ export function* contractOfOp(
   contract: Contract,
   c: ValueConstraint,
   rest: readonly string[],
+  given?: FlowSink | null,
 ): Work<readonly Item[]> {
   const { program } = contract.pass;
   const scope = program.scope;
+  // (#1668: read inline, its caller's flow; as its own demand (`cop|`), its run's, taken as the run starts. Its
+  // operands whose items its answer unions are included; those it reads to make a new result, not)
+  const flow = given === undefined ? contract.pass.solver.sink() : given;
   if (c.kind === "fallback") {
-    const left = (yield* contract.contractOfValueAt(c.left, rest)).filter(
+    const kept = flow?.child() ?? null;
+    const left = (yield* contract.contractOfValueAt(c.left, rest, kept)).filter(
       (item) => rest.length > 0 || item.tag !== "null",
     );
-    return mergeItems([...left, ...(yield* contract.contractOfValueAt(c.right, rest))], scope);
+    if (kept !== null)
+      flow!.attach(kept, ...(rest.length === 0 ? (["operandFilter"] as const) : []));
+    return mergeItems(
+      [...left, ...(yield* contract.contractOfValueAt(c.right, rest, flow))],
+      scope,
+    );
   }
   // F19a before F17b: a receiver that may be a reference has the runtime's `get`, no default merged beside it
+  // #1668: R, a receiver decision
   if (c.kind === "get" && heldReference(yield* contract.valueReceiver(c.receiver)))
     return [unknownItem(REASON.opaque)];
-  if (c.kind === "get")
-    return mergeItems(
+  if (c.kind === "get") {
+    const element = flow?.child() ?? null;
+    const fallback = flow?.child() ?? null;
+    const items = mergeItems(
       [
         ...belowSelected(
-          yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest)),
+          yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest), element),
           rest,
         ),
-        ...(yield* contract.contractOfValueAt(c.fallback, rest)),
+        ...(yield* contract.contractOfValueAt(c.fallback, rest, fallback)),
       ],
       scope,
     );
+    if (element !== null) flow!.attach(element, "selected");
+    if (fallback !== null) flow!.attach(fallback, "default");
+    return items;
+  }
   if (c.kind === "load") {
     // F19: a computed key
     if (c.key === null) {
       const nullDefault =
         rest.length === 0 &&
         c.fallback !== null &&
+        // #1668: D, a predicate on the default
         (yield* contract.onlyNull(c.fallback)).length > 0;
       return [...hostAt(rest), ...(nullDefault ? [ingressNull()] : [])];
     }
-    const expected = yield* contract.expectedOf(c, rest);
+    const expected = yield* contract.expectedOf(c, rest, flow);
     if (expected !== null) return expected;
     if (c.fallback !== null)
-      return [...(yield* contract.defaultKinds(c.fallback, rest)), ...emptyAt(rest)];
+      return [...(yield* contract.defaultKinds(c.fallback, rest, flow)), ...emptyAt(rest)];
   }
   if (c.kind !== "operation") return [unknownItem(REASON.external)];
   const { family, name } = c.contract;
@@ -95,6 +114,7 @@ export function* contractOfOp(
   if (
     family === "method" &&
     c.receiver !== null &&
+    // #1668: R, a receiver decision
     heldReference(yield* contract.valueReceiver(c.receiver))
   )
     return [unknownItem(REASON.opaque)];
@@ -113,7 +133,7 @@ export function* contractOfOp(
     return mergeItems(
       [
         makeItem(builtinResult(name)),
-        ...(fallback === undefined ? [] : yield* contract.contractOfValue(fallback)),
+        ...(fallback === undefined ? [] : yield* contract.contractOfValue(fallback, flow)),
       ],
       scope,
     );
@@ -123,6 +143,7 @@ export function* contractOfOp(
   if (method !== undefined && c.receiver !== null && method.gives.kind !== "copy") {
     const gives = method.gives;
     const out: Item[] = [];
+    // #1668: D, a declared result per receiver kind
     for (const item of withoutEmpty(yield* contract.contractOfValue(c.receiver))) {
       if (gives.kind === "declared") {
         if (rest.length === 0)
@@ -141,7 +162,7 @@ export function* contractOfOp(
       } else if (COLLECTIONS.has(item.tag))
         out.push(
           ...belowSelected(
-            yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest)),
+            yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest), flow),
             rest,
           ),
         );
@@ -152,6 +173,7 @@ export function* contractOfOp(
   // kind declares (a range's whole numbers)
   if (method !== undefined && c.receiver !== null && method.gives.kind === "copy") {
     const copy = method.gives;
+    // #1668: D, the receiver's kinds decide the copy's
     const receiver = yield* contract.contractOfValue(c.receiver);
     if (rest.length === 0) return [carried(makeItem(copy.into), receiver)];
     const kinds = withoutEmpty(receiver);
@@ -167,7 +189,7 @@ export function* contractOfOp(
           })
         : []),
       ...(kinds.some((item) => kindElement(item.tag) === undefined)
-        ? yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest.slice(1)))
+        ? yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest.slice(1)), flow)
         : []),
       ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
     ]);
@@ -175,17 +197,17 @@ export function* contractOfOp(
   if (family === "operator" && name === "+" && rest.length > 0) {
     // #1384: an indexed run's terms holding the property, and those between them
     const indexed = yield* indexedPlus(contract.pass, c.result, rest, false, (term) =>
-      contract.contractOfValueAt(term, rest),
+      contract.contractOfValueAt(term, rest, flow),
     );
     if (indexed !== null) return indexed;
     // TABLE r4.87: a `+` fourth or later in a run of terms answers below its root as the run's third
     const repeated = contract.plusRepeatOf(c.result, false);
-    if (repeated !== c.result) return yield* contract.contractOfValueAt(repeated, rest);
+    if (repeated !== c.result) return yield* contract.contractOfValueAt(repeated, rest, flow);
     const operands: (readonly Item[])[] = [];
     // (an operand admission rejected from the join gives it nothing: A6, `joinElements`)
     for (const argument of c.arguments)
       if (contract.pass.lists.joined(argument))
-        operands.push(yield* contract.contractOfValueAt(argument, rest));
+        operands.push(yield* contract.contractOfValueAt(argument, rest, flow));
     return plusElements(operands, rest, contract.pass);
   }
   const conversion = family === "conversion" ? conversionCategory(name) : undefined;
@@ -196,7 +218,7 @@ export function* contractOfOp(
       [
         makeItem(conversionKind(conversion.result)),
         ...(fallback !== undefined
-          ? yield* contract.contractOfValue(fallback)
+          ? yield* contract.contractOfValue(fallback, flow)
           : conversion.optional
             ? [makeItem("null")]
             : []),
@@ -207,10 +229,10 @@ export function* contractOfOp(
   if (conversion?.kind === "parses") {
     const fallback = defaultOf(c);
     return (
-      (yield* contract.expectedOf(c, rest)) ?? [
+      (yield* contract.expectedOf(c, rest, flow)) ?? [
         ...(fallback === undefined
           ? [unknownItem(REASON.external)]
-          : yield* contract.defaultKinds(fallback, rest)),
+          : yield* contract.defaultKinds(fallback, rest, flow)),
         ...emptyAt(rest),
       ]
     );
@@ -221,11 +243,14 @@ export function* contractOfOp(
   const clock = family === "clock" ? clockResult(name) : undefined;
   if (clock !== undefined) return rest.length === 0 ? [makeItem(clock)] : [];
   // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
+  // (#1668: a choice's reads decide presence as well as supply items: no flow of its own yet)
+  if (interaction?.kind === "options") flow?.opaque("choice");
   if (interaction?.kind === "options")
     return mergeItems(
       yield* choiceItems(
         c,
         rest,
+        // #1668: a choice's reads: its includer records `opaque`
         (value, path) => contract.contractOfValueAt(value, path),
         contract.choiceKeysStored(),
         contract.choiceOptions(c, false),
@@ -238,6 +263,7 @@ export function* contractOfOp(
   if (operator !== null) {
     const operands: (readonly Item[])[] = [];
     for (const argument of c.arguments)
+      // #1668: D, the operator table makes a new result
       operands.push(withoutEmpty(yield* contract.contractOfValue(argument)));
     return operationItems(operator, operands, scope, c.site);
   }
@@ -255,6 +281,7 @@ export function* contractOfOp(
   // runtime's opaque answer on a known kind (r4.47 (1)); what the core cannot know keeps its own reasons. A receiver
   // without items yet is a provisional bottom: the result stays the bottom (S3 §1, r4.44)
   if (family === "method" && c.receiver !== null) {
+    // #1668: D, a declared result per receiver kind
     const receiver = withoutEmpty(yield* contract.contractOfValue(c.receiver));
     return mergeItems(
       receiver.flatMap((item) => {

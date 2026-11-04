@@ -52,6 +52,7 @@ import {
   type Item,
 } from "../items.js";
 import type { Decision, Work } from "../solver.js";
+import type { FlowSink } from "./contributions.js";
 import type { ReadRoute } from "../values.js";
 import {
   HELD_REFERENCE,
@@ -109,13 +110,23 @@ export function literalRoute(
 }
 
 /** The contract of a key (§3.2): a demand, once per key and pass. */
-export function* contractOf(contract: Contract, asked: Key): Work<readonly Item[]> {
+export function* contractOf(
+  contract: Contract,
+  asked: Key,
+  flow: FlowSink | null = null,
+): Work<readonly Item[]> {
   // (a key in its family's identity, a wrapper's its cursor: one demand per key, whoever made it)
   const key = canonicalKey(contract, asked);
-  if (contract.keyStopped(key)) return STOPPED;
+  if (contract.keyStopped(key)) {
+    flow?.opaque("stopped");
+    return STOPPED;
+  }
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
+  const slot = joinParts("c", key);
+  // (#1668: the key's answer included by the caller that passed `flow`, whether it is computed now or was before)
+  flow?.include(slot, "contract");
   return yield {
-    key: joinParts("c", key),
+    key: slot,
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
@@ -125,6 +136,8 @@ export function* contractOf(contract: Contract, asked: Key): Work<readonly Item[
 
 function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
   const { program } = contract.pass;
+  // (#1668: this run's flow, where the pass records one; the reads below include into it)
+  const flow = contract.pass.solver.sink();
   const place = keyPlace(key);
   const found = program.places[place];
   if (found === undefined) return [unknownItem(REASON.external)];
@@ -133,9 +146,18 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
   if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
   // G3 3a: a key past a wrapper, one step below its parent's position (a cursor's from the arena, no text)
   const path = isKeyId(key) ? null : keyPath(key);
-  if (positionable(contract, key, path)) return yield positioned(contract, key, path);
+  if (positionable(contract, key, path)) {
+    const demand = positioned(contract, key, path);
+    flow?.include(demand.key, "position");
+    return yield demand;
+  }
   // a key through a member a built-in value answers by itself (a copy of `d.values`, of `date.year`)
-  const items = yield* contract.keyThrough(key, 0);
+  const through = flow?.child() ?? null;
+  const items = yield* contract.keyThrough(key, 0, through);
+  if (through !== null)
+    if (found.kind.kind === "parameter" || found.kind.kind === "result")
+      flow!.attach(through, "called");
+    else flow!.attach(through);
   // a parameter's and a result's kinds come through their calls (F20–F22): marked so, as the guard mark travels
   return found.kind.kind === "parameter" || found.kind.kind === "result"
     ? items.map((item) => (item.tag === "empty" ? item : { ...item, called: true }))
@@ -143,23 +165,34 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
 }
 
 /** `keyThrough` at the step `at`, the first of the key's path from its `from` on that a built-in value answers. */
-export function* keyListsAt(contract: Contract, key: Key, at: number): Work<readonly Item[]> {
+export function* keyListsAt(
+  contract: Contract,
+  key: Key,
+  at: number,
+  flow: FlowSink | null = null,
+): Work<readonly Item[]> {
   // (one prefix, found once per length, and the key read again as it is: a member chain reads each key at each of its
   // steps, so neither its prefixes are climbed nor the key rebuilt per step)
   const prefix = keyPrefixIn(contract, key, at);
+  // #1668: R, a receiver decision
   const receiver = yield* contract.receiverKinds(prefix);
-  if (heldReference(receiver)) return yield* keyContract(contract, key);
+  if (heldReference(receiver)) return yield* keyContract(contract, key, flow);
   const path = keyStepsIn(contract, key);
   return yield* members(contract, path, at, receiver, (along, start) =>
     contract.keyThrough(
       along === path ? key : keyBelowIn(contract, prefix, stepsFrom(along, at)),
       start,
+      flow,
     ),
   );
 }
 
 /** The contract of a key from its stores and its prefixes' (§3.2). */
-export function* keyContract(contract: Contract, asked: Key): Work<readonly Item[]> {
+export function* keyContract(
+  contract: Contract,
+  asked: Key,
+  flow: FlowSink | null = null,
+): Work<readonly Item[]> {
   const { program } = contract.pass;
   // (a key in its identity: the levels and the prefixes its walk reads are held by it, G3 stage 1)
   const key = canonicalKey(contract, asked);
@@ -167,7 +200,7 @@ export function* keyContract(contract: Contract, asked: Key): Work<readonly Item
   const { place, path } = walk;
   const found = program.place(place);
   if (program.cellOwner.has(place) || program.hasOf.has(place))
-    return yield* contract.contractOfLiteral(place, stepsRest(path));
+    return yield* contract.contractOfLiteral(place, stepsRest(path), flow);
   // F19a: a reference's member is opaque, whatever is stored through it
   const receiver = yield* receiverWalk(contract, walk);
   if (receiver.reference) return [unknownItem(REASON.opaque)];
@@ -178,6 +211,7 @@ export function* keyContract(contract: Contract, asked: Key): Work<readonly Item
   if (written !== null) {
     const at = termAt(written, path);
     if (at !== null) {
+      // (#1668: its stores read for their marks and emptiness alone: no flow, none of them included)
       const stored = yield* contractAlong(contract, place, path, 0, receiver.floor, walk.prefix);
       const marks = marksOf(stored);
       // (each kind with the written type's spelling, #1398)
@@ -195,7 +229,7 @@ export function* keyContract(contract: Contract, asked: Key): Work<readonly Item
         : tags;
     }
   }
-  const along = yield* contractAlong(contract, place, path, 0, receiver.floor, walk.prefix);
+  const along = yield* contractAlong(contract, place, path, 0, receiver.floor, walk.prefix, flow);
   // below a prefix without a structure, what its unknowns and references hold there
   return mergeItems([...along, ...receiver.below], program.scope);
 }
@@ -322,6 +356,7 @@ export function* contractRead(
   // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
   const key = canonicalKey(contract, asked);
   const { program } = contract.pass;
+  // #1668: K, a reader's word on the contract, no contract slot's answer
   const items = yield* contract.contractOf(key);
   const kinds = withoutEmpty(items);
   const walk = keyWalk(contract, key);
@@ -339,6 +374,7 @@ export function* contractRead(
   // every selection on the way holds an element
   for (let length = 1; length <= path.length && definite; length += 1)
     if (path.at(length - 1) === "element") {
+      // #1668: K, a definiteness test
       const elements = yield* contract.contractOf(walk.prefix(length));
       if (
         elements.length === 0 ||
@@ -354,7 +390,8 @@ export function* contractRead(
   // arrival (`later`), an element read the contract answers fails X3 before it (r4.48 (5))
   const word: ContextWord = deferred
     ? "deferred-parameter"
-    : later && stepIndex(path, "element") >= 0 && (yield* contract.severalElements(key))
+    : // #1668: N, a count
+      later && stepIndex(path, "element") >= 0 && (yield* contract.severalElements(key))
       ? "member"
       : context;
   return items.map((item) =>
@@ -378,6 +415,7 @@ export function* refReceiver(contract: Contract, asked: Key): Work<boolean> {
     const parent =
       path === null ? keyParentIn(contract, key)! : keyOf(keyPlace(key), path.slice(0, -1));
     const from = yield* positionOf(contract, { key: parent, length: depth - 1 });
+    // #1668: R, a receiver decision
     if (from !== null) return !from.noRef || heldReference(yield* contract.receiverKinds(parent));
   }
   return (yield* receiverWalk(contract, keyWalk(contract, key))).reference;
@@ -403,6 +441,7 @@ function* receiverWalk(
   let below: readonly Item[] = [];
   for (let length = 0; length < path.length; length += 1) {
     contract.pass.program.work.charge("invSteps");
+    // #1668: R, a receiver decision
     const items = yield* contract.receiverKinds(walk.prefix(length));
     if (heldReference(items)) return { reference: true, floor, below };
     if (!items.some(holdsBelow)) {
@@ -425,6 +464,7 @@ export function* receiverKinds(contract: Contract, asked: Key): Work<readonly It
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
+    // #1668: R, the receiver demand's run: never included
     make: () => contract.contractOf(key),
     decision: RECEIVER,
   };
@@ -441,6 +481,7 @@ export function* valueReceiver(contract: Contract, receiver: PlaceId): Work<read
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
+    // #1668: R, the receiver demand's run: never included
     make: () => contract.contractOfValue(receiver),
     decision: RECEIVER,
   };
@@ -461,6 +502,7 @@ function* contractAlong(
     isPathSteps(path)
       ? keyAt(contract, place, path.to(length))
       : keyOf(place, path.slice(0, length)),
+  flow: FlowSink | null = null,
 ): Work<Item[]> {
   const { program, definitions, lists } = contract.pass;
   const out: Item[] = [];
@@ -474,29 +516,34 @@ function* contractAlong(
       // same structure below the path once (with a selection step, every entry by itself)
       const stores = contract.prefixStores(prefix);
       // (a property of a prefix of closed objects from its holders alone, #1456)
-      const property = yield* propertyItems(contract, prefix, stores, rest);
+      const property = yield* propertyItems(contract, prefix, stores, rest, flow);
       if (property !== null) for (const item of property) out.push(item);
       else if (someStepOf(rest, (step) => step === SELECTED_VALUE || step === SELECTED_TEXT))
         for (const entry of stores.list)
-          for (const item of yield* contract.entryAt(entry, rest)) out.push(item);
+          for (const item of yield* contract.entryAt(entry, rest, flow)) out.push(item);
       else {
         const levels = prefixLevels(contract, prefix, stores);
         for (const group of entryGroups(contract, levels)) {
-          const first = yield* contract.entryAt(group.entries[0]!, rest);
+          const lead = flow?.child() ?? null;
+          const first = yield* contract.entryAt(group.entries[0]!, rest, lead);
           // (an unknown's ingress stores are each entry's own, C9: there every entry answers by itself)
           if (
             group.entries.length > 1 &&
             !first.some((item) => item.tag === "unknown" || item.fan !== undefined)
           ) {
+            // (#1668: its first entry read for the group, the group's writer on it)
+            if (lead !== null) flow!.attach(lead, "groupFirst", "writer");
             for (const item of withWriter(first, group.w)) out.push(item);
             continue;
           }
+          if (lead !== null) flow!.attach(lead);
           for (const item of first) out.push(item);
           for (const entry of group.entries.slice(1))
-            for (const item of yield* contract.entryAt(entry, rest)) out.push(item);
+            for (const item of yield* contract.entryAt(entry, rest, flow)) out.push(item);
         }
         if (levels.base.length > 0)
-          for (const group of groupsAt(contract, prefix, levels.base, rest))
+          for (const group of groupsAt(contract, prefix, levels.base, rest)) {
+            const literal = flow?.child() ?? null;
             out.push(
               ...annotated(
                 contract,
@@ -506,25 +553,27 @@ function* contractAlong(
                   yield* contract.contractOfValueAt(
                     group.literal,
                     isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
+                    literal,
                   ),
                   group.w,
                 ),
               ),
             );
+            if (literal !== null) flow!.attach(literal, "groupFirst", "annotated", "writer");
+          }
       }
       // a replaced source's own stores below the prefix, only where they lie: its layers' summary, their sources'
       // answers merged in order (#1466); where it declines, each source by itself, marked as its copies' entries are
       // (§3.2: a guarded read of a copy of it is a mark of its holder)
-      const summary = yield* summaryItems(contract, stores, rest);
+      const summary = yield* summaryItems(contract, stores, rest, flow);
       if (summary !== null) for (const item of summary) out.push(item);
       else
         for (const sub of contract.relevantSubs(stores, rest)) {
-          const items = yield* contract.subAt(sub.key, rest);
-          out.push(
-            ...(marksAt(contract, contract.keyIdentity(sub.key).holder, rest)
-              ? marked(items)
-              : items),
-          );
+          const source = flow?.child() ?? null;
+          const items = yield* contract.subAt(sub.key, rest, source);
+          const marks = marksAt(contract, contract.keyIdentity(sub.key).holder, rest);
+          if (source !== null) flow!.attach(source, ...(marks ? (["marked"] as const) : []));
+          out.push(...(marks ? marked(items) : items));
         }
       continue;
     }
@@ -546,9 +595,14 @@ function* contractAlong(
       )
         // F21: several sites
         out.push(unknownItem(REASON.deferred, definitions.writerOf(d)));
+      const whole = flow?.child() ?? null;
       out.push(
-        ...withWriter(yield* contract.contractOfValueAt(d.value!, []), definitions.writerOf(d)),
+        ...withWriter(
+          yield* contract.contractOfValueAt(d.value!, [], whole),
+          definitions.writerOf(d),
+        ),
       );
+      if (whole !== null) flow!.attach(whole, "writer");
     }
   }
   return out;
@@ -558,12 +612,19 @@ function* contractAlong(
  * A projected source's stores below its path start after the path: a demand, once per source and path, whatever
  * number of its copies read there (r4.46 (3)).
  */
-export function* subAt(contract: Contract, asked: Key, rest: Rest): Work<readonly Item[]> {
+export function* subAt(
+  contract: Contract,
+  asked: Key,
+  rest: Rest,
+  flow: FlowSink | null = null,
+): Work<readonly Item[]> {
   // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
   const sub = canonicalKey(contract, asked);
   const site = contract.pass.program.places[keyPlace(sub)]?.site ?? null;
+  const slot = joinParts("s", sub, restPart(rest));
+  flow?.include(slot, "sub");
   return yield {
-    key: joinParts("s", sub, restPart(rest)),
+    key: slot,
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
@@ -573,6 +634,7 @@ export function* subAt(contract: Contract, asked: Key, rest: Rest): Work<readonl
 
 function* subAtMade(contract: Contract, sub: Key, rest: Rest): Work<readonly Item[]> {
   const { program } = contract.pass;
+  const flow = contract.pass.solver.sink();
   program.work.charge("invSteps");
   if (!isKeyId(sub)) {
     const base = keyPath(sub);
@@ -582,6 +644,9 @@ function* subAtMade(contract: Contract, sub: Key, rest: Rest): Work<readonly Ite
         keyPlace(sub),
         stepsJoin(base, restSteps(rest)),
         base.length + 1,
+        -1,
+        undefined,
+        flow,
       ),
       program.scope,
     );
@@ -598,6 +663,7 @@ function* subAtMade(contract: Contract, sub: Key, rest: Rest): Work<readonly Ite
       base.length + 1,
       -1,
       (length) => keyBelowRef(contract, sub, restTo(contract, rest, length - base.length)),
+      flow,
     ),
     program.scope,
   );

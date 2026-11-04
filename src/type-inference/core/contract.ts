@@ -1,6 +1,7 @@
+import { edgesOf, type Contributions, type FlowSink } from "./contract/contributions.js";
 import type { PlaceId, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { countApart, keep, textUnits, type WorkLedger } from "./budget.js";
+import { countApart, joinParts, keep, textUnits, type WorkLedger } from "./budget.js";
 import {
   aliasWriter,
   boundClass,
@@ -707,21 +708,37 @@ export class Contract {
     return literalRoute(this, literal, rest, node);
   }
 
-  public contractOf(key: Key): Work<readonly Item[]> {
-    return contractOf(this, key);
+  /**
+   * #1668: the keys whose answers a key's contract includes in this settled pass, through the slots it includes
+   * (`edgesOf`): `unavailable` in a pass that records none, while the solver runs, and where any slot on the way has no
+   * published flow (unfinished, stopped, forgotten) or a route recorded none.
+   */
+  public contributions(key: Key): Contributions {
+    const { solver } = this.pass;
+    if (!solver.recording) return { state: "unavailable", reason: "the pass records none" };
+    if (solver.reading !== null) return { state: "unavailable", reason: "the solver runs" };
+    return edgesOf(
+      joinParts("c", this.canonicalKey(key)),
+      (slot) => solver.flowOf(slot),
+      this.work,
+    );
+  }
+
+  public contractOf(key: Key, flow: FlowSink | null = null): Work<readonly Item[]> {
+    return contractOf(this, key, flow);
   }
 
   /**
    * A key's contract along a path through a member a built-in value answers by itself from the step `from` on, its
    * receiver decided as a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
    */
-  public keyThrough(asked: Key, from: number): Work<readonly Item[]> {
+  public keyThrough(asked: Key, from: number, flow: FlowSink | null = null): Work<readonly Item[]> {
     const key = this.canonicalKey(asked);
     // (a cursor's member step from the arena's nearest member, never its path's text)
     const at = isKeyId(key)
       ? memberStepIn(this, key, from)
       : memberStepOf(this, keyPath(key), from);
-    return at < 0 ? keyContract(this, key) : keyListsAt(this, key, at);
+    return at < 0 ? keyContract(this, key, flow) : keyListsAt(this, key, at, flow);
   }
 
   public severalElements(key: Key): Work<boolean> {
@@ -749,20 +766,28 @@ export class Contract {
     return valueReceiver(this, receiver);
   }
 
-  public entryAt(entry: PrefixEntry, rest: Rest): Work<readonly Item[]> {
-    return entryAt(this, entry, rest);
+  public entryAt(
+    entry: PrefixEntry,
+    rest: Rest,
+    flow: FlowSink | null = null,
+  ): Work<readonly Item[]> {
+    return entryAt(this, entry, rest, flow);
   }
 
-  public subAt(sub: Key, rest: Rest): Work<readonly Item[]> {
-    return subAt(this, sub, rest);
+  public subAt(sub: Key, rest: Rest, flow: FlowSink | null = null): Work<readonly Item[]> {
+    return subAt(this, sub, rest, flow);
   }
 
-  public contractOfValueAt(value: PlaceId, rest: Rest): Work<readonly Item[]> {
-    return contractOfValueAt(this, value, rest);
+  public contractOfValueAt(
+    value: PlaceId,
+    rest: Rest,
+    flow: FlowSink | null = null,
+  ): Work<readonly Item[]> {
+    return contractOfValueAt(this, value, rest, flow);
   }
 
-  public contractOfValue(value: PlaceId): Work<readonly Item[]> {
-    return contractOfValue(this, value);
+  public contractOfValue(value: PlaceId, flow: FlowSink | null = null): Work<readonly Item[]> {
+    return contractOfValue(this, value, flow);
   }
 
   public chainOf(value: PlaceId): ChainRoot | null {
@@ -890,12 +915,20 @@ export class Contract {
     return literalHop(this, literal, step);
   }
 
-  public expectedOf(c: ValueConstraint, rest: readonly string[]): Work<readonly Item[] | null> {
-    return expectedOf(this, c, rest);
+  public expectedOf(
+    c: ValueConstraint,
+    rest: readonly string[],
+    flow: FlowSink | null = null,
+  ): Work<readonly Item[] | null> {
+    return expectedOf(this, c, rest, flow);
   }
 
-  public defaultKinds(fallback: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
-    return defaultKinds(this, fallback, rest);
+  public defaultKinds(
+    fallback: PlaceId,
+    rest: readonly string[],
+    flow: FlowSink | null = null,
+  ): Work<readonly Item[]> {
+    return defaultKinds(this, fallback, rest, flow);
   }
 
   public onlyNull(fallback: PlaceId): Work<readonly Item[]> {
@@ -1242,8 +1275,9 @@ export class Contract {
     node: FlowNode | null,
     exact: boolean,
     below?: boolean,
+    flow: FlowSink | null = null,
   ): Work<readonly Item[]> {
-    return indexItems(this, literal, rest, node, exact, below);
+    return indexItems(this, literal, rest, node, exact, below, flow);
   }
 
   public gathered(
@@ -1252,11 +1286,16 @@ export class Contract {
     rest: Rest,
     lo: number,
     hi: number,
+    flow: FlowSink | null = null,
   ): Work<readonly Item[]> {
-    return gathered(this, site, node, rest, lo, hi);
+    return gathered(this, site, node, rest, lo, hi, flow);
   }
 
-  public contractOfLiteral(literal: PlaceId, rest: Rest): Work<readonly Item[]> {
-    return contractOfLiteral(this, literal, rest);
+  public contractOfLiteral(
+    literal: PlaceId,
+    rest: Rest,
+    flow?: FlowSink | null,
+  ): Work<readonly Item[]> {
+    return contractOfLiteral(this, literal, rest, flow);
   }
 }

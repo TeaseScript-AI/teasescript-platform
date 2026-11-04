@@ -42,6 +42,7 @@ import {
   type Writer,
 } from "../items.js";
 import type { ProofDemand, Proven, Work } from "../solver.js";
+import type { FlowSink } from "./contributions.js";
 import { copyOnly, subFirstOf } from "./identity.js";
 import { ingressLeafOf } from "./ingress.js";
 import { pathAt, pathBelow } from "./literal-index.js";
@@ -1890,22 +1891,28 @@ function* layerMade(
   rest: PathRef,
   path: number,
 ): Work<Proven<LayerProof>> {
+  // (#1668: its sources' and the layers' below it, staged: a summary that declines includes none of them)
+  const flow = contract.pass.solver.sink();
+  const staged = flow?.child() ?? null;
   let root: SupportNode | null = null;
   for (const sub of layer.own.get(rest.at(0)) ?? []) {
     contract.pass.program.work.charge("invSteps");
     if (!ownHas(contract, sub, rest)) continue;
     if (marksAt(contract, contract.keyIdentity(sub).holder, rest))
       return { items: [], proof: DECLINED };
-    const items = yield* contract.subAt(sub, rest);
+    const items = yield* contract.subAt(sub, rest, staged);
     if (!summarised(items)) return { items: [], proof: DECLINED };
     root = union(contract, root, summaryLeaf(contract, sub, items));
   }
   for (const child of childrenAt(contract, layer, rest, path)) {
     if (child.origin === null) return { items: [], proof: DECLINED };
-    const { proof } = yield* contract.pass.solver.proven(layerDemand(contract, child, path));
+    const demand = layerDemand(contract, child, path);
+    staged?.include(demand.key, "summary");
+    const { proof } = yield* contract.pass.solver.proven(demand);
     if (proof === null || proof.declined) return { items: [], proof: DECLINED };
     root = union(contract, root, proof.root);
   }
+  if (staged !== null) flow!.attach(staged);
   return { items: root?.items ?? [], proof: summaryProof(contract, root) };
 }
 
@@ -1949,12 +1956,17 @@ function layersAt(contract: Contract, stores: PrefixStores, rest: Rest): LayersA
 }
 
 /** The union of the summaries of the layers `layersAt` found; `undefined` where one declines. */
-function* unionOf(contract: Contract, at: LayersAt): Work<SupportNode | null | undefined> {
+function* unionOf(
+  contract: Contract,
+  at: LayersAt,
+  flow: FlowSink | null = null,
+): Work<SupportNode | null | undefined> {
   const roots: SupportNode[] = [];
   for (const { layer } of at.layers) {
-    const { proof } = yield* contract.pass.solver.proven(
-      layerDemand(contract, layer, pathIdAt(contract, at.path)),
-    );
+    const demand = layerDemand(contract, layer, pathIdAt(contract, at.path));
+    // (#1668: a layer's summary, whose proof's root holds the items the prefix's answer takes)
+    flow?.include(demand.key, "summary");
+    const { proof } = yield* contract.pass.solver.proven(demand);
     if (proof === null || proof.declined) return undefined;
     if (proof.root !== null) roots.push(proof.root);
   }
@@ -2008,16 +2020,23 @@ export function* summaryItems(
   contract: Contract,
   stores: PrefixStores,
   rest: Rest,
+  flow: FlowSink | null = null,
 ): Work<readonly Item[] | null> {
   const at = layersAt(contract, stores, rest);
   if (at === undefined) return null;
+  // (#1668: staged until the summary is taken; where it declines, its caller reads each source and includes those)
+  const staged = flow?.child() ?? null;
   const sub = singleSource(contract, at, rest);
   if (sub !== null) {
-    const items = yield* contract.subAt(sub, rest);
-    return summarised(items) ? items : null;
+    const items = yield* contract.subAt(sub, rest, staged);
+    if (!summarised(items)) return null;
+    if (staged !== null) flow!.attach(staged, "summary");
+    return items;
   }
-  const root = yield* unionOf(contract, at);
-  return root === undefined ? null : (root?.items ?? []);
+  const root = yield* unionOf(contract, at, staged);
+  if (root === undefined) return null;
+  if (staged !== null) flow!.attach(staged, "summary");
+  return root?.items ?? [];
 }
 
 /** `severalWork`'s count of a prefix's layers at `rest`: the distinct sources whose answer holds an element, to two. */
@@ -2030,6 +2049,7 @@ export function* summaryCount(
   if (at === undefined) return null;
   const sub = singleSource(contract, at, rest);
   if (sub !== null) {
+    // #1668: N or K: a count, a presence test or an offending test over the sources
     const items = yield* contract.subAt(sub, rest);
     return summarised(items) ? (withoutEmpty(items).length > 0 ? 1 : 0) : null;
   }
@@ -2059,6 +2079,7 @@ export function summaryPresence(
   run(
     (function* (): Work<readonly Item[]> {
       if (sub !== null) {
+        // #1668: N or K: a count, a presence test or an offending test over the sources
         const items = yield* contract.subAt(sub, rest);
         if (summarised(items)) after = presenceSteps(items)[mask]!;
         return [];
@@ -2093,6 +2114,7 @@ export function offendingStores(
   return run(
     (function* (): Work<ReadonlySet<Definition | null> | null> {
       if (sub !== null) {
+        // #1668: N or K: a count, a presence test or an offending test over the sources
         const items = yield* contract.subAt(sub, rest);
         if (!summarised(items)) return null;
         if (offends(items)) {
@@ -2103,6 +2125,7 @@ export function offendingStores(
         return out;
       }
       for (const { layer, defs } of at.layers) {
+        // #1668: K, the offending test over the layers' summaries
         const { items, proof } = yield* contract.pass.solver.proven(
           layerDemand(contract, layer, pathIdAt(contract, at.path)),
         );
@@ -2147,5 +2170,8 @@ export function* replayLayer(contract: Contract, parts: readonly string[]): Work
   else throw new Error(`No layer is written '${parts.join("|")}'.`);
   if (layer?.origin?.kind !== kind || layer.origin.key !== origin)
     throw new Error(`No layer comes from '${parts.join("|")}' here.`);
-  return (yield* contract.pass.solver.proven(layerDemand(contract, layer, path))).items;
+  // (#1668: a replayed name's answer is the layer's summary)
+  const demand = layerDemand(contract, layer, path);
+  contract.pass.solver.sink()?.include(demand.key, "summary");
+  return (yield* contract.pass.solver.proven(demand)).items;
 }

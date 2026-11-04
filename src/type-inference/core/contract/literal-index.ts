@@ -628,7 +628,8 @@ export function* loadsBelow(
         for (const entry of members) {
           const answer = exact
             ? yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
-            : withWriter(yield* contract.contractOfValueAt(entry.value, after), group.writer);
+            : // #1668: the loads' answer is kept outside the solver: its includer records `opaque`
+              withWriter(yield* contract.contractOfValueAt(entry.value, after), group.writer);
           for (const item of answer) items.push(item);
         }
     }

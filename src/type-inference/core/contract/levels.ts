@@ -8,6 +8,7 @@ import { EMPTY, firstWriter, REASON, type Item } from "../items.js";
 import { stepName } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
+import type { FlowSink } from "./contributions.js";
 import { plainStep, propertyOnly, unknownItem } from "./kinds.js";
 import {
   indexPaths,
@@ -35,6 +36,7 @@ export function* entryAt(
   contract: Contract,
   entry: PrefixEntry,
   rest: Rest,
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   contract.pass.program.work.charge("invSteps");
   // (a cursor's span read one step at a time, its path's id where a key or a value takes it whole, G3 stage 1)
@@ -46,28 +48,47 @@ export function* entryAt(
   if (entry.elem !== undefined) {
     if (ref.length === 0 || ref.at(0) !== "element") return [];
     const at = ref.from(1).after(entry.at ?? []);
+    const element = flow?.child() ?? null;
     const items = annotated(
       contract,
       entry,
       at,
-      withWriter(yield* contract.contractOfValueAt(entry.elem, at), entry.w),
+      withWriter(yield* contract.contractOfValueAt(entry.elem, at, element), entry.w),
     );
+    if (element !== null)
+      flow!.attach(
+        element,
+        ...(ref.length === 1 ? (["withoutEmpty"] as const) : []),
+        "annotated",
+        "writer",
+      );
     return ref.length === 1 ? withoutEmpty(items) : items;
   }
   // §3.2: a copy read under a guard; a tested child's mark by the entry's holder at the path (r4.15)
-  if (entry.key !== undefined)
-    return annotated(
+  if (entry.key !== undefined) {
+    // (#1668: the copied key below, the edge a copy makes, as its marks and writer annotate it)
+    const below = flow?.child() ?? null;
+    const items = annotated(
       contract,
       entry,
       ref,
-      withWriter(yield* contract.contractOf(keyBelowRef(contract, entry.key, ref)), entry.w),
+      withWriter(yield* contract.contractOf(keyBelowRef(contract, entry.key, ref), below), entry.w),
     );
-  return annotated(
+    if (below !== null) flow!.attach(below, "annotated", "writer");
+    return items;
+  }
+  const stored = flow?.child() ?? null;
+  const items = annotated(
     contract,
     entry,
     ref,
-    withWriter(yield* contract.contractOfValueAt(entry.value!, ref.after(entry.at ?? [])), entry.w),
+    withWriter(
+      yield* contract.contractOfValueAt(entry.value!, ref.after(entry.at ?? []), stored),
+      entry.w,
+    ),
   );
+  if (stored !== null) flow!.attach(stored, "annotated", "writer");
+  return items;
 }
 
 /**
@@ -142,6 +163,7 @@ export function* propertyItems(
   asked: Key,
   stores: PrefixStores,
   rest: Rest,
+  flow: FlowSink | null = null,
 ): Work<readonly Item[] | null> {
   if (rest.length !== 1 || !propertyOnly(rest.at(0)!)) return null;
   const levels = prefixLevels(contract, asked, stores);
@@ -204,7 +226,7 @@ export function* propertyItems(
     for (const source of holders) {
       work.charge("invSteps");
       before(source.at);
-      for (const item of yield* contract.entryAt(source.entry!, rest)) out.push(item);
+      for (const item of yield* contract.entryAt(source.entry!, rest, flow)) out.push(item);
     }
   else {
     contract.keep(holders.length);
@@ -219,13 +241,15 @@ export function* propertyItems(
       while (holders[first]!.group!.literal !== group.literal) first += 1;
       before(holders[first]!.at);
       // (a literal stored whole: its group stands at the prefix itself)
+      const literal = flow?.child() ?? null;
       for (const item of annotated(
         contract,
         group,
         rest,
-        withWriter(yield* contract.contractOfValueAt(group.literal, rest), group.w),
+        withWriter(yield* contract.contractOfValueAt(group.literal, rest, literal), group.w),
       ))
         out.push(item);
+      if (literal !== null) flow!.attach(literal, "groupFirst", "annotated", "writer");
     }
   }
   before(Infinity);

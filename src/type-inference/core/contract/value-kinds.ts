@@ -2,6 +2,7 @@ import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { CorePass } from "../answers.js";
 import { joinParts, joinSteps, keepText } from "../budget.js";
 import type { Contract } from "../contract.js";
+import type { FlowSink } from "./contributions.js";
 import { keyOf } from "../definitions.js";
 import { belowSelected, withoutEmpty } from "../exact-path.js";
 import { marked } from "../guards.js";
@@ -57,8 +58,9 @@ export function contractOfValueAt(
   contract: Contract,
   value: PlaceId,
   rest: Rest,
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
-  return through(contract, value, rest, 0);
+  return through(contract, value, rest, 0, flow);
 }
 
 /**
@@ -74,6 +76,7 @@ function through(
   value: PlaceId,
   rest: Rest,
   from: number,
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const { program } = contract.pass;
   // (a read, a projection or a call passes the path on whole, so its member steps are scanned where it ends: a chain of
@@ -84,15 +87,15 @@ function through(
     program.speakerPlaces.has(value) ||
     program.callOutOf.has(value)
   )
-    return valueAt(contract, value, rest);
+    return valueAt(contract, value, rest, flow);
   // (a span's member step from its path's steps, made once per path and kept, `memberStepIn`)
   const ref = restRef(contract, rest);
   const at =
     ref.kind === "span"
       ? spanMemberStep(contract, ref, from)
       : memberStepOf(contract, restSteps(rest), from);
-  if (at < 0) return valueAt(contract, value, rest);
-  return listsAt(contract, value, restSteps(rest), at, from);
+  if (at < 0) return valueAt(contract, value, rest, flow);
+  return listsAt(contract, value, restSteps(rest), at, from, flow);
 }
 
 /** `memberStepOf` for a span: its first member step from `from` on, from its path's kept steps (`memberStepIn`). */
@@ -108,14 +111,17 @@ function* listsAt(
   rest: Steps,
   at: number,
   from: number,
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
+  // (#1668: the receiver read to decide its members, none of it included: no flow)
   const receiver = yield* through(contract, value, stepsRest(stepsTo(rest, at)), from);
   // F19a, r4.44: a receiver that may be a reference has the runtime's members, decided once for a whole value
+  // #1668: R, a receiver decision
   const decided = at === 0 ? yield* contract.valueReceiver(value) : receiver;
   if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
-    return yield* through(contract, value, stepsRest(rest), at + 1);
+    return yield* through(contract, value, stepsRest(rest), at + 1, flow);
   return yield* members(contract, rest, at, receiver, (path, start) =>
-    through(contract, value, stepsRest(path), start),
+    through(contract, value, stepsRest(path), start, flow),
   );
 }
 
@@ -162,59 +168,79 @@ export function* members(
 }
 
 /** The kinds at a path of a value, by the value's kind. */
-function* valueAt(contract: Contract, value: PlaceId, rest: Rest): Work<readonly Item[]> {
-  if (!contract.pass.solver.enterRead()) return STOPPED;
+function* valueAt(
+  contract: Contract,
+  value: PlaceId,
+  rest: Rest,
+  flow: FlowSink | null = null,
+): Work<readonly Item[]> {
+  if (!contract.pass.solver.enterRead()) {
+    flow?.opaque("stopped");
+    return STOPPED;
+  }
   try {
     // (a cursor's span read by its path's id, its key a cursor and a literal's demand named by it: G3 stage 1)
     const ref = restRef(contract, rest);
-    if (ref.length === 0) return yield* contract.contractOfValue(value);
+    if (ref.length === 0) return yield* contract.contractOfValue(value, flow);
     const { program, guards } = contract.pass;
     program.work.charge("invSteps");
     if (program.speakerPlaces.has(value)) return [unknownItem(REASON.opaque)];
     const binding = program.occurrenceOf.get(value);
     if (binding !== undefined) {
+      // (#1668: a binding read, the edge a copy of it makes, entered and marked as its value is)
+      const read = flow?.child() ?? null;
       const items = contract.entered(
         value,
-        yield* contract.contractOf(keyAtRef(contract, binding, ref)),
+        yield* contract.contractOf(keyAtRef(contract, binding, ref), read),
       );
       // §3.2: the mark travels with the value (r4.6): none of a binding no test names
-      return !guards.untested(binding) && guards.guardedReadAt(value, ref.text(ref.length))
-        ? marked(items)
-        : items;
+      const marks = !guards.untested(binding) && guards.guardedReadAt(value, ref.text(ref.length));
+      if (read !== null) flow!.attach(read, "entered", ...(marks ? (["marked"] as const) : []));
+      return marks ? marked(items) : items;
     }
     const projection = program.projOf.get(value);
     if (projection !== undefined) {
       if (projection.step === "iteration")
         // (an iteration's and a length's walk read arrays: a span's steps copied out, `stepsArray`)
-        return yield* contractIteration(contract, projection.owner, stepsArray(ref.steps()));
+        return yield* contractIteration(contract, projection.owner, stepsArray(ref.steps()), flow);
       if (measuresLength(projection.step))
         return yield* contractLength(
           contract,
           projection.owner,
           projection.step,
           stepsArray(ref.steps()),
+          flow,
         );
+      const selects = selectsElement(projection.step);
+      const read = flow?.child() ?? null;
       const elements = yield* contract.contractOfValueAt(
         projection.owner,
         ref.after([stepName(projection.step)]),
+        read,
       );
-      if (!selectsElement(projection.step)) return elements;
+      if (read !== null) flow!.attach(read, ...(selects ? (["selected"] as const) : []));
+      if (!selects) return elements;
+      // (#1668: the owner read whole for its selection alone: no flow)
+      // #1668: S, the owner read for its selection
       const owners = withoutEmpty(yield* contract.contractOfValue(projection.owner));
       return withOwnSelection(elements, owners, contract.pass);
     }
     if (program.callOutOf.has(value))
-      return yield* contract.contractOf(keyAtRef(contract, resultOf(contract, value), ref));
+      return yield* contract.contractOf(keyAtRef(contract, resultOf(contract, value), ref), flow);
     // a literal's contract at a path once per literal and path, whatever asks: a selection nested k deep reads each
     // level's literal once, its answer composed from the level inside's, never again per level above (#1426)
     if (program.hasOf.has(value) || program.cellOwner.has(value)) {
       const site = program.places[value]?.site ?? null;
       // (the rest in its identity: a wrapper's own literal asked by an array, at its cursor's span, G3 stage 1)
       const at = canonicalRest(contract, value, rest);
+      const slot = joinParts("cl", value, restPart(at));
+      flow?.include(slot, "literal");
       const demand: Demand = {
-        key: joinParts("cl", value, restPart(at)),
+        key: slot,
         kind: "contract",
         file: site?.file ?? -1,
         offset: site?.start ?? -1,
+        // #1668: the literal demand's run takes its own flow as it starts
         make: () => contract.contractOfLiteral(value, at),
       };
       return yield demand;
@@ -229,8 +255,10 @@ function* valueAt(contract: Contract, value: PlaceId, rest: Rest): Work<readonly
       interactionCategory(operation.contract.name)?.kind === "options"
     ) {
       const site = program.places[value]?.site ?? operation.site;
+      const slot = joinParts("cop", value, restPart(rest));
+      flow?.include(slot, "operation");
       const demand: Demand = {
-        key: joinParts("cop", value, restPart(rest)),
+        key: slot,
         kind: "contract",
         file: site.file,
         offset: site.start,
@@ -243,7 +271,7 @@ function* valueAt(contract: Contract, value: PlaceId, rest: Rest): Work<readonly
     // operands (`o + o + …`, `a otherwise b otherwise …`) costs no native call per level (#1572)
     return contract.entered(
       value,
-      yield* inline(contractOfOp(contract, operation, stepsArray(ref.steps()))),
+      yield* inline(contractOfOp(contract, operation, stepsArray(ref.steps()), flow)),
     );
   } finally {
     contract.pass.solver.leaveRead();
@@ -251,35 +279,50 @@ function* valueAt(contract: Contract, value: PlaceId, rest: Rest): Work<readonly
 }
 
 /** The kinds a value can have at any point, mirroring the value side's dispatch. */
-export function* contractOfValue(contract: Contract, value: PlaceId): Work<readonly Item[]> {
-  if (!contract.pass.solver.enterRead()) return STOPPED;
+export function* contractOfValue(
+  contract: Contract,
+  value: PlaceId,
+  flow: FlowSink | null = null,
+): Work<readonly Item[]> {
+  if (!contract.pass.solver.enterRead()) {
+    flow?.opaque("stopped");
+    return STOPPED;
+  }
   try {
     const { program, guards } = contract.pass;
     program.work.charge("invSteps");
     if (program.speakerPlaces.has(value)) return [unknownItem(REASON.opaque)];
     const binding = program.occurrenceOf.get(value);
     if (binding !== undefined) {
-      const items = contract.entered(value, yield* contract.contractOf(keyOf(binding, [])));
+      const read = flow?.child() ?? null;
+      const items = contract.entered(value, yield* contract.contractOf(keyOf(binding, []), read));
       // §3.2: the mark travels with the value (r4.6)
-      return guards.guardedRead(value) ? marked(items) : items;
+      const marks = guards.guardedRead(value);
+      if (read !== null) flow!.attach(read, "entered", ...(marks ? (["marked"] as const) : []));
+      return marks ? marked(items) : items;
     }
     const projection = program.projOf.get(value);
     if (projection !== undefined) {
       // a property read, a loop's visit, a length
       if (projection.step === "iteration")
-        return yield* contractIteration(contract, projection.owner, []);
+        return yield* contractIteration(contract, projection.owner, [], flow);
       if (measuresLength(projection.step))
-        return yield* contractLength(contract, projection.owner, projection.step, []);
-      if (!selectsElement(projection.step))
+        return yield* contractLength(contract, projection.owner, projection.step, [], flow);
+      if (!selectsElement(projection.step)) {
         // G3 (TABLE r4.164): a property or index read's contract once per occurrence, its owner's one step down,
         // whatever asks: a chain of k such reads of nested literals asks each link once, never once per read above
         // (and once per stop: `stop` forgets it)
-        return yield projected(contract, value, projection);
+        const demand = projected(contract, value, projection);
+        flow?.include(demand.key, "projection");
+        return yield demand;
+      }
       // S6c: a selection reads its owner twice, at its step and whole, so once per value, whatever asks: a chain of k
       // `.first` reads each link once whole, never each link 2^k times
       const site = program.places[value]?.site ?? null;
+      const slot = joinParts("cpj", value);
+      flow?.include(slot, "selection");
       const demand: Demand = {
-        key: joinParts("cpj", value),
+        key: slot,
         kind: "contract",
         file: site?.file ?? -1,
         offset: site?.start ?? -1,
@@ -288,13 +331,15 @@ export function* contractOfValue(contract: Contract, value: PlaceId): Work<reado
       return yield demand;
     }
     if (program.callOutOf.has(value))
-      return yield* contract.contractOf(keyOf(resultOf(contract, value), []));
+      return yield* contract.contractOf(keyOf(resultOf(contract, value), []), flow);
     const operation = program.opOf.get(value);
     // once per operation, whatever asks
     if (operation !== undefined) {
       const site = program.places[value]?.site ?? operation.site;
+      const slot = joinParts("cop", value);
+      flow?.include(slot, "operation");
       const demand: Demand = {
-        key: joinParts("cop", value),
+        key: slot,
         kind: "contract",
         file: site.file,
         offset: site.start,
@@ -303,9 +348,9 @@ export function* contractOfValue(contract: Contract, value: PlaceId): Work<reado
       return contract.entered(value, yield demand);
     }
     if (program.hasOf.has(value) || program.cellOwner.has(value))
-      return yield* contract.contractOfLiteral(value, []);
+      return yield* contract.contractOfLiteral(value, [], flow);
     if (program.isHost(value)) return [unknownItem(REASON.external)];
-    return yield* contract.contractOf(keyOf(value, []));
+    return yield* contract.contractOf(keyOf(value, []), flow);
   } finally {
     contract.pass.solver.leaveRead();
   }
@@ -316,7 +361,16 @@ function* selection(
   contract: Contract,
   projection: { readonly owner: PlaceId; readonly step: string },
 ): Work<readonly Item[]> {
-  const elements = yield* contract.contractOfValueAt(projection.owner, [stepName(projection.step)]);
+  const flow = contract.pass.solver.sink();
+  const read = flow?.child() ?? null;
+  const elements = yield* contract.contractOfValueAt(
+    projection.owner,
+    [stepName(projection.step)],
+    read,
+  );
+  if (read !== null) flow!.attach(read, "selected");
+  // (#1668: the owner read whole for its selection alone: no flow)
+  // #1668: S, the owner read for its selection
   const owners = withoutEmpty(yield* contract.contractOfValue(projection.owner));
   return withOwnSelection(elements, owners, contract.pass);
 }
@@ -333,13 +387,16 @@ function* contractIteration(
   contract: Contract,
   owner: PlaceId,
   rest: readonly string[],
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const out: Item[] = [];
+  // (#1668: the owner's kinds decide what a loop visits: no flow; its elements visited, included)
+  // #1668: S or D: the owner's kinds decide what is visited or measured
   for (const item of withoutEmpty(yield* contract.contractOfValue(owner))) {
     if (item.tag === "list" || item.tag === "set")
       out.push(
         ...belowSelected(
-          yield* contract.contractOfValueAt(owner, joinSteps(["element"], rest)),
+          yield* contract.contractOfValueAt(owner, joinSteps(["element"], rest), flow),
           rest,
         ),
       );
@@ -361,17 +418,21 @@ function* contractLength(
   owner: PlaceId,
   step: string,
   rest: readonly string[],
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   // F19a before F14: a receiver that may be a reference has the runtime's members, its `length` among them
+  // #1668: R, a receiver decision
   if (heldReference(yield* contract.valueReceiver(owner)))
-    return yield* contract.contractOfValueAt(owner, joinSteps([step], rest));
+    return yield* contract.contractOfValueAt(owner, joinSteps([step], rest), flow);
   const out: Item[] = [];
+  // (#1668: the owner's kinds decide the length's kinds: no flow; an object's own member, included)
+  // #1668: S or D: the owner's kinds decide what is visited or measured
   for (const item of withoutEmpty(yield* contract.contractOfValue(owner))) {
     if (item.tag === "string" || item.tag === "list" || item.tag === "set" || item.tag === "dict") {
       if (rest.length === 0) out.push(carried(makeItem("integer", item.writer), [item]));
     } else if (item.tag === "object" || REFERENCE.has(item.tag))
       // an object's own `length` (F11), a reference's member (F19a)
-      out.push(...(yield* contract.contractOfValueAt(owner, joinSteps([step], rest))));
+      out.push(...(yield* contract.contractOfValueAt(owner, joinSteps([step], rest), flow)));
     else if (item.tag === "unknown") out.push(item);
   }
   return mergeItems(out, contract.pass.program.scope);
@@ -387,10 +448,13 @@ export function* expectedOf(
   contract: Contract,
   c: ValueConstraint,
   rest: readonly string[],
+  flow: FlowSink | null = null,
 ): Work<readonly Item[] | null> {
   const written = (c.kind === "load" ? c.receiver : null) ?? contract.landsIn(c.result, []);
+  // (#1668: a default's kinds included where the answer holds them, staged where a branch may not)
   if (written === null && c.kind === "load" && c.fallback !== null && rest.length > 0) {
-    const named = yield* contract.defaultKinds(c.fallback, rest);
+    const staged = flow?.child() ?? null;
+    const named = yield* contract.defaultKinds(c.fallback, rest, staged);
     const kinds = withoutEmpty(named);
     // (a stored object keeps every property it holds, `matchesValueType`, one its default lacks too: stored data there,
     // which may be absent, ADR 0021 1.8, its own `missing` owing the check (#1459). `#`, the presence rule's property no
@@ -404,8 +468,10 @@ export function* expectedOf(
     // (a stored value's reader keeps an element of a collection that fits as it is, `matchesValueType`, so it may lack
     // a property the default's element has; the root object and the objects nested in it take it from the default, and
     // JSON's reader every level: #1458, the lead's ruling on Codex r3's N2)
-    if (rest.includes("element") && rest.at(-1) !== "element")
+    if (rest.includes("element") && rest.at(-1) !== "element") {
+      if (staged !== null) flow!.attach(staged);
       return [...named, unknownItem(REASON.missing)];
+    }
   }
   if (written === null) return null;
   const term = termAt(written, rest);
@@ -423,13 +489,21 @@ export function* expectedOf(
     (c.kind !== "load" || !rest.includes("element")) &&
     belowObject(written, rest)
   ) {
-    const named = withoutEmpty(yield* contract.defaultKinds(fallback, rest));
-    if (rest.at(-1) === "#") return named;
+    const staged = flow?.child() ?? null;
+    const named = withoutEmpty(yield* contract.defaultKinds(fallback, rest, staged));
+    if (rest.at(-1) === "#") {
+      if (staged !== null) flow!.attach(staged, "withoutEmpty");
+      return named;
+    }
     if (named.some((item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0))
       return [unknownItem(REASON.external | REASON.missing), ...emptyAt(rest)];
-    if (named.length > 0) return [...named, ...emptyAt(rest)];
+    if (named.length > 0) {
+      if (staged !== null) flow!.attach(staged, "withoutEmpty");
+      return [...named, ...emptyAt(rest)];
+    }
   }
   const nullDefault =
+    // #1668: D, a predicate on the default
     rest.length === 0 && fallback !== undefined && (yield* contract.onlyNull(fallback)).length > 0;
   // (the written type's kinds carry its spelling, #1398)
   const kinds = term === null ? ["unknown" as const] : typeKinds(term);
@@ -461,19 +535,31 @@ export function* defaultKinds(
   contract: Contract,
   fallback: PlaceId,
   rest: readonly string[],
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const site = contract.pass.program.places[fallback]?.site ?? null;
+  const slot = joinParts("dk", fallback, rest);
+  flow?.include(slot, "default");
   return yield {
-    key: joinParts("dk", fallback, rest),
+    key: slot,
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
-    make: () => contract.contractOfValueAt(fallback, rest),
+    make: () => defaultRun(contract, fallback, rest),
     decision: typedDefault(rest, false),
   };
 }
 
 /** F19 (r4.1): whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`). */
+/** A default's run (`defaultKinds`): its fallback's kinds at the path, its run's flow taken as it starts. */
+function* defaultRun(
+  contract: Contract,
+  fallback: PlaceId,
+  rest: readonly string[],
+): Work<readonly Item[]> {
+  return yield* contract.contractOfValueAt(fallback, rest, contract.pass.solver.sink());
+}
+
 export function* onlyNull(contract: Contract, fallback: PlaceId): Work<readonly Item[]> {
   const site = contract.pass.program.places[fallback]?.site ?? null;
   return yield {
@@ -481,6 +567,7 @@ export function* onlyNull(contract: Contract, fallback: PlaceId): Work<readonly 
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
+    // #1668: D, the null-only demand's run: its answer is made anew (`ONLY_NULL.flow`)
     make: () => contract.contractOfValue(fallback),
     decision: ONLY_NULL,
   };

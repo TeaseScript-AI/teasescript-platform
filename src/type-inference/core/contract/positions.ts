@@ -8,6 +8,7 @@ import { selectsElement } from "../method-categories.js";
 import { Position, positions, UNPOSITIONED } from "../positions.js";
 import { stepName } from "../program.js";
 import type { Proof, ProofDemand, Proven, Work } from "../solver.js";
+import type { FlowSink } from "./contributions.js";
 import {
   canonicalKey,
   isKeyId,
@@ -48,8 +49,8 @@ export function projected(
     proves: true,
     make: () => {
       contract.remember(joinParts("cpv", value));
-      return advance(contract, { value: projection.owner }, step, () =>
-        contract.contractOfValueAt(projection.owner, [step]),
+      return advance(contract, { value: projection.owner }, step, (flow) =>
+        contract.contractOfValueAt(projection.owner, [step], flow),
       );
     },
   };
@@ -81,7 +82,7 @@ export function positioned(
           ? { key: keyParentIn(contract, key)!, length: keyDepthIn(contract, key) - 1 }
           : { key: keyOf(keyPlace(key), path.slice(0, -1)), length: path.length - 1 };
       const step = path === null || isKeyId(key) ? keyLastIn(contract, key)! : path.at(-1)!;
-      return advance(contract, owner, step, () => contract.keyThrough(key, 0));
+      return advance(contract, owner, step, (flow) => contract.keyThrough(key, 0, flow));
     },
   };
 }
@@ -134,8 +135,11 @@ function* advance(
   contract: Contract,
   owner: Owner,
   step: string,
-  own: () => Work<readonly Item[]>,
+  own: (flow: FlowSink | null) => Work<readonly Item[]>,
 ): Work<Proven<Proof>> {
+  // (#1668: this run's flow: its own computation's reads, or its frontier's read below the wrapper; the positions and
+  // receivers it reads to choose between them included in neither)
+  const flow = contract.pass.solver.sink();
   // (a key's element step below its parent's position, a cursor's alone (`positionable`); a value read at an index
   // keeps its own computation)
   const advances = propertyOnly(step) || ("key" in owner && positionStep(step));
@@ -147,24 +151,32 @@ function* advance(
       ? contract.wrapperHop(from.read, step)
       : null;
   if (from === null || (!from.hopped && hop === null))
-    return { items: yield* own(), proof: UNPOSITIONED };
+    return { items: yield* own(flow), proof: UNPOSITIONED };
   // F19a (`receiverWalk`): the owner's receiver holds no reference, and a structure, as every one above it did
   const receiver =
     "key" in owner
-      ? yield* contract.receiverKinds(owner.key)
+      ? // #1668: R, a receiver decision
+        yield* contract.receiverKinds(owner.key)
       : yield* contract.valueReceiver(owner.value);
   const noRef = from.noRef && !heldReference(receiver);
   const clean = from.clean && noRef && receiver.some(holdsBelow);
-  if (!clean) return { items: yield* own(), proof: UNPOSITIONED };
-  const items = from.hopped
-    ? mergeItems(
-        withWriter(
-          yield* contract.contractOfValueAt(from.read, stepsBelow(contract, from.rest, step)),
-          from.writer,
+  if (!clean) return { items: yield* own(flow), proof: UNPOSITIONED };
+  let items: readonly Item[];
+  if (from.hopped) {
+    const frontier = flow?.child() ?? null;
+    items = mergeItems(
+      withWriter(
+        yield* contract.contractOfValueAt(
+          from.read,
+          stepsBelow(contract, from.rest, step),
+          frontier,
         ),
-        contract.pass.program.scope,
-      )
-    : yield* own();
+        from.writer,
+      ),
+      contract.pass.program.scope,
+    );
+    if (frontier !== null) flow!.attach(frontier, "positioned", "writer");
+  } else items = yield* own(flow);
   return {
     items,
     proof:
@@ -195,6 +207,7 @@ export function* positionOf(contract: Contract, owner: Owner): Work<Position | n
     if (length === 0) return new Position(keyPlace(key), 0, null, false, null, true, true);
     const path = isKeyId(key) ? null : keyPath(key);
     if (!positionable(contract, key, path)) return null;
+    // #1668: R, the position chooses the route: its includer records what the route reads
     const { proof } = yield* solver.proven(positioned(contract, key, path));
     return proof instanceof Position ? proof : null;
   }
@@ -209,6 +222,7 @@ export function* positionOf(contract: Contract, owner: Owner): Work<Position | n
     contract.wrapperHop(chain.root, chain.first) === null
   )
     return null;
+  // #1668: R, the position chooses the route: its includer records what the route reads
   const { proof } = yield* solver.proven(projected(contract, value, projection));
   return proof instanceof Position ? proof : null;
 }
