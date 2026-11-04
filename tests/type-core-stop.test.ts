@@ -55,7 +55,7 @@ import {
 } from "../src/type-inference/core/solver.js";
 import { REASON, STOPPED, type Item } from "../src/type-inference/core/items.js";
 import type { Obligation } from "../src/type-inference/core/result.js";
-import type { PlaceId } from "../src/type-inference/graph.js";
+import type { PlaceId, SourceSite } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { completedCore, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
@@ -71,6 +71,8 @@ import {
   heldStops,
   heldUnstopped,
   HELD_MODES,
+  ownTextOf,
+  ownTextSource,
   provenRelabel,
   runProblems,
   randomCopyGraph,
@@ -5608,24 +5610,24 @@ test("a read its one holder's source answers stops where main's does at a small 
 /**
  * The owner's one accepted relabel at a combined stop (TABLE r4.322, #1595, the lead's rulings), each form accepted
  * alone and each condition alone refusing it. A stopped check under a more precise label than the reference's generic
- * one: a key step (a dict's `entry`, a derived list's index text) or a derived list named by its own text (`xs.values`
- * for a parameter's `show.xs.values`, `build().values` for a result's). Proved where the natural analysis names the key
- * so, at the key or below it, though it owes another check there, or where a written type at the key spells it (1);
- * refused where neither proves it (1), where the check, its location or its expected types differ (2), and where
- * anything else differs: the words, or a label that differs beyond those forms (3).
+ * one: E, some `element` steps below its root spelled `entry`; or E2, the source text of the very expression the
+ * reference's path names, read at the check's site (`xs.values` for a parameter's `show.xs.values`, `build().values`
+ * for a result's, whatever its operands). Proved where the natural analysis names the value so at that site, at the key
+ * or below it, though it owes another check there, or where a written type at the key proves the form (1); refused
+ * where neither proves it (1), where the check, its location or its expected types differ (2), and where anything else
+ * differs: the words, a root or parameter named like a step, another expression's text, an altered operand (3).
  */
 test("a combined stop's more precise label is accepted only as the owner's three conditions allow (#1595)", () => {
-  const graphOf = (source: string) =>
-    analyseCore(coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!).graph;
-  const untyped = graphOf("let a = 1\nexit\n");
-  const typed = graphOf(
-    'function build: integer dict {return dict {a: hostValue}}\nfunction show(xs: dict) {say "${xs}"}\nshow(build())\nexit\n',
-  );
-  const listed = graphOf(
-    'function build: integer[] {return [hostValue]}\nsay "${build()}"\nexit\n',
-  );
-  const site = { file: 0, start: 40, end: 49 };
-  const check = (target: string, kind: Obligation["kind"] = "integer-check"): Obligation => ({
+  const analysed = (program: string) =>
+    analyseCore(
+      coreRequest([{ path: "main.tease", source: program }], ["hostValue", "hostOther"])!,
+    );
+  const graphOf = (program: string) => analysed(program).graph;
+  const check = (
+    target: string,
+    site = { file: 0, start: 40, end: 49 },
+    kind: Obligation["kind"] = "integer-check",
+  ): Obligation => ({
     kind,
     target,
     against: ["integer"],
@@ -5634,144 +5636,216 @@ test("a combined stop's more precise label is accepted only as the owner's three
     boundary: false,
   });
   // (the natural analysis's checks there: at the stopped check's own site, the value it reads, unless another is given)
-  const named = (targets: readonly string[], at = site): Obligation[] =>
-    targets.map((target) => ({ ...check(target), site: at }));
-  const elsewhere = { ...site, start: 70, end: 79 };
+  const named = (targets: readonly string[], at = check("").site): Obligation[] =>
+    targets.map((target) => check(target, at));
+  // (E2's cases: a real program, its read at the check's site, its graph and its own text)
+  const real = (program: string, read: string) => {
+    const answers = analysed(program);
+    const start = program.indexOf(read);
+    assert.ok(start >= 0, read);
+    const at = { file: 0, start, end: start + read.length };
+    return {
+      graph: answers.graph,
+      source: ownTextOf(answers, [program]),
+      relabel: (reference: string, stopped: string, natural: readonly string[] = []) =>
+        provenRelabel(
+          check(reference, at),
+          [check(stopped, at)],
+          named(natural, at),
+          answers.graph,
+          ownTextOf(answers, [program]),
+        )?.target,
+    };
+  };
+  const untyped = graphOf("let a = 1\nexit\n");
+  const typed = graphOf(
+    'function build: integer dict {return dict {a: hostValue}}\nfunction show(xs: dict) {say "${xs}"}\nshow(build())\nexit\n',
+  );
+  const listed = graphOf(
+    'function build: integer[] {return [hostValue]}\nsay "${build()}"\nexit\n',
+  );
   const [u, x] = [check("build.result.element"), check("build.result.entry")];
-  const [param, own] = [check("show.xs.values"), check("xs.values")];
-  // (the forms, each proved by the natural analysis's naming, at the key or below it)
-  assert.equal(provenRelabel(u, [x], named(["build.result.entry"]), untyped), x);
-  assert.equal(provenRelabel(u, [x], named(["build.result.entry.f"]), untyped), x);
-  const indexed = check("xs[0].values");
-  assert.equal(
-    provenRelabel(check("xs.element.values"), [indexed], named(["xs[0].values[0]"]), untyped),
-    indexed,
-  );
-  assert.equal(provenRelabel(param, [own], named(["xs.values[0]"]), typed), own);
-  const element = check("xs.values[0]");
-  assert.equal(
-    provenRelabel(check("show.xs.values.element"), [element], named(["xs.values[0]"]), typed),
-    element,
-  );
-  const called = check("build().values");
-  assert.equal(
-    provenRelabel(check("build.result.values"), [called], named(["build().values[0]"]), typed),
-    called,
-  );
-  // (1)'s second proof: a written type at the key spells it, where the natural analysis names the key nowhere
-  assert.equal(provenRelabel(u, [x], named([]), typed), x);
-  assert.equal(provenRelabel(param, [own], named([]), typed), own);
-  const nested = graphOf('let xs: dict[] = [dict {a: hostValue}]\nsay "${xs}"\nexit\n');
-  assert.equal(provenRelabel(check("xs.element.values"), [indexed], named([]), nested), indexed);
-  assert.equal(provenRelabel(check("xs.element.values"), [indexed], named([]), untyped), undefined);
-  // (every changed step proved through the written type, its optionals and unions as the compiler reads them: Codex
-  // r1's B2 and N1 on #1687)
+  // E: proved by the natural analysis's naming at the key or below it, or by a written dictionary
+  assert.equal(provenRelabel(u, [x], named(["build.result.entry"]), untyped, null), x);
+  assert.equal(provenRelabel(u, [x], named(["build.result.entry.f"]), untyped, null), x);
+  assert.equal(provenRelabel(u, [x], named([]), typed, null), x);
+  // (every changed step proved through the written type, its optionals and unions as the compiler reads them)
   const nestedDict = graphOf('let xs: integer[] dict = dict {a: [hostValue]}\nsay "${xs}"\nexit\n');
-  const [twice, once] = [check("xs.entry.entry"), check("xs.entry.element")];
   assert.equal(
-    provenRelabel(check("xs.element.element"), [twice], named([]), nestedDict),
+    provenRelabel(check("xs.element.element"), [check("xs.entry.entry")], [], nestedDict, null),
     undefined,
   );
-  assert.equal(provenRelabel(check("xs.element.element"), [once], named([]), nestedDict), once);
-  for (const written of ["dict[]?", "dict[] | dict set"]) {
-    const graph = graphOf(`let xs: ${written} = [dict {a: hostValue}]\nsay "\${xs}"\nexit\n`);
-    assert.equal(
-      provenRelabel(check("xs.element.values"), [indexed], named([]), graph),
-      indexed,
-      written,
-    );
-  }
-  // (through the derived list to the dictionary's values: a composed tail proved at its own owner, Codex r2's B2)
-  const listsDict = graphOf(
-    'function show(xs: integer[] dict) {repeat xs.values[0][0] {say "a"}}\nshow(dict {a: [hostValue]})\nexit\n',
-  );
-  const tail = check("show.xs.values.element.element");
-  assert.equal(provenRelabel(tail, [check("xs.values[0].entry")], named([]), listsDict), undefined);
   assert.equal(
-    provenRelabel(check("show.xs.values.element"), [element], named([]), listsDict),
-    element,
-  );
-  // (an index's text names a derived list's element, never an ordinary list's, nor one a root named `values` holds;
-  // a derived chain is its own text whatever lies below its first derived list, Codex r3's B1 and N1)
-  const ordinary = graphOf('let xs: integer[] = [hostValue]\nsay "${xs}"\nexit\n');
-  assert.equal(
-    provenRelabel(check("xs.element"), [check("xs[0]")], named([]), ordinary),
-    undefined,
-  );
-  const rootNamed = graphOf('let values: integer[] = [hostValue]\nsay "${values}"\nexit\n');
-  assert.equal(
-    provenRelabel(check("values.element"), [check("values[0]")], named([]), rootNamed),
-    undefined,
-  );
-  const dictOfDicts = graphOf(
-    'function show(xs: integer dict dict) {repeat xs.values[0].values[0] {say "a"}}\nshow(dict {a: dict {b: hostValue}})\nexit\n',
-  );
-  const chained = check("xs.values[0].values[0]");
-  assert.equal(
-    provenRelabel(
-      check("show.xs.values.element.values.element"),
-      [chained],
-      named([]),
-      dictOfDicts,
-    ),
-    chained,
-  );
-  assert.equal(
-    provenRelabel(check("show.xs.values.element.values.element"), [chained], named([]), listsDict),
-    chained,
+    provenRelabel(check("xs.element.element"), [check("xs.entry.element")], [], nestedDict, null)
+      ?.target,
+    "xs.entry.element",
   );
   const optional = graphOf('let xs: integer dict? = dict {a: hostValue}\nsay "${xs}"\nexit\n');
   assert.equal(
-    provenRelabel(check("xs.element"), [check("xs.entry")], named([]), optional),
+    provenRelabel(check("xs.element"), [check("xs.entry")], [], optional, null),
     undefined,
   );
-  // (1) neither proves it: named otherwise, or not at all, and no written dictionary there
-  // (own text where no derived list makes the value its own text: no natural naming proves that form)
+  // (a root, a parameter or a function named like a step stays the root: Codex r4's B1)
+  const rootNamed = graphOf(
+    'let element: integer dict = dict {a: hostValue}\nsay "${element}"\nexit\n',
+  );
   assert.equal(
-    provenRelabel(check("xs.element"), [check("xs[0]")], named(["xs[0]"]), untyped),
+    provenRelabel(check("element"), [check("entry")], named(["entry"]), rootNamed, null),
+    undefined,
+  );
+  assert.equal(
+    provenRelabel(check("element.element"), [check("entry.entry")], [], rootNamed, null),
+    undefined,
+  );
+  assert.equal(
+    provenRelabel(check("element.element"), [check("element.entry")], [], rootNamed, null)?.target,
+    "element.entry",
+  );
+  const parameterNamed = graphOf(
+    'function show(element: integer dict dict) {say "${element}"}\nexit\n',
+  );
+  assert.equal(
+    provenRelabel(
+      check("show.element.element"),
+      [check("show.entry.entry")],
+      [],
+      parameterNamed,
+      null,
+    ),
+    undefined,
+  );
+  assert.equal(
+    provenRelabel(
+      check("show.element.element"),
+      [check("show.element.entry")],
+      [],
+      parameterNamed,
+      null,
+    )?.target,
+    "show.element.entry",
+  );
+  const functionNamed = graphOf(
+    'function element: integer dict {return dict {a: hostValue}}\nsay "${element()}"\nexit\n',
+  );
+  assert.equal(
+    provenRelabel(
+      check("element.result.element"),
+      [check("entry.result.entry")],
+      [],
+      functionNamed,
+      null,
+    ),
+    undefined,
+  );
+  // E2: the source text of the very expression, proved by the natural analysis there or a written dictionary
+  const untypedRead = real(
+    'let xs = [dict {a: hostValue}]\nrepeat xs[0].values[0] {say "a"}\nexit\n',
+    "xs[0].values",
+  );
+  assert.equal(
+    untypedRead.relabel("xs.element.values", "xs[0].values", ["xs[0].values[0]"]),
+    "xs[0].values",
+  );
+  assert.equal(untypedRead.relabel("xs.element.values", "xs[0].values"), undefined);
+  const parameter = real(
+    'function show(xs: dict) {repeat xs.values[0] {say "a"}}\nshow(dict {a: hostValue})\nexit\n',
+    "xs.values[0]",
+  );
+  assert.equal(parameter.relabel("show.xs.values.element", "xs.values[0]"), "xs.values[0]");
+  assert.equal(
+    parameter.relabel("show.xs.values.element", "xs.values[99]", ["xs.values[99]"]),
+    undefined,
+  );
+  const receiver = real(
+    'function show(xs: dict) {repeat xs.values[0] {say "a"}}\nshow(dict {a: hostValue})\nexit\n',
+    "xs.values",
+  );
+  assert.equal(receiver.relabel("show.xs.values", "xs.values"), "xs.values");
+  const result = real(
+    'function build: integer dict {return dict {a: hostValue}}\nrepeat build().values[0] {say "a"}\nexit\n',
+    "build().values[0]",
+  );
+  assert.equal(
+    result.relabel("build.result.values.element", "build().values[0]"),
+    "build().values[0]",
+  );
+  assert.equal(result.relabel("build.result.values.element", "build(987).values[99]"), undefined);
+  // (whatever the expression's operands: a call's argument, a nested index, Codex r4's N1)
+  const operand = real(
+    'let box = {n: hostOther}\nfunction build(n): integer dict[] {return [dict {a: hostValue}]}\nrepeat build(box.n)[0].values[0] {say "a"}\nexit\n',
+    "build(box.n)[0].values",
+  );
+  assert.equal(
+    operand.relabel("build.result.element.values", "build(box.n)[0].values"),
+    "build(box.n)[0].values",
+  );
+  const nestedIndex = real(
+    'let ns = [0]\nlet xs: dict[] = [dict {a: hostValue}]\nrepeat xs[ns[0]].values[0] {say "a"}\nexit\n',
+    "xs[ns[0]].values",
+  );
+  assert.equal(nestedIndex.relabel("xs.element.values", "xs[ns[0]].values"), "xs[ns[0]].values");
+  // (another expression's text, an ordinary list's index, a root named `values`, a derived chain's text whatever lies
+  // below its first derived list)
+  const ordinary = real('let xs: integer[] = [hostValue]\nrepeat xs[0] {say "a"}\nexit\n', "xs[0]");
+  assert.equal(ordinary.relabel("xs.element", "xs[0]", ["xs[0]"]), undefined);
+  const values = real(
+    'let values: integer[] = [hostValue]\nrepeat values[0] {say "a"}\nexit\n',
+    "values[0]",
+  );
+  assert.equal(values.relabel("values.element", "values[0]"), undefined);
+  const chained = real(
+    'function show(xs: integer dict dict) {repeat xs.values[0].values[0] {say "a"}}\nshow(dict {a: dict {b: hostValue}})\nexit\n',
+    "xs.values[0].values[0]",
+  );
+  assert.equal(
+    chained.relabel("show.xs.values.element.values.element", "xs.values[0].values[0]"),
+    "xs.values[0].values[0]",
+  );
+  assert.equal(
+    chained.relabel("show.xs.values.element.values.element", "xs.values[0].values.element"),
+    undefined,
+  );
+  assert.equal(
+    chained.relabel("show.xs.values.element.values.element", "xs.values[0].entry.values[0]"),
     undefined,
   );
   // (an `entry` only for an element step, never for a property or a derived list, whatever the natural analysis names)
   assert.equal(
-    provenRelabel(check("xs.values"), [check("xs.entry")], named(["xs.entry"]), untyped),
+    provenRelabel(check("xs.values"), [check("xs.entry")], named(["xs.entry"]), untyped, null),
     undefined,
   );
-  // (the label's text alone, at another value's site: a parameter of another function, a property spelled as a step
-  // beside it in one walk unit, Codex r1's and r2's B1 on #1687)
-  assert.equal(provenRelabel(u, [x], named(["build.result.entry"], elsewhere), untyped), undefined);
-  assert.equal(provenRelabel(param, [own], named(["xs.values[0]"], elsewhere), untyped), undefined);
+  // (1) neither proves it: the label's text at another value's site, named otherwise or not at all, no written dictionary
+  const elsewhere = { file: 0, start: 70, end: 79 };
+  assert.equal(
+    provenRelabel(u, [x], named(["build.result.entry"], elsewhere), untyped, null),
+    undefined,
+  );
   for (const [natural, graph] of [
     [["build.result.element"], untyped],
     [["build.resultant.entry"], untyped],
     [[], untyped],
     [[], listed],
   ] as const)
-    assert.equal(provenRelabel(u, [x], named(natural), graph), undefined, JSON.stringify(natural));
+    assert.equal(
+      provenRelabel(u, [x], named(natural), graph, null),
+      undefined,
+      JSON.stringify(natural),
+    );
   // (2) another check, location or expected types under the label
   for (const other of [
-    check("build.result.entry", "null-check"),
-    { ...x, site: { ...site, end: 50 } },
+    check("build.result.entry", undefined, "null-check"),
+    { ...x, site: { ...x.site, end: 50 } },
     { ...x, boundary: true },
     { ...x, against: ["number" as const] },
   ])
     assert.equal(
-      provenRelabel(u, [other], named([other.target]), untyped),
+      provenRelabel(u, [other], named([other.target]), untyped, null),
       undefined,
       JSON.stringify(other),
     );
-  // (3) words that differ beyond the label, or a label that differs beyond its forms
+  // (3) words that differ beyond the label
   const worded = { ...x, on: "check that the count is a whole number" };
-  assert.equal(provenRelabel(u, [worded], named([x.target]), untyped), undefined);
-  for (const [from, to] of [
-    ["show.ys.values", "xs.values"],
-    ["a.xs.values", "xs.values"],
-    ["show.xs.values", "show.values"],
-  ] as const)
-    assert.equal(
-      provenRelabel(check(from), [check(to)], named([to]), typed),
-      undefined,
-      `${from} -> ${to}`,
-    );
+  assert.equal(provenRelabel(u, [worded], named([x.target]), untyped, null), undefined);
 });
 
 /**
@@ -5919,34 +5993,44 @@ test("a combined stop's more precise label is proved by its written type exactly
     [...levels]
       .reverse()
       .reduce((type, level) => (level === "list" ? `${type}[]` : `${type} dict`), "integer");
-  const empty = (levels: readonly Level[]) => (levels[0] === "list" ? "[]" : "dict {}");
   const roots = [
     {
       name: "xs",
       path: ["xs"],
       own: "xs",
-      source: (t: string, e: string) => `let xs: ${t} = ${e}\nsay "\${xs}"\nexit\n`,
+      program: (t: string, v: string, read: string) =>
+        `let xs: ${t} = ${v}\nrepeat ${read} {say "a"}\nexit\n`,
     },
     {
       name: "values",
       path: ["values"],
       own: "values",
-      source: (t: string, e: string) => `let values: ${t} = ${e}\nsay "\${values}"\nexit\n`,
+      program: (t: string, v: string, read: string) =>
+        `let values: ${t} = ${v}\nrepeat ${read} {say "a"}\nexit\n`,
     },
     {
       name: "parameter",
       path: ["show", "xs"],
       own: "xs",
-      source: (t: string) => `function show(xs: ${t}) {say "\${xs}"}\nexit\n`,
+      program: (t: string, _: string, read: string) =>
+        `function show(xs: ${t}) {repeat ${read} {say "a"}}\nexit\n`,
     },
     {
       name: "result",
       path: ["build", "result"],
       own: "build()",
-      source: (t: string, e: string) =>
-        `function build: ${t} {return ${e}}\nsay "\${build()}"\nexit\n`,
+      program: (t: string, v: string, read: string) =>
+        `function build: ${t} {return ${v}}\nrepeat ${read} {say "a"}\nexit\n`,
     },
   ];
+  // (a value of the written type: each level's container holding one, `hostValue` at the bottom)
+  const literal = (levels: readonly Level[]) =>
+    [...levels]
+      .reverse()
+      .reduce(
+        (value, level) => (level === "list" ? `[${value}]` : `dict {a: ${value}}`),
+        "hostValue",
+      );
   // (every chain down the levels: at each its element; at a dictionary its `values` then an element, or, last, its
   // `keys` then an element; at a list, last, its `values` or `keys`, a property no written type follows, then an
   // element; each step with its owner's container, a derived list's `derived`, past a property `unknown`)
@@ -5997,8 +6081,7 @@ test("a combined stop's more precise label is proved by its written type exactly
       );
     return label.form === "E2" && derived;
   };
-  const site = { file: 0, start: 40, end: 49 };
-  const check = (target: string): Obligation => ({
+  const check = (target: string, site: SourceSite): Obligation => ({
     kind: "integer-check",
     target,
     against: ["integer"],
@@ -6012,13 +6095,25 @@ test("a combined stop's more precise label is proved by its written type exactly
     for (const root of roots) {
       if (root.name === "values" && shape.levels.join() !== "list,dict") continue;
       const written = shape.written ?? annotation(shape.levels);
-      const graph = analyseCore(
-        coreRequest(
-          [{ path: "main.tease", source: root.source(written, empty(shape.levels)) }],
-          ["hostValue", "hostOther"],
-        )!,
-      ).graph;
-      for (const chain of chains(shape.levels))
+      for (const chain of chains(shape.levels)) {
+        // (the read the chain names, as a source writes it: a dictionary's index `["a"]`, a list's `[0]`; a real
+        // program reading it, the checks at its site, its own text the source there)
+        const spelled = (i: number, step: string) =>
+          step !== "element"
+            ? `.${step}`
+            : ["dict", "dict?", "dicts"].includes(chain[i]!.owner)
+              ? '["a"]'
+              : "[0]";
+        const ownText = (spell: (i: number, step: string) => string) =>
+          root.own + chain.map(({ step }, i) => spell(i, step)).join("");
+        const read = ownText(spelled);
+        const program = root.program(written, literal(shape.levels), read);
+        const start = program.indexOf(read);
+        const at = { file: 0, start, end: start + read.length };
+        const answers = analyseCore(
+          coreRequest([{ path: "main.tease", source: program }], ["hostValue", "hostOther"])!,
+        );
+        const source = ownTextOf(answers, [program]);
         for (const partial of [false, true]) {
           // (the reference generic, or already spelling `entry` at its first element step a dictionary owns, as a
           // reference that read part of its key settled does)
@@ -6045,18 +6140,21 @@ test("a combined stop's more precise label is proved by its written type exactly
               entries,
             });
           }
-          const ownText = (spell: (i: number, step: string) => string) =>
-            root.own + chain.map(({ step }, i) => spell(i, step)).join("");
-          const asWritten = (_: number, step: string) => (step === "element" ? "[0]" : `.${step}`);
-          labels.push({ target: ownText(asWritten), form: "E2" });
+          // (E2: the read's own text; beside it texts no expression there has: a generic `element` or an `entry`
+          // mixed in, another derived list, an altered operand)
+          labels.push({ target: read, form: "E2" });
           for (const [i, { step }] of chain.entries()) {
-            const at = (other: string) =>
-              ownText((j, each) => (j === i ? other : asWritten(j, each)));
+            const replaced = (other: string) =>
+              ownText((j, each) => (j === i ? other : spelled(j, each)));
             if (step === "element") {
-              labels.push({ target: at(".element"), form: "mixed" });
-              labels.push({ target: at(".entry"), form: "mixed" });
+              labels.push({ target: replaced(".element"), form: "mixed" });
+              labels.push({ target: replaced(".entry"), form: "mixed" });
+              labels.push({ target: replaced("[9]"), form: "mixed" });
             } else
-              labels.push({ target: at(step === "values" ? ".keys" : ".values"), form: "mixed" });
+              labels.push({
+                target: replaced(step === "values" ? ".keys" : ".values"),
+                form: "mixed",
+              });
           }
           // (each target once, by its first form: a mixed variant spelled as an E label is that label)
           const seen = new Set([u.join(".")]);
@@ -6065,13 +6163,20 @@ test("a combined stop's more precise label is proved by its written type exactly
             seen.add(label.target);
             pairs += 1;
             const accepted =
-              provenRelabel(check(u.join(".")), [check(label.target)], [], graph) !== undefined;
+              provenRelabel(
+                check(u.join("."), at),
+                [check(label.target, at)],
+                [],
+                answers.graph,
+                source,
+              ) !== undefined;
             if (accepted !== expected(chain, label))
               disagree.push(
                 `${written} ${root.name}: ${u.join(".")} -> ${label.target} (${label.form}): walk ${accepted}`,
               );
           }
         }
+      }
     }
   assert.deepEqual(disagree, []);
   assert.ok(pairs > 1000, `${pairs} pairs`);
@@ -6122,7 +6227,9 @@ test("a combined stop's label after a call's result is one precise form, made wh
                 continue;
               relabelled += 1;
               // (one of the grammar's two forms of `u`, proved by the program's written types alone)
-              if (provenRelabel(u, [x], [], reference.graph) === undefined)
+              if (
+                provenRelabel(u, [x], [], reference.graph, ownTextSource(reference)) === undefined
+              )
                 problems.push(`${mode.name} @${demand}/${allowance}: ${u.target} -> ${x.target}`);
             }
         }
