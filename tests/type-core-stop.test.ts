@@ -5774,6 +5774,38 @@ test("a combined stop's more precise label is accepted only as the owner's three
       undefined,
       JSON.stringify(proof),
     );
+  // (a root's written type is its own declaration's, by its file and offsets: two files' locals at the same offsets,
+  // each its own written type)
+  {
+    const sources = [
+      'function f {\nlet ys: integer dict = dict {a: hostValue}\nrepeat ys[0] {say "a"}\n}\nf()\nexit\n',
+      'function g {\nlet ys: integer[] = [hostValue, hostValue]\nrepeat ys[0] {say "a"}\n}\ng()\nexit\n',
+    ];
+    const answers = recordedAnalysis(
+      sources.map((source, i) => ({ path: `${"ab"[i]!}.tease`, source })),
+    );
+    const labels = labelIdentities(answers)!;
+    const roots = [...Array(labels.places).keys()].flatMap((place) => {
+      const path = labels.climb(place);
+      return path?.steps.join() === "element" ? [path.root] : [];
+    });
+    const rootIn = (file: number) => roots.find((each) => labels.site(each)?.file === file)!;
+    const [ru, rx] = [
+      { ...u, target: "ys.element", on: "check that ys.element is a whole number" },
+      { ...u, target: "ys.entry", on: "check that ys.entry is a whole number" },
+    ];
+    const proved = (file: number) =>
+      provenRelabel(
+        ru,
+        [rx],
+        [],
+        answers.graph,
+        withLabels(labels, [[ru, { kind: "path", place: rootIn(file), steps: ["element"] }]]),
+        withLabels(labels, [[rx, { kind: "path", place: rootIn(file), steps: ["entry"] }]]),
+      );
+    assert.equal(proved(0), rx);
+    assert.equal(proved(1), undefined);
+  }
   // (a stopped check whose label the recorder did not capture: refused and counted, never inferred)
   const unrecorded = { ...x, target: "xs.other", on: u.on.split(u.target).join("xs.other") };
   assert.equal(provenRelabel(u, [unrecorded], natural, graph, from, to), undefined);
