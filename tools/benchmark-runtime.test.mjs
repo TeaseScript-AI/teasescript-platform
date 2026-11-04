@@ -323,6 +323,24 @@ test("--cpu times nothing when the candidate differs from the base at a cut", as
   );
 });
 
+test("a failed --cpu run leaves no earlier summary in its output folder", async (t) => {
+  const { directory, dists, run } = setUp(t, {
+    mutations: { changed: { at: 1, set: { rng: { state: 99 } } } },
+  });
+  const out = path.join(directory, "cpu");
+  const quick = ["--out", out, "--rounds", "1", "--warmups", "0", "--batch", "1"];
+  assert.equal(
+    (await run("--cpu", "--base", dists.clean, "--candidate", dists.clean, ...quick)).status,
+    0,
+  );
+  assert.equal(fs.existsSync(path.join(out, "summary.json")), true);
+  assert.equal(
+    (await run("--cpu", "--base", dists.clean, "--candidate", dists.changed, ...quick)).status,
+    1,
+  );
+  assert.equal(fs.existsSync(path.join(out, "summary.json")), false);
+});
+
 test("--cpu accepts a candidate whose instruction counts differ", async (t) => {
   const { directory, dists, run } = setUp(t, {
     mutations: { fewer: { at: 0, set: { instructions: 1 } } },

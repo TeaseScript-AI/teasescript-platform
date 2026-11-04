@@ -523,6 +523,7 @@ export async function main(argv, { directory = benchmarkDirectory, log = console
   const timedCases = options.cases ? cases : cases.filter((entry) => !entry.probe);
   fs.mkdirSync(options.out, { recursive: true });
   const samplesFile = path.join(options.out, "samples.jsonl");
+  fs.rmSync(path.join(options.out, "summary.json"), { force: true });
   fs.writeFileSync(samplesFile, "");
   const { problems, samples } = measureCpu(builds, timedCases, {
     rounds: options.rounds,
