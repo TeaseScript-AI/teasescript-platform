@@ -178,6 +178,7 @@ export function* gatherAt(
   if (site.kind !== "reads" && site.kind !== "groups") flow?.opaque("exact");
   if (site.kind === "exact") {
     const entry = here!.exact[at]!;
+    // #1668: the value side's exact gather: its includer records `opaque`
     return yield* values.valueItems(entry.value, entry.g?.node ?? node, rest);
   }
   if (site.kind === "copies" || site.kind === "reads") {
@@ -287,10 +288,12 @@ function* groupItems<E extends ValueEntry>(
   const out: Item[] = [];
   const answers: (readonly Item[])[] = [];
   const read = function* (entry: E): Work<readonly Item[]> {
+    // #1668: I, the caller's read takes its flow
     const items = yield* answer(entry);
     return exact ? items : withWriter(items, group.writer);
   };
   for (const entry of group.read) {
+    // #1668: I, the caller's read takes its flow
     const items = yield* read(entry);
     answers.push(items);
     for (const item of items) out.push(item);
@@ -303,6 +306,7 @@ function* groupItems<E extends ValueEntry>(
   if (leaves !== null) {
     flow?.opaque("leaves");
     out.push({ ...differing, ingress: leaves });
+    // #1668: I, the caller's read takes its flow
   } else for (const entry of group.rest) for (const item of yield* read(entry)) out.push(item);
   return out;
 }

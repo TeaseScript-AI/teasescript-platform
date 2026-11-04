@@ -298,6 +298,7 @@ function* severalWork(contract: Contract, at: Key): Work<readonly Item[]> {
       for (const sub of contract.relevantSubs(stored, below)) {
         if (count >= 2) break;
         contract.pass.program.work.charge("invSteps");
+        // #1668: N, a count
         if (withoutEmpty(yield* contract.subAt(sub.key, below)).length > 0) count += 1;
       }
   }
@@ -308,6 +309,7 @@ function* severalWork(contract: Contract, at: Key): Work<readonly Item[]> {
 function* elementsOf(contract: Contract, entry: PrefixEntry, below: Rest): Work<number> {
   const { program, definitions } = contract.pass;
   program.work.charge("invSteps");
+  // #1668: N, a count
   if (withoutEmpty(yield* contract.entryAt(entry, below)).length === 0) return 0;
   if (entry.key !== undefined)
     // #1668: N, a count

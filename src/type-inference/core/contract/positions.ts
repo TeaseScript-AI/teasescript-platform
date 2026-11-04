@@ -49,6 +49,7 @@ export function projected(
     proves: true,
     make: () => {
       contract.remember(joinParts("cpv", value));
+      // #1668: I, the read takes the run's flow (`own`)
       return advance(contract, { value: projection.owner }, step, (flow) =>
         contract.contractOfValueAt(projection.owner, [step], flow),
       );
@@ -82,6 +83,7 @@ export function positioned(
           ? { key: keyParentIn(contract, key)!, length: keyDepthIn(contract, key) - 1 }
           : { key: keyOf(keyPlace(key), path.slice(0, -1)), length: path.length - 1 };
       const step = path === null || isKeyId(key) ? keyLastIn(contract, key)! : path.at(-1)!;
+      // #1668: I, the read takes the run's flow (`own`)
       return advance(contract, owner, step, (flow) => contract.keyThrough(key, 0, flow));
     },
   };

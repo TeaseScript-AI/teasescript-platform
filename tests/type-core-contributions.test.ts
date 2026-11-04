@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ts } from "ts-morph";
+import { Project, ts } from "ts-morph";
 
 import type { CorePass } from "../src/type-inference/core/answers.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
@@ -495,65 +494,21 @@ test("every slot a run includes is one its run read", () => {
 });
 
 test("every producing read in the contract layer passes a flow, follows an inclusion or is classified", () => {
-  // (the inclusion matrix in code, read from the syntax tree: in every solver generator (typed `Work<…>`, or an untyped
-  // one that is no iterator's own method), every read of another slot's answer (a producing method, a producing
-  // helper the layer defines, a demand it yields, a proof) passes a flow as an argument, follows the slot's `include`
-  // in its function, or carries its class (`// #1668: <class>`) on the line before or leading its statement, so a new
-  // read cannot go unclassified, however it is written)
-  const folder = join(process.cwd(), "src/type-inference/core/contract");
-  const parsed = readdirSync(folder)
-    .filter((name) => name.endsWith(".ts"))
-    .sort()
-    .map((file) => {
-      const text = readFileSync(join(folder, file), "utf8");
-      return { file, text, tree: ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true) };
-    });
-  const methods = new Set([
-    "contractOf",
-    "contractOfValueAt",
-    "contractOfValue",
-    "subAt",
-    "contractOfLiteral",
-    "entryAt",
-    "receiverKinds",
-    "valueReceiver",
-    "severalElements",
-    "keyThrough",
-    "indexItems",
-    "gathered",
-    "defaultKinds",
-    "onlyNull",
-    "expectedOf",
-    "contractRead",
-    "proven",
-  ]);
-  const flows = new Set([
-    "flow",
-    "staged",
-    "read",
-    "lead",
-    "source",
-    "literal",
-    "whole",
-    "element",
-    "stored",
-    "below",
-    "through",
-    "kept",
-    "frontier",
-    "fallback",
-    "given",
-    "kinds",
-    "side",
-  ]);
-  type FunctionLike =
-    ts.FunctionDeclaration | ts.FunctionExpression | ts.MethodDeclaration | ts.ArrowFunction;
-  const functionLike = (node: ts.Node): node is FunctionLike =>
-    ts.isFunctionDeclaration(node) ||
-    ts.isFunctionExpression(node) ||
-    ts.isMethodDeclaration(node) ||
-    ts.isArrowFunction(node);
-  // (an expression through its parentheses and assertions)
+  // (the inclusion matrix in code, by the type checker: every call in the contract layer whose type is a `Work` of
+  // items (a producing method, helper, alias or callback, however spelled), unless it only transfers one made in its
+  // arguments, and every yield of a demand, passes a sink (a `FlowSink` or the run's `"run"`) at a sink parameter,
+  // follows a sink's `include` of the same key in its own function, or carries its class (`// #1668: <class>`) on the
+  // line before or leading its statement, so a new read cannot go unclassified)
+  const project = new Project({
+    tsConfigFilePath: join(process.cwd(), "tsconfig.json"),
+    skipAddingFilesFromTsConfig: true,
+  });
+  const files = project.addSourceFilesAtPaths(
+    join(process.cwd(), "src/type-inference/core/contract/*.ts"),
+  );
+  project.resolveSourceFileDependencies();
+  const program = project.getProgram().compilerObject;
+  const checker = program.getTypeChecker();
   const bare = (expression: ts.Expression): ts.Expression => {
     let at = expression;
     while (
@@ -565,152 +520,185 @@ test("every producing read in the contract layer passes a flow, follows an inclu
       at = at.expression;
     return at;
   };
-  const walk = (node: ts.Node, visit: (node: ts.Node) => void): void => {
-    visit(node);
-    ts.forEachChild(node, (child) => walk(child, visit));
+  const functionLike = (node: ts.Node): boolean =>
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isArrowFunction(node);
+  const ownerOf = (node: ts.Node): ts.Node | null => {
+    for (let at = node.parent; at !== undefined; at = at.parent) if (functionLike(at)) return at;
+    return null;
   };
-  // (the layer's producing helpers: its module-level functions, a constant's too, typed `Work<…>` of items or proven
-  // items, generators or not)
-  const producing = /^Work<\s*(?:readonly Item\[\]|Item\[\]|Proven<)/;
-  const helpers = new Set<string>();
-  for (const { tree } of parsed)
-    for (const statement of tree.statements) {
-      const named: (readonly [string, FunctionLike])[] = [];
-      if (ts.isFunctionDeclaration(statement) && statement.name !== undefined)
-        named.push([statement.name.text, statement]);
-      if (ts.isVariableStatement(statement))
-        for (const declaration of statement.declarationList.declarations)
-          if (declaration.initializer !== undefined) {
-            const initializer = bare(declaration.initializer);
-            if (functionLike(initializer))
-              named.push([declaration.name.getText(tree), initializer]);
-          }
-      for (const [name, fn] of named)
-        if (fn.type !== undefined && producing.test(fn.type.getText(tree))) helpers.add(name);
-    }
+  const text = (type: ts.Type) =>
+    checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation);
+  // (a `Work`'s result, from its alias or its generator's type reference)
+  const resultOf = (type: ts.Type): ts.Type | undefined => {
+    if (type.aliasSymbol?.getName() === "Work") return type.aliasTypeArguments?.[0];
+    if (type.getSymbol()?.getName() !== "Generator" || !(type.flags & ts.TypeFlags.Object))
+      return undefined;
+    // EVIDENCE: the Object flag tested above marks the TypeScript checker's ObjectType.
+    const object = type as ts.ObjectType;
+    if ((object.objectFlags & ts.ObjectFlags.Reference) === 0) return undefined;
+    // EVIDENCE: the Reference object flag tested above marks the checker's TypeReference.
+    return checker.getTypeArguments(object as ts.TypeReference)[1];
+  };
+  const producing = (call: ts.CallExpression): ts.Signature | undefined => {
+    const signature = checker.getResolvedSignature(call);
+    const result = signature && resultOf(checker.getReturnTypeOfSignature(signature));
+    return result !== undefined &&
+      /(?:^|\| )(?:readonly )?Item\[\](?:$| \|)|^Proven/.test(text(result))
+      ? signature
+      : undefined;
+  };
+  const sink = (type: ts.Type): boolean =>
+    (type.isUnion() ? type.types : [type]).some(
+      (part) =>
+        part.getSymbol()?.getName() === "FlowSink" ||
+        (part.isStringLiteral() && part.value === "run"),
+    );
+  const symbolAt = (expression: ts.Expression) => checker.getSymbolAtLocation(bare(expression));
   const unclassified: string[] = [];
   let reads = 0;
-  for (const { file, text, tree } of parsed) {
-    const lines = text.split("\n");
+  for (const file of files) {
+    const tree = program.getSourceFile(file.getFilePath())!;
+    const source = tree.getFullText();
+    const lines = source.split("\n");
     const lineOf = (node: ts.Node) => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line;
     const tagged = (node: ts.Node): boolean => {
       if (/^\s*(?:[?:]\s*)?\/\/ #1668:/.test(lines[lineOf(node) - 1] ?? "")) return true;
       for (let at: ts.Node = node; !ts.isBlock(at) && !ts.isSourceFile(at); at = at.parent) {
-        const comments = ts.getLeadingCommentRanges(text, at.getFullStart()) ?? [];
-        if (comments.some((range) => text.slice(range.pos, range.end).includes("#1668:")))
+        const comments = ts.getLeadingCommentRanges(source, at.getFullStart()) ?? [];
+        if (comments.some((range) => source.slice(range.pos, range.end).includes("#1668:")))
           return true;
         if (ts.isStatement(at)) return false;
       }
       return false;
     };
-    const keyOfObject = (object: ts.ObjectLiteralExpression): string[] => {
-      for (const property of object.properties) {
-        if (ts.isShorthandPropertyAssignment(property) && property.name.text === "key")
-          return ["key"];
-        if (ts.isPropertyAssignment(property) && property.name.getText(tree) === "key")
-          return ts.isIdentifier(property.initializer) ? [property.initializer.text] : [];
-      }
-      return [];
-    };
-    // (the names a yielded demand's key goes by: its object's `key`, or a variable's `<name>.key` and its object's)
-    const keyNames = (yielded: ts.Expression, body: ts.Node): string[] => {
-      if (ts.isObjectLiteralExpression(yielded)) return keyOfObject(yielded);
-      if (!ts.isIdentifier(yielded)) return [];
-      const names = [`${yielded.text}.key`];
-      walk(body, (node) => {
+    // (every sink's `include`: its function, where it stands, its key's symbol, or `d`'s of `d.key`)
+    const includes: {
+      readonly owner: ts.Node | null;
+      readonly at: number;
+      readonly key: ts.Symbol | undefined;
+      readonly of: ts.Symbol | undefined;
+    }[] = [];
+    const collect = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        const callee = bare(node.expression);
+        const key = node.arguments[0];
         if (
-          ts.isVariableDeclaration(node) &&
-          node.name.getText(tree) === yielded.text &&
-          node.initializer !== undefined &&
-          ts.isObjectLiteralExpression(node.initializer)
-        )
-          names.push(...keyOfObject(node.initializer));
-      });
-      return names;
-    };
-    // (a scope: a function typed `Work<…>`, or an untyped generator that is no iterator's own method)
-    const solving = (node: ts.Node): node is FunctionLike =>
-      functionLike(node) &&
-      (node.type !== undefined
-        ? /^Work</.test(node.type.getText(tree))
-        : node.asteriskToken !== undefined &&
-          !(ts.isMethodDeclaration(node) && ts.isComputedPropertyName(node.name)));
-    walk(tree, (scope) => {
-      if (!solving(scope) || scope.body === undefined) return;
-      const body = scope.body;
-      // (the function's own `include` calls: their first argument's text and where they stand)
-      const includes: { readonly key: string; readonly at: number }[] = [];
-      const own = (node: ts.Node): void => {
-        if (solving(node) || functionLike(node)) return;
-        if (ts.isCallExpression(node)) {
-          const callee = bare(node.expression);
-          const key = node.arguments[0];
-          if (
-            ts.isPropertyAccessExpression(callee) &&
-            callee.name.text === "include" &&
-            key !== undefined
-          )
-            includes.push({ key: bare(key).getText(tree), at: node.getStart(tree) });
-        }
-        ts.forEachChild(node, own);
-      };
-      ts.forEachChild(body, own);
-      const visit = (node: ts.Node): void => {
-        // (a scope inside is checked by itself)
-        if (solving(node)) return;
-        let read: ts.Node | null = null;
-        let call: ts.CallExpression | null = null;
-        let names: string[] = [];
-        if (
-          ts.isYieldExpression(node) &&
-          node.asteriskToken === undefined &&
-          node.expression !== undefined
+          ts.isPropertyAccessExpression(callee) &&
+          callee.name.text === "include" &&
+          key !== undefined &&
+          sink(checker.getTypeAtLocation(callee.expression))
         ) {
-          read = node;
-          names = keyNames(node.expression, body);
-        } else if (ts.isCallExpression(node)) {
-          // (a method however it is accessed, `contract.m(…)` or `contract["m"](…)`; a helper by its name)
-          const callee = bare(node.expression);
-          const access = ts.isElementAccessExpression(callee)
-            ? bare(callee.argumentExpression)
-            : null;
-          const member = ts.isPropertyAccessExpression(callee)
-            ? callee.name.text
-            : access !== null && ts.isStringLiteralLike(access)
-              ? access.text
-              : null;
-          const method = member !== null && methods.has(member);
-          const helper = ts.isIdentifier(callee) && helpers.has(callee.text);
-          if (method || helper) {
-            read = node;
-            call = node;
-            const proved = node.arguments[0];
-            if (member === "proven" && proved !== undefined)
-              names = [`${proved.getText(tree)}.key`];
+          const named = bare(key);
+          includes.push({
+            owner: ownerOf(node),
+            at: node.getStart(tree),
+            key: symbolAt(named),
+            of:
+              ts.isPropertyAccessExpression(named) && named.name.text === "key"
+                ? symbolAt(named.expression)
+                : undefined,
+          });
+        }
+      }
+      ts.forEachChild(node, collect);
+    };
+    collect(tree);
+    // (a demand's key symbols: its object's `key`, or a variable's initializer's)
+    const keysOf = (expression: ts.Expression): ts.Symbol[] => {
+      const at = bare(expression);
+      if (ts.isObjectLiteralExpression(at)) {
+        for (const property of at.properties) {
+          if (ts.isShorthandPropertyAssignment(property) && property.name.text === "key") {
+            const value = checker.getShorthandAssignmentValueSymbol(property);
+            return value === undefined ? [] : [value];
+          }
+          if (ts.isPropertyAssignment(property) && property.name.getText(tree) === "key") {
+            const value = symbolAt(property.initializer);
+            return value === undefined ? [] : [value];
           }
         }
-        if (read !== null) {
-          reads += 1;
-          const passed =
-            call?.arguments.some(
-              (argument) =>
-                (ts.isIdentifier(argument) && flows.has(argument.text)) ||
-                (ts.isStringLiteral(argument) && argument.text === "run") ||
-                argument.getText(tree) === "contract.pass.solver.sink()",
-            ) ?? false;
-          // (an `include` call of the same key earlier in this function itself, not in a callback inside it)
-          const included = includes.some(
-            (include) => include.at < read!.getStart(tree) && names.includes(include.key),
-          );
-          if (!passed && !included && !tagged(read))
-            unclassified.push(`${file}:${lineOf(read) + 1}: ${read.getText(tree).split("\n")[0]}`);
+        return [];
+      }
+      const declaration = symbolAt(at)?.valueDeclaration;
+      return declaration !== undefined &&
+        ts.isVariableDeclaration(declaration) &&
+        declaration.initializer !== undefined
+        ? keysOf(declaration.initializer)
+        : [];
+    };
+    const visit = (node: ts.Node): void => {
+      let read: ts.Node | null = null;
+      let passed = false;
+      let keys: ts.Symbol[] = [];
+      let demands: ts.Symbol[] = [];
+      if (
+        ts.isYieldExpression(node) &&
+        node.asteriskToken === undefined &&
+        node.expression !== undefined
+      ) {
+        const type = checker.getTypeAtLocation(node.expression);
+        if (type.getProperty("make") !== undefined && type.getProperty("key") !== undefined) {
+          read = node;
+          keys = keysOf(node.expression);
+          const demand = symbolAt(node.expression);
+          demands = demand === undefined ? [] : [demand];
         }
-        ts.forEachChild(node, visit);
-      };
-      ts.forEachChild(body, visit);
-    });
+      } else if (ts.isCallExpression(node)) {
+        const signature = producing(node);
+        // (a call only transferring one made in its arguments, `inline(…)`: that call is the read)
+        const transfers = node.arguments.some((argument) => {
+          const made = bare(argument);
+          return ts.isCallExpression(made) && producing(made) !== undefined;
+        });
+        if (signature !== undefined && !transfers) {
+          read = node;
+          const parameters = signature.getParameters();
+          passed = node.arguments.some((argument, at) => {
+            const parameter = parameters[Math.min(at, parameters.length - 1)];
+            if (parameter === undefined) return false;
+            const given = checker.getTypeAtLocation(argument);
+            return (
+              sink(checker.getTypeOfSymbolAtLocation(parameter, node)) &&
+              sink(given) &&
+              text(given) !== "null"
+            );
+          });
+          const callee = bare(node.expression);
+          const proved = node.arguments[0];
+          if (
+            ts.isPropertyAccessExpression(callee) &&
+            callee.name.text === "proven" &&
+            proved !== undefined
+          ) {
+            const demand = symbolAt(proved);
+            demands = demand === undefined ? [] : [demand];
+          }
+        }
+      }
+      if (read !== null) {
+        reads += 1;
+        const owner = ownerOf(read);
+        const start = read.getStart(tree);
+        const included = includes.some(
+          (include) =>
+            include.owner === owner &&
+            include.at < start &&
+            ((include.key !== undefined && keys.includes(include.key)) ||
+              (include.of !== undefined && demands.includes(include.of))),
+        );
+        if (!passed && !included && !tagged(read))
+          unclassified.push(
+            `${file.getBaseName()}:${lineOf(read) + 1}: ${read.getText(tree).split("\n")[0]}`,
+          );
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(tree);
   }
-  assert.ok(helpers.size > 20 && reads > 100, `${helpers.size} producing helpers, ${reads} reads`);
+  assert.ok(reads > 150, `${reads} reads`);
   assert.deepEqual(unclassified, []);
 });
 

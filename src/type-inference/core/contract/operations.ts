@@ -205,6 +205,7 @@ export function* contractOfOp(
   }
   if (family === "operator" && name === "+" && rest.length > 0) {
     // #1384: an indexed run's terms holding the property, and those between them
+    // #1668: I, each term's read takes the flow
     const indexed = yield* indexedPlus(contract.pass, c.result, rest, false, (term) =>
       contract.contractOfValueAt(term, rest, flow),
     );

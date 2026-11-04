@@ -1874,6 +1874,7 @@ function layerDemand(contract: Contract, layer: SubLayer, path: number): ProofDe
     file: -1,
     offset: -1,
     proves: true,
+    // #1668: the demand's own run: its frame's flow, taken as it starts
     make: () => layerMade(contract, layer, stepsOfId(contract, keyIdAt(0, path)).rest(), path),
   };
   return at.demand;
@@ -2077,6 +2078,7 @@ export function summaryPresence(
   const sub = singleSource(contract, at, rest);
   after = null;
   run(
+    // #1668: K, the offending test over the sources (`run`)
     (function* (): Work<readonly Item[]> {
       if (sub !== null) {
         // #1668: N or K: a count, a presence test or an offending test over the sources
