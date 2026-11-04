@@ -5729,6 +5729,35 @@ test("a combined stop's more precise label is accepted only as the owner's three
     provenRelabel(u, [x], natural, graph, withLabels(from, [[u, { ...root, kind: "own" }]]), to),
     undefined,
   );
+  // (3) with the natural analysis naming the stopped label there: an `entry` for a reference's property step, and the
+  // read's own text where no derived list is on its path (the compiler spells that read's path)
+  const element = [...Array(to.places).keys()].find((place) => {
+    const path = to.climb(place);
+    return path?.root === root.place && path.steps.join() === "element";
+  })!;
+  assert.ok(element !== undefined);
+  assert.equal(
+    provenRelabel(
+      u,
+      [x],
+      natural,
+      graph,
+      withLabels(from, [[u, { ...root, steps: ["values"] }]]),
+      withLabels(to, [[x, { kind: "path", place: root.place, steps: ["entry"] }]]),
+    ),
+    undefined,
+  );
+  assert.equal(
+    provenRelabel(
+      u,
+      [x],
+      natural,
+      graph,
+      from,
+      withLabels(to, [[x, { kind: "own", place: element, steps: [] }]]),
+    ),
+    undefined,
+  );
   // (3) E2: another expression's own text on the read's chain (its receiver, `xs.values`), own text with a step below
   // it, an `entry` path through the derived list
   {
