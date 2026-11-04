@@ -5998,8 +5998,11 @@ test("a combined stop's more precise label is proved by its written type exactly
           labels.push({ target: ownText((j) => (j === i ? ".element" : "[0]")), form: "mixed" });
           labels.push({ target: ownText((j) => (j === i ? ".entry" : "[0]")), form: "mixed" });
         }
+        // (each target once, by its first form: a mixed variant spelled as an E label is that label)
+        const seen = new Set([u.join(".")]);
         for (const label of labels) {
-          if (label.target === u.join(".")) continue;
+          if (seen.has(label.target)) continue;
+          seen.add(label.target);
           pairs += 1;
           const accepted =
             provenRelabel(check(u.join(".")), [check(label.target)], [], graph) !== undefined;
