@@ -1410,6 +1410,23 @@ test("a known text argument a method's domain rejects is a compile error with th
       assert.equal(result.diagnostics[0]!.message, message, source);
       assert.equal(result.plan, null, source);
     }
+  // (Codex r1: a written `string` that holds host data is text, its fill known empty; an argument the analysis
+  // rejects is read by no domain, in parentheses too; a domain's error inside parentheses stands at the content)
+  for (const [source, sitedAs] of [
+    [
+      'let t: string = hostValue\nsay t.padStart(5, "")\nexit\n',
+      ["warning TSV041@16", "error TSV043@44"],
+    ],
+    ['say "abc".substring(1.5, 1)\nexit\n', ["error TSV043@20"]],
+    ['say "abc".substring((4.5))\nexit\n', ["error TSV043@21"]],
+    ['say "abc".substring((4))\nexit\n', ["error TSV043@21"]],
+  ] as const)
+    for (const sharing of [<T>(run: () => T): T => run(), withoutSharing])
+      assert.deepEqual(
+        sited(inBothOrders(() => sharing(() => candidate(source)))),
+        sitedAs,
+        source,
+      );
   for (const [source, says] of [
     ['say "abc".substring(1)\nexit\n', "bc"],
     ['say "abc".padStart(5, "-")\nexit\n', "--abc"],
