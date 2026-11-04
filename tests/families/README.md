@@ -70,7 +70,9 @@ the options that cannot change or multiply them, by full name (`--name`, `--owne
 `--for`, `--mem`, `--class`, `--timeout`, `--host`, `--node`, `--commit`, `--checkout`, `--patch`, `--in`, `--after`,
 `--in-result`, `--needs-baseline`, `--data`, `--alone`, `--write`, `--target`, `--big`, `--writable-trees`,
 `--sandbox`, `--dry`), and refuses any other, as `--shards` or another `--items`. A job reads its batch from
-`$SX_ITEMS`, one item a line, its shard last.
+`$SX_ITEMS`, one item a line, its shard last. A replay's per-area report is `stalls.mjs`'s area lines and total, counted
+in sources, not a sum of the shards' log lines, whose `unansweredAlike` counts runs; a pool's shards run with `--work`,
+whose records it reads.
 
 With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the stored
 result of the same source (its generator, name and key, so an edited source is new), mode and check (unanswered alike
@@ -214,6 +216,29 @@ for i in $(seq 0 39); do echo "$((i * 50)) 50"; done > seeds.txt
 sx-job submit --commit base=<base> --commit head=<head> --items seeds.txt --target 10m --campaign <T> \
   -- bash -c 'bash "$SX_TREE_head/tests/families/seeded.sh" pair'
 ```
+
+## Plans
+
+`plans.mjs` (#1526 phase A's kit, landed from #1678's copy) compiles each source of a set through the core backend on
+two built trees in one worker, in the four modes, and compares the plan, the diagnostics, the trace of every unit the
+compile charges and the questions it asks its answers, exactly; `--demands 16,64` also at those demand allowances,
+`--stops` the held family's settled stops and questions phase. A set is `corpus` (the cases file `CASES_JSON` names),
+`fixture`, `held`, or an area by its name or folder. A run (one compile of a source in a mode on one tree, or one
+analysis of the held family's stop search, or that search's work between them) stalls by the runner's rule above: its
+units past `--units` (4) times its program's allowance, the allowance of the source's natural compile for a run at a
+test allowance; a run past the safety net, `--timeout` (1,800 s), makes its source `uncharged`, never a stall. One JSON
+line per source goes to `--out`, whose sources a rerun with it counts as recorded without running them again, and a
+summary to stdout; `plans.mjs summary <records>...` classifies the records (identical, work only, questions,
+publication, stops) and lists each difference, stall and uncharged source. A builder runs the head tree's copy instead
+of copying a kit, and extends it here where a comparison needs more:
+
+```sh
+sx-job submit --commit base=<base> --commit head=<head> --shards 16 --mem 3G --timeout 1h --campaign <T> \
+  -- bash -c 'node "$SX_TREE_head/tests/families/plans.mjs" "$SX_TREE_base" "$SX_TREE_head" <set> --shard {i}/{n} \
+  --out "$SX_OUT/plans.jsonl" > "$SX_OUT/plans.log"'
+```
+
+For `corpus`, add `--data ~/work/o4-m4-g3/cases.json` and `CASES_JSON=$HOME/work/o4-m4-g3/cases.json` before `node`.
 
 ## The unit limit and the safety net (#1647)
 

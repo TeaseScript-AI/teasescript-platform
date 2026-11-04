@@ -24,3 +24,6 @@ outside the repository").
   `publication.mjs` among them, record any thrown value, as `unprintable <type>` where its conversion to text throws,
   through a `describeCaught.mjs` in the folder (#1532). Each folder's `PORTED-1532.md` lists the changed files, whose
   originals stay beside them as `<file>.pre-1532`.
+- The plans kit (`plans.mjs` and its job scripts, #1526 phase A's, copied into the evidence of the PRs after it, last
+  #1678's, sha256 `54eacfbb…`): its portable part is `tests/families/plans.mjs` (`../README.md`, "Plans"), which
+  later runs use instead of a copy; the copies stay their PRs' evidence.
