@@ -1610,6 +1610,41 @@ test("an integer-only use of a written number place is the current checker's err
     }
 });
 
+/**
+ * #1173's narrowing exception: a read under a test of its key (`if p is integer`) is left to its items, so the use is
+ * no error there, as in the current checker; the same read untested is one. The core's own analysis (a type test is
+ * outside the candidate route's slice), in both orders.
+ */
+test("a written number read that 'is integer' narrows is no integer-use error, untested it is one (#1173)", () => {
+  const uses = [
+    (read: string) => `repeat ${read} { say "x" }`,
+    (read: string) => `let xs = [1, 2]\nsay xs[${read}]`,
+    (read: string) => `for i in ${read}..3 { say i }`,
+    (read: string) => `for i in 1..${read} { say i }`,
+  ];
+  const errors = (source: string): number => {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    return inBothOrders(
+      () =>
+        analyseCore(request).diagnostics.filter(
+          (diagnostic) => diagnostic.kind === "integer-use" && diagnostic.class === "compile-error",
+        ).length,
+    );
+  };
+  for (const use of uses) {
+    const narrowed = `let p: number = hostValue\nif p is integer {\n${use("p")}\n}\nexit\n`;
+    assert.equal(errors(narrowed), 0, narrowed);
+    assert.deepEqual(
+      sited(compileSource(narrowed, OPTIONS)).filter((d) => d.startsWith("error")),
+      [],
+      narrowed,
+    );
+    const untested = `let p: number = hostValue\n${use("p")}\nexit\n`;
+    assert.equal(errors(untested), 1, untested);
+  }
+});
+
 test("parentheses answer for their content: a parenthesised count and index read as bare ones (S3 3.4)", () => {
   // the flow graph's node of a parenthesised expression is its content's, the value the parentheses hold
   const source = "let n = 2\nrepeat ((n)) {}\nlet xs = [1, 2]\nlet y = xs[(n)]\nexit\n";

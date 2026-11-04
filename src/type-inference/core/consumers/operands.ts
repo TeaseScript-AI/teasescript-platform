@@ -137,8 +137,9 @@ export function integerOnly(
   const { program } = walk.pass;
   const rule: DiagnosticRule = { rule: "count", use };
   const owedBy = typeof soft === "object" ? soft : null;
-  // #1173 (option C): a read of a place written `number` is no whole number by its type, whatever value it holds now
-  if (soft === false && writtenNumber(walk, value)) {
+  // #1173 (option C): a read of a place written `number` is no whole number by its type, whatever value it holds now;
+  // a read under a test of its key (§3.2) is left to its items, which that test narrows (`if p is integer`)
+  if (soft === false && writtenNumber(walk, value) && !walk.pass.guards.guardedRead(value)) {
     program.work.charge("checks");
     error(walk, "integer-use", ownSpan(walk, value, site), rule, ["number"]);
     return;

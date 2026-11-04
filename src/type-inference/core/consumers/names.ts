@@ -251,7 +251,7 @@ function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[])
 
 /**
  * #1173 (the owner's option C): whether the place a read reads is written `number` at the read's path, a member of a
- * written union included (`number?`), and no test narrows the read. Its written type alone decides it, no decision.
+ * written union included (`number?`). Its written type alone decides it, no decision.
  */
 export function writtenNumber(walk: Consumers, value: PlaceId): boolean {
   const { program } = walk.pass;
@@ -261,7 +261,7 @@ export function writtenNumber(walk: Consumers, value: PlaceId): boolean {
     : program.occurrenceOf.get(value);
   if (root === undefined || writtenOf(program.place(root).kind) === null) return false;
   const key = readKey(walk, value);
-  if (key === null || walk.pass.values.narrowingMark(value) !== "") return false;
+  if (key === null) return false;
   const written = writtenOf(program.place(keyPlace(key)).kind);
   const term = written === null ? null : termAt(written, keyPath(key));
   const number = (at: TypeTerm): boolean =>
