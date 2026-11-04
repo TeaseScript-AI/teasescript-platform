@@ -23,6 +23,8 @@ import { Consumers, withConsumerOrder } from "../src/type-inference/core/consume
 import { operationItems } from "../src/type-inference/core/operator-table.js";
 import { propertyStep } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
+import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
+import { chargesBySite } from "./helpers/type-core-charges.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { ItemSource } from "./helpers/type-core-items.js";
 import {
@@ -741,4 +743,28 @@ test("a settled stop finishes the host data of every copy-graph topology in line
     ),
     [],
   );
+});
+
+/**
+ * #1710 (TABLE r4.261: a charge where work grows with the input): two consumer debits, each its site's own work, one
+ * per site it serves, observed at the site (`chargesBySite`), not as a total. `integerOnly` charges one `checks` unit for
+ * each count it checks, before it reads the count's items: `repeat []` once, twice, three times. The expected-site
+ * question (`expectedTask`, which a fix's code form asks of the site its value lands at) charges one for each site it
+ * answers, before it walks that site's consumers, and none for a site it has answered: an operator's two operands, each
+ * once. Each source holds its own error or warning, so its message asks.
+ */
+test("a count's check and an expected site's question each charge their own site once (#1710)", () => {
+  const checks = (source: string, site: string): number => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { bySite } = chargesBySite("checks", () => {
+      const answers = analyseCore(request);
+      const text = messageSource([source], answers.diagnostics);
+      for (const diagnostic of answers.diagnostics) coreMessage(diagnostic, text);
+    });
+    return bySite.get(site) ?? 0;
+  };
+  for (const k of [1, 2, 3])
+    assert.equal(checks(`${"repeat [] {}\n".repeat(k)}exit\n`, "integerOnly"), k, `${k} counts`);
+  assert.equal(checks("say true - 1\nexit\n", "expectedTask"), 2);
 });
