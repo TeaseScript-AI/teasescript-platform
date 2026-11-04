@@ -7,20 +7,25 @@
 // where both have one, what differs. It classifies nothing: the S11 classification reads the records (README "Shadow").
 //   <set>: corpus (CASES_JSON=<cases.json>), fixture (the tree's tools/corpus/fixture), or an area of tests/families by
 //   its name or folder (its generators' sources at their own sizes, `sources.mjs`).
-// Each route runs in a worker of its own with `--memory` MB of heap, which takes its runs (one route in one mode) in
-// turn until one fails. A run fails where its heap is exhausted, where its charged units pass `--units` times the
-// largest allowance of a ledger it charged (#1647's rule; the legacy route charges none), where it passes the safety
-// net of `--timeout` seconds, or where its worker ends. A failed run is recorded with its route, mode, the phase it was
-// in (`phase`: `parse and names`, `analysis`, `analysis pass k`, `completion`, `lowering` (the core's includes its
-// route's text), `record`) and its failure; the source's other runs go on, and a fresh worker takes the route's next run. A worker
-// that ran anything before carries its memory along, so its heap failure or safety net is ambiguous: that run is retried
-// once in a fresh worker, whose result is the run's (`retried` names the first failure), and `runsBeforeFailure` tells a
-// fresh worker's failure (0) from a reused one's. A source with a failed run is `incomplete`, never agreement.
-// Resumes: a source already in `--out` is not run again. Prints one JSON summary line; exit 0 when every run has an
-// outcome, else 1.
+// Each route runs in a worker of its own with `--memory` MB of old generation (a heap size flag in NODE_OPTIONS or the
+// command, which would override it, is dropped by running the command again without it), which takes its runs (one
+// route in one mode) in turn until one fails. A run fails where its heap is exhausted, where its charged units pass
+// `--units` times the largest allowance of a ledger it charged (#1647's rule; the legacy route charges none), where it
+// passes the safety net of `--timeout` seconds, or where its worker ends. A failed run is recorded with its route, mode,
+// the phase it was in (`phase`: `parse and names`, `analysis`, `analysis pass k`, `completion`, `lowering`, the core's
+// with its route's text, `record`), its failure and its worker's heap limit as V8 measured it (`heapMiB`); the source's
+// other runs go on, and a fresh worker takes the route's next run. A worker that ran anything before carries its memory
+// along, so its heap failure or safety net is ambiguous: that run is retried once in a fresh worker, whose result is the
+// run's (`retried` names the first failure), and `runsBeforeFailure` tells a fresh worker's failure (0) from a reused
+// one's. A worker that ends or throws after a run's outcome keeps that outcome and is replaced (`replaced`), also where
+// its end reaches the next run before that run's first phase. A source with a failed run is `incomplete`, never
+// agreement. Resumes: a source already in `--out` is not run again, its record counted as it stands. Prints one JSON
+// summary line (`differing` counts sources); exit 0 when every run has an outcome, else 1.
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import v8 from "node:v8";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 
@@ -87,7 +92,33 @@ function delta(a, b, limit = 80) {
   return { diffs, more };
 }
 
-if (isMainThread) {
+/** A heap size flag of V8's, which overrides a worker's `resourceLimits` (Codex r1 on #1713). */
+const HEAP_FLAG =
+  /^--(max-old-space-size|max-semi-space-size|max-young-generation-size|max-heap-size)(=|$)/;
+const withoutHeapFlags = (flags) =>
+  flags.filter(
+    (flag, i) =>
+      !HEAP_FLAG.test(flag) &&
+      !(HEAP_FLAG.test(flags[i - 1] ?? "") && !flag.includes("=") && /^\d/.test(flag)),
+  );
+const nodeOptions = (process.env.NODE_OPTIONS ?? "").split(/\s+/).filter(Boolean);
+
+if (isMainThread && [...process.execArgv, ...nodeOptions].some((flag) => HEAP_FLAG.test(flag))) {
+  // (the same command without them, so that `--memory` is each worker's heap: the queue sets one in NODE_OPTIONS)
+  const ran = spawnSync(
+    process.execPath,
+    [
+      ...withoutHeapFlags(process.execArgv),
+      fileURLToPath(import.meta.url),
+      ...process.argv.slice(2),
+    ],
+    {
+      stdio: "inherit",
+      env: { ...process.env, NODE_OPTIONS: withoutHeapFlags(nodeOptions).join(" ") },
+    },
+  );
+  process.exit(ran.status ?? 1);
+} else if (isMainThread) {
   const [root, given, ...rest] = process.argv.slice(2);
   const option = (name) => {
     const at = rest.indexOf(name);
@@ -117,10 +148,14 @@ if (isMainThread) {
     .map((_, index) => index)
     .filter((index) => (only === null ? index % shards === shard : only.has(sources[index].name)))
     .slice(0, limit);
-  const done = new Set();
+  // (a source already in --out is not run again, its record counted as it stands: a failure stays a failure)
+  const done = new Map();
   if (out !== undefined && existsSync(out))
     for (const line of readFileSync(out, "utf8").split("\n"))
-      if (line.startsWith("{")) done.add(JSON.parse(line).name);
+      if (line.startsWith("{")) {
+        const record = JSON.parse(line);
+        done.set(record.name, record);
+      }
   const { sourceKey } = await import(
     pathToFileURL(path.join(root, "tests", "families", "sources.mjs")).href
   );
@@ -132,6 +167,7 @@ if (isMainThread) {
     runs: 0,
     failed: 0,
     retried: 0,
+    replaced: 0,
     incomplete: 0,
     differing: 0,
     units,
@@ -140,25 +176,62 @@ if (isMainThread) {
     node: process.version,
   };
 
-  /** Each route's worker and the runs it took since it was fresh. */
-  const workers = new Map(ROUTES.map((route) => [route, { worker: null, runs: 0 }]));
+  /** A source's record into the summary, as it ran or as `--out` kept it. */
+  function count(record) {
+    for (const row of record.rows)
+      for (const route of ROUTES) {
+        summary.runs += 1;
+        if (row[route].outcome === "failed") summary.failed += 1;
+        if (row[route].retried !== undefined) summary.retried += 1;
+      }
+    if (
+      record.rows.some((row) => row.delta !== undefined && Object.values(row.delta).some(Boolean))
+    )
+      summary.differing += 1;
+    if (record.incomplete) summary.incomplete += 1;
+  }
+
+  /**
+   * Each route's worker, the runs it took since it was fresh, its heap limit as it measured it (`limitMiB`), and whether
+   * it ended or threw between runs (`ended`): its listeners live as long as it does, so nothing it throws ends the batch.
+   */
+  const workers = new Map(
+    ROUTES.map((route) => [route, { worker: null, runs: 0, limitMiB: null, ended: false }]),
+  );
   const fresh = (route) => {
     const slot = workers.get(route);
-    slot.worker = new Worker(fileURLToPath(import.meta.url), {
+    const worker = new Worker(fileURLToPath(import.meta.url), {
       workerData: { root, set, units, route },
       resourceLimits: { maxOldGenerationSizeMb: memory },
     });
-    slot.runs = 0;
+    Object.assign(slot, { worker, runs: 0, limitMiB: null, ended: false });
+    worker
+      .on("message", (message) => {
+        if (message.limitMiB !== undefined && slot.worker === worker)
+          slot.limitMiB = message.limitMiB;
+      })
+      // (a retired worker's late events are its own, not its successor's)
+      .on("error", () => {
+        if (slot.worker === worker) slot.ended = true;
+      })
+      .on("exit", () => {
+        if (slot.worker === worker) slot.ended = true;
+      });
     return slot;
   };
   const retire = async (route) => {
     const slot = workers.get(route);
     await slot.worker?.terminate().catch(() => {});
-    slot.worker = null;
+    Object.assign(slot, { worker: null, ended: false });
   };
 
   /** One run in the route's worker: its outcome (`done`), or its failure with the phase it was in. */
-  function attempt(route, index, mode) {
+  async function attempt(route, index, mode) {
+    // (a worker that ended or threw after its last run's outcome is replaced; that outcome stands)
+    if (workers.get(route).ended) {
+      summary.replaced += 1;
+      await retire(route);
+    }
     const slot = workers.get(route).worker === null ? fresh(route) : workers.get(route);
     const { worker } = slot;
     const runsBeforeFailure = slot.runs;
@@ -167,10 +240,19 @@ if (isMainThread) {
       let over = null;
       const failed = (failure, extra = {}) =>
         finish({
-          failed: { route, mode, phase, failure, runsBeforeFailure, heapMiB: memory, ...extra },
+          failed: {
+            route,
+            mode,
+            phase,
+            failure,
+            runsBeforeFailure,
+            heapMiB: slot.limitMiB,
+            ...extra,
+          },
         });
       const timer = setTimeout(() => failed("safety net"), seconds * 1000);
       const onMessage = (message) => {
+        if (message.limitMiB !== undefined) return;
         if (message.phase !== undefined) phase = message.phase;
         else if (message.over !== undefined) over = message.over;
         else finish(message);
@@ -194,12 +276,19 @@ if (isMainThread) {
 
   /** A run, retried once in a fresh worker where a reused one exhausted its heap or reached the safety net. */
   async function run(route, index, mode) {
-    const first = await attempt(route, index, mode);
+    let first = await attempt(route, index, mode);
     if (first.failed === undefined) return first;
     await retire(route);
+    // (a reused worker that failed before the run reached its first phase ended after its last run: the run starts again
+    // in a fresh worker, as if the worker had been replaced before it)
+    if (first.failed.phase === null && first.failed.runsBeforeFailure > 0) {
+      summary.replaced += 1;
+      first = await attempt(route, index, mode);
+      if (first.failed === undefined) return first;
+      await retire(route);
+    }
     const { failure, runsBeforeFailure } = first.failed;
     if (runsBeforeFailure === 0 || (failure !== "heap" && failure !== "safety net")) return first;
-    summary.retried += 1;
     const again = await attempt(route, index, mode);
     if (again.failed !== undefined) await retire(route);
     return { ...again, retried: first.failed };
@@ -209,6 +298,7 @@ if (isMainThread) {
     const source = sources[index];
     if (done.has(source.name)) {
       summary.resumed += 1;
+      count(done.get(source.name));
       continue;
     }
     const record = {
@@ -226,10 +316,8 @@ if (isMainThread) {
       const results = {};
       for (const route of ROUTES) {
         const result = await run(route, index, mode);
-        summary.runs += 1;
         results[route] = result;
         if (result.failed !== undefined) {
-          summary.failed += 1;
           failures.push(result.failed);
           row[route] = {
             outcome: "failed",
@@ -264,18 +352,17 @@ if (isMainThread) {
         };
         if (row.delta.plan)
           row.planDelta = delta(JSON.parse(l.compared.plan), JSON.parse(c.compared.plan));
-        if (Object.values(row.delta).some(Boolean)) summary.differing += 1;
       }
       record.rows.push(row);
     }
     if (failures.length > 0) {
-      summary.incomplete += 1;
       record.incomplete = true;
       record.failed = failures;
       // (the first failure, as the research's records grouped an absent record by its reason)
       const [first] = failures;
       record.reason = `${first.route} mode ${first.mode}: ${first.failure} in ${first.phase}`;
     }
+    count(record);
     if (out !== undefined) appendFileSync(out, `${JSON.stringify(record)}\n`);
     if (decisionsOut !== undefined && decisions.length > 0)
       appendFileSync(decisionsOut, `${JSON.stringify({ key: record.key, decisions })}\n`);
@@ -286,6 +373,10 @@ if (isMainThread) {
 } else {
   // (each route has workers of its own: the parent asks each for its route's runs)
   const { root, set, units, route } = workerData;
+  // (the heap limit this worker has, the one a failure is recorded with)
+  parentPort.postMessage({
+    limitMiB: Math.round(v8.getHeapStatistics().heap_size_limit / 1048576),
+  });
   const dist = distOf(root);
   const imp = (file) => import(pathToFileURL(path.join(dist, file)).href);
   const { compileProjectWithBackend } = await imp("src/compiler.js");
@@ -404,24 +495,22 @@ if (isMainThread) {
         const records = O.decisionRecords(source.files, source.globals, { mode });
         phase("record");
         const parsed = JSON.parse(records.text);
-        if (parsed.outside !== undefined)
-          return {
-            summary: {
-              outcome: "outside",
-              outside: parsed.outside,
-              excluded: seen.excluded,
-              ...work(),
-            },
-          };
-        ({ plan, diagnostics } = parsed);
+        // (the decisions a compile read are kept also where its program leaves the slice, as compare.mjs kept them)
         decisions = { ordinary: records.ordinary, completion: records.completion };
         extra = {
+          excluded: seen.excluded,
           decisionCounts: {
             ordinary: records.ordinary.map((x) => x.length),
             completion: records.completion.map((x) => x.length),
           },
           decisionsHash: hash(text([records.ordinary, records.completion])),
         };
+        if (parsed.outside !== undefined)
+          return {
+            summary: { outcome: "outside", outside: parsed.outside, ...work(), ...extra },
+            decisions,
+          };
+        ({ plan, diagnostics } = parsed);
       } else {
         const result = O.inMode(mode, () =>
           compileProjectWithBackend(source.files, { globals: source.globals }, undefined),
@@ -444,7 +533,6 @@ if (isMainThread) {
           checks: seen.checks,
           planHash: hash(planText),
           planBytes: planText.length,
-          ...(route === "core" ? { excluded: seen.excluded } : {}),
           ...work(),
           ...extra,
         },

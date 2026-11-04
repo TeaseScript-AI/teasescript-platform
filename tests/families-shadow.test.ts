@@ -10,7 +10,8 @@ const tool = resolve("tests/families/shadow.mjs");
 /**
  * A built tree's modules as the shadow comparison loads them. Each compile analyses its source with the route's backend
  * and plans `[source]`; the legacy analysis exhausts the heap for `crash` in the third mode (in any worker) and for
- * `leak` in the first mode in a worker that compiled before (a fresh one compiles it).
+ * `leak` in the first mode in a worker that compiled before (a fresh one compiles it); for `idle`, the legacy
+ * route's worker throws just after each outcome is posted; the core reads one decision of `outside` and leaves the slice there.
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": "export class WorkLedger { charge() {} }\n",
@@ -39,6 +40,10 @@ export const LEGACY_BACKEND = {
     const mode = globalThis.shadowMode;
     if (source === "crash" && mode.reversed && !mode.unshared) exhaust();
     if (source === "leak" && !mode.reversed && !mode.unshared && compiled > 0) exhaust();
+    if (source === "idle")
+      queueMicrotask(() => {
+        throw new Error("idle worker error");
+      });
     compiled += 1;
     return { checked: { runtimeChecks: new Map(), formShapes: new Map(), storageTypes: [], coreChecks: null } };
   },
@@ -61,6 +66,8 @@ export function inMode(mode, run) {
 export const jsonText = (value) => JSON.stringify(value);
 export function decisionRecords(files, globals, { mode }) {
   const { plan, diagnostics } = inMode(mode, () => compileProjectWithBackend(files, { globals }, CORE_BACKEND));
+  if (files[0].source === "outside")
+    return { text: JSON.stringify({ outside: "this construct" }), ordinary: [[{ key: 1 }]], completion: [] };
   return { text: JSON.stringify({ plan, diagnostics }), ordinary: [[]], completion: [] };
 }
 `,
@@ -78,12 +85,18 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
   cpSync(resolve("tests/families/sources.mjs"), join(folder, "tests/families/sources.mjs"));
   writeFileSync(
     join(folder, "tests/families/area/cases.mjs"),
-    `export const cases = ${JSON.stringify(["fine", "leak", "crash", "after"].map((s) => [s, s]))};\n`,
+    `export const cases = ${JSON.stringify(["fine", "leak", "crash", "after", "outside", "idle"].map((s) => [s, s]))};\n`,
   );
   const out = join(folder, "shadow.jsonl");
-  const ran = spawnSync(process.execPath, [tool, folder, "area", "--memory", "16", "--out", out], {
-    encoding: "utf8",
-  });
+  // (a heap flag in NODE_OPTIONS, as the queue sets one, overrides no worker's --memory)
+  const decisions = join(folder, "decisions.jsonl");
+  const shadow = () =>
+    spawnSync(
+      process.execPath,
+      [tool, folder, "area", "--memory", "16", "--out", out, "--decisions", decisions],
+      { encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=1024" } },
+    );
+  const ran = shadow();
   assert.equal(ran.status, 1, ran.stderr);
   const records = readFileSync(out, "utf8")
     .trim()
@@ -91,10 +104,27 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
     .map((line) => JSON.parse(line));
   assert.deepEqual(
     records.map((r) => r.name),
-    ["fine", "leak", "crash", "after"].map((name) => `cases.mjs/${name}`),
+    ["fine", "leak", "crash", "after", "outside", "idle"].map((name) => `cases.mjs/${name}`),
   );
-  const [fine, leak, crash, after] = records;
-  for (const record of [fine, leak, after]) {
+  const [fine, leak, crash, after, outside, idle] = records;
+  // (outside the slice: the core's decisions kept with its outcome, as compare.mjs kept them, and no delta)
+  for (const row of outside.rows) {
+    assert.equal(row.legacy.outcome, "plan");
+    assert.deepEqual(
+      [row.core.outcome, row.core.outside, row.core.decisionCounts, row.delta],
+      ["outside", "this construct", { ordinary: [1], completion: [] }, undefined],
+    );
+  }
+  const kept = readFileSync(decisions, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .find((line) => line.key === outside.key);
+  assert.deepEqual(
+    kept.decisions.map((d: { ordinary: unknown }) => d.ordinary),
+    [0, 1, 2, 3].map(() => [[{ key: 1 }]]),
+  );
+  for (const record of [fine, leak, after, idle]) {
     assert.equal(record.incomplete, undefined, record.name);
     assert.equal(record.rows.length, 4);
     for (const row of record.rows) {
@@ -107,14 +137,17 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
       });
     }
   }
-  // (the reused worker's crash, retried in a fresh one: the fresh one's result, the first failure named)
+  // (the reused worker's crash, retried in a fresh one: the fresh one's result, the first failure named, with the heap
+  // limit the worker measured (V8's, its 16 MB old generation with the other spaces), not NODE_OPTIONS' 1,024)
+  const limit = leak.rows[0].legacy.retried.heapMiB;
+  assert.ok(limit >= 16 && limit < 1024, String(limit));
   assert.deepEqual(leak.rows[0].legacy.retried, {
     route: "legacy",
     mode: 0,
     phase: "analysis",
     failure: "heap",
     runsBeforeFailure: 4,
-    heapMiB: 16,
+    heapMiB: limit,
   });
   // (a crash that repeats in the fresh worker: recorded once, as the fresh worker's; the core's run and every other
   // mode kept)
@@ -124,7 +157,7 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
     phase: "analysis",
     failure: "heap",
     runsBeforeFailure: 0,
-    heapMiB: 16,
+    heapMiB: limit,
   };
   assert.equal(crash.incomplete, true);
   assert.deepEqual(crash.failed, [failure]);
@@ -143,14 +176,16 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
   );
   assert.equal(crash.rows[2].delta, undefined);
   assert.equal(crash.rows[2].legacy.retried.runsBeforeFailure, 6);
-  const summary = JSON.parse(ran.stdout.trim());
-  assert.deepEqual(
-    {
-      runs: summary.runs,
-      failed: summary.failed,
-      retried: summary.retried,
-      incomplete: summary.incomplete,
-    },
-    { runs: 32, failed: 1, retried: 2, incomplete: 1 },
-  );
+  const counted = (stdout: string) => {
+    const { resumed, runs, failed, retried, replaced, incomplete } = JSON.parse(stdout.trim());
+    return { resumed, runs, failed, retried, replaced, incomplete };
+  };
+  // (the worker that threw after each outcome was replaced each time, and its outcomes kept)
+  const recorded = { runs: 48, failed: 1, retried: 2, incomplete: 1 };
+  assert.deepEqual(counted(ran.stdout), { ...recorded, resumed: 0, replaced: 3 });
+  // (again with the same --out: nothing runs again, and the recorded failure still counts)
+  const again = shadow();
+  assert.equal(again.status, 1, again.stderr);
+  assert.deepEqual(counted(again.stdout), { ...recorded, resumed: 6, replaced: 0 });
+  assert.equal(readFileSync(out, "utf8").trim().split("\n").length, 6);
 });

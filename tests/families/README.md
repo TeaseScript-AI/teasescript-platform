@@ -245,11 +245,12 @@ For `corpus`, add `--data ~/work/o4-m4-g3/cases.json` and `CASES_JSON=$HOME/work
 `shadow.mjs` (S9b's interim and S11's final shadow comparison, landed by #1704 from the S11 readiness research's copy)
 compiles each source of a set (`corpus`, `fixture` or an area) through both public routes of one built tree, the
 legacy backend and the core (`decisionRecords`), in the four modes, and writes one JSON line per source to `--out` and
-the core's decision records to `--decisions`. Each route runs in its own worker with `--memory` MB of heap (1,400),
-under the unit limit below (the legacy route charges no ledger) and the safety net. A run that fails (heap, units,
-safety net, worker exit) leaves the source's other runs and is recorded as `{ outcome: "failed", failure, phase,
-runsBeforeFailure }` in its row and in the record's `failed` list, with `incomplete: true` and the first failure as
-`reason`; the next run starts in a fresh worker. A reused worker's heap failure or safety net is retried once in a fresh
+the core's decision records to `--decisions`. Each route runs in its own worker with `--memory` MB of old generation
+(1,400; a heap size flag in `NODE_OPTIONS`, as the queue sets one, is dropped so that it holds), under the unit limit
+below (the legacy route charges no ledger) and the safety net. A run that fails (heap, units, safety net, worker exit)
+leaves the source's other runs and is recorded as `{ outcome: "failed", failure, phase, runsBeforeFailure, heapMiB }`
+(`heapMiB`: the worker's heap limit as V8 measured it) in its row and in the record's `failed` list, with
+`incomplete: true` and the first failure as `reason`; the next run starts in a fresh worker. A reused worker's heap failure or safety net is retried once in a fresh
 one, whose result is the run's (`retried` names the first). It classifies nothing. The S11 classification reads `key`,
 `index`, `origins`, `incomplete`/`reason`, and per row `mode`, `delta` (`diagnosticIdentity`, `diagnosticText`,
 `checks`, `plan`) and each route's `outcome`, `diagnostics`, `checks`, `planHash`, `outside`/`excluded`; and `ordinary`
