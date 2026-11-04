@@ -222,6 +222,30 @@ function keeps(
   return fields(want) === fields(got) && (got.message === want.message || got.message === words());
 }
 
+/**
+ * Whether the stopped run's `operand` check stands for the unstopped run's lost `null-check` (#1688, the lead's ruling
+ * (A)): the same check in other words, where a stopped decision leaves an operand's kinds unknown and the operator's
+ * consumer owes its operand check (`consumers/operands.ts`) for the null the natural analysis proved. It stands only
+ * where all three hold:
+ * - it is at the null check's whole site (file and offsets), so on the same value: an operand check's site is its
+ *   operand's own span;
+ * - its domain excludes `null`, so a null there is still rejected before the operator;
+ * - its domain is within the null check's `against`, so it lets through nothing the null check would not: a wider
+ *   domain is a weaker check, never one in other words (option (A′), refused).
+ * Nothing else stands for anything; the pair is reported apart (`standing check`), never as lost nor as equal, and the
+ * operand check is still counted as its own content.
+ */
+export function operandStandsForNullCheck(operand: Obligation, nullCheck: Obligation): boolean {
+  return (
+    operand.kind === "operand" &&
+    nullCheck.kind === "null-check" &&
+    operand.boundary === nullCheck.boundary &&
+    siteKey(operand.site) === siteKey(nullCheck.site) &&
+    !operand.against.includes("null") &&
+    operand.against.every((kind) => nullCheck.against.includes(kind))
+  );
+}
+
 /** Whether `inner` lies within `outer`. */
 function within(inner: Span, outer: Span): boolean {
   return outer.start <= inner.start && inner.end <= outer.end;
@@ -392,8 +416,27 @@ export function stopProblems(c: StopCase): string[] {
       left.set(text, [mine, theirs - 1]);
     }
   }
+  // (a lost null check the stopped run owes as an operand check, each operand check standing for one: reported apart,
+  // its operand check still counted as its own content, #1688)
+  const standingFor = new Set<number>();
+  const standsFor = (text: string): Obligation | undefined => {
+    const lost: Obligation = JSON.parse(text);
+    const index = stopped.answers.checks.findIndex(
+      (check, at) => !standingFor.has(at) && operandStandsForNullCheck(check, lost),
+    );
+    if (index < 0) return undefined;
+    standingFor.add(index);
+    return stopped.answers.checks[index];
+  };
   for (const [text, [mine, theirs]] of left) {
-    for (let count = mine - theirs; count > 0; count -= 1) problems.push(`lost check ${text}`);
+    for (let count = mine - theirs; count > 0; count -= 1) {
+      const operand = standsFor(text);
+      problems.push(
+        operand === undefined
+          ? `lost check ${text}`
+          : `standing check ${text} by ${JSON.stringify(operand)}`,
+      );
+    }
     for (let count = theirs - mine; count > 0; count -= 1) problems.push(`extra check ${text}`);
   }
   // (the checks left compared, in their published order: each side less, from its first copies, what stands for some)
@@ -413,7 +456,7 @@ export function stopProblems(c: StopCase): string[] {
     (text) => (publishedAfter.get(text) ?? 0) - left.get(text)![1],
   );
   if (
-    problems.every((problem) => !/^(lost|extra) check /.test(problem)) &&
+    problems.every((problem) => !/^(lost|extra|standing) check /.test(problem)) &&
     JSON.stringify(owed) !== JSON.stringify(kept)
   )
     problems.push(`checks order ${kept.join(" | ")}`);
