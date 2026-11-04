@@ -289,10 +289,8 @@ function writtenTermOf(walk: Consumers, value: PlaceId): TypeTerm | null {
   if (element !== undefined) return below(writtenTermOf(walk, element), "element");
   // (a removal gives the element it removed, a `remove` only from a dict, its value: a list's or set's gives `null`)
   const removal = walk.removedOf.get(value);
-  if (removal !== undefined) {
-    const receiver = writtenTermOf(walk, removal.receiver);
-    return removal.always || receiver?.kind === "dict" ? below(receiver, "element") : null;
-  }
+  if (removal !== undefined)
+    return removedTerm(writtenTermOf(walk, removal.receiver), removal.always);
   const projection = program.projOf.get(value);
   if (projection !== undefined)
     return projection.step === "iteration"
@@ -300,6 +298,39 @@ function writtenTermOf(walk: Consumers, value: PlaceId): TypeTerm | null {
       : below(writtenTermOf(walk, projection.owner), stepName(projection.step));
   const binding = program.occurrenceOf.get(value);
   return binding === undefined ? null : writtenOf(program.place(binding).kind);
+}
+
+/**
+ * What a removal removes from a receiver of written type `term`, per member as a projection distributes (`termAt`): a
+ * collection's element where the removal always gives it (`removeFirst()`, `removeAt(i)`), else (`remove`) a dict's
+ * value and nothing from a list or set; nothing from `null` (the receiver's own check) or another kind; the members'
+ * results as one union. Once per term and kind of removal, so a union receiver's result keeps its identity.
+ */
+const REMOVED = new WeakMap<TypeTerm, Map<boolean, TypeTerm | null>>();
+function removedTerm(term: TypeTerm | null, always: boolean): TypeTerm | null {
+  if (term === null) return null;
+  let kinds = REMOVED.get(term);
+  if (kinds === undefined) REMOVED.set(term, (kinds = new Map()));
+  let found = kinds.get(always);
+  if (found === undefined) {
+    if (term.kind === "union") {
+      const members = term.members
+        .map((member) => removedTerm(member, always))
+        .filter((member) => member !== null);
+      found =
+        members.length === 0
+          ? null
+          : members.length === 1
+            ? members[0]!
+            : { kind: "union", members };
+    } else
+      found =
+        term.kind === "dict" || (always && (term.kind === "list" || term.kind === "set"))
+          ? term.element
+          : null;
+    kinds.set(always, found);
+  }
+  return found;
 }
 
 /** A written type's term one step below, or `null`: once per term and step, so a projected union keeps its identity. */

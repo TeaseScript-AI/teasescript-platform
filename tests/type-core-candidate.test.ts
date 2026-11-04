@@ -1602,6 +1602,14 @@ test("an integer-only use of a written number place is the current checker's err
     `let ps: number[] = [1, 2]\n${use("ps.remove(1)")}`,
     `let ps: number[][] = [[1], [2]]\n${use("ps.removeFirst()[0]")}`,
     `function f: number dict {\n  return dict{a: 1}\n}\n${use('f().remove("a")')}`,
+    // (a removal per member of an optional receiver, composed too; a written union of a collection beside another type
+    // is TSV075's error, so `?` is the union a receiver has: Codex r5)
+    `let ps: (number dict)? = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: (integer dict)? = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: number dict[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
+    `let ps: integer dict[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
+    `let ps: (number[])? = [1, 2]\n${use("ps.removeFirst()")}`,
+
     ...["removeFirst()", "removeLast()", "removeAt(0)"].flatMap((removal) => [
       `let ps: number[] = [1, 2]\n${use(`ps.${removal}`)}`,
       `let ps: integer[] = [1, 2]\n${use(`ps.${removal}`)}`,
@@ -1643,6 +1651,23 @@ test("an integer-only use of a written number place is the current checker's err
         inBothOrders(() => withoutSharing(() => coreErrors(source))),
         current,
         `${source} (unshared)`,
+      );
+    }
+  // (a receiver that may be null: the current checker reports the receiver's null where the core reports the use, both
+  // an error at that site, the null contributing nothing to the removed value)
+  for (const use of uses)
+    for (const program of [
+      `let ps: (number dict)?[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
+      `function f: (number dict)? {\n  return dict{a: 1}\n}\n${use('f().remove("a")')}`,
+    ]) {
+      const source = `${program}\nexit\n`;
+      const sites = (found: readonly string[]) => found.map((error) => error.split("@")[1]);
+      const current = sites(errors(compileSource(source, OPTIONS)));
+      assert.ok(current.length > 0, source);
+      assert.deepEqual(
+        inBothOrders(() => sites(coreErrors(source))),
+        current,
+        source,
       );
     }
   // (a set's `remove` gives `null`, no element: its error names the null, not a number, Codex r3)
