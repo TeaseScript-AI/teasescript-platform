@@ -200,6 +200,17 @@ export function kindsAt(admission: Admission, asked: Key): readonly ItemTag[] | 
  * it (`lazily`): recorded, its candidates owe nothing (`hotSets`) and are not taken.
  */
 export function decide(admission: Admission, asked: DecidedAt, lazily = false): Decision | null {
+  // (#1444(b,c): a decision's scans are its own, never the written-decider summary's, `Admission.deciding`)
+  admission.deciding += 1;
+  try {
+    return decisionOf(admission, asked, lazily);
+  } finally {
+    admission.deciding -= 1;
+  }
+}
+
+/** `decide`'s decision, a decision running. */
+function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): Decision | null {
   const { program, definitions, lists, contract } = admission.pass;
   const work = program.work;
   const at = atOf(admission, asked);

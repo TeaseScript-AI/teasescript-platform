@@ -709,12 +709,7 @@ export class Admission {
 
   /** The decision of a decided path in its identity (`DecidedAt`: a cursor's key alone, its steps never made). */
   public decide(at: DecidedAt, lazily?: boolean): Decision | null {
-    this.deciding += 1;
-    try {
-      return decide(this, at, lazily);
-    } finally {
-      this.deciding -= 1;
-    }
+    return decide(this, at, lazily);
   }
 
   /**
