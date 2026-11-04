@@ -1,4 +1,5 @@
-import type { Expression, ObjectProperty, Statement } from "../../../ast.js";
+import type { Expression, ListLiteral, ObjectProperty, Statement } from "../../../ast.js";
+import { selectsElement } from "../method-categories.js";
 import {
   changesAnything,
   type EffectFacts,
@@ -37,6 +38,8 @@ export interface MessageSource {
    * list literal's element); `null` where it lands any other way.
    */
   readonly landing: (site: SourceSite) => Landing | null;
+  /** The narrowest expression that owns the property `steps` lead to below the value at `site` (`ownerOf`, #1495). */
+  readonly owner: (site: SourceSite, steps: readonly StoreStep[]) => SourceSite;
   /**
    * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
@@ -325,7 +328,65 @@ export function landingOf(given: readonly Given[], site: SourceSite): Landing | 
       );
       if (property !== undefined) steps.push({ property: property.name.name });
       at = property?.value;
-    } else return null;
+    } else {
+      // (a list literal's selected element, `[a, b].random` or `[a, b][0]`: that element is the place, no step more)
+      const list = selectedList(at);
+      if (list === null) return null;
+      at = list.elements.find(holds);
+    }
   }
   return null;
+}
+
+/** The list literal a selection of one element reads (`.random`, `.first`, `.last`, an index), through parentheses. */
+function selectedList(expression: Expression): ListLiteral | null {
+  const object =
+    expression.kind === "propertyAccessExpression" && selectsElement(expression.property.name)
+      ? expression.object
+      : expression.kind === "indexExpression"
+        ? expression.object
+        : null;
+  if (object === null) return null;
+  let inner = object;
+  while (inner.kind === "parenthesizedExpression") inner = inner.expression;
+  return inner.kind === "listLiteral" ? inner : null;
+}
+
+/**
+ * The narrowest expression that owns the property `steps` lead to below the value at `site` (#1495): from the value,
+ * each property step taken into an object literal's property of that name, through parentheses, while one is there;
+ * the value itself where none is, or where `site` lies in no value a statement gives.
+ */
+export function ownerOf(
+  given: readonly Given[],
+  site: SourceSite,
+  steps: readonly StoreStep[],
+): SourceSite {
+  const holds = (expression: Expression): boolean =>
+    expression.span.start.offset <= site.start && site.end <= expression.span.end.offset;
+  const found = given.findLast((entry) => entry.value.span.start.offset <= site.start);
+  // (the value at `site`, by the walk `landingOf` takes)
+  let at: Expression | undefined = found?.value;
+  while (
+    at !== undefined &&
+    holds(at) &&
+    !(at.span.start.offset === site.start && at.span.end.offset === site.end)
+  ) {
+    if (at.kind === "parenthesizedExpression") at = at.expression;
+    else if (at.kind === "listLiteral") at = at.elements.find(holds);
+    else if (at.kind === "objectLiteral")
+      at = at.properties.find((entry) => holds(entry.value))?.value;
+    else at = selectedList(at)?.elements.find(holds);
+  }
+  if (at === undefined || !holds(at)) return site;
+  for (const step of steps) {
+    while (at.kind === "parenthesizedExpression") at = at.expression;
+    if (!("property" in step) || at.kind !== "objectLiteral") break;
+    const property: ObjectProperty | undefined = at.properties.find(
+      (entry) => entry.name.name === step.property,
+    );
+    if (property === undefined) break;
+    at = property.value;
+  }
+  return { file: site.file, start: at.span.start.offset, end: at.span.end.offset };
 }

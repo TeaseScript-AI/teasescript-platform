@@ -8,7 +8,13 @@ import { repeatCountFix, repeatCountMessage } from "../../loop-rules.js";
 import { cannotConvert, describeShownValue } from "../../runtime/values/value-types.js";
 import type { WorkLedger } from "./budget.js";
 import type { ItemTag } from "./items.js";
-import type { CheckedDiagnostic, CoreCode, DiagnosticRule, StaticRule } from "./result.js";
+import type {
+  CheckedDiagnostic,
+  CoreCode,
+  DiagnosticRule,
+  StaticRule,
+  StoreStep,
+} from "./result.js";
 import {
   type Given,
   givenBy,
@@ -17,6 +23,7 @@ import {
   inTarget,
   type Landing,
   landingOf,
+  ownerOf,
   type LineStatements,
   type MessageSource,
   UNGUARDED,
@@ -211,8 +218,6 @@ export function messageSource(
     return found;
   };
   const landing = (site: SourceSite): Landing | null => landingOf(givensOf(site.file), site);
-  // (every name a project's code spells: its identifiers but the property names of objects, speakers, reads and
-  // arguments, which no variable can clash with; with the host globals and built-ins, `freeName`'s taken names)
   // (the kept variable's name: the analysis's, chosen once and charged as its question, else surveyed here once, uncharged)
   const surveyed = new Map<string, string>();
   const freeName =
@@ -230,10 +235,13 @@ export function messageSource(
       }
       return name;
     });
+  const owner = (site: SourceSite, steps: readonly StoreStep[]): SourceSite =>
+    ownerOf(givensOf(site.file), site, steps);
   return {
     freeName,
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
     landing,
+    owner,
     target: (site) =>
       statementsOf(site.file)
         .get(line(site) - 1)
