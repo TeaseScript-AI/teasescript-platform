@@ -508,7 +508,10 @@ function readRoute(x, route) {
 export function readRecord(record) {
   if (!isObject(record)) return { why: "not an object" };
   if (typeof record.key !== "string") return { why: "no key" };
-  const name = record.name ?? record.origins?.[0]?.name ?? null;
+  // (the source's name, the runner's or the research's first origin's: shown in the reports, so text or nothing)
+  const name =
+    record.name ?? (Array.isArray(record.origins) ? record.origins[0]?.name : null) ?? null;
+  if (name !== null && typeof name !== "string") return { why: "a name that is no text" };
   if (record.rows === undefined)
     return record.incomplete === true
       ? { reading: { key: record.key, name, rows: undefined }, text: canonical({ aborted: true }) }
@@ -884,6 +887,8 @@ async function main(argv) {
   if (unreadable.length > 0) result.verdict = "failed";
   const { perPair, perOrder, signatures: sigs, ...gateTable } = result;
   if (out !== undefined) {
+    // (every report made before any is written, so no folder holds part of them)
+    const md = markdown(result);
     mkdirSync(out, { recursive: true });
     writeFileSync(
       path.join(out, "pairs.jsonl"),
@@ -911,7 +916,7 @@ async function main(argv) {
       ].join("\n") + "\n",
     );
     writeFileSync(path.join(out, "gate.json"), `${JSON.stringify(gateTable, null, 1)}\n`);
-    writeFileSync(path.join(out, "gate.md"), markdown(result));
+    writeFileSync(path.join(out, "gate.md"), md);
   }
   const brief = (table) =>
     Object.fromEntries(table.filter((r) => r.pairs > 0).map((r) => [r.id, r.pairs]));

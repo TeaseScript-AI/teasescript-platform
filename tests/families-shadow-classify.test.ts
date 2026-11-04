@@ -523,4 +523,12 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   const refused = run(half);
   assert.equal(refused.status, 1);
   assert.match(refused.stdout, /^gate: failed/m);
+  // (a name that is no text is refused before any report is written)
+  const named = write("named.jsonl", [
+    { ...record("named", () => ({})), name: { toString: "bad" } },
+  ]);
+  const badName = run(named, "--out", join(folder, "named"));
+  assert.equal(badName.status, 1, badName.stderr);
+  assert.match(badName.stdout, /^gate: failed/m);
+  assert.match(badName.stderr, /a name that is no text/);
 });
