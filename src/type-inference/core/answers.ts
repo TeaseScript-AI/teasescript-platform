@@ -1619,7 +1619,7 @@ class CoreAnswers implements Answers {
   public publishedOrder(): ReadonlyMap<Obligation, number> {
     const consumers = this.#consumers;
     const ranked: { readonly item: CompletedWarning; readonly rule: number }[] = [];
-    for (const item of consumers.diagnostics)
+    for (const item of [...consumers.diagnostics])
       if (item.class === "warning-runtime-check" && item.kind !== "budget")
         ranked.push({ item, rule: consumers.rules.get(item) ?? 0 });
     for (const item of consumers.completedWarnings) ranked.push({ item, rule: 1 });
