@@ -222,26 +222,40 @@ function keeps(
   return fields(want) === fields(got) && (got.message === want.message || got.message === words());
 }
 
+/** The operator consumer's own words for an operand's null check and for its operand check (`consumers/operations.ts`). */
+const OPERATOR_NULL_CHECK = /^check that (.+) is not null before (.+)$/;
+const OPERATOR_OPERAND_CHECK = /^check the operand of (.+) when it runs$/;
+
 /**
  * Whether the stopped run's `operand` check stands for the unstopped run's lost `null-check` (#1688, the lead's ruling
  * (A)): the same check in other words, where a stopped decision leaves an operand's kinds unknown and the operator's
- * consumer owes its operand check (`consumers/operands.ts`) for the null the natural analysis proved. It stands only
+ * consumer (`consumers/operations.ts`) owes its operand check for the null the natural analysis proved. It stands only
  * where all three hold:
- * - it is at the null check's whole site (file and offsets), so on the same value: an operand check's site is its
- *   operand's own span;
- * - its domain excludes `null`, so a null there is still rejected before the operator;
- * - its domain is within the null check's `against`, so it lets through nothing the null check would not: a wider
- *   domain is a weaker check, never one in other words (option (A′), refused).
+ * - it is at the null check's whole site (file and offsets) on the same value: both are the operator consumer's own,
+ *   for one operator (their words name it: "check that X is not null before /", "check the operand of / when it
+ *   runs"), so both are at that operand's own span (`operandSite`), never a receiver's check at the same span nor the
+ *   whole operation's operand check;
+ * - its domain excludes `null`: it holds neither `null` nor `unknown`, which admits it;
+ * - its domain is within the null check's `against`, each kind among them by name: a wider domain is a weaker check,
+ *   never one in other words (option (A′), refused), and a domain this cannot compare by name (a null check's
+ *   `unknown` or `non-null` beside a value kind) stands for nothing.
  * Nothing else stands for anything; the pair is reported apart (`standing check`), never as lost nor as equal, and the
  * operand check is still counted as its own content.
  */
 export function operandStandsForNullCheck(operand: Obligation, nullCheck: Obligation): boolean {
+  const nullWords = OPERATOR_NULL_CHECK.exec(nullCheck.on);
+  const operandWords = OPERATOR_OPERAND_CHECK.exec(operand.on);
   return (
     operand.kind === "operand" &&
     nullCheck.kind === "null-check" &&
     operand.boundary === nullCheck.boundary &&
     siteKey(operand.site) === siteKey(nullCheck.site) &&
+    nullWords !== null &&
+    operandWords !== null &&
+    nullWords[1] === nullCheck.target &&
+    nullWords[2] === operandWords[1] &&
     !operand.against.includes("null") &&
+    !operand.against.includes("unknown") &&
     operand.against.every((kind) => nullCheck.against.includes(kind))
   );
 }
@@ -419,6 +433,7 @@ export function stopProblems(c: StopCase): string[] {
   // (a lost null check the stopped run owes as an operand check, each operand check standing for one: reported apart,
   // its operand check still counted as its own content, #1688)
   const standingFor = new Set<number>();
+  const standingCopies = new Map<string, number>();
   const standsFor = (text: string): Obligation | undefined => {
     const lost: Obligation = JSON.parse(text);
     const index = stopped.answers.checks.findIndex(
@@ -426,6 +441,7 @@ export function stopProblems(c: StopCase): string[] {
     );
     if (index < 0) return undefined;
     standingFor.add(index);
+    standingCopies.set(text, (standingCopies.get(text) ?? 0) + 1);
     return stopped.answers.checks[index];
   };
   for (const [text, [mine, theirs]] of left) {
@@ -448,15 +464,18 @@ export function stopProblems(c: StopCase): string[] {
       return done >= counts(text);
     });
   };
+  // (a standing null check is accounted for as its pair, so its copy is not compared: the rest still is, #1688)
   const owed = compared(checksBefore, (text) =>
-    marked.has(text) ? Infinity : (publishedBefore.get(text) ?? 0) - left.get(text)![0],
+    marked.has(text)
+      ? Infinity
+      : (publishedBefore.get(text) ?? 0) - left.get(text)![0] + (standingCopies.get(text) ?? 0),
   );
   const kept = compared(
     checksAfter,
     (text) => (publishedAfter.get(text) ?? 0) - left.get(text)![1],
   );
   if (
-    problems.every((problem) => !/^(lost|extra|standing) check /.test(problem)) &&
+    problems.every((problem) => !/^(lost|extra) check /.test(problem)) &&
     JSON.stringify(owed) !== JSON.stringify(kept)
   )
     problems.push(`checks order ${kept.join(" | ")}`);

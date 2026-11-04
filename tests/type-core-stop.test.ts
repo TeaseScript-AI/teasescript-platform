@@ -6384,6 +6384,56 @@ test("a stopped operand check stands for a lost null check only at its site, exc
   for (const other of others)
     assert.equal(operandStandsForNullCheck(other, nullCheck), false, JSON.stringify(other));
   assert.equal(operandStandsForNullCheck(operand, { ...nullCheck, kind: "integer-check" }), false);
+  // (the ledger: a standing pair is accounted for, the other checks still compared in order; each operand check stands
+  // for one lost copy: a divisor whose null check and operand check both publish, the null check left out of the
+  // stopped side, its other checks reversed, or its null check published twice on the unstopped side)
+  {
+    const source = "let xs = [4, null, hostValue]\nsay 1 / xs[1]\nrepeat hostOther {}\nexit\n";
+    const run = heldRun({ name: "divisor", source, slice: true, values: [] }, HELD_MODES[0]!);
+    const checks = run.answers.checks;
+    const lost = checks.find(
+      (check) => check.kind === "null-check" && check.on.endsWith(" before /"),
+    )!;
+    assert.ok(checks.some((check) => operandStandsForNullCheck(check, lost)));
+    const publishing = (each: StopRun, list: readonly Obligation[]): StopRun => ({
+      ...each,
+      answers: Object.defineProperty(Object.create(each.answers), "checks", { value: list }),
+    });
+    const others = checks.filter((check) => check !== lost);
+    assert.ok(others.length >= 2);
+    const judged = (unstopped: StopRun, stopped: StopRun) =>
+      stopProblems({ unstopped, stopped, fitting: [], violating: [] }).map((problem) =>
+        problem.replace(/ \{.*$/, ""),
+      );
+    assert.deepEqual(judged(run, publishing(run, others)), ["standing check"]);
+    assert.deepEqual(judged(run, publishing(run, [...others].reverse())), [
+      "standing check",
+      "checks order",
+    ]);
+    assert.deepEqual(judged(publishing(run, [...checks, lost]), publishing(run, others)), [
+      "standing check",
+      "lost check",
+    ]);
+  }
+  // (its whole site: another end; the operator consumer's own two checks for one operator, never a receiver's check at
+  // the operand's span, another operator's, or a null check whose words name another value; a domain admitting null,
+  // `unknown` too, or one a name cannot compare: Codex r1 on #1725)
+  const unmatched: (readonly [Obligation, Obligation])[] = [
+    [{ ...operand, site: { file: 0, start: 27, end: 33 } }, nullCheck],
+    [
+      operand,
+      { ...nullCheck, on: "check that xs is a list or a dict with .index before the read" },
+    ],
+    [{ ...operand, on: "check the operand of * when it runs" }, nullCheck],
+    [operand, { ...nullCheck, target: "xs" }],
+    [
+      { ...operand, against: ["unknown"] },
+      { ...nullCheck, against: ["unknown"] },
+    ],
+    [operand, { ...nullCheck, against: ["non-null"] }],
+  ];
+  for (const [other, check] of unmatched)
+    assert.equal(operandStandsForNullCheck(other, check), false, JSON.stringify([other, check]));
   // (a domain holding null stands for nothing, even where the null check's own kinds would hold it: the clause alone)
   assert.equal(
     operandStandsForNullCheck(
