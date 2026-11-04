@@ -100,6 +100,54 @@ identity verification without executing Node. The normal pull-request CI starts
 again after publication and still runs the complete canonical command on the
 published commit.
 
+### The switch's shadow gate
+
+The switch to the constraint backend ([architecture](ARCHITECTURE.md#static-type-analysis)) needs this gate's
+verdict `green` on the switching commit's `main`. The gate compiles every source of the 15,406-source set (`corpus`,
+its cases file named by `CASES_JSON`), the type-core fixture (`fixture`) and each maintained family (`copies`,
+`joins`, `messages`, `property`, `rings`, `stops`) through both public routes of one built tree in the four modes. It
+then classifies every legacy/core pair, and every source's core with sharing on against off, with
+`tests/families/shadow-classify.mjs` (runner and classes: [`tests/families/README.md`](../tests/families/README.md#shadow)).
+Per set, its manifest from a built tree of that commit, then its shards on the central queue:
+
+```shell
+env -u NODE_OPTIONS node <tree>/tests/families/shadow.mjs <tree> <set> --manifest > expect-<set>.jsonl
+sx-job submit --commit <main sha> --shards 16 --mem 6G --timeout 2h --campaign <T>-<set> -- bash -c 'env -u NODE_OPTIONS \
+  node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
+  > "$SX_OUT/shadow.log"'
+```
+
+and then over all records:
+
+```shell
+node tests/families/shadow-classify.mjs <every shard's shadow.jsonl> --expect expect-corpus.jsonl \
+  --expect expect-fixture.jsonl --expect expect-copies.jsonl ... --out <folder> --gate
+```
+
+with one `--expect` per set's manifest (the flag takes one file).
+
+For `corpus`, both commands also need `CASES_JSON=<cases.json>` before `node`, and the job `--data <cases.json>`.
+`env -u NODE_OPTIONS` keeps the queue's heap flag from overriding each route's `--memory`. `--demands 16` is the
+completion control: nothing stops at the natural allowance on current `main`, so only a demand-allowance run reaches
+a receiving completion. `--expect` makes a source without a result count as `unavailable`.
+
+Each class has one of three states:
+
+- `pass`: agreement, or the legacy route's heap exhausted in its analysis while the core finished (legacy behaviour the
+  switch resolves);
+- `attributed`: the difference has a known rule class (written copies, absent properties, ingress; the checks or plan
+  a lowering reads; wording; a stop that only one sharing mode, or both differently, take), and the switch still owes
+  each source its accepted expectation, a stop through the stop oracle's lost-check judgment;
+- `open`: the gate is not green while such a row has a pair. These rows are every exclusion of the candidate slice,
+  the surviving-check, integer-use and stop differences, failed runs other than the legacy heap, exceptions, results
+  that are missing or rowless; in the sharing column, a difference where neither mode stops, a mode outside the slice
+  and an order not compared; and coverage without ordinary decisions or without a completion at the control.
+
+The verdict line is `gate: green` only when no row is `open`. A result the classifier cannot read, a pair that no
+class or two classes take, a result outside the manifests, or a source recorded twice with different results fails
+the run (`gate: failed`, exit 1). An exclusion text or a changed diagnostic code that no taxonomy version decides needs
+a new version with a witness before the gate can pass. `--gate` exits 1 unless the verdict is `green`.
+
 ## Test admission and consolidation
 
 Give each maintained test family a distinct evidence obligation: accepted behavior, a real public/trusted boundary,
