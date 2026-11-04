@@ -8,6 +8,7 @@ import { selectsElement } from "../method-categories.js";
 import { siteKey } from "../program.js";
 import type { CoreDiagnostic, DiagnosticKind, DiagnosticRule, Presence } from "../result.js";
 import { expected } from "./expected.js";
+import { anyRecorded, keptTypes } from "./kinds.js";
 
 // The consumers' diagnostics: an error at its site, and the facts a fix's code forms read (TABLE r4.151).
 
@@ -98,13 +99,55 @@ export function withFacts(walk: Consumers, diagnostic: CoreDiagnostic): CoreDiag
       diagnostic.kinds.includes("null") || rule.rule === "operator"
         ? expected(walk, site)
         : undefined;
+    const keeps = keptChoice(walk, site, rule);
     return {
       ...diagnostic,
       ...(expects === undefined ? {} : { expects }),
       present: present(walk, site, rule),
+      // (a plain kept `let` proved adds nothing to the record: main's records stand)
+      ...(keeps === null ? { keeps: "unproved" as const } : keeps.length === 0 ? {} : { keeps }),
     };
   }
   return diagnostic;
+}
+
+/**
+ * What a new variable keeping a warning's subject declares (`keeps`, `keptTypes`): its subject, a member's receiver, a
+ * selection's collection or the value at `site`; `null` where the subject's value is not found while a mixed answer
+ * reaches some value of the pass, which proves no plain
+ * `let` and gives the kept-value fix in words (#1352).
+ */
+function keptChoice(
+  walk: Consumers,
+  site: SourceSite,
+  rule: DiagnosticRule,
+): readonly ItemTag[] | null {
+  const { program } = walk.pass;
+  const expression = program.exprAt(site)?.expression;
+  const receiver = rule.rule === "member" || rule.rule === "selection";
+  // (a value not found: words, never a plain `let`, where the stage recorded an answer (a mixed or a stopped one may
+  // reach it); where it recorded none, every choice's read settled as one type or there is none, so the plain `let` is
+  // proved, the lead's ruling on Codex r12 on #1660)
+  const unfound = (): readonly ItemTag[] | null => (anyRecorded(walk) ? null : []);
+  // (a site with no expression of its own, a default's or a `get` call's: its value where the core places one; a
+  // receiver there the `get`'s own, by its place, never by text, Codex r12 on #1660; else unfound)
+  if (expression === undefined) {
+    const place = program.placeBySite.get(siteKey(site));
+    const c = place === undefined ? undefined : program.opOf.get(place);
+    const value = !receiver ? place : c?.kind === "get" ? c.receiver : undefined;
+    return value === undefined ? unfound() : keptTypes(walk, value);
+  }
+  let subject = !receiver
+    ? expression
+    : expression.kind === "callExpression" && expression.callee.kind === "propertyAccessExpression"
+      ? expression.callee.object
+      : expression.kind === "propertyAccessExpression" || expression.kind === "indexExpression"
+        ? expression.object
+        : expression;
+  while (subject.kind === "parenthesizedExpression") subject = subject.expression;
+  const span = { file: site.file, start: subject.span.start.offset, end: subject.span.end.offset };
+  const place = program.placeBySite.get(siteKey(span));
+  return place === undefined ? unfound() : keptTypes(walk, place);
 }
 
 /**

@@ -94,7 +94,7 @@ export function typeAt(type: string, diagnosed: Diagnosed): string | null {
  * declaration as the source writes it, with that type, where `codeAt` proves it in the declaration's place (#1268,
  * TABLE r4.146): a statement or a parameter, its text clear of the other diagnostics, its start value the author's
  * own, read where it stands; else the declaration and the type in words. `subject`, the root as the sentence names
- * it; `null` where the type is no form (`typeAt`) or the root no declaration.
+ * it, `named` as its words name it; `null` where the type is no form (`typeAt`) or the root no declaration.
  */
 export function declaration(
   root: StoreRoot | null,
@@ -102,6 +102,7 @@ export function declaration(
   source: MessageSource,
   diagnosed: Diagnosed,
   subject = "it",
+  named = subject,
 ): string | null {
   const written = typeAt(type, diagnosed);
   if (root === null || root.kind === "result" || written === null) return null;
@@ -131,7 +132,7 @@ export function declaration(
           parameter ? "parameter" : "statement",
         );
   return code === null
-    ? `declare ${parameter ? `the parameter '${root.name}'` : subject} with the type '${written}'`
+    ? `declare ${parameter ? `the parameter '${root.name}'` : named} with the type '${written}'`
     : `declare ${parameter ? "the parameter" : subject} as '${code}'`;
 }
 

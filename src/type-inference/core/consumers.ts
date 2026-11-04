@@ -60,7 +60,7 @@ import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
 import { freshStores, ingressMark } from "./consumers/fresh.js";
-import { mixed, mixedJoin } from "./consumers/mixed.js";
+import { mixed, mixedChoices, mixedJoin } from "./consumers/mixed.js";
 import type {
   CheapDecision,
   CheapFrontier,
@@ -612,6 +612,10 @@ export class Consumers {
       };
       this.admission.publish();
       this.published = true;
+      // (the rule of a mixed askChoice, its own stage after every other consumer's read and the publication, so its reads
+      // move no other read's stop; after it only the facts are read, with no demand allowance, #1352, Codex r9 on #1660)
+      this.rule = 4;
+      mixedChoices(this);
     } catch (error) {
       if (!(error instanceof BudgetExhausted)) throw error;
       this.pass.program.work.stop(error.limit);

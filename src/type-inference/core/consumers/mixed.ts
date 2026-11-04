@@ -2,13 +2,18 @@ import type { PlaceId, SourceSite } from "../../graph.js";
 import { Admission } from "../admission.js";
 import { joinParts, joinSteps, keepText, keptArray } from "../budget.js";
 import type { Consumers } from "../consumers.js";
-import { propertyStep } from "../program.js";
+import { termAt, writtenOf } from "../contract.js";
+import { kindsInOrder, type ItemTag } from "../items.js";
+import { propertyStep, type ValueConstraint } from "../program.js";
+import type { DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
+import { answerRead, oneType, passedOperands, recordAnswer } from "./kinds.js";
 import type { Landing, LandingQuestion } from "./model.js";
 import { copiesOnly, firstDirect, valueReach } from "./reach.js";
 import { placeText, storeRoot, storeSteps } from "./warnings.js";
 
-// Elements of more than one type (ADR 0021 1.3): a literal's where it lands, and a list join's (#1272).
+// Values of more than one type (ADR 0021 1.3): a literal's elements where it lands, a list join's (#1272), and an
+// `askChoice`'s answer where its type would be inferred (V30 §19, #1352).
 
 /**
  * Where a literal lands (A2): the place and the key path that a whole store, an add (an added list as the collection
@@ -156,9 +161,8 @@ export function mixed(
       const copy = reach!.copy === null ? null : (program.places[reach!.copy]?.site ?? null);
       if (question.first !== null) {
         question.into ??= placeText(walk, store.place, question.path);
-        error(
+        mixedError(
           walk,
-          "written-target",
           question.first,
           {
             rule: "store",
@@ -177,9 +181,8 @@ export function mixed(
     }
   }
   const node = literal === undefined ? null : program.place(literal).kind;
-  error(
+  mixedError(
     walk,
-    "written-target",
     site,
     {
       rule: "mixed",
@@ -225,9 +228,8 @@ export function mixedJoin(
       d.path.length === 0 &&
       (d.how === "initializer" || d.how === "parameter default"),
   );
-  error(
+  mixedError(
     walk,
-    "written-target",
     compound ? (program.places[right]?.site ?? c.site) : c.site,
     {
       rule: "mixed",
@@ -240,4 +242,200 @@ export function mixedJoin(
     },
     found.kinds,
   );
+}
+
+/**
+ * Per pass, the sites of the literals' and joins' errors of mixed elements (`mixed`, `mixedJoin`, made before the walk,
+ * `Consumers.check`), and whether they are in order yet.
+ */
+const MIXED_SITES = new WeakMap<Consumers, { sites: SourceSite[]; sorted: boolean }>();
+
+/** A literal's or a join's error of mixed elements, its site recorded for `holdsMixed`. */
+function mixedError(
+  walk: Consumers,
+  site: SourceSite,
+  rule: DiagnosticRule,
+  kinds: readonly ItemTag[],
+): void {
+  error(walk, "written-target", site, rule, kinds);
+  let made = MIXED_SITES.get(walk);
+  if (made === undefined) MIXED_SITES.set(walk, (made = { sites: [], sorted: true }));
+  made.sites.push(site);
+  made.sorted = false;
+}
+
+/**
+ * Whether a literal's or a join's error of mixed elements lies within `site`: a search of their sites, by start, each
+ * step charged (their sort once, by their number).
+ */
+function holdsMixed(walk: Consumers, site: SourceSite): boolean {
+  const made = MIXED_SITES.get(walk);
+  if (made === undefined) return false;
+  if (!made.sorted) {
+    walk.pass.program.work.charge("checks", made.sites.length);
+    made.sites.sort((a, b) => a.file - b.file || a.start - b.start);
+    made.sorted = true;
+  }
+  const { sites } = made;
+  // (the first at or after the site's start, which lies within it where any does)
+  let low = 0;
+  let high = sites.length;
+  while (low < high) {
+    walk.pass.program.work.charge("checks");
+    const middle = (low + high) >> 1;
+    const at = sites[middle]!;
+    if (at.file < site.file || (at.file === site.file && at.start < site.start)) low = middle + 1;
+    else high = middle;
+  }
+  const first = sites[low];
+  return first !== undefined && first.file === site.file && first.end <= site.end;
+}
+
+/** What a mixed answer's first store into a place whose type would be inferred says (`mixedChoice`). */
+type Stored = Omit<Extract<DiagnosticRule, { rule: "mixed-choice" }>, "rule">;
+
+/** Per pass, each value's first such store, its own or one a value it passes on reaches (`passedOperands`), once. */
+const REACHED = new WeakMap<Consumers, Map<PlaceId, Stored | null>>();
+
+/**
+ * The first store of `value` itself (a store, an argument, a return, an add, or a literal holding it where the literal
+ * lands, `landingOf`) into a place with no written type there whose type would be a union: its admitted type (A2: the
+ * decision, else every type stored there; `unknown` below an unrestricted written part, the place's own or a copy's)
+ * holds more than one type and comes from no copy of a written type (A4); a place another store decides as one type
+ * keeps that store's check (C1). An argument's call alone types its parameter (V30 §11): its own value's known types
+ * decide it, whatever another call passes. The union to declare is every type the place takes, this value's among them.
+ */
+function storedUnion(walk: Consumers, value: PlaceId): Stored | null {
+  const { program, definitions } = walk.pass;
+  const { admission } = walk;
+  const stores = definitions.byValue.get(value) ?? [];
+  program.work.charge("checks", stores.length);
+  for (const d of stores) {
+    if (d.kind !== "whole" && d.kind !== "add") continue;
+    // (a literal's cell: where the literal lands, at the cell's step below it)
+    const owner = program.cellOwner.get(d.place);
+    let place = d.place;
+    let path = admission.destPath(d);
+    if (owner !== undefined) {
+      const landing = landingOf(walk, owner.owner);
+      if (landing === null) continue;
+      const cell = program.place(d.place).kind;
+      place = landing.place;
+      path = joinSteps(landingPath(walk, landing), [
+        cell.kind === "property" ? propertyStep(cell.name) : "element",
+      ]);
+    }
+    const written = writtenOf(program.place(place).kind);
+    if (written !== null && termAt(written, path) !== null) continue;
+    const admitted = admission.admitted(place, path);
+    const own = answerRead(walk, value).kinds;
+    const argument = d.how === "argument";
+    if (argument ? oneType(own) : admission.inheritsWritten(place, path) || oneType(admitted))
+      continue;
+    const steps = storeSteps(walk, place, path);
+    return {
+      into: placeText(walk, place, path),
+      root: storeRoot(walk, place),
+      steps,
+      type: kindsInOrder(new Set([...admitted.filter((tag) => tag !== "unknown"), ...own])),
+      // (a collection root that holds null beside its lists: an optional collection, V30 §13)
+      ...(steps.length === 1 && admission.admitted(place, []).includes("null")
+        ? { optional: true as const }
+        : {}),
+    };
+  }
+  return null;
+}
+
+/**
+ * The first store whose place's type would be a union of `value`'s, or of what it passes on (`passedOperands`), its
+ * own stores first, then each value it reaches in order: each value once per pass (`REACHED`), however many choices
+ * reach it, in an explicit post-order, so a chain of `otherwise`s costs its length (Codex r2's B4 on #1660).
+ */
+function reachedUnion(walk: Consumers, start: PlaceId): Stored | null {
+  const { program } = walk.pass;
+  let memo = REACHED.get(walk);
+  if (memo === undefined) REACHED.set(walk, (memo = new Map()));
+  const known = memo.get(start);
+  if (known !== undefined) return known;
+  const next = new Map<PlaceId, PlaceId[]>();
+  const stack: { readonly value: PlaceId; readonly expanded: boolean }[] = [
+    { value: start, expanded: false },
+  ];
+  while (stack.length > 0) {
+    const { value, expanded } = stack.pop()!;
+    if (memo.has(value)) continue;
+    if (expanded) {
+      // (what a warning keeping this value declares, from a settled read alone: its known types where more than one,
+      // none for one; a stopped read proves neither, whatever it holds)
+      const read = answerRead(walk, value);
+      recordAnswer(walk, value, read.stopped ? "stopped" : oneType(read.kinds) ? [] : read.kinds);
+      let found = storedUnion(walk, value);
+      for (const to of next.get(value)!) found ??= memo.get(to) ?? null;
+      memo.set(value, found);
+      continue;
+    }
+    if (next.has(value)) continue;
+    const uses = program.consumersOf.get(value) ?? [];
+    program.work.charge("checks", uses.length);
+    const to = uses.flatMap((use) =>
+      use.kind === "part" && passedOperands(program.opOf.get(use.result)).includes(value)
+        ? [use.result]
+        : [],
+    );
+    next.set(value, to);
+    stack.push({ value, expanded: true });
+    for (const each of to.toReversed())
+      if (!memo.has(each) && !next.has(each)) stack.push({ value: each, expanded: false });
+  }
+  return memo.get(start) ?? null;
+}
+
+/**
+ * V30 §13, §19 (#1352): an `askChoice` whose buttons return more than one type (its known types, `answerRead`, of more than one: V30 §19,
+ * whole numbers with numbers one type, `null` beside a type optional, an unknown button adding none) is an error at the
+ * choice where its answer, as it stands or through what passes it on unchanged (`passedOperands`), lands in a place
+ * whose type would be their union (`storedUnion`), at its first such store (`reachedUnion`); once per choice.
+ */
+function mixedChoice(
+  walk: Consumers,
+  c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+): void {
+  // (the choice's answer: one known type from a settled read, nothing to record; more than one, the error where it
+  // lands, proved whether its read settled or stopped, since a stop only hides types. A stopped read of one known type
+  // proves neither: it records what it reaches, each value's own read settled or stopped, and makes no error, Codex r7
+  // on #1660)
+  const read = answerRead(walk, c.result);
+  if (oneType(read.kinds) && !read.stopped) return;
+  const stored = reachedUnion(walk, c.result);
+  if (oneType(read.kinds)) return;
+  const answer = read.kinds;
+  // (a list or set option whose elements mix is that literal's error already, as the current checker gives it; what
+  // the answer reaches is still recorded)
+  if (stored !== null && !holdsMixed(walk, c.site))
+    error(walk, "written-target", c.site, { rule: "mixed-choice", ...stored }, answer);
+}
+
+/**
+ * #1352's stage (`Consumers.check`): `mixedChoice` of every `askChoice` outside the units past the nesting limit, in
+ * the consumers' order, each read with its choice's demand allowance and each its own unit (`Consumers.runs`: a stop
+ * takes back the running choice's findings alone, Codex r10 on #1660); run after every other consumer's read and the
+ * publication, so no read of the pass that can stop at its demand allowance comes after its reads (Codex r9).
+ * A choice past the nesting limit has no published warning that reads its record (TSV076 defers them).
+ */
+export function mixedChoices(walk: Consumers): void {
+  const { program } = walk.pass;
+  const choices = program.constraints.filter(
+    (c): c is Extract<ValueConstraint, { readonly kind: "operation" }> =>
+      c.kind === "operation" && c.evidence?.kind === "choice",
+  );
+  for (const c of walk.order(choices)) {
+    // (each choice its own unit: a stop takes back the running choice's findings alone, Codex r10 on #1660)
+    if (!walk.runs(c.site)) continue;
+    const node = program.exprAt(c.site);
+    if (node === null) continue;
+    walk.reading = node;
+    mixedChoice(walk, c);
+  }
+  walk.reading = null;
 }

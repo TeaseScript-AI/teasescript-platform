@@ -87,11 +87,16 @@ export const READS = new Map([
     "decisionWork",
     "a decision's work record (its path a packet's for a cursor's, G3 stage 1): research data, no obligation",
   ],
+  ["destPath", "a store's destination path, an add's element: syntax"],
   [
     "expand",
     "a stored value's recipe of the store walk (its own stop, its cells and operands): syntax, read",
   ],
   ["groups", "the places and paths `decide` decides: its inputs"],
+  [
+    "inheritsWritten",
+    "whether a copy's written type decides a path (A4): a decision's answer, recorded by `decide`",
+  ],
   ["ingressSiteOf", "C1's site for external data a store brings: a site, read"],
   [
     "kindsAt",

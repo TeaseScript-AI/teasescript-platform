@@ -263,6 +263,7 @@ export function codeOf(rule: DiagnosticRule): CoreCode {
     case "iterable":
       return "TSV012";
     case "mixed":
+    case "mixed-choice":
       return "TSV044";
     case "choice":
       return "TSV029";
@@ -341,6 +342,15 @@ export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource
     present: diagnostic.present ?? "unproved",
     severity: diagnostic.class === "compile-error" ? "error" : "warning",
     alone,
+    // (a warning whose facts were not asked, as after a stop, proves no plain kept `let` where its text holds an
+    // askChoice, whose answer reaches it only through its own operands: #1352)
+    ...(diagnostic.class !== "warning-runtime-check"
+      ? {}
+      : diagnostic.keeps !== undefined
+        ? { keeps: diagnostic.keeps }
+        : diagnostic.present === undefined && text.includes("askChoice")
+          ? { keeps: "unproved" as const }
+          : {}),
   };
   if (diagnostic.class === "compile-error")
     return errorSentence(rule, text, kinds, source, diagnostic.site, diagnostic.expects, diagnosed);
