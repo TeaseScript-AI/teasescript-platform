@@ -6415,6 +6415,27 @@ test("a stopped operand check stands for a lost null check only at its site, exc
       "lost check",
     ]);
   }
+  // (the same on a divisor whose own text spans two lines: Codex r2 on #1725)
+  {
+    const source = "say 1 / [4,\n null, hostValue][1]\nexit\n";
+    const run = heldRun({ name: "multiline", source, slice: true, values: [] }, HELD_MODES[0]!);
+    const checks = run.answers.checks;
+    const lost = checks.find(
+      (check) => check.kind === "null-check" && check.on.endsWith(" before /"),
+    )!;
+    assert.ok(lost.target.includes("\n"), lost.target);
+    const others = checks.filter((check) => check !== lost);
+    const stopped: StopRun = {
+      ...run,
+      answers: Object.defineProperty(Object.create(run.answers), "checks", { value: others }),
+    };
+    assert.deepEqual(
+      stopProblems({ unstopped: run, stopped, fitting: [], violating: [] }).map((problem) =>
+        problem.replace(/ \{[\s\S]*$/, ""),
+      ),
+      ["standing check"],
+    );
+  }
   // (its whole site: another end; the operator consumer's own two checks for one operator, never a receiver's check at
   // the operand's span, another operator's, or a null check whose words name another value; a domain admitting null,
   // `unknown` too, or one a name cannot compare: Codex r1 on #1725)
@@ -6426,6 +6447,7 @@ test("a stopped operand check stands for a lost null check only at its site, exc
     ],
     [{ ...operand, on: "check the operand of * when it runs" }, nullCheck],
     [operand, { ...nullCheck, target: "xs" }],
+    [operand, { ...nullCheck, on: "check that xs.element is not null before *" }],
     [
       { ...operand, against: ["unknown"] },
       { ...nullCheck, against: ["unknown"] },
@@ -6434,6 +6456,15 @@ test("a stopped operand check stands for a lost null check only at its site, exc
   ];
   for (const [other, check] of unmatched)
     assert.equal(operandStandsForNullCheck(other, check), false, JSON.stringify([other, check]));
+  // (a target that is a value's own text over several lines, its words whole)
+  const multiline = "[4,\n null][1]";
+  assert.equal(
+    operandStandsForNullCheck(
+      { ...operand, target: multiline },
+      { ...nullCheck, target: multiline, on: `check that ${multiline} is not null before /` },
+    ),
+    true,
+  );
   // (a domain holding null stands for nothing, even where the null check's own kinds would hold it: the clause alone)
   assert.equal(
     operandStandsForNullCheck(

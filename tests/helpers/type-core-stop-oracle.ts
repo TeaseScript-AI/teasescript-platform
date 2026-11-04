@@ -222,8 +222,7 @@ function keeps(
   return fields(want) === fields(got) && (got.message === want.message || got.message === words());
 }
 
-/** The operator consumer's own words for an operand's null check and for its operand check (`consumers/operations.ts`). */
-const OPERATOR_NULL_CHECK = /^check that (.+) is not null before (.+)$/;
+/** The operator consumer's own words for an operand's operand check (`consumers/operations.ts`), naming its operator. */
 const OPERATOR_OPERAND_CHECK = /^check the operand of (.+) when it runs$/;
 
 /**
@@ -243,17 +242,15 @@ const OPERATOR_OPERAND_CHECK = /^check the operand of (.+) when it runs$/;
  * operand check is still counted as its own content.
  */
 export function operandStandsForNullCheck(operand: Obligation, nullCheck: Obligation): boolean {
-  const nullWords = OPERATOR_NULL_CHECK.exec(nullCheck.on);
-  const operandWords = OPERATOR_OPERAND_CHECK.exec(operand.on);
+  // (the null check's words, its own target whole, a source's line breaks in it as well: Codex r2 on #1725)
+  const operator = OPERATOR_OPERAND_CHECK.exec(operand.on)?.[1];
   return (
     operand.kind === "operand" &&
     nullCheck.kind === "null-check" &&
     operand.boundary === nullCheck.boundary &&
     siteKey(operand.site) === siteKey(nullCheck.site) &&
-    nullWords !== null &&
-    operandWords !== null &&
-    nullWords[1] === nullCheck.target &&
-    nullWords[2] === operandWords[1] &&
+    operator !== undefined &&
+    nullCheck.on === `check that ${nullCheck.target} is not null before ${operator}` &&
     !operand.against.includes("null") &&
     !operand.against.includes("unknown") &&
     operand.against.every((kind) => nullCheck.against.includes(kind))
