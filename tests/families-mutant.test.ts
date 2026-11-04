@@ -185,25 +185,37 @@ test("a mutant's proof refuses any other patch, Codex r4's three shapes on #1680
   );
   assert.equal(edited.status, 1, edited.stderr);
   assert.match(edited.stderr, /not the head with the patch applied at "kept.ts"/);
-  // (Codex r1 on #1686: a path with a tab, its patch left unapplied; a file under `ident`, the expansion the queue's
-  // apply wrote accepted and one replaced after it refused, compared as the bytes the build reads)
+  // (Codex r1 on #1686: a path with a tab, its patch left unapplied)
   const unapplied = proved(
     (cwd) => writeFileSync(join(cwd, tabbed), "after\n"),
     () => {},
   );
   assert.equal(unapplied.status, 1, unapplied.stderr);
   assert.ok(unapplied.stderr.includes(JSON.stringify(tabbed)), unapplied.stderr);
+  // (Codex r1 and r2 on #1686: any conversion between a file's bytes and its blob, from a tracked `.gitattributes`,
+  // `.git/info/attributes` or `core.autocrlf`, is refused: `git apply` converts its preimage, a checkout its output,
+  // and neither is proved alike, so an expansion replaced after the apply, or a line ending restored, could pass)
   const ident = (cwd: string) => writeFileSync(join(cwd, "kept.ts"), 'export const v = "$Id$";\n');
-  const expanded = proved(ident, undefined, undefined, "*.ts ident\n");
-  assert.equal(expanded.status, 0, expanded.stderr);
-  const injected = proved(
-    ident,
+  const tracked = proved(ident, undefined, undefined, "*.ts ident\n");
+  assert.deepEqual([tracked.status, tracked.stdout], [2, ""], tracked.stderr);
+  assert.match(tracked.stderr, /'ident: set'; a mutant's files must convert in no way/);
+  const info = proved(
+    (cwd) => {
+      writeFileSync(join(cwd, ".git", "info", "attributes"), "*.ts text=auto\n");
+      writeFileSync(join(cwd, "kept.ts"), "a2\n");
+    },
     undefined,
-    (cwd) => writeFileSync(join(cwd, "kept.ts"), 'export const v = "$Id: injected $";\n'),
-    "*.ts ident\n",
+    (cwd) => writeFileSync(join(cwd, ".git", "info", "attributes"), "*.ts text=auto\n"),
   );
-  assert.equal(injected.status, 1, injected.stderr);
-  assert.match(injected.stderr, /not the head with the patch applied at "kept.ts"/);
+  assert.deepEqual([info.status, info.stdout], [2, ""], info.stderr);
+  assert.match(info.stderr, /'text: auto'/);
+  const autocrlf = proved(
+    (cwd) => writeFileSync(join(cwd, "kept.ts"), "a2\n"),
+    undefined,
+    (cwd) => git(cwd, "config", "core.autocrlf", "true"),
+  );
+  assert.deepEqual([autocrlf.status, autocrlf.stdout], [2, ""], autocrlf.stderr);
+  assert.match(autocrlf.stderr, /core.autocrlf is true/);
   // (a patch of an existing `.gitattributes` changes how the other files convert: refused)
   const attributes = proved(
     (cwd) => {

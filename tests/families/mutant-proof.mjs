@@ -6,8 +6,10 @@
 //   head, and no path created, deleted, renamed, copied or re-moded (`git apply --summary` prints nothing), so the
 //   queue's `git apply` of it changes those files and nothing else.
 // - Equality: the patch applied again to the head in a private index gives each path's expected blob without the
-//   checkout; each path's file in the checkout must hold that blob's bytes as a checkout writes them (its attributes'
-//   conversions applied; a patch of a `.gitattributes` is refused).
+//   checkout; each path's file in the checkout must hold that blob's bytes exactly. A path any conversion may touch
+//   (`core.autocrlf`, or a `text`, `eol`, `crlf`, `ident`, `filter` or `working-tree-encoding` attribute from any
+//   attributes file) is refused, as is a patch of a `.gitattributes`: no conversion is proved alike for `git apply`,
+//   which converts its preimage, and a checkout.
 // Prints the proof as one JSON object: the patch's sha256 and, per path, its blob at the head, the expected blob and
 // the sha256 of the expected file's bytes and the checkout's file's; exits 2 for a patch it refuses, 1 where the checkout is not the head with the patch applied.
 import { spawnSync } from "node:child_process";
@@ -68,6 +70,28 @@ for (const path of paths) {
   head.set(path, found[2]);
 }
 
+// (no conversion between a file's bytes and its blob at any path: none is proved alike for `git apply`, which converts
+// its preimage, and a checkout, so a path a conversion may touch is refused, and the bytes are compared as they are)
+const autocrlf = spawnSync("git", ["-C", checkout, "config", "--get", "core.autocrlf"], {
+  encoding: "utf8",
+});
+if (["true", "input"].includes(autocrlf.stdout.trim()))
+  refuse(2, `core.autocrlf is ${autocrlf.stdout.trim()}; a mutant's files must convert in no way`);
+const CONVERTING = ["text", "eol", "crlf", "ident", "filter", "working-tree-encoding"];
+for (const path of paths) {
+  const fields = git(["check-attr", "-z", ...CONVERTING, "--", path])
+    .toString("utf8")
+    .split("\0");
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    const [attribute, value] = [fields[index + 1], fields[index + 2]];
+    if (value === "unspecified" || (value === "unset" && attribute !== "eol")) continue;
+    refuse(
+      2,
+      `${JSON.stringify(path)} has '${attribute}: ${value}'; a mutant's files must convert in no way`,
+    );
+  }
+}
+
 // (equality: the patch applied again to the head in a private index, against the checkout's files)
 const scratch = mkdtempSync(join(tmpdir(), "mutant-proof-"));
 const expected = new Map();
@@ -82,8 +106,7 @@ try {
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
-// (the file's bytes as the build reads them, against the expected blob written out as a checkout writes it, its
-// attributes' conversions included, as `git apply` writes it)
+// (the file's bytes as the build reads them, against the expected blob's bytes: no conversion lies between them)
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const proof = {
   patch: sha256(readFileSync(patch)),
@@ -91,7 +114,7 @@ const proof = {
     path,
     head: head.get(path),
     expected: expected.get(path),
-    expectedFile: sha256(git(["cat-file", "--filters", `--path=${path}`, expected.get(path)])),
+    expectedFile: sha256(git(["cat-file", "blob", expected.get(path)])),
     checkoutFile: sha256(readFileSync(join(checkout, path))),
   })),
 };

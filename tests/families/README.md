@@ -223,9 +223,10 @@ which it builds after `mutant-proof.mjs` proved that checkout the head with the 
 proof reads the patch the queue applied (the job's `$SX_IN/patch-main.diff`), the head's objects and the checkout's
 files at the patch's paths, every path literally: it refuses a patch that is not a text change of regular files at the
 head (one that creates, deletes, renames, copies or re-modes a path, or a binary change), applies it again to the head
-in a private index, and requires each path's file in the checkout to hold that blob's bytes as a checkout writes them
-(its attributes' conversions applied; a patch of a `.gitattributes` is refused). `mutant.json` holds the patch's hash
-and each path's blobs at the head and expected, and the expected and the checkout's file bytes' hashes: a seed whose outcome differs reaches the
+in a private index, and requires each path's file in the checkout to hold that blob's bytes exactly; a path any
+conversion may touch (`core.autocrlf`, a `text`, `eol`, `crlf`, `ident`, `filter` or `working-tree-encoding`
+attribute) is refused, as is a patch of a `.gitattributes`. `mutant.json` holds the patch's hash and each path's blobs
+at the head and expected, and the expected and the checkout's file bytes' hashes: a seed whose outcome differs reaches the
 mutated code, and a mutant no seed tells apart survives the family.
 
 ## The unit limit and the safety net (#1647)
