@@ -187,15 +187,16 @@ interface Use {
 
 /**
  * The statement a check holds (#1268, TABLE r4.146): the statement of the use at `site` (`MessageSource.statement`),
- * with the subject's read in it (`read`), and its text as the check holds it: with `value` in the place of `subject`
- * where the fix keeps the subject in a new variable first and the statement reads it once (another read would stay
- * unchecked); else `null`.
+ * with the subject's read in it (`read`), and its text as the check holds it: with the kept variable's `name` in the
+ * place of `subject` where the fix keeps the subject in a new variable first and the statement reads it once (another
+ * read would stay unchecked); else `null`.
  */
 function guarded(
   source: MessageSource,
   site: SourceSite,
   subject: string,
   kept: boolean,
+  name: string,
 ): { readonly statement: SourceSite; readonly read: SourceSite; readonly text: string } | null {
   // (the subject the use reads: its first text inside the use's own, a receiver's or a collection's to the left)
   const at = source.text(site).indexOf(subject);
@@ -211,7 +212,11 @@ function guarded(
   const from = read.start - statement.start;
   return text.indexOf(subject) !== from || text.includes(subject, from + 1)
     ? null
-    : { statement, read, text: `${text.slice(0, from)}value${text.slice(from + subject.length)}` };
+    : {
+        statement,
+        read,
+        text: `${text.slice(0, from)}${name}${text.slice(from + subject.length)}`,
+      };
 }
 
 /**
@@ -227,7 +232,11 @@ function guardForms(
   kept: boolean,
   test: Test,
 ): { readonly check: string; readonly keep: string | null } | null {
-  const held = ownText(subject) ? guarded(use.source, use.site, subject, kept) : null;
+  if (!ownText(subject)) return null;
+  // (the kept variable's name, free in the whole project: `value`, else the first free `value2`, `value3`, … #1274;
+  // asked only where the fix keeps a value, as its survey is charged, Astra r1 on #1715)
+  const name = kept ? use.source.freeName("value") : "";
+  const held = guarded(use.source, use.site, subject, kept, name);
   if (held === null) return null;
   const form = (code: string, holds: SourceSite): string | null =>
     codeAt(
@@ -244,14 +253,14 @@ function guardForms(
       },
       "statement",
     );
-  const check = form(`if ${test.code(kept ? "value" : subject)} { ${held.text} }`, held.statement);
+  const check = form(`if ${test.code(kept ? name : subject)} { ${held.text} }`, held.statement);
   // (the kept value's `let` only where a fact proves it (`keeps`): a plain one, or declared with a mixed answer's union,
   // which alone keeps it, V30 §19, #1352; else in words)
   const { keeps: types } = use.diagnosed;
   const keeps = types === "unproved" ? null : types === undefined ? "" : typeText(types);
   const keep =
     kept && keeps !== null
-      ? form(`let value${keeps === "" ? "" : `: ${keeps}`} = ${subject}`, held.read)
+      ? form(`let ${name}${keeps === "" ? "" : `: ${keeps}`} = ${subject}`, held.read)
       : null;
   return check === null || (kept && keep === null) ? null : { check, keep };
 }

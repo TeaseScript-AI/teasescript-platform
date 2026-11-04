@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compileProject } from "../src/compiler.js";
+import { compileProject, compileSourceWithBackend } from "../src/compiler.js";
+import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { jsonFieldMismatch, jsonKindMismatch } from "../src/runtime/values/value-types.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
-import { checkedResult, reportedDiagnostics } from "../src/type-inference/core/consumer.js";
+import {
+  checkedResult,
+  coreCheckResult,
+  reportedDiagnostics,
+  SliceIndex,
+} from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -2164,4 +2170,160 @@ test("the kept-value fact's work grows linearly with the warnings and the choice
     for (let at = 1; at < work.length; at += 1)
       assert.ok(work[at]! <= 2.05 * work[at - 1]!, `${JSON.stringify(mode)} ${work.join(", ")}`);
   }
+});
+
+/**
+ * #1274: a fix that keeps a value in a new variable names one free in the whole project (`MessageSource.freeName`):
+ * `value`, else `value2`, `value3`, …, the first no identifier of any file's code spells (a property's name aside) and
+ * no host global or built-in reserves, and its check reads that name. Each of the sentence's three forms (a null check,
+ * a type check of a kept union, a selection's length) beside each way a name is or is not taken (declared before the
+ * use or after it, as a function, a parameter, two names at once; only in a text or as a property's name; a host
+ * global): the `let` and the check pasted in place of the use's line compile.
+ */
+test("a kept value's variable takes a name free in the project, and the fix compiles where pasted (#1274)", () => {
+  const uses = [
+    { setup: "let xs = [7, null]", use: "say xs[0] + 1" },
+    { setup: "let v = 1", use: 'v = askChoice "None", [5, 10]' },
+    { setup: "let groups: integer[][] = [[], [21]]", use: "say groups.random.last" },
+  ];
+  const taken: readonly (readonly [string, readonly string[], readonly string[], string])[] = [
+    ["free", [], [], "value"],
+    ["declared before", ["let value = 2"], ["say value"], "value2"],
+    ["declared after", [], ["let value = 2", "say value"], "value2"],
+    ["a function", ["function value { return 1 }"], [], "value2"],
+    ["a parameter", ["function f(value) { return value }"], [], "value2"],
+    ["two names", ["let value = 2", "let value2 = 3"], ["say value + value2"], "value3"],
+    ["only in a text", ['say "value"'], [], "value"],
+    ["only a property's name", ["let o = {value: 1}", "say o.value"], [], "value"],
+  ];
+  for (const { setup, use } of uses)
+    for (const [name, before, after, expected] of taken) {
+      const source = [setup, ...before, use, ...after, "exit", ""].join("\n");
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, source);
+      const { diagnostics } = analyseCore(request);
+      const text = messageSource([source], diagnostics);
+      const fix = diagnostics
+        .map((diagnostic) => coreMessage(diagnostic, text))
+        .map((message) =>
+          /as in '(let [^']*)', and check (?:it|its length), as in '(if [^']*)'/.exec(message),
+        )
+        .find((found) => found !== null);
+      assert.ok(fix !== undefined && fix !== null, `${name}: ${source}`);
+      const [, keep, check] = fix;
+      assert.ok(keep!.startsWith(`let ${expected}`), `${name}: ${keep}`);
+      assert.ok(new RegExp(`\\b${expected}\\b`).test(check!), `${name}: ${check}`);
+      const pasted = source.replace(`${use}\n`, `${keep}\n${check}\n`);
+      const fixed = coreRequest([{ path: "main.tease", source: pasted }]);
+      assert.ok(fixed !== null, `${name}: the pasted names resolve: ${pasted}`);
+      assert.deepEqual(
+        analyseCore(fixed).diagnostics.filter((d) => d.class === "compile-error"),
+        [],
+        `${name}: ${pasted}`,
+      );
+    }
+  // (a host global the script never names is reserved too, as the compile reads the analysis: `coreCheckResult`, the
+  // one that forwards the request's globals and built-ins to its message source)
+  const source = "let xs = [7, null]\nsay xs[0] + 1\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "value"])!;
+  const checked = coreCheckResult(
+    analyseCore(request),
+    new SliceIndex(request.files.map((file) => file.program)),
+    request,
+  );
+  const messages = checked.diagnostics.flat().map((diagnostic) => diagnostic.message);
+  assert.ok(
+    messages.some((message) => message.includes("as in 'let value2 = xs[0]'")),
+    JSON.stringify(messages),
+  );
+});
+
+/**
+ * #1274, Codex r1's B1: the names a fix may not declare are surveyed without a native call per level, so a warning's
+ * message beside an expression of any depth still compiles (12,800 nested parentheses).
+ */
+test("a warning's fix beside a deeply nested expression still compiles (#1274)", () => {
+  const source = `let n = ${"(".repeat(12800)}1${")".repeat(12800)}\nrepeat hostValue {}\nexit\n`;
+  const result = compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);
+  assert.ok(result.plan !== null);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV011"],
+  );
+});
+
+/**
+ * #1274, Astra r1 on #1715: the kept variable's name is chosen once per program, its survey charged to the analysis's
+ * total as a shared build and to no demand. k warnings beside a taken `value`, k = 16 to 256: each fix names `value2`,
+ * the survey's charge is at least one unit per syntax node, the demands' records stay as the analysis left them, and
+ * the total after the messages grows at most ×2.15 per doubling of the nodes (a survey per warning grows by ×4).
+ */
+test("a kept value's name is surveyed once, charged to the analysis and no demand (#1274)", () => {
+  const measured = [16, 32, 64, 128, 256].map((k) => {
+    const source = `let value = 1\nlet xs = [7, null]\n${"say xs[0] + 1\n".repeat(k)}exit\n`;
+    const request = coreRequest([{ path: "main.tease", source }])!;
+    const answers = analyseCore(request);
+    const before = answers.budget;
+    const checked = coreCheckResult(
+      answers,
+      new SliceIndex(request.files.map((file) => file.program)),
+      request,
+    );
+    const fixes = checked.diagnostics
+      .flat()
+      .filter((diagnostic) => diagnostic.message.includes("as in 'let value2 = xs[0]'"));
+    assert.equal(fixes.length, k, `k = ${k}`);
+    const nodes = before.counts.get("syntaxNodes")!;
+    const surveyed =
+      (answers.budget.counts.get("indexSteps") ?? 0) - (before.counts.get("indexSteps") ?? 0);
+    assert.ok(surveyed >= nodes, `k = ${k}: ${surveyed} survey units for ${nodes} nodes`);
+    assert.deepEqual(answers.budget.demands, before.demands, `k = ${k}`);
+    assert.deepEqual(answers.budget.decisions, before.decisions, `k = ${k}`);
+    return { total: answers.budget.total, nodes };
+  });
+  for (let at = 1; at < measured.length; at += 1) {
+    const [small, large] = [measured[at - 1]!, measured[at]!];
+    const doubling = (2 * (large.total / small.total)) / (large.nodes / small.nodes);
+    assert.ok(doubling <= 2.15, `${JSON.stringify(measured)}: ${doubling.toFixed(3)} per doubling`);
+  }
+});
+
+/**
+ * #1274, Codex r3 on #1715: the kept name's survey charges each name the host reserves and each file's root too, so its
+ * charge grows with unused host globals and with empty files (16 and 256 of each). After a stop, its units are
+ * finishing work, counted in the finishing breakdown as in the total.
+ */
+test("a kept value's name survey charges the host's names and every file (#1274)", () => {
+  const source = "let value = 1\nlet xs = [7, null]\nsay xs[0] + 1\nexit\n";
+  for (const [globals, empty] of [
+    [16, 0],
+    [256, 0],
+    [0, 16],
+    [0, 256],
+  ] as const) {
+    const files = [
+      { path: "main.tease", source },
+      ...Array.from({ length: empty }, (_, at) => ({ path: `empty${at}.tease`, source: "" })),
+    ];
+    const hosts = ["hostValue", ...Array.from({ length: globals }, (_, at) => `host${at}`)];
+    const request = coreRequest(files, hosts)!;
+    const answers = analyseCore(request);
+    const before = answers.budget;
+    assert.equal(answers.keptName("value"), "value2");
+    const nodes = before.counts.get("syntaxNodes")!;
+    const surveyed =
+      (answers.budget.counts.get("indexSteps") ?? 0) - (before.counts.get("indexSteps") ?? 0);
+    assert.ok(
+      surveyed >= nodes + hosts.length,
+      `${globals} globals, ${empty} empty files: ${surveyed} units for ${nodes} nodes and ${hosts.length} names`,
+    );
+  }
+  const request = coreRequest([{ path: "main.tease", source }])!;
+  const stopped = analyseCore(request).stoppedAt("work");
+  stopped.keptName("value");
+  const { finishing, apart } = stopped.budget;
+  assert.equal(
+    [...apart.values()].reduce((sum, units) => sum + units, 0),
+    finishing,
+  );
 });

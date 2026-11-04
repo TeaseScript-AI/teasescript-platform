@@ -6,6 +6,7 @@ import { CONVERSIONS } from "../../conversions.js";
 import { localCalendarOffsetMessage } from "../../duration.js";
 import { repeatCountFix, repeatCountMessage } from "../../loop-rules.js";
 import { cannotConvert, describeShownValue } from "../../runtime/values/value-types.js";
+import type { WorkLedger } from "./budget.js";
 import type { ItemTag } from "./items.js";
 import type { CheckedDiagnostic, CoreCode, DiagnosticRule, StaticRule } from "./result.js";
 import {
@@ -40,11 +41,12 @@ export { described, pathPhrase } from "./messages/words.js";
 /**
  * The message source of a project's files and of their analysis's diagnostics: each file's text, its lines counted
  * once, its statements on one line by their line, each parsed once, and its diagnostics' sites in start order, each
- * on first need.
+ * on first need; `keptName`, the analysis's name for a kept value (`Answers.keptName`), else one surveyed here.
  */
 export function messageSource(
   sources: readonly string[],
   diagnostics: readonly CheckedDiagnostic[],
+  keptName?: (base: string) => string,
 ): MessageSource {
   const starts = new Map<number, number[]>();
   const programs = new Map<number, Program>();
@@ -209,7 +211,27 @@ export function messageSource(
     return found;
   };
   const landing = (site: SourceSite): Landing | null => landingOf(givensOf(site.file), site);
+  // (every name a project's code spells: its identifiers but the property names of objects, speakers, reads and
+  // arguments, which no variable can clash with; with the host globals and built-ins, `freeName`'s taken names)
+  // (the kept variable's name: the analysis's, chosen once and charged as its question, else surveyed here once, uncharged)
+  const surveyed = new Map<string, string>();
+  const freeName =
+    keptName ??
+    ((base: string): string => {
+      let name = surveyed.get(base);
+      if (name === undefined) {
+        name = keptVariableName(
+          sources.map((_, file) => programOf(file)),
+          [],
+          base,
+          null,
+        );
+        surveyed.set(base, name);
+      }
+      return name;
+    });
   return {
+    freeName,
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
     landing,
     target: (site) =>
@@ -415,4 +437,68 @@ export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource
           originSentence(context, context === "missing" ? text : name),
     );
   return sentences.filter((sentence) => sentence !== "").join(" ");
+}
+
+/** The property names of objects, speakers, reads and arguments: no variable a fix declares can clash with them. */
+const PROPERTY_NAMES: Readonly<Record<string, string>> = {
+  objectProperty: "name",
+  speakerProperty: "name",
+  propertyAccessExpression: "property",
+  namedArgument: "name",
+  formArgument: "name",
+};
+
+/**
+ * A name a fix may declare anywhere in a project (#1274): `base`, else `base2`, `base3`, …, the first no identifier of
+ * the programs spells (a property's name aside) and `reserved` (the host globals and built-ins) does not hold. One
+ * walk of every node, by an explicit worklist (no native call depth, Codex r1), and one selection. Each reserved name,
+ * each syntax node (a file's root among them) and each name tried is charged one `indexSteps` unit to `work` where it
+ * is given (Astra r1 and Codex r3 on #1715: the survey grows with the program and its host names). A node's spans and
+ * field lists, a bounded constant per node, take no charge of their own (TABLE r4.261).
+ */
+export function keptVariableName(
+  programs: readonly Program[],
+  reserved: Iterable<string>,
+  base: string,
+  work: WorkLedger | null,
+): string {
+  // (each reserved name and each file's root, as each node below it, one unit: Codex r3 B1 on #1715)
+  const taken = new Set<string>();
+  for (const name of reserved) {
+    work?.charge("indexSteps");
+    taken.add(name);
+  }
+  for (const program of programs) {
+    work?.charge("indexSteps");
+    const pending: Readonly<Record<string, unknown>>[] = [{ statements: program.statements }];
+    while (pending.length > 0) {
+      const node = pending.pop()!;
+      const kind = node["kind"];
+      for (const [key, value] of Object.entries(node)) {
+        if (value === null || typeof value !== "object") continue;
+        // EVIDENCE: invariant: the parser builds its nodes, their lists and their spans of plain objects and arrays.
+        const items: readonly unknown[] = Array.isArray(value) ? value : [value];
+        for (const item of items) {
+          if (item === null || typeof item !== "object") continue;
+          // EVIDENCE: invariant: an object the parser built is a plain record of its fields.
+          const fields = item as Readonly<Record<string, unknown>>;
+          if (typeof fields["kind"] === "string") work?.charge("indexSteps");
+          if (fields["kind"] !== "identifier") pending.push(fields);
+          else if (
+            typeof fields["name"] === "string" &&
+            !(typeof kind === "string" && PROPERTY_NAMES[kind] === key)
+          )
+            taken.add(fields["name"]);
+        }
+      }
+    }
+  }
+  work?.charge("indexSteps");
+  if (!taken.has(base)) return base;
+  let suffix = 2;
+  while (taken.has(`${base}${suffix}`)) {
+    work?.charge("indexSteps");
+    suffix += 1;
+  }
+  return `${base}${suffix}`;
 }
