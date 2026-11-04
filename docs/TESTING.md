@@ -120,8 +120,11 @@ sx-job submit --commit <main sha> --shards 16 --mem 6G --timeout 2h --campaign <
 and then over all records:
 
 ```shell
-node tests/families/shadow-classify.mjs <every shard's shadow.jsonl> --expect expect-<set>.jsonl... --out <folder> --gate
+node tests/families/shadow-classify.mjs <every shard's shadow.jsonl> --expect expect-corpus.jsonl \
+  --expect expect-fixture.jsonl --expect expect-copies.jsonl ... --out <folder> --gate
 ```
+
+with one `--expect` per set's manifest (the flag takes one file).
 
 For `corpus`, both commands also need `CASES_JSON=<cases.json>` before `node`, and the job `--data <cases.json>`.
 `env -u NODE_OPTIONS` keeps the queue's heap flag from overriding each route's `--memory`. `--demands 16` is the
