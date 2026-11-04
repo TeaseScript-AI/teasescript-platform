@@ -67,10 +67,6 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a node's path in the literal it is in, one per cell, as admission keeps (charged)",
   ],
-  "consumer.ts completedBelow split": [
-    1,
-    "the steps of a stopped store's destination counted from its obligation's text, not kept",
-  ],
   "consumer.ts coreFacts spread": [1, "a lookup of a place's element levels, not kept"],
   "consumer.ts expected spread": [1, "a lookup of a landing's level, not kept"],
   "consumer.ts fallbackSteps split": [

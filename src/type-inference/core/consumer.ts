@@ -994,10 +994,8 @@ function runtimeChecks(
       core.expected.set(call, type);
     }
   const stopped = answers.budget.exhausted !== null;
-  // each store's owed obligations, for the parts below its destination its own check does not reach (#1224); each
-  // stopped store whose completed check leaves its destination open, for the completed contracts below it
+  // each store's owed obligations, for the parts below its destination its own check does not reach (#1224)
   const atStore = new Map<Store, Obligation[]>();
-  const completedOpen = new Map<Store, Obligation>();
   for (const { obligation, kinds } of owed) {
     // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
     // every plan: no plan content (S3 §4); where a stopped decision left a store's own check against `unknown` (no
@@ -1009,11 +1007,7 @@ function runtimeChecks(
           ? index.findExpressionAt(obligation.site)
           : undefined;
       const owner = at === undefined ? undefined : index.storeOf(at);
-      if (owner === undefined) continue;
-      if (!contracts.completes(owner)) {
-        if (!completedOpen.has(owner)) completedOpen.set(owner, obligation);
-        continue;
-      }
+      if (owner === undefined || !contracts.completes(owner)) continue;
     }
     const expression = index.expressionAt(obligation.site);
     const store = index.storeOf(expression);
@@ -1041,13 +1035,6 @@ function runtimeChecks(
     );
     if (parts.length > 0) core.partChecks.set(store, parts);
   }
-  // a stopped store's check the receiving completion completed (#1526 phase C step 5) where its destination stays open:
-  // the completion's complete contracts below the destination, as the unstopped analysis owes them there
-  for (const [store, own] of completedOpen) {
-    if (checks.has(store) || core.partChecks.has(store)) continue;
-    const parts = completedBelow(answers, own);
-    if (parts.length > 0) core.partChecks.set(store, parts);
-  }
   return { checks, core, contracts: contracts.results };
 }
 
@@ -1071,45 +1058,6 @@ function partChecksOf(destination: string, obligations: readonly Obligation[]): 
         : partOf(destination, obligation.target.slice(destination.length + 1).split("."), type);
     if (part === null) continue;
     const key = JSON.stringify([part.path, part.type]);
-    if (made.has(key)) continue;
-    made.add(key);
-    out.push(part);
-  }
-  return out;
-}
-
-/**
- * The part checks of a stopped store whose completed check leaves its destination open (#1224): each complete contract
- * the receiving completion (#1526 phase C) holds at a path below the destination, one per path. The destination is the
- * one the store's own obligation (`own`) names, its place the one the completion's slot at the store's site receives at,
- * so nothing more is asked of the analysis.
- */
-function completedBelow(answers: Answers, own: Obligation): PartCheckPlan[] {
-  const above = own.target.split(".").length - 1;
-  const slot = answers.receiving.find(
-    ({ obligation }) =>
-      obligation.slot.site.file === own.site.file &&
-      obligation.slot.site.start === own.site.start &&
-      obligation.slot.site.end === own.site.end &&
-      obligation.path.length === above,
-  )?.obligation;
-  if (slot === undefined) return [];
-  const out: PartCheckPlan[] = [];
-  const made = new Set<string>();
-  for (const { obligation, result } of answers.receiving) {
-    if (
-      obligation.place !== slot.place ||
-      obligation.extent !== "complete" ||
-      obligation.path.length <= above ||
-      !slot.path.every((step, at) => obligation.path[at] === step) ||
-      result === null ||
-      "shape" in result ||
-      result.state !== "complete"
-    )
-      continue;
-    const part = partOf(own.target, obligation.path.slice(above), result.ref);
-    if (part === null) continue;
-    const key = JSON.stringify(part.path);
     if (made.has(key)) continue;
     made.add(key);
     out.push(part);
