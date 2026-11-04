@@ -312,6 +312,13 @@ stops area, `focused` the run before a review round there, `deep` a change to wh
 `bin/canaries.mjs <build> <out>` checks that 12 mutants of clean plans fail; `bin/shrink.mjs`, `bin/merge.mjs` (shards)
 and `bin/metrics.mjs` print their usage. The tool's own tests: `node --test tests/families/property/test/`.
 
+## Reading decision records
+
+A probe reads a compile's admission decision records with `decisionRecords` (`tests/helpers/type-core-oracles.ts`): one
+compile through the public route, its receiving completion included, each pass's records and each completion's apart.
+With `require` (`requireRecords` over a campaign's runs) it fails where no record of a kind was read: #1685's first
+debit probe read properties the records are not under and compared empty lists.
+
 ## Kept outside the repository
 
 The desktop corpus's kits and data, and their known problems, are indexed per area in `corpus/<area>.md` (`tooling`,
