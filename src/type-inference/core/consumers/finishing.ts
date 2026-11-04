@@ -1233,10 +1233,9 @@ function laterKeySources(walk: Consumers, key: Key, node: FlowNode): readonly It
 
 /**
  * A key's domain in the finishing path (S3 §5 revisions 14, 16): its finished contract, else its written or retained
- * admitted type, `STOPPED` where none decides it. One source for every reader after a stop: a receiver's read
- * (`finishingKeyRead`) and a label's step, which spells a dict's value `entry` (#1595).
+ * admitted type, `STOPPED` where none decides it: a receiver's read (`finishingKeyRead`).
  */
-export function keyDomain(walk: Consumers, key: Key): readonly Item[] {
+function keyDomain(walk: Consumers, key: Key): readonly Item[] {
   const { contract, program } = walk.pass;
   const found = walk.run(contract.contractOf(key));
   if (!found.some(unsettledItem)) return found;
@@ -1251,6 +1250,41 @@ export function keyDomain(walk: Consumers, key: Key): readonly Item[] {
   return tags.length === 0 || tags.includes("unknown")
     ? STOPPED
     : [...new Set(tags)].map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
+}
+
+/**
+ * After a program stop, the kinds a label's step is spelled from where the key's contract asked then is unsettled, and
+ * the proof they rest on (#1595, TABLE r4.322, the lead's ruling on its HEAD 0): the key's finished contract; else its
+ * written type; else, at a settled stop, what admission retained where that is a decision or a written kind (A1, A2,
+ * A4, a copy's source's among them), proved by the stopped analysis itself. Never an open answer (`unknown`, every kind
+ * fitting) nor a path no decision retains (a stopped one's): `null` there, and the label keeps its generic step.
+ */
+export function labelDomain(
+  walk: Consumers,
+  key: Key,
+): {
+  readonly kinds: readonly Item[];
+  readonly source: "contract" | "written" | "retained";
+} | null {
+  const { contract, program } = walk.pass;
+  const found = walk.run(contract.contractOf(key));
+  if (!found.some(unsettledItem)) return { kinds: found, source: "contract" };
+  const text = isKeyId(key) ? keyOfId(contract, key) : key;
+  const [place, path] = [keyPlace(text), keyPath(text)];
+  const written = writtenOf(program.place(place).kind);
+  const term = written === null ? null : termAt(written, path);
+  const decided =
+    term !== null
+      ? { tags: typeTags(term), source: "written" as const }
+      : walk.settled
+        ? { tags: walk.admission.retained(place, path)?.tags ?? [], source: "retained" as const }
+        : null;
+  if (decided === null || decided.tags.length === 0 || decided.tags.includes("unknown"))
+    return null;
+  return {
+    kinds: [...new Set(decided.tags)].map((tag) => makeItem(tag, null, { cert: "pos" })),
+    source: decided.source,
+  };
 }
 
 /**

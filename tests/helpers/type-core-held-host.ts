@@ -770,7 +770,10 @@ export interface CombinedStop {
   readonly checks: ReadonlyMap<string, "a" | "w" | "z">;
   /** Each accepted record by its code at its whole site (`code file:start:end`). */
   readonly records: ReadonlyMap<string, "a" | "w" | "z">;
-  /** #1595's named exception: the reference's checks and records the stop names by another label alone. */
+  /**
+   * The reference's checks the stop owes by a more precise label alone, as the natural analysis spells it
+   * (`provenRelabel`, TABLE r4.322), and the records that go with them.
+   */
   readonly relabelled: {
     readonly checks: ReadonlySet<string>;
     readonly records: ReadonlySet<string>;
@@ -1085,9 +1088,35 @@ export function combinedAnalyses(
   };
 }
 
-/** A check's `on` words with every dotted or indexed path left out (#1595: a label alone differs). */
-const withoutLabels = (on: string): string =>
-  on.replace(/[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[^\]\s]*\])+/g, "·");
+/**
+ * The owner's one accepted difference at a combined stop (TABLE r4.322, #1595): the stopped analysis owes the
+ * reference's check `u` under a more precise label than the reference's, which ran out of demand reading the key, where
+ * all three hold for the stopped check `x`:
+ * 1. the label follows from a proven type: the natural analysis (no demand, no stop) owes `x` exactly, label included;
+ * 2. the check, its location and its expected types are identical: kind, whole site, boundary and `against`;
+ * 3. no other difference is ignored: every other part equal, and the words `u`'s with only its label replaced by `x`'s.
+ * The stopped check accepted, else `undefined`.
+ */
+export function provenRelabel(
+  u: Obligation,
+  owed: readonly Obligation[],
+  natural: ReadonlySet<string>,
+): Obligation | undefined {
+  return owed.find(
+    (x) =>
+      x.target !== u.target &&
+      // (1)
+      natural.has(JSON.stringify(x)) &&
+      // (2)
+      x.kind === u.kind &&
+      siteKey(x.site) === siteKey(u.site) &&
+      x.boundary === u.boundary &&
+      JSON.stringify(x.against) === JSON.stringify(u.against) &&
+      // (3)
+      x.on === u.on.split(u.target).join(x.target) &&
+      JSON.stringify({ ...u, target: x.target, on: x.on }) === JSON.stringify(x),
+  );
+}
 
 /**
  * A combined stop's rule (S8, TABLE r4.285, r4.290 and its inventory). The demand-only run is the reference, recorded with
@@ -1106,8 +1135,8 @@ const withoutLabels = (on: string): string =>
  *   exactly its domain (their domains' intersection: checks on one value): the reference satisfied in other words;
  * - (z) a boundary against `unknown`, no plan content (S3 §4), nothing owed at its slot, where an undecided store record
  *   stands at the site of a store whose value holds the boundary's value (`holds`).
- * A record goes with its obligations, never one the natural analysis reports itself. A check the stop owes by another
- * label alone (its kind, whole site, domain and boundary, and its words but for their labels) is #1595's named exception.
+ * A record goes with its obligations, never one the natural analysis reports itself. A check the stop owes by a more
+ * precise label alone, the natural analysis's, is accepted (`provenRelabel`, TABLE r4.322).
  */
 export function combinedStop(reference: Answers, natural: Answers, stopped: Answers): CombinedStop {
   const [reads, finished] = [readsOf(reference), readsOf(stopped)];
@@ -1122,16 +1151,6 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
   const naturalTexts = new Set(natural.checks.map((check) => JSON.stringify(check)));
   let parsed: ReturnType<typeof syntaxOf> | undefined;
   const syntax = (): ReturnType<typeof syntaxOf> => (parsed ??= syntaxOf(reference));
-  const relabelledTo = (u: Obligation): boolean =>
-    owed.some(
-      (x) =>
-        x.kind === u.kind &&
-        siteKey(x.site) === siteKey(u.site) &&
-        x.boundary === u.boundary &&
-        domainText(domainOfCheck(x)) === domainText(domainOfCheck(u)) &&
-        (x.target !== u.target || x.on !== u.on) &&
-        withoutLabels(x.on) === withoutLabels(u.on),
-    );
   const classOf = (u: Obligation): "a" | "w" | "z" | "relabelled" | readonly string[] | null => {
     const text = JSON.stringify(u);
     if (owedTexts.has(text)) return null;
@@ -1194,7 +1213,7 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
       )
     )
       return "z";
-    return relabelledTo(u) ? "relabelled" : unanswered;
+    return provenRelabel(u, owed, naturalTexts) === undefined ? unanswered : "relabelled";
   };
   const checks = new Map<string, "a" | "w" | "z">();
   const coarse = { checks: new Map<string, readonly string[]>(), records: new Set<string>() };
@@ -1249,8 +1268,8 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
 /**
  * The mark-ownership rule at the analysis (S8): every check of the unstopped analysis the stop removed is a deferred
  * mark's obligation, and every warning or error it removed is a mark's record (its code at its site). At a combined stop
- * (`rule`), what the combined stop's rule accepts is owned too, and #1595's relabelled checks and records and the coarse
- * (a) reading's counted class (`CombinedStop.coarse`, with its open reads' keys) are named.
+ * (`rule`), what the combined stop's rule accepts is owned too (a proven relabel's checks and records among them,
+ * TABLE r4.322), and the coarse (a) reading's counted class (`CombinedStop.coarse`, with its open reads' keys) is named.
  */
 function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): string[] {
   const marks = stopped.budget.deferred;
@@ -1259,9 +1278,13 @@ function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): s
   const records = new Set([...stopped.diagnostics, ...marks].map(recordKey));
   const problems: string[] = [];
   for (const check of unstopped.checks.map((each) => JSON.stringify(each)))
-    if (kept.has(check) || owned.has(check) || rule?.checks.has(check)) continue;
-    else if (rule?.relabelled.checks.has(check))
-      problems.push(`exception #1595 relabelled check ${check}`);
+    if (
+      kept.has(check) ||
+      owned.has(check) ||
+      rule?.checks.has(check) ||
+      rule?.relabelled.checks.has(check)
+    )
+      continue;
     else if (rule?.coarse.checks.has(check))
       problems.push(
         `exception coarse(a) rejection check ${check} open ${rule.coarse.checks.get(check)!.join(" ")}`,
@@ -1269,10 +1292,14 @@ function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): s
     else problems.push(`unowned check ${check}`);
   for (const d of unstopped.diagnostics) {
     const record = recordKey(d);
-    if (d.kind === "budget" || records.has(record) || rule?.records.has(record)) continue;
-    if (rule?.relabelled.records.has(record))
-      problems.push(`exception #1595 relabelled record ${recordOf(d)}`);
-    else if (rule?.coarse.records.has(record))
+    if (
+      d.kind === "budget" ||
+      records.has(record) ||
+      rule?.records.has(record) ||
+      rule?.relabelled.records.has(record)
+    )
+      continue;
+    if (rule?.coarse.records.has(record))
       problems.push(`exception coarse(a) rejection record ${recordOf(d)}`);
     else problems.push(`unowned record ${recordOf(d)}`);
   }

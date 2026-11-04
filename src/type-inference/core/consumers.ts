@@ -58,7 +58,7 @@ import {
 } from "./contract-descriptors.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
-import { finishedItems, finishingRead, keyDomain } from "./consumers/finishing.js";
+import { finishedItems, finishingRead, labelDomain } from "./consumers/finishing.js";
 import { freshStores, ingressMark } from "./consumers/fresh.js";
 import { mixed, mixedChoices, mixedJoin } from "./consumers/mixed.js";
 import type {
@@ -465,12 +465,12 @@ export class Consumers {
   }
 
   /**
-   * After a program stop, a key's kinds as the finishing path's domains give them (`keyDomain`: its finished contract,
-   * else its written or retained type), else `null`: a label's step reads it where the contract asked after the stop is
-   * unsettled, as the unstopped label spells it (#1595).
+   * After a program stop, the kinds a label's step reads of a key whose contract asked then is unsettled, from a proof
+   * the stopped analysis holds (`labelDomain`: its finished contract, its written type, a retained decision), else
+   * `null`: the label keeps its generic step (#1595).
    */
   public stoppedDomain(key: Key): readonly Item[] | null {
-    return this.pass.program.work.stopped === null ? null : keyDomain(this, key);
+    return this.pass.program.work.stopped === null ? null : (labelDomain(this, key)?.kinds ?? null);
   }
 
   /**

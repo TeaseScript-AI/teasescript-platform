@@ -39,9 +39,11 @@ import {
 import {
   FRONTIER_COPIES,
   FRONTIER_DEPTH,
+  labelDomain,
   withFrontierBound,
   type FrontierRead,
 } from "../src/type-inference/core/consumers/finishing.js";
+import { keyOf } from "../src/type-inference/core/definitions.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { CoreProgram, propertyStep } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -52,6 +54,7 @@ import {
   type ProofDemand,
 } from "../src/type-inference/core/solver.js";
 import { REASON, STOPPED, type Item } from "../src/type-inference/core/items.js";
+import type { Obligation } from "../src/type-inference/core/result.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { completedCore, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
@@ -68,6 +71,7 @@ import {
   heldStops,
   heldUnstopped,
   HELD_MODES,
+  provenRelabel,
   runProblems,
   randomCopyGraph,
   topologySources,
@@ -5599,4 +5603,90 @@ test("a read its one holder's source answers stops where main's does at a small 
       const set = stopSet([{ path: "main.tease", source }], mode, globals, 256);
       assert.deepEqual(set?.stops, stops[index], `${source}\nmode ${index}`);
     });
+});
+
+/**
+ * The owner's one accepted relabel at a combined stop (TABLE r4.322, #1595), each of its three conditions alone refusing
+ * it: a stopped check under the natural analysis's more precise label is accepted for the reference's under the generic
+ * one; refused where the natural analysis does not owe it (1), where the check, its location or its expected types differ
+ * (2), and where anything but the label differs, in the words or elsewhere (3).
+ */
+test("a combined stop's more precise label is accepted only as the owner's three conditions allow (#1595)", () => {
+  const site = { file: 0, start: 40, end: 49 };
+  const u: Obligation = {
+    kind: "copy-type",
+    target: "build.result.element",
+    against: ["integer"],
+    on: "validate external data entering build.result.element against integer",
+    site,
+    boundary: true,
+  };
+  const x: Obligation = {
+    ...u,
+    target: "build.result.entry",
+    on: "validate external data entering build.result.entry against integer",
+  };
+  const natural = (...checks: Obligation[]) =>
+    new Set(checks.map((check) => JSON.stringify(check)));
+  assert.equal(provenRelabel(u, [x], natural(x)), x);
+  // (1) the natural analysis spells it otherwise, or not at all: no proven type behind the label
+  assert.equal(provenRelabel(u, [x], natural(u)), undefined);
+  // (2) another check, location or expected types under the label
+  for (const other of [
+    { ...x, kind: "integer-check" as const },
+    { ...x, site: { ...site, end: 50 } },
+    { ...x, boundary: false },
+    { ...x, against: ["number" as const] },
+  ])
+    assert.equal(provenRelabel(u, [other], natural(other)), undefined, JSON.stringify(other));
+  // (3) words that differ beyond the label
+  const worded = {
+    ...x,
+    on: "validate external data entering build.result.entry against a whole number",
+  };
+  assert.equal(provenRelabel(u, [worded], natural(worded)), undefined);
+});
+
+/**
+ * After a program stop a label's step is spelled from a proof the stopped analysis holds (`labelDomain`, the lead's ruling
+ * on #1595's HEAD 0): never from an open retained answer. A host value's binding, whose admitted type every kind fits,
+ * read at every settled stop of a real run where its contract asked then is unsettled, four modes: no label domain.
+ */
+test("a label's step after a stop never rests on an open retained answer (#1595)", () => {
+  const source = 'let x = hostValue\nsay "BEFORE"\nsay "${x}"\nsay "AFTER"\nexit\n';
+  const c: HeldCase = { name: "an open retained answer", source, slice: true, values: [] };
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"])!;
+  let open = 0;
+  for (const mode of HELD_MODES)
+    for (const { allowance } of heldStops(c, mode)) {
+      let walk: Consumers | undefined;
+      const check = Consumers.prototype.check;
+      Consumers.prototype.check = function (this: Consumers) {
+        walk = this;
+        return check.call(this);
+      };
+      try {
+        mode.run(() => withTestAllowance(allowance, () => analyseCore(request)));
+      } finally {
+        Consumers.prototype.check = check;
+      }
+      if (!walk!.settled) continue;
+      const place = walk!.pass.program.places.find(
+        (each) => each.kind.kind === "binding" && each.kind.name === "x",
+      )!.id;
+      const { work } = walk!.pass.program;
+      work.apart(() => {
+        const contract = walk!.run(walk!.pass.contract.contractOf(keyOf(place, [])));
+        const retained = walk!.admission.retained(place, []);
+        if (contract.some((item) => item.tag === "unknown") && retained?.tags.includes("unknown"))
+          open += 1;
+        const found = labelDomain(walk!, keyOf(place, []));
+        assert.ok(
+          found === null || !found.kinds.some((item) => item.tag === "unknown"),
+          `${mode.name} @${allowance}: ${JSON.stringify(found)}`,
+        );
+      });
+    }
+  // (the source reaches the open answer: the test is not vacuous)
+  assert.ok(open > 0);
 });
