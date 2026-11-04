@@ -494,11 +494,11 @@ test("every slot a run includes is one its run read", () => {
 });
 
 test("every producing read in the contract layer passes a flow, follows an inclusion or is classified", () => {
-  // (the inclusion matrix in code, by the type checker: every call in the contract layer whose type is a `Work` of
-  // items (a producing method, helper, alias or callback, however spelled), unless it only transfers one made in its
-  // arguments, and every yield of a demand, passes a sink (a `FlowSink` or the run's `"run"`) at a sink parameter,
-  // follows a sink's `include` of the same key in its own function, or carries its class (`// #1668: <class>`) on the
-  // line before or leading its statement, so a new read cannot go unclassified)
+  // (the inclusion matrix in code, by the type checker and symbol identity: every call in the contract layer whose
+  // result is a `Work` of items or of items with a proof (`Item` itself, however aliased or spelled), unless it is the
+  // solver's `inline` transfer of the read in its argument, and every yield of a demand, passes a sink (the layer's
+  // `FlowSink`, or the run's `"run"`) at a sink parameter, follows `FlowSink.include` of the same key in its own
+  // function, or carries its class (`// #1668: <class>`) on the line before or leading its statement)
   const project = new Project({
     tsConfigFilePath: join(process.cwd(), "tsconfig.json"),
     skipAddingFilesFromTsConfig: true,
@@ -509,6 +509,24 @@ test("every producing read in the contract layer passes a flow, follows an inclu
   project.resolveSourceFileDependencies();
   const program = project.getProgram().compilerObject;
   const checker = program.getTypeChecker();
+  const core = (name: string) =>
+    program.getSourceFile(join(process.cwd(), "src/type-inference/core", name))!;
+  // (the declarations the forms are bound to, by their symbols)
+  const declared = (file: ts.SourceFile, name: string): ts.Symbol => {
+    for (const statement of file.statements)
+      if (
+        (ts.isInterfaceDeclaration(statement) ||
+          ts.isClassDeclaration(statement) ||
+          ts.isFunctionDeclaration(statement)) &&
+        statement.name?.text === name
+      )
+        return checker.getSymbolAtLocation(statement.name)!;
+    throw new Error(`no ${name}`);
+  };
+  const item = declared(core("items.ts"), "Item");
+  const flowSink = declared(core("contract/contributions.ts"), "FlowSink");
+  const include = flowSink.members!.get(ts.escapeLeadingUnderscores("include"))!;
+  const inline = declared(core("solver.ts"), "inline");
   const bare = (expression: ts.Expression): ts.Expression => {
     let at = expression;
     while (
@@ -529,11 +547,23 @@ test("every producing read in the contract layer passes a flow, follows an inclu
     for (let at = node.parent; at !== undefined; at = at.parent) if (functionLike(at)) return at;
     return null;
   };
-  const text = (type: ts.Type) =>
-    checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation);
-  // (a `Work`'s result, from its alias or its generator's type reference)
+  const parts = (type: ts.Type): readonly ts.Type[] => (type.isUnion() ? type.types : [type]);
+  const original = (symbol: ts.Symbol | undefined): ts.Symbol | undefined =>
+    symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0
+      ? checker.getAliasedSymbol(symbol)
+      : symbol;
+  // (a list of items: an array whose element is `Item`; or what holds one as its `items`)
+  const items = (type: ts.Type): boolean =>
+    parts(type).some((part) => {
+      const element = checker.isArrayLikeType(part)
+        ? checker.getIndexTypeOfType(part, ts.IndexKind.Number)
+        : undefined;
+      if (element !== undefined) return original(element.getSymbol()) === item;
+      const held = part.getProperty("items");
+      return held !== undefined && items(checker.getTypeOfSymbol(held));
+    });
+  // (a `Work`'s result: the generator's return type, `Work<T>` being a `Generator` of `T`)
   const resultOf = (type: ts.Type): ts.Type | undefined => {
-    if (type.aliasSymbol?.getName() === "Work") return type.aliasTypeArguments?.[0];
     if (type.getSymbol()?.getName() !== "Generator" || !(type.flags & ts.TypeFlags.Object))
       return undefined;
     // EVIDENCE: the Object flag tested above marks the TypeScript checker's ObjectType.
@@ -545,18 +575,34 @@ test("every producing read in the contract layer passes a flow, follows an inclu
   const producing = (call: ts.CallExpression): ts.Signature | undefined => {
     const signature = checker.getResolvedSignature(call);
     const result = signature && resultOf(checker.getReturnTypeOfSignature(signature));
-    return result !== undefined &&
-      /(?:^|\| )(?:readonly )?Item\[\](?:$| \|)|^Proven/.test(text(result))
-      ? signature
-      : undefined;
+    return result !== undefined && items(result) ? signature : undefined;
   };
+  // (the layer's sink, by its class's symbol, or the run's `"run"`)
   const sink = (type: ts.Type): boolean =>
-    (type.isUnion() ? type.types : [type]).some(
+    parts(type).some(
       (part) =>
-        part.getSymbol()?.getName() === "FlowSink" ||
-        (part.isStringLiteral() && part.value === "run"),
+        original(part.getSymbol()) === flowSink || (part.isStringLiteral() && part.value === "run"),
     );
-  const symbolAt = (expression: ts.Expression) => checker.getSymbolAtLocation(bare(expression));
+  const declarationOf = (call: ts.CallExpression): ts.Symbol | undefined => {
+    const declaration = checker.getResolvedSignature(call)?.getDeclaration();
+    const name = declaration?.name;
+    return name === undefined ? undefined : original(checker.getSymbolAtLocation(name));
+  };
+  // (a key's identity: an identifier's symbol, or `<receiver>.key`'s receiver)
+  const ids = new Map<ts.Symbol, number>();
+  const idOf = (symbol: ts.Symbol | undefined): string | undefined => {
+    if (symbol === undefined) return undefined;
+    if (!ids.has(symbol)) ids.set(symbol, ids.size);
+    return String(ids.get(symbol));
+  };
+  const keyOfExpression = (expression: ts.Expression): string | undefined => {
+    const at = bare(expression);
+    if (ts.isPropertyAccessExpression(at) && at.name.text === "key") {
+      const receiver = idOf(checker.getSymbolAtLocation(bare(at.expression)));
+      return receiver === undefined ? undefined : `${receiver}.key`;
+    }
+    return ts.isIdentifier(at) ? idOf(checker.getSymbolAtLocation(at)) : undefined;
+  };
   const unclassified: string[] = [];
   let reads = 0;
   for (const file of files) {
@@ -574,66 +620,58 @@ test("every producing read in the contract layer passes a flow, follows an inclu
       }
       return false;
     };
-    // (every sink's `include`: its function, where it stands, its key's symbol, or `d`'s of `d.key`)
+    // (every `FlowSink.include` call: its function, where it stands, its key)
     const includes: {
       readonly owner: ts.Node | null;
       readonly at: number;
-      readonly key: ts.Symbol | undefined;
-      readonly of: ts.Symbol | undefined;
+      readonly key: string | undefined;
     }[] = [];
     const collect = (node: ts.Node): void => {
-      if (ts.isCallExpression(node)) {
-        const callee = bare(node.expression);
-        const key = node.arguments[0];
-        if (
-          ts.isPropertyAccessExpression(callee) &&
-          callee.name.text === "include" &&
-          key !== undefined &&
-          sink(checker.getTypeAtLocation(callee.expression))
-        ) {
-          const named = bare(key);
-          includes.push({
-            owner: ownerOf(node),
-            at: node.getStart(tree),
-            key: symbolAt(named),
-            of:
-              ts.isPropertyAccessExpression(named) && named.name.text === "key"
-                ? symbolAt(named.expression)
-                : undefined,
-          });
-        }
-      }
+      if (
+        ts.isCallExpression(node) &&
+        node.arguments[0] !== undefined &&
+        declarationOf(node) === include
+      )
+        includes.push({
+          owner: ownerOf(node),
+          at: node.getStart(tree),
+          key: keyOfExpression(node.arguments[0]),
+        });
       ts.forEachChild(node, collect);
     };
     collect(tree);
-    // (a demand's key symbols: its object's `key`, or a variable's initializer's)
-    const keysOf = (expression: ts.Expression): ts.Symbol[] => {
+    // (a demand's key: its object's `key`, or a variable's initializer's; and `<demand>.key` itself)
+    const keysOf = (expression: ts.Expression): string[] => {
       const at = bare(expression);
       if (ts.isObjectLiteralExpression(at)) {
         for (const property of at.properties) {
           if (ts.isShorthandPropertyAssignment(property) && property.name.text === "key") {
-            const value = checker.getShorthandAssignmentValueSymbol(property);
+            const value = idOf(checker.getShorthandAssignmentValueSymbol(property));
             return value === undefined ? [] : [value];
           }
           if (ts.isPropertyAssignment(property) && property.name.getText(tree) === "key") {
-            const value = symbolAt(property.initializer);
+            const value = keyOfExpression(property.initializer);
             return value === undefined ? [] : [value];
           }
         }
         return [];
       }
-      const declaration = symbolAt(at)?.valueDeclaration;
-      return declaration !== undefined &&
+      if (!ts.isIdentifier(at)) return [];
+      const own = idOf(checker.getSymbolAtLocation(at));
+      const declaration = checker.getSymbolAtLocation(at)?.valueDeclaration;
+      return [
+        ...(own === undefined ? [] : [`${own}.key`]),
+        ...(declaration !== undefined &&
         ts.isVariableDeclaration(declaration) &&
         declaration.initializer !== undefined
-        ? keysOf(declaration.initializer)
-        : [];
+          ? keysOf(declaration.initializer)
+          : []),
+      ];
     };
     const visit = (node: ts.Node): void => {
       let read: ts.Node | null = null;
       let passed = false;
-      let keys: ts.Symbol[] = [];
-      let demands: ts.Symbol[] = [];
+      let keys: string[] = [];
       if (
         ts.isYieldExpression(node) &&
         node.asteriskToken === undefined &&
@@ -643,17 +681,11 @@ test("every producing read in the contract layer passes a flow, follows an inclu
         if (type.getProperty("make") !== undefined && type.getProperty("key") !== undefined) {
           read = node;
           keys = keysOf(node.expression);
-          const demand = symbolAt(node.expression);
-          demands = demand === undefined ? [] : [demand];
         }
       } else if (ts.isCallExpression(node)) {
         const signature = producing(node);
-        // (a call only transferring one made in its arguments, `inline(…)`: that call is the read)
-        const transfers = node.arguments.some((argument) => {
-          const made = bare(argument);
-          return ts.isCallExpression(made) && producing(made) !== undefined;
-        });
-        if (signature !== undefined && !transfers) {
+        // (the solver's `inline` only transfers the read made in its argument: that call is the read)
+        if (signature !== undefined && declarationOf(node) !== inline) {
           read = node;
           const parameters = signature.getParameters();
           passed = node.arguments.some((argument, at) => {
@@ -663,7 +695,7 @@ test("every producing read in the contract layer passes a flow, follows an inclu
             return (
               sink(checker.getTypeOfSymbolAtLocation(parameter, node)) &&
               sink(given) &&
-              text(given) !== "null"
+              !(given.flags & ts.TypeFlags.Null)
             );
           });
           const callee = bare(node.expression);
@@ -672,10 +704,8 @@ test("every producing read in the contract layer passes a flow, follows an inclu
             ts.isPropertyAccessExpression(callee) &&
             callee.name.text === "proven" &&
             proved !== undefined
-          ) {
-            const demand = symbolAt(proved);
-            demands = demand === undefined ? [] : [demand];
-          }
+          )
+            keys = keysOf(proved);
         }
       }
       if (read !== null) {
@@ -683,11 +713,11 @@ test("every producing read in the contract layer passes a flow, follows an inclu
         const owner = ownerOf(read);
         const start = read.getStart(tree);
         const included = includes.some(
-          (include) =>
-            include.owner === owner &&
-            include.at < start &&
-            ((include.key !== undefined && keys.includes(include.key)) ||
-              (include.of !== undefined && demands.includes(include.of))),
+          (one) =>
+            one.owner === owner &&
+            one.at < start &&
+            one.key !== undefined &&
+            keys.includes(one.key),
         );
         if (!passed && !included && !tagged(read))
           unclassified.push(
