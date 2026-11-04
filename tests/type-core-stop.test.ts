@@ -5731,6 +5731,11 @@ test("a combined stop's more precise label is accepted only as the owner's three
     provenRelabel(check("xs.element"), [check("xs[0]")], named(["xs[0]"]), untyped),
     undefined,
   );
+  // (an `entry` only for an element step, never for a property or a derived list, whatever the natural analysis names)
+  assert.equal(
+    provenRelabel(check("xs.values"), [check("xs.entry")], named(["xs.entry"]), untyped),
+    undefined,
+  );
   // (the label's text alone, at another value's site: a parameter of another function, a property spelled as a step
   // beside it in one walk unit, Codex r1's and r2's B1 on #1687)
   assert.equal(provenRelabel(u, [x], named(["build.result.entry"], elsewhere), untyped), undefined);
