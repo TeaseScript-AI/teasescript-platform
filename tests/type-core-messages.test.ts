@@ -1297,7 +1297,15 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
       "TSV043 substring number",
       'let n = 1.5\nsay "abc".substring(n)\n',
       [
-        "E TSV043: substring() needs a whole number (integer) for 'start', but 'n' is a number. Convert the number with the toInteger function, which drops the fraction.",
+        "E TSV043: substring() needs a whole number (integer) for 'start', but 'n' is a number that can have decimals. Convert the number with the toInteger function, which drops the fraction.",
+      ],
+    ],
+    [
+      // (a place written `number` is no whole number whatever it holds, as at every whole-number use: #1173)
+      "TSV043 repeat written number",
+      'let n: number = 1\nsay "abc".repeat(n)\n',
+      [
+        "E TSV043: repeat() needs a whole number (integer) for 'count', but 'n' is a number that can have decimals. Convert the number with the toInteger function, which drops the fraction.",
       ],
     ],
     [

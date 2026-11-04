@@ -50,6 +50,7 @@ import {
   SORT_ONE_TYPE,
   stablePath,
   typeText,
+  wholeDescribed,
 } from "./words.js";
 import {
   codeAt,
@@ -890,9 +891,8 @@ export function errorSentence(
       );
     }
     case "count":
-      // (where a whole number is required, a `number` is "a number that can have decimals": DIAGNOSTICS.md)
       return (
-        `${operandRule(rule, text)}, but '${text}' is ${described(kinds).replace(/\ba number\b/, "a number that can have decimals")}.` +
+        `${operandRule(rule, text)}, but '${text}' is ${wholeDescribed(kinds)}.` +
         (kinds.includes("number") ? ROUND_COUNT_FIX : " Use a whole number here.")
       );
     case "boolean":
@@ -900,7 +900,7 @@ export function errorSentence(
     case "key":
       return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${keyFix(text, kinds, site, diagnosed)}`;
     case "argument":
-      return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${argumentFixOf(rule, kinds, text)}`;
+      return `${operandRule(rule, text)}, but '${text}' is ${rule.takes === "integer" ? wholeDescribed(kinds) : described(kinds)}.${argumentFixOf(rule, kinds, text)}`;
     case "elements":
       return rule.families.length > 1
         ? `${SORT_ONE_TYPE}, but '${rule.receiver}' holds ${mixedTypes(rule.families)}.`

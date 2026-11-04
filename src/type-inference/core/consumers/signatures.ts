@@ -21,7 +21,7 @@ import { offendingKinds, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
 import { hasMethod } from "./kinds.js";
 import { domainItems, keyLabel, ownSpan, quietKinds, receiverKinds, shownLabel } from "./names.js";
-import { consume } from "./operands.js";
+import { consume, writtenNumberUse } from "./operands.js";
 import { obligation, warning } from "./warnings.js";
 
 // C13 (TABLE C13, S3 §1): a built-in method's arguments and the elements it reads, against what its contract takes.
@@ -124,6 +124,19 @@ export function methodArguments(
     // (the first contract's word for what it takes, which a fix converts to)
     const [kind, taken] = taking[0]!;
     const parameter = parameterName(kind, name, position);
+    const rule: DiagnosticRule = {
+      rule: "argument",
+      callee: name,
+      parameter,
+      domain,
+      takes: taken!,
+    };
+    // (a whole number's argument: C2's rule for a place written `number`, as at every whole-number use)
+    if (
+      taking.every(([, each]) => each === "integer") &&
+      writtenNumberUse(walk, argument, c.site, "operator", rule)
+    )
+      return;
     consume(
       walk,
       argument,
@@ -131,7 +144,7 @@ export function methodArguments(
       c.site,
       new Set(domain),
       `the ${parameter} of ${name}`,
-      { rule: "argument", callee: name, parameter, domain, takes: taken! },
+      rule,
       domain,
     );
   });
