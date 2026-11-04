@@ -155,18 +155,21 @@ export function edgesOf(
   const out: Inclusion[] = [];
   // (a path's qualifiers as interned links, each to the list before it: a step adds only its inclusion's own, so a
   // deep path is never copied per step, and equal lists are one link. A slot reached under other qualifiers is
-  // followed again under them: bounded by the qualifier lists the code makes)
-  const links: { readonly before: number; readonly qualifier: Qualifier }[] = [];
-  const linkOf = new Map<string, number>();
+  // followed again under them: bounded by the qualifier lists the code makes. No text is made for either)
+  const links: {
+    readonly before: number;
+    readonly qualifier: Qualifier | null;
+    readonly next: Map<Qualifier, number>;
+  }[] = [{ before: -1, qualifier: null, next: new Map() }];
   const extended = (before: number, qualifiers: readonly Qualifier[]): number => {
     let at = before;
     for (const qualifier of qualifiers) {
-      const name = `${at} ${qualifier}`;
-      let next = linkOf.get(name);
+      const from = links[at]!.next;
+      let next = from.get(qualifier);
       if (next === undefined) {
         next = links.length;
-        links.push({ before: at, qualifier });
-        linkOf.set(name, next);
+        links.push({ before: at, qualifier, next: new Map() });
+        from.set(qualifier, next);
       }
       at = next;
     }
@@ -174,12 +177,13 @@ export function edgesOf(
   };
   const listOf = (at: number): Qualifier[] => {
     const list: Qualifier[] = [];
-    for (let link = at; link >= 0; link = links[link]!.before) list.push(links[link]!.qualifier);
+    for (let link = at; link > 0; link = links[link]!.before) list.push(links[link]!.qualifier!);
     return list.reverse();
   };
-  const seen = new Set<string>([`${start}\u0000-1`]);
+  // (each slot followed, with the links it was followed under)
+  const seen = new Map<string, Set<number>>([[start, new Set([0])]]);
   const todo: { readonly slot: string; readonly qualifiers: number }[] = [
-    { slot: start, qualifiers: -1 },
+    { slot: start, qualifiers: 0 },
   ];
   for (let next = todo.pop(); next !== undefined; next = todo.pop()) {
     work.shared(() => work.charge("structureSteps"));
@@ -197,9 +201,10 @@ export function edgesOf(
         out.push({ ...inclusion, qualifiers: list });
         continue;
       }
-      const visit = `${inclusion.slot}\u0000${qualifiers}`;
-      if (seen.has(visit)) continue;
-      seen.add(visit);
+      const under = seen.get(inclusion.slot) ?? new Set<number>();
+      if (under.has(qualifiers)) continue;
+      under.add(qualifiers);
+      seen.set(inclusion.slot, under);
       todo.push({ slot: inclusion.slot, qualifiers });
     }
   }

@@ -414,14 +414,16 @@ function* contractIteration(
   const kinds = flow?.child() ?? null;
   let unknowns = false;
   for (const item of withoutEmpty(yield* contract.contractOfValue(owner, kinds))) {
-    if (item.tag === "list" || item.tag === "set")
-      out.push(
-        ...belowSelected(
-          yield* contract.contractOfValueAt(owner, joinSteps(["element"], rest), flow),
-          rest,
-        ),
+    if (item.tag === "list" || item.tag === "set") {
+      // (#1668: included where its items survive the selection: an empty collection's element puts none in)
+      const element = flow?.child() ?? null;
+      const selected = belowSelected(
+        yield* contract.contractOfValueAt(owner, joinSteps(["element"], rest), element),
+        rest,
       );
-    else if ((item.tag === "dict" || kindElement(item.tag) !== undefined) && rest.length === 0)
+      if (element !== null && selected.length > 0) flow!.attach(element);
+      out.push(...selected);
+    } else if ((item.tag === "dict" || kindElement(item.tag) !== undefined) && rest.length === 0)
       out.push(
         carried(makeItem(item.tag === "dict" ? "string" : kindElement(item.tag)!, item.writer), [
           item,

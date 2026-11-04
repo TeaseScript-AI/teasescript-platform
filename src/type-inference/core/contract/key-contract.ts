@@ -212,7 +212,7 @@ export function* keyContract(
   if (program.cellOwner.has(place) || program.hasOf.has(place))
     return yield* contract.contractOfLiteral(place, stepsRest(path), flow);
   // F19a: a reference's member is opaque, whatever is stored through it
-  const receiver = yield* receiverWalk(contract, walk);
+  const receiver = yield* receiverWalk(contract, walk, flow);
   if (receiver.reference) return [unknownItem(REASON.opaque)];
   const written = writtenOf(found.kind);
   // F2, F22: the written type is the contract; the stores keep M. §3.2 (r4.9): it fixes the kinds, never removes the
@@ -241,6 +241,7 @@ export function* keyContract(
   }
   const along = yield* contractAlong(contract, place, path, 0, receiver.floor, walk.prefix, flow);
   // below a prefix without a structure, what its unknowns and references hold there
+  if (receiver.kept !== null) flow!.attach(receiver.kept, "belowReceiver");
   return mergeItems([...along, ...receiver.below], program.scope);
 }
 
@@ -446,24 +447,34 @@ export function* refReceiver(contract: Contract, asked: Key): Work<boolean> {
 function* receiverWalk(
   contract: Contract,
   walk: KeyWalk,
-): Work<{ readonly reference: boolean; readonly floor: number; readonly below: readonly Item[] }> {
+  flow: FlowSink | null = null,
+): Work<{
+  readonly reference: boolean;
+  readonly floor: number;
+  readonly below: readonly Item[];
+  readonly kept: FlowSink | null;
+}> {
   const { path } = walk;
   let floor = -1;
   let below: readonly Item[] = [];
+  // (#1668: each prefix's receiver decision read to decide; the floor's, whose unknowns `below` holds for the path
+  // below it, staged where it holds one (`kept`), for a reader that includes `below`)
+  let kept: FlowSink | null = null;
   for (let length = 0; length < path.length; length += 1) {
     contract.pass.program.work.charge("invSteps");
-    // #1668: R, a receiver decision
-    const items = yield* contract.receiverKinds(walk.prefix(length));
-    if (heldReference(items)) return { reference: true, floor, below };
+    const staged = flow?.child() ?? null;
+    const items = yield* contract.receiverKinds(walk.prefix(length), staged);
+    if (heldReference(items)) return { reference: true, floor, below, kept: null };
     if (!items.some(holdsBelow)) {
       floor = length;
       below = [
         ...items.filter((item) => item.tag === "unknown").map(belowUnknown),
         ...(items.some((item) => REFERENCE.has(item.tag)) ? [unknownItem(REASON.opaque)] : []),
       ];
+      kept = items.some((item) => item.tag === "unknown") ? staged : null;
     }
   }
-  return { reference: false, floor, below };
+  return { reference: false, floor, below, kept };
 }
 
 /** A receiver's contract as a demand of its own, with F19a's decision whether it is a reference's (r4.44). */

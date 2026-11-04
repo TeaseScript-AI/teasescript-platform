@@ -17,9 +17,12 @@ import {
   WorkLedger,
 } from "../src/type-inference/core/budget.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
+import { makeItem, type Item } from "../src/type-inference/core/items.js";
+import { Solver, type Demand, type Work } from "../src/type-inference/core/solver.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { checkedResult } from "../src/type-inference/core/consumer.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { itemScope } from "./helpers/type-core-items.js";
 import { MODES, inMode, type Mode } from "./helpers/type-core-oracles.js";
 
 // #1668: which keys' answers a key's contract includes in a settled pass, recorded only where a pass asks for it.
@@ -194,6 +197,16 @@ test("each key's edges are the keys its contract includes: copies, written place
     ['let a = hostValue\nfor b in a {\n  say "${b}"\n}\nexit\n', [["b", [], ["a"]]]],
     ['let a = hostValue\nlet b = a.remove("k")\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
     ['let a = hostValue\nlet b = a.startsWith("k")\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
+    // (an element an empty collection holds none of, which the selection removes: no key of it; a held one's its key)
+    ['let a = []\nlet b = a.get(0, default: 1)\nsay "${b}"\nexit\n', [["b", [], []]]],
+    ['let a = []\nfor b in a {\n  say "${b}"\n}\nexit\n', [["b", [], []]]],
+    ['let a = dict {}\nlet b = a.remove("k")\nsay "${b}"\nexit\n', [["b", [], []]]],
+    [
+      'let a = dict {"k": hostValue}\nlet b = a.remove("k")\nsay "${b}"\nexit\n',
+      [["b", [], ["a.element"]]],
+    ],
+    // (below an unknown, its unknown: the unknown's key)
+    ['let a = hostValue\nlet b = a.f\nsay "${b}"\nexit\n', [["a", ["f"], ["a"]]]],
   ];
   for (const mode of MODES)
     for (const [source, asks] of cases) {
@@ -295,6 +308,52 @@ test("a snapshot charges each slot it visits, each inclusion it follows and each
     }
 });
 
+test("a decision's copy of its run's flow is charged with its qualifiers", () => {
+  // (a decided demand whose run includes one slot: its sink's inclusion one unit, the decision's qualified copy two;
+  // nothing else of the run differs with recording on)
+  const units = (record: boolean): number => {
+    const scope = itemScope();
+    const solve = () => {
+      const solver = new Solver(scope);
+      const read: Demand = {
+        key: "read",
+        kind: "value",
+        file: 0,
+        offset: 0,
+        make: function* (): Work<readonly Item[]> {
+          return [makeItem("integer")];
+        },
+      };
+      const decided: Demand = {
+        key: "decided",
+        kind: "value",
+        file: 0,
+        offset: 1,
+        make: function* (): Work<readonly Item[]> {
+          solver.sink()?.include(read.key, "value");
+          return yield read;
+        },
+        decision: {
+          choose: () => "own",
+          answer: (_choice, input) => input,
+          flow: (_choice, inclusions) =>
+            inclusions.map((inclusion) => ({ ...inclusion, qualifiers: ["defaultChoice"] })),
+        },
+      };
+      solver.run(
+        (function* (): Work<readonly Item[]> {
+          return yield decided;
+        })(),
+      );
+      if (record) assert.equal(solver.flowOf("decided")?.[0]?.qualifiers[0], "defaultChoice");
+    };
+    if (record) withContributions(solve);
+    else solve();
+    return scope.work.total;
+  };
+  assert.equal(units(true) - units(false), 3);
+});
+
 test("a cycle of copies publishes each member's edges once its component is solved", () => {
   for (const mode of MODES) {
     const pass = analysed('let a = 1\nlet b = a\na = b\nsay "${a} ${b}"\nexit\n', mode, true).pass;
@@ -342,7 +401,7 @@ test("every producing read in the contract layer passes a flow, follows an inclu
   const method =
     /\b(?:contract|self|this|c)\.(contractOf|contractOfValueAt|contractOfValue|subAt|contractOfLiteral|entryAt|receiverKinds|valueReceiver|severalElements|keyThrough|indexItems|gathered|defaultKinds|onlyNull|expectedOf|contractRead)\(|\.proven\(|yield (?:positioned|projected)\(/;
   const helper = /yield\*\s+(?:inline\()?(\w+)\(/;
-  const raw = /(?<![\w*])yield\s+(?:\{|demand\b)/;
+  const raw = /(?<![\w*])yield\s+(?!\*)\S/;
   const argument =
     /[(,]\s*(?:flow|staged|read|lead|source|literal|whole|element|stored|below|through|kept|frontier|fallback|given|kinds|"run"|contract\.pass\.solver\.sink\(\))\s*[,)]/;
   const unclassified: string[] = [];
@@ -350,22 +409,27 @@ test("every producing read in the contract layer passes a flow, follows an inclu
     const lines = text.split("\n");
     lines.forEach((line, at) => {
       const trimmed = line.trim();
-      if (trimmed.startsWith("//") || trimmed.startsWith("*")) return;
+      if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) return;
       const named = helper.exec(line)?.[1];
-      const producing =
-        method.test(line) || raw.test(line) || (named !== undefined && helpers.has(named));
-      if (!producing) return;
-      // (the statement from the read to its end)
-      const end = lines.findIndex((next, from) => from >= at && /[;{]\s*$/.test(next));
-      const call = lines.slice(at, end < 0 ? at + 1 : Math.min(end + 1, at + 10)).join(" ");
-      const tagged = /^\s*(?:[?:]\s*)?\/\/ #1668:/.test(lines[at - 1] ?? "");
-      // (a raw demand or a proof read by its key: its `include` earlier in the same function)
+      // (the function the line is in: a raw yield produces only in a solver generator, `Work<…>`)
       let start = at;
       while (
         start > 0 &&
         !/^(?:export )?(?:async )?function|^\s*(?:public|private) /.test(lines[start]!)
       )
         start -= 1;
+      const header = lines.slice(start, at + 1).join(" ");
+      const solving = /\)\s*:\s*Work</.test(header.slice(0, header.indexOf("{") + 1 || undefined));
+      const producing =
+        method.test(line) ||
+        (solving && raw.test(line)) ||
+        (named !== undefined && helpers.has(named));
+      if (!producing) return;
+      // (the statement from the read to its end)
+      const end = lines.findIndex((next, from) => from >= at && /[;{]\s*$/.test(next));
+      const call = lines.slice(at, end < 0 ? at + 1 : Math.min(end + 1, at + 10)).join(" ");
+      const tagged = /^\s*(?:[?:]\s*)?\/\/ #1668:/.test(lines[at - 1] ?? "");
+      // (a raw demand or a proof read by its key: its `include` earlier in the same function)
       // (the demand's key, by its name: a raw demand's `key: <name>`, a proof's demand variable's `<name>.key`)
       const body = lines.slice(start, at).join(" ");
       // (a demand made by a factory and yielded by its variable: `<variable>.key`; a raw one: `key: <name>`, or `key`)

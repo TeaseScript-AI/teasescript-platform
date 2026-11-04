@@ -80,17 +80,16 @@ export function* contractOfOp(
   if (c.kind === "get") {
     const element = flow?.child() ?? null;
     const fallback = flow?.child() ?? null;
+    const selected = belowSelected(
+      yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest), element),
+      rest,
+    );
     const items = mergeItems(
-      [
-        ...belowSelected(
-          yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest), element),
-          rest,
-        ),
-        ...(yield* contract.contractOfValueAt(c.fallback, rest, fallback)),
-      ],
+      [...selected, ...(yield* contract.contractOfValueAt(c.fallback, rest, fallback))],
       scope,
     );
-    if (element !== null) flow!.attach(element, "selected");
+    // (#1668: an element read whose items the selection removes whole, an empty collection's, puts none in)
+    if (element !== null && selected.length > 0) flow!.attach(element, "selected");
     if (fallback !== null) flow!.attach(fallback, "default");
     return items;
   }
@@ -163,13 +162,16 @@ export function* contractOfOp(
           out.push(carried(makeItem("null"), [item]));
       } else if (gives.fromList === "null" && item.tag !== "dict") {
         if (rest.length === 0) out.push(carried(makeItem("null"), [item]));
-      } else if (COLLECTIONS.has(item.tag))
-        out.push(
-          ...belowSelected(
-            yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest), flow),
-            rest,
-          ),
+      } else if (COLLECTIONS.has(item.tag)) {
+        // (#1668: included where its items survive the selection: an empty collection's element puts none in)
+        const element = flow?.child() ?? null;
+        const selected = belowSelected(
+          yield* contract.contractOfValueAt(c.receiver, joinSteps(["element"], rest), element),
+          rest,
         );
+        if (element !== null && selected.length > 0) flow!.attach(element);
+        out.push(...selected);
+      }
     }
     if (kinds !== null && unknowns) flow!.attach(kinds, "unknown");
     return mergeItems(out, scope);
