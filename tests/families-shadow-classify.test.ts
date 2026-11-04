@@ -59,6 +59,14 @@ const planned = (diagnostics: unknown[] = [], planHash = "p", checks = "c") => (
   decisionCounts: { ordinary: [1], completion: [1] },
 });
 /** A record of four rows, `row(mode index)` giving each one's legacy, core and delta. */
+/** `shadow.mjs --demands`'s rows: the core alone at a demand allowance, each run reaching a completion or not. */
+const control = (demand: number, completion = [1]) => ({
+  demand,
+  rows: MODES.map((mode) => ({
+    mode,
+    core: { outcome: "plan", decisionCounts: { ordinary: [1], completion } },
+  })),
+});
 const record = (key: string, row: (i: number) => Record<string, unknown>) => ({
   key,
   origins: [{ set: "synthetic", name: key }],
@@ -69,6 +77,7 @@ const record = (key: string, row: (i: number) => Record<string, unknown>) => ({
     delta: SAME,
     ...row(i),
   })),
+  demands: [control(16)],
 });
 
 test("every recorded witness falls in its class, each pair in exactly one", async () => {
@@ -531,4 +540,33 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   assert.equal(badName.status, 1, badName.stderr);
   assert.match(badName.stdout, /^gate: failed/m);
   assert.match(badName.stderr, /a name that is no text/);
+});
+
+test("coverage: the natural runs' ordinary decisions and a receiving completion at the demand control (16)", async () => {
+  const C = await load();
+  const coverage = (demands: unknown[]) =>
+    C.classifyRecords(entries([{ ...record("covered", () => ({})), demands }])).coverage;
+  assert.deepEqual(
+    [coverage([control(16)]).state, coverage([control(16)]).controlCompletionRuns],
+    ["pass", 4],
+  );
+  // (without the control, at another allowance, or with no completion there: open, whatever the natural runs hold)
+  for (const demands of [[], [control(64)], [control(16, [])]])
+    assert.equal(coverage(demands).state, "open", JSON.stringify(demands));
+  // (a failed control run is counted)
+  const failed = {
+    demand: 16,
+    rows: control(16).rows.map((row, i) =>
+      i === 1 ? { mode: row.mode, core: { outcome: "failed", failure: "heap" } } : row,
+    ),
+  };
+  assert.deepEqual([coverage([failed]).state, coverage([failed]).controlFailedRuns], ["pass", 1]);
+  // (a control row the classifier cannot read is refused)
+  const short = { demand: 16, rows: control(16).rows.slice(1) };
+  assert.deepEqual(
+    C.classifyRecords(entries([{ ...record("short", () => ({})), demands: [short] }])).problems.map(
+      (p: { why: string }) => p.why,
+    ),
+    ["a demand run not in four modes"],
+  );
 });

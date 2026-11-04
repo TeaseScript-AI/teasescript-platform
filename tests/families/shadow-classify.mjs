@@ -122,6 +122,11 @@ const SURVIVING = new Set(["TSV010", "TSV012", "TSV052", "TSV062", "TSV065", "TS
 /** The rule classes of written copies, absent properties and ingress (C1, C5, C9). */
 const RULE = new Set(["TSV041", "TSV043", "TSV044"]);
 const COMPLETED = new Set(["plan", "rejected"]);
+/**
+ * The demand allowance of the completion control (the S11 readiness research's): nothing stops at the natural allowance
+ * on current main, so the coverage row asks for a receiving completion here, beside the natural runs' ordinary records.
+ */
+const CONTROL = 16;
 
 /**
  * The route pair's classes. `state`: `pass`, `attributed` (the rule class is known; S11 still owes each source's
@@ -542,7 +547,45 @@ export function readRecord(record) {
   const rank = ({ mode }) => Number(mode.reversed) * 2 + Number(mode.unshared);
   rows.sort((a, b) => rank(a) - rank(b));
   if (rows.some((r, i) => rank(r) !== i)) return { why: "a mode twice" };
-  return { reading: { key: record.key, name, rows }, text: canonical(rows) };
+  // (`shadow.mjs --demands`: the core alone at a demand allowance in the four modes, read for coverage only)
+  if (record.demands !== undefined && !Array.isArray(record.demands))
+    return { why: "demand runs that are no list" };
+  const demands = [];
+  for (const each of record.demands ?? []) {
+    if (!Number.isInteger(each?.demand) || each.demand < 1 || !Array.isArray(each.rows))
+      return { why: "a demand run without its allowance or rows" };
+    if (each.rows.length !== 4) return { why: "a demand run not in four modes" };
+    const runs = [];
+    for (const row of each.rows) {
+      const m = row?.mode;
+      if (typeof m?.reversed !== "boolean" || typeof m?.unshared !== "boolean")
+        return { why: "a demand run without its mode" };
+      const x = row.core;
+      if (!isObject(x) || !OUTCOMES.has(x.outcome))
+        return { why: "a demand run without a known outcome" };
+      if (x.outcome === "failed" && typeof x.failure !== "string")
+        return { why: "a failed demand run without its failure" };
+      if (x.outcome === "outside" && typeof x.outside !== "string")
+        return { why: "an outside demand run without its text" };
+      if (x.decisionCounts !== undefined && !isObject(x.decisionCounts))
+        return { why: "demand decision counts that are no object" };
+      if (!counts(x.decisionCounts?.ordinary) || !counts(x.decisionCounts?.completion))
+        return { why: "demand decision counts that are no list of counts" };
+      runs.push({
+        rank: rank({ mode: m }),
+        outcome: x.outcome,
+        completion: (x.decisionCounts?.completion ?? []).some(Boolean),
+      });
+    }
+    runs.sort((a, b) => a.rank - b.rank);
+    if (runs.some((r, i) => r.rank !== i)) return { why: "a demand run's mode twice" };
+    demands.push({ demand: each.demand, runs });
+  }
+  demands.sort((a, b) => a.demand - b.demand);
+  return {
+    reading: { key: record.key, name, rows, demands },
+    text: canonical([rows, demands]),
+  };
 }
 
 /**
@@ -593,6 +636,9 @@ export function classifier() {
     frontEnd: 0,
     ordinaryRecordRuns: 0,
     completionRecordRuns: 0,
+    controlRuns: 0,
+    controlCompletionRuns: 0,
+    controlFailedRuns: 0,
     fourModeDifferences: 0,
   };
   const place = (record, facts, classes, list, extra) => {
@@ -636,6 +682,14 @@ export function classifier() {
       totals.pairs += 1;
       if (each.core.ordinary) totals.ordinaryRecordRuns += 1;
       if (each.core.completion) totals.completionRecordRuns += 1;
+      // (the completion control: the core's runs at demand allowance CONTROL, beside this mode's natural run)
+      for (const { demand, runs } of record.demands)
+        if (demand === CONTROL) {
+          const run = runs[record.rows.indexOf(each)];
+          totals.controlRuns += 1;
+          if (run.completion) totals.controlCompletionRuns += 1;
+          if (run.outcome === "failed") totals.controlFailedRuns += 1;
+        }
       const facts = pairFacts(each);
       const mode = MODE(each.mode);
       const id = place(record, facts, PAIR_CLASSES, pairs, {
@@ -758,9 +812,13 @@ export function classifier() {
     const pairTable = table(PAIR_CLASSES);
     const sharingTable = table(SHARING_CLASSES);
     const coverage = {
-      state: totals.ordinaryRecordRuns > 0 && totals.completionRecordRuns > 0 ? "pass" : "open",
+      state: totals.ordinaryRecordRuns > 0 && totals.controlCompletionRuns > 0 ? "pass" : "open",
       ordinaryRecordRuns: totals.ordinaryRecordRuns,
       completionRecordRuns: totals.completionRecordRuns,
+      control: CONTROL,
+      controlRuns: totals.controlRuns,
+      controlCompletionRuns: totals.controlCompletionRuns,
+      controlFailedRuns: totals.controlFailedRuns,
     };
     const open = [
       ...pairTable.filter((r) => r.state === "open" && r.pairs > 0).map((r) => r.id),
@@ -814,7 +872,7 @@ function markdown(result) {
     ...result.sharing.map(line),
     "",
     `Components of the differing pairs: identity ${t.identity}, same-identity wording ${t.wording}, checks ${t.checks}, plan ${t.plan}; outcomes ${JSON.stringify(t.outcomes)}; front-end rejections among compared pairs ${t.frontEnd}.`,
-    `Coverage (${result.coverage.state}): ordinary record runs ${result.coverage.ordinaryRecordRuns}, completion runs ${result.coverage.completionRecordRuns}.`,
+    `Coverage (${result.coverage.state}): natural ordinary record runs ${result.coverage.ordinaryRecordRuns}, natural completion runs ${result.coverage.completionRecordRuns}; at the demand control ${result.coverage.control}: runs ${result.coverage.controlRuns}, completion runs ${result.coverage.controlCompletionRuns}, failed ${result.coverage.controlFailedRuns}.`,
     `Information (not gated): sources whose core publication differs across the four modes ${t.fourModeDifferences}.`,
     `Open: ${result.open.join(", ") || "none"}. Problems: ${result.problems.length}.`,
     "",
