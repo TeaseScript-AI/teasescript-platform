@@ -134,7 +134,7 @@ export function methodArguments(
     // (a whole number's argument: C2's rule for a place written `number`, as at every whole-number use)
     if (
       taking.every(([, each]) => each === "integer") &&
-      writtenNumberUse(walk, argument, c.site, "operator", rule)
+      writtenNumberUse(walk, argument, node, c.site, "operator", rule)
     )
       return;
     consume(

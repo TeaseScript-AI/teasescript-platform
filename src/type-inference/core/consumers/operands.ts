@@ -127,16 +127,33 @@ export function consume(
 /**
  * #1173 (option C), every whole-number use's one rule: a read of a place written `number` is no whole number by its
  * type, whatever value it holds now, an error under `rule`; a read under a test of its key (§3.2) is left to its items,
- * which that test narrows (`if p is integer`). Whether it erred.
+ * which that test narrows (`if p is integer`), and so is a read of a written union whose value is known to be only its
+ * other members (`number?` holding `null`), whose error names that value and its fix (Codex r7). Whether it erred.
  */
 export function writtenNumberUse(
   walk: Consumers,
   value: PlaceId,
+  node: FlowNode,
   site: SourceSite,
   kind: DiagnosticKind,
   rule: DiagnosticRule,
 ): boolean {
-  if (!writtenNumber(walk, value) || walk.pass.guards.guardedRead(value)) return false;
+  const term = writtenNumber(walk, value);
+  if (term === null || walk.pass.guards.guardedRead(value)) return false;
+  if (term.kind === "union") {
+    const items = withoutEmpty(walk.valueItems(value, node, []));
+    if (
+      items.length > 0 &&
+      items.every(
+        (item) =>
+          item.cert === "def" &&
+          item.tag !== "unknown" &&
+          item.tag !== "integer" &&
+          item.tag !== "number",
+      )
+    )
+      return false;
+  }
   walk.pass.program.work.charge("checks");
   error(walk, kind, ownSpan(walk, value, site), rule, ["number"]);
   return true;
@@ -155,7 +172,7 @@ export function integerOnly(
   const { program } = walk.pass;
   const rule: DiagnosticRule = { rule: "count", use };
   const owedBy = typeof soft === "object" ? soft : null;
-  if (soft === false && writtenNumberUse(walk, value, site, "integer-use", rule)) return;
+  if (soft === false && writtenNumberUse(walk, value, node, site, "integer-use", rule)) return;
   // §3.3: a whole number on every run
   if (owedBy === null) {
     const quiet = quietKinds(walk, value);

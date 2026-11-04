@@ -166,6 +166,11 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       "repeat 2.5 {}\nexit\n",
       [`E TSV011 '2.5': ${COUNT}, but '2.5' is a number that can have decimals. ${ROUND}`],
     ],
+    // (a written `number?` known to hold null names the null, not the number: Codex r7 on #1717)
+    [
+      "let n: number? = null\nrepeat n {}\nexit\n",
+      [`E TSV011 'n': ${COUNT}, but 'n' is null. Use a whole number here.`],
+    ],
     [
       "let xs = [1, 2]\nlet y = xs[0.5]\nexit\n",
       [
@@ -1307,6 +1312,11 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
       [
         "E TSV043: repeat() needs a whole number (integer) for 'count', but 'n' is a number that can have decimals. Convert the number with the toInteger function, which drops the fraction.",
       ],
+    ],
+    [
+      "TSV043 repeat written optional null",
+      'let n: number? = null\nsay "abc".repeat(n)\n',
+      ["E TSV043: repeat() needs a whole number (integer) for 'count', but 'n' is null."],
     ],
     [
       "TSV043 substring warning unknown",

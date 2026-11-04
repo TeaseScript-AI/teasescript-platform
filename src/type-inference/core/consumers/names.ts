@@ -250,13 +250,13 @@ function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[])
 }
 
 /**
- * #1173 (the owner's option C): whether a value's written type is `number`, a member of a written union included
- * (`number?`). The written type a value carries (`writtenTermOf`) is its own written type alone, so no decision and no
+ * #1173 (the owner's option C): a value's written type where it is `number` or a written union with it (`number?`),
+ * else `null`. The written type a value carries (`writtenTermOf`) is its own written type alone, so no decision and no
  * charged key is asked for it and no counter or stop moves.
  */
-export function writtenNumber(walk: Consumers, value: PlaceId): boolean {
+export function writtenNumber(walk: Consumers, value: PlaceId): TypeTerm | null {
   const term = writtenTermOf(walk, value);
-  return term !== null && isNumber(term);
+  return term !== null && isNumber(term) ? term : null;
 }
 
 /** Whether a written term is `number` or a union with it, once per term (a written type is read at every use). */
