@@ -821,12 +821,16 @@ export function requireRecords(
   if (missing.length > 0) throw new Error(`No ${missing.join(" or ")} decision record was read.`);
 }
 
+/** Whether a `decisionRecords` compile is running: one inside it would record into both (Codex r1's H1 on #1692). */
+let recordingDecisions = false;
+
 /**
  * The decision records of `files` compiled through the public route (`publishedRoute`: `compileProjectWithBackend` with
  * the core backend, its receiving completion included, which `analyseCore` alone never runs), in `mode` (the source
  * order with the sharing on by default) at the test demand allowance `demand` (`null`, the default: the natural one).
  * Read where the compiler leaves them, from every pass's walk and every completion, not from one `Answers`. With
- * `require`, the compile must read a record of each kind given (`requireRecords`). The way a probe reads decision records
+ * `require`, the compile must read a record of each kind given (`requireRecords`). Not reentrant: a call while one runs
+ * throws, since its walks would be the outer compile's too. The way a probe reads decision records
  * (`tests/families/README.md`).
  *
  * @public (a probe reads it from a built tree, not by an import)
@@ -841,6 +845,7 @@ export function decisionRecords(
   } = {},
 ): DecisionRecords {
   const { mode = MODES[0]!, demand = null, require = [] } = options;
+  if (recordingDecisions) throw new Error("decisionRecords is already recording a compile.");
   const copy = (list: readonly DecisionWork[]): DecisionWork[] =>
     list.map((d) => ({ ...d, path: [...d.path] }));
   const ordinary: DecisionWork[][] = [];
@@ -857,11 +862,13 @@ export function decisionRecords(
     }
   };
   let text: string;
+  recordingDecisions = true;
   try {
     const run = (): string => inMode(mode, () => publishedRoute(files, globals).text);
     text = demand === null ? run() : withTestDemandAllowance(demand, run);
   } finally {
     Consumers.prototype.check = check;
+    recordingDecisions = false;
   }
   const completion = walks.flatMap(({ completion }) =>
     completion === null ? [] : [copy(completion.decisions)],

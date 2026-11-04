@@ -812,6 +812,15 @@ test("the public route's receiving completion makes the decisions the analysis's
       at,
     );
   }
+  // (a compile inside one, as a source's getter can start, is refused: its records would be the outer compile's too)
+  const nested = {
+    path: "main.tease",
+    get source() {
+      decisionRecords(files, GLOBALS, { demand: 16 });
+      return "let x = 1\nexit\n";
+    },
+  };
+  assert.throws(() => decisionRecords([nested], GLOBALS), /already recording a compile/);
   // (a compile with no completion reads no completion record: required, it fails rather than compare nothing)
   assert.throws(
     () =>
