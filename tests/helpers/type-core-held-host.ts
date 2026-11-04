@@ -1112,9 +1112,17 @@ export function provenRelabel(
       siteKey(x.site) === siteKey(u.site) &&
       x.boundary === u.boundary &&
       JSON.stringify(x.against) === JSON.stringify(u.against) &&
-      // (3)
+      // (3) (beside (2)'s parts, every other part equal: the words with only the label replaced)
       x.on === u.on.split(u.target).join(x.target) &&
-      JSON.stringify({ ...u, target: x.target, on: x.on }) === JSON.stringify(x),
+      JSON.stringify({
+        ...u,
+        kind: x.kind,
+        site: x.site,
+        boundary: x.boundary,
+        against: x.against,
+        target: x.target,
+        on: x.on,
+      }) === JSON.stringify(x),
   );
 }
 
