@@ -5,6 +5,7 @@ import type { KeyId, PathRef, PathSteps } from "../contract/key-ids.js";
 import type { Definition, Key } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
+import type { LandingTape } from "./landings.js";
 import type { CoreProgram } from "../program.js";
 import type { Touch, TouchRef } from "../touch.js";
 import { type CanonicalKey } from "../contract/key-ids.js";
@@ -23,6 +24,46 @@ export interface InheritedCopy {
    */
   readonly store?: Definition;
   readonly cellsLive?: boolean;
+}
+
+/**
+ * A step of `landedBelow`'s walk: a place, the prefix its paths are taken at or below, and how its path is written in
+ * the place asked (its first `drop` steps replaced by `prepend`); the step that reached it (`parent`).
+ */
+export interface LandingTask {
+  readonly place: PlaceId;
+  readonly below: readonly string[];
+  readonly drop: number;
+  readonly prepend: readonly string[];
+  readonly parent?: LandingTask;
+}
+
+/** A point of a call's tape (`LandingTape`): its events, the paths brought by then and the repeat events by then. */
+export interface TapePoint {
+  readonly events: number;
+  readonly paths: number;
+  readonly repeats: number;
+}
+
+/**
+ * The paths copies land in a place at or below a prefix (`landedBelow`), as the walk of one task (`frame`) brought them
+ * in one call: the range of that call's tape from `from` to `to`, the task's own paths up to `own`, then per task its
+ * walk took next (`children`, in walk order) the range from its point to the next one's. Points of the one tape, never
+ * copies of it.
+ */
+export interface Listing {
+  readonly tape: LandingTape;
+  readonly frame: LandingTask;
+  readonly from: TapePoint;
+  readonly own: TapePoint;
+  readonly children: readonly { readonly task: LandingTask; readonly from: TapePoint }[];
+  readonly to: TapePoint;
+}
+
+/** A place's listings by their prefixes' steps (`Admission.listings`). */
+export interface ListingNode {
+  listing: Listing | null;
+  readonly next: Map<string, ListingNode>;
 }
 
 /**
