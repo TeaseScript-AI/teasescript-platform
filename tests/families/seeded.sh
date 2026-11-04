@@ -13,9 +13,10 @@ pair) base=$SX_TREE_base head=$SX_TREE_head ;;
 mutant)
   base=$SX_TREE_head head=$SX_CHECKOUT
   cd "$SX_CHECKOUT" || exit 2
-  # (every path the patch adds, changes or removes, its hash at the head and in the checkout, `absent` where none)
-  git add -A --intent-to-add
-  mapfile -t changed < <(git diff --name-only)
+  # (every path the patch adds, changes or removes, a rename as both, its hash at the head and in the checkout, `absent`
+  # where none: the checkout's whole change against HEAD, staged so new and removed files count alike)
+  git add -A
+  mapfile -t changed < <(git diff --cached --no-renames --name-only HEAD)
   [ "${#changed[@]}" -gt 0 ] || { echo "seeded.sh mutant: the checkout has no change" >&2; exit 2; }
   hash() { sha256sum | cut -c1-64; }
   for file in "${changed[@]}"; do
@@ -24,7 +25,11 @@ mutant)
     [ -f "$file" ] && after=$(hash < "$file")
     printf '%s %s %s\n' "$file" "$before" "$after"
   done > "$SX_OUT/mutant.sha256"
-  npm run -s build:typescript > "$SX_OUT/build.log" 2>&1 || { echo "seeded.sh mutant: the build failed" >&2; exit 2; }
+  npm run -s build:typescript > "$SX_OUT/build.log" 2>&1 || {
+    rc=$?
+    echo "seeded.sh mutant: the build failed (exit $rc)" >&2
+    exit "$rc"
+  }
   ;;
 *) echo "usage: bash tests/families/seeded.sh pair|mutant" >&2; exit 2 ;;
 esac
