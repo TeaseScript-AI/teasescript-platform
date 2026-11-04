@@ -12,6 +12,7 @@ import { inItsOrder, makeItem, REASON, type Item, type ItemTag } from "../items.
 import { dictList } from "../method-categories.js";
 import { propertyName, siteKey, stepName } from "../program.js";
 import { elementStep } from "../result.js";
+import { unsettledItem } from "./kinds.js";
 
 // The names obligations use: an operand's span, a key's label, a chain's derived or anonymous start, quiet kinds.
 
@@ -123,12 +124,48 @@ export function shownLabel(walk: Consumers, label: Label): () => string {
 function elementStepOf(walk: Consumers, owner: PlaceId): string {
   let step = walk.elementSteps.get(owner);
   if (step === undefined) {
-    step = elementStep(
-      withoutEmpty(walk.run(walk.pass.contract.contractOfValue(owner))).map((item) => item.tag),
-    );
+    step = elementStep(withoutEmpty(ownerKinds(walk, owner)).map((item) => item.tag));
     walk.elementSteps.set(owner, step);
   }
   return step;
+}
+
+/**
+ * The kinds a label's step reads of an owner: its contract; after a program stop where that is unsettled, the domain of
+ * the key the owner reads (`labelKey`) as the finishing path gives it (`Consumers.stoppedDomain`), so a dict's value is
+ * still its `entry` and its `values` still a derived list (#1595). The one route for an owner's kinds, both for its
+ * element step (`elementStepOf`) and for whether a chain passes a derived list (`derivedChain`), so the two rest on one
+ * proof (#1687).
+ */
+function ownerKinds(walk: Consumers, owner: PlaceId): readonly Item[] {
+  const items = walk.run(walk.pass.contract.contractOfValue(owner));
+  if (walk.pass.program.work.stopped === null || !items.some(unsettledItem)) return items;
+  const key = labelKey(walk, owner);
+  return (key === null ? null : walk.stoppedDomain(key)) ?? items;
+}
+
+/**
+ * The key a label's owner reads (#1595, #1687): up its chain of projections and `get`s to its start, a binding's key
+ * there (`readKey`) or a call's result (`resultOfCall`), each step on the way one step below; `null` for any other start
+ * and through an iteration.
+ */
+function labelKey(walk: Consumers, value: PlaceId): Key | null {
+  const { program } = walk.pass;
+  const steps: string[] = [];
+  let at = value;
+  for (let depth = 0; depth < 256; depth += 1) {
+    const projection =
+      program.projOf.get(at) ??
+      (walk.getOf.has(at) ? { owner: walk.getOf.get(at)!, step: "index" } : undefined);
+    if (projection === undefined) break;
+    if (projection.step === "iteration") return null;
+    program.work.charge("checks");
+    steps.push(stepName(projection.step));
+    at = projection.owner;
+  }
+  const result = walk.resultOfCall.get(at);
+  const root = result === undefined ? readKey(walk, at) : keptKey(program.work, result, []);
+  return root === null ? null : keptKeyBelow(program.work, root, steps.reverse());
 }
 
 /** Whether a projection chain passes a dict's `values` or `keys`: a derived list, which no place holds (once each). */
@@ -139,7 +176,7 @@ function derived(walk: Consumers, value: PlaceId): boolean {
 }
 
 function derivedChain(walk: Consumers, value: PlaceId): boolean {
-  const { program, contract } = walk.pass;
+  const { program } = walk.pass;
   let at: PlaceId = value;
   for (let depth = 0; depth < 256; depth += 1) {
     const projection =
@@ -148,7 +185,7 @@ function derivedChain(walk: Consumers, value: PlaceId): boolean {
     if (projection === undefined) return false;
     if (
       dictList(propertyName(projection.step)) !== undefined &&
-      walk.run(contract.contractOfValue(projection.owner)).some((item) => item.tag === "dict")
+      ownerKinds(walk, projection.owner).some((item) => item.tag === "dict")
     )
       return true;
     at = projection.owner;

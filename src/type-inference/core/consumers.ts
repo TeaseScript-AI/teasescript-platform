@@ -58,7 +58,7 @@ import {
 } from "./contract-descriptors.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
-import { finishedItems, finishingRead } from "./consumers/finishing.js";
+import { finishedItems, finishingRead, labelDomain } from "./consumers/finishing.js";
 import { freshStores, ingressMark } from "./consumers/fresh.js";
 import { mixed, mixedChoices, mixedJoin } from "./consumers/mixed.js";
 import type {
@@ -321,6 +321,7 @@ export class Consumers {
         // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
         read: (value, node, at) =>
           this.finishing ? finishingRead(this, value, node, stepsArray(restSteps(at))) : null,
+        domain: (key) => this.stoppedDomain(key),
       },
       rejected,
       cycling,
@@ -461,6 +462,15 @@ export class Consumers {
         return STOPPED;
       }
     }
+  }
+
+  /**
+   * After a program stop, the kinds a label's step reads of a key whose contract asked then is unsettled, from a proof
+   * the stopped analysis holds (`labelDomain`: its finished contract, its written type, a retained decision), else
+   * `null`: the label keeps its generic step (#1595).
+   */
+  public stoppedDomain(key: Key): readonly Item[] | null {
+    return this.pass.program.work.stopped === null ? null : (labelDomain(this, key)?.kinds ?? null);
   }
 
   /**
@@ -1135,6 +1145,15 @@ export class Consumers {
    */
   public finish(all: boolean): void {
     this.finishing = true;
+    // (after a program stop each label's recipe is made wholly after it, as its steps and derived lists are read then:
+    // none straddles it, half from before and half from after, #1595, #1687; a finishing path without a stop, the units
+    // nested past the nesting limit, reads them as before)
+    if (this.pass.program.work.stopped !== null) {
+      this.labels.clear();
+      this.elementSteps.clear();
+      this.derivedChains.clear();
+      this.admission.keyLabels.clear();
+    }
     // (after a stop no decision stops: what a stop forgets by is dropped, #1599)
     this.pass.contract.closeDecisions();
     this.#stoppedAt = all ? null : (this.#stoppedAt ?? { stage: STAGES, unit: 0 });

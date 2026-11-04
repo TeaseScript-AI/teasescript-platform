@@ -3,9 +3,10 @@ import {
   createSerializableObject,
   type SerializableRuntimeValue,
 } from "../../src/runtime/values/serializable-values.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
+import { analyseCore, type Answers, type CorePass } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import {
+  pathText,
   withTestAllowance,
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
@@ -19,10 +20,13 @@ import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./type-core-analysis.js";
 import { runGlobals } from "./type-core-route.js";
 import { VALUE_KINDS } from "../../src/value-kinds.js";
-import type { Expression } from "../../src/ast.js";
+import type { Expression, TypeAnnotation } from "../../src/ast.js";
 import { expressionChildren, unwrap } from "../../src/expression-children.js";
+import type { FlowGraph } from "../../src/type-inference/core/flow-graph/model.js";
 import { REASON, type Item } from "../../src/type-inference/core/items.js";
-import type { SourceSite } from "../../src/type-inference/graph.js";
+import type { PlaceId, SourceSite } from "../../src/type-inference/graph.js";
+import type { Label } from "../../src/type-inference/core/contract/labels.js";
+import { propertyName, stepName } from "../../src/type-inference/core/program.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
 import { sampled } from "./sweep.js";
@@ -770,13 +774,21 @@ export interface CombinedStop {
   readonly checks: ReadonlyMap<string, "a" | "w" | "z">;
   /** Each accepted record by its code at its whole site (`code file:start:end`). */
   readonly records: ReadonlyMap<string, "a" | "w" | "z">;
-  /** #1595's named exception: the reference's checks and records the stop names by another label alone. */
+  /**
+   * The reference's checks the stop owes by a more precise label alone, as the natural analysis spells it
+   * (`provenRelabel`, TABLE r4.322), and the records that go with them.
+   */
   readonly relabelled: {
     readonly checks: ReadonlySet<string>;
     readonly records: ReadonlySet<string>;
   };
   /** The stopped analysis's checks at the accepted slots, which the reference does not have. */
   readonly owing: ReadonlySet<string>;
+  /**
+   * The checks a candidate relabel needed whose label the recorder did not capture (`LabelIdentities.missing`): each
+   * refused, never inferred; a finding wherever it is not empty.
+   */
+  readonly unidentified: ReadonlySet<string>;
   /**
    * The coarse (a) reading's counted class, never a pass (TABLE r4.299): the reference's consumer checks (a) would take
    * but for open reads of their unit the stopped analysis did not answer, each with those reads' keys; and their records.
@@ -868,6 +880,26 @@ interface Emission {
 interface Recorded {
   readonly reads: ReadonlyMap<string, readonly RecordedRead[]>;
   readonly emissions: readonly Emission[];
+  /** The labels the last walk made for the checks it emitted, with what places them (`labelIdentities`). */
+  readonly labels?: RecordedLabels;
+}
+
+/**
+ * A check's label as the compiler made it (#1595, the lead's ruling on Codex r6): its recipe's root, a place's own label
+ * (`labelRoot`, `"path"`) or a value's own text (`ownLabel`, `"own"`), that place, and the steps its recipe takes below.
+ */
+export interface LabelIdentity {
+  readonly kind: "path" | "own";
+  readonly place: PlaceId;
+  readonly steps: readonly string[];
+}
+
+/** A walk's labels as recorded (`recordingReads`): each emitted check's, by its text, and its program's places. */
+interface RecordedLabels {
+  readonly labelled: ReadonlyMap<string, LabelIdentity | null>;
+  readonly program: CorePass["program"];
+  readonly getOf: ReadonlyMap<PlaceId, PlaceId>;
+  readonly resultOfCall: ReadonlyMap<PlaceId, PlaceId>;
 }
 
 /**
@@ -902,7 +934,7 @@ export function withReadsChanged(
   const reads = new Map(recorded?.reads ?? []);
   const key = readKey(site, steps);
   reads.set(key, change(reads.get(key) ?? []));
-  consumerReads.set(shadow, { reads, emissions: recorded?.emissions ?? [] });
+  consumerReads.set(shadow, { ...recorded, reads, emissions: recorded?.emissions ?? [] });
   return shadow;
 }
 
@@ -949,6 +981,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
   interface Walk {
     readonly reads: Map<string, RecordedRead[]>;
     readonly emissions: Emission[];
+    readonly labelled: Map<string, LabelIdentity | null>;
     unit: number;
     stage: string;
     unitSite: string;
@@ -959,18 +992,169 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     if (walk === undefined)
       walks.set(
         consumers,
-        (walk = { reads: new Map(), emissions: [], unit: 0, stage: "", unitSite: "" }),
+        (walk = {
+          reads: new Map(),
+          emissions: [],
+          labelled: new Map(),
+          unit: 0,
+          stage: "",
+          unitSite: "",
+        }),
       );
     return walk;
   };
   // (each walk's warnings as `warning` and `error` record them, whatever map the walk began with, for the run alone)
   const maps: EmissionsOf[] = [];
+  // (each check's label as the compiler made it, #1595, the lead's ruling on Codex r6: every recipe a place's label
+  // roots (`Contract.labelRoots`) or a walk's label memo holds (`Consumers.labels`: a value's own text at its place), and
+  // every recipe below them as it is made, keeps its text in place, observed as it is shown; a check takes the recipe
+  // last shown with its target's text, where no recipe of another identity showed that text since the check before;
+  // else no label, which the oracle refuses and counts. The maps and recipes stay the compiler's own objects, observed
+  // through their own properties, so nothing the analysis computes changes.)
+  let live = true;
+  let shown = 0;
+  let emittedAt = 0;
+  const hooked = new WeakSet<object>();
+  const rootPlaces = new WeakMap<Label, PlaceId>();
+  const ownPlaces = new WeakMap<Label, PlaceId>();
+  const touched = new Map<string, Map<Label, number>>();
+  // (a recipe's own text slot, read without showing it; a recipe's text where it is shown, made or plain: its nearest
+  // made text above it and its steps below, as `labelText` and `labelPlainText` join them, `pathText`)
+  const slots = new WeakMap<Label, () => string | null>();
+  const slotText = (recipe: Label): string | null => {
+    const slot = slots.get(recipe);
+    return slot === undefined ? recipe.text : slot();
+  };
+  const plain = (recipe: Label): string | null => {
+    const parts: string[] = [];
+    let at: Label | null = recipe;
+    for (; at !== null && slotText(at) === null; at = at.parent) parts.push(at.step);
+    const made = at === null ? null : slotText(at);
+    return made === null ? null : pathText([made, ...parts.reverse()]);
+  };
+  const touch = (recipe: Label, text: string): void => {
+    if (!live) return;
+    let recipes = touched.get(text);
+    if (recipes === undefined) touched.set(text, (recipes = new Map()));
+    recipes.set(recipe, (shown += 1));
+  };
+  const onSet = <K, V>(map: Map<K, V>, each: (key: K, value: V) => void): void => {
+    if (hooked.has(map)) return;
+    hooked.add(map);
+    for (const [key, value] of map) each(key, value);
+    Object.defineProperty(map, "set", {
+      configurable: true,
+      writable: true,
+      value(this: Map<K, V>, key: K, value: V) {
+        if (live) each(key, value);
+        return Map.prototype.set.call(this, key, value);
+      },
+    });
+  };
+  const onPush = (list: Obligation[], each: (check: Obligation) => void): void => {
+    if (hooked.has(list)) return;
+    hooked.add(list);
+    Object.defineProperty(list, "push", {
+      configurable: true,
+      writable: true,
+      value(this: Obligation[], ...checks: Obligation[]) {
+        if (live) for (const check of checks) each(check);
+        return Array.prototype.push.apply(this, checks);
+      },
+    });
+  };
+  const observe = (recipe: Label): void => {
+    if (hooked.has(recipe)) return;
+    hooked.add(recipe);
+    let text = recipe.text;
+    let below = recipe.below;
+    slots.set(recipe, () => text);
+    if (below !== null) onSet(below, (_, child) => observe(child));
+    Object.defineProperties(recipe, {
+      text: {
+        configurable: true,
+        enumerable: true,
+        get: () => {
+          const shownText = text ?? plain(recipe);
+          if (shownText !== null) touch(recipe, shownText);
+          return text;
+        },
+        set: (value: string | null) => {
+          text = value;
+          if (value !== null) touch(recipe, value);
+        },
+      },
+      below: {
+        configurable: true,
+        enumerable: true,
+        get: () => below,
+        set: (value: Map<string, Label> | null) => {
+          below = value;
+          if (value !== null) onSet(value, (_, child) => observe(child));
+        },
+      },
+    });
+  };
+  const identityOf = (recipe: Label): LabelIdentity | null => {
+    const steps: string[] = [];
+    let root = recipe;
+    for (; root.parent !== null; root = root.parent) steps.push(root.step);
+    steps.reverse();
+    const path = rootPlaces.get(root);
+    if (path !== undefined) return { kind: "path", place: path, steps };
+    const own = ownPlaces.get(root);
+    return own === undefined ? null : { kind: "own", place: own, steps };
+  };
+  const identityText = (identity: LabelIdentity | null | undefined): string =>
+    JSON.stringify(identity ?? null);
+  const emitted = (walk: Walk, check: Obligation): void => {
+    const recipes = [...(touched.get(check.target) ?? [])].sort((a, b) => b[1] - a[1]);
+    const since = new Set(
+      recipes
+        .filter(([, at]) => at > emittedAt)
+        .map(([recipe]) => identityText(identityOf(recipe))),
+    );
+    const found = recipes[0] === undefined || since.size > 1 ? null : identityOf(recipes[0][0]);
+    emittedAt = shown;
+    const key = JSON.stringify(check);
+    walk.labelled.set(
+      key,
+      walk.labelled.has(key) && identityText(walk.labelled.get(key)) !== identityText(found)
+        ? null
+        : found,
+    );
+  };
+  const labelling = (consumers: Consumers): void => {
+    const walk = walkOf(consumers);
+    onSet(consumers.pass.contract.labelRoots, (place, recipe) => {
+      rootPlaces.set(recipe, place);
+      observe(recipe);
+    });
+    onSet(consumers.labels, (place, recipe) => {
+      observe(recipe);
+      if (recipe.parent === null && !rootPlaces.has(recipe) && !ownPlaces.has(recipe))
+        ownPlaces.set(recipe, place);
+    });
+    const { admission } = consumers;
+    onPush(admission.readChecks, (check) => emitted(walk, check));
+    if (!hooked.has(admission.boundaries)) {
+      for (const list of admission.boundaries.values())
+        onPush(list, (check) => emitted(walk, check));
+      onSet(admission.boundaries, (_, list) => {
+        for (const check of list) emitted(walk, check);
+        onPush(list, (check) => emitted(walk, check));
+      });
+    }
+  };
   const recording = (consumers: Consumers): void => {
+    labelling(consumers);
     if (consumers.rules instanceof EmissionsOf) return;
     const walk = walkOf(consumers);
     const map = new EmissionsOf(consumers.rules, (diagnostic) => {
-      if ("obligation" in diagnostic)
+      if ("obligation" in diagnostic) {
         walk.emissions.push({ obligation: JSON.stringify(diagnostic.obligation), unit: walk.unit });
+        emitted(walk, diagnostic.obligation);
+      }
     });
     maps.push(map);
     Object.defineProperty(consumers, "rules", {
@@ -989,6 +1173,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     return finish.apply(this, args);
   };
   prototype.enter = function (this: Consumers, ...args: Parameters<Consumers["enter"]>) {
+    labelling(this);
     const walk = walkOf(this);
     walk.unit += 1;
     walk.stage = String(args[0]);
@@ -996,6 +1181,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     return enter.apply(this, args);
   };
   prototype.runs = function (this: Consumers, ...args: Parameters<Consumers["runs"]>) {
+    labelling(this);
     const walk = walkOf(this);
     walk.unit += 1;
     walk.unitSite = `stage ${walk.stage} ${siteKey(args[0])}`;
@@ -1042,13 +1228,33 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
   try {
     const made = make();
     // (the analysis's last walk: a receiving completion pass's store checks, #1526 phase C, are none of its walks)
-    const last = [...walks].filter(([consumers]) => !consumers.pass.closure).at(-1)?.[1];
-    consumerReads.set(made.answers, last ?? { reads: new Map(), emissions: [] });
+    const last = [...walks].filter(([consumers]) => !consumers.pass.closure).at(-1);
+    consumerReads.set(made.answers, {
+      ...(last?.[1] ?? { reads: new Map(), emissions: [] }),
+      ...(last === undefined
+        ? {}
+        : {
+            labels: {
+              labelled: last[1].labelled,
+              program: last[0].pass.program,
+              getOf: last[0].getOf,
+              resultOfCall: last[0].resultOfCall,
+            },
+          }),
+    });
     return made;
   } finally {
+    live = false;
     Object.assign(prototype, { valueItems, runs, enter, check, finish, skip });
     for (const map of maps) map.into = undefined;
   }
+}
+
+/** An analysis of a program's files with its reads recorded (`recordingReads`), for its label source (`labelSource`). */
+export function recordedAnalysis(files: readonly SourceFile[]): Answers {
+  const request = coreRequest([...files], GLOBALS);
+  if (request === null) throw new Error("The files do not resolve.");
+  return recordingReads(() => ({ answers: analyseCore(request) })).answers;
 }
 
 /**
@@ -1085,9 +1291,292 @@ export function combinedAnalyses(
   };
 }
 
-/** A check's `on` words with every dotted or indexed path left out (#1595: a label alone differs). */
-const withoutLabels = (on: string): string =>
-  on.replace(/[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[^\]\s]*\])+/g, "·");
+/** A dictionary's derived lists (`dictList`): a read through one is named by its own text (`keyLabel`, §10.5). */
+const DERIVED = new Set(["values", "keys"]);
+
+/**
+ * The written types a program declares, by the whole site (file and offsets) of the place that holds them, as the
+ * compiler sites its places: a `let` or `global` statement, a parameter, a function's name for its result.
+ */
+const declaredTypes = new WeakMap<FlowGraph, ReadonlyMap<string, TypeAnnotation | null>>();
+function declaredIn(graph: FlowGraph): ReadonlyMap<string, TypeAnnotation | null> {
+  let types = declaredTypes.get(graph);
+  if (types !== undefined) return types;
+  const made = new Map<string, TypeAnnotation | null>();
+  const at = (file: number, node: { readonly span: Expression["span"] }) =>
+    siteKey({ file, start: node.span.start.offset, end: node.span.end.offset });
+  for (const { file, statement } of graph.nodes)
+    if (statement?.kind === "letStatement" || statement?.kind === "globalStatement")
+      made.set(at(file, statement), statement.typeAnnotation);
+  for (const region of graph.regions)
+    if (region.kind === "function") {
+      const { declaration, file } = region;
+      made.set(at(file, declaration.name), declaration.returnTypeAnnotation);
+      for (const parameter of declaration.parameters)
+        made.set(at(file, parameter), parameter.typeAnnotation);
+    }
+  declaredTypes.set(graph, (types = made));
+  return types;
+}
+
+/**
+ * An analysis's labels as the compiler made them (`recordingReads`): each emitted check's (`of`, `null` where none was
+ * recorded, which the oracle refuses and counts in `missing`), its program's places and the path its projections give a
+ * place up to its root (`climb`: `keyLabel`'s walk, its element steps spelled `element`).
+ */
+export interface LabelIdentities {
+  readonly of: (check: Obligation) => LabelIdentity | null;
+  readonly site: (place: PlaceId) => SourceSite | null;
+  readonly climb: (
+    place: PlaceId,
+  ) => { readonly root: PlaceId; readonly steps: readonly string[] } | null;
+  readonly missing: Set<string>;
+  /** The number of the program's places (ids `0` to it). */
+  readonly places: number;
+}
+
+/**
+ * Test-only: `labels` with the given checks' labels (`LabelIdentity`) in place of the recorded ones, for a unit case of
+ * the predicate on a label the compiler never made.
+ */
+export function withLabels(
+  labels: LabelIdentities,
+  given: readonly (readonly [Obligation, LabelIdentity])[],
+): LabelIdentities {
+  const set = new Map(given.map(([check, identity]) => [JSON.stringify(check), identity]));
+  return { ...labels, of: (check) => set.get(JSON.stringify(check)) ?? labels.of(check) };
+}
+
+/** An analysis's recorded labels (`LabelIdentities`), `null` where it was made without them. */
+export function labelIdentities(answers: Answers): LabelIdentities | null {
+  const labels = readsOf(answers)?.labels;
+  if (labels === undefined) return null;
+  const { labelled, program, getOf, resultOfCall } = labels;
+  const missing = new Set<string>();
+  return {
+    of: (check) => {
+      const text = JSON.stringify(check);
+      const found = labelled.get(text) ?? null;
+      if (found === null) missing.add(text);
+      return found;
+    },
+    site: (place) => program.places[place]?.site ?? null,
+    climb: (place) => {
+      const steps: string[] = [];
+      let at = place;
+      for (let depth = 0; depth < 256; depth += 1) {
+        const binding = program.occurrenceOf.get(at);
+        if (binding !== undefined) return { root: binding, steps: steps.reverse() };
+        const owner = getOf.get(at);
+        const projection: { readonly owner: PlaceId; readonly step: string } | undefined =
+          program.projOf.get(at) ?? (owner === undefined ? undefined : { owner, step: "index" });
+        if (projection === undefined) {
+          const result = resultOfCall.get(at);
+          return result === undefined ? null : { root: result, steps: steps.reverse() };
+        }
+        steps.push(
+          stepName(projection.step) === "element" && projection.step !== "element"
+            ? "element"
+            : propertyName(projection.step),
+        );
+        at = projection.owner;
+      }
+      return null;
+    },
+    missing,
+    places: program.places.length,
+  };
+}
+
+/**
+ * The precise label forms a stopped check carries where the demand-only reference spells the generic one (#1595,
+ * TABLE r4.322), compared as the compiler made both labels (`LabelIdentity`), never read back from a site, an expression
+ * or a name (the lead's ruling on Codex r6). The compiler's label grammar (`keyLabel` in `consumers/names.ts`):
+ * - a root: a place's label, a binding's name, a parameter `F.P`, a result `F.result`; else the value's own text;
+ * - each step below it: a property's name; a selection, an index or a `get`, spelled `element`, or `entry` where every
+ *   kind of its owner is a dictionary (`elementStepOf`); a dictionary's `values` or `keys`;
+ * - and where the chain passes a `values` or `keys` step with a dictionary among its owner's kinds (`derivedChain`), the
+ *   whole label is the value's own text instead (`ownLabel`).
+ * After a stop the stopped analysis may prove more of an owner's kinds than the reference (`labelDomain`), which gives
+ * exactly two precise forms of the reference's path label, never mixed:
+ * - `"entry"`: the same root place and some `element` steps below it spelled `entry`, every other step the same;
+ * - `"own"`: a place's own text with no step below it, the place whose path up the compiler's projections (`climb`) is
+ *   the reference's, root and steps, with at least one `values` or `keys` step.
+ * The form of the stopped label `x` beside the reference's `u`, else `null`. A place is one in both runs where its id
+ * and its whole site are.
+ */
+function relabelForm(
+  u: LabelIdentity,
+  x: LabelIdentity,
+  reference: LabelIdentities,
+  stopped: LabelIdentities,
+): "entry" | "own" | null {
+  if (u.kind !== "path") return null;
+  const same = (place: PlaceId): boolean => {
+    const [a, b] = [reference.site(u.place), stopped.site(place)];
+    return place === u.place && a !== null && b !== null && siteKey(a) === siteKey(b);
+  };
+  // (an element step the reference spells `entry` already, as a reference that read part of its key settled does)
+  const spells = (path: readonly string[], each: readonly string[]): boolean =>
+    path.length === each.length &&
+    path.every((step, i) => step === each[i] || (step === "element" && each[i] === "entry"));
+  if (x.kind === "path")
+    return same(x.place) &&
+      spells(u.steps, x.steps) &&
+      u.steps.some((step, i) => step !== x.steps[i])
+      ? "entry"
+      : null;
+  const path = x.steps.length === 0 ? stopped.climb(x.place) : null;
+  return path !== null &&
+    same(path.root) &&
+    spells(path.steps, u.steps) &&
+    u.steps.some((step) => DERIVED.has(step))
+    ? "own"
+    : null;
+}
+
+/** A written type's members, an optional's `null` and a union's own members each one (`T?`, `A | B`). */
+const membersOf = (type: TypeAnnotation): (TypeAnnotation | null)[] =>
+  type.kind === "optionalType"
+    ? [...membersOf(type.value), null]
+    : type.kind === "unionType"
+      ? type.members.flatMap(membersOf)
+      : [type];
+
+/** Whether every value a written type's members admit is a dictionary (`dict`, `T dict`): never with a `null` among them. */
+const writtenDict = (members: readonly (TypeAnnotation | null)[]): boolean =>
+  members.length > 0 &&
+  members.every(
+    (type) =>
+      type !== null &&
+      (type.kind === "dictType" || (type.kind === "namedType" && type.name === "dict")),
+  );
+
+/** Whether some value a written type's members admit is a dictionary: a derived list's owner (`derivedChain`). */
+const writtenSomeDict = (members: readonly (TypeAnnotation | null)[]): boolean =>
+  members.some(
+    (type) =>
+      type !== null &&
+      (type.kind === "dictType" || (type.kind === "namedType" && type.name === "dict")),
+  );
+
+/**
+ * A written type's members one `element` step down, as the compiler's `termAt` takes one (`typeAtStep`): each member's
+ * element where it has one, the others left out (`null`, a scalar); none where no member has one.
+ */
+const elementsOf = (members: readonly (TypeAnnotation | null)[]): (TypeAnnotation | null)[] =>
+  members.flatMap((type) =>
+    type !== null &&
+    (type.kind === "listType" || type.kind === "setType" || type.kind === "dictType")
+      ? membersOf(type.element)
+      : [],
+  );
+
+/**
+ * Whether a written type at the key proves `x`'s form (#1595, the lead's ruling on Q4: the author's own proof, as the
+ * compiler reads it). The root's written type (`written`: the declaration at the reference label's root place's whole site)
+ * is followed along `u`'s steps below the root, element steps (an `entry` it already spells among them) through its
+ * elements, optionals and unions as `termAt` follows them; a step it cannot follow proves nothing past it. `x` is the
+ * stopped label's steps below the root (none for own text). One clause per form:
+ * - `"entry"`: every step `x` spells `entry` has a written dictionary as its owner, every kind of it
+ *   (`elementStepOf`), and no `values` or `keys` step on the way has a dictionary among its owner's kinds, where the
+ *   compiler names the value by its own text instead (`derivedChain`);
+ * - `"own"`: a `values` or `keys` step on the way has a dictionary among its owner's written kinds (`derivedChain`).
+ */
+function writtenProves(
+  written: TypeAnnotation | null,
+  u: readonly string[],
+  x: readonly string[],
+  form: "entry" | "own",
+): boolean {
+  if (written === null) return false;
+  let members = membersOf(written);
+  // (the last step `x` spells `entry`: past it a step the type cannot follow leaves nothing to prove)
+  const last = Math.max(...u.flatMap((step, i) => (form === "entry" && step !== x[i] ? [i] : [])));
+  for (let at = 0; at < u.length; at += 1) {
+    const step = u[at]!;
+    if (form === "entry" && x[at] === "entry" && !writtenDict(members)) return false;
+    // (a derived list: its own text, never an `entry` path, the two forms exclusive as `keyLabel` makes them)
+    if (DERIVED.has(step) && writtenSomeDict(members)) return form === "own";
+    // (an element step, the reference's own `entry` among them: an element spelled as its dictionary's already)
+    if (step !== "element" && step !== "entry") return form === "entry" && at > last;
+    members = elementsOf(members);
+  }
+  return form === "entry";
+}
+
+/**
+ * The owner's one accepted difference at a combined stop (TABLE r4.322, #1595, the lead's rulings on its HEAD 0 and on
+ * Q3/Q4): the stopped analysis owes the reference's check `u` under a more precise label than the reference's, which ran
+ * out of demand reading the key, where all three hold for the stopped check `x`:
+ * 1. the label follows from a proven type: the natural analysis (no demand, no stop) names that very value so, a check of
+ *    its own at `x`'s whole site, the value read there, targeting the label or a path below it (it need not owe `x`
+ *    itself: knowing more, it may owe another check there; the value, never a label's text alone nor a read beside it
+ *    in the same walk unit: Codex r1's and r2's B1 on #1687), or a written type at the key proves its form
+ *    (`writtenProves`, the written type the reference label's root place declares);
+ * 2. the check, its location and its expected types are identical: kind, whole site, boundary and `against`;
+ * 3. no other difference is ignored: the label is one of the compiler's two precise forms of the reference's
+ *    (`relabelForm`), the words are `u`'s with only the label replaced, and every other part is equal.
+ * Both labels are the compiler's own as recorded (`labelIdentities`: `reference` the reference's, `stopped` the stopped
+ * analysis's): a check of these whose label was not recorded is refused and counted (`LabelIdentities.missing`), never
+ * read back from its site, its expression or a name. The stopped check accepted, else `undefined`. `natural` is the
+ * natural analysis's checks; `graph` the program's.
+ */
+export function provenRelabel(
+  u: Obligation,
+  owed: readonly Obligation[],
+  natural: readonly Obligation[],
+  graph: FlowGraph,
+  reference: LabelIdentities | null,
+  stopped: LabelIdentities | null,
+): Obligation | undefined {
+  return owed.find((x) => {
+    if (
+      x.target === u.target ||
+      // (2)
+      x.kind !== u.kind ||
+      siteKey(x.site) !== siteKey(u.site) ||
+      x.boundary !== u.boundary ||
+      JSON.stringify(x.against) !== JSON.stringify(u.against) ||
+      // (3) (beside (2)'s parts, every other part equal: the words with only the label replaced)
+      x.on !== u.on.split(u.target).join(x.target) ||
+      JSON.stringify({
+        ...u,
+        kind: x.kind,
+        site: x.site,
+        boundary: x.boundary,
+        against: x.against,
+        target: x.target,
+        on: x.on,
+      }) !== JSON.stringify(x) ||
+      reference === null ||
+      stopped === null
+    )
+      return false;
+    // (3)'s form, of the two labels as the compiler made them
+    const [from, to] = [reference.of(u), stopped.of(x)];
+    if (from === null || to === null) return false;
+    const form = relabelForm(from, to, reference, stopped);
+    if (form === null) return false;
+    const site = reference.site(from.place);
+    // (1)
+    return (
+      natural.some(
+        (n) =>
+          siteKey(n.site) === siteKey(x.site) &&
+          (n.target === x.target ||
+            n.target.startsWith(`${x.target}.`) ||
+            n.target.startsWith(`${x.target}[`)),
+      ) ||
+      writtenProves(
+        site === null ? null : (declaredIn(graph).get(siteKey(site)) ?? null),
+        from.steps,
+        to.kind === "path" ? to.steps : [],
+        form,
+      )
+    );
+  });
+}
 
 /**
  * A combined stop's rule (S8, TABLE r4.285, r4.290 and its inventory). The demand-only run is the reference, recorded with
@@ -1106,8 +1595,8 @@ const withoutLabels = (on: string): string =>
  *   exactly its domain (their domains' intersection: checks on one value): the reference satisfied in other words;
  * - (z) a boundary against `unknown`, no plan content (S3 §4), nothing owed at its slot, where an undecided store record
  *   stands at the site of a store whose value holds the boundary's value (`holds`).
- * A record goes with its obligations, never one the natural analysis reports itself. A check the stop owes by another
- * label alone (its kind, whole site, domain and boundary, and its words but for their labels) is #1595's named exception.
+ * A record goes with its obligations, never one the natural analysis reports itself. A check the stop owes by a more
+ * precise label alone, the natural analysis's, is accepted (`provenRelabel`, TABLE r4.322).
  */
 export function combinedStop(reference: Answers, natural: Answers, stopped: Answers): CombinedStop {
   const [reads, finished] = [readsOf(reference), readsOf(stopped)];
@@ -1120,18 +1609,9 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
   const owed = [...stopped.checks, ...marks.map((mark) => mark.obligation)];
   const owedTexts = new Set(owed.map((check) => JSON.stringify(check)));
   const naturalTexts = new Set(natural.checks.map((check) => JSON.stringify(check)));
+  const [referenceLabels, stoppedLabels] = [labelIdentities(reference), labelIdentities(stopped)];
   let parsed: ReturnType<typeof syntaxOf> | undefined;
   const syntax = (): ReturnType<typeof syntaxOf> => (parsed ??= syntaxOf(reference));
-  const relabelledTo = (u: Obligation): boolean =>
-    owed.some(
-      (x) =>
-        x.kind === u.kind &&
-        siteKey(x.site) === siteKey(u.site) &&
-        x.boundary === u.boundary &&
-        domainText(domainOfCheck(x)) === domainText(domainOfCheck(u)) &&
-        (x.target !== u.target || x.on !== u.on) &&
-        withoutLabels(x.on) === withoutLabels(u.on),
-    );
   const classOf = (u: Obligation): "a" | "w" | "z" | "relabelled" | readonly string[] | null => {
     const text = JSON.stringify(u);
     if (owedTexts.has(text)) return null;
@@ -1194,7 +1674,16 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
       )
     )
       return "z";
-    return relabelledTo(u) ? "relabelled" : unanswered;
+    return provenRelabel(
+      u,
+      owed,
+      natural.checks,
+      reference.graph,
+      referenceLabels,
+      stoppedLabels,
+    ) === undefined
+      ? unanswered
+      : "relabelled";
   };
   const checks = new Map<string, "a" | "w" | "z">();
   const coarse = { checks: new Map<string, readonly string[]>(), records: new Set<string>() };
@@ -1243,14 +1732,18 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
     )
       coarse.records.add(record);
   }
-  return { checks, records, relabelled, owing, coarse };
+  const unidentified = new Set([
+    ...(referenceLabels?.missing ?? []),
+    ...(stoppedLabels?.missing ?? []),
+  ]);
+  return { checks, records, relabelled, owing, coarse, unidentified };
 }
 
 /**
  * The mark-ownership rule at the analysis (S8): every check of the unstopped analysis the stop removed is a deferred
  * mark's obligation, and every warning or error it removed is a mark's record (its code at its site). At a combined stop
- * (`rule`), what the combined stop's rule accepts is owned too, and #1595's relabelled checks and records and the coarse
- * (a) reading's counted class (`CombinedStop.coarse`, with its open reads' keys) are named.
+ * (`rule`), what the combined stop's rule accepts is owned too (a proven relabel's checks and records among them,
+ * TABLE r4.322), and the coarse (a) reading's counted class (`CombinedStop.coarse`, with its open reads' keys) is named.
  */
 function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): string[] {
   const marks = stopped.budget.deferred;
@@ -1259,9 +1752,13 @@ function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): s
   const records = new Set([...stopped.diagnostics, ...marks].map(recordKey));
   const problems: string[] = [];
   for (const check of unstopped.checks.map((each) => JSON.stringify(each)))
-    if (kept.has(check) || owned.has(check) || rule?.checks.has(check)) continue;
-    else if (rule?.relabelled.checks.has(check))
-      problems.push(`exception #1595 relabelled check ${check}`);
+    if (
+      kept.has(check) ||
+      owned.has(check) ||
+      rule?.checks.has(check) ||
+      rule?.relabelled.checks.has(check)
+    )
+      continue;
     else if (rule?.coarse.checks.has(check))
       problems.push(
         `exception coarse(a) rejection check ${check} open ${rule.coarse.checks.get(check)!.join(" ")}`,
@@ -1269,10 +1766,14 @@ function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): s
     else problems.push(`unowned check ${check}`);
   for (const d of unstopped.diagnostics) {
     const record = recordKey(d);
-    if (d.kind === "budget" || records.has(record) || rule?.records.has(record)) continue;
-    if (rule?.relabelled.records.has(record))
-      problems.push(`exception #1595 relabelled record ${recordOf(d)}`);
-    else if (rule?.coarse.records.has(record))
+    if (
+      d.kind === "budget" ||
+      records.has(record) ||
+      rule?.records.has(record) ||
+      rule?.relabelled.records.has(record)
+    )
+      continue;
+    if (rule?.coarse.records.has(record))
       problems.push(`exception coarse(a) rejection record ${recordOf(d)}`);
     else problems.push(`unowned record ${recordOf(d)}`);
   }

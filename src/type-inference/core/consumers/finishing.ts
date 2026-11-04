@@ -6,6 +6,7 @@ import type { CorePass } from "../answers.js";
 import { joinSteps, keptParts, keptSlice, keptSteps, type WorkLedger } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { defaultOf, termAt, typedDefault, typeTags, unknownItem, writtenOf } from "../contract.js";
+import { isKeyId, keyOfId } from "../contract/key-ids.js";
 import { keptPath, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
@@ -1225,16 +1226,21 @@ export function finishingKeyRead(walk: Consumers, key: Key, node: FlowNode): rea
 
 /** `finishingKeyRead`'s sources after a host global's own data: the key's finished answer, then the domains. */
 function laterKeySources(walk: Consumers, key: Key, node: FlowNode): readonly Item[] {
-  const { contract, values, program } = walk.pass;
-  const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
-    const items = walk.run(work());
-    return items.some(unsettledItem) ? null : items;
-  };
-  const found =
-    (program.work.stopped === null ? null : settled(() => values.keyItems(key, node))) ??
-    settled(() => contract.contractOf(key));
-  if (found !== null) return found;
-  const [place, path] = [keyPlace(key), keyPath(key)];
+  const { values, program } = walk.pass;
+  const items = program.work.stopped === null ? null : walk.run(values.keyItems(key, node));
+  return items === null || items.some(unsettledItem) ? keyDomain(walk, key) : items;
+}
+
+/**
+ * A key's domain in the finishing path (S3 §5 revisions 14, 16): its finished contract, else its written or retained
+ * admitted type, `STOPPED` where none decides it: a receiver's read (`finishingKeyRead`).
+ */
+function keyDomain(walk: Consumers, key: Key): readonly Item[] {
+  const { contract, program } = walk.pass;
+  const found = walk.run(contract.contractOf(key));
+  if (!found.some(unsettledItem)) return found;
+  const text = isKeyId(key) ? keyOfId(contract, key) : key;
+  const [place, path] = [keyPlace(text), keyPath(text)];
   const written = writtenOf(program.place(place).kind);
   const term = written === null ? null : termAt(written, path);
   const retained = term === null && walk.settled ? walk.admission.retained(place, path) : null;
@@ -1244,6 +1250,41 @@ function laterKeySources(walk: Consumers, key: Key, node: FlowNode): readonly It
   return tags.length === 0 || tags.includes("unknown")
     ? STOPPED
     : [...new Set(tags)].map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
+}
+
+/**
+ * After a program stop, the kinds a label's step is spelled from where the key's contract asked then is unsettled, and
+ * the proof they rest on (#1595, TABLE r4.322, the lead's ruling on its HEAD 0): the key's finished contract; else its
+ * written type; else, at a settled stop, what admission retained where that is a decision or a written kind (A1, A2,
+ * A4, a copy's source's among them), proved by the stopped analysis itself. Never an open answer (`unknown`, every kind
+ * fitting) nor a path no decision retains (a stopped one's): `null` there, and the label keeps its generic step.
+ */
+export function labelDomain(
+  walk: Consumers,
+  key: Key,
+): {
+  readonly kinds: readonly Item[];
+  readonly source: "contract" | "written" | "retained";
+} | null {
+  const { contract, program } = walk.pass;
+  const found = walk.run(contract.contractOf(key));
+  if (!found.some(unsettledItem)) return { kinds: found, source: "contract" };
+  const text = isKeyId(key) ? keyOfId(contract, key) : key;
+  const [place, path] = [keyPlace(text), keyPath(text)];
+  const written = writtenOf(program.place(place).kind);
+  const term = written === null ? null : termAt(written, path);
+  const decided =
+    term !== null
+      ? { tags: typeTags(term), source: "written" as const }
+      : walk.settled
+        ? { tags: walk.admission.retained(place, path)?.tags ?? [], source: "retained" as const }
+        : null;
+  if (decided === null || decided.tags.length === 0 || decided.tags.includes("unknown"))
+    return null;
+  return {
+    kinds: [...new Set(decided.tags)].map((tag) => makeItem(tag, null, { cert: "pos" })),
+    source: decided.source,
+  };
 }
 
 /**
