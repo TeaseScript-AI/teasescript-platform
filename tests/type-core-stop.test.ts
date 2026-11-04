@@ -6072,7 +6072,8 @@ test("a combined stop's more precise label is proved by its written type exactly
  * (`build()["a"].values[0]`), and a derived list's element, then an index (`build().values[0]["a"]`), four modes, each
  * stopping demand allowance up to 3, every settled stop: each check the stopped analysis owes under another label than
  * the demand-only reference's own check there (the same kind, whole site, boundary and expected types) is that check's
- * path with some `element` steps spelled `entry`, or the value's own text, the source at its site.
+ * path with some `element` steps spelled `entry`, or own text: the value's, or a receiver's along the same read, the
+ * source at its site or a prefix of it.
  */
 test("a combined stop's label after a call's result is one precise form, made wholly after the stop (#1595)", () => {
   const sources = [
@@ -6114,7 +6115,11 @@ test("a combined stop's label after a call's result is one precise form, made wh
                 from.every(
                   (step, i) => step === to[i] || (step === "element" && to[i] === "entry"),
                 );
-              if (!entries && x.target !== source.slice(x.site.start, x.site.end))
+              // (own text: the value's, or its receiver's at the same read, a prefix of the source there)
+              const read = source.slice(x.site.start, x.site.end);
+              const own =
+                read.startsWith(x.target) && [undefined, ".", "["].includes(read[x.target.length]);
+              if (!entries && !own)
                 problems.push(`${mode.name} @${demand}/${allowance}: ${u.target} -> ${x.target}`);
             }
         }
