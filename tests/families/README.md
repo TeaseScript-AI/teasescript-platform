@@ -50,7 +50,11 @@ exception: the runner writes it to `--out` and counts it apart (`unanswered`). I
 a total (sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, uncharged, modes, runs,
 differences, the unit limit's multiple and the safety net in seconds), and exits 1 when any run differs, throws, leaves
 nodes unanswered other than alike, is uncompared or reaches the safety net, or any source stalls. Run large sizes as one
-capped job per area or shard on a worker. Report stalls, uncharged runs and publication exceptions separately; none
+capped job per area or shard on a worker. A pool of shards on the central queue (`sx-job submit --items`) takes its items from
+`node tests/families/items.mjs make <N> <prefix words…>` (`<prefix> 0/N` to `<prefix> N-1/N`, the runner's 0-based
+shards; one call a group, appended to one file), and `node tests/families/items.mjs check <file>` refuses a list whose
+group misses a shard, repeats one or names one past the last (a 1-based list skipped shard 0 twice in #1652's
+campaigns). Report stalls, uncharged runs and publication exceptions separately; none
 establishes agreement.
 
 With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the stored
