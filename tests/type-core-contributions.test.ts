@@ -230,8 +230,9 @@ test("every slot a run includes is one its run read", () => {
       withFlowCheck(
         (slot, inclusions, reads) => {
           published += 1;
+          // (an answer kept outside the solver includes the slots its maker's run read: `kept`)
           for (const inclusion of inclusions)
-            if (inclusion.slot !== null)
+            if (inclusion.slot !== null && inclusion.route !== "kept")
               assert.ok(reads.has(inclusion.slot), `${slot} includes ${inclusion.slot} unread`);
         },
         () => analysed(source, mode, true),

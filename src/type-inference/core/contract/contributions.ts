@@ -114,7 +114,12 @@ export class FlowSink {
 
   /** A child's inclusions kept, each under `qualifiers` (outermost first), each one charged as it is copied. */
   public attach(child: FlowSink, ...qualifiers: Qualifier[]): void {
-    for (const inclusion of child.inclusions)
+    this.attachAll(child.inclusions, ...qualifiers);
+  }
+
+  /** Inclusions kept as `attach` keeps a child's: an answer kept elsewhere with the inclusions it was made of. */
+  public attachAll(inclusions: readonly Inclusion[], ...qualifiers: Qualifier[]): void {
+    for (const inclusion of inclusions)
       this.#push(
         qualifiers.length === 0
           ? inclusion

@@ -199,11 +199,15 @@ export function* gatherAt(
   }
   if (site.kind === "groups") {
     const group = gatherGroups(contract, site)[at]!;
-    if (group === null) {
-      // (#1668: the loads' merged answer is kept per pass outside the solver: no flow of it)
-      flow?.opaque("loads");
-      return yield* loadsBelow(contract, othersAt(contract, here?.others, false), rest, false);
-    }
+    if (group === null)
+      return yield* loadsBelow(
+        contract,
+        othersAt(contract, here?.others, false),
+        rest,
+        false,
+        null,
+        flow,
+      );
     return yield* groupItems(
       contract,
       group,
