@@ -3,7 +3,7 @@ import {
   createSerializableObject,
   type SerializableRuntimeValue,
 } from "../../src/runtime/values/serializable-values.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
+import { analyseCore, type Answers, type CorePass } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import {
   withTestAllowance,
@@ -23,7 +23,7 @@ import type { Expression, TypeAnnotation } from "../../src/ast.js";
 import { expressionChildren, unwrap } from "../../src/expression-children.js";
 import type { FlowGraph } from "../../src/type-inference/core/flow-graph/model.js";
 import { REASON, type Item } from "../../src/type-inference/core/items.js";
-import type { SourceSite } from "../../src/type-inference/graph.js";
+import type { FunctionId, PlaceId, SourceSite } from "../../src/type-inference/graph.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
 import { sampled } from "./sweep.js";
@@ -874,6 +874,81 @@ interface Recorded {
   readonly emissions: readonly Emission[];
   /** The source text at a site, as the analysis's own program reads it (`CoreProgram.textAt`, a label's own text). */
   readonly textAt?: (site: SourceSite) => string;
+  /** A label's roots as the analysis's own program identifies the value at a site (`rootIn`). */
+  readonly rootsAt?: (site: SourceSite) => readonly (RootPlace | null)[];
+}
+
+/** A label's root as the compiler identifies it (`labelRoot`): the root place's label and its own site. */
+export interface RootPlace {
+  readonly label: string;
+  readonly site: SourceSite | null;
+}
+
+/**
+ * The roots of the value at a site, by the program's own identity (`keyLabel`'s walk): the place at the site's whole
+ * span (`placeBySite`); first its read's root, up its projections to the binding an occurrence reads (`occurrenceOf`) or
+ * the function result a call gives (its `call` constraint, as `Consumers.resultOfCall` maps it), `null` for any other
+ * start; then the root of each place the value is stored, passed or returned into (`consumersOf`: a store's place, an
+ * argument's parameter, a return's result; through a literal's cell or property, its literal's), where a check at a
+ * store, a call, a return or a literal's element names that place's path.
+ */
+function rootIn(program: CorePass["program"]): (site: SourceSite) => readonly (RootPlace | null)[] {
+  let calls: Map<PlaceId, FunctionId> | undefined;
+  const rootOf = (start: PlaceId | undefined): RootPlace | null => {
+    if (calls === undefined) {
+      calls = new Map();
+      for (const each of program.constraints)
+        if (each.kind === "call") calls.set(each.result, each.fn);
+    }
+    for (let at = start, depth = 0; at !== undefined && depth < 256; depth += 1) {
+      const fn = calls.get(at);
+      const own = ["binding", "parameter", "result"].includes(program.place(at).kind.kind);
+      const root =
+        program.occurrenceOf.get(at) ??
+        (fn === undefined ? (own ? at : undefined) : program.functionOf(fn).result);
+      if (root !== undefined) {
+        const place = program.place(root);
+        return { label: place.label, site: place.site };
+      }
+      at = program.projOf.get(at)?.owner;
+    }
+    return null;
+  };
+  // (the places a value goes into: through a literal's cell or property, the literal's own, as a literal's elements
+  // land, `literalLanding`)
+  const into = (value: PlaceId): RootPlace[] => {
+    const roots: RootPlace[] = [];
+    const seen = new Set<PlaceId>();
+    for (let pending = [value], next = pending.pop(); next !== undefined; next = pending.pop()) {
+      if (seen.has(next) || seen.size > 256) continue;
+      seen.add(next);
+      for (const use of program.consumersOf.get(next) ?? []) {
+        const fn =
+          use.kind === "return" || use.kind === "argument" ? program.functionOf(use.fn) : null;
+        const place =
+          use.kind === "store"
+            ? use.into
+            : use.kind === "return"
+              ? fn?.result
+              : use.kind === "argument"
+                ? typeof use.parameter === "number"
+                  ? fn?.parameters[use.parameter]
+                  : program.parameterPlace(use.fn, use.parameter)
+                : undefined;
+        const cell = place === undefined ? undefined : program.cellOwner.get(place);
+        if (cell !== undefined) pending.push(cell.owner);
+        else {
+          const root = rootOf(place);
+          if (root !== null) roots.push(root);
+        }
+      }
+    }
+    return roots;
+  };
+  return (site) => {
+    const value = program.placeBySite.get(siteKey(site));
+    return value === undefined ? [null] : [rootOf(value), ...into(value)];
+  };
 }
 
 /**
@@ -1052,13 +1127,22 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     const program = last?.[0].pass.program;
     consumerReads.set(made.answers, {
       ...(last?.[1] ?? { reads: new Map(), emissions: [] }),
-      ...(program === undefined ? {} : { textAt: (site: SourceSite) => program.textAt(site) }),
+      ...(program === undefined
+        ? {}
+        : { textAt: (site: SourceSite) => program.textAt(site), rootsAt: rootIn(program) }),
     });
     return made;
   } finally {
     Object.assign(prototype, { valueItems, runs, enter, check, finish, skip });
     for (const map of maps) map.into = undefined;
   }
+}
+
+/** An analysis of a program's files with its reads recorded (`recordingReads`), for its label source (`labelSource`). */
+export function recordedAnalysis(files: readonly SourceFile[]): Answers {
+  const request = coreRequest([...files], GLOBALS);
+  if (request === null) throw new Error("The files do not resolve.");
+  return recordingReads(() => ({ answers: analyseCore(request) })).answers;
 }
 
 /**
@@ -1104,83 +1188,88 @@ const DERIVED = new Set(["values", "keys"]);
 /** The selections a key path spells `element` (`selectsElement`), as a value's own text spells them. */
 const SELECTIONS = new Set(["first", "last", "random"]);
 
-/** The program's declared functions. */
-const functionsOf = (graph: FlowGraph) =>
-  graph.regions.flatMap((region) => (region.kind === "function" ? [region.declaration] : []));
-
 /**
- * A key path's root as `keyLabel` spells it (`labelRoot`): a binding's name, a function's parameter `F.P` or result
- * `F.result`, with the written type declared there and the steps the root takes; `null` for any other start.
+ * The written types a program declares, by the whole site (file and offsets) of the place that holds them, as the
+ * compiler sites its places: a `let` or `global` statement, a parameter, a function's name for its result.
  */
-function labelRootOf(
-  graph: FlowGraph,
-  steps: readonly string[],
-): {
-  readonly own: (text: string) => boolean;
-  readonly written: TypeAnnotation | null;
-  readonly from: number;
-} | null {
-  const declared = functionsOf(graph).find((f) => f.name.name === steps[0]);
-  if (declared !== undefined && steps[1] === "result")
-    return {
-      own: (text) => text.startsWith(`${steps[0]}(`) && text.endsWith(")"),
-      written: declared.returnTypeAnnotation,
-      from: 2,
-    };
-  const parameter = declared?.parameters.find((each) => each.name.name === steps[1]);
-  if (parameter !== undefined)
-    return { own: (text) => text === steps[1], written: parameter.typeAnnotation, from: 2 };
-  if (declared !== undefined || steps[0] === undefined) return null;
-  const lets = graph.nodes.flatMap(({ statement }) =>
-    statement?.kind === "letStatement" || statement?.kind === "globalStatement" ? [statement] : [],
-  );
-  const binding = lets.find((each) => each.name.name === steps[0]);
-  return { own: (text) => text === steps[0], written: binding?.typeAnnotation ?? null, from: 1 };
+const declaredTypes = new WeakMap<FlowGraph, ReadonlyMap<string, TypeAnnotation | null>>();
+function declaredIn(graph: FlowGraph): ReadonlyMap<string, TypeAnnotation | null> {
+  let types = declaredTypes.get(graph);
+  if (types !== undefined) return types;
+  const made = new Map<string, TypeAnnotation | null>();
+  const at = (file: number, node: { readonly span: Expression["span"] }) =>
+    siteKey({ file, start: node.span.start.offset, end: node.span.end.offset });
+  for (const { file, statement } of graph.nodes)
+    if (statement?.kind === "letStatement" || statement?.kind === "globalStatement")
+      made.set(at(file, statement), statement.typeAnnotation);
+  for (const region of graph.regions)
+    if (region.kind === "function") {
+      const { declaration, file } = region;
+      made.set(at(file, declaration.name), declaration.returnTypeAnnotation);
+      for (const parameter of declaration.parameters)
+        made.set(at(file, parameter), parameter.typeAnnotation);
+    }
+  declaredTypes.set(graph, (types = made));
+  return types;
 }
 
-/** What a label's own text is read from: the expression at a site, and the source text there (`ownLabel`). */
-export interface OwnTextSource {
+/** What a label is read from: the expression at a site, the source text there (`ownLabel`) and its roots (`rootIn`). */
+export interface LabelSource {
   readonly expressionAt: (site: SourceSite) => Expression | undefined;
   readonly textAt: (site: SourceSite) => string;
+  readonly rootsAt: (site: SourceSite) => readonly (RootPlace | null)[];
 }
 
-/** An analysis's own-text source: its syntax (`syntaxOf`) and its recorded text (`recordingReads`); `null` unrecorded. */
-export function ownTextSource(answers: Answers): OwnTextSource | null {
-  const textAt = readsOf(answers)?.textAt;
-  return textAt === undefined ? null : ownTextIn(answers, textAt);
+/** A label's root, the program's place (`rootIn`): its steps and the written type its declaration holds (`declaredIn`). */
+interface Root {
+  readonly steps: readonly string[];
+  readonly written: TypeAnnotation | null;
 }
 
-/** An analysis's own-text source by its files' sources (`ownTextSource` for one made without its reads recorded). */
-export function ownTextOf(answers: Answers, sources: readonly string[]): OwnTextSource {
-  return ownTextIn(answers, (site) => (sources[site.file] ?? "").slice(site.start, site.end));
-}
+const rootFrom = (graph: FlowGraph, root: RootPlace | null | undefined): Root | null =>
+  root === null || root === undefined
+    ? null
+    : {
+        steps: targetSteps(root.label),
+        written: root.site === null ? null : (declaredIn(graph).get(siteKey(root.site)) ?? null),
+      };
 
-function ownTextIn(answers: Answers, textAt: (site: SourceSite) => string): OwnTextSource {
+/** An analysis's label source: its syntax (`syntaxOf`) and its program's text and roots (`recordingReads`). */
+export function labelSource(answers: Answers): LabelSource | null {
+  const recorded = readsOf(answers);
+  if (recorded?.textAt === undefined || recorded.rootsAt === undefined) return null;
   let parsed: ReturnType<typeof syntaxOf> | undefined;
-  return { expressionAt: (site) => (parsed ??= syntaxOf(answers)).at.get(siteKey(site)), textAt };
+  return {
+    expressionAt: (site) => (parsed ??= syntaxOf(answers)).at.get(siteKey(site)),
+    textAt: recorded.textAt,
+    rootsAt: recorded.rootsAt,
+  };
 }
 
 /**
- * The read chain a value's own text names, from the expression at a check's site down to its start (`keyLabel`'s walk
- * up the projections, read from the syntax): the start's root as `labelRoot` spells it (a binding's name, the enclosing
- * function's parameter `F.P`, in the check's own file, a call's result `F.result`), each step below it with the
- * spellings a label may give it (a property's name; `element` for an index or a `get`; a selection, `first`, `last` or
- * `random`, either `element` or, an object's property of that name, its name), and the site of each step's
- * expression, outermost last. One list of spellings a step, never their combinations (Codex r5's B1 on #1687); `null`
- * for any other start.
+ * The read chain at a check's site, every part identified by the compiler's own identity, never by a name or a text
+ * alone (the recognition family's rule, the lead's ruling on Codex r5): from the expression at the site's whole span
+ * (file and offsets) down to its start, each step below it with the spellings a label may give it (a property's name;
+ * `element` for an index or a `get`; a selection, `first`, `last` or `random`, either `element` or, an object's property
+ * of that name, its name) and the site of its expression, outermost last; then the start's root, the place the program
+ * reads there (`rootIn`: a binding, a parameter, a call's result), with the written type its declaration holds
+ * (`declaredIn`, by the root place's own site), `null` where the program names none. Where no expression stands at the
+ * site, the root of the place there and no steps. One walk down the read, linear in its length: one list of spellings a
+ * step, never their combinations (Codex r5's B1 on #1687).
  */
 function readChain(
   graph: FlowGraph,
-  file: number,
-  at: Expression,
+  source: LabelSource,
+  site: SourceSite,
 ): {
-  readonly root: readonly string[];
+  readonly root: Root | null;
   readonly steps: readonly (readonly string[])[];
   readonly sites: readonly SourceSite[];
-} | null {
+} {
   const below: { expression: Expression; steps: readonly string[] }[] = [];
+  const at = source.expressionAt(site);
   let start = at;
-  for (let depth = 0; depth < 256; depth += 1) {
+  while (start !== undefined) {
     const inner = unwrap(start);
     if (inner.kind === "propertyAccessExpression") {
       const name = inner.property.name;
@@ -1198,33 +1287,14 @@ function readChain(
       start = inner.callee.object;
     } else break;
   }
-  const origin = unwrap(start);
-  const offset = siteOf(file, origin).start;
-  // (a call's result, a parameter of the function in this file the read stands in, else a binding)
-  let root: readonly string[] | null = null;
-  if (origin.kind === "callExpression" && origin.callee.kind === "identifier") {
-    const name = origin.callee.name;
-    if (functionsOf(graph).some((f) => f.name.name === name)) root = [name, "result"];
-  } else if (origin.kind === "identifier") {
-    const enclosing = graph.regions.find(
-      (region) =>
-        region.kind === "function" &&
-        region.file === file &&
-        region.declaration.span.start.offset <= offset &&
-        offset < region.declaration.span.end.offset &&
-        region.declaration.parameters.some((each) => each.name.name === origin.name),
-    );
-    root =
-      enclosing?.kind === "function"
-        ? [enclosing.declaration.name.name, origin.name]
-        : [origin.name];
-  }
-  if (root === null) return null;
   below.reverse();
   return {
-    root,
+    root: rootFrom(
+      graph,
+      source.rootsAt(start === undefined ? site : siteOf(site.file, unwrap(start)))[0],
+    ),
     steps: below.map(({ steps }) => steps),
-    sites: below.map(({ expression }) => siteOf(file, expression)),
+    sites: below.map(({ expression }) => siteOf(site.file, expression)),
   };
 }
 
@@ -1238,53 +1308,59 @@ function readChain(
  * - and where the chain passes a `values` or `keys` step with a dictionary among its owner's kinds (`derivedChain`), the
  *   whole label is the value's own text instead (`ownLabel`): the source text of the expression the label names.
  * After a stop the stopped analysis may prove more of an owner's kinds than the reference (`labelDomain`), which gives
- * exactly two precise forms, never mixed:
+ * exactly two precise forms, never mixed, each on a root the program identifies at the check's site:
  * - `"entry"`: the reference's path with some `element` steps below its root spelled `entry`, the root and every other
- *   step unchanged (a root or parameter named like a step stays the root, Codex r4's B1 on #1687);
- * - `"own"`: the source text of the very expression the reference's path names, read at the check's site along its read
- *   chain (`readChain`), its path the reference's with at least one `values` or `keys` step below its root: never
- *   another expression's text nor an altered operand (Codex r4's B2), and whatever the expression's operands are (N1).
- * The form of `x` beside `u`, else `null`.
+ *   step unchanged (a root or parameter named like a step stays the root, Codex r4's B1 on #1687); its root the read's
+ *   (`readChain`) or a place the value there is stored, passed or returned into (`rootIn`);
+ * - `"own"`: the source text of the very expression the reference's path names, along the read's chain from its root,
+ *   its path the reference's with at least one `values` or `keys` step below its root: never another expression's text
+ *   nor an altered operand (Codex r4's B2), and whatever the expression's operands are (N1).
+ * The form of `x` beside `u` with its root, else `null`.
  */
 function relabelForm(
   graph: FlowGraph,
-  source: OwnTextSource | null,
+  source: LabelSource,
   u: Obligation,
   x: Obligation,
-): "entry" | "own" | null {
+): { readonly form: "entry" | "own"; readonly root: Root } | null {
   const [from, to] = [targetSteps(u.target), targetSteps(x.target)];
-  const root = labelRootOf(graph, from);
-  if (
+  const below = (root: Root | null): root is Root =>
     root !== null &&
-    from.length === to.length &&
-    from.slice(0, root.from).every((step, i) => step === to[i]) &&
-    from.some((step, i) => step !== to[i]) &&
-    from.every(
-      (step, i) => step === to[i] || (i >= root.from && step === "element" && to[i] === "entry"),
-    )
-  )
-    return "entry";
-  const at = source?.expressionAt(x.site);
-  if (source === null || at === undefined) return null;
-  // (the expression on the read's chain whose text the label is, and whose path is the reference's: its root, then each
-  // step one of its spellings, an element step the reference spells `entry` already being an element step)
-  const chain = readChain(graph, x.site.file, at);
-  if (chain === null) return null;
-  const { root: start, steps, sites } = chain;
-  const depth = from.length - start.length;
-  if (
-    depth < 1 ||
-    depth > steps.length ||
-    start.some((step, i) => step !== from[i]) ||
-    source.textAt(sites[depth - 1]!) !== x.target ||
-    !steps.slice(0, depth).every((spellings, i) => {
-      const step = from[start.length + i]!;
+    root.steps.length <= from.length &&
+    root.steps.every((step, i) => step === from[i]);
+  const { root, steps, sites } = readChain(graph, source, x.site);
+  if (from.length === to.length && from.some((step, i) => step !== to[i])) {
+    const entry = [
+      root,
+      ...source
+        .rootsAt(x.site)
+        .slice(1)
+        .map((each) => rootFrom(graph, each)),
+    ].find(
+      (each): each is Root =>
+        below(each) &&
+        from.every(
+          (step, i) =>
+            step === to[i] || (i >= each.steps.length && step === "element" && to[i] === "entry"),
+        ),
+    );
+    if (entry !== undefined) return { form: "entry", root: entry };
+  }
+  if (!below(root)) return null;
+  // (the expression on the read's chain whose text the label is, and whose path is the reference's: each step one of
+  // its spellings, an element step the reference spells `entry` already being an element step)
+  const length = root.steps.length;
+  const depth = from.length - length;
+  return depth >= 1 &&
+    depth <= steps.length &&
+    source.textAt(sites[depth - 1]!) === x.target &&
+    steps.slice(0, depth).every((spellings, i) => {
+      const step = from[length + i]!;
       return spellings.includes(step) || (step === "entry" && spellings.includes("element"));
-    })
-  )
-    return null;
-  const rootLength = labelRootOf(graph, from)?.from ?? from.length;
-  return from.slice(rootLength).some((step) => DERIVED.has(step)) ? "own" : null;
+    }) &&
+    from.slice(length).some((step) => DERIVED.has(step))
+    ? { form: "own", root }
+    : null;
 }
 
 /** A written type's members, an optional's `null` and a union's own members each one (`T?`, `A | B`). */
@@ -1326,26 +1402,25 @@ const elementsOf = (members: readonly (TypeAnnotation | null)[]): (TypeAnnotatio
 
 /**
  * Whether a written type at the key proves `x`'s form (#1595, the lead's ruling on Q4: the author's own proof, as the
- * compiler reads it). The root's written type is followed along `u`'s element steps (an `entry` it already spells among
- * them) through its elements, optionals and
- * unions as `termAt` follows them; a step it cannot follow proves nothing past it. One clause per form:
+ * compiler reads it). The root's written type (`readChain`'s, the program's root place's declaration) is followed along
+ * `u`'s element steps (an `entry` it already spells among them) through its elements, optionals and unions as `termAt`
+ * follows them; a step it cannot follow proves nothing past it. One clause per form:
  * - `"entry"`: every step `x` spells `entry` has a written dictionary as its owner, every kind of it
  *   (`elementStepOf`), and no `values` or `keys` step on the way has a dictionary among its owner's kinds, where the
  *   compiler names the value by its own text instead (`derivedChain`);
  * - `"own"`: a `values` or `keys` step on the way has a dictionary among its owner's written kinds (`derivedChain`).
  */
 function writtenProves(
-  graph: FlowGraph,
+  root: Root,
   u: readonly string[],
   x: readonly string[],
   form: "entry" | "own",
 ): boolean {
-  const root = labelRootOf(graph, u);
-  if (root === null || root.written === null) return false;
+  if (root.written === null) return false;
   let members = membersOf(root.written);
   // (the last step `x` spells `entry`: past it a step the type cannot follow leaves nothing to prove)
   const last = Math.max(...u.flatMap((step, i) => (form === "entry" && step !== x[i] ? [i] : [])));
-  for (let at = root.from; at < u.length; at += 1) {
+  for (let at = root.steps.length; at < u.length; at += 1) {
     const step = u[at]!;
     if (form === "entry" && x[at] === "entry" && !writtenDict(members)) return false;
     // (a derived list: its own text, never an `entry` path, the two forms exclusive as `keyLabel` makes them)
@@ -1370,23 +1445,25 @@ function writtenProves(
  * 3. no other difference is ignored: the label is one of the compiler's two precise forms of the reference's
  *    (`relabelForm`), the words are `u`'s with only the label replaced, and every other part is equal.
  * The stopped check accepted, else `undefined`. `natural` is the natural analysis's checks; `graph` the program's;
- * `source` the reference's own text (`ownTextSource`), without which no own text is recognized.
+ * `source` the reference's (`labelSource`), without which no label is recognized: every value is identified by its
+ * whole site and the program's place, never by a name or a text alone.
  */
 export function provenRelabel(
   u: Obligation,
   owed: readonly Obligation[],
   natural: readonly Obligation[],
   graph: FlowGraph,
-  source: OwnTextSource | null,
+  source: LabelSource | null,
 ): Obligation | undefined {
+  if (source === null) return undefined;
   const from = targetSteps(u.target);
   return owed.find((x) => {
     if (x.target === u.target) return false;
     const to = targetSteps(x.target);
-    // (3)'s form
-    const form = relabelForm(graph, source, u, x);
+    // (3)'s form, on the read chain at the check's site (each candidate's own: (2) compares the sites after)
+    const found = relabelForm(graph, source, u, x);
     return (
-      form !== null &&
+      found !== null &&
       // (1)
       (natural.some(
         (n) =>
@@ -1395,7 +1472,7 @@ export function provenRelabel(
             n.target.startsWith(`${x.target}.`) ||
             n.target.startsWith(`${x.target}[`)),
       ) ||
-        writtenProves(graph, from, to, form)) &&
+        writtenProves(found.root, from, to, found.form)) &&
       // (2)
       x.kind === u.kind &&
       siteKey(x.site) === siteKey(u.site) &&
@@ -1447,7 +1524,7 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
   const owed = [...stopped.checks, ...marks.map((mark) => mark.obligation)];
   const owedTexts = new Set(owed.map((check) => JSON.stringify(check)));
   const naturalTexts = new Set(natural.checks.map((check) => JSON.stringify(check)));
-  const ownText = ownTextSource(reference);
+  const labels = labelSource(reference);
   let parsed: ReturnType<typeof syntaxOf> | undefined;
   const syntax = (): ReturnType<typeof syntaxOf> => (parsed ??= syntaxOf(reference));
   const classOf = (u: Obligation): "a" | "w" | "z" | "relabelled" | readonly string[] | null => {
@@ -1512,7 +1589,7 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
       )
     )
       return "z";
-    return provenRelabel(u, owed, natural.checks, reference.graph, ownText) === undefined
+    return provenRelabel(u, owed, natural.checks, reference.graph, labels) === undefined
       ? unanswered
       : "relabelled";
   };
