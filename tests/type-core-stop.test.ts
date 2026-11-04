@@ -5754,6 +5754,8 @@ test("a combined stop's more precise label is accepted only as the owner's three
   assert.equal(parameter.relabel("show.xs.values.element", "xs.values[0]"), "xs.values[0]");
   // (the text of another expression on the read's chain, its receiver's, for the read's own path)
   assert.equal(parameter.relabel("show.xs.values.element", "xs.values"), undefined);
+  // (the read's own text for another path of the same depth: its derived step spelled otherwise)
+  assert.equal(parameter.relabel("show.xs.keys.element", "xs.values[0]"), undefined);
   assert.equal(
     parameter.relabel("show.xs.values.element", "xs.values[99]", ["xs.values[99]"]),
     undefined,
