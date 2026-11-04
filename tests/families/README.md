@@ -200,7 +200,8 @@ sx-job submit --checkout <head> --patch mutant.diff --commit head=<head> --items
 ```
 
 `pair` compares the base tree with the head tree. `mutant` compares the head tree with the head's checkout under the
-patch, which it builds, and writes each changed file's hash before and after into `mutant.sha256`, the mutant's proof
+patch, which it builds, and writes each path the patch adds, changes or removes, with its hash before and after
+(`absent` where none), into `mutant.sha256`, the mutant's proof
 (above): a seed whose outcome differs reaches the mutated code, and a mutant no seed tells apart survives the family.
 
 ## The unit limit and the safety net (#1647)
