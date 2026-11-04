@@ -1837,7 +1837,7 @@ test("the stop oracle refuses a stopped run whose without leaves the run's allow
 /**
  * #1631: a rerun without the run's demand allowance can stop in the same phase, settled, at the same program allowance,
  * yet under another demand allowance none of its decisions stops, so its compile differs. The issue's witness at program
- * allowance 2,039 and demand allowance 27: the run's own `without` gives no problem, the uncapped run's is refused.
+ * allowance 1,886 (2,039 before #1251 made no narrowing index for it) and demand allowance 27: the run's own `without` gives no problem, the uncapped run's is refused.
  */
 test("the stop oracle refuses a stopped run whose without leaves the run's demand allowance (#1631)", () => {
   const c: HeldCase = {
@@ -1849,10 +1849,10 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
   };
   const mode = HELD_MODES[0]!;
   const unstopped = heldRun(c, mode, undefined, 27);
-  const stopped = heldRun(c, mode, 2039, 27);
-  const uncapped = heldRun(c, mode, 2039);
+  const stopped = heldRun(c, mode, 1886, 27);
+  const uncapped = heldRun(c, mode, 1886);
   for (const { budget } of [stopped.answers, uncapped.answers])
-    assert.deepEqual([budget.allowance, budget.stoppedIn, budget.settled], [2039, "walk", true]);
+    assert.deepEqual([budget.allowance, budget.stoppedIn, budget.settled], [1886, "walk", true]);
   assert.ok(stopped.answers.budget.decisions.some((d) => d.stopped));
   assert.ok(!uncapped.answers.budget.decisions.some((d) => d.stopped));
   // (a combined stop, judged under its rule: its finishing read answers `first` from its stores' syntax through the copy
@@ -2880,7 +2880,7 @@ test("#1216's redundant check stands at its counted stops", () => {
   }))
     for (const allowance of testedAllowances(phase, low, high))
       if (has(analyse(allowance))) count += 1;
-  assert.equal(count, 99);
+  assert.equal(count, 96);
 });
 
 /**
@@ -2914,7 +2914,7 @@ test("a settled stop keeps the checks of the host data a place's stores hold (#1
 /**
  * #1501 (the owner's reviewer's control on #1536): host data stored into an unrestricted written element keeps its
  * boundary (`copy-type xs.element`, against `unknown`, at `hostValue`) at the walk's settled stops in source order, owned or
- * kept, its domain's `unknown` being opaque; before the finishing read took that reason the walk's stops lost it (895).
+ * kept, its domain's `unknown` being opaque; before the finishing read took that reason the walk's stops lost it (895; 783 since #1251 makes no narrowing index for this program).
  */
 test("a settled stop keeps the boundary of host data an unrestricted written element holds, at the walk's stops (#1501)", () => {
   const c = heldFamily(true).find((each) => each.name === "writtenList-1-repeat-plain")!;
@@ -2924,7 +2924,7 @@ test("a settled stop keeps the boundary of host data an unrestricted written ele
   );
   const mode = HELD_MODES[0]!;
   const { run: unstopped } = heldUnstopped(c, mode);
-  // the reviewer's own stop: forward order, program allowance 895, a settled walk stop, where the boundary of
+  // the reviewer's own stop: forward order, program allowance 783, a settled walk stop, where the boundary of
   // `hostValue` (16:25) was lost
   const boundary = unstopped.answers.checks.find(
     (check) =>
@@ -2939,10 +2939,10 @@ test("a settled stop keeps the boundary of host data an unrestricted written ele
     ["hostValue", "hostOther"],
   )!;
   const { stoppedIn, settled } = mode.run(() =>
-    withTestAllowance(895, () => analyseCore(request)),
+    withTestAllowance(783, () => analyseCore(request)),
   ).budget;
   assert.deepEqual({ stoppedIn, settled }, { stoppedIn: "walk", settled: true });
-  assert.deepEqual(heldProblems(c, mode, 895, unstopped), [], "walk @895");
+  assert.deepEqual(heldProblems(c, mode, 783, unstopped), [], "walk @783");
   // (and every eighth of the walk's stops, where the finishing read answers the repeat count's domain)
   const stops = heldStops(c, mode, 8).filter((stop) => stop.phase === "walk");
   assert.ok(stops.length > 0);
