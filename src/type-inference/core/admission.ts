@@ -55,7 +55,7 @@ import type {
   KeyStops,
   LandingIndex,
   Level,
-  Listing,
+  ListingNode,
   LiveGroup,
   OpenStep,
   OwnStructure,
@@ -374,7 +374,7 @@ export class Admission {
    * Per place and prefix text, the paths copies land there that a caller asked (`landedBelow`), for this pass alone: each
    * entry one charged emit of the call that made it, so they hold no more than the pass's charged work.
    */
-  readonly listings = new Map<PlaceId, Map<string, Listing>>();
+  readonly listings = new Map<PlaceId, ListingNode>();
   listingCount = 0;
   /** Per place copies land in, the landed paths whose contents may not fit (`hotSets`). */
   hots: ReadonlyMap<PlaceId, readonly (readonly string[])[]> | null = null;

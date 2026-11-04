@@ -6984,7 +6984,8 @@ export const LANDING_FAMILIES: readonly WorkFamily[] = (["first", "last"] as con
  * at a prefix or at every link; seeds overlapping a listing; sibling prefixes holding other paths; one place asked at two
  * prefixes, its other values loaded at each; a wide object read at one narrow property in every call (Codex r1's B1);
  * one place's two strips written into one destination (its H1); a longer prefix walked after a path it reaches was
- * brought, so its walk is not kept; copies of a whole cycle, a fed cycle and a cycle that takes
+ * brought, so its walk is not kept; a chain whose every link is asked, then one narrow prefix through all of them (Codex
+ * r2's B2); copies of a whole cycle, a fed cycle and a cycle that takes
  * steps; and a chain one of whose copies a list rejects, landed in every pass (Sol's design rounds r1–r3).
  */
 export const LANDING_SHAPES: readonly WorkFamily[] = (
@@ -7171,6 +7172,18 @@ export const LANDING_SHAPES: readonly WorkFamily[] = (
           "let w = [{p: q.p, r: {g: typed}}, {p: a.p, r: {g: typed}}][0]",
           "let y = [{p: q.p, r: x.r}, {p: {f3: typed}, r: {g: typed}}][0]",
           'say "${x.p.f0} ${w.p.f0} ${y.p.f0}"',
+          "exit",
+        ),
+    ],
+    [
+      "narrow-after-chain",
+      (k: number) =>
+        lines(
+          LANDING_TYPED,
+          "let c0 = {p: {f: typed}}",
+          rows(k, (i) => `let c${i + 1} = [c${i}, {p: {f: typed}}][0]`),
+          `let x = [{q: c${k}.p}, {q: {f: typed}}][0]`,
+          'say "${x.q.f}"',
           "exit",
         ),
     ],

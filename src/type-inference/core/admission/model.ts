@@ -38,27 +38,44 @@ export interface LandingTask {
 }
 
 /**
- * The paths copies land in a place at or below a prefix (`landedBelow`), as the walk of one task (`frame`) wrote them:
- * indexes into the paths and texts of the call that made it (`data`), in order; the first `own` the task's own, then per
- * task its walk took next (`children`) that task's paths (`start` to `end`) and the tasks its walk went through; and
- * every task the listing's walk went through (`tasks`).
+ * What one `landedBelow` call brought, shared by the listings it keeps: the paths it brought first (`paths`, `texts`),
+ * the order its walk brought paths in, as indexes into them, a path brought again after one of its walks opened
+ * included (`order`), and the tasks it walked in their order (`walked`).
+ */
+export interface LandingCall {
+  readonly id: number;
+  readonly paths: (readonly string[])[];
+  readonly texts: string[];
+  readonly order: number[];
+  readonly walked: LandingTask[];
+}
+
+/**
+ * The paths copies land in a place at or below a prefix (`landedBelow`), as the walk of one task (`frame`) brought them:
+ * a range of its call's `order` (`from` to `to`), the paths before `own` the task's own, then per task its walk took
+ * next (`children`) that task's range and the range of the tasks it walked; a path whose index is below `start` was
+ * brought before the walk opened. Ranges, not copies, so nested walks keep each entry once.
  */
 export interface Listing {
-  readonly data: {
-    readonly id: number;
-    readonly paths: readonly (readonly string[])[];
-    readonly texts: readonly string[];
-  };
-  readonly indices: readonly number[];
+  readonly call: LandingCall;
+  readonly from: number;
+  readonly to: number;
   readonly own: number;
+  readonly start: number;
   readonly children: readonly {
     readonly task: LandingTask;
-    readonly start: number;
-    readonly end: number;
-    readonly tasks: readonly LandingTask[];
+    readonly from: number;
+    readonly to: number;
+    readonly walkedFrom: number;
+    readonly walkedTo: number;
   }[];
-  readonly tasks: readonly LandingTask[];
   readonly frame: LandingTask;
+}
+
+/** A place's listings by their prefixes' steps (`Admission.listings`): no text made for a key. */
+export interface ListingNode {
+  listing: Listing | null;
+  readonly next: Map<string, ListingNode>;
 }
 
 /**
