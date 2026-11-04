@@ -5008,11 +5008,11 @@ test("a narrowed read of a stopped decision's key is what its test proves, ungua
 });
 
 /**
- * TABLE r4.183's recorded cost: a decision over a deep written type costs its depth × its copies (C1's per-copy visits,
- * G6 in #1319's design-round list) against an allowance linear in the program's nodes, so `out`'s decisions cross it at
- * 64 levels and copies, the deepest first in the reversed order: one restart, then the next path's decision stops in
- * the restarted pass and stops the analysis there, its stores marked and the stop oracle holding. The G6 repair's
- * acceptance: this returns to `valid` with no restart.
+ * TABLE r4.183: a decision that stops in the restarted pass stops the analysis there, its stores marked and the stop
+ * oracle holding. #1194's copies of a deep written type (64 levels and copies) are the witness: at the natural allowance
+ * they are `valid` in the four modes with no restart (r4.183's recorded cost was the alias class's eligibility index,
+ * charged to the first decision that asked for it, the sharing on only, #1703); at the demand allowance 1,024 the
+ * reversed order's deepest decision stops, and the next path's in the restarted pass, with the sharing on and off.
  */
 test("a decision stopping in the restarted pass stops the analysis: #1194's copies reversed (TABLE r4.183)", () => {
   const source = [
@@ -5025,20 +5025,41 @@ test("a decision stopping in the restarted pass stops the analysis: #1194's copi
     withSolverSeam({ reverseWorklist: true }, () =>
       withConsumerOrder((list) => [...list].reverse(), make),
     );
-  // (the reference: no decision stops under a demand allowance the analysis never reaches)
-  const unstopped = stopRunIn(
-    (make) => withTestDemandAllowance(30_000_000, () => reversed(make)),
-    source,
-  );
-  assert.equal(unstopped.answers.budget.exhausted, null);
-  assert.equal(unstopped.result.diagnostics.length, 0);
-  const stopped = stopRunIn(reversed, source);
-  const { budget } = stopped.answers;
-  assert.equal(budget.counts.get("stopPasses"), 1);
-  assert.equal(budget.exhausted, "work");
-  assert.equal(budget.settled, false);
-  assert.ok(budget.deferred.some((mark) => mark.rule.rule === "store"));
-  assert.deepEqual(stopProblems({ unstopped, stopped, fitting: [], violating: [] }), []);
+  const sharings = [
+    ["shared", <T>(make: () => T): T => make()],
+    ["unshared", withoutSharing],
+  ] as const;
+  for (const [name, sharing] of sharings)
+    for (const order of [<T>(make: () => T): T => make(), reversed]) {
+      const natural = stopRunIn((make) => sharing(() => order(make)), source);
+      const where = `${name}, reversed: ${order === reversed}`;
+      assert.equal(natural.answers.budget.exhausted, null, where);
+      assert.equal(natural.answers.budget.counts.get("stopPasses"), undefined, where);
+      assert.equal(natural.result.diagnostics.length, 0, where);
+    }
+  for (const [name, sharing] of sharings) {
+    const ordered = <T>(make: () => T): T => sharing(() => reversed(make));
+    // (the reference: no decision stops under a demand allowance the analysis never reaches)
+    const unstopped = stopRunIn(
+      (make) => withTestDemandAllowance(30_000_000, () => ordered(make)),
+      source,
+    );
+    assert.equal(unstopped.answers.budget.exhausted, null, name);
+    assert.equal(unstopped.result.diagnostics.length, 0, name);
+    const stopped = stopRunIn(
+      (make) => withTestDemandAllowance(1_024, () => ordered(make)),
+      source,
+    );
+    const { budget } = stopped.answers;
+    assert.equal(budget.counts.get("stopPasses"), 1, name);
+    assert.equal(budget.exhausted, "work", name);
+    assert.equal(budget.settled, false, name);
+    assert.ok(
+      budget.deferred.some((mark) => mark.rule.rule === "store"),
+      name,
+    );
+    assert.deepEqual(stopProblems({ unstopped, stopped, fitting: [], violating: [] }), [], name);
+  }
 });
 
 /** A test of the stopped-key family in the four modes: the solver's and consumers' orders, sharing on and off. */

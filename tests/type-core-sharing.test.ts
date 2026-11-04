@@ -1343,3 +1343,29 @@ test("a choice's walk or check shared by its lists moves no decision's stop at 2
       );
     }
 });
+
+/**
+ * #1703: copies of a deep written list (`out = typed`) are one alias class with the sharing on, whose eligibility index
+ * holds the pass's demanded paths; built inside the first decision that asked, it stopped that decision at its demand
+ * allowance (one `budget` warning per copy instead of one per element, and from depth 18 in the reversed order a
+ * stopped analysis). At the first depths that reproduced it, 18 (reversed) and 21 (source order), no decision stops
+ * and the four modes publish the same.
+ */
+test("copies of a deep written list stop no decision and publish the same in the four modes (#1703)", () => {
+  for (const depth of [18, 21]) {
+    const files = [
+      {
+        path: "main.tease",
+        source: `let typed:integer${"[]".repeat(depth)}=hostValue\nlet out=typed\nout=typed\nout=hostValue\nexit\n`,
+      },
+    ];
+    const [first, ...others] = MODES.map((mode) => publication(files, mode, GLOBALS));
+    assert.ok(first !== null && others.every((other) => other === first), `depth ${depth}`);
+    for (const mode of MODES)
+      assert.deepEqual(
+        stopSet(files, mode, GLOBALS, null)?.stops,
+        [],
+        `depth ${depth}: ${JSON.stringify(mode)}`,
+      );
+  }
+});

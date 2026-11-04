@@ -128,7 +128,11 @@ function eligibleAt(
   }
   let index = admission.eligible.get(representative);
   if (index === undefined) {
-    index = eligibility(admission, representative, prefix);
+    // (the index, and the pass's demands it reads, a structure only the sharing makes: charged to the analysis, never
+    // to the decision that asked first, which the unshared route charges none of, so no decision stops for it: #1703)
+    index = admission.pass.program.work.shared(() =>
+      eligibility(admission, representative, prefix),
+    );
     admission.eligible.set(representative, index);
   }
   if (!index.has(deepest)) index.set(deepest, eligibleBy(admission, representative, [deepest]));
