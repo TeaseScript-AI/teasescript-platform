@@ -8,9 +8,9 @@ import { ts } from "ts-morph";
  * from the syntax alone, in `tests/helpers/` and `tests/families/`: a key handed to a map's or a set's `set`, `get`,
  * `has`, `add` or `delete` that is text (a template or a `+`) holding a site's offset (a member named `so`, `eo`,
  * `offset`, `start` or `end`) must also hold its file (a name or member with `file` in it, or a call of
- * `siteKey`, `planSiteKey` or `placeKey`). A key named by a variable, or made by a call of a function, declared in a block
- * holding the call (the nearest, before it), is read through that declaration, one step; a call inside a key's text is
- * not followed. Text that is no key (a message, a comparison's projection) is outside the check, as are the test files'
+ * `siteKey`, `planSiteKey` or `placeKey`). A key named by a variable, or made by a call of a function, is read through
+ * its nearest binding, one step (a parameter or a binding without an initializer holds none); a call inside a key's text
+ * is not followed, so a key whose offsets only a helper's text holds passes. Text that is no key (a message, a comparison's projection) is outside the check, as are the test files'
  * assertion texts.
  */
 const SCOPE = ["tests/helpers/**/*.ts", "tests/families/**/*.{mjs,ts}"];
@@ -33,30 +33,51 @@ export function siteKeyDiagnostics(sources) {
   const diagnostics = [];
   for (const { file, text } of sources) {
     const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-    /** What `name` names at `use`: the nearest declaration before it in a block holding it, or `null`. */
+    /**
+     * What `name` names at `use`: its nearest binding in a scope holding the use, the variable's initializer or the
+     * function it declares; `null` where that binding holds no text a key is read from (a parameter, a loop's or a
+     * catch's binding, a destructured name, a declaration without an initializer or after the use), or none is found.
+     */
     const declared = (name, use) => {
       for (let scope = use.parent; scope !== undefined; scope = scope.parent) {
-        const statements = ts.isSourceFile(scope) || ts.isBlock(scope) ? scope.statements : null;
+        if (ts.isFunctionLike(scope) && scope.parameters.some((each) => binds(each.name, name)))
+          return null;
+        if (
+          ts.isCatchClause(scope) &&
+          scope.variableDeclaration !== undefined &&
+          binds(scope.variableDeclaration.name, name)
+        )
+          return null;
+        if (
+          (ts.isForStatement(scope) || ts.isForOfStatement(scope) || ts.isForInStatement(scope)) &&
+          scope.initializer !== undefined &&
+          ts.isVariableDeclarationList(scope.initializer) &&
+          scope.initializer.declarations.some((each) => binds(each.name, name))
+        )
+          return null;
+        const statements =
+          ts.isSourceFile(scope) ||
+          ts.isBlock(scope) ||
+          ts.isModuleBlock(scope) ||
+          ts.isCaseClause(scope) ||
+          ts.isDefaultClause(scope)
+            ? scope.statements
+            : null;
         if (statements === null) continue;
-        let found = null;
+        // (`undefined`: no binding of the name in this block; a function is hoisted, a variable shadows the whole block)
+        let found;
         for (const statement of statements) {
-          if (statement.getStart(source) > use.getStart(source)) break;
           if (ts.isFunctionDeclaration(statement) && statement.name?.text === name)
             found = statement;
           if (ts.isVariableStatement(statement))
             for (const each of statement.declarationList.declarations)
-              if (ts.isIdentifier(each.name) && each.name.text === name)
-                found = each.initializer ?? null;
+              if (binds(each.name, name))
+                found =
+                  ts.isIdentifier(each.name) && each.getStart(source) < use.getStart(source)
+                    ? (each.initializer ?? null)
+                    : null;
         }
-        // (a function declared after its call is hoisted)
-        for (const statement of statements)
-          if (
-            found === null &&
-            ts.isFunctionDeclaration(statement) &&
-            statement.name?.text === name
-          )
-            found = statement;
-        if (found !== null) return found;
+        if (found !== undefined) return found;
       }
       return null;
     };
@@ -102,6 +123,14 @@ export function siteKeyDiagnostics(sources) {
     check(source);
   }
   return diagnostics;
+}
+
+/** Whether a binding name or pattern binds `name`. */
+function binds(binding, name) {
+  if (ts.isIdentifier(binding)) return binding.text === name;
+  return binding.elements.some(
+    (element) => !ts.isOmittedExpression(element) && binds(element.name, name),
+  );
 }
 
 /** An expression without its parentheses, `as`, `!` and `satisfies`. */

@@ -347,8 +347,9 @@ debit probe read properties the records are not under and compared empty lists.
 ## Site keys
 
 An oracle or runner keys a site by its file and its offsets (`tests/helpers/site-keys.ts`: the compiler's `siteKey`, a
-plan instruction's `planSiteKey`, `enclosingFunction` in the site's own file); `npm run lint` refuses a map's or a set's
-key of offsets alone in `tests/helpers/` and `tests/families/` (`tools/oxlint/check-site-keys.mjs`, #1700).
+plan instruction's `planSiteKey`, `enclosingFunction` in the site's own file). `npm run lint` refuses, in `tests/helpers/`
+and `tests/families/`, a map's or a set's key whose text holds a site's offsets and not its file, read one step through
+its variable or function, not through a call inside that text (`tools/oxlint/check-site-keys.mjs`, #1700).
 
 ## Kept outside the repository
 

@@ -28,7 +28,10 @@ test("a site's key names its file: a plan's instruction by the file it comes fro
   const { graph } = analyseCore(coreRequest(files, [])!);
   const read = files[0]!.source.indexOf("xs[0]");
   const inside = files[1]!.source.indexOf("xs[0]");
-  assert.equal(enclosingFunction(graph, { file: 0, start: read, end: read + 2 }), null);
+  assert.equal(
+    enclosingFunction(graph, { file: 0, start: read, end: read + 2 })?.declaration.name.name,
+    undefined,
+  );
   assert.equal(
     enclosingFunction(graph, { file: 1, start: inside, end: inside + 2 })?.declaration.name.name,
     "shadow",

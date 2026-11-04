@@ -45,6 +45,11 @@ test("a map's or a set's key of a site's offsets without its file is refused, th
         // (a variable of that name declared after the use, or in another block, is not the key)
         "{ const key = `${site.start}`; }",
         "seen.add(key);",
+        // (a nearer binding of the name shadows the outer key: a parameter, one without an initializer; Codex r1's B1 on
+        // #1705)
+        "const id = `${site.start}`;",
+        "function lookup(id: number) { return cache.has(id); }",
+        "function later() { let id: number; id = 1; return cache.has(id); }",
       ].join("\n"),
     ),
     [],
