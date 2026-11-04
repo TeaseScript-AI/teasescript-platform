@@ -1145,6 +1145,15 @@ export class Consumers {
    */
   public finish(all: boolean): void {
     this.finishing = true;
+    // (after a program stop each label's recipe is made wholly after it, as its steps and derived lists are read then:
+    // none straddles it, half from before and half from after, #1595, #1687; a finishing path without a stop, the units
+    // nested past the nesting limit, reads them as before)
+    if (this.pass.program.work.stopped !== null) {
+      this.labels.clear();
+      this.elementSteps.clear();
+      this.derivedChains.clear();
+      this.admission.keyLabels.clear();
+    }
     // (after a stop no decision stops: what a stop forgets by is dropped, #1599)
     this.pass.contract.closeDecisions();
     this.#stoppedAt = all ? null : (this.#stoppedAt ?? { stage: STAGES, unit: 0 });

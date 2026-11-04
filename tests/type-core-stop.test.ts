@@ -5889,6 +5889,16 @@ test("a combined stop spells a dictionary's value and a derived list's read as t
  * pair's answer is read a second time from the shape alone, by the grammar (`expected`), never by the predicate's walk,
  * and the two agree on every pair. Codex r1's to r3's written shapes are members (a nested written dict, an optional
  * and a union container, a composed tail, an ordinary list, a nested derived chain).
+ *
+ * The reading is derived from the grammar above, read off the compiler's `keyLabel`, `elementStepOf` and
+ * `derivedChain`, and from the shape's containers alone: an element step's owner is its level's container (a derived
+ * list past `values` or `keys`, nothing known past a list's `values` or `keys`, a property), and a level's kinds are its
+ * container's (a nullable dictionary's include `null`, a union's every member's). It is wrong where the grammar is: a
+ * label form `keyLabel` makes that the grammar lacks, an `elementStepOf` or `derivedChain` rule it states otherwise (every
+ * kind against some kind), or a container whose kinds it reads otherwise than `termAt` follows the written type. Its
+ * "accept" answers are checked against the compiler itself outside CI: a sample of the family's programs compiled at
+ * settled combined stops, every precise label `labelDomain` gives there one the reading accepts (#1687's evidence,
+ * `produced.mjs`); its "refuse" answers stand on the grammar alone.
  */
 test("a combined stop's more precise label is proved by its written type exactly as the label grammar allows (#1595)", () => {
   // (a level's container: a list, a dictionary, a nullable dictionary, a union of dictionaries)
@@ -6053,4 +6063,63 @@ test("a combined stop's more precise label is proved by its written type exactly
     }
   assert.deepEqual(disagree, []);
   assert.ok(pairs > 1000, `${pairs} pairs`);
+});
+
+/**
+ * A combined stop's label after a call's result is one of the compiler's two precise forms, never half of each (#1595,
+ * #1687): its recipe made wholly after the stop, and an owner's kinds read by one route (`labelKey`), a call's result
+ * through an index into it as well. A read through an index into a call's result, then a derived list
+ * (`build()["a"].values[0]`), and a derived list's element, then an index (`build().values[0]["a"]`), four modes, each
+ * stopping demand allowance up to 3, every settled stop: each check the stopped analysis owes under another label than
+ * the demand-only reference's own check there (the same kind, whole site, boundary and expected types) is that check's
+ * path with some `element` steps spelled `entry`, or the value's own text, the source at its site.
+ */
+test("a combined stop's label after a call's result is one precise form, made wholly after the stop (#1595)", () => {
+  const sources = [
+    'function build: integer dict dict {return dict {a: dict {a: hostValue}}}\nsay "BEFORE"\nrepeat build()["a"].values[0] {say "ok"}\nsay "AFTER"\nexit\n',
+    'function build: integer dict dict {return dict {a: dict {a: hostValue}}}\nsay "BEFORE"\nrepeat build().values[0]["a"] {say "ok"}\nsay "AFTER"\nexit\n',
+  ];
+  const problems: string[] = [];
+  let relabelled = 0;
+  for (const source of sources)
+    for (const mode of HELD_MODES) {
+      const c: HeldCase = { name: "a call's result", source, slice: true, values: [] };
+      for (const demand of heldDemands(c, mode).filter((each) => each <= 3)) {
+        const { reference, stoppedAt } = combinedAnalyses(
+          [{ path: "main.tease", source }],
+          mode,
+          demand,
+        );
+        for (const { allowance } of heldStops(c, mode, 1, demand)) {
+          const stopped = stoppedAt(allowance);
+          if (!stopped.budget.settled) continue;
+          const owed = [
+            ...stopped.checks,
+            ...stopped.budget.deferred.map((mark) => mark.obligation),
+          ];
+          for (const u of reference.checks)
+            for (const x of owed) {
+              if (
+                x.target === u.target ||
+                x.kind !== u.kind ||
+                JSON.stringify(x.site) !== JSON.stringify(u.site) ||
+                x.boundary !== u.boundary ||
+                JSON.stringify(x.against) !== JSON.stringify(u.against)
+              )
+                continue;
+              relabelled += 1;
+              const [from, to] = [u.target.split("."), x.target.split(".")];
+              const entries =
+                from.length === to.length &&
+                from.every(
+                  (step, i) => step === to[i] || (step === "element" && to[i] === "entry"),
+                );
+              if (!entries && x.target !== source.slice(x.site.start, x.site.end))
+                problems.push(`${mode.name} @${demand}/${allowance}: ${u.target} -> ${x.target}`);
+            }
+        }
+      }
+    }
+  assert.deepEqual([...new Set(problems)], []);
+  assert.ok(relabelled > 0);
 });

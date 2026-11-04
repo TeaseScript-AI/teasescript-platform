@@ -209,6 +209,12 @@ const LISTED_READS = [
     "consumers.ts",
     "the published boundary checks, dropped before a finishing walk",
   ],
+  [
+    "keyLabels",
+    ".clear",
+    "consumers.ts",
+    "the label recipes, dropped at a program stop so none straddles it (#1595): a label, no obligation",
+  ],
   ["boundaries", ".values", "answers.ts", "the published boundary checks, read after the walk"],
   ["boundaries", ".get", "answers.ts", "a key's published boundary checks, read after the walk"],
   [
