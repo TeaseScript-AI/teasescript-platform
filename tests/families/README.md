@@ -53,6 +53,25 @@ nodes unanswered other than alike, is uncompared or reaches the safety net, or a
 capped job per area or shard on a worker. Report stalls, uncharged runs and publication exceptions separately; none
 establishes agreement.
 
+A pool of shards on the central queue goes through `tests/families/items.mjs`, which writes its items the way the
+runners read them and refuses a list that misses a shard, repeats one, names one past the last or holds another form
+(a 1-based list skipped shard 0 twice in #1652's campaigns):
+
+```sh
+for area in copies joins; do node tests/families/items.mjs make 128 area "$area"; done > replay.txt
+node tests/families/items.mjs make 8 held > held.txt
+node tests/families/items.mjs submit replay.txt --target 10m --campaign <T> … -- bash -c '…'
+```
+
+`make <N> <words…>` prints `<words> 0/N` to `<words> N-1/N` (the runners' 0-based shards), `check <file>` checks a
+whole list, and `submit <file> <options…> -- <command>` checks it, then runs `sx-job submit` with the file as its one
+items option and the rest, so the items the check accepted are exactly the items the queue receives: it forwards only
+the options that cannot change or multiply them, by full name (`--name`, `--owner`, `--campaign`, `--priority`,
+`--for`, `--mem`, `--class`, `--timeout`, `--host`, `--node`, `--commit`, `--checkout`, `--patch`, `--in`, `--after`,
+`--in-result`, `--needs-baseline`, `--data`, `--alone`, `--write`, `--target`, `--big`, `--writable-trees`,
+`--sandbox`, `--dry`), and refuses any other, as `--shards` or another `--items`. A job reads its batch from
+`$SX_ITEMS`, one item a line, its shard last.
+
 With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the stored
 result of the same source (its generator, name and key, so an edited source is new), mode and check (unanswered alike
 only where that result holds the base's parts and count), and a run the baseline does not hold is `uncompared`, never
