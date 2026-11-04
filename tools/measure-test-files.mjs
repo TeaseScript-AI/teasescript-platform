@@ -1,32 +1,49 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { run } from "node:test";
 import { shardFiles } from "./test-shards.mjs";
 
-// Measures what `tools/costly-test-files.mjs` records: the build, the full compiled suite in the order and with the
-// concurrency of `npm test`, timing each file from its process's start to its end, and the checks CI's `check-2` job
-// runs before its tests (`npm run check:pretest`). `--write` rewrites `tools/costly-test-files.mjs` from the run;
-// `--raw FILE` keeps every file's and every top-level test's seconds. Run it in a built checkout on four CPUs, as CI's
-// runners have (`taskset -c 0-3`), on a machine nothing else loads. As in CI, every step has a Node compile cache: a
-// fresh one unless `NODE_COMPILE_CACHE` names one. A failed step or test fails the run and leaves the module as it was.
-const usage = "Usage: node tools/measure-test-files.mjs [--write] [--raw FILE]\n";
+// Measures what `tools/costly-test-files.mjs` records: each compiled test file's seconds, from its process's start to its
+// end, and the seconds of the checks CI's `check-2` job runs before its tests (`npm run check:pretest`). `--write`
+// rewrites `tools/costly-test-files.mjs`; `--raw FILE` keeps the measurement.
+//
+// `--from-ci RUN[:ATTEMPT] ...` (with `gh`) takes them from CI's own runs of the suite, the machines the shards balance:
+// each test job keeps its files' seconds as an artifact (`TEST_FILE_SECONDS`, `.github/workflows/ci.yml`), the jobs API
+// gives the pre-test step's seconds, and each file counts its median over the runs, at least three since CI's runners
+// vary. Re-running a workflow run adds an attempt, which counts as a run of its own.
+//
+// Without it, the build, the full suite in `npm test`'s order and concurrency, and then `check:pretest` (after the
+// suite, with the new seconds written: `test:verification` refuses weights that miss a type-core file) run here, for a
+// local look: in a built checkout, on four CPUs as CI's runners have (`taskset -c 0-3`), on a machine nothing else loads,
+// with a Node compile cache as in CI, a fresh one unless `NODE_COMPILE_CACHE` names one. Such seconds do not predict
+// CI's (#1719). A failed step or test leaves the module as it was.
+const usage =
+  "Usage: node tools/measure-test-files.mjs [--write] [--raw FILE] [--from-ci RUN[:ATTEMPT] ...]\n";
 const argv = process.argv.slice(2);
 const write = argv[0] === "--write";
 if (write) argv.shift();
 let raw = null;
-if (argv[0] === "--raw" && argv.length === 2) raw = resolve(argv[1]);
-else if (argv.length > 0) {
-  process.stderr.write(usage);
+if (argv[0] === "--raw" && argv.length >= 2)
+  [raw] = argv
+    .splice(0, 2)
+    .slice(1)
+    .map((p) => resolve(p));
+const fromCi = argv[0] === "--from-ci" ? argv.slice(1) : null;
+if ((fromCi === null && argv.length > 0) || (fromCi !== null && fromCi.length < 3)) {
+  process.stderr.write(`${usage}(--from-ci takes three runs or more)\n`);
   process.exit(1);
 }
-
-process.env.NODE_COMPILE_CACHE ??= mkdtempSync(join(tmpdir(), "measure-test-files-cache-"));
 
 // The files listed by name: every type-core file, whose cost grows with the checker's tests, and any other of this many
 // seconds or more. The rest count their mean.
 const listedSeconds = 10;
+const target = new URL("./costly-test-files.mjs", import.meta.url);
+const fail = (lines) => {
+  process.stderr.write(lines.map((line) => `measure-test-files: ${line}\n`).join(""));
+  process.exit(1);
+};
 
 /** The seconds `command` takes, or null where it fails. */
 function timed(command, args, env = {}) {
@@ -39,37 +56,103 @@ function timed(command, args, env = {}) {
   return Number(process.hrtime.bigint() - start) / 1e9;
 }
 
-const build = timed("npm", ["run", "build"], { BUILD_SOURCEMAPS: "0" });
-if (build === null) process.exit(1);
+const gh = (...args) => execFileSync("gh", args, { encoding: "utf8" }).trim();
+const median = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+};
 
-const names = readdirSync("dist/tests").filter((file) => file.endsWith(".test.js"));
-const paths = shardFiles(names, 1, 1).map((file) => resolve("dist/tests", file));
-const fileSeconds = {};
-const testSeconds = {};
-const failed = [];
-for await (const event of run({ files: paths, concurrency: true, isolation: "process" })) {
-  if (event.data?.nesting !== 0 || event.data.file === undefined) continue;
-  const file = event.data.file.slice(event.data.file.lastIndexOf("/") + 1);
-  if (event.type === "test:fail") failed.push(`${file}: ${event.data.name}`);
-  if (event.type !== "test:complete") continue;
-  const seconds = event.data.details.duration_ms / 1000;
-  // (a file's own entry is named by its path; its top-level tests by their names)
-  if (event.data.name === event.data.file) fileSeconds[file] = seconds;
-  else (testSeconds[file] ??= {})[event.data.name] = seconds;
+/** CI's runs: each run's files' seconds (both test jobs' artifacts), its pre-test step's seconds and its commit. */
+function ciRuns(ids) {
+  return ids.map((id) => {
+    const [runId, given] = id.split(":");
+    const attempt =
+      given ?? gh("api", `repos/{owner}/{repo}/actions/runs/${runId}`, "-q", ".run_attempt");
+    const where = `repos/{owner}/{repo}/actions/runs/${runId}/attempts/${attempt}`;
+    const commit = gh("api", where, "-q", ".head_sha");
+    const jobs = JSON.parse(gh("api", `${where}/jobs`, "-q", ".jobs"));
+    const step = jobs
+      .flatMap((job) => job.steps ?? [])
+      .find((found) => found.name === "Check source before the tests");
+    if (step?.conclusion !== "success")
+      fail([`run ${runId}:${attempt} has no passed pre-test step`]);
+    const pretest = (Date.parse(step.completed_at) - Date.parse(step.started_at)) / 1000;
+    const folder = mkdtempSync(join(tmpdir(), "measure-test-files-ci-"));
+    const seconds = {};
+    let filesAtOnce;
+    for (const shard of [1, 2]) {
+      const name = `test-file-seconds-${attempt}-${shard}`;
+      gh("run", "download", runId, "--name", name, "--dir", join(folder, name));
+      const kept = JSON.parse(readFileSync(join(folder, name, "test-file-seconds.json"), "utf8"));
+      Object.assign(seconds, kept.seconds);
+      filesAtOnce = kept.filesAtOnce;
+    }
+    return { run: `${runId}:${attempt}`, commit, pretest, filesAtOnce, seconds };
+  });
 }
-const missing = names.filter((file) => fileSeconds[file] === undefined);
-if (failed.length > 0 || missing.length > 0) {
-  process.stderr.write(
-    [...failed.map((line) => `failed ${line}`), ...missing.map((file) => `no time for ${file}`)]
-      .map((line) => `measure-test-files: ${line}\n`)
-      .join(""),
+
+let measured;
+if (fromCi !== null) {
+  const runs = ciRuns(fromCi);
+  // (the suite as the checkout has it: a file no run measured is refused, one the checkout lost is left out)
+  const suite = readdirSync(new URL("../tests/", import.meta.url))
+    .filter((file) => file.endsWith(".test.ts"))
+    .map((file) => file.replace(/\.ts$/, ".js"));
+  const unmeasured = suite.filter((file) =>
+    runs.every((found) => found.seconds[file] === undefined),
   );
-  process.exit(1);
+  if (unmeasured.length > 0) fail(unmeasured.map((file) => `no CI run measured ${file}`));
+  const atOnce = new Set(runs.map((found) => found.filesAtOnce));
+  if (atOnce.size !== 1) fail([`the runs ran ${[...atOnce].join(" and ")} files at once`]);
+  measured = {
+    source: `--from-ci ${runs.map((found) => found.run).join(" ")}`,
+    from: `CI runs ${runs.map((found) => `${found.run} (${found.commit.slice(0, 9)})`).join(", ")}`,
+    filesAtOnce: [...atOnce][0],
+    pretestSeconds: median(runs.map((found) => found.pretest)),
+    fileSeconds: Object.fromEntries(
+      suite.map((file) => [file, median(runs.flatMap((found) => found.seconds[file] ?? []))]),
+    ),
+    runs,
+  };
+} else {
+  process.env.NODE_COMPILE_CACHE ??= mkdtempSync(join(tmpdir(), "measure-test-files-cache-"));
+  if (timed("npm", ["run", "build"], { BUILD_SOURCEMAPS: "0" }) === null) process.exit(1);
+  const names = readdirSync("dist/tests").filter((file) => file.endsWith(".test.js"));
+  const paths = shardFiles(names, 1, 1).map((file) => resolve("dist/tests", file));
+  const fileSeconds = {};
+  const testSeconds = {};
+  const failed = [];
+  for await (const event of run({ files: paths, concurrency: true, isolation: "process" })) {
+    if (event.data?.nesting !== 0 || event.data.file === undefined) continue;
+    const file = event.data.file.slice(event.data.file.lastIndexOf("/") + 1);
+    if (event.type === "test:fail") failed.push(`${file}: ${event.data.name}`);
+    if (event.type !== "test:complete") continue;
+    const seconds = event.data.details.duration_ms / 1000;
+    // (a file's own entry is named by its path; its top-level tests by their names)
+    if (event.data.name === event.data.file) fileSeconds[file] = seconds;
+    else (testSeconds[file] ??= {})[event.data.name] = seconds;
+  }
+  const missing = names.filter((file) => fileSeconds[file] === undefined);
+  if (failed.length > 0 || missing.length > 0)
+    fail([
+      ...failed.map((line) => `failed ${line}`),
+      ...missing.map((file) => `no time for ${file}`),
+    ]);
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  measured = {
+    source: "",
+    from: `a local run at ${commit.slice(0, 9)}, Node ${process.version}, ${availableParallelism()} CPUs`,
+    filesAtOnce: availableParallelism() - 1,
+    pretestSeconds: null,
+    fileSeconds,
+    testSeconds,
+  };
 }
 
-const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-const filesAtOnce = availableParallelism() - 1;
-const sorted = Object.entries(fileSeconds).sort(([a, x], [b, y]) => y - x || (a < b ? -1 : 1));
+const sorted = Object.entries(measured.fileSeconds).sort(
+  ([a, x], [b, y]) => y - x || (a < b ? -1 : 1),
+);
 const listed = sorted.filter(
   ([file, seconds]) => file.startsWith("type-core-") || seconds >= listedSeconds,
 );
@@ -77,9 +160,9 @@ const others = sorted.filter((entry) => !listed.includes(entry));
 const mean = others.reduce((sum, [, seconds]) => sum + seconds, 0) / Math.max(others.length, 1);
 const moduleText = (
   pretest,
-) => `// Generated by \`taskset -c 0-3 node tools/measure-test-files.mjs --write\` (its header says how to run it) at
-// ${commit.slice(0, 9)}, Node ${process.version}, ${availableParallelism()} CPUs, ${filesAtOnce} files at once. Regenerate it when a test file's cost changes
-// much or a type-core test file is added (\`tools/test-shards.test.mjs\` requires every type-core file listed).
+) => `// Generated by \`node tools/measure-test-files.mjs --write${measured.source ? ` ${measured.source}` : ""}\` from
+// ${measured.from}; ${measured.filesAtOnce} files at once. Regenerate it from three CI runs or more when a test file's
+// cost changes much; a new type-core test file needs an entry (\`tools/test-shards.test.mjs\` requires every one listed).
 // The full suite starts the listed files first, costliest first, and CI's test jobs share the files out by these
 // seconds (\`tools/test-shards.mjs\`).
 
@@ -88,41 +171,31 @@ export const costlyTestSeconds = {
 ${listed.map(([file, seconds]) => `  ${JSON.stringify(file)}: ${Math.max(1, Math.round(seconds))},`).join("\n")}
 };
 
-/** The seconds of every other test file in the same run, their mean (${others.length} files). */
+/** The seconds of every other test file in the same runs, their mean (${others.length} files). */
 export const otherTestSeconds = ${mean.toFixed(1)};
 
 /** The seconds of the checks CI's last test job runs before its tests (\`check:pretest\`). */
 export const pretestSeconds = ${Math.round(pretest)};
 
-/** The test files one CI test job runs at once: \`node --test\`'s default on four CPUs, as CI's runners have. */
-export const testFilesAtOnce = ${filesAtOnce};
+/** The test files one CI test job runs at once: \`node --test\`'s default on CI's four CPUs. */
+export const testFilesAtOnce = ${measured.filesAtOnce};
 
 export const costlyTestFiles = Object.keys(costlyTestSeconds);
 `;
 
-// The pre-test checks run after the suite, with the new files' seconds already written where \`--write\` is given: they
-// include \`tools/test-shards.test.mjs\`, which refuses weights that miss a type-core file. A failure restores the module.
-const target = new URL("./costly-test-files.mjs", import.meta.url);
-const previous = readFileSync(target, "utf8");
-if (write) writeFileSync(target, moduleText(0));
-const pretest = timed("npm", ["run", "check:pretest"]);
-if (pretest === null) {
-  if (write) writeFileSync(target, previous);
-  process.exit(1);
+const previous = existsSync(target) ? readFileSync(target, "utf8") : null;
+if (measured.pretestSeconds === null) {
+  // (the local path's pre-test checks, with the new seconds written)
+  if (write) writeFileSync(target, moduleText(0));
+  measured.pretestSeconds = timed("npm", ["run", "check:pretest"]);
+  if (measured.pretestSeconds === null) {
+    if (write && previous !== null) writeFileSync(target, previous);
+    process.exit(1);
+  }
 }
-if (write) writeFileSync(target, moduleText(pretest));
-const summary = {
-  commit,
-  node: process.version,
-  cpus: availableParallelism(),
-  filesAtOnce,
-  pretestSeconds: pretest,
-  buildSeconds: build,
-  fileSeconds,
-  testSeconds,
-};
-if (raw !== null) writeFileSync(raw, `${JSON.stringify(summary, null, 1)}\n`);
+if (write) writeFileSync(target, moduleText(measured.pretestSeconds));
+if (raw !== null) writeFileSync(raw, `${JSON.stringify(measured, null, 1)}\n`);
 process.stdout.write(
-  `measure-test-files: ${names.length} files, ${sorted.reduce((sum, [, s]) => sum + s, 0).toFixed(0)} s summed, ` +
-    `pre-test checks ${pretest.toFixed(0)} s, build ${build.toFixed(0)} s, ${filesAtOnce} files at once\n`,
+  `measure-test-files: ${sorted.length} files, ${sorted.reduce((sum, [, s]) => sum + s, 0).toFixed(0)} s summed, ` +
+    `pre-test checks ${measured.pretestSeconds.toFixed(0)} s, ${measured.filesAtOnce} files at once, from ${measured.from}\n`,
 );

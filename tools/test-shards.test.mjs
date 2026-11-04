@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -93,7 +93,7 @@ test("--shard=i/N names shard i of N, and anything else malformed is refused", (
     assert.throws(() => shardOption(bad), /--shard=i\/N/, bad);
 });
 
-test("the filter's two shards run every compiled test file once between them, and refuse a shard beside files", (t) => {
+test("the filter's two shards run every compiled test file once between them, keep each one's seconds, and refuse a shard beside files", (t) => {
   const filter = fileURLToPath(new URL("./test-output-filter.mjs", import.meta.url));
   const cwd = mkdtempSync(join(tmpdir(), "test-shards-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -120,9 +120,16 @@ test("the filter's two shards run every compiled test file once between them, an
       input: "",
     });
   const ran = (shard) => {
+    // (with TEST_FILE_SECONDS, as CI runs it: each file the shard ran has its seconds there)
+    environment.TEST_FILE_SECONDS = join(cwd, `seconds-${shard.replace("/", "of")}.json`);
     const result = run("--full-output", `--shard=${shard}`);
     assert.equal(result.status, 0, result.stderr);
-    return [...result.stdout.matchAll(/ran (\S+\.test\.js)/g)].map((found) => found[1]);
+    const files = [...result.stdout.matchAll(/ran (\S+\.test\.js)/g)].map((found) => found[1]);
+    const kept = JSON.parse(readFileSync(environment.TEST_FILE_SECONDS, "utf8"));
+    assert.deepEqual(Object.keys(kept.seconds).sort(), [...files].sort());
+    assert.ok(Object.values(kept.seconds).every((seconds) => seconds > 0));
+    delete environment.TEST_FILE_SECONDS;
+    return files;
   };
   const [first, second] = [ran("1/2"), ran("2/2")];
   assert.ok(first.length > 0 && second.length > 0, `${first} | ${second}`);
