@@ -2077,9 +2077,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 104 | A typed reading into a written `object` (#1223; only the new type analysis's plans carry it): an object type may carry `keepExtra: true`, with which a typed `fromJson` keeps a JSON object's other keys, and a `storageLoad` may carry `repair` beside a union with an object member, as an `object?`'s; plan validation previously rejected both. |
+| Instruction plan | 105 | A check of a part of a stored value (#1224; only the new type analysis's plans carry it): a `declareBinding` or an `assign` may carry `partChecks`, each a path of properties and elements, a type and a place, which the runtime checks in the value it stores where the value has that part; plan validation previously rejected the field. |
 | Runtime snapshot | 91 | Form presentation (#1153): a form settlement carries `temporalPresentation`, the date and time presentation its answers were shown in, from which the Player rebuilds the summary; previously it used the presentation in force when the session was restored. |
-| Checkpoint | 129 | The plan contract of a typed reading into a written `object`. |
+| Checkpoint | 130 | The plan contract of a check of a part of a stored value. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2111,6 +2111,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Instruction plan history
 
+- Revision 104: A typed reading into a written `object` (#1223; only the new type analysis's plans carry it): an object type may carry `keepExtra: true`, with which a typed `fromJson` keeps a JSON object's other keys, and a `storageLoad` may carry `repair` beside a union with an object member, as an `object?`'s; plan validation previously rejected both.
 - Revision 103: The new type analysis's runtime checks (the port of the coarse core, step S7; only its plans carry them
   until it is selected): an `assign` of a property may carry `requireExisting`, a call `indexCheck`, `fallbackCheck`,
   and `expected`, a `binary` `otherwise` `fallbackCheck`, a `storeTemporary` `fallbackCheck` and `repair`, a `fileStore`
@@ -2488,6 +2489,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 129: The plan contract of a typed reading into a written `object`.
 - Revision 128: The form-presentation snapshot contract.
 - Revision 127: The plan contract of the new type analysis's runtime checks.
 - Revision 126: The player-profile plan and snapshot contracts.

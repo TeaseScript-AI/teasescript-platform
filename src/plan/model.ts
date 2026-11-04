@@ -6,7 +6,7 @@ import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 import type { PlainKind, ScalarKind } from "../value-kinds.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 104;
+export const INSTRUCTION_PLAN_VERSION = 105;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -225,6 +225,7 @@ export interface DeclareBindingInstruction extends InstructionBase {
   readonly name: string;
   readonly value: ExpressionPlan;
   readonly typeCheck?: TypeCheckPlan;
+  readonly partChecks?: readonly PartCheckPlan[];
 }
 
 export interface AssignInstruction extends InstructionBase {
@@ -239,6 +240,7 @@ export interface AssignInstruction extends InstructionBase {
    * it.
    */
   readonly requireExisting?: true;
+  readonly partChecks?: readonly PartCheckPlan[];
 }
 
 export interface ValidateAssignmentTargetInstruction extends InstructionBase {
@@ -1258,6 +1260,24 @@ export interface TypeCheckPlan {
   /** The receiving place as the message names it, such as `'count'` or `an element of 'items'`. */
   readonly place: string;
 }
+
+/**
+ * A check of a part of a stored value whose whole the compiler leaves unchecked (#1224): where a variable holds data from
+ * outside the script, a property or an element below it may still have a type, such as one a store into it gave. After
+ * the store's own check, the runtime follows `path` through the stored value, a property where an object has it and
+ * every element of a list or set or value of a dict, and checks each value it reaches against `type` as
+ * {@link TypeCheckPlan} does; a value without the part passes. A store's part checks are executed in order, and none
+ * repeats another's path and type. Only the coarse core emits it.
+ */
+export interface PartCheckPlan {
+  readonly path: readonly PartStep[];
+  readonly type: TypePlan;
+  /** The part as the message names it, such as `'copy.open'`. */
+  readonly place: string;
+}
+
+/** A step of {@link PartCheckPlan.path}: an object's property, or the elements of a list or set or values of a dict. */
+export type PartStep = { readonly property: string } | { readonly element: true };
 
 /**
  * The checked part of a type. A list, set, or dict with a `null` element accepts any elements or values, and an object

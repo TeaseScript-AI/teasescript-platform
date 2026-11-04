@@ -17,6 +17,8 @@ import { isRepeatCount } from "../../loop-rules.js";
 import { literalRange } from "../../switch-cases.js";
 import {
   repairedObject,
+  type PartCheckPlan,
+  type PartStep,
   type TypeCheckPlan,
   type TypePlan,
   type TypePropertyPlan,
@@ -79,6 +81,7 @@ import {
   coreMessage,
   coreMessageInWords,
   messageSource,
+  pathPhrase,
   staticCode,
   type MessageSource,
 } from "./messages.js";
@@ -899,6 +902,7 @@ function runtimeChecks(
     fallbackChecks: new Map<BinaryExpression | CallExpression, TypeCheckPlan>(),
     expected: new Map<CallExpression, TypePlan>(),
     repairs: new Set<LoadExpression>(),
+    partChecks: new Map<Store, readonly PartCheckPlan[]>(),
   };
   // each owed check with the kinds its rule names, a stopped analysis's store type where it decided none (D4 a′)
   const owed: { readonly obligation: Obligation; readonly kinds: readonly ItemTag[] | null }[] = [];
@@ -990,6 +994,8 @@ function runtimeChecks(
       core.expected.set(call, type);
     }
   const stopped = answers.budget.exhausted !== null;
+  // each store's owed obligations, for the parts below its destination its own check does not reach (#1224)
+  const atStore = new Map<Store, Obligation[]>();
   for (const { obligation, kinds } of owed) {
     // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
     // every plan: no plan content (S3 §4); where a stopped decision left a store's own check against `unknown` (no
@@ -1012,11 +1018,124 @@ function runtimeChecks(
         if (index.iterates(at)) throw new OutsideContract(at, "a check of a loop variable");
       throw new Error("A check of the slice belongs to no store.");
     }
+    const held = atStore.get(store);
+    if (held === undefined) atStore.set(store, [obligation]);
+    else held.push(obligation);
     if (checks.has(store)) continue;
     const type = contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null);
     if (type !== null) checks.set(store, type);
   }
+  for (const [store, obligations] of atStore) {
+    // (the label of the place it stores into, as `stored` found it: no question beyond the store's own check's)
+    const destination = contracts.destinations.get(store);
+    if (destination === undefined) continue;
+    const whole = checks.get(store)?.type ?? null;
+    // (each object type's properties by name, made once for every part the store's check is read at: no search per part)
+    const named = new Map<TypePlan, ReadonlyMap<string, TypePlan>>();
+    const parts = partChecksOf(destination, obligations).filter(
+      (part) => whole === null || !reaches(whole, part.path, named),
+    );
+    if (parts.length > 0) core.partChecks.set(store, parts);
+  }
   return { checks, core, contracts: contracts.results };
+}
+
+/**
+ * The part checks a store's owed obligations below its destination make (#1224, the lead's ruling (c)): one per obligation
+ * the analysis owes at the store below its destination (`destination`, the label of the place it stores into), with
+ * the obligation's kinds at the steps its target names below the destination (`pathText`'s: a property's name, quoted
+ * for an internal one, `element`, `entry` or `index` for an element). None is made for an obligation at the destination
+ * itself, for one whose kinds leave its part open, or for a step of another form: nothing is checked that the analysis
+ * does not owe there.
+ */
+function partChecksOf(destination: string, obligations: readonly Obligation[]): PartCheckPlan[] {
+  const out: PartCheckPlan[] = [];
+  const made = new Set<string>();
+  for (const obligation of obligations) {
+    if (!obligation.target.startsWith(`${destination}.`)) continue;
+    const type = kindsPlan(obligation.against);
+    const part =
+      type === null
+        ? null
+        : partOf(destination, obligation.target.slice(destination.length + 1).split("."), type);
+    if (part === null) continue;
+    const key = JSON.stringify([part.path, part.type]);
+    if (made.has(key)) continue;
+    made.add(key);
+    out.push(part);
+  }
+  return out;
+}
+
+/**
+ * A part check of `type` at `steps` below a destination (`pathText`'s steps: a property's name, quoted for an internal
+ * one, `element`, `entry` or `index` for an element), its place the path as messages name one (`pathPhrase`); `null` for
+ * a step of another form, which makes no part.
+ */
+function partOf(
+  destination: string,
+  steps: readonly string[],
+  type: TypePlan,
+): PartCheckPlan | null {
+  const path: PartStep[] = [];
+  for (const step of steps)
+    if (step === "element" || step === "entry" || step === "index") path.push({ element: true });
+    else if (
+      step !== "iteration" &&
+      (step.startsWith("'") || /^[\p{L}_][\p{L}\p{N}_]*$/u.test(step))
+    )
+      path.push({ property: propertyName(step) });
+    else return null;
+  // (the place as messages name a path below one in words: `'copy.open'`, `an element of 'copy.xs'`)
+  const [root, ...above] = destination.split(".");
+  return {
+    path,
+    type,
+    place: pathPhrase({ code: root! }, [
+      ...above,
+      ...steps.map((step) => (step === "index" ? "element" : step)),
+    ]),
+  };
+}
+
+/**
+ * Whether a store's check of `type` checks every value at `path` below it (`named`: each object type's properties by
+ * name, shared by the store's parts): each member that can hold the next step (an
+ * object, or a collection for an element) lists it and checks below it; a member that cannot hold it leaves no value
+ * there. An open level (an object without the property, a collection whose elements are open) reaches nothing below.
+ */
+function reaches(
+  type: TypePlan,
+  path: readonly PartStep[],
+  named: Map<TypePlan, ReadonlyMap<string, TypePlan>>,
+): boolean {
+  const pending: [TypePlan, number][] = [[type, 0]];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const [at, depth] = next;
+    if (depth === path.length) continue;
+    const step = path[depth]!;
+    if (at.kind === "union") {
+      for (const member of at.members) pending.push([member, depth]);
+      continue;
+    }
+    if ("property" in step) {
+      if (at.kind !== "object") continue;
+      let properties = named.get(at);
+      if (properties === undefined) {
+        const byName = new Map<string, TypePlan>();
+        for (const property of at.properties)
+          if (!byName.has(property.name)) byName.set(property.name, property.type);
+        named.set(at, (properties = byName));
+      }
+      const found = properties.get(step.property);
+      if (found === undefined) return false;
+      pending.push([found, depth + 1]);
+    } else if (at.kind === "list" || at.kind === "set" || at.kind === "dict") {
+      if (at.element === null) return false;
+      pending.push([at.element, depth + 1]);
+    }
+  }
+  return true;
 }
 
 /**
@@ -1238,6 +1357,8 @@ class Contracts {
   readonly #descriptors: ContractDescriptors<readonly Expression[]>;
   /** Each checked store's contract result, as `stored` made it. */
   readonly results = new Map<Store, ContractResult>();
+  /** Each store `stored` was asked for, by the label of the place it stores into (its variable, then the core's steps). */
+  readonly destinations = new Map<Store, string>();
 
   public constructor(
     private readonly answers: Answers,
@@ -1277,6 +1398,8 @@ class Contracts {
     const whole = store.kind === "letStatement" || store.target.kind === "identifier";
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
+    if (place !== null)
+      this.destinations.set(store, [declaration.name.name, ...place.path].join("."));
     const result =
       whole && declaration.typeAnnotation !== null
         ? this.#descriptors.written(

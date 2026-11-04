@@ -17,7 +17,7 @@ import {
 } from "./snapshot-validation.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 129;
+export const CHECKPOINT_VERSION = 130;
 
 export interface RuntimeCheckpoint {
   readonly format: typeof CHECKPOINT_FORMAT;

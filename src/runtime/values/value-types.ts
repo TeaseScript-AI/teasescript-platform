@@ -1,4 +1,9 @@
-import type { PlanSourceLocation, TypeCheckPlan, TypePlan } from "../../plan/model.js";
+import type {
+  PartCheckPlan,
+  PlanSourceLocation,
+  TypeCheckPlan,
+  TypePlan,
+} from "../../plan/model.js";
 import type { SourceSpan } from "../../source.js";
 import {
   booleanFromText,
@@ -39,6 +44,42 @@ export function assertValueType(
     `${capitalize(check.place)} holds ${describeType(check.type)}, so it cannot take ${taken}.${typeFix(mismatch)}`,
     copySpan(span),
   );
+}
+
+/**
+ * Checks the parts of a stored value its store's plan names (`PartCheckPlan`, #1224): each part's path followed through
+ * `value`, a property where an object has it and every element of a list or set or value of a dict, and each value it
+ * reaches checked as `assertValueType` checks it, in order; a value without the part passes.
+ */
+export function assertPartChecks(
+  value: SerializableRuntimeValue,
+  checks: readonly PartCheckPlan[],
+  span: SourceSpan | PlanSourceLocation,
+): void {
+  // (each object's properties by name, made once for every part that steps into it: no search per part)
+  const named = new Map<object, Map<string, SerializableRuntimeValue>>();
+  for (const check of checks) {
+    let reached: SerializableRuntimeValue[] = [value];
+    for (const step of check.path) {
+      const next: SerializableRuntimeValue[] = [];
+      for (const at of reached)
+        if ("property" in step) {
+          if (!isObject(at)) continue;
+          let properties = named.get(at);
+          if (properties === undefined) {
+            properties = new Map();
+            for (const property of at.properties)
+              if (!properties.has(property.name)) properties.set(property.name, property.value);
+            named.set(at, properties);
+          }
+          const found = properties.get(step.property);
+          if (found !== undefined) next.push(found);
+        } else if (isList(at) || isSet(at)) for (const item of at.items) next.push(item);
+        else if (isDict(at)) for (const entry of at.entries) next.push(entry.value);
+      reached = next;
+    }
+    for (const part of reached) assertValueType(part, check, span);
+  }
 }
 
 /**

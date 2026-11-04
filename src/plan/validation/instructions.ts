@@ -19,7 +19,11 @@ import {
   validateTemporaryId,
 } from "../validation-support.js";
 import { PROPERTY_FIELDS, validateExpression } from "./expressions.js";
-import { validateOptionalTypeCheck, validateTypePlan } from "./type-plans.js";
+import {
+  validateOptionalPartChecks,
+  validateOptionalTypeCheck,
+  validateTypePlan,
+} from "./type-plans.js";
 import { validateInteractionInstruction } from "./interaction.js";
 
 /**
@@ -67,10 +71,10 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["end"],
   ["goto", "target"],
   ["transfer", "mode", "destination"],
-  ["declareBinding", "name", "value", "typeCheck"],
+  ["declareBinding", "name", "value", "typeCheck", "partChecks"],
   ["prepareReference", "expression", "destinationTemporary"],
   ["validateAssignmentTarget", "target"],
-  ["assign", "target", "value", "typeCheck", "requireExisting"],
+  ["assign", "target", "value", "typeCheck", "requireExisting", "partChecks"],
   ["validateCallReceiver", "receiver", "method"],
   ["evaluate", "expression"],
   ["jumpIfFalse", "condition", "target"],
@@ -177,6 +181,7 @@ export function validateInstruction(
       requireString(value.name, `${path}.name`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       validateOptionalTypeCheck(value, path, errors);
+      validateOptionalPartChecks(value, path, errors);
       return;
     case "prepareReference":
       validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
@@ -209,6 +214,7 @@ export function validateInstruction(
             `${path}.requireExisting`,
           ),
         );
+      validateOptionalPartChecks(value, path, errors);
       return;
     case "validateCallReceiver":
       validateExpression(value.receiver, `${path}.receiver`, errors, false, temporaryCount);

@@ -10,6 +10,7 @@ import {
   repairedObject,
   type ExpressionPlan,
   type TemplatePartPlan,
+  type PartCheckPlan,
   type TypeCheckPlan,
   type PlanSourceLocation,
   type TagQueryExpressionPlan,
@@ -110,6 +111,13 @@ export function compileExpression(
   function child(expression: Expression): ExpressionPlan {
     return plans.get(unwrapParentheses(expression))!;
   }
+}
+
+/** The optional `partChecks` field of a receiving store (#1224), present only where the core checks parts of its value. */
+export function withPartChecks(partChecks: readonly PartCheckPlan[] | undefined): {
+  partChecks?: readonly PartCheckPlan[];
+} {
+  return partChecks === undefined ? {} : { partChecks };
 }
 
 /** The optional `typeCheck` field of a receiving instruction or plan, present only when the value is checked. */

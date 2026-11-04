@@ -17,6 +17,7 @@ import type {
 import type { Diagnostic } from "../diagnostics.js";
 import type { Sharing } from "../operation-checks.js";
 import type {
+  PartCheckPlan,
   PlanImage,
   PlanTag,
   PreparedFormShape,
@@ -160,6 +161,8 @@ export interface CoreRuntimeChecks {
   readonly expected: ReadonlyMap<CallExpression, TypePlan>;
   /** The loads with an object type that take a bad or missing field from their default (ADR 0021 rule 6.5). */
   readonly repairs: ReadonlySet<LoadExpression>;
+  /** The checks of parts below a store's destination whose whole the core leaves unchecked (#1224). */
+  readonly partChecks: ReadonlyMap<LetStatement | AssignmentStatement, readonly PartCheckPlan[]>;
 }
 
 /** No core checks, which lowering reads for a legacy result. */
@@ -169,6 +172,7 @@ export const NO_CORE_CHECKS: CoreRuntimeChecks = {
   fallbackChecks: new Map(),
   expected: new Map(),
   repairs: new Set(),
+  partChecks: new Map(),
 };
 
 /**
