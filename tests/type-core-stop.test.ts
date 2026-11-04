@@ -5932,9 +5932,10 @@ test("a combined stop's more precise label is proved by its written type exactly
         `function build: ${t} {return ${e}}\nsay "\${build()}"\nexit\n`,
     },
   ];
-  // (every chain down the levels: at each its element, or its `values` then an element, or, last, its `keys` then an
-  // element; each step with its owner's container, a derived list's a list)
-  type Step = { readonly step: string; readonly owner: Level | "derived" };
+  // (every chain down the levels: at each its element; at a dictionary its `values` then an element, or, last, its
+  // `keys` then an element; at a list, last, its `values` or `keys`, a property no written type follows, then an
+  // element; each step with its owner's container, a derived list's `derived`, past a property `unknown`)
+  type Step = { readonly step: string; readonly owner: Level | "derived" | "unknown" };
   const chains = (levels: readonly Level[]): Step[][] => {
     const out: Step[][] = [];
     const down = (at: number, chain: Step[]) => {
@@ -5942,6 +5943,11 @@ test("a combined stop's more precise label is proved by its written type exactly
       if (at === levels.length) return;
       const level = levels[at]!;
       down(at + 1, [...chain, { step: "element", owner: level }]);
+      if (level === "list") {
+        for (const step of ["values", "keys"])
+          out.push([...chain, { step, owner: level }, { step: "element", owner: "unknown" }]);
+        return;
+      }
       down(at + 1, [
         ...chain,
         { step: "values", owner: level },
