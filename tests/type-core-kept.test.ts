@@ -84,14 +84,15 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     2,
     "a type plan's levels: a written type's, or a plan cut at SLICE_DEPTH",
   ],
-  "consumer.ts stored join": [
-    2,
-    "a store's target name in a message; its destination's label, one per checked store, read by its part checks",
-  ],
-  "consumer.ts stored spread": [
+  "consumer.ts destination join": [
     1,
-    "a store's destination's label, one per checked store, read by its part checks",
+    "a store's destination's label, one per store with an owed check, read by its part checks",
   ],
+  "consumer.ts destination spread": [
+    1,
+    "a store's destination's label, one per store with an owed check, read by its part checks",
+  ],
+  "consumer.ts stored join": [1, "a store's target name in a message"],
   "consumer.ts takesNull spread": [2, "lookups of a landing's levels, not kept"],
   "contract-descriptors.ts #contract composite": [
     1,

@@ -410,6 +410,8 @@ test("a completion decision that would reject a store or retarget a selecting st
           at,
         );
         assert.ok(completion.counts.forgone > 0, `${at}: what the loss forgoes, counted`);
+        // (and none of its own store checks' obligations, which a store's part checks would read: #1682)
+        assert.deepEqual(answers.completedWarnings(), [], at);
         // (every obligation lost, the stores' own among them, never completed against a wider contract)
         assert.deepEqual(
           [...new Set(answers.receiving.map(({ result }) => shown(result).split("/")[0]))],
@@ -555,6 +557,7 @@ test("a completion past its allowance ends and keeps no result, the analysis at 
         answers.receiving.every(({ obligation }) => !answers.completedCheck(obligation.slot.site)),
         at,
       );
+      assert.deepEqual(answers.completedWarnings(), [], at);
     }
   }
 });

@@ -15,11 +15,14 @@ import {
   createSerializableObject,
   type SerializableRuntimeValue,
 } from "../src/runtime/values/serializable-values.js";
-import { analyseCore } from "../src/type-inference/core/answers.js";
+import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
+import { withoutRecords } from "../src/type-inference/core/consumers.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { completedCore, coreRequest } from "./helpers/type-core-analysis.js";
 import { HELD_MODES } from "./helpers/type-core-held-host.js";
+import { partProblems } from "./helpers/type-core-oracles.js";
 
 /*
  * A typed part below a variable that holds host data (#1224, the lead's ruling (c)): the analysis owes the part's check
@@ -256,6 +259,111 @@ test("a store checks only the parts the analysis owes there, and a value without
   assert.match(
     ran(plan(literal), { hostValue: { open: 3 } }).failure ?? "",
     new RegExp(`^TSR058@${at(literal, "hostValue")}`, "u"),
+  );
+});
+
+/** The demands at which the stopped cases' decisions stop and the receiving completion completes them. */
+const DEMANDS = [1, 16, 64];
+
+test("after a demand stop, a store checks the parts the natural walk owes there, by the one rule (#1682)", () => {
+  for (const c of [
+    {
+      name: "an open root",
+      source:
+        'let seed: object = {payload: 7}\nlet copy = hostInit\ncopy.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n',
+      init: { open: {} },
+      values: [{ open: 3 }, { open: { x: 1 } }],
+    },
+    {
+      // the replacement's own check `{}` does not reach the owed part below its open level
+      name: "a checked root above an open level",
+      source:
+        'let seed: integer = 7\nlet copy = {inner: hostInit}\ncopy.inner.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n',
+      init: { open: 1 },
+      values: [{ inner: { open: "bad" } }, { inner: { open: 2 } }],
+    },
+    {
+      // the natural walk owes `copy.open.n` alone: a value without `open` as an object passes, as unstopped
+      name: "a part no stricter than the natural walk's",
+      source:
+        'let seed: integer = 7\nlet copy = hostInit\ncopy.open = {n: seed}\ncopy = hostValue\nsay "REACHED"\nexit\n',
+      init: { open: { n: 1 } },
+      values: [{ open: 3 }, { open: { n: "x" } }, { open: { n: 2 } }],
+    },
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS);
+    assert.ok(request !== null, c.name);
+    const natural = plan(c.source);
+    const naturalRuns = c.values.map((v) => ran(natural, { hostInit: c.init, hostValue: v }));
+    assert.ok(partChecks(natural).length > 0, c.name);
+    for (const mode of HELD_MODES)
+      for (const demand of DEMANDS) {
+        const at = `${c.name}, ${mode.name}, demand ${demand}`;
+        const stopped = (): InstructionPlan =>
+          withTestDemandAllowance(demand, () => plan(c.source));
+        // (a decision stopped and the completion completed it, losing nothing)
+        const answers: Answers = mode.run(() =>
+          withTestDemandAllowance(demand, () => completedCore(request)),
+        );
+        const completion = answers.budget.closure;
+        assert.ok(completion !== null, at);
+        assert.equal(completion.counts.unsettled + completion.counts.capped, 0, at);
+        // the plan: the natural store's parts, by the natural rule; the runs: as unstopped, also after a restore
+        const planned = mode.run(stopped);
+        assert.deepEqual(partChecks(planned), partChecks(natural), at);
+        assert.deepEqual(partProblems(natural, planned), { problems: [], covered: [] }, at);
+        assert.deepEqual(
+          c.values.map((v) => ran(planned, { hostInit: c.init, hostValue: v })),
+          naturalRuns,
+          at,
+        );
+        // (with the completion's records left out, phase B's plan: no part at the stop)
+        assert.deepEqual(
+          partChecks(
+            mode.run(() =>
+              withoutRecords(
+                { diagnostic: () => false, check: () => false, completion: true },
+                stopped,
+              ),
+            ),
+          ),
+          [],
+          at,
+        );
+      }
+  }
+});
+
+test("at every stop a store's parts are the natural store's or fewer, never uncovered or stricter (#1682)", () => {
+  // (the family over the part's depth, several children, elements and their properties, an open or a checked root, an
+  // initializer, a replacement and a copy's store; each part a covered one only where the natural whole check's type
+  // there is the part's own)
+  const covered: string[] = [];
+  let parts = 0;
+  for (const source of [
+    'let seed: integer = 7\nlet copy = hostInit\ncopy.a.b = seed\ncopy = hostValue\nsay "REACHED"\nexit\n',
+    'let s: integer = 7\nlet t: string = "x"\nlet copy = hostInit\ncopy.one = s\ncopy.two = t\ncopy = hostValue\nsay "REACHED"\nexit\n',
+    'let s: integer = 7\nlet t: string = "x"\nlet copy = hostInit\ncopy.two = t\ncopy.one = s\ncopy = hostValue\nsay "REACHED"\nexit\n',
+    'let seed: integer = 7\nlet copy = hostInit\ncopy.xs = [seed]\ncopy = hostValue\nsay "REACHED"\nexit\n',
+    'let seed: integer = 7\nlet copy = hostInit\ncopy.xs = [{n: seed}]\ncopy = hostValue\nsay "REACHED"\nexit\n',
+    'let seed: integer = 7\nlet copy = {inner: hostInit}\ncopy.inner.open = seed\ncopy.inner = hostValue\nsay "REACHED"\nexit\n',
+    'let seed: integer = 7\nlet copy = {known: 1, inner: hostInit}\ncopy.inner.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n',
+    'let seed: integer = 7\nlet copy = hostInit\ncopy.open = seed\nlet other = copy\nother = hostValue\nsay "REACHED"\nexit\n',
+  ]) {
+    const natural = plan(source);
+    for (const mode of HELD_MODES)
+      for (const demand of DEMANDS) {
+        const planned = mode.run(() => withTestDemandAllowance(demand, () => plan(source)));
+        const found = partProblems(natural, planned);
+        assert.deepEqual(found.problems, [], `${source} (${mode.name}, demand ${demand})`);
+        covered.push(...found.covered);
+        parts += partChecks(planned).length;
+      }
+  }
+  assert.ok(parts > 0);
+  assert.ok(
+    covered.every((line) => line.endsWith(" =")),
+    covered.join("; "),
   );
 });
 

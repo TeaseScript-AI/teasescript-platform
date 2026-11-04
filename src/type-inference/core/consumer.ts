@@ -1025,9 +1025,30 @@ function runtimeChecks(
     const type = contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null);
     if (type !== null) checks.set(store, type);
   }
+  // after a demand stop, the obligations the receiving completion's own store checks owe (#1682): the natural walk's of
+  // the decisions it made on the settled pass's inputs, each at its store as the unstopped one is, for that store's
+  // parts only (its own check stays step 5's), merged into its owed ones in source order of their sites
+  const completed = new Map<Store, Obligation[]>();
+  if (!leftOutCompletion())
+    for (const warning of answers.completedWarnings()) {
+      if (
+        leftOutWarning(warning) ||
+        index.fallbackOf(index.expressionAt(warning.site)) !== undefined
+      )
+        continue;
+      const store = index.storeOf(index.expressionAt(warning.obligation.site));
+      if (store === undefined) continue;
+      const held = completed.get(store);
+      if (held === undefined) completed.set(store, [warning.obligation]);
+      else held.push(warning.obligation);
+    }
+  for (const [store, more] of completed) {
+    const held = atStore.get(store);
+    atStore.set(store, held === undefined ? more : bySiteMerged(held, more));
+  }
   for (const [store, obligations] of atStore) {
-    // (the label of the place it stores into, as `stored` found it: no question beyond the store's own check's)
-    const destination = contracts.destinations.get(store);
+    // (the label of the place it stores into, as `stored` finds it: no question beyond the store's own check's)
+    const destination = contracts.destination(store);
     if (destination === undefined) continue;
     const whole = checks.get(store)?.type ?? null;
     // (each object type's properties by name, made once for every part the store's check is read at: no search per part)
@@ -1038,6 +1059,23 @@ function runtimeChecks(
     if (parts.length > 0) core.partChecks.set(store, parts);
   }
   return { checks, core, contracts: contracts.results };
+}
+
+/**
+ * Two lists of a store's obligations as one, in source order of their sites (file, start, end), each list's own order kept
+ * and the first's before the second's at one site.
+ */
+function bySiteMerged(first: readonly Obligation[], second: readonly Obligation[]): Obligation[] {
+  const before = (a: Obligation, b: Obligation): boolean =>
+    (a.site.file - b.site.file || a.site.start - b.site.start || a.site.end - b.site.end) < 0;
+  const out: Obligation[] = [];
+  let at = 0;
+  for (const obligation of first) {
+    while (at < second.length && before(second[at]!, obligation)) out.push(second[at++]!);
+    out.push(obligation);
+  }
+  while (at < second.length) out.push(second[at++]!);
+  return out;
 }
 
 /**
@@ -1357,8 +1395,8 @@ class Contracts {
   readonly #descriptors: ContractDescriptors<readonly Expression[]>;
   /** Each checked store's contract result, as `stored` made it. */
   readonly results = new Map<Store, ContractResult>();
-  /** Each store `stored` was asked for, by the label of the place it stores into (its variable, then the core's steps). */
-  readonly destinations = new Map<Store, string>();
+  /** Each store's label of the place it stores into (`destination`), once. */
+  readonly #destinations = new Map<Store, string | undefined>();
 
   public constructor(
     private readonly answers: Answers,
@@ -1398,8 +1436,7 @@ class Contracts {
     const whole = store.kind === "letStatement" || store.target.kind === "identifier";
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
-    if (place !== null)
-      this.destinations.set(store, [declaration.name.name, ...place.path].join("."));
+    this.destination(store);
     const result =
       whole && declaration.typeAnnotation !== null
         ? this.#descriptors.written(
@@ -1430,6 +1467,23 @@ class Contracts {
       ...(whole ? [] : (place?.path ?? []).map(propertyName)),
     ].join(".");
     return { type, place: `'${name}'` };
+  }
+
+  /**
+   * The label of the place a store stores into (its variable, then the core's steps), as `stored` reads it, once per
+   * store; `undefined` where the answers name no place there. It asks for no contract.
+   */
+  public destination(store: Store): string | undefined {
+    if (this.#destinations.has(store)) return this.#destinations.get(store);
+    const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
+    const declaration =
+      store.kind === "letStatement" ? store : place === null ? undefined : this.lets.get(place.id);
+    const label =
+      place === null || declaration === undefined
+        ? undefined
+        : [declaration.name.name, ...place.path].join(".");
+    this.#destinations.set(store, label);
+    return label;
   }
 
   /** Whether the receiving completion completed the contract at a store's destination (`#completed`). */

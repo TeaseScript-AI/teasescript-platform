@@ -17,6 +17,7 @@ import {
   Consumers,
   STOP_RULE,
   typedCall,
+  type CompletedWarning,
   type CompletionPass,
   type Retargeted,
 } from "./consumers.js";
@@ -498,6 +499,12 @@ export interface Answers {
   received(id: PlaceId, path: readonly string[]): ContractResult | null;
   /** Whether the receiving completion's own store checks (C1) owe a runtime check at a site, as unstopped. */
   completedCheck(site: SourceSite): boolean;
+  /**
+   * The store warnings the receiving completion's own store checks (C1) made, the natural walk's obligations of its
+   * decisions on the settled pass's inputs (#1682), in the published order (`bySite`, at the stores consumer's rank);
+   * none where the completion lost a result, reached its allowance or left the slice. A store's part checks read them.
+   */
+  completedWarnings(): readonly CompletedWarning[];
   /**
    * The receiving completion (#1526 phase C, `Consumers.receive`), asked for once everything of the analysis that can
    * stop has run, its questions included (`asked`): `again`'s result, the questions asked again with the completed
@@ -1584,6 +1591,11 @@ class CoreAnswers implements Answers {
 
   public completedCheck(site: SourceSite): boolean {
     return this.#consumers.completedChecks.has(siteKey(site));
+  }
+
+  public completedWarnings(): readonly CompletedWarning[] {
+    // (each the stores consumer's, ranked as the walk ranks it: `Consumers.check`)
+    return bySite(this.#consumers.completedWarnings.map((item) => ({ item, rule: 1 })));
   }
 
   public completed<T>(again: () => T): T | null {
