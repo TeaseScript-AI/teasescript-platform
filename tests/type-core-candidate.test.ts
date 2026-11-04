@@ -1586,6 +1586,14 @@ test("an integer-only use of a written number place is the current checker's err
     // (a `get` result reads its receiver's element: Codex r1 B1)
     `let ps: number[] = [1]\n${use("ps.get(0, default: 0)")}`,
     `let ps: integer[] = [1]\n${use("ps.get(0, default: 0)")}`,
+    // (every read form that gives a part of a written place, composed too: Codex r2)
+    `let ps: number[][] = [[1]]\n${use("ps.get(0, default: [0])[0]")}`,
+    `let ps: number[][] = [[1]]\n${use("ps.get(0, default: [0]).get(0, default: 0)")}`,
+    `let ps: integer[][] = [[1]]\n${use("ps.get(0, default: [0])[0]")}`,
+    ...["removeFirst()", "removeLast()", "removeAt(0)"].flatMap((removal) => [
+      `let ps: number[] = [1, 2]\n${use(`ps.${removal}`)}`,
+      `let ps: integer[] = [1, 2]\n${use(`ps.${removal}`)}`,
+    ]),
     ...[
       "let p: number = 1",
       "let p: number = 1.5",

@@ -79,6 +79,7 @@ import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "./
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, STOPPED, type Item, type Writer } from "./items.js";
+import { methodCategory } from "./method-categories.js";
 import { Laminar } from "./narrowing.js";
 import { siteKey, type CoreProgram } from "./program.js";
 import { outsideSyntax } from "./slice-syntax.js";
@@ -259,6 +260,8 @@ export class Consumers {
   #callableNodes: Map<unknown, number> | null = null;
   readonly order: <T>(list: readonly T[]) => T[];
   readonly getOf = new Map<PlaceId, PlaceId>();
+  /** F7: a removing method's result (`removeFirst()`, `removeAt(i)`), by its receiver: the element it removed. */
+  readonly removedOf = new Map<PlaceId, PlaceId>();
   readonly resultOfCall = new Map<PlaceId, PlaceId>();
   /** Each value's label's recipe (`keyLabel`), made once from its owner's. */
   readonly labels = new Map<PlaceId, Label>();
@@ -329,6 +332,12 @@ export class Consumers {
     const program = pass.program;
     for (const c of program.constraints) {
       if (c.kind === "get") this.getOf.set(c.result, c.receiver);
+      if (
+        c.kind === "operation" &&
+        c.receiver !== null &&
+        methodCategory(c.contract.name)?.gives.kind === "removed"
+      )
+        this.removedOf.set(c.result, c.receiver);
       if (c.kind === "call") this.resultOfCall.set(c.result, program.functionOf(c.fn).result);
     }
   }

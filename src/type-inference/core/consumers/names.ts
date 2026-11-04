@@ -250,50 +250,39 @@ function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[])
 }
 
 /**
- * #1173 (the owner's option C): whether the place a read reads is written `number` at the read's path, a member of a
- * written union included (`number?`); a `get` result reads its receiver's element. Its written type alone decides it,
- * no decision, and a written type that holds no `number` anywhere asks no charged key (so no counter or stop moves).
+ * #1173 (the owner's option C): whether a value's written type is `number`, a member of a written union included
+ * (`number?`). The written type a value carries (`writtenTermOf`) is its own written type alone, so no decision and no
+ * charged key is asked for it and no counter or stop moves.
  */
 export function writtenNumber(walk: Consumers, value: PlaceId): boolean {
-  const owner = walk.getOf.get(value);
-  return owner === undefined ? numberAt(walk, value, []) : numberAt(walk, owner, ["element"]);
-}
-
-function numberAt(walk: Consumers, value: PlaceId, below: readonly string[]): boolean {
-  const { program } = walk.pass;
-  // (the root the read reads, as `readKey` finds it, without its charged key)
-  const root = program.projOf.has(value)
-    ? program.targetRoot(value).root
-    : program.occurrenceOf.get(value);
-  const rootWritten = root === undefined ? null : writtenOf(program.place(root).kind);
-  if (rootWritten === null || !holdsNumber(rootWritten)) return false;
-  const key = readKey(walk, value);
-  if (key === null) return false;
-  const written = writtenOf(program.place(keyPlace(key)).kind);
-  const term = written === null ? null : termAt(written, [...keyPath(key), ...below]);
+  const term = writtenTermOf(walk, value);
   const number = (at: TypeTerm): boolean =>
     at.kind === "union" ? at.members.some(number) : at.kind === "atom" && at.name === "number";
   return term !== null && number(term);
 }
 
-/** Whether a written type holds `number` at any path, once per term. */
-const HOLDS_NUMBER = new WeakMap<TypeTerm, boolean>();
-function holdsNumber(term: TypeTerm): boolean {
-  let holds = HOLDS_NUMBER.get(term);
-  if (holds === undefined) {
-    holds =
-      term.kind === "atom"
-        ? term.name === "number"
-        : term.kind === "union"
-          ? term.members.some(holdsNumber)
-          : term.kind === "list" || term.kind === "set" || term.kind === "dict"
-            ? holdsNumber(term.element)
-            : term.kind === "object"
-              ? (term.properties ?? []).some((property) => holdsNumber(property.type))
-              : false;
-    HOLDS_NUMBER.set(term, holds);
-  }
-  return holds;
+/**
+ * The written type a value carries, through every read form that gives a part of a written place: a read of a
+ * binding, parameter or result its written type; a property, element or selection its owner's at that step; a `get`
+ * result, and what a removing method removed, its receiver's element. `null` where no written type reaches it (a call,
+ * an operation, a literal, a written type's reference to another place).
+ */
+function writtenTermOf(walk: Consumers, value: PlaceId): TypeTerm | null {
+  const { program } = walk.pass;
+  const element = walk.getOf.get(value) ?? walk.removedOf.get(value);
+  if (element !== undefined) return below(writtenTermOf(walk, element), "element");
+  const projection = program.projOf.get(value);
+  if (projection !== undefined)
+    return projection.step === "iteration"
+      ? below(writtenTermOf(walk, projection.owner), "element")
+      : below(writtenTermOf(walk, projection.owner), stepName(projection.step));
+  const binding = program.occurrenceOf.get(value);
+  return binding === undefined ? null : writtenOf(program.place(binding).kind);
+}
+
+/** A written type's term one step below, or `null`. */
+function below(term: TypeTerm | null, step: string): TypeTerm | null {
+  return term === null ? null : termAt(term, [step]);
 }
 
 /** §3.3, the quiet path: a value's contract kinds, asked before any read is evaluated; `null` with an unknown. */
