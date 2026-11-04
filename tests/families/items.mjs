@@ -6,13 +6,45 @@
 // shard `i/N` last, written as the runners read it (no leading zeros, N at most 10,000); `check` refuses (exit 1) a list
 // that is empty, holds an item of another form, or has a group whose shards are not exactly 0 to N-1 once with one N, so
 // a 1-based list, which skips shard 0 (twice in #1652's campaigns), never reaches the queue. `make` checks what it
-// prints; `submit` checks the whole list, then runs `sx-job submit` with the rest of its arguments and the list as
-// its one items option.
+// prints; `submit` checks the whole list, then runs `sx-job submit` with the list as its one items option and the rest
+// of its arguments, whose options must be ones that cannot change the items (`SUBMIT_OPTIONS`).
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const MAX_SHARDS = 10_000;
+
+/**
+ * The `sx-job submit` options `submit` forwards, by full name, each with whether it takes a value: every one that
+ * cannot change or multiply the item set (not `--items`, not `--shards`).
+ */
+const SUBMIT_OPTIONS = new Map([
+  ["--name", true],
+  ["--owner", true],
+  ["--campaign", true],
+  ["--priority", true],
+  ["--for", true],
+  ["--mem", true],
+  ["--class", true],
+  ["--timeout", true],
+  ["--host", true],
+  ["--node", true],
+  ["--commit", true],
+  ["--checkout", true],
+  ["--patch", true],
+  ["--in", true],
+  ["--after", true],
+  ["--in-result", true],
+  ["--needs-baseline", true],
+  ["--data", true],
+  ["--alone", true],
+  ["--write", true],
+  ["--target", true],
+  ["--big", false],
+  ["--writable-trees", false],
+  ["--sandbox", false],
+  ["--dry", false],
+]);
 const SHARD = /^(0|[1-9]\d*)\/([1-9]\d*)$/;
 
 /** Each problem of a list of items, or none. */
@@ -89,18 +121,22 @@ if (command === "make" && rest.length > 1 && SHARD.test(`0/${rest[0]}`)) {
   checked(lines);
   process.stdout.write(`items: ${lines.length} items, every group's shards 0 to N-1 once\n`);
 } else if (command === "submit" && rest.length > 1 && rest.includes("--")) {
-  // (the pool is the checked file and no other: an items option among the rest, in any form the queue's parser takes,
-  // `--items`, `--items=…` or a prefix of it, is refused, and the checked file goes last among the options, its absolute
-  // path attached, so no option replaces it and no file name reads as one)
+  // (the items the check accepted are exactly the items the queue receives: `submit` forwards only the queue options
+  // that cannot change or multiply the item set (`SUBMIT_OPTIONS`), each by its full name, and refuses any other, as
+  // `--items` in any spelling or `--shards`; the checked file goes as the one items option, its absolute path attached)
   const split = rest.indexOf("--");
   const [file, options, command] = [rest[0], rest.slice(1, split), rest.slice(split)];
-  const items = options.find((option) => {
-    const name = option.split("=")[0];
-    return name.length > 3 && "--items".startsWith(name);
-  });
-  if (items !== undefined) {
-    process.stderr.write(`items: '${items}' would replace the checked list; give it as the file\n`);
-    process.exit(2);
+  for (let index = 0; index < options.length; index += 1) {
+    const [name, attached] = [options[index].split("=")[0], options[index].includes("=")];
+    const takes = SUBMIT_OPTIONS.get(name);
+    if (takes === undefined) {
+      process.stderr.write(
+        `items: submit forwards no '${name}' (it could change the checked items; the forwarded options are ` +
+          `${[...SUBMIT_OPTIONS.keys()].join(" ")})\n`,
+      );
+      process.exit(2);
+    }
+    if (takes && !attached) index += 1;
   }
   checked(itemsOf(file));
   const submitted = spawnSync(

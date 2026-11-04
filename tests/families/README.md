@@ -64,8 +64,13 @@ node tests/families/items.mjs submit replay.txt --target 10m --campaign <T> … 
 ```
 
 `make <N> <words…>` prints `<words> 0/N` to `<words> N-1/N` (the runners' 0-based shards), `check <file>` checks a
-whole list, and `submit <file> <options…> -- <command>` checks it, then runs `sx-job submit --items <file>` with the
-rest; a job reads its batch from `$SX_ITEMS`, one item a line, its shard last.
+whole list, and `submit <file> <options…> -- <command>` checks it, then runs `sx-job submit` with the file as its one
+items option and the rest, so the items the check accepted are exactly the items the queue receives: it forwards only
+the options that cannot change or multiply them, by full name (`--name`, `--owner`, `--campaign`, `--priority`,
+`--for`, `--mem`, `--class`, `--timeout`, `--host`, `--node`, `--commit`, `--checkout`, `--patch`, `--in`, `--after`,
+`--in-result`, `--needs-baseline`, `--data`, `--alone`, `--write`, `--target`, `--big`, `--writable-trees`,
+`--sandbox`, `--dry`), and refuses any other, as `--shards` or another `--items`. A job reads its batch from
+`$SX_ITEMS`, one item a line, its shard last.
 
 With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the stored
 result of the same source (its generator, name and key, so an edited source is new), mode and check (unanswered alike

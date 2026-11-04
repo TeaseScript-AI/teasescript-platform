@@ -52,12 +52,43 @@ test("a pool's shard items are 0 to N-1 once in every group, and a 1-based list 
   const submitted = items(["submit", list, "--campaign", "T", "--", "bash", "-c", "true"], env);
   assert.equal(submitted.status, 0, submitted.stderr);
   assert.equal(submitted.stdout, `sx-job submit --campaign T --items=${list} -- bash -c true\n`);
-  // (no option replaces the checked list, and a list named like an option is still the list, Codex r2 on #1681)
+  // the items the check accepted are exactly the items the queue receives (Codex r1-r3 on #1681): with every forwarded
+  // option, one items option, the checked file, its three items; an option that could change or multiply them
+  // (`--shards`, `--items` in any spelling) refused, naming it
+  const counting = join(folder, "counting");
+  mkdirSync(counting);
+  writeFileSync(
+    join(counting, "sx-job"),
+    '#!/bin/sh\nn=0\nfor a in "$@"; do case "$a" in --items=*) n=$((n+1)); f=${a#--items=};; esac; done\n' +
+      'echo "items options $n, items $(grep -c . "$f")"\n',
+    { mode: 0o755 },
+  );
+  const countingEnv = { ...process.env, PATH: `${counting}:${process.env["PATH"] ?? ""}` };
+  const listed = items(["submit", list, "--unlisted", "--", "true"], countingEnv);
+  assert.equal(listed.status, 2);
+  const forwarded =
+    /the forwarded options are ([^)]*)\)/.exec(listed.stderr)?.[1]?.split(" ") ?? [];
+  assert.ok(forwarded.includes("--campaign") && !forwarded.includes("--shards"), listed.stderr);
+  for (const option of forwarded) {
+    const received = items(["submit", list, `${option}=x`, "--", "true"], countingEnv);
+    assert.equal(received.stdout, "items options 1, items 3\n", option);
+  }
   const bad = join(folder, "bad.txt");
   writeFileSync(bad, "held 1/2\nheld 2/2\n");
-  for (const option of [["--items", bad], [`--items=${bad}`], ["--item", bad]]) {
+  for (const option of [
+    ["--shards", "2"],
+    ["--items", bad],
+    [`--items=${bad}`],
+    ["--item", bad],
+    ["--it", bad],
+  ]) {
     const replaced = items(["submit", list, ...option, "--", "true"], env);
     assert.deepEqual([replaced.status, replaced.stdout], [2, ""], option.join(" "));
+    assert.match(
+      replaced.stderr,
+      new RegExp(`forwards no '${option[0]!.split("=")[0]}'`),
+      option.join(" "),
+    );
   }
   const dashed = join(folder, "--pool.txt");
   writeFileSync(dashed, made.stdout);
