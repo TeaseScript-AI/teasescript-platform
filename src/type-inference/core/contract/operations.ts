@@ -213,10 +213,17 @@ export function* contractOfOp(
     const repeated = contract.plusRepeatOf(c.result, false);
     if (repeated !== c.result) return yield* contract.contractOfValueAt(repeated, rest, flow);
     const operands: (readonly Item[])[] = [];
+    // (#1668: each operand staged, kept under the join's filter where it drops `empty`, `plusDropsEmpty`)
+    const sides: FlowSink[] = [];
     // (an operand admission rejected from the join gives it nothing: A6, `joinElements`)
     for (const argument of c.arguments)
-      if (contract.pass.lists.joined(argument))
-        operands.push(yield* contract.contractOfValueAt(argument, rest, flow));
+      if (contract.pass.lists.joined(argument)) {
+        const side = flow?.child() ?? null;
+        operands.push(yield* contract.contractOfValueAt(argument, rest, side));
+        if (side !== null) sides.push(side);
+      }
+    const drops = plusDropsEmpty(operands, rest);
+    for (const side of sides) flow!.attach(side, ...(drops ? (["withoutEmpty"] as const) : []));
     return plusElements(operands, rest, contract.pass);
   }
   const conversion = family === "conversion" ? conversionCategory(name) : undefined;
@@ -309,6 +316,14 @@ export function* contractOfOp(
   return [unknownItem(REASON.external)];
 }
 
+/** F10: whether `l + r`'s element drops its operands' `empty`: where one of them holds an element for certain. */
+function plusDropsEmpty(operands: readonly (readonly Item[])[], rest: readonly string[]): boolean {
+  return (
+    rest.length === 1 &&
+    operands.some((items) => items.length > 0 && !items.some((item) => item.tag === "empty"))
+  );
+}
+
 /**
  * F10: the elements of `l + r`, held when either side holds one; no position is a fact (F8, F10, F12 r5): where both
  * sides contribute elements, which one an element read takes is unknown, so each kind is possible.
@@ -318,11 +333,8 @@ export function plusElements(
   rest: readonly string[],
   pass: CorePass,
 ): readonly Item[] {
-  const held =
-    rest.length === 1 &&
-    operands.some((items) => items.length > 0 && !items.some((item) => item.tag === "empty"));
   const items = mergeItems(
-    held ? withoutEmpty(operands.flat()) : operands.flat(),
+    plusDropsEmpty(operands, rest) ? withoutEmpty(operands.flat()) : operands.flat(),
     pass.program.scope,
   );
   return operands.filter((items) => withoutEmpty(items).length > 0).length > 1

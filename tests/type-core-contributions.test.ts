@@ -247,6 +247,20 @@ test("each key's edges are the keys its contract includes: copies, written place
       'let x = 1\nif hostValue is integer {\n  x = null\n}\nlet b = [x].get(0, default: 3) otherwise 2\nsay "${b}"\nexit\n',
       [["b", [], ["x"]]],
     ],
+    // (a join drops its operands' `empty` where one of them holds an element: an operand holding only it is no edge;
+    // where none holds one, each operand's emptiness is the join's)
+    [
+      'let a = []\nlet v = [1]\nlet b = a + v\nsay "${b.first}"\nexit\n',
+      [["b", ["element"], ["v.element"]]],
+    ],
+    [
+      'let a = []\nlet v = [1]\nlet b = v + a\nsay "${b.first}"\nexit\n',
+      [["b", ["element"], ["v.element"]]],
+    ],
+    [
+      'let a = []\nlet c = []\nlet b = a + c\nsay "${b.length}"\nexit\n',
+      [["b", ["element"], ["a.element", "c.element"]]],
+    ],
     // (a reader that holds only its receiver's unknowns: a slot of the receiver without one is no edge)
     [
       'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).length\nsay "${b}"\nexit\n',
@@ -565,8 +579,11 @@ test("every producing read in the contract layer passes a flow, follows an inclu
         named.push([statement.name.text, statement]);
       if (ts.isVariableStatement(statement))
         for (const declaration of statement.declarationList.declarations)
-          if (declaration.initializer !== undefined && functionLike(declaration.initializer))
-            named.push([declaration.name.getText(tree), declaration.initializer]);
+          if (declaration.initializer !== undefined) {
+            const initializer = bare(declaration.initializer);
+            if (functionLike(initializer))
+              named.push([declaration.name.getText(tree), initializer]);
+          }
       for (const [name, fn] of named)
         if (fn.type !== undefined && producing.test(fn.type.getText(tree))) helpers.add(name);
     }
@@ -620,6 +637,23 @@ test("every producing read in the contract layer passes a flow, follows an inclu
     walk(tree, (scope) => {
       if (!solving(scope) || scope.body === undefined) return;
       const body = scope.body;
+      // (the function's own `include` calls: their first argument's text and where they stand)
+      const includes: { readonly key: string; readonly at: number }[] = [];
+      const own = (node: ts.Node): void => {
+        if (solving(node) || functionLike(node)) return;
+        if (ts.isCallExpression(node)) {
+          const callee = bare(node.expression);
+          const key = node.arguments[0];
+          if (
+            ts.isPropertyAccessExpression(callee) &&
+            callee.name.text === "include" &&
+            key !== undefined
+          )
+            includes.push({ key: bare(key).getText(tree), at: node.getStart(tree) });
+        }
+        ts.forEachChild(node, own);
+      };
+      ts.forEachChild(body, own);
       const visit = (node: ts.Node): void => {
         // (a scope inside is checked by itself)
         if (solving(node)) return;
@@ -663,9 +697,9 @@ test("every producing read in the contract layer passes a flow, follows an inclu
                 (ts.isStringLiteral(argument) && argument.text === "run") ||
                 argument.getText(tree) === "contract.pass.solver.sink()",
             ) ?? false;
-          const before = text.slice(scope.getStart(tree), read.getStart(tree));
-          const included = names.some((name) =>
-            new RegExp(`\\.include\\(\\s*${name.replace(".", "\\.")}\\b`).test(before),
+          // (an `include` call of the same key earlier in this function itself, not in a callback inside it)
+          const included = includes.some(
+            (include) => include.at < read!.getStart(tree) && names.includes(include.key),
           );
           if (!passed && !included && !tagged(read))
             unclassified.push(`${file}:${lineOf(read) + 1}: ${read.getText(tree).split("\n")[0]}`);
