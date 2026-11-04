@@ -11,6 +11,11 @@ import {
   type CompilationResult,
 } from "../src/compiler.js";
 import { REPEAT_COUNT_RULE } from "../src/loop-rules.js";
+import {
+  TEXT_METHODS,
+  type TextParameterKind,
+  type TextSignature,
+} from "../src/text-operations.js";
 import type { InstructionPlan, TypePlan } from "../src/plan/model.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
@@ -1366,6 +1371,138 @@ test("a receiver without an index gets its own error alone, never a list index's
     ['let xs = [1, 2]\nsay xs.take("x")\nexit\n', 'count "x"'],
   ] as const)
     assert.deepEqual(rules(source), [`compile-error ${expected}`], source);
+});
+
+/**
+ * V30 §8 (#1701): a method of text's argument that is visibly out of range, empty, or names a group the regex lacks is a
+ * compile error, the runtime's sentence at the argument (TSV043), where its values are known; a fitting call plans and
+ * runs; an unknown argument keeps its runtime check. The issue's witnesses, their controls and a host argument, in the
+ * four modes.
+ */
+test("a known text argument a method's domain rejects is a compile error with the runtime's sentence (V30 §8, #1701)", () => {
+  const errors = [
+    [
+      'say "abc".substring(4)\nsay "AFTER"\nexit\n',
+      20,
+      "substring() needs 'start' from 0 through 3 (the length of the text), not 4.",
+    ],
+    [
+      'say "abc".padStart(5, "")\nsay "AFTER"\nexit\n',
+      22,
+      "padStart() needs non-empty text for 'fill'.",
+    ],
+    [
+      'say "a".replace(/(a)/, "$2")\nsay "AFTER"\nexit\n',
+      23,
+      "'$2' in the replacement refers to group 2, but this regex has 1 group. Write '$0' for the whole match or '$1' " +
+        "for its group, or '$$' for a '$'.",
+    ],
+    [
+      'let t = "abc"\nsay t.substring(4)\nexit\n',
+      30,
+      "substring() needs 'start' from 0 through 3 (the length of the text), not 4.",
+    ],
+  ] as const;
+  for (const [source, at, message] of errors)
+    for (const sharing of [<T>(run: () => T): T => run(), withoutSharing]) {
+      const result = inBothOrders(() => sharing(() => candidate(source)));
+      assert.deepEqual(sited(result), [`error TSV043@${at}`], source);
+      assert.equal(result.diagnostics[0]!.message, message, source);
+      assert.equal(result.plan, null, source);
+    }
+  // (Codex r1: a written `string` that holds host data is text, its fill known empty; an argument the analysis
+  // rejects is read by no domain, in parentheses too; a domain's error inside parentheses stands at the content)
+  for (const [source, sitedAs] of [
+    [
+      'let t: string = hostValue\nsay t.padStart(5, "")\nexit\n',
+      ["warning TSV041@16", "error TSV043@44"],
+    ],
+    // (Codex r3: an admitted text element is text, `empty` ignored; a receiver that may be null keeps its own check
+    // first, the fill unread; host data unwritten is no proof of text, for `count` as for any method)
+    [
+      'let xs: string[] = hostValue\nsay xs[0].padStart(5, "")\nexit\n',
+      ["warning TSV041@19", "warning TSV041@19", "error TSV043@51"],
+    ],
+    [
+      'let t: string? = hostValue\nsay t.padStart(5, "")\nexit\n',
+      ["warning TSV041@17", "warning TSV043@31"],
+    ],
+    ['say hostValue.count("")\nexit\n', ["warning TSV043@4"]],
+    ['say "abc".substring(1.5, 1)\nexit\n', ["error TSV043@20"]],
+    ['say "abc".substring((4.5))\nexit\n', ["error TSV043@21"]],
+    ['say "abc".substring((4))\nexit\n', ["error TSV043@21"]],
+  ] as const)
+    for (const sharing of [<T>(run: () => T): T => run(), withoutSharing])
+      assert.deepEqual(
+        sited(inBothOrders(() => sharing(() => candidate(source)))),
+        sitedAs,
+        source,
+      );
+  for (const [source, says] of [
+    ['say "abc".substring(1)\nexit\n', "bc"],
+    ['say "abc".padStart(5, "-")\nexit\n', "--abc"],
+    ['say "a".replace(/(a)/, "$1")\nexit\n', "a"],
+  ] as const) {
+    const result = inBothOrders(() => candidate(source));
+    assert.deepEqual(sited(result), [], source);
+    assert.ok(result.plan !== null, source);
+    assertRuns(result.plan, source, [says], [[null, null]]);
+  }
+  const host = candidate('say "abc".substring(hostValue)\nexit\n');
+  assert.deepEqual(sited(host), ["warning TSV043@20"]);
+  assert.ok(host.plan !== null);
+  assertRuns(
+    host.plan,
+    "a host argument",
+    ["c"],
+    [
+      [2, null],
+      [4, "TSV043@4:30"],
+    ],
+  );
+});
+
+/**
+ * #1701 over every method of text (`TEXT_METHODS`): the current checker is the reference. Each method is called on known
+ * text, and on a list, with every combination of known arguments of its parameters' kinds (empty and other text, a regex with one group,
+ * replacements naming groups 1 and 2, positions inside and past the text, end before start); the candidate's errors at
+ * the arguments, code and sentence, are the current checker's, in the source order.
+ */
+test("every method of text's known-argument errors are the current checker's (#1701)", () => {
+  const byKind: Record<TextParameterKind, readonly string[]> = {
+    text: ['""', '"b"', '"$1"', '"$2"'],
+    regex: ["/(b)/"],
+    textOrRegex: ['""', '"b"', "/(b)/"],
+    position: ["0", "2", "4"],
+    count: ["0", "2"],
+  };
+  let compared = 0;
+  for (const entry of Object.values(TEXT_METHODS)) {
+    const method: TextSignature = entry;
+    const name = method.name;
+    let calls: string[][] = [[]];
+    for (const parameter of method.parameters) {
+      const next = calls.flatMap((call) => byKind[parameter.kind].map((value) => [...call, value]));
+      calls = parameter.optional === true ? [...calls, ...next] : next;
+    }
+    // (a list receiver too: a list's method of the same name takes no text domain)
+    for (const receiver of ['"abc"', '["abc"]'])
+      for (const call of calls) {
+        const source = `say ${receiver}.${name}(${call.join(", ")})\nexit\n`;
+        // (the errors at the arguments, where a domain's stands: a receiver without the method is its member check's)
+        const opening = source.indexOf("(");
+        const atArguments = (result: CompilationResult) =>
+          result.diagnostics
+            .filter((d) => d.severity === "error" && d.span.start.offset > opening)
+            .map((d) => `${d.code}@${d.span.start.offset}: ${d.message}`);
+        const current = atArguments(compileSource(source, OPTIONS));
+        const found = insideSlice(() => atArguments(candidate(source)));
+        if (found === null) continue;
+        compared += 1;
+        assert.deepEqual(found, current, source);
+      }
+  }
+  assert.ok(compared >= 75, `${compared} calls compared`);
 });
 
 test("parentheses answer for their content: a parenthesised count and index read as bare ones (S3 3.4)", () => {

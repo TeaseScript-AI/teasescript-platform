@@ -14,6 +14,15 @@ import type {
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "../../diagnostics.js";
 import { isRepeatCount } from "../../loop-rules.js";
+import { isRegex } from "../../runtime/values/value-predicates.js";
+import {
+  isTextMethod,
+  stringLength,
+  takesRegex,
+  takesText,
+  TEXT_METHODS,
+  type DomainValue,
+} from "../../text-operations.js";
 import { literalRange } from "../../switch-cases.js";
 import {
   repairedObject,
@@ -753,6 +762,11 @@ function staticDiagnostics(
   for (const call of index.calls) {
     const conversion = knownConversionError(answers, index, call);
     if (conversion !== null) report(index.site(conversion.value), conversion.rule);
+    // (an argument the analysis found a problem with is not read: its own diagnostic stands)
+    const diagnosed = (argument: Expression): boolean =>
+      sited.has(siteKey(index.fileOf(argument), unwrap(argument).span));
+    for (const found of knownTextArguments(answers, index, call, known, diagnosed))
+      report(index.site(found.at), { rule: "text-argument", message: found.message });
   }
   // V30 §6: a written range that holds no number, an ordinary warning where a loop or `toList()` reads it
   const empty = (range: Expression, use: "loop" | "list"): void => {
@@ -840,6 +854,82 @@ function staticDiagnostics(
   for (const call of index.calls)
     if (call.callee.kind === "propertyAccessExpression" && call.callee.property.name === "toList")
       empty(call.callee.object, "list");
+  return found;
+}
+
+/**
+ * V30 §8 (#1701): "a visibly negative, out-of-range, or empty argument" of a method of text is a compile error. Each
+ * argument domain of the method (`TextDomain`) whose values are all known, the receiver's text where it reads its
+ * length, is checked in the method's order with the runtime's sentence, and reported at the last argument it reads (its
+ * content, inside parentheses, §3.4); an argument the analysis or an earlier domain found a problem with is not read,
+ * as the current checker does (`operation-checks.ts`). Every argument positional, and the receiver text as the core
+ * answers it or as the place it reads is admitted (the invariant below).
+ */
+function knownTextArguments(
+  answers: Answers,
+  index: SliceIndex,
+  call: CallExpression,
+  known: (expression: Expression) => KnownValue | undefined,
+  diagnosed: (argument: Expression) => boolean,
+): { readonly at: Expression; readonly message: string }[] {
+  const callee = call.callee;
+  if (callee.kind !== "propertyAccessExpression" || !isTextMethod(callee.property.name)) return [];
+  const method = TEXT_METHODS[callee.property.name];
+  if (
+    call.arguments.length > method.parameters.length ||
+    call.arguments.some((argument) => argument.kind !== "positionalArgument")
+  )
+    return [];
+  const receiver = answers.at(nodeOf(answers, index, callee.object));
+  if (receiver === null) return [];
+  // (the invariant: a method's argument domains apply only where the receiver is answered text, or the place it reads
+  // is admitted text, `empty`, an element read's own concern, ignored; nothing else, so a receiver that may be null or
+  // of another kind keeps its own check first, and one that only a fallback or a call proves text is #1727's)
+  const text = (kinds: readonly ItemTag[]): boolean => {
+    const present = kinds.filter((tag) => tag !== "empty");
+    return present.length > 0 && present.every((tag) => tag === "string");
+  };
+  const admitted =
+    receiver.place === null ? null : answers.place(receiver.place.id, receiver.place.path).admitted;
+  if (
+    !text(receiver.items.map((item) => item.tag)) &&
+    !(admitted !== null && "kinds" in admitted && text(admitted.kinds))
+  )
+    return [];
+  const receiverText = known(callee.object);
+  const values: (DomainValue | undefined | null)[] = call.arguments.map((argument, position) => {
+    if (diagnosed(argument.value)) return null;
+    const parameter = method.parameters[position]!;
+    const value = known(argument.value);
+    if (!takesText(parameter) && !takesRegex(parameter))
+      return typeof value === "number" ? value : undefined;
+    return (takesText(parameter) && typeof value === "string") ||
+      (takesRegex(parameter) && value !== undefined && isRegex(value))
+      ? value
+      : undefined;
+  });
+  const found: { at: Expression; message: string }[] = [];
+  for (const domain of method.domains) {
+    const read: DomainValue[] = [];
+    for (const position of domain.reads) {
+      const value =
+        position === "length"
+          ? typeof receiverText === "string"
+            ? stringLength(receiverText)
+            : undefined
+          : values[position];
+      if (value === undefined || value === null) break;
+      read.push(value);
+    }
+    if (read.length !== domain.reads.length) continue;
+    const message = domain.problem(read, method);
+    if (message === undefined) continue;
+    for (const position of domain.reads) if (position !== "length") values[position] = null;
+    const last = Math.max(
+      ...domain.reads.map((position) => (position === "length" ? -1 : position)),
+    );
+    found.push({ at: unwrap(call.arguments[last]!.value), message });
+  }
   return found;
 }
 
