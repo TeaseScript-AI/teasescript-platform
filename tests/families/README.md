@@ -252,15 +252,39 @@ command clears it), under the unit limit below (the legacy route charges no ledg
 `{ outcome: "failed", failure, phase, runsBeforeFailure, heapMiB }` (`heapMiB`: the worker's heap limit as V8 measured
 it) in its row and in the record's `failed` list, with `incomplete: true` and the first failure as `reason`; the next
 run starts in a fresh worker. A reused worker's heap failure or safety net is retried once in a fresh one, whose
-result is the run's (`retried` names the first). It classifies nothing. The S11 classification reads `key`, `index`,
-`origins`, `incomplete`/`reason`, and per row `mode`, `delta` (`diagnosticIdentity`, `diagnosticText`, `checks`,
-`plan`) and each route's `outcome`, `diagnostics`, `checks`, `planHash`, `outside`/`excluded`; and `ordinary` and
-`completion` from `--decisions`. An incomplete record is never agreement.
+result is the run's (`retried` names the first). It classifies nothing; `--manifest` prints the sources the same
+options owe, one `{ key, name }` line each, and runs nothing. An incomplete record is never agreement.
 
 ```sh
 sx-job submit --commit <sha> --shards 16 --mem 2G --timeout 1h --campaign <T> -- bash -c 'env -u NODE_OPTIONS \
   node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --out "$SX_OUT/shadow.jsonl" \
   --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
+```
+
+`shadow-classify.mjs` (S11's classification, taxonomy version 1) reads the records of a campaign (and the S11
+readiness research's `results.jsonl`, whose crashed sources have no rows) and gives every route pair (a source in one
+mode, legacy against core) exactly one class, and every source in each order one class of the sharing column, the core
+with sharing on against off (#1711). Each class has its rule in words, a witness and a gate state: `pass`,
+`attributed` (the rule class is known; S11 still owes each source's accepted expectation) or `open`. Pairs: `agree`;
+`differs/stop`, `/surviving`, `/integer`, `/rule` by the codes whose diagnostic identities (path, code, severity,
+offsets) changed, in that precedence, then `/checks`, `/plan`, `/wording` where the identities are equal (the other
+differing parts are columns of the pair); `excluded/<text>`, the research's 53 exclusion texts as 48 rules; `failed/
+legacy-heap` (the legacy route's heap in its analysis with the core finished: legacy behaviour the switch resolves,
+#1075), `failed/other`, `exception`, `aborted-record`, `unavailable`. Sharing: `equal`, `one-mode-stop` and
+`both-stop-differ` (attributed, each row for the stop oracle's judgment), `neither-stops-differ`, `outside`,
+`uncompared`. Every rule is tested on every pair: a pair none takes, or two, fails the run (exit 1), so an exclusion
+text no version names, or changed codes that none of the rules' codes decide, fail until the next version adds them
+with a witness; so does input the classifier cannot read whole (a compared row without its four delta parts, a
+manifest line without its key), a record outside `--expect` or a key recorded twice with different readings. The gate table (`gate.json`, `gate.md`) adds
+the differing pairs' parts, the research's inventory signatures (`signatures.tsv`), decision coverage (ordinary and
+completion records, open at 0) and, as information only, the sources whose core differs across the four modes; the
+verdict line is `gate: green` only with no `open` row, and `--gate` (S11's final run, with `--expect`) exits 1
+otherwise.
+Over the research's records it reproduces its aggregate (`~/work/evidence/1728/`):
+
+```sh
+env -u NODE_OPTIONS node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --manifest > expect.jsonl
+node tests/families/shadow-classify.mjs <shards' shadow.jsonl>... --expect expect.jsonl --out <folder> [--gate]
 ```
 
 The #1704 witnesses (`copies`, `--only` with `1188-sol-candidate-neighbours.mjs/node-graft@8`, `node-mixed@8`,

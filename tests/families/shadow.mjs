@@ -1,10 +1,10 @@
 // node tests/families/shadow.mjs <tree> <set> [--shard i/N] [--out f.jsonl] [--decisions f.jsonl] [--units 4]
-//   [--timeout 1800] [--memory 1400] [--only names.json] [--limit n]
+//   [--timeout 1800] [--memory 1400] [--only names.json] [--limit n] [--manifest]
 // The shadow comparison (S9b's interim and S11's final shadow suite; #1704 landed it from the S11 readiness research's
 // copy): each source of a set compiled through both public routes of one built tree, the legacy backend
 // (`compileProjectWithBackend` with the production default) and the core (`decisionRecords`, its receiving completion
 // included), in the four modes (`MODES`), and one JSON line per source to `--out` with each route's outcome per mode and
-// where both have one, what differs. It classifies nothing: the S11 classification reads the records (README "Shadow").
+// where both have one, what differs. It classifies nothing: `shadow-classify.mjs` does (README "Shadow").
 //   <set>: corpus (CASES_JSON=<cases.json>), fixture (the tree's tools/corpus/fixture), or an area of tests/families by
 //   its name or folder (its generators' sources at their own sizes, `sources.mjs`).
 // Each route runs in a worker of its own with `--memory` MB of old generation, which takes its runs (one route in one
@@ -131,6 +131,15 @@ if (
     .map((_, index) => index)
     .filter((index) => (only === null ? index % shards === shard : only.has(sources[index].name)))
     .slice(0, limit);
+  const { sourceKey } = await import(
+    pathToFileURL(path.join(root, "tests", "families", "sources.mjs")).href
+  );
+  // (--manifest: the sources these options owe, one `{ key, name }` line each, for shadow-classify.mjs's --expect)
+  if (rest.includes("--manifest")) {
+    for (const index of indices)
+      console.log(JSON.stringify({ key: sourceKey(sources[index]), name: sources[index].name }));
+    process.exit(0);
+  }
   // (a source already in --out is not run again, its record counted as it stands: a failure stays a failure)
   const done = new Map();
   if (out !== undefined && existsSync(out))
@@ -139,9 +148,6 @@ if (
         const record = JSON.parse(line);
         done.set(record.name, record);
       }
-  const { sourceKey } = await import(
-    pathToFileURL(path.join(root, "tests", "families", "sources.mjs")).href
-  );
   const summary = {
     set: path.basename(set),
     shard: `${shard}/${shards}`,
