@@ -911,7 +911,7 @@ function writtenTask(
  * it, so what a task's walk brings and the tasks it walks are each one range of the call's: a record (the call's root,
  * and each longer prefix of a place with listings) keeps its ranges, and each child of its root's, as a listing, where
  * nothing in it was skipped as walked before it opened. A task with a listing takes it as its walk would bring it: its
- * root's own paths, then each child not walked before, its paths and tasks.
+ * root's own paths, then each child not walked before, its paths.
  */
 function walkLandings(
   admission: Admission,
@@ -921,13 +921,7 @@ function walkLandings(
 ): Listing {
   const { cycleOf, fed, wholes } = inheritance(admission);
   const work = admission.pass.program.work;
-  const call: LandingCall = {
-    id: (admission.listingCount += 1),
-    paths: [],
-    texts: [],
-    order: [],
-    walked: [],
-  };
+  const call: LandingCall = { id: (admission.listingCount += 1), paths: [], texts: [], order: [] };
   // (per text and per task id, the order it was first brought in)
   const out = new Map<string, number>();
   const seen = new Map<string, number>();
@@ -937,8 +931,6 @@ function walkLandings(
     readonly task: LandingTask;
     readonly from: number;
     to: number;
-    readonly walkedFrom: number;
-    walkedTo: number;
   }
   interface Record {
     readonly task: LandingTask;
@@ -967,9 +959,7 @@ function walkLandings(
   };
   const endChild = (record: Record): void => {
     const last = record.children.at(-1);
-    if (last === undefined) return;
-    last.to = call.order.length;
-    last.walkedTo = call.walked.length;
+    if (last !== undefined) last.to = call.order.length;
   };
   const close = (record: Record): Listing => {
     endChild(record);
@@ -1013,13 +1003,7 @@ function walkLandings(
     if (parent !== undefined) {
       parent.own ??= call.order.length;
       endChild(parent);
-      parent.children.push({
-        task,
-        from: call.order.length,
-        to: -1,
-        walkedFrom: call.walked.length,
-        walkedTo: -1,
-      });
+      parent.children.push({ task, from: call.order.length, to: -1 });
     }
     const id = keptParts(admission.work, task.place, task.below, task.drop, task.prepend);
     const at = seen.get(id);
@@ -1030,7 +1014,6 @@ function walkLandings(
       continue;
     }
     seen.set(id, seen.size);
-    call.walked.push(task);
     const add = (path: readonly string[]): void => {
       if (!isPrefix(task.below, path)) return;
       const steps = joinSteps(task.prepend, path.slice(task.drop));
@@ -1041,7 +1024,9 @@ function walkLandings(
       add(path);
     };
     // (a listing's paths written where this task writes, each charged as its emit: its root's own, then each child of
-    // its root not walked before, its paths and its tasks, each path once)
+    // its root not walked before in this call, each path once. Nothing of the listing is copied into this call: its
+    // paths are read where its call keeps them, and a later task among those its walk went through is walked or taken
+    // as it comes, so no open walk holds another's history)
     const take = (from: Listing): void => {
       const written = writing(from, task);
       const brought = new Set<number>();
@@ -1070,13 +1055,6 @@ function walkLandings(
           const record = records.at(-1)!;
           record.least = Math.min(record.least, walked);
           continue;
-        }
-        for (let at = child.walkedFrom; at < child.walkedTo; at += 1) {
-          const sub = writtenTask(written, from.call.walked[at]!);
-          const subId = keptParts(admission.work, sub.place, sub.below, sub.drop, sub.prepend);
-          if (seen.has(subId)) continue;
-          seen.set(subId, seen.size);
-          call.walked.push(sub);
         }
         bring(child.from, child.to);
       }

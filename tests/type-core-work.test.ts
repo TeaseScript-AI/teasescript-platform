@@ -1433,7 +1433,7 @@ test("a join's operand reaching an earlier join takes its composed type, its wor
  * `indexSteps` 2.47 per doubling, k² calls of `joinSteps`, `splitPath` and `pathText`).
  */
 test("a chain of copies between selection levels lands its paths once per link, its work linear either way (#1547)", () => {
-  assert.equal(LANDING_FAMILIES.length, 6);
+  assert.equal(LANDING_FAMILIES.length, 7);
   assert.deepEqual(
     [...steepCounters(LANDING_FAMILIES), ...steepCounters(LANDING_FAMILIES, true)],
     [],

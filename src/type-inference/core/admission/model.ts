@@ -39,22 +39,21 @@ export interface LandingTask {
 
 /**
  * What one `landedBelow` call brought, shared by the listings it keeps: the paths it brought first (`paths`, `texts`),
- * the order its walk brought paths in, as indexes into them, a path brought again after one of its walks opened
- * included (`order`), and the tasks it walked in their order (`walked`).
+ * and the order its walk brought paths in, as indexes into them, a path brought again after one of its walks opened
+ * included (`order`): each entry made once, by a charged emit or take.
  */
 export interface LandingCall {
   readonly id: number;
   readonly paths: (readonly string[])[];
   readonly texts: string[];
   readonly order: number[];
-  readonly walked: LandingTask[];
 }
 
 /**
  * The paths copies land in a place at or below a prefix (`landedBelow`), as the walk of one task (`frame`) brought them:
  * a range of its call's `order` (`from` to `to`), the paths before `own` the task's own, then per task its walk took
- * next (`children`) that task's range and the range of the tasks it walked; a path whose index is below `start` was
- * brought before the walk opened. Ranges, not copies, so nested walks keep each entry once.
+ * next (`children`) that task's range; a path whose index is below `start` was brought before the walk opened. Ranges of
+ * the one order, never copies, so however many walks are open, each entry is kept once.
  */
 export interface Listing {
   readonly call: LandingCall;
@@ -66,8 +65,6 @@ export interface Listing {
     readonly task: LandingTask;
     readonly from: number;
     readonly to: number;
-    readonly walkedFrom: number;
-    readonly walkedTo: number;
   }[];
   readonly frame: LandingTask;
 }

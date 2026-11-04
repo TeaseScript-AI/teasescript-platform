@@ -6953,10 +6953,11 @@ function landingChain(
  * #1547, #1428: chains whose every link copies the one before into a selection between two levels (whole, through its
  * property, through an object's property), the level inside first or last. Each link's landed paths are asked once,
  * sources first, so each call reaches the listing of the link below instead of walking the chain again
- * (`landedBelow`); the join-reach families' kept and copied chains are #1428's.
+ * (`landedBelow`); and a chain whose every link is asked, then one narrow prefix through all of them, each walk keeping
+ * what it walks once however many are open. The join-reach families' kept and copied chains are #1428's.
  */
-export const LANDING_FAMILIES: readonly WorkFamily[] = (["first", "last"] as const).flatMap(
-  (order) => {
+export const LANDING_FAMILIES: readonly WorkFamily[] = (["first", "last"] as const)
+  .flatMap((order) => {
     const pick = (x: string, other: string): string =>
       order === "first" ? `[${x}, ${other}][0]` : `[${other}, ${x}][1]`;
     return (
@@ -6974,8 +6975,25 @@ export const LANDING_FAMILIES: readonly WorkFamily[] = (["first", "last"] as con
       measures: `#1547: k levels, ${between} between each two, the level inside ${order}`,
       program: (k) => main(landingChain(k, "{p: typed}", link)),
     }));
-  },
-);
+  })
+  .concat({
+    // (every link of a chain asked at its root, then one narrow prefix through all of them: as many walks open at once
+    // as links, each keeping what it walks once, Codex r2's B2 on #1669)
+    name: "landing-narrow-after-chain",
+    measures:
+      "#1547: a chain whose every link is asked, then one narrow prefix through all of them",
+    program: (k) =>
+      main(
+        lines(
+          LANDING_TYPED,
+          "let c0 = {p: {f: typed}}",
+          rows(k, (i) => `let c${i + 1} = [c${i}, {p: {f: typed}}][0]`),
+          `let x = [{q: c${k}.p}, {q: {f: typed}}][0]`,
+          'say "${x.q.f}"',
+          "exit",
+        ),
+      ),
+  });
 
 /**
  * #1547, #1428: the shapes the landings' listings must answer as their walk does (each call's paths in order): chains
