@@ -1,5 +1,5 @@
 // node tests/families/shadow.mjs <tree> <set> [--shard i/N] [--out f.jsonl] [--decisions f.jsonl] [--units 4]
-//   [--timeout 1800] [--memory 1400] [--only names.json] [--limit n] [--manifest]
+//   [--timeout 1800] [--memory 2048] [--only names.json] [--limit n] [--demands 16] [--manifest]
 // The shadow comparison (S9b's interim and S11's final shadow suite; #1704 landed it from the S11 readiness research's
 // copy): each source of a set compiled through both public routes of one built tree, the legacy backend
 // (`compileProjectWithBackend` with the production default) and the core (`decisionRecords`, its receiving completion
@@ -19,7 +19,11 @@
 // one's. A worker that ends or throws after a run's outcome keeps that outcome and is replaced (`replaced`), also where
 // its end reaches the next run before that run's first phase. A source with a failed run is `incomplete`, never
 // agreement. Resumes: a source already in `--out` is not run again, its record counted as it stands. Prints one JSON
-// summary line (`differing` counts sources); exit 0 when every run has an outcome, else 1.
+// summary line (`differing` counts sources); exit 0 when every run has an outcome, else 1. `--demands 16` (the S11
+// gate's completion control: nothing stops at the natural allowance on current main, so no natural run reaches a
+// receiving completion) also runs the core route of each source in the four modes at each of these demand
+// allowances, and records each run's outcome and decision counts under `demands` (`{ demand, rows }`), a failure as
+// the natural runs' are; the legacy route has no demand allowance.
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -121,7 +125,10 @@ if (
   if (units !== null && !(Number.isInteger(units) && units > 0))
     refused(`--units ${option("--units")} is no positive whole multiple of the allowance, or none`);
   const seconds = Number(option("--timeout") ?? 1800);
-  const memory = Number(option("--memory") ?? 1400);
+  const memory = Number(option("--memory") ?? 2048);
+  const demands = (option("--demands") ?? "").split(",").filter(Boolean).map(Number);
+  if (!demands.every((d) => Number.isInteger(d) && d > 0))
+    refused(`--demands ${option("--demands")} is no list of positive whole demand allowances`);
   const sources = await sourcesOfSet(set, root);
   const only =
     option("--only") === undefined
@@ -162,6 +169,7 @@ if (
     units,
     timeout: seconds,
     memory,
+    demands,
     node: process.version,
   };
 
@@ -172,6 +180,12 @@ if (
         summary.runs += 1;
         if (row[route].outcome === "failed") summary.failed += 1;
         if (row[route].retried !== undefined) summary.retried += 1;
+      }
+    for (const { rows } of record.demands ?? [])
+      for (const row of rows) {
+        summary.runs += 1;
+        if (row.core.outcome === "failed") summary.failed += 1;
+        if (row.core.retried !== undefined) summary.retried += 1;
       }
     if (
       record.rows.some((row) => row.delta !== undefined && Object.values(row.delta).some(Boolean))
@@ -215,7 +229,7 @@ if (
   };
 
   /** One run in the route's worker: its outcome (`done`), or its failure with the phase it was in. */
-  async function attempt(route, index, mode) {
+  async function attempt(route, index, mode, demand = null) {
     // (a worker that ended or threw after its last run's outcome is replaced; that outcome stands)
     if (workers.get(route).ended) {
       summary.replaced += 1;
@@ -236,6 +250,7 @@ if (
             failure,
             runsBeforeFailure,
             heapMiB: slot.limitMiB,
+            ...(demand === null ? {} : { demand }),
             ...extra,
           },
         });
@@ -259,26 +274,26 @@ if (
         resolve(value);
       }
       worker.on("message", onMessage).on("error", onError).on("exit", onExit);
-      worker.postMessage({ index, mode });
+      worker.postMessage({ index, mode, demand });
     });
   }
 
   /** A run, retried once in a fresh worker where a reused one exhausted its heap or reached the safety net. */
-  async function run(route, index, mode) {
-    let first = await attempt(route, index, mode);
+  async function run(route, index, mode, demand = null) {
+    let first = await attempt(route, index, mode, demand);
     if (first.failed === undefined) return first;
     await retire(route);
     // (a reused worker that failed before the run reached its first phase ended after its last run: the run starts again
     // in a fresh worker, as if the worker had been replaced before it)
     if (first.failed.phase === null && first.failed.runsBeforeFailure > 0) {
       summary.replaced += 1;
-      first = await attempt(route, index, mode);
+      first = await attempt(route, index, mode, demand);
       if (first.failed === undefined) return first;
       await retire(route);
     }
     const { failure, runsBeforeFailure } = first.failed;
     if (runsBeforeFailure === 0 || (failure !== "heap" && failure !== "safety net")) return first;
-    const again = await attempt(route, index, mode);
+    const again = await attempt(route, index, mode, demand);
     if (again.failed !== undefined) await retire(route);
     return { ...again, retried: first.failed };
   }
@@ -344,12 +359,41 @@ if (
       }
       record.rows.push(row);
     }
+    // (the demand control: the core alone at each demand allowance, its outcome and decision counts kept)
+    for (const demand of demands) {
+      const rows = [];
+      for (let mode = 0; mode < 4; mode += 1) {
+        const result = await run("core", index, mode, demand);
+        const at = { reversed: mode >= 2, unshared: mode % 2 === 1 };
+        if (result.failed !== undefined) {
+          failures.push(result.failed);
+          rows.push({
+            mode: at,
+            core: {
+              outcome: "failed",
+              ...result.failed,
+              route: undefined,
+              mode: undefined,
+              demand: undefined,
+              retried: result.retried,
+            },
+          });
+        } else {
+          const { outcome, outside, decisionCounts, units, allowance } = result.summary;
+          rows.push({
+            mode: result.mode,
+            core: { outcome, outside, decisionCounts, units, allowance, retried: result.retried },
+          });
+        }
+      }
+      (record.demands ??= []).push({ demand, rows });
+    }
     if (failures.length > 0) {
       record.incomplete = true;
       record.failed = failures;
       // (the first failure, as the research's records grouped an absent record by its reason)
       const [first] = failures;
-      record.reason = `${first.route} mode ${first.mode}: ${first.failure} in ${first.phase}`;
+      record.reason = `${first.route}${first.demand === undefined ? "" : ` at demand ${first.demand}`} mode ${first.mode}: ${first.failure} in ${first.phase}`;
     }
     count(record);
     if (out !== undefined) appendFileSync(out, `${JSON.stringify(record)}\n`);
@@ -463,17 +507,17 @@ if (
   }
 
   const sources = await sourcesOfSet(set, root);
-  parentPort.on("message", ({ index, mode: modeIndex }) => {
+  parentPort.on("message", ({ index, mode: modeIndex, demand }) => {
     const source = sources[index];
     const mode = O.MODES[modeIndex];
     Object.assign(meter, { spent: 0, allowance: 0 });
     pass = 0;
     seen = { checks: null, excluded: null };
-    parentPort.postMessage({ ...runRoute(source, mode), mode });
+    parentPort.postMessage({ ...runRoute(source, mode, demand), mode });
   });
 
   /** One route's outcome in `mode`: compare.mjs's summary, and the texts the parent compares with the other route's. */
-  function runRoute(source, mode) {
+  function runRoute(source, mode, demand) {
     phase("parse and names");
     try {
       let plan;
@@ -481,7 +525,11 @@ if (
       let extra = {};
       let decisions;
       if (route === "core") {
-        const records = O.decisionRecords(source.files, source.globals, { mode });
+        const records = O.decisionRecords(
+          source.files,
+          source.globals,
+          demand === null ? { mode } : { mode, demand },
+        );
         phase("record");
         const parsed = JSON.parse(records.text);
         // (the decisions a compile read are kept also where its program leaves the slice, as compare.mjs kept them)

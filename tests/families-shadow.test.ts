@@ -74,8 +74,10 @@ export function inMode(mode, run) {
   return run();
 }
 export const jsonText = (value) => JSON.stringify(value);
-export function decisionRecords(files, globals, { mode }) {
+export function decisionRecords(files, globals, { mode, demand }) {
   const { plan, diagnostics } = inMode(mode, () => compileProjectWithBackend(files, { globals }, CORE_BACKEND));
+  if (demand !== undefined)
+    return { text: JSON.stringify({ plan, diagnostics }), ordinary: [[{ key: 1 }]], completion: [[{ key: demand }]] };
   if (files[0].source === "outside")
     return { text: JSON.stringify({ outside: "this construct" }), ordinary: [[{ key: 1 }]], completion: [] };
   return { text: JSON.stringify({ plan, diagnostics }), ordinary: [[]], completion: [] };
@@ -240,4 +242,48 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
     classified.problems.map((p: { problem: string; name: string }) => [p.problem, p.name]),
     [0, 1, 2, 3].map(() => ["unclassified", "cases.mjs/outside"]),
   );
+
+  // (--demands 16: the core alone at that demand allowance in the four modes, for the gate's completion control)
+  const only = join(folder, "only.json");
+  writeFileSync(only, JSON.stringify(["cases.mjs/fine"]));
+  const controlled = join(folder, "control.jsonl");
+  const withControl = (...extra: string[]) =>
+    spawnSync(
+      process.execPath,
+      [tool, folder, "area", "--memory", "16", "--only", only, "--out", controlled, ...extra],
+      { encoding: "utf8", env },
+    );
+  assert.equal(withControl("--demands", "0").status, 2);
+  const ran16 = withControl("--demands", "16");
+  assert.equal(ran16.status, 0, ran16.stderr);
+  assert.equal(JSON.parse(ran16.stdout.trim()).runs, 12);
+  const [fineControlled] = readFileSync(controlled, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    fineControlled.demands.map(
+      (d: {
+        demand: number;
+        rows: Array<{ mode: unknown; core: { outcome: string; decisionCounts: unknown } }>;
+      }) => ({
+        demand: d.demand,
+        rows: d.rows.map((row) => [row.mode, row.core.outcome, row.core.decisionCounts]),
+      }),
+    ),
+    [
+      {
+        demand: 16,
+        rows: [0, 1, 2, 3].map((m) => [
+          { reversed: m >= 2, unshared: m % 2 === 1 },
+          "plan",
+          { ordinary: [1], completion: [1] },
+        ]),
+      },
+    ],
+  );
+  // (the classifier counts the control's completions; the gate's coverage row also needs the natural runs' ordinary
+  // decisions, which this fake source has none of)
+  const { coverage } = C.classifyRecords([{ record: fineControlled, bytes: 0, where: "control" }]);
+  assert.deepEqual([coverage.controlRuns, coverage.controlCompletionRuns], [4, 4]);
 });
