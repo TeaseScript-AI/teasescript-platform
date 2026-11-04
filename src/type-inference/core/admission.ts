@@ -139,6 +139,12 @@ export type { Candidate, DecidedAt, Decision } from "./admission/model.js";
  */
 
 /** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
+/** A demanded rest (`demandsOf`): a decided path and the step its rest starts at, kept where the index reads it. */
+export interface Demand {
+  readonly path: Steps;
+  readonly from: number;
+}
+
 export interface AdmissionHost {
   run<T>(work: Work<T>): T;
   /**
@@ -307,8 +313,8 @@ export class Admission {
   readonly chains = new Map<string, ChainEnd | null>();
   /** Per class (its representative), its eligible member at each tested key of its demanded paths (§4.3). */
   readonly eligible = new Map<Definition, Map<string, Definition | null>>();
-  /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once. */
-  demands: Map<CanonicalKey, Steps[]> | null = null;
+  /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once: each by reference. */
+  demands: Map<CanonicalKey, Demand[]> | null = null;
   readonly representative = new Map<Definition, Definition>();
   /** The expected types of typed ingresses by identity, and the contract-side classes, for `conflictClass`. */
   readonly termIds = new Map<TypeTerm, string>();
