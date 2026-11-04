@@ -6071,9 +6071,9 @@ test("a combined stop's more precise label is proved by its written type exactly
  * through an index into it as well. A read through an index into a call's result, then a derived list
  * (`build()["a"].values[0]`), and a derived list's element, then an index (`build().values[0]["a"]`), four modes, each
  * stopping demand allowance up to 3, every settled stop: each check the stopped analysis owes under another label than
- * the demand-only reference's own check there (the same kind, whole site, boundary and expected types) is that check's
- * path with some `element` steps spelled `entry`, or own text: the value's, or a receiver's along the same read, the
- * source at its site or a prefix of it.
+ * the demand-only reference's own check there (the same kind, whole site, boundary and expected types) is one of the
+ * label grammar's two forms of it, proved by the program's written types (`provenRelabel` with no natural analysis):
+ * never an `entry` path through a dictionary's derived list, nor own text with a path step below it.
  */
 test("a combined stop's label after a call's result is one precise form, made wholly after the stop (#1595)", () => {
   const sources = [
@@ -6109,17 +6109,8 @@ test("a combined stop's label after a call's result is one precise form, made wh
               )
                 continue;
               relabelled += 1;
-              const [from, to] = [u.target.split("."), x.target.split(".")];
-              const entries =
-                from.length === to.length &&
-                from.every(
-                  (step, i) => step === to[i] || (step === "element" && to[i] === "entry"),
-                );
-              // (own text: the value's, or its receiver's at the same read, a prefix of the source there)
-              const read = source.slice(x.site.start, x.site.end);
-              const own =
-                read.startsWith(x.target) && [undefined, ".", "["].includes(read[x.target.length]);
-              if (!entries && !own)
+              // (one of the grammar's two forms of `u`, proved by the program's written types alone)
+              if (provenRelabel(u, [x], [], reference.graph) === undefined)
                 problems.push(`${mode.name} @${demand}/${allowance}: ${u.target} -> ${x.target}`);
             }
         }
