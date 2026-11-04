@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   costlyTestFiles,
   costlyTestSeconds,
+  otherTestSeconds,
   pretestSeconds,
   testFilesAtOnce,
 } from "./costly-test-files.mjs";
@@ -48,6 +49,17 @@ test("the shards' estimated ends, the last after the pre-test checks, differ by 
     ...costlyTestFiles,
     ...files.filter((f) => !costlyTestFiles.includes(f)).sort(),
   ]);
+});
+
+test("the costliest files fill shard 1's slots, and the next starts in shard 2 after the pre-test checks", () => {
+  const costliest = costlyTestFiles.slice(0, testFilesAtOnce + 1);
+  assert.ok(pretestSeconds < costlyTestSeconds[costliest[testFilesAtOnce - 1]]);
+  assert.deepEqual(shardFiles(costliest, 1, 2), costliest.slice(0, testFilesAtOnce));
+  assert.deepEqual(shardFiles(costliest, 2, 2), costliest.slice(testFilesAtOnce));
+  // (small files take shard 1's free slots while shard 2 runs its pre-test checks)
+  const small = Array.from({ length: 10 }, (_, i) => `small-${i}.test.js`);
+  assert.ok(small.length * otherTestSeconds < pretestSeconds);
+  assert.deepEqual(shardFiles([costliest[0], ...small], 2, 2), []);
 });
 
 test("every type-core test file has measured seconds, and every file with seconds exists", () => {

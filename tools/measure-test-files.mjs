@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { availableParallelism } from "node:os";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { run } from "node:test";
 import { shardFiles } from "./test-shards.mjs";
 
@@ -9,8 +9,8 @@ import { shardFiles } from "./test-shards.mjs";
 // concurrency of `npm test`, timing each file from its process's start to its end, and the checks CI's `check-2` job
 // runs before its tests (`npm run check:pretest`). `--write` rewrites `tools/costly-test-files.mjs` from the run;
 // `--raw FILE` keeps every file's and every top-level test's seconds. Run it in a built checkout on four CPUs, as CI's
-// runners have (`taskset -c 0-3`), on a machine nothing else loads. A failed step or test fails the run and leaves the
-// module as it was.
+// runners have (`taskset -c 0-3`), on a machine nothing else loads. As in CI, every step has a Node compile cache: a
+// fresh one unless `NODE_COMPILE_CACHE` names one. A failed step or test fails the run and leaves the module as it was.
 const usage = "Usage: node tools/measure-test-files.mjs [--write] [--raw FILE]\n";
 const argv = process.argv.slice(2);
 const write = argv[0] === "--write";
@@ -21,6 +21,8 @@ else if (argv.length > 0) {
   process.stderr.write(usage);
   process.exit(1);
 }
+
+process.env.NODE_COMPILE_CACHE ??= mkdtempSync(join(tmpdir(), "measure-test-files-cache-"));
 
 // The files listed by name: every type-core file, whose cost grows with the checker's tests, and any other of this many
 // seconds or more. The rest count their mean.
