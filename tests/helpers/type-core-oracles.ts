@@ -885,7 +885,7 @@ export function decisionRecords(
  * type, else their union); `null` where the check reaches nothing there (an object without the property, a collection
  * with open elements, no member that holds the step).
  */
-export function projectedType(type: TypePlan, path: readonly PartStep[]): TypePlan | null {
+function projectedType(type: TypePlan, path: readonly PartStep[]): TypePlan | null {
   let at: readonly TypePlan[] = [type];
   for (const step of path) {
     const next: TypePlan[] = [];
@@ -909,7 +909,7 @@ export function projectedType(type: TypePlan, path: readonly PartStep[]): TypePl
  * Whether a check against `wide` accepts every value one against `narrow` does (a type plan's own rules: an object checks
  * only the properties it lists, a collection with open elements accepts any, a union any member's values).
  */
-export function accepts(wide: TypePlan, narrow: TypePlan): boolean {
+function accepts(wide: TypePlan, narrow: TypePlan): boolean {
   if (JSON.stringify(wide) === JSON.stringify(narrow)) return true;
   if (narrow.kind === "union") return narrow.members.every((member) => accepts(wide, member));
   if (wide.kind === "union") return wide.members.some((member) => accepts(member, narrow));
