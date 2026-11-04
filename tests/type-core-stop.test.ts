@@ -5652,6 +5652,9 @@ test("a combined stop's more precise label is accepted only as the owner's three
   // (1)'s second proof: a written type at the key spells it, where the natural analysis names the key nowhere
   assert.equal(provenRelabel(u, [x], [], typed), x);
   assert.equal(provenRelabel(param, [own], [], typed), own);
+  const nested = graphOf('let xs: dict[] = [dict {a: hostValue}]\nsay "${xs}"\nexit\n');
+  assert.equal(provenRelabel(check("xs.element.values"), [indexed], [], nested), indexed);
+  assert.equal(provenRelabel(check("xs.element.values"), [indexed], [], untyped), undefined);
   // (1) neither proves it: named otherwise, or not at all, and no written dictionary there
   for (const [natural, graph] of [
     [["build.result.element"], untyped],

@@ -1141,7 +1141,8 @@ const writtenDict = (type: TypeAnnotation | null): boolean =>
 /**
  * Whether a written type at the key spells `x`'s more precise step (#1595, the lead's ruling on Q4: the author's own
  * proof, as the compiler reads it): the key's root declared with a written type (a `let` or `global`, a function's
- * parameter, or its result), followed through its written elements to the step that changes, a dictionary there.
+ * parameter, or its result), followed through its written elements to the owner the more precise step reads, a
+ * dictionary there.
  */
 function writtenSpells(graph: FlowGraph, u: readonly string[], x: readonly string[]): boolean {
   const lets = graph.nodes.flatMap(({ statement }) =>
@@ -1154,17 +1155,20 @@ function writtenSpells(graph: FlowGraph, u: readonly string[], x: readonly strin
       : u[1] === "result"
         ? [declared.returnTypeAnnotation, 2]
         : [declared.parameters.find((each) => each.name.name === u[1])?.typeAnnotation ?? null, 2];
-  // (the step that changes: the first key step, or the derived list's)
-  const changes = keyStepsAlone(u, x)
-    ? u.findIndex((step, i) => step !== x[i])
-    : u.findIndex((step) => DERIVED.has(step));
-  for (; type !== null && at < changes; at += 1)
+  // (the owner the more precise step reads: a dict's `entry`'s, at the first changed step; a derived list's, at its
+  // `values` or `keys` step, named by its own text or through an index's text before it)
+  const changed = u.findIndex((step, i) => step !== x[i]);
+  const owner =
+    keyStepsAlone(u, x) && x[changed] === "entry"
+      ? changed
+      : u.findIndex((step, i) => DERIVED.has(step) && i >= Math.min(changed, at));
+  for (; type !== null && at < owner; at += 1)
     type =
       u[at] === "element" &&
       (type.kind === "listType" || type.kind === "setType" || type.kind === "dictType")
         ? type.element
         : null;
-  return at === changes && writtenDict(type);
+  return at === owner && writtenDict(type);
 }
 
 /**
