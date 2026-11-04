@@ -6384,4 +6384,12 @@ test("a stopped operand check stands for a lost null check only at its site, exc
   for (const other of others)
     assert.equal(operandStandsForNullCheck(other, nullCheck), false, JSON.stringify(other));
   assert.equal(operandStandsForNullCheck(operand, { ...nullCheck, kind: "integer-check" }), false);
+  // (a domain holding null stands for nothing, even where the null check's own kinds would hold it: the clause alone)
+  assert.equal(
+    operandStandsForNullCheck(
+      { ...operand, against: ["integer", "null"] },
+      { ...nullCheck, against: ["integer", "number", "null"] },
+    ),
+    false,
+  );
 });
