@@ -4,6 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 const tool = resolve("tests/families/shadow.mjs");
 
@@ -82,7 +83,7 @@ export function decisionRecords(files, globals, { mode }) {
 `,
 };
 
-test("the shadow comparison keeps a crashed route's partial record, retries a reused worker's crash once, and goes on (#1704)", (t) => {
+test("the shadow comparison keeps a crashed route's partial record, retries a reused worker's crash once, and goes on (#1704)", async (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-shadow-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   for (const [file, text] of Object.entries(MODULES)) {
@@ -206,4 +207,37 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
   assert.equal(again.status, 1, again.stderr);
   assert.deepEqual(counted(again.stdout), { ...recorded, resumed: 7, replaced: 0 });
   assert.equal(readFileSync(out, "utf8").trim().split("\n").length, 7);
+
+  // (--manifest: the sources these options owe, the keys shadow-classify.mjs's --expect reads)
+  const env = { ...process.env };
+  delete env.NODE_OPTIONS;
+  const manifest = spawnSync(process.execPath, [tool, folder, "area", "--manifest"], {
+    encoding: "utf8",
+    env,
+  });
+  assert.equal(manifest.status, 0, manifest.stderr);
+  assert.deepEqual(
+    manifest.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line)),
+    records.map((r) => ({ key: r.key, name: r.name })),
+  );
+  // (the classifier reads these records: the crash's mode is the legacy route's heap in its analysis with the core
+  // finished; 'this construct' is an exclusion text no taxonomy version lists, so its four pairs fail the run)
+  const C = await import(pathToFileURL(resolve("tests/families/shadow-classify.mjs")).href);
+  const classified = C.classifyRecords(
+    records.map((record) => ({ record, bytes: 0, where: record.name })),
+    new Set(records.map((r) => r.key)),
+  );
+  assert.deepEqual(
+    classified.perPair
+      .filter((p: { class: string }) => p.class !== "agree")
+      .map((p: { name: string; class: string }) => [p.name, p.class]),
+    [["cases.mjs/crash", "failed/legacy-heap"]],
+  );
+  assert.deepEqual(
+    classified.problems.map((p: { problem: string; name: string }) => [p.problem, p.name]),
+    [0, 1, 2, 3].map(() => ["unclassified", "cases.mjs/outside"]),
+  );
 });
