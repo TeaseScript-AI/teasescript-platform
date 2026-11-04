@@ -7,7 +7,7 @@ import { kindsInOrder, type ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
 import type { DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
-import { answerRead, knownKinds, oneType, passedOperands, recordAnswer } from "./kinds.js";
+import { answerRead, oneType, passedOperands, recordAnswer } from "./kinds.js";
 import type { Landing, LandingQuestion } from "./model.js";
 import { copiesOnly, firstDirect, valueReach } from "./reach.js";
 import { placeText, storeRoot, storeSteps } from "./warnings.js";
@@ -328,7 +328,7 @@ function storedUnion(walk: Consumers, value: PlaceId): Stored | null {
     const written = writtenOf(program.place(place).kind);
     if (written !== null && termAt(written, path) !== null) continue;
     const admitted = admission.admitted(place, path);
-    const own = knownKinds(walk, value);
+    const own = answerRead(walk, value).kinds;
     const argument = d.how === "argument";
     if (argument ? oneType(own) : admission.inheritsWritten(place, path) || oneType(admitted))
       continue;
@@ -366,10 +366,10 @@ function reachedUnion(walk: Consumers, start: PlaceId): Stored | null {
     const { value, expanded } = stack.pop()!;
     if (memo.has(value)) continue;
     if (expanded) {
-      // (what a warning keeping this value declares: its known types where more than one, read here in the walk, or
-      // that the read stopped)
+      // (what a warning keeping this value declares, from a settled read alone: its known types where more than one,
+      // none for one; a stopped read proves neither, whatever it holds)
       const read = answerRead(walk, value);
-      recordAnswer(walk, value, !oneType(read.kinds) ? read.kinds : read.stopped ? "stopped" : []);
+      recordAnswer(walk, value, read.stopped ? "stopped" : oneType(read.kinds) ? [] : read.kinds);
       let found = storedUnion(walk, value);
       for (const to of next.get(value)!) found ??= memo.get(to) ?? null;
       memo.set(value, found);
@@ -401,8 +401,10 @@ export function mixedChoice(
   walk: Consumers,
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
 ): void {
-  // (the choice's answer: its types where more than one; where they are one and its read stopped, the walk proved
-  // nothing, so what it reaches is recorded too, each value's own read stopped or not, and no error is made)
+  // (the choice's answer: one known type from a settled read, nothing to record; more than one, the error where it
+  // lands, proved whether its read settled or stopped, since a stop only hides types. A stopped read of one known type
+  // proves neither: it records what it reaches, each value's own read settled or stopped, and makes no error, Codex r7
+  // on #1660)
   const read = answerRead(walk, c.result);
   if (oneType(read.kinds) && !read.stopped) return;
   const stored = reachedUnion(walk, c.result);

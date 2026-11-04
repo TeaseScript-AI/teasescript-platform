@@ -157,11 +157,6 @@ export function answerRead(
   };
 }
 
-/** `answerRead`'s known types alone. */
-export function knownKinds(walk: Consumers, value: PlaceId): ItemTag[] {
-  return answerRead(walk, value).kinds;
-}
-
 /**
  * The rule of where a mixed answer travels (#1352): the operands whose value an operation's result is, unchanged,
  * where it takes them (V30 §18), both sides of an `otherwise` and a `get`'s default; none for any other value. An answer
@@ -198,12 +193,14 @@ export function anyCarried(walk: Consumers): boolean {
 }
 
 /**
- * What a new variable keeping a warning's subject declares (#1352, the kept-value fix of every warning), from the
- * walk's record (a read after the walk alone answers nothing where a finishing walk ran, Codex r6 on #1660): the types
- * the walk recorded where a mixed answer reaches the subject; where the walk's read stopped (Codex r7), the read made
- * again now, proof only where it did not stop: its types, none for one type, else `null` (unproved, the fix in
- * words); else none (`[]`: a `let` without a type infers no union there). Asked only where the subject's value is
- * found; where it is not, `anyCarried` says whether a plain `let` is proved.
+ * What a new variable keeping a warning's subject declares (#1352, the kept-value fix of every warning), a proof in
+ * three values whose only source of "no union" is a settled read (the lead's ruling on Codex r7): the union a settled
+ * read showed (`let value: <union> = …`); none (`[]`, the plain `let`) where a settled read showed one type, or no
+ * answer reaches the subject; `null` (unproved, the fix in words, never a plain `let`) where every read on the path
+ * stopped. The walk's record first (a read after the walk alone answers nothing where a finishing walk ran, Codex r6);
+ * where it is `stopped`, the read made again at publication, the proof only where it settles (Codex r7: a local demand
+ * stop leaves the facts asked). Asked only where the subject's value is found; where it is not, `anyCarried` says
+ * whether a plain `let` is proved.
  */
 export function keptTypes(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
   const recorded = ANSWERED.get(walk)?.get(value);

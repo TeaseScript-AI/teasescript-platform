@@ -1934,6 +1934,7 @@ test("an askChoice of more than one type errs where its type would be inferred, 
   for (const [source, allowance, union] of [
     [`repeat (${S}) {}\nexit\n`, 25, true],
     [`let xs = []\nrepeat xs.get(0, default: ${S}) {}\nexit\n`, 64, true],
+    [`let xs = []\nrepeat xs.get(0, default: ${S}) {}\nexit\n`, 256, true],
     [`let xs = []\nrepeat xs.get(0, default: ${S}) {}\nexit\n`, 1, false],
     [`repeat ((${S}) otherwise 1) {}\nexit\n`, 4, true],
     // (the walk's read stopped, and a block past the nesting limit ran the finishing walk, so the read again answers
@@ -1966,6 +1967,19 @@ test("an askChoice of more than one type errs where its type would be inferred, 
         `${allowance} ${JSON.stringify(mode)} ${source}: ${JSON.stringify(kept)}`,
       );
     }
+  // (r7's witnesses' kept forms pasted compile: under both checkers, the `get` default's under the core alone, #1075)
+  for (const pasted of [
+    `let value: integer | string = ${S}\nif value is integer { repeat (value) {} }\nexit\n`,
+    `let xs = []\nlet value: integer | string = xs.get(0, default: ${S})\nif value is integer { repeat value {} }\nexit\n`,
+  ]) {
+    assert.deepEqual(
+      reported(main(pasted)).filter(({ error }) => error),
+      [],
+      `the core: ${pasted}`,
+    );
+    if (!getDefault(pasted))
+      assert.deepEqual(v1Errors(pasted), [], `the current checker: ${pasted}`);
+  }
   // (a program that holds no mixed askChoice gets nothing of this rule: no kept-value field, also where a stopped
   // decision leaves a subject unfound, and a warning whose facts a stop did not ask keeps main's plain kept `let`)
   const box =
