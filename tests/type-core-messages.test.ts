@@ -2404,10 +2404,10 @@ test("TSV041's advice names the property an object literal types and its narrowe
       "Check that 'hostValue' is an object first.",
     ],
     [
-      "let holder = [{f: [1]}, hostValue]\nexit\n",
-      "hostValue",
-      "Give 'f' of an element of 'holder' a list where 'hostValue' gets its value.",
-      "Check that 'hostValue' is an object first.",
+      `${other}\nlet holder = [{f: [1]}, other]\nsay "\${holder[0].f}"\nexit\n`,
+      "[{f: [1]}, other]",
+      "Give 'f' of an element of 'holder' a list where '[{f: [1]}, other]' gets its value.",
+      "",
     ],
   ];
   for (const [source, at, advice, own] of cases) {
