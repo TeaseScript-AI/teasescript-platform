@@ -562,6 +562,37 @@ test("a completion past its allowance ends and keeps no result, the analysis at 
   }
 });
 
+test("a completion that reaches its allowance in the questions asked again keeps none of its store warnings (#1682)", () => {
+  // (Codex r1's N3 on #1690: the warnings published, read by the questions asked again, then the allowance reached there)
+  const source =
+    'let seed: integer = 7\nlet copy = hostInit\ncopy.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostInit", "hostValue"]);
+  assert.ok(request !== null);
+  const charge = WorkLedger.prototype.charge;
+  let ledger: WorkLedger | null = null;
+  WorkLedger.prototype.charge = function (this: WorkLedger, ...args) {
+    ledger = this;
+    return charge.apply(this, args);
+  };
+  try {
+    withTestDemandAllowance(16, () => {
+      const answers = analyseCore(request);
+      let published = 0;
+      const again = answers.completed(() => {
+        published = answers.completedWarnings().length;
+        ledger!.charge("checks", 1e9);
+        return true;
+      });
+      assert.ok(published > 0);
+      assert.equal(again, null);
+      assert.equal(answers.budget.closure?.counts.capped, 1);
+      assert.deepEqual(answers.completedWarnings(), []);
+    });
+  } finally {
+    WorkLedger.prototype.charge = charge;
+  }
+});
+
 /**
  * The completion's place (the lead's ruling on #1637): after everything that can stop, the questions included, within
  * the smaller of twice the work before it and what is left of the total, so it never makes or moves a stop. At each

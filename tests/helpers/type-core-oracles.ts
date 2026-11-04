@@ -881,15 +881,18 @@ export function decisionRecords(
 
 /**
  * The type a store's whole check checks at `path` below it, as `reaches` in `consumer.ts` reads it: a property's type
- * where an object lists it, a collection's element type, through a union's members that can hold the step (one member's
- * type, else their union); `null` where the check reaches nothing there (an object without the property, a collection
+ * where an object lists it, a collection's element type, through a union's members at any depth that can hold the step
+ * (one member's type, else their union); `null` where the check reaches nothing there (an object without the property, a collection
  * with open elements, no member that holds the step).
  */
 function projectedType(type: TypePlan, path: readonly PartStep[]): TypePlan | null {
+  // (a union's members, a nested union's at any depth, as `reaches` walks them)
+  const members = (t: TypePlan): TypePlan[] =>
+    t.kind === "union" ? t.members.flatMap(members) : [t];
   let at: readonly TypePlan[] = [type];
   for (const step of path) {
     const next: TypePlan[] = [];
-    for (const each of at.flatMap((t) => (t.kind === "union" ? t.members : [t])))
+    for (const each of at.flatMap(members))
       if ("property" in step) {
         if (each.kind !== "object") continue;
         const found = each.properties.find((property) => property.name === step.property);

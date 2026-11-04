@@ -369,6 +369,45 @@ test("at every stop a store's parts are the natural store's or fewer, never unco
   );
 });
 
+test("the invariant's projection walks nested unions, so a part stricter than the whole check is no covered one (#1682)", () => {
+  // (a valid plan pair, not a compiled one, Codex r1's N1 on #1690: a whole check whose nested union holds an open object
+  // accepts `{p: "bad"}`, a part `.p: integer` alone rejects it)
+  const source = 'let copy = hostValue\nsay "REACHED"\nexit\n';
+  const variant = (edit: (store: Record<string, unknown>) => void): InstructionPlan => {
+    const copy: EditablePlan = JSON.parse(JSON.stringify(plan(source)));
+    const store = copy.instructions.find(
+      (instruction) => instruction["kind"] === "declareBinding",
+    )!;
+    edit(store);
+    // (read back as a plan, which validation checks below)
+    const edited: InstructionPlan = JSON.parse(JSON.stringify(copy));
+    assert.deepEqual(validateInstructionPlan(edited).errors, []);
+    return edited;
+  };
+  const whole = variant((store) => {
+    store["typeCheck"] = {
+      type: {
+        kind: "union",
+        members: [
+          { kind: "union", members: [{ kind: "object", properties: [] }, { kind: "null" }] },
+          { kind: "object", properties: [{ name: "p", type: { kind: "integer" } }] },
+        ],
+      },
+      place: "'copy'",
+    };
+  });
+  const part = variant((store) => {
+    store["partChecks"] = [
+      { path: [{ property: "p" }], type: { kind: "integer" }, place: "'copy.p'" },
+    ];
+  });
+  assert.equal(ran(whole, { hostValue: { p: "bad" } }).failure, null);
+  assert.match(ran(part, { hostValue: { p: "bad" } }).failure ?? "", /^TSR058@/u);
+  const { problems, covered } = partProblems(whole, part);
+  assert.equal(problems.length, 1, problems.join("; "));
+  assert.deepEqual(covered, []);
+});
+
 test("a stopped store's parts from the settled pass and the completion come in the natural order (#1682)", () => {
   // (at demand 32 `copy.b.y`'s decision is the settled pass's and `copy.a.x`'s the completion's, at one site: the
   // natural order is the published one, `copy.a.x` first)
