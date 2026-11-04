@@ -213,7 +213,19 @@ are generated, not recorded. `seeded.sh` runs it as a central-queue item pool, e
 for i in $(seq 0 39); do echo "$((i * 50)) 50"; done > seeds.txt
 sx-job submit --commit base=<base> --commit head=<head> --items seeds.txt --target 10m --campaign <T> \
   -- bash -c 'bash "$SX_TREE_head/tests/families/seeded.sh" pair'
+git diff > mutant.diff   # the mutant: files' text changed, on the head
+sx-job submit --checkout <head> --patch mutant.diff --commit head=<head> --items seeds.txt --target 10m \
+  --campaign <T> -- bash -c 'bash "$SX_TREE_head/tests/families/seeded.sh" mutant'
 ```
+
+`pair` compares the base tree with the head tree; `mutant` the head tree with the head's checkout under the patch,
+which it builds after `mutant-proof.mjs` proved that checkout the head with the patch applied as written (#1684). The
+proof reads the patch the queue applied (the job's `$SX_IN/patch-main.diff`), the head's objects and the checkout's
+files at the patch's paths, every path literally: it refuses a patch that is not a text change of regular files at the
+head (one that creates, deletes, renames, copies or re-modes a path, or a binary change), applies it again to the head
+in a private index, and requires each path's file in the checkout to hash to that blob. `mutant.json` holds the
+patch's hash and each path's blob at the head, expected and in the checkout: a seed whose outcome differs reaches the
+mutated code, and a mutant no seed tells apart survives the family.
 
 ## The unit limit and the safety net (#1647)
 
