@@ -80,7 +80,15 @@ test("a pass that asks for none records none, and recording changes no answer, d
         demands: JSON.stringify([run.answers.budget.demands, run.answers.budget.decisions]),
       });
       assert.deepEqual(projected(on), projected(off), source);
-      assert.ok(on.answers.budget.total >= off.answers.budget.total);
+      // (each inclusion recorded is charged as shared work: the total grows by at least one unit each, no demand's
+      // allowance by any)
+      let inclusions = 0;
+      withFlowCheck(
+        (_slot, flow) => (inclusions += flow.length),
+        () => analysed(source, mode, true),
+      );
+      assert.ok(inclusions > 0, source);
+      assert.ok(on.answers.budget.total - off.answers.budget.total >= inclusions, source);
     }
 });
 
@@ -185,6 +193,18 @@ test("an inclusion keeps the transforms its answer went through: a default's cho
       true,
     ).pass;
     assert.ok(qualifiers(otherwise, "b").includes("operandFilter"));
+    // (a level group read by its first entry: the group's writer on it)
+    const selected = analysed(
+      'let typed: integer | string = 1\nlet y = {q: 2}\nlet x = [{q: typed}, y][0]\nsay "${x.q}"\nexit\n',
+      mode,
+      true,
+    ).pass;
+    const place = selected.program.places.findIndex((at) => at?.label === "x");
+    const found = selected.contract.contributions(keyOf(place, ["q"]));
+    assert.ok(
+      found.state === "complete" &&
+        found.edges.every((edge) => edge.qualifiers.includes("groupFirst")),
+    );
   }
 });
 
