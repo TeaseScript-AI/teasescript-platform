@@ -3,7 +3,7 @@
 // properties and lists then a host value stored below them, compiled on both built trees (`dist/`) in the source order;
 // per seed one JSON line with each tree's units (every `WorkLedger.charge`) and whether the outcomes (each diagnostic's
 // code and offset and the plan's checks, or a thrown error's name and message) are the same, and both outcomes and the
-// source where they differ. A mutant runs it against its own tree (`seeded-mutant.sh`, README "A seeded family").
+// source where they differ. `seeded.sh pair` runs it as a central-queue item pool (README "A seeded family").
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 

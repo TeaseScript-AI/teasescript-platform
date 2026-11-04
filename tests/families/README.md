@@ -194,15 +194,7 @@ are generated, not recorded. `seeded.sh` runs it as a central-queue item pool, e
 for i in $(seq 0 39); do echo "$((i * 50)) 50"; done > seeds.txt
 sx-job submit --commit base=<base> --commit head=<head> --items seeds.txt --target 10m --campaign <T> \
   -- bash -c 'bash "$SX_TREE_head/tests/families/seeded.sh" pair'
-git diff > mutant.diff   # one clause changed, on the head
-sx-job submit --checkout <head> --patch mutant.diff --commit head=<head> --items seeds.txt --target 10m \
-  --campaign <T> -- bash -c 'bash "$SX_TREE_head/tests/families/seeded.sh" mutant'
 ```
-
-`pair` compares the base tree with the head tree. `mutant` compares the head tree with the head's checkout under the
-patch, which it builds; a mutant changes tracked regular files only (any other change of the checkout is refused), and
-each file's hash before and after, its path and the whole change's hash go into `mutant.sha256`, the mutant's proof
-(above): a seed whose outcome differs reaches the mutated code, and a mutant no seed tells apart survives the family.
 
 ## The unit limit and the safety net (#1647)
 
