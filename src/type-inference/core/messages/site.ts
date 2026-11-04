@@ -298,8 +298,9 @@ export function givenBy(statement: Statement): Given | null {
 /**
  * Where the expression at `site` lands among the values statements give (`MessageSource.landing`, in their start order):
  * in the last value that starts at or before it, the statement's variable and steps, then each list literal's element
- * and object literal's property down to it, through parentheses; `null` inside any other expression, or outside that
- * value (a site after a statement in a handler block that a value holds).
+ * and object literal's property down to it, through parentheses, a list literal's selected element and either operand
+ * of `otherwise`; `null` inside any other expression, or outside that value (a site after a statement in a handler
+ * block that a value holds).
  */
 export function landingOf(given: readonly Given[], site: SourceSite): Landing | null {
   let low = 0;
@@ -328,7 +329,10 @@ export function landingOf(given: readonly Given[], site: SourceSite): Landing | 
       );
       if (property !== undefined) steps.push({ property: property.name.name });
       at = property?.value;
-    } else {
+    } else if (at.kind === "binaryExpression" && at.operator === "otherwise")
+      // (either operand of `otherwise` is the value there, no step more)
+      at = [at.left, at.right].find(holds);
+    else {
       // (a list literal's selected element, `[a, b].random` or `[a, b][0]`: that element is the place, no step more)
       const list = selectedList(at);
       if (list === null) return null;
@@ -376,6 +380,8 @@ export function ownerOf(
     else if (at.kind === "listLiteral") at = at.elements.find(holds);
     else if (at.kind === "objectLiteral")
       at = at.properties.find((entry) => holds(entry.value))?.value;
+    else if (at.kind === "binaryExpression" && at.operator === "otherwise")
+      at = [at.left, at.right].find(holds);
     else at = selectedList(at)?.elements.find(holds);
   }
   if (at === undefined || !holds(at)) return site;

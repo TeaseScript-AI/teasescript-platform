@@ -2353,8 +2353,9 @@ test("a kept value's name survey charges the host's names and every file (#1274)
  * #1495 (#1468's rule for a place an object literal types): where a store's place is a property below the warned value,
  * TSV041's advice names that property in words and where its type must come from, the narrowest expression that owns it
  * (`MessageSource.owner`), never the whole literal; also where a part of the value already fits, and for a value an
- * element selection of a list literal gives (`[a, b].random`). A value whose place is its own, or which lands where the
- * advice cannot tell, keeps its own check.
+ * element selection of a list literal gives (`[a, b].random`) or either operand of `otherwise` (a value the set's
+ * collision family gives, where the check named a whole number for an element that holds an object). A value whose
+ * place is its own keeps its own check.
  */
 test("TSV041's advice names the property an object literal types and its narrowest owner (#1495)", () => {
   const other = 'let other = fromJson("{\\"volume\\": \\"loud\\"}", default: null)';
@@ -2363,7 +2364,7 @@ test("TSV041's advice names the property an object literal types and its narrowe
       `${other}\nlet wrap = {inner: [{volume: 5}, other].random}\nsay "\${wrap.inner.volume}"\nexit\n`,
       "{inner: [{volume: 5}, other].random}",
       "Give 'wrap.inner.volume' a whole number (integer) where '[{volume: 5}, other].random' gets its value.",
-      "other",
+      "Check that 'other' is an object first.",
     ],
     [
       'let wrap = {inner: [{volume: 5}, hostValue].random}\nsay "${wrap.inner.volume}"\nexit\n',
@@ -2375,7 +2376,25 @@ test("TSV041's advice names the property an object literal types and its narrowe
       `${other}\nlet wrap = ({inner: {deep: ([{volume: 5}, other][0])}})\nsay "\${wrap.inner.deep.volume}"\nexit\n`,
       "({inner: {deep: ([{volume: 5}, other][0])}})",
       "Give 'wrap.inner.deep.volume' a whole number (integer) where '[{volume: 5}, other][0]' gets its value.",
-      "other",
+      "Check that 'other' is an object first.",
+    ],
+    [
+      "let t: integer = 7\nlet peer = {x: t}\nlet first = [hostValue otherwise {x: 1}, peer]\nexit\n",
+      "hostValue",
+      "Give 'x' of an element of 'first' a whole number (integer) where 'hostValue' gets its value.",
+      "Check that 'hostValue' is an object first.",
+    ],
+    [
+      "let t: integer = 7\nlet peer = {x: t}\nlet first = [{y: hostValue otherwise peer}, {y: peer}]\nexit\n",
+      "hostValue",
+      "Give 'y.x' of an element of 'first' a whole number (integer) where 'hostValue' gets its value.",
+      "Check that 'hostValue' is an object first.",
+    ],
+    [
+      "let t: integer = 7\nlet peer = {x: t}\nlet first = [peer, {x: hostValue otherwise 1}]\nexit\n",
+      "hostValue",
+      "Check that 'hostValue' is a whole number (integer) first.",
+      "",
     ],
   ];
   for (const [source, at, advice, own] of cases) {
@@ -2390,7 +2409,10 @@ test("TSV041's advice names the property an object literal types and its narrowe
         .join(" | ");
     assert.ok(message(at).includes(advice), `${at}: ${message(at)}`);
     // (the value whose place is its own keeps its own check)
-    if (own !== "")
-      assert.ok(message(own).includes(`Check that '${own}' is an object first.`), message(own));
+    const all = diagnostics
+      .filter((d) => d.code === "TSV041")
+      .map((d) => coreMessage(d, text))
+      .join(" | ");
+    if (own !== "") assert.ok(all.includes(own), all);
   }
 });
