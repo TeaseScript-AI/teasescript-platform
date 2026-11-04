@@ -13,15 +13,16 @@
 //   <set>: corpus (CASES_JSON=<cases.json>), fixture (the base tree's tools/corpus/fixture), held (the base tree's
 //   `heldFamily()`), or an area of tests/families by its name (the head tree's) or folder (its generators' sources at
 //   their own sizes, by the head tree's `sources.mjs`).
-// A run is one compile (or the held family's analysis) of a source in a mode on one tree. It stalls where its charged
-// units (every `WorkLedger.charge` of its tree while it runs) pass `--units` times its program's allowance, as in
-// `run.mjs` (#1647): the largest allowance of a ledger it charged, max(30 M, 256 × syntax nodes), and for a run at a test
-// allowance (a stop, the questions phase) the allowance of the same source's natural compile on that tree, so the limit
-// is the same on every machine; a source past `--memory` MB of heap, or whose worker ends, stalls too. The wall clock is
-// only a safety net, `--timeout` seconds a source: one that reaches it does work no ledger charges, and is recorded as
-// `uncharged` with the run then going on, never as a stall. Either way a fresh worker takes the next source. A stalled
-// or uncharged source is never agreement. Resumes: a source already in `--out` is skipped. Prints one JSON summary line;
-// exit 0 when every compared run is equal and nothing stalled or reached the safety net, else 1.
+// A run is one compile of a source in a mode on one tree, or one analysis of the held family's (each of its stop
+// search's, `heldStops`, apart). It stalls where its charged units (every `WorkLedger.charge` of its tree while it runs)
+// pass `--units` times its program's allowance, as in `run.mjs` (#1647): the largest allowance of a ledger it charged,
+// max(30 M, 256 × syntax nodes), and for a run at a test allowance (a stop, the questions phase, the stop search) the
+// allowance of the same source's natural compile on that tree, so the limit is the same on every machine; a source past
+// `--memory` MB of heap, or whose worker ends, stalls too. The wall clock is only a safety net, `--timeout` seconds a run:
+// a run that reaches it does work no ledger charges, and its source is recorded as `uncharged` with that run, never as a
+// stall. Either way a fresh worker takes the next source. A stalled or uncharged source is never agreement. Resumes: a
+// source already in `--out` is not run again, its record counted as it stands. Prints one JSON summary line; exit 0 when
+// every compared run is equal and nothing stalled or reached the safety net, else 1.
 // `summary` classifies the records per set, source and mode (`modes`, each with its demand, stop and questions runs):
 // identical; work only (the plan, the diagnostics, the error and the questions equal, the charge trace not); a question
 // sequence apart; a publication difference; at a demand allowance apart; for the held family, a stop set or a stopped
@@ -225,10 +226,14 @@ if (isMainThread && process.argv[2] === "summary") {
     .map((_, index) => index)
     .filter((index) => (only === null ? index % shards === shard : only.has(sources[index].name)))
     .slice(0, limit);
-  const done = new Set();
+  // (a source already in --out is not run again, its record counted as it stands: a stall stays a stall)
+  const done = new Map();
   if (out !== undefined && existsSync(out))
     for (const line of readFileSync(out, "utf8").split("\n"))
-      if (line.startsWith("{")) done.add(JSON.parse(line).name);
+      if (line.startsWith("{")) {
+        const record = JSON.parse(line);
+        done.set(record.name, record);
+      }
   const summary = {
     set: path.basename(set),
     shard: `${shard}/${shards}`,
@@ -244,6 +249,15 @@ if (isMainThread && process.argv[2] === "summary") {
     node: process.version,
   };
   const started = Date.now();
+  /** A source's record into the summary: a stall, a safety net reached, or its runs and differences. */
+  const count = (record) => {
+    if (record.stalled !== undefined) summary.stalled += 1;
+    else if (record.uncharged !== undefined) summary.uncharged += 1;
+    else {
+      summary.runs += record.runs;
+      summary.differing += record.differing;
+    }
+  };
   const write = (record) => {
     if (out !== undefined) appendFileSync(out, `${JSON.stringify(record)}\n`);
   };
@@ -257,6 +271,7 @@ if (isMainThread && process.argv[2] === "summary") {
     const source = sources[index];
     if (done.has(source.name)) {
       summary.resumed += 1;
+      count(done.get(source.name));
       continue;
     }
     worker ??= fresh();
@@ -265,9 +280,20 @@ if (isMainThread && process.argv[2] === "summary") {
       // (the run going on, as the worker starts each; the run past the unit limit, as it ends)
       let running = null;
       let over = null;
+      // (the safety net a run: armed as the source is handed over and again as each run starts)
+      let timer = null;
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(
+          () => finish({ uncharged: `safety net ${seconds} s`, run: running }),
+          seconds * 1000,
+        );
+      };
       const onMessage = (message) => {
-        if (message.running !== undefined) running = message.running;
-        else if (message.over !== undefined) over = message.over;
+        if (message.running !== undefined) {
+          running = message.running;
+          arm();
+        } else if (message.over !== undefined) over = message.over;
         else finish(message);
       };
       const onError = (error) =>
@@ -281,27 +307,24 @@ if (isMainThread && process.argv[2] === "summary") {
             ? { stalled: "units", ...(over ?? { run: running }) }
             : { stalled: `worker exit ${code}`, run: running },
         );
-      const timer = setTimeout(
-        () => finish({ uncharged: `safety net ${seconds} s`, run: running }),
-        seconds * 1000,
-      );
       function finish(value) {
         clearTimeout(timer);
         current.off("message", onMessage).off("error", onError).off("exit", onExit);
         resolve(value);
       }
       current.on("message", onMessage).on("error", onError).on("exit", onExit);
+      arm();
       current.postMessage(index);
     });
     if (record.stalled !== undefined || record.uncharged !== undefined) {
-      summary[record.stalled !== undefined ? "stalled" : "uncharged"] += 1;
       await worker.terminate().catch(() => {});
       worker = null;
-      write({ set: summary.set, name: source.name, ...record });
+      const failed = { set: summary.set, name: source.name, ...record };
+      count(failed);
+      write(failed);
       continue;
     }
-    summary.runs += record.runs;
-    summary.differing += record.differing;
+    count(record);
     write(record);
   }
   await worker?.terminate();
@@ -316,12 +339,22 @@ if (isMainThread && process.argv[2] === "summary") {
   /**
    * The run going on (`run`): the units its tree's ledgers charged (`spent`) and the largest allowance of a ledger it
    * charged, or for a run at a test allowance its source's natural one on that tree (`floor`). Past `units` times that,
-   * the worker posts the run and ends (`OVER_EXIT`).
+   * the worker posts the run and ends (`OVER_EXIT`). In a stop search (`search`, `heldStops`, whose analyses run at the
+   * natural and at test allowances) each analysis is a run of its own, told apart by its ledger (`ledger`), numbered.
    */
-  const meter = { run: null, spent: 0, allowance: 0, floor: 0 };
+  const meter = { run: null, spent: 0, allowance: 0, floor: 0, search: null, ledger: null };
   const start = (run, floor = 0) => {
-    Object.assign(meter, { run, spent: 0, allowance: 0, floor });
+    Object.assign(meter, { run, spent: 0, allowance: 0, floor, search: null, ledger: null });
     parentPort.postMessage({ running: run });
+  };
+  /** `heldStops` of `tree` in `mode`, each analysis it makes metered as one run (`meter`). */
+  const searched = (tree, c, mode) => {
+    meter.search = { tree: tree.name, mode, at: "stop search", analysis: 0 };
+    try {
+      return tree.held.heldStops(c, tree.held.HELD_MODES[mode], 1);
+    } finally {
+      Object.assign(meter, { run: null, search: null, ledger: null });
+    }
   };
 
   async function load(root, name) {
@@ -388,6 +421,17 @@ if (isMainThread && process.argv[2] === "summary") {
     }
     const { charge } = tree.budget.WorkLedger.prototype;
     tree.budget.WorkLedger.prototype.charge = function (counter, units = 1) {
+      if (meter.search !== null && this !== meter.ledger) {
+        meter.search.analysis += 1;
+        meter.ledger = this;
+        Object.assign(meter, {
+          run: { ...meter.search },
+          spent: 0,
+          allowance: 0,
+          floor: tree.natural,
+        });
+        parentPort.postMessage({ running: meter.run });
+      }
       if (meter.run !== null) {
         meter.spent += units;
         if (Number.isInteger(this.allowance) && this.allowance > meter.allowance)
@@ -526,8 +570,8 @@ if (isMainThread && process.argv[2] === "summary") {
       }
       const c = heldCases?.get(unit.name);
       if (stops && c?.slice && b.error === null) {
-        const list = base.held.heldStops(c, base.held.HELD_MODES[mode], 1);
-        const headList = head.held.heldStops(c, head.held.HELD_MODES[mode], 1);
+        const list = searched(base, c, mode);
+        const headList = searched(head, c, mode);
         entry.stops = {
           count: list.length,
           sameSet: JSON.stringify(list) === JSON.stringify(headList),

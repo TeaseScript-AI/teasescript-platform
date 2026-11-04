@@ -9,9 +9,10 @@ const tool = resolve("tests/families/plans.mjs");
 
 /**
  * A built tree's modules as the plans comparison loads them: a ledger whose allowance is 1,000 or a test's, and a compile
- * that charges it by its source: `over` 5,000 units (past 4 times the allowance), `slow` 300 after waiting 400 ms once,
- * `hang` 1 after waiting 2 s, any other 300; the held family's `stopped`, at its one settled stop (a test allowance of
- * 10), 300 (30 times that allowance, within 4 times its natural one).
+ * that charges it by its source: `over` 5,000 units (past 4 times the allowance), `slow` 300 after waiting 100 ms in
+ * every run (its eight runs together past a 0.5 s safety net, each within it), `hang` 1 after waiting 1 s, any other 300;
+ * the held family's stop search, at a test allowance of 10, 300 for `stopped` (30 times that allowance, within 4 times
+ * its natural one) and 5,000 for `searched` (past 4 times its natural one), and `stopped` at its one settled stop 300.
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": `let test = null;
@@ -36,8 +37,8 @@ export const withTestDemandAllowance = (_, run) => run();
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 export function compileProjectWithBackend(files) {
   const source = files[0].source;
-  if (source === "slow" && !globalThis.waited) (globalThis.waited = true), wait(400);
-  if (source === "hang") wait(2000);
+  if (source === "slow") wait(100);
+  if (source === "hang") wait(1000);
   ledger().charge("frames", source === "over" ? 5000 : source === "hang" ? 1 : 300);
   return { plan: { instructions: [] }, diagnostics: [] };
 }
@@ -52,9 +53,14 @@ export function analyseCore(request) {
 }
 `,
   "tests/helpers/type-core-analysis.js": `export const coreRequest = (files) => ({ source: files[0].source });\n`,
-  "tests/helpers/type-core-held-host.js": `export const HELD_MODES = [0, 1, 2, 3].map(() => ({ run: (f) => f() }));
-export const heldFamily = () => [{ name: "stopped", source: "stopped", slice: true }];
-export const heldStops = () => [{ allowance: 10, phase: "admission" }];
+  "tests/helpers/type-core-held-host.js": `import { WorkLedger } from "../../src/type-inference/core/budget.js";
+export const HELD_MODES = [0, 1, 2, 3].map(() => ({ run: (f) => f() }));
+export const heldFamily = () =>
+  ["stopped", "searched"].map((name) => ({ name, source: name, slice: true }));
+export function heldStops(c) {
+  new WorkLedger(10).charge("frames", c.name === "searched" ? 5000 : 300);
+  return [{ allowance: 10, phase: "admission" }];
+}
 `,
 };
 
@@ -84,7 +90,7 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
         join(folder, "head"),
         set,
         "--timeout",
-        "1",
+        "0.5",
         "--out",
         out,
         ...more,
@@ -115,24 +121,56 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
     allowance: 1000,
     differing: undefined,
   });
-  // (slow, within its limit: compared, and equal; past the safety net with no units: uncharged, no stall)
+  // (slow, within its limit and each run within the safety net: compared, and equal; a run past the net with no units:
+  // uncharged, no stall)
   for (const name of ["fine", "slow"]) assert.equal(outcome(name).differing, 0, name);
   assert.deepEqual(outcome("hang"), {
     stalled: undefined,
-    uncharged: "safety net 1 s",
+    uncharged: "safety net 0.5 s",
     run: { tree: "base", mode: 0, at: "natural" },
     work: undefined,
     allowance: undefined,
     differing: undefined,
   });
-  const { sources, runs, differing, stalled, uncharged, units } = area.summary;
-  assert.deepEqual(
-    { sources, runs, differing, stalled, uncharged, units },
-    { sources: 4, runs: 8, differing: 0, stalled: 1, uncharged: 1, units: 4 },
-  );
-  // (a stop at a test allowance of 10 charges 300: within 4 times the source's natural allowance, no stall)
+  const counted = ({ summary }: { summary: Record<string, unknown> }) => {
+    const { sources, resumed, runs, differing, stalled, uncharged, units } = summary;
+    return { sources, resumed, runs, differing, stalled, uncharged, units };
+  };
+  const recorded = { sources: 4, runs: 8, differing: 0, stalled: 1, uncharged: 1, units: 4 };
+  assert.deepEqual(counted(area), { ...recorded, resumed: 0 });
+  // (again with the same --out: nothing runs again, and the recorded stall and safety net still count)
+  const again = plans("area", join(folder, "area.jsonl"));
+  assert.equal(again.ran.status, 1, again.ran.stderr);
+  assert.deepEqual(counted(again), { ...recorded, resumed: 4 });
+  assert.equal(again.records.length, 4);
+  // (at a test allowance of 10, 300 units are within 4 times the source's natural allowance, in the stop search and at
+  // the stop; the search's own analysis past it is a stall, named by its run)
   const held = plans("held", join(folder, "held.jsonl"), "--stops");
-  assert.equal(held.ran.status, 0, held.ran.stderr);
-  assert.equal(held.records[0]!.stalled, undefined);
+  assert.equal(held.ran.status, 1, held.ran.stderr);
+  assert.deepEqual(
+    held.records.map(({ name, stalled, run, work, allowance }) => ({
+      name,
+      stalled,
+      run,
+      work,
+      allowance,
+    })),
+    [
+      {
+        name: "stopped",
+        stalled: undefined,
+        run: undefined,
+        work: undefined,
+        allowance: undefined,
+      },
+      {
+        name: "searched",
+        stalled: "units",
+        run: { tree: "base", mode: 0, at: "stop search", analysis: 1 },
+        work: 5000,
+        allowance: 1000,
+      },
+    ],
+  );
   assert.equal(held.summary.runs, 8);
 });
