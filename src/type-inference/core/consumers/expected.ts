@@ -292,7 +292,7 @@ function* consumerTakesTask(walk: Consumers, consumer: Consumption): CompileTask
           takes:
             consumer.what === "condition"
               ? ["boolean"]
-              : consumer.what === "count" || consumer.what === "range"
+              : consumer.what === "count"
                 ? ["integer"]
                 : ["string"],
           binds: "whole",

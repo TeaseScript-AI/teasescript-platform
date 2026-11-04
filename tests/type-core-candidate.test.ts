@@ -1282,12 +1282,12 @@ test("the candidate hears of each file it walks, as the production default does"
 
 test("C2's integer check warns with TSV011 at a count and TSV043 at a list index, and runs at the use", () => {
   const count = candidate(
-    'let count: number = hostValue\nsay "ready"\nrepeat count {\n  say "turn"\n}\nexit\n',
+    'let count = hostValue\nsay "ready"\nrepeat count {\n  say "turn"\n}\nexit\n',
   );
-  assert.deepEqual(sited(count), ["warning TSV041@20", "warning TSV011@49"]);
-  assert.ok(count.diagnostics[1]!.message.startsWith(REPEAT_COUNT_RULE));
+  assert.deepEqual(sited(count), ["warning TSV011@41"]);
+  assert.ok(count.diagnostics[0]!.message.startsWith(REPEAT_COUNT_RULE));
   assert.ok(count.plan !== null);
-  assert.deepEqual(checksOf(count.plan), ["0:29 number"]);
+  assert.deepEqual(checksOf(count.plan), []);
   assert.deepEqual(runWith(count.plan, 2), {
     status: "halted",
     says: ["ready", "turn", "turn"],
@@ -1296,29 +1296,31 @@ test("C2's integer check warns with TSV011 at a count and TSV043 at a list index
   assert.deepEqual(runWith(count.plan, 2.5), {
     status: "failed",
     says: ["ready"],
-    failure: "TSR043@49:54",
+    failure: "TSR043@41:46",
   });
-  assertRuns(count.plan, "the count", ["ready", "turn", "turn"], [["x", "TSR058@20:29"]]);
+  assertRuns(count.plan, "the count", ["ready", "turn", "turn"], [["x", "TSR043@41:46"]]);
 
-  const index = candidate(
-    "let rows = [10, 20]\nlet at: number = hostValue\nrepeat rows[at] {}\nexit\n",
-  );
-  assert.deepEqual(sited(index), ["warning TSV041@37", "warning TSV043@59"]);
+  const index = candidate("let rows = [10, 20]\nlet at = hostValue\nrepeat rows[at] {}\nexit\n");
+  assert.deepEqual(sited(index), ["warning TSV043@51"]);
   assert.ok(index.plan !== null);
-  assert.deepEqual(checksOf(index.plan), ["20:46 number"]);
+  assert.deepEqual(checksOf(index.plan), []);
   assertRuns(
     index.plan,
     "the index",
     [],
     [
       [1, null],
-      [0.5, "TSR024@59:61"],
-      [2, "TSR025@59:61"],
-      ["x", "TSR058@37:46"],
+      [0.5, "TSR024@51:53"],
+      [2, "TSR025@51:53"],
+      ["x", "TSR024@51:53"],
     ],
   );
 
-  // the proven cases stay errors under the same codes
+  // the proven cases stay errors under the same codes, a written `number` read among them (#1173)
+  assert.deepEqual(sited(candidate("let count: number = hostValue\nrepeat count {}\nexit\n")), [
+    "warning TSV041@20",
+    "error TSV011@37",
+  ]);
   assert.deepEqual(sited(candidate("let n = 2.5\nrepeat n {}\nexit\n")), ["error TSV011@19"]);
   assert.deepEqual(sited(candidate("let n: integer = 2.5\nexit\n")), ["error TSV041@17"]);
   assert.deepEqual(sited(candidate("let xs = [10, 20]\nlet i = 1.5\nrepeat xs[i] {}\nexit\n")), [
@@ -1562,35 +1564,38 @@ test("a for loop's range bound that is a number or text is an error at the bound
 });
 
 /**
- * #1173 (the owner's option C): an integer-only use is checked against the type of the place it reads, a place of the
- * type `number` (written, or copied from one) an error whatever value it holds. The current checker is the reference
- * here: over every integer-only use the candidate route reaches (a repeat count, a list index, a `for` range's start
- * and end) and the places a use reads (written `number`, `integer` or none, a whole or fractional start value, a copy of
- * a `number` place, host data into a `number`), the candidate's errors are the current checker's, in the four modes.
+ * #1173 (the owner's option C): an integer-only use is checked against the type of the place it reads, a place written
+ * `number` an error whatever value it holds (a copy of one, and a place widened by a later store, rule 1.2, are #1173's
+ * next part). The current checker is the reference here: over every integer-only use the candidate route reaches (a
+ * repeat count, a list index, a `for` range's start and end) and the places a use reads (written `number`, `number?`,
+ * `integer` or none, a whole or fractional start value, host data into a `number`), the candidate's errors are the
+ * current checker's, in the four modes. A `number` narrowed by `is integer` is quiet (`type-core-narrowing.test.ts`).
  */
-test("an integer-only use of a number place is the current checker's error at every use, in the four modes (#1173)", () => {
+test("an integer-only use of a written number place is the current checker's error at every use, in the four modes (#1173)", () => {
   const uses = [
     (read: string) => `repeat ${read} { say "x" }`,
     (read: string) => `let xs = [1, 2]\nsay xs[${read}]`,
     (read: string) => `for i in ${read}..3 { say i }`,
     (read: string) => `for i in 1..${read} { say i }`,
   ];
-  const reads = [
-    ["", "1"],
-    ["", "1.5"],
-    ["let p: number = 1\n", "p"],
-    ["let p: number = 1.5\n", "p"],
-    ["let p: integer = 1\n", "p"],
-    ["let p = 1\n", "p"],
-    ["let p = 1.5\n", "p"],
-    ["let q: number = 1\nlet p = q\n", "p"],
-    ["let p: number = hostValue\n", "p"],
-  ] as const;
+  const programs = (use: (read: string) => string): readonly string[] => [
+    use("1"),
+    use("1.5"),
+    ...[
+      "let p: number = 1",
+      "let p: number = 1.5",
+      "let p: number? = 1",
+      "let p: integer = 1",
+      "let p = 1",
+      "let p = 1.5",
+      "let p: number = hostValue",
+    ].map((declaration) => `${declaration}\n${use("p")}`),
+  ];
   const errors = (result: CompilationResult) =>
     sited(result).filter((diagnostic) => diagnostic.startsWith("error"));
   for (const use of uses)
-    for (const [before, read] of reads) {
-      const source = `${before}${use(read)}\nexit\n`;
+    for (const program of programs(use)) {
+      const source = `${program}\nexit\n`;
       const current = errors(compileSource(source, OPTIONS));
       assert.deepEqual(
         inBothOrders(() => errors(candidate(source))),
@@ -2840,16 +2845,16 @@ function finish(
 
 test("a checkpoint after a passed check resumes with the same state, and the later check still runs", () => {
   const source =
-    'let count: number = hostValue\nsay "checked"\nrepeat count {\n  say "turn"\n}\nexit\n';
+    'let count: integer = hostValue\nsay "checked"\nrepeat count {\n  say "turn"\n}\nexit\n';
   const compiled = candidate(source);
   assert.ok(compiled.plan !== null);
   const plan = compiled.plan;
-  assert.deepEqual(checksOf(plan), ["0:29 number"]);
+  assert.deepEqual(checksOf(plan), ["0:30 integer"]);
   // (the repeat's own count check, the runtime's: TSR043 at the count, nothing said after it)
   const count = source.indexOf("count {");
   for (const [hostValue, ending] of [
     [2, "halted"],
-    [2.5, "failed"],
+    [-1, "failed"],
   ] as const) {
     // the store's check has passed when the session waits at the reading pause after it
     const waiting = run(plan, createFreshRuntimeSnapshot(plan, { globals: { hostValue } }));

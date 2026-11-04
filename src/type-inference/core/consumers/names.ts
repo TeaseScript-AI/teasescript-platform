@@ -1,10 +1,11 @@
 import type { Expression } from "../../../ast.js";
-import type { PlaceId, SourceSite } from "../../graph.js";
+import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import { isExternal, isOpaque } from "../admission.js";
 import { joinSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { heldReference, REFERENCE } from "../contract.js";
 import { labelBelow, labelRoot, labelText, type Label } from "../contract/labels.js";
+import { termAt, writtenOf } from "../contract/terms.js";
 import { keptKey, keptKeyBelow, keyPath, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
@@ -239,17 +240,33 @@ export function domainItems(
 }
 
 /** The admitted type at `rest` of the place a read reads (a copy's of a written type, A4), `null` with an unknown. */
-export function admittedKinds(
-  walk: Consumers,
-  value: PlaceId,
-  rest: readonly string[],
-): ItemTag[] | null {
+function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[]): ItemTag[] | null {
   const key = readKey(walk, value);
   if (key === null) return null;
   const tags = walk.admission
     .admitted(keyPlace(key), joinSteps(keyPath(key), rest))
     .filter((tag) => tag !== "empty");
   return tags.length === 0 || tags.includes("unknown") ? null : tags;
+}
+
+/**
+ * #1173 (the owner's option C): whether the place a read reads is written `number` at the read's path, a member of a
+ * written union included (`number?`), and no test narrows the read. Its written type alone decides it, no decision.
+ */
+export function writtenNumber(walk: Consumers, value: PlaceId): boolean {
+  const { program } = walk.pass;
+  // (the root the read reads, as `readKey` finds it, without its charged key: a root with no written type has none)
+  const root = program.projOf.has(value)
+    ? program.targetRoot(value).root
+    : program.occurrenceOf.get(value);
+  if (root === undefined || writtenOf(program.place(root).kind) === null) return false;
+  const key = readKey(walk, value);
+  if (key === null || walk.pass.values.narrowingMark(value) !== "") return false;
+  const written = writtenOf(program.place(keyPlace(key)).kind);
+  const term = written === null ? null : termAt(written, keyPath(key));
+  const number = (at: TypeTerm): boolean =>
+    at.kind === "union" ? at.members.some(number) : at.kind === "atom" && at.name === "number";
+  return term !== null && number(term);
 }
 
 /** §3.3, the quiet path: a value's contract kinds, asked before any read is evaluated; `null` with an unknown. */

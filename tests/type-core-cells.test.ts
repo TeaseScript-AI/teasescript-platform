@@ -265,8 +265,8 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
   ];
   // a kind that came through a call (`called`) stays possible in dead code, so a guarded value copied from a call's
   // result or a field or element of one warns as on `main`: the live form's record, X1's word on the use (reviews r3's
-  // and r4's B3 shapes, standing, with an operation, a length and a merge); a written destination keeps the flag as it
-  // keeps the guard mark
+  // and r4's B3 shapes, standing, with an operation, a length and a merge); a written `number` destination is an error
+  // at the use whatever it holds (#1173), in dead code too
   const written = `global n = 2.0\nfunction f(x: number): number {\n  return x\n}\nfunction fs(x: number[]): number[] {\n  return x\n}`;
   const transfers: readonly (readonly [string, string, string])[] = [
     [
@@ -309,17 +309,20 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       "global n = 2.0\nfunction f(x: number): number {\n  if hostValue { return f(x) }\n  return x\n}",
       "if n is integer { let v = f(n)\nrepeat v {} }",
     ],
+    [
+      "a copy of a written copy",
+      written,
+      "if n is integer { let v: number = f(n)\nlet w = v\nrepeat w {} }",
+    ],
+  ];
+  // a written `number` destination: an intrinsic error at the use whatever it holds (#1173), the same in dead code
+  const writtenNumbers: readonly (readonly [string, string, string])[] = [
     ["a written copy", written, "if n is integer { let v: number = f(n)\nrepeat v {} }"],
     ["a written list", written, "if n is integer { let v: number[] = [f(n)]\nrepeat v.first {} }"],
     [
       "a written list a call returns",
       written,
       "if n is integer { let v: number[] = fs([n])\nrepeat v.first {} }",
-    ],
-    [
-      "a copy of a written copy",
-      written,
-      "if n is integer { let v: number = f(n)\nlet w = v\nrepeat w {} }",
     ],
     [
       "a written element",
@@ -365,6 +368,19 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
   ] as const;
   for (const reversed of [false, true]) {
     const order = reversed ? " reversed" : "";
+    for (const [what, before, body] of writtenNumbers) {
+      const live = analysed(`${before}\n${body}\nexit\n`, reversed);
+      if (
+        live[0] !== "compile-error" ||
+        !live.some((line) => line.startsWith("integer-use compile-error"))
+      )
+        differing.push(`${what}, live${order}: ${live.join("; ")}`);
+      for (const [where, shape] of shapes) {
+        const found = analysed(shape(before, body), reversed);
+        if (JSON.stringify(found) !== JSON.stringify(live))
+          differing.push(`${what}, ${where}${order}: ${found.join("; ")}`);
+      }
+    }
     for (const [what, before, body] of transfers) {
       const live = analysed(`${before}\n${body}\nexit\n`, reversed);
       const unordered = ([outcome, ...lines]: readonly string[]): string =>

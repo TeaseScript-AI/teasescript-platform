@@ -12,7 +12,7 @@ import {
 } from "../result.js";
 import { error } from "./diagnostics.js";
 import { TEXT } from "./kinds.js";
-import { admittedKinds, keyLabel, kindsOf, ownSpan, quietKinds, shownLabel } from "./names.js";
+import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel, writtenNumber } from "./names.js";
 import { obligation, warnGroups, warning } from "./warnings.js";
 
 // C2, C3, C11, C12, C13: an operand's items against the kinds that fit, a whole number, an index by its receiver.
@@ -137,9 +137,8 @@ export function integerOnly(
   const { program } = walk.pass;
   const rule: DiagnosticRule = { rule: "count", use };
   const owedBy = typeof soft === "object" ? soft : null;
-  // #1173 (option C): a read of a place whose type is `number` (written, or a copy's, A4) is no whole number by its
-  // type, whatever value it holds now
-  if (soft === false && admittedKinds(walk, value, [])?.includes("number") === true) {
+  // #1173 (option C): a read of a place written `number` is no whole number by its type, whatever value it holds now
+  if (soft === false && writtenNumber(walk, value)) {
     program.work.charge("checks");
     error(walk, "integer-use", ownSpan(walk, value, site), rule, ["number"]);
     return;
