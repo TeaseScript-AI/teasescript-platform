@@ -112,7 +112,7 @@ import { notBoolean, notLogicalOperand } from "./evaluation/operators.js";
 import { repairedRecord } from "./values/expected-reading.js";
 import { stopAllMediaForSessionEnd } from "./operations/media-lifecycle.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
-import { assertFallbackType, assertValueType } from "./values/value-types.js";
+import { assertFallbackType, assertPartChecks, assertValueType } from "./values/value-types.js";
 
 export interface RuntimeRunOptions {
   readonly instructionBudget?: number;
@@ -806,6 +806,8 @@ function executePlannedInstruction(
       const value = evaluator.evaluate(instruction.value);
       if (instruction.typeCheck !== undefined)
         assertValueType(value, instruction.typeCheck, instruction.value.span);
+      if (instruction.partChecks !== undefined)
+        assertPartChecks(value, instruction.partChecks, instruction.value.span);
       if (rerun) {
         const root = currentFrame(snapshot);
         const binding = root.bindings.find((item) => item.name === instruction.name)!;
@@ -865,7 +867,9 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     case "assign": {
+      // (a store whose parts are checked stores the value it checked, never a join in place)
       if (
+        instruction.partChecks !== undefined ||
         !evaluator.appendAssigned(
           instruction.target,
           instruction.value,
@@ -876,6 +880,8 @@ function executePlannedInstruction(
         const value = evaluator.evaluate(instruction.value);
         if (instruction.typeCheck !== undefined)
           assertValueType(value, instruction.typeCheck, instruction.value.span);
+        if (instruction.partChecks !== undefined)
+          assertPartChecks(value, instruction.partChecks, instruction.value.span);
         evaluator.assign(instruction.target, value, instruction.requireExisting === true);
       }
       advance(snapshot);

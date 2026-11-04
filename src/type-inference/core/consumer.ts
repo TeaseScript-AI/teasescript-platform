@@ -17,6 +17,8 @@ import { isRepeatCount } from "../../loop-rules.js";
 import { literalRange } from "../../switch-cases.js";
 import {
   repairedObject,
+  type PartCheckPlan,
+  type PartStep,
   type TypeCheckPlan,
   type TypePlan,
   type TypePropertyPlan,
@@ -891,7 +893,8 @@ function runtimeChecks(
     const file = index.fileOf(node);
     return request.files[file]!.source.slice(node.span.start.offset, node.span.end.offset);
   };
-  const contracts = new Contracts(answers, index, declarations(answers, index));
+  const lets = declarations(answers, index);
+  const contracts = new Contracts(answers, index, lets);
   const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
   const core = {
     requireExisting: new Set<AssignmentStatement>(),
@@ -899,6 +902,7 @@ function runtimeChecks(
     fallbackChecks: new Map<BinaryExpression | CallExpression, TypeCheckPlan>(),
     expected: new Map<CallExpression, TypePlan>(),
     repairs: new Set<LoadExpression>(),
+    partChecks: new Map<Store, readonly PartCheckPlan[]>(),
   };
   // each owed check with the kinds its rule names, a stopped analysis's store type where it decided none (D4 a′)
   const owed: { readonly obligation: Obligation; readonly kinds: readonly ItemTag[] | null }[] = [];
@@ -990,6 +994,8 @@ function runtimeChecks(
       core.expected.set(call, type);
     }
   const stopped = answers.budget.exhausted !== null;
+  // each store's owed obligations, for the parts below its destination its own check does not reach (#1224)
+  const atStore = new Map<Store, Obligation[]>();
   for (const { obligation, kinds } of owed) {
     // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
     // every plan: no plan content (S3 §4); where a stopped decision left a store's own check against `unknown` (no
@@ -1012,11 +1018,95 @@ function runtimeChecks(
         if (index.iterates(at)) throw new OutsideContract(at, "a check of a loop variable");
       throw new Error("A check of the slice belongs to no store.");
     }
+    atStore.set(store, [...(atStore.get(store) ?? []), obligation]);
     if (checks.has(store)) continue;
     const type = contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null);
     if (type !== null) checks.set(store, type);
   }
+  for (const [store, obligations] of atStore) {
+    // (the label of the place it stores into, as its obligations' targets name it: its variable, then the core's steps)
+    const place = answers.at(nodeOf(answers, index, store))?.place;
+    if (place === undefined || place === null) continue;
+    const destination = [declarationOf(answers, index, lets, store).name.name, ...place.path].join(
+      ".",
+    );
+    const whole = checks.get(store)?.type ?? null;
+    const parts = partChecksOf(destination, obligations).filter(
+      (part) => whole === null || !reaches(whole, part.path),
+    );
+    if (parts.length > 0) core.partChecks.set(store, parts);
+  }
   return { checks, core, contracts: contracts.results };
+}
+
+/**
+ * The part checks a store's owed obligations below its destination make (#1224, the lead's ruling (c)): one per obligation
+ * the analysis owes at the store below its destination (`destination`, the label of the place it stores into), with
+ * the obligation's kinds at the steps its target names below the destination (`pathText`'s: a property's name, quoted
+ * for an internal one, `element`, `entry` or `index` for an element). None is made for an obligation at the destination
+ * itself, for one whose kinds leave its part open, or for a step of another form: nothing is checked that the analysis
+ * does not owe there.
+ */
+function partChecksOf(destination: string, obligations: readonly Obligation[]): PartCheckPlan[] {
+  const out: PartCheckPlan[] = [];
+  const made = new Set<string>();
+  for (const obligation of obligations) {
+    if (!obligation.target.startsWith(`${destination}.`)) continue;
+    const steps = obligation.target.slice(destination.length + 1).split(".");
+    const path: PartStep[] = [];
+    for (const step of steps)
+      if (step === "element" || step === "entry" || step === "index") path.push({ element: true });
+      else if (step.startsWith("'") || /^[\p{L}_][\p{L}\p{N}_]*$/u.test(step))
+        if (step === "iteration") break;
+        else path.push({ property: propertyName(step) });
+      else break;
+    const type = kindsPlan(obligation.against);
+    if (path.length < steps.length || type === null) continue;
+    const key = JSON.stringify([path, type]);
+    if (made.has(key)) continue;
+    made.add(key);
+    out.push({ path, type, place: partPlace(destination, path) });
+  }
+  return out;
+}
+
+/**
+ * Whether a store's check of `type` checks every value at `path` below it: each member that can hold the next step (an
+ * object, or a collection for an element) lists it and checks below it; a member that cannot hold it leaves no value
+ * there. An open level (an object without the property, a collection whose elements are open) reaches nothing below.
+ */
+function reaches(type: TypePlan, path: readonly PartStep[]): boolean {
+  const pending: [TypePlan, number][] = [[type, 0]];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const [at, depth] = next;
+    if (depth === path.length) continue;
+    const step = path[depth]!;
+    if (at.kind === "union") {
+      for (const member of at.members) pending.push([member, depth]);
+      continue;
+    }
+    if ("property" in step) {
+      if (at.kind !== "object") continue;
+      const property = at.properties.find((each) => each.name === step.property);
+      if (property === undefined) return false;
+      pending.push([property.type, depth + 1]);
+    } else if (at.kind === "list" || at.kind === "set" || at.kind === "dict") {
+      if (at.element === null) return false;
+      pending.push([at.element, depth + 1]);
+    }
+  }
+  return true;
+}
+
+/** A part as a message names it: `'copy.a.b'` for properties, `an element of 'copy.xs'` below them, else of its root. */
+function partPlace(destination: string, path: readonly PartStep[]): string {
+  const names: string[] = [];
+  for (const step of path) if ("property" in step) names.push(step.property);
+  const written = [destination, ...names].join(".");
+  if (names.length === path.length) return `'${written}'`;
+  return names.length === path.length - 1 && !("property" in path.at(-1)!)
+    ? `an element of '${written}'`
+    : `a part of '${destination}'`;
 }
 
 /**

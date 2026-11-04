@@ -32,6 +32,50 @@ export function validateOptionalTypeCheck(
   validateTypePlan(check.type, `${checkPath}.type`, errors);
 }
 
+/** Validates the optional `partChecks` of a receiving instruction (`PartCheckPlan`): a non-empty list of part checks. */
+export function validateOptionalPartChecks(
+  owner: Record<string, unknown>,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!("partChecks" in owner)) return;
+  const checks = owner.partChecks;
+  const checksPath = `${path}.partChecks`;
+  if (!Array.isArray(checks) || checks.length === 0) {
+    errors.push(planError("TSC002", "Part checks must be a non-empty array.", checksPath));
+    return;
+  }
+  for (const [index, check] of checks.entries()) {
+    const checkPath = `${checksPath}[${index}]`;
+    if (!isRecord(check)) {
+      errors.push(planError("TSC002", "A part check must be an object.", checkPath));
+      continue;
+    }
+    rejectUnknownFields(check, ["path", "type", "place"], checkPath, errors);
+    requireString(check.place, `${checkPath}.place`, errors);
+    validateTypePlan(check.type, `${checkPath}.type`, errors);
+    if (!Array.isArray(check.path) || check.path.length === 0) {
+      errors.push(
+        planError("TSC002", "A part check's path must be a non-empty array.", `${checkPath}.path`),
+      );
+      continue;
+    }
+    for (const [at, step] of check.path.entries()) {
+      const stepPath = `${checkPath}.path[${at}]`;
+      const property = isRecord(step) && "property" in step;
+      if (
+        !isRecord(step) ||
+        (property
+          ? typeof step.property !== "string" || Object.keys(step).length !== 1
+          : step.element !== true || Object.keys(step).length !== 1)
+      )
+        errors.push(
+          planError("TSC002", "A part step must be a property name or the elements.", stepPath),
+        );
+    }
+  }
+}
+
 /** Validates a type of a runtime type check or a type test, iteratively for deep types. */
 export function validateTypePlan(
   root: unknown,

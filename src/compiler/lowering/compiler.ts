@@ -77,6 +77,7 @@ import {
   unwrapParentheses,
   normalizeUnaryExpression,
   compileExpression,
+  withPartChecks,
   withTypeCheck,
   withFallbackCheck,
   repairedBy,
@@ -479,6 +480,7 @@ export class InstructionCompiler {
           name: statement.name.name,
           value: lowered.plan,
           ...withTypeCheck(this.typeChecks.get(statement)),
+          ...withPartChecks(this.coreChecks.partChecks.get(statement)),
           span: planSpan(statement.span),
         });
         this.emitTemporaryCleanup(lowered.temporaryIds, statement.span);
@@ -530,6 +532,7 @@ export class InstructionCompiler {
           ...(this.coreChecks.requireExisting.has(statement)
             ? { requireExisting: true as const }
             : {}),
+          ...withPartChecks(this.coreChecks.partChecks.get(statement)),
           span: planSpan(statement.span),
         });
         this.emitTemporaryCleanup(
