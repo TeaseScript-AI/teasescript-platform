@@ -2408,7 +2408,7 @@ test("TSV041's advice names the property an object literal types and its narrowe
     [
       "let t: integer = 1\nlet box = {x: t}\nlet boxes = [box]\nboxes[0].x = hostValue otherwise 1\nexit\n",
       "hostValue",
-      "Check 'hostValue' first, as in 'if hostValue is integer { boxes[0].x=hostValue otherwise 1 }'.",
+      "Check 'hostValue' first, as in 'if hostValue is integer { boxes[0].x = hostValue otherwise 1 }'.",
       "",
     ],
     [
