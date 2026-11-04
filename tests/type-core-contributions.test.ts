@@ -189,10 +189,11 @@ test("each key's edges are the keys its contract includes: copies, written place
     ['let a = null\nlet b = a otherwise 1\nsay "${b}"\nexit\n', [["b", [], []]]],
     // (an object's own selection replaces its elements: no key of them)
     ['let a = {p: 1}\nlet b = a.first\nsay "${b}"\nexit\n', [["b", [], []]]],
-    // (a length, an iteration and a method's result of an unknown value: the value's unknown, so its key)
+    // (a length, an iteration and two methods' results of an unknown value: the value's unknown, so its key)
     ['let a = hostValue\nlet b = a.length\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
     ['let a = hostValue\nfor b in a {\n  say "${b}"\n}\nexit\n', [["b", [], ["a"]]]],
     ['let a = hostValue\nlet b = a.remove("k")\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
+    ['let a = hostValue\nlet b = a.startsWith("k")\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
   ];
   for (const mode of MODES)
     for (const [source, asks] of cases) {
