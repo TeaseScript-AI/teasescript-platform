@@ -127,8 +127,9 @@ export function consume(
 /**
  * #1173 (option C), every whole-number use's one rule: a read of a place written `number` is no whole number by its
  * type, whatever value it holds now, an error under `rule`; a read under a test of its key (§3.2) is left to its items,
- * which that test narrows (`if p is integer`), and so is a read of a written union whose value is known to be only its
- * other members (`number?` holding `null`), whose error names that value and its fix (Codex r7). Whether it erred.
+ * which that test narrows (`if p is integer`); a read of a written union whose value is known to be only its other
+ * members (`number?` holding `null`) is the error its items give, naming that value and its fix (Codex r7), from the
+ * items asked here once (Codex r8). Whether it erred.
  */
 export function writtenNumberUse(
   walk: Consumers,
@@ -140,6 +141,8 @@ export function writtenNumberUse(
 ): boolean {
   const term = writtenNumber(walk, value);
   if (term === null || walk.pass.guards.guardedRead(value)) return false;
+  walk.pass.program.work.charge("checks");
+  let kinds: readonly ItemTag[] = ["number"];
   if (term.kind === "union") {
     const items = withoutEmpty(walk.valueItems(value, node, []));
     if (
@@ -152,10 +155,9 @@ export function writtenNumberUse(
           item.tag !== "number",
       )
     )
-      return false;
+      kinds = items.map((item) => item.tag);
   }
-  walk.pass.program.work.charge("checks");
-  error(walk, kind, ownSpan(walk, value, site), rule, ["number"]);
+  error(walk, kind, ownSpan(walk, value, site), rule, kinds);
   return true;
 }
 
