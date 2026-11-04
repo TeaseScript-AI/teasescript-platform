@@ -76,7 +76,7 @@ function through(
   value: PlaceId,
   rest: Rest,
   from: number,
-  flow: FlowSink | null = null,
+  flow: Flow = null,
 ): Work<readonly Item[]> {
   const { program } = contract.pass;
   // (a read, a projection or a call passes the path on whole, so its member steps are scanned where it ends: a chain of
@@ -111,8 +111,9 @@ function* listsAt(
   rest: Steps,
   at: number,
   from: number,
-  flow: FlowSink | null = null,
+  given: Flow = null,
 ): Work<readonly Item[]> {
+  const flow = runFlow(contract, given);
   // (#1668: the receiver read to decide its members, none of it included: no flow)
   const receiver = yield* through(contract, value, stepsRest(stepsTo(rest, at)), from);
   // F19a, r4.44: a receiver that may be a reference has the runtime's members, decided once for a whole value
@@ -172,8 +173,9 @@ function* valueAt(
   contract: Contract,
   value: PlaceId,
   rest: Rest,
-  flow: FlowSink | null = null,
+  given: Flow = null,
 ): Work<readonly Item[]> {
+  const flow = runFlow(contract, given);
   if (!contract.pass.solver.enterRead()) {
     flow?.opaque("stopped");
     return STOPPED;
@@ -545,19 +547,23 @@ export function* defaultKinds(
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
-    make: () => defaultRun(contract, fallback, rest),
+    make: () => through(contract, fallback, rest, 0, "run"),
     decision: typedDefault(rest, false),
   };
 }
 
 /** F19 (r4.1): whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`). */
 /** A default's run (`defaultKinds`): its fallback's kinds at the path, its run's flow taken as it starts. */
-function* defaultRun(
-  contract: Contract,
-  fallback: PlaceId,
-  rest: readonly string[],
-): Work<readonly Item[]> {
-  return yield* contract.contractOfValueAt(fallback, rest, contract.pass.solver.sink());
+/**
+ * #1668: a flow given to the value side's walk: a caller's, none, or the running demand's own (`"run"`), taken as the
+ * walk's code starts, so a demand whose run is this walk (`defaultKinds`) makes it as it did, with nothing moved
+ * before its run starts (its demand's units unchanged).
+ */
+type Flow = FlowSink | null | "run";
+
+/** A walk's flow (`Flow`) once its code runs. */
+function runFlow(contract: Contract, flow: Flow): FlowSink | null {
+  return flow === "run" ? contract.pass.solver.sink() : flow;
 }
 
 export function* onlyNull(contract: Contract, fallback: PlaceId): Work<readonly Item[]> {
