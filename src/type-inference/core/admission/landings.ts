@@ -991,7 +991,10 @@ export function landedBelow(
   const before = work.total;
   try {
     const listing = walkLandings(admission, place, prefix, true);
-    keepListing(admission, listing);
+    // (kept when a later walk first looks at its place, so a place no walk reaches costs nothing more: #1670's chain)
+    const pending = admission.pendingListings.get(place);
+    if (pending === undefined) admission.pendingListings.set(place, [listing]);
+    else pending.push(listing);
     const texts = [...listing.tape.texts];
     if (counts !== null) {
       counts.units = work.total - before;
@@ -1041,6 +1044,19 @@ function keepListing(admission: Admission, listing: Listing): void {
   node.listing = listing;
   if (currentOps !== null)
     currentOps.retained += 1 + 3 * (3 + listing.children.length) + listing.children.length;
+}
+
+/**
+ * A place's listings (`Admission.listings`), the calls' results asked of it kept first, in the order they were made
+ * (`landedBelow`), each debited as its keeping; `undefined` where it has none.
+ */
+function trieOf(admission: Admission, place: PlaceId): ListingNode | undefined {
+  const pending = admission.pendingListings.get(place);
+  if (pending !== undefined) {
+    admission.pendingListings.delete(place);
+    for (const listing of pending) keepListing(admission, listing);
+  }
+  return admission.listings.get(place);
 }
 
 /** The listing of a place's node at `below`, or `null`: each trie node walked debited. */
@@ -1219,7 +1235,7 @@ function walkLandings(
       add(path);
     };
     // (a place without listings walks as before: no trie is looked at, #1670's chain)
-    const node = listed && task !== root ? admission.listings.get(task.place) : undefined;
+    const node = listed && task !== root ? trieOf(admission, task.place) : undefined;
     const known = node === undefined ? null : lookup(work, node, task.below);
     if (known !== null) {
       take(known, task);

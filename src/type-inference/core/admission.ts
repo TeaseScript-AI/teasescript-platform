@@ -55,6 +55,7 @@ import type {
   KeyStops,
   LandingIndex,
   Level,
+  Listing,
   ListingNode,
   LiveGroup,
   OpenStep,
@@ -388,6 +389,8 @@ export class Admission {
    * (#1428, #1547): each a pair of ranges of that call's tape, which charged emits and reports made.
    */
   readonly listings = new Map<PlaceId, ListingNode>();
+  /** Per place, the calls' results asked of it not yet kept in `listings` (`trieOf` keeps them at the first look). */
+  readonly pendingListings = new Map<PlaceId, Listing[]>();
   /** Per place copies land in, the landed paths whose contents may not fit (`hotSets`). */
   hots: ReadonlyMap<PlaceId, readonly (readonly string[])[]> | null = null;
   /** The copies places answer through (`passThrough`), once per pass. */
