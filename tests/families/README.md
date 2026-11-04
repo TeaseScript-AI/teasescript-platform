@@ -259,7 +259,7 @@ receiving completion. It classifies nothing; `--manifest` prints the sources the
 line each, and runs nothing. An incomplete record is never agreement.
 
 ```sh
-sx-job submit --commit <sha> --shards 16 --mem 5G --timeout 2h --campaign <T> -- bash -c 'env -u NODE_OPTIONS \
+sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> -- bash -c 'env -u NODE_OPTIONS \
   node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
   --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
 ```
