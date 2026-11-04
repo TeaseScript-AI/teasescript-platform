@@ -17,7 +17,8 @@ concurrency:
 jobs:
   # The check runs as two jobs side by side (#1638): each installs and builds, then runs one half of the compiled tests
   # (`--shard=i/2`, shared out by measured seconds, `tools/test-shards.mjs`); check-2 also runs the checks before the
-  # tests (`check:pretest`), once. Together they run what `npm run check` runs.
+  # tests (`check:pretest`), once. Together they run what `npm run check` runs; `check`, the required check, passes only
+  # where both passed.
   check-1:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -74,3 +75,17 @@ jobs:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
           BUILD_SOURCEMAPS: "0"
         run: npm test -- --shard=2/2
+  check:
+    needs: [check-1, check-2]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require both test jobs
+        env:
+          RESULTS: ${{ needs.check-1.result }} ${{ needs.check-2.result }}
+        run: |
+          if [ "$RESULTS" != "success success" ]; then
+            echo "check-1 and check-2: $RESULTS"
+            exit 1
+          fi

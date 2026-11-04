@@ -33,7 +33,7 @@ export function shardFiles(files, index, count) {
 
 /** `--shard=i/N`'s shard, or `null` for any other argument; a malformed one throws. */
 export function shardOption(argument) {
-  if (!argument.startsWith("--shard=")) return null;
+  if (!argument.startsWith("--shard")) return null;
   const found = /^--shard=(\d+)\/(\d+)$/.exec(argument);
   const [index, count] = found === null ? [0, 0] : [Number(found[1]), Number(found[2])];
   if (count < 1 || index < 1 || index > count)

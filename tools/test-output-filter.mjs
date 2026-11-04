@@ -42,12 +42,16 @@ const fullOutput = arguments_[0] === "--full-output";
 if (fullOutput) arguments_.shift();
 // (`--shard=i/N`: the full suite's shard i of N, as CI's test jobs run it, `tools/test-shards.mjs`)
 let shard = null;
-try {
-  shard = arguments_.length === 1 ? shardOption(arguments_[0]) : null;
-} catch (error) {
-  await refuse(`test-output-filter: ${error.message}.\n${usage}`);
+if (arguments_.some((argument) => argument.startsWith("--shard"))) {
+  if (arguments_.length > 1)
+    await refuse(`test-output-filter: --shard runs the full suite's shard alone.\n${usage}`);
+  try {
+    shard = shardOption(arguments_[0]);
+  } catch (error) {
+    await refuse(`test-output-filter: ${error.message}.\n${usage}`);
+  }
+  arguments_.shift();
 }
-if (shard !== null) arguments_.shift();
 const fullSuite = arguments_.length === 0;
 let testFiles = arguments_;
 if (fullSuite) {
