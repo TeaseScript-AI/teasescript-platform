@@ -1,14 +1,12 @@
+// The coarse core's work as a sampled regression oracle (`tests/helpers/type-core-work.ts`), one of three files that
+// CI runs side by side.
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProject, createFreshRuntimeSession } from "../src/index.js";
 import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
-import {
-  withTestDemandAllowance,
-  WorkLedger,
-  type WorkCounter,
-} from "../src/type-inference/core/budget.js";
+import { WorkLedger, type WorkCounter } from "../src/type-inference/core/budget.js";
 import {
   asked,
   coreCheckResult,
@@ -17,7 +15,6 @@ import {
   storeContracts,
 } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import { writtenTypeSteps } from "../src/type-inference/core/contract.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
 import { isPlusValue, plusIndexVisits } from "../src/type-inference/core/plus-index.js";
 import { withFlatListings, withNameRecords } from "../src/type-inference/core/property-names.js";
@@ -29,27 +26,19 @@ import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
-  ADMISSION_INGRESS_PRESETS,
-  ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
   COPY_CHAIN_FAMILIES,
-  COPY_RING_FAMILIES,
   DIRECT_INGRESS_PROGRAMS,
   HOT_CANDIDATE_FAMILIES,
-  INHERITED_FIELD_FAMILIES,
-  JOIN_REACH_FAMILIES,
   LAYER_FAMILIES,
-  OUTPUT_BOUND_FAMILIES,
   MIXED_ADD_PRODUCTS,
   NARROWING_FAMILIES,
-  NESTED_OBJECT_SELECTIONS,
   ORACLE_PROGRAMS,
   PROPERTY_STORE_FAMILIES,
   READ_CHAIN_PRODUCTS,
   SEARCH_FAMILIES,
   VALUE_CLASS_SITES,
   VALUE_SHARING_PROGRAMS,
-  W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
   W44_VARIANTS,
   W45_VARIANTS,
@@ -59,47 +48,16 @@ import {
 } from "./helpers/type-core-families.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { askEveryRead, narrowingPass, narrowingPassIn } from "./helpers/type-core-narrowing.js";
-
-/**
- * The work of the coarse core (checkpoint 9, TABLE §8 and §10.1's W rows) as a sampled regression oracle: every
- * family's charged work at k = 128 against k = 64, per doubling of the programs' syntax nodes, since a family's source
- * need not double exactly. Linear work doubles; a structure bounded by a product of two program dimensions about
- * quadruples. The TABLE's `n log n` structures (a key's definitions sorted, its lifting table, its own events) give up
- * to 2.33 at these sizes where nothing else is charged: W26's k stores of one place in one block measure 2.12 here and
- * 2.08 at k = 1,024, while the products the reference model's calibration found measured 2.56 and more. Two sizes
- * calibrate on known products; they prove no bound: the full series to k = 1,024 is the step's evidence, outside CI.
- */
-const DOUBLING = 2.15;
-
-/** A family's program at size k, prepared once for each of its analyses. */
-interface Sized {
-  readonly name: string;
-  readonly request: CoreAnalysisRequest;
-}
-
-function sized(family: WorkFamily, k: number): Sized {
-  const name = `${family.name} at ${k}`;
-  const request = coreRequest(family.program(k));
-  assert.ok(request !== null, `${name}: its files parse and resolve`);
-  return { name, request };
-}
-
-/**
- * A fresh analysis of a family's program, in the source order or with the consumers' and the solver's orders reversed,
- * with the sharing of answers on or off (`withoutSharing`).
- */
-function analysed({ name, request }: Sized, reversed = false, unshared = false): Answers {
-  const run = (): Answers =>
-    reversed
-      ? withConsumerOrder(
-          (list) => [...list].reverse(),
-          () => withSolverSeam({ reverseWorklist: true }, () => analyseCore(request)),
-        )
-      : analyseCore(request);
-  const answers = unshared ? withoutSharing(run) : run();
-  assert.equal(answers.budget.exhausted, null, `${name}: within the allowance`);
-  return answers;
-}
+import {
+  DOUBLING,
+  type Sized,
+  sized,
+  analysed,
+  COUNTER_DOUBLING,
+  type Measured,
+  steepCounters,
+  many,
+} from "./helpers/type-core-work.js";
 
 /** The charged work of a family's program at size k, and its syntax nodes. */
 function work(family: WorkFamily, k: number): { total: number; nodes: number } {
@@ -116,171 +74,6 @@ test("every sampled family's work grows with its program, not with a product of 
     return doubling > DOUBLING ? [`${family.name}: ${doubling.toFixed(3)}`] : [];
   });
   assert.deepEqual(steep, []);
-});
-
-/**
- * S3 §5, revision 14: an admission decision is a demand with the program's nodes' allowance, since a key's stores come
- * from every call site. W5's `shown` places, each a function's own, read a record that every chapter's call stores
- * (their callables' allowances it crossed 4.08 and 8.08 times, reversed): at k = 64 and 128 in either order no decision
- * stops, and the work stays linear.
- */
-test("W5's decisions stop at no demand allowance, in either order, and its work stays linear", () => {
-  const w5 = WORK_FAMILIES.find((family) => family.name === "W5")!;
-  const [at64, at128] = [sized(w5, 64), sized(w5, 128)];
-  for (const reversed of [false, true]) {
-    const [small, large] = [analysed(at64, reversed).budget, analysed(at128, reversed).budget];
-    for (const budget of [small, large])
-      assert.deepEqual(
-        budget.decisions.filter((d) => d.stopped),
-        [],
-        `reversed: ${reversed}`,
-      );
-    const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
-    assert.ok((2 * (large.total / small.total)) / scale <= DOUBLING, `reversed: ${reversed}`);
-  }
-});
-
-/**
- * W34 (TABLE §13.3, r4.33–r4.38), W44 and W45 (r4.46 (3)): every variant in the source order and with the consumers'
- * and the solver's orders reversed, its total and each counter of at least 200 units per doubling of the source. A counter is the raw count of
- * one structure's steps, so a copy walked per field or a mark set made per copy shows in its own counter where the
- * total would hide it; a counter may carry its structure's log factor (a sort, a table of jumps: 2.33 at these sizes
- * where nothing else is charged to it), a product of two dimensions measures 3 and more. The full series to k = 1,024
- * is the step's evidence, outside CI.
- */
-const COUNTER_DOUBLING = 2.35;
-
-/** A program's charged work, in total and by counter. */
-type Measured = Pick<Answers["budget"], "total" | "counts">;
-
-/**
- * The families of `families` whose total or a counter of at least 200 units grows faster than linearly, either order;
- * `unshared`: with the sharing of answers off; `measure`: the work of another run than the analysis's.
- */
-function steepCounters(
-  families: readonly WorkFamily[],
-  unshared = false,
-  measure: (at: Sized, reversed: boolean) => Measured = (at, reversed) =>
-    analysed(at, reversed, unshared).budget,
-  sizes: readonly [number, number] = [64, 128],
-): string[] {
-  const steep: string[] = [];
-  for (const family of families) {
-    const [at64, at128] = [sized(family, sizes[0]), sized(family, sizes[1])];
-    for (const reversed of [false, true]) {
-      const small = measure(at64, reversed);
-      const large = measure(at128, reversed);
-      // (an output-bound family per its output's growth, TABLE r4.245, r4.294; any other per its source's)
-      const scale =
-        family.output === undefined
-          ? (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1)
-          : family.output(sizes[1]) / family.output(sizes[0]);
-      const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}${sizes[0] === 64 ? "" : ` ${sizes[0]} → ${sizes[1]}`}`;
-      const doubling = (before: number, after: number): number =>
-        (2 * (after / Math.max(1, before))) / scale;
-      // (where `main` grows faster on the family's shape, at or under `main`'s growth, TABLE r4.233)
-      const bound = Math.max(DOUBLING, family.main?.total ?? 0);
-      const counterBound = (counter: string): number =>
-        counter === "invSteps"
-          ? Math.max(COUNTER_DOUBLING, family.main?.invSteps ?? 0)
-          : COUNTER_DOUBLING;
-      if (doubling(small.total, large.total) > bound)
-        steep.push(`${name}: ${doubling(small.total, large.total).toFixed(3)}`);
-      for (const [counter, after] of large.counts)
-        if (
-          counter !== "syntaxNodes" &&
-          after >= 200 &&
-          doubling(small.counts.get(counter) ?? 0, after) > counterBound(counter)
-        )
-          steep.push(
-            `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,
-          );
-    }
-  }
-  return steep;
-}
-
-test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
-  assert.deepEqual(steepCounters([...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS]), []);
-});
-
-/**
- * #1573: two choices of k reads of one host global's properties, one class mixed by their leaves, read in k lists in
- * both orders: each list's contract reads one choice and names the other's leaves (`othersLeaves`) from one walk of
- * each choice's options and one check of the read choice's answer, where `main` walked and checked them again for
- * each list (2.52 total, 3.40 `invSteps` at k = 64 → 128). With the sharing on, in either order.
- */
-test("two choices read in k lists grow with the program in either order, each counter too (#1573)", () => {
-  const family: WorkFamily = {
-    name: "choices-read-in-lists",
-    measures:
-      "#1573: each choice's leaves walked and its answer checked once, whichever list reads it",
-    program: (k) => [
-      {
-        path: "main.tease",
-        source: [
-          many(
-            2,
-            (j) =>
-              `let p${j} = askChoice ${many(k, (r) => `{text: "${r}", value: hostValue.p${r}}`, ", ")}`,
-          ),
-          many(
-            k,
-            (i) =>
-              `let xs${i} = [${i % 2 === 0 ? "p0, p1" : "p1, p0"}]\nlet n${i}: integer = xs${i}[hostValue.i]`,
-          ),
-          "exit",
-        ].join("\n"),
-      },
-    ],
-  };
-  assert.deepEqual(steepCounters([family]), []);
-});
-
-/**
- * #1573 (Codex r1's B2 on #1628): a third list of m loads of one class, the members of the first two lists in their order
- * or in another, names their leaves through one node per sequence of its other members (`setNode`), shared with an
- * earlier list of that sequence and else folded anew, one step per member, never by sorting them: the contract's steps
- * (`invSteps`) the third list adds at 16, 32 and 64 members are linear in its members, the second doubling adding at
- * most 2.1 times what the first added, in either order of the analysis (with a sort per list, 2.18 times).
- */
-test("a further list of a set's members, in any order, adds contract steps linear in its members (#1573)", () => {
-  const steps = (m: number, lists: readonly (readonly number[])[], reversed: boolean): number => {
-    const source = [
-      many(
-        m,
-        (j) => `let p${j} = load("same", default: ${j % 2 === 1 ? "hostOther" : "hostValue"})`,
-      ),
-      ...lists.map(
-        (list, i) =>
-          `let xs${i} = [${list.map((j) => `p${j}`).join(", ")}]\nlet n${i}: integer = xs${i}[hostValue.i].p`,
-      ),
-      "exit",
-    ].join("\n");
-    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
-    assert.ok(request !== null, source);
-    const run = (): Answers => analyseCore(request);
-    const answers = reversed
-      ? withConsumerOrder(
-          (list) => [...list].reverse(),
-          () => withSolverSeam({ reverseWorklist: true }, run),
-        )
-      : run();
-    return answers.budget.counts.get("invSteps") ?? 0;
-  };
-  for (const reversed of [false, true])
-    for (const turned of [false, true]) {
-      // (what the third list adds at 16, 32 and 64 members)
-      const [small, middle, large] = [16, 32, 64].map((m) => {
-        const order = Array.from({ length: m }, (_, j) => j);
-        const third = turned ? order.map((j) => (j * (m - 1) + 1) % m) : order;
-        return steps(m, [order, order, third], reversed) - steps(m, [order, order], reversed);
-      });
-      assert.ok(
-        large! - middle! <= 2.1 * (middle! - small!),
-        `reversed: ${reversed}, turned: ${turned}: ${small} → ${middle} → ${large}`,
-      );
-    }
 });
 
 /**
@@ -338,26 +131,6 @@ test("a list's other members are found in steps of their own, whatever lists cam
     }
   } finally {
     WorkLedger.prototype.charge = original;
-  }
-});
-
-/**
- * #1466: a stack of k diamonds of copies, its siblings, wide and nested joins and chains of listing layers read at
- * sparse paths (`LAYER_FAMILIES`), each read answered once per layer and path from the layers below it that hold its
- * property, at one small doubling, in either order and with the sharing off too: the total and the contract's own
- * counter (`invSteps`), which `main` grew as k³ on the diamonds (7.85 per doubling from 16 to 32); where `main` grows
- * faster than the bound on a family's shape, at or under `main`'s growth (`WorkFamily.main`, TABLE r4.233). The
- * support's other counters carry its log factor, which reads above the counters' bound at these sizes. The series to
- * k = 64 in four modes is the PR's evidence, outside CI.
- */
-test("a stack of diamonds of copies and its siblings grow with the program in either order (#1466)", () => {
-  for (const unshared of [false, true]) {
-    const measure = (at: Sized, reversed: boolean): Measured => {
-      const { total, counts } = analysed(at, reversed, unshared).budget;
-      const kept = ["syntaxNodes", "invSteps"] as const;
-      return { total, counts: new Map(kept.map((counter) => [counter, counts.get(counter) ?? 0])) };
-    };
-    assert.deepEqual(steepCounters(LAYER_FAMILIES, unshared, measure, [16, 32]), []);
   }
 });
 
@@ -450,251 +223,6 @@ test("a decided object's property search grows with the program in a stack of co
 });
 
 /**
- * #1466, Codex r5's F1 (TABLE r4.245): k reads of `h.p<i>` each answered by k layers holding a source on its path, so the
- * summaries' demands are the answers' own pairs P, counted from the program's holders: at k 16 and 32 in the four modes
- * the demands are exactly P less the pairs one source answers by reference (TABLE r4.251), one per pair a summary
- * answers, never repeated, never a pass-through layer's, `checks` at or under `main`'s,
- * `invSteps` growing at or under `main`'s, and the total's excess over `main` per pair not rising (r4.245's exception for
- * an output-bound family; the control keeps the total's bound). `main`'s work is the family's measured oracle.
- */
-test("summaries' demands on output-bound reads are their answers' pairs, at main's growth per pair (#1466)", () => {
-  const modes = [
-    [false, false],
-    [false, true],
-    [true, false],
-    [true, true],
-  ] as const;
-  for (const family of OUTPUT_BOUND_FAMILIES)
-    modes.forEach(([reversed, unshared], mode) => {
-      const at = (k: 16 | 32) => {
-        const request = coreRequest(
-          [{ path: "main.tease", source: family.source(k) }],
-          ["hostValue", "hostOther"],
-        );
-        assert.ok(request !== null, `${family.name} at ${k}: its files parse and resolve`);
-        const { budget } = analysed(
-          { name: `${family.name} at ${k}`, request },
-          reversed,
-          unshared,
-        );
-        const [total, checks, invSteps] = family.main[k][mode]!;
-        const name = `${family.name} at ${k}, mode ${mode}`;
-        assert.equal(
-          budget.facts.layerDemands,
-          family.pairs(k) - family.references(k),
-          `${name}: one demand per pair a summary answers`,
-        );
-        assert.ok(
-          (budget.counts.get("checks") ?? 0) <= checks,
-          `${name}: checks at or under main's`,
-        );
-        return { budget, main: { total, invSteps }, nodes: budget.counts.get("syntaxNodes") ?? 1 };
-      };
-      const [small, large] = [at(16), at(32)];
-      const scale = large.nodes / small.nodes;
-      const growth = (before: number, after: number): number => (2 * after) / before / scale;
-      const name = `${family.name}, mode ${mode}`;
-      assert.ok(
-        growth(
-          small.budget.counts.get("invSteps") ?? 0,
-          large.budget.counts.get("invSteps") ?? 0,
-        ) <= growth(small.main.invSteps, large.main.invSteps),
-        `${name}: invSteps at or under main's growth`,
-      );
-      if (family.outputBound) {
-        const perPair = (at: typeof small, k: 16 | 32): number =>
-          (at.budget.total - at.main.total) / family.pairs(k);
-        assert.ok(
-          perPair(large, 32) <= perPair(small, 16),
-          `${name}: the excess per pair not rising`,
-        );
-      } else
-        assert.ok(
-          growth(small.budget.total, large.budget.total) <= DOUBLING,
-          `${name}: total within the bound`,
-        );
-    });
-});
-
-/**
- * #1466, the READY replay's `graph/224` and `graph/533` (a mutual feedback whose candidate route asks one `q` deeper per
- * question), the deep read they showed and Astra r1's alternating feedback (`a.next.back.next…`; TABLE r4.250, r4.251):
- * a read `depth` properties down, one holder answering it, asks that holder's source by reference at the caller's own
- * path (`singleSource`), never a layer's summary rebuilt from the path's record, makes no path id (only a summary's
- * demand needs one), and walks its path's steps once, its prefixes' texts never kept. At depths 16 and 32 in the four
- * modes, against `main`'s work there (measured on 7d6c4d3d4: a regression oracle of these shapes): no layer demand; the
- * total, `invSteps` and `checks` at or under `main`'s, `main`'s lead on the total not shrinking, and the literal work's
- * growth at or under `main`'s (kept texts made it a power of the depth steeper; a path id made for every read put the
- * alternating read 2D + 9 units above `main`). At depths 2 to 4 the head's excess over `main` is at most the reference's
- * fixed setup (6, 9 and 1 units on the deep read, 6, 10 and 2 on the alternating one), from 5 none.
- */
-test("a deep read asks its one holder's source by reference and walks its path's steps once (#1466)", () => {
-  const shapes = [
-    {
-      name: "a read",
-      source: (depth: number): string =>
-        [
-          "let a={left:1,q:null}",
-          "let b={right:2,q:null}",
-          "a.q=b",
-          "b.q=a",
-          `let read=a${".q".repeat(depth)}`,
-          "say read",
-          "exit",
-        ].join("\n"),
-      // (`main`'s work at depths 16 and 32, and its totals at 2 to 7, the sharing on and off, equal in either order)
-      shared: {
-        total: [8855, 23083],
-        invSteps: [2103, 7187],
-        checks: [260, 356],
-        literalUnits: [1974, 6030],
-        small: [2410, 2712, 3037, 3385, 3758, 4155],
-      },
-      unshared: {
-        total: [7451, 18875],
-        invSteps: [2184, 7364],
-        checks: [260, 356],
-        literalUnits: [562, 1782],
-        small: [2193, 2453, 2727, 3018, 3328, 3656],
-      },
-      setup: [6, 9, 1, 0, 0, 0],
-    },
-    {
-      name: "an alternating read",
-      source: (depth: number): string =>
-        [
-          "let a={left:1,next:null}",
-          "let b={right:2,back:null}",
-          "a.next=b",
-          "b.back=a",
-          `let read=a${Array.from({ length: depth }, (_, index) => (index % 2 ? ".back" : ".next")).join("")}`,
-          "say read",
-          "exit",
-        ].join("\n"),
-      shared: {
-        total: [10239, 29677],
-        invSteps: [2427, 8601],
-        checks: [260, 356],
-        literalUnits: [3053, 11245],
-        small: [2420, 2726, 3061, 3424, 3819, 4263],
-      },
-      unshared: {
-        total: [8647, 24711],
-        invSteps: [2508, 8778],
-        checks: [260, 356],
-        literalUnits: [1453, 6239],
-        small: [2200, 2460, 2739, 3039, 3364, 3729],
-      },
-      setup: [6, 10, 2, 0, 0, 0],
-    },
-  ];
-  type Counter = "total" | "invSteps" | "checks" | "literalUnits";
-  const modes = [
-    [false, false],
-    [false, true],
-    [true, false],
-    [true, true],
-  ] as const;
-  for (const shape of shapes)
-    modes.forEach(([reversed, unshared], mode) => {
-      const at = (depth: number) => {
-        const request = coreRequest([{ path: "main.tease", source: shape.source(depth) }]);
-        assert.ok(request !== null, `${shape.name} ${depth} deep: its files parse and resolve`);
-        const { budget } = analysed(
-          { name: `${shape.name} ${depth} deep`, request },
-          reversed,
-          unshared,
-        );
-        const counts: Record<Counter, number> = {
-          total: budget.total,
-          invSteps: budget.counts.get("invSteps") ?? 0,
-          checks: budget.counts.get("checks") ?? 0,
-          literalUnits: budget.counts.get("literalUnits") ?? 0,
-        };
-        return {
-          counts,
-          demands: budget.facts.layerDemands,
-          nodes: budget.counts.get("syntaxNodes") ?? 1,
-        };
-      };
-      const ours = unshared ? shape.unshared : shape.shared;
-      const sizes = [at(16), at(32)];
-      sizes.forEach((size, index) => {
-        const name = `${shape.name}, mode ${mode}, ${16 << index} deep`;
-        assert.equal(size.demands, 0, `${name}: no layer demand`);
-        for (const counter of ["total", "invSteps", "checks"] as const)
-          assert.ok(
-            size.counts[counter] <= ours[counter][index]!,
-            `${name}: ${counter} ${size.counts[counter]} against main's ${ours[counter][index]}`,
-          );
-      });
-      const lead = (index: number): number => ours.total[index]! - sizes[index]!.counts.total;
-      assert.ok(
-        lead(1) >= lead(0),
-        `${shape.name}, mode ${mode}: main's lead ${lead(0)} then ${lead(1)}`,
-      );
-      const scale = sizes[1]!.nodes / sizes[0]!.nodes;
-      const growth = (2 * sizes[1]!.counts.literalUnits) / sizes[0]!.counts.literalUnits / scale;
-      const mains = (2 * ours.literalUnits[1]!) / ours.literalUnits[0]! / scale;
-      assert.ok(
-        growth <= mains,
-        `${shape.name}, mode ${mode}: literalUnits ${growth.toFixed(4)} against main's ${mains.toFixed(4)}`,
-      );
-      shape.setup.forEach((setup, index) => {
-        const excess = at(index + 2).counts.total - ours.small[index]!;
-        assert.ok(
-          excess <= setup,
-          `${shape.name}, mode ${mode}, ${index + 2} deep: ${excess} over main's`,
-        );
-      });
-    });
-});
-
-/**
- * #1466, Codex r4's positive hits: k joined layers, each listing a step of its own, read at each, one doubling later, where
- * a read finding its layer by visiting each joined layer grows past the bound (2.40 against the selection's 2.02,
- * `invSteps`): a read finds the one layer listing its step by the place's per-step map, its descent the map's depth.
- */
-test("a read finds the joined layer listing its step by the place's map (#1466)", () => {
-  const family = LAYER_FAMILIES.find((each) => each.name === "distinct-steps")!;
-  for (const unshared of [false, true]) {
-    const measure = (at: Sized, reversed: boolean): Measured => {
-      const { total, counts } = analysed(at, reversed, unshared).budget;
-      return {
-        total,
-        counts: new Map([
-          ["syntaxNodes", counts.get("syntaxNodes") ?? 0],
-          ["invSteps", counts.get("invSteps") ?? 0],
-        ]),
-      };
-    };
-    assert.deepEqual(steepCounters([family], unshared, measure, [32, 64]), []);
-  }
-});
-
-/**
- * #1466, Codex r2's sibling and its shared shape: a read below nested joins, or below joined copies over a record listing
- * the same step, asks only the layer holding its property, never a joining layer or a copy it passes through. Below
- * nested joins that layer's one source answers the read by reference, so no summary's demand is made (TABLE r4.251);
- * over the shared record a listing layer lies below the step, so each property's holder makes its summary's demand, one
- * per property: k, at each size and in either order (r4.227's bound; a regression oracle of the selection, where a
- * joining layer asked too would make the read's summaries' demands).
- */
-test("a read below nested or shared joins asks only the layers holding its path (#1466)", () => {
-  const families = LAYER_FAMILIES.filter(
-    (each) => each.name.startsWith("nested-join") || each.name === "shared-join",
-  );
-  for (const family of families)
-    for (const k of [8, 16, 32, 64])
-      for (const reversed of [false, true])
-        assert.equal(
-          analysed(sized(family, k), reversed).budget.facts.layerDemands,
-          family.name === "shared-join" ? k : 0,
-          `${family.name} at ${k}${reversed ? " reversed" : ""}`,
-        );
-});
-
-/**
  * Stage 3b's families (TABLE §13.3, W27–W34 and the tested-copy variant): the narrowing index built and every read's
  * narrowing (N2 with N5) and route (N3) asked, as S10's second part's consumers will ask them, in source order and
  * reversed with the solver's worklist; its total and each counter under the standard gate. The series to k = 1,024 is
@@ -711,17 +239,6 @@ test("every stage 3b family's index and queries grow with the program in either 
     return { total: pass.program.work.total, counts: pass.program.work.counts() };
   };
   assert.deepEqual(steepCounters(NARROWING_FAMILIES, false, measure), []);
-});
-
-/**
- * N5's families through the analysis (S10 part 2b): a read in a stored value takes its narrowing, so the stores' own
- * preserving tests run as the analysis asks them, components included; the same gate.
- */
-test("stage 3b's N5 families grow with the program through the analysis too, in either order (§13.3)", () => {
-  assert.deepEqual(
-    steepCounters(NARROWING_FAMILIES.filter((family) => family.name.startsWith("W29"))),
-    [],
-  );
 });
 
 /**
@@ -835,9 +352,6 @@ test("a question asked by every read of one place, read k times, takes work that
   }
   assert.deepEqual(steep, []);
 });
-
-const many = (k: number, row: (index: number) => string, by = "\n"): string =>
-  Array.from({ length: k }, (_, index) => row(index)).join(by);
 
 /** #1199's list with each object `around` the same way, the wide one at `at` among the k small ones. */
 const nestedObjects = (
@@ -1388,85 +902,6 @@ test("each product a repair removed grows with the program in either order (#119
 });
 
 /**
- * #1310 (the lead's rule): an operand that reaches an earlier join, through a literal's property, a nested list element,
- * an `otherwise`'s side, a kept variable or a copy, takes that join's composed type, so the join check composes each
- * tree once (beside #1357's prefixes each in an object above): each family's total and its counters grow with the
- * program in either order, the sharing on and off. The kept variables and copies of a written union without a conflicting
- * leaf are reported, not gated: admission's landings walk the chain once per link on `main` too (#1428), the copies'
- * charged work (`landedBelow`'s `copiesAlong`, `landsThrough` and `emit` from `hotSets`) and both forms' ids, made
- * there below the charged length (`keptParts` in `landedBelow`, 14,470 → 57,510 code units kept, 28,974 → 115,217
- * copied, as on `main`); at k = 64 → 128 total and `indexSteps`:
- *
- * | copies of a written union | `main` | this head |
- * | joined at each link | 2.18, 2.47 | 2.16, 2.45 |
- * | only copied | 2.02, 2.04 | 2.02, 2.04 |
- * | joined, from an unwritten list | 2.01, 2.03 | 2.01, 2.02 |
- *
- * Each link an object of its own property, the composed type grows with the chain (Codex r15's and r16's B1): the
- * projections' members are gated at 64 → 128 and 128 → 256, the growing join an operand's first part (an `otherwise`'s
- * first side); a kept variable's and a copy's are reported, a variable read beside each join of distinct properties
- * growing on `main` too (#1384: about 3.4 total, `exactValues` 3.9). An `otherwise` holding the earlier join on its
- * later side is gated below, with the composition's own invariant. (A literal's later element, the other later part, is
- * #1192's accepted nested-literal product on `main`.)
- */
-test("a join's operand reaching an earlier join takes its composed type, its work linear either way (#1310)", () => {
-  const gated = JOIN_REACH_FAMILIES.filter(
-    (family) =>
-      !/^join-reach-(kept|copy)-(left|right)(-width)?$/.test(family.name) &&
-      !family.name.startsWith("join-reach-choice-later-"),
-  );
-  assert.equal(gated.length, 22);
-  // (a composed type growing with the chain: its second doubling too, where a walk of a growing part first crosses the
-  // total's gate, Codex r16's B1)
-  const growing = gated.filter((family) => family.name.endsWith("-width"));
-  assert.deepEqual(
-    [
-      ...steepCounters(gated),
-      ...steepCounters(gated, true),
-      ...steepCounters(growing, false, undefined, [128, 256]),
-      ...steepCounters(growing, true, undefined, [128, 256]),
-    ],
-    [],
-  );
-});
-
-/**
- * #1310: composing an operand's parts visits the smaller part only, so an earlier join growing with a chain is never
- * walked again where it stands as an operand's later part (`join-reach-choice-later-*`, an `otherwise`'s later side).
- * This gates that one operation, its visits (`partVisits`) at most 2.15 per doubling in either order; a walk of the
- * later part measures 3.9. The same analyses gate the shape's total and counters, the sharing on: its fallback check
- * makes each label below a fallback only where a check or warning names it, charged (#1433), so the shape's work is
- * linear in the code units it makes too (the uncharged-work probe, outside CI; 4.0 per doubling before).
- */
-test("the composition of an operand's parts visits only its smaller part, its shape's work linear (#1310, #1433)", () => {
-  const later = JOIN_REACH_FAMILIES.filter((family) =>
-    family.name.startsWith("join-reach-choice-later-"),
-  );
-  assert.equal(later.length, 6);
-  // (each analysis the counters' gate makes, kept for the visits')
-  const budgets = new Map<string, Measured>();
-  const steep = steepCounters(later, false, (at, reversed) => {
-    const { budget } = analysed(at, reversed);
-    budgets.set(`${at.name}${reversed ? " reversed" : ""}`, budget);
-    return budget;
-  });
-  for (const family of later)
-    for (const reversed of [false, true]) {
-      const [small, large] = [64, 128].map((k) =>
-        budgets.get(`${family.name} at ${k}${reversed ? " reversed" : ""}`)!,
-      );
-      const visits = (budget: Measured): number => budget.counts.get("partVisits") ?? 0;
-      assert.ok(visits(large!) >= 128, `${family.name}: each link's parts composed`);
-      const scale =
-        (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
-      const doubling = (2 * (visits(large!) / Math.max(1, visits(small!)))) / scale;
-      if (doubling > DOUBLING)
-        steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
-    }
-  assert.deepEqual(steep, []);
-});
-
-/**
  * The holder cache's witness: k variables holding `q` joined in another run, then a run of k variables lacking it and
  * one holding it with k properties below it, asked at each of them, so each question looks for the bindings holding
  * `q` among many.
@@ -1726,126 +1161,6 @@ test("an indexed run's warm query charges its counted steps alone, a few without
 });
 
 /**
- * #1194: a written type's levels are read once per type, and each walk of it steps on from the prefix before, so k
- * copies of a value of a type k levels deep walk the type about k² steps (each decided path still asks it from its
- * root: the per-path questions, a design round), never k³ (each copy and each label reading every level from the root,
- * 7.45 per doubling before). The walk is uncharged work (`writtenTypeSteps` counts it), gated at its measured doubling.
- */
-/**
- * Measured per pass (steps ÷ passes), as `c1Visits`'s bound divides by `rejectPasses`: at 64 levels `out`'s decision
- * crosses its allowance (its cost is depth × copies, G6 in #1319's design-round list), and the pass that restarts it
- * (TABLE r4.180, r4.183) walks the type again.
- */
-test("copies of a deep written type walk the type once, not once per copy (#1194)", () => {
-  const measured = (k: number): { steps: number; nodes: number } => {
-    const source = [
-      `let typed: integer${"[]".repeat(k)} = []`,
-      "let out = typed",
-      ...Array.from({ length: k }, () => "out = typed"),
-      "exit",
-    ].join("\n");
-    const request = coreRequest([{ path: "main.tease", source }]);
-    assert.ok(request !== null, `${k} levels: its file parses and resolves`);
-    const before = writtenTypeSteps();
-    const answers = analyseCore(request);
-    const { counts } = answers.budget;
-    const passes = 1 + (counts.get("rejectPasses") ?? 0) + (counts.get("stopPasses") ?? 0);
-    return { steps: (writtenTypeSteps() - before) / passes, nodes: counts.get("syntaxNodes") ?? 0 };
-  };
-  const [small, large] = [measured(32), measured(64)];
-  const doubling = (2 * (large.steps / small.steps)) / (large.nodes / small.nodes);
-  assert.ok(doubling <= 4.15, `${doubling.toFixed(3)} per doubling of the source`);
-});
-
-/**
- * #1438: a decider group's region holds each path below the group as a node one step below its parent's, never an
- * array or a text, so the decision of a literal nested k deep grows with k: the largest decision's units per doubling
- * of the source, for a literal of two kinds in either order and for one copying a written union in the source order
- * (2.01 and 2.06 here). Reversed, that one's decision costs depth × copies, G6 in #1319's design-round list (about 3.6,
- * as before G3 2c). A region that made each level's path and its text measured 4.42 and 4.45, and stopped both shapes'
- * decisions at their allowance at 300 levels.
- */
-test("a deep literal's decision grows with its depth, never with its square (#1438)", () => {
-  const nest = (k: number, leaf: string): string => `${"[".repeat(k)}${leaf}${"]".repeat(k)}`;
-  const shapes: readonly (readonly [string, (k: number) => string, readonly boolean[]])[] = [
-    ["of two kinds", (k) => `let xs = [${nest(k, "1")}, ${nest(k, '"bad"')}]`, [false, true]],
-    [
-      "copying a written union",
-      (k) => `let typed: integer | string = 1\nlet xs = [${nest(k, "typed")}, ${nest(k, '"ok"')}]`,
-      [false],
-    ],
-  ];
-  const largest = (budget: Answers["budget"]): number =>
-    Math.max(...budget.decisions.map((decision) => decision.units));
-  const steep: string[] = [];
-  for (const [name, source, orders] of shapes) {
-    const [at64, at128] = [64, 128].map((k): Sized => {
-      const request = coreRequest([{ path: "main.tease", source: `${source(k)}\nexit` }]);
-      assert.ok(request !== null, `${name} at ${k}: its file parses and resolves`);
-      return { name: `${name} at ${k}`, request };
-    });
-    for (const reversed of orders) {
-      const [small, large] = [at64!, at128!].map((at) => analysed(at, reversed).budget);
-      const scale =
-        (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
-      const doubling = (2 * (largest(large!) / largest(small!))) / scale;
-      if (doubling > DOUBLING)
-        steep.push(`${name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
-    }
-  }
-  assert.deepEqual(steep, []);
-});
-
-/**
- * Admission (TABLE §5, §10.3; the port plan's §3.3): its decisions, rejections, candidates and boundary checks, gated as
- * W34 is; A6's chain of dependent rejections, which takes a pass per link (§8's passes × stores, each pass charged), is
- * a gated known limit by the owner's decision (TABLE r4.49, option A): a regression check on the 64 → 128 step only,
- * at its measured doubling, not a bound at larger sizes; a change to admission's passes re-measures and proposes the
- * gate with its counts, never retunes it. Copies interleaved with conditional stores below their path (S6-CARRIERS
- * §4.7, condition (b)) are gated in the same form, a known limit by the owner's decision too (TABLE r4.69 (1)), and so
- * are copies separated by calls storing their source (r4.71).
- */
-test("every admission family's work and each of its counters grow with the program in either order", () => {
-  assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);
-  const steep: string[] = [];
-  for (const family of ADMISSION_KNOWN_PRODUCTS) {
-    const [at64, at128] = [sized(family, 64), sized(family, 128)];
-    for (const reversed of [false, true]) {
-      const small = analysed(at64, reversed).budget;
-      const large = analysed(at128, reversed).budget;
-      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
-      const doubling = (2 * (large.total / small.total)) / scale;
-      if (doubling > family.measured)
-        steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
-    }
-  }
-  assert.deepEqual(steep, []);
-});
-
-/**
- * #1188: admission's hot-candidate discovery by touch tries lists no contribution once per context that reaches it (a
- * configuration prefix, a group's place, a read, a literal, a merge place or a cycle), so each family's total and each
- * of its counters grow with the program in either order. The series to k = 1,024, both orders and the sharing off, is
- * the step's evidence, outside CI.
- */
-test("every hot-candidate family's work and each of its counters grow with the program in either order (#1188)", () => {
-  assert.deepEqual(steepCounters(HOT_CANDIDATE_FAMILIES), []);
-});
-
-/**
- * G5 (5a, #1339): a cycle of whole copies is cut at its stops at once, so no member's entry walks the cycle again; each
- * family's total and each of its counters grow with the program in either order, with the sharing on and off. The
- * chord cycle reached the allowance at k = 64 on `main`. The series, the four modes and the conflicting chord cycle (whose
- * per-property components remain, G5's 5b), are the step's evidence, outside CI.
- */
-test("a cycle of whole copies read at every member grows with the program in either order, shared or not (#1339)", () => {
-  assert.deepEqual(
-    [...steepCounters(COPY_RING_FAMILIES), ...steepCounters(COPY_RING_FAMILIES, true)],
-    [],
-  );
-});
-
-/**
  * #1397: k/8 choices of k host reads each, read in k lists, each list the choices in a shuffled order of its own
  * (#1359's B1 family, `leaf-permuted` in `tests/families/joins/1359-peer-set-orders.mjs`). Each list's item unites its
  * elements in its own order, a node of its own, and C1's site walked each such node's leaves though no list's store
@@ -1899,113 +1214,6 @@ test("lists of one set of choices in many orders site their host data without wa
 });
 
 /**
- * #1426: in a selection nested k deep whose options are objects, read at a property, each level's literal is read at the
- * path once, its answer composed from the level inside's: the contract's merges and steps grow with the program in
- * either order (a level merged again from every literal inside measured 3.75 to 3.93 here). #1444: admission lists
- * the own structure of each literal's elements once, after the elements inside it, whichever literal the order asks
- * first (`expectStructures`), so its checks and the total grow with the program in either order too (asked outer
- * first, each element's walk of the nest inside it measured 2.64 to 2.76 for `checks` here). The series to k = 256, the
- * four modes and the siblings are the steps' evidence, outside CI.
- */
-test("nested selections of objects merge each level's items once, in either order (#1426)", () => {
-  const steep: string[] = [];
-  for (const family of NESTED_OBJECT_SELECTIONS) {
-    const [at32, at64] = [sized(family, 32), sized(family, 64)];
-    for (const reversed of [false, true]) {
-      const [small, large] = [at32, at64].map((at) => analysed(at, reversed).budget);
-      const scale =
-        (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
-      const doubling = (before: number, after: number): number =>
-        (2 * (after / Math.max(1, before))) / scale;
-      const name = `${family.name}${reversed ? " reversed" : ""}`;
-      for (const counter of ["mergeItems", "invSteps", "checks"] as const) {
-        const factor = doubling(small!.counts.get(counter) ?? 0, large!.counts.get(counter) ?? 0);
-        if (factor > COUNTER_DOUBLING) steep.push(`${name} ${counter}: ${factor.toFixed(3)}`);
-      }
-      if (doubling(small!.total, large!.total) > DOUBLING)
-        steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
-    }
-  }
-  assert.deepEqual(steep, []);
-});
-
-/**
- * #1444(b,c): the same nests with a written union at the property, its copy in the level inside (`[x, {p: typed}][0]`),
- * directly and through a copy of the written binding: each literal's elements asked their earliest decider outside
- * every decision are answered from the groups' summaries, each level once (`writtenDecider`), not each level's walk of
- * the nest inside it again (`checks` 4.11 to 4.29 per doubling before). With the leaf an object of another type, each
- * level's list mixes the property's types and each rejection shows only in the next pass, k passes (A6's chain, gated
- * as its own known limit): each pass's work grows with the program (2.69 per doubling before at k = 32 → 64). The
- * series to k = 128 in the four modes and the siblings are the step's evidence, outside CI.
- */
-const WRITTEN_NESTS: readonly WorkFamily[] = (
-  [
-    ["a written union", "", "{p: typed}"],
-    ["a copy of a written union", "let copied = typed\n", "{p: copied}"],
-    ["a written option of another type", "", '{p: "origin"}'],
-  ] as const
-).map(([shape, setup, leaf]) => ({
-  name: `written nest ${shape}`,
-  measures: `#1444: k selections of objects nested, ${shape} at the property`,
-  program: (k: number) => {
-    const other = setup === "" ? "{p: typed}" : "{p: copied}";
-    let value: string = leaf;
-    for (let i = 0; i < k; i += 1) value = `[${value}, ${other}][0]`;
-    const source = `let typed: integer | string = 1\n${setup}let out = ${value}\nsay "\${out.p}"\nexit\n`;
-    return [{ path: "main.tease", source }];
-  },
-}));
-
-test("a written decider in nested selections is answered once per level, each pass in proportion (#1444)", () => {
-  const steep: string[] = [];
-  for (const family of WRITTEN_NESTS) {
-    // (the option's k passes, A6's, are its known limit: the work of each pass is gated)
-    const passes = family.name.includes("option");
-    const [small, large] = (passes ? [16, 32] : [32, 64]).map((k) => sized(family, k));
-    for (const reversed of [false, true]) {
-      const [a, b] = [small!, large!].map((at) => analysed(at, reversed).budget);
-      const scale = (b!.counts.get("syntaxNodes") ?? 0) / (a!.counts.get("syntaxNodes") ?? 1);
-      const per = (budget: typeof a, units: number): number =>
-        passes ? units / ((budget!.counts.get("rejectPasses") ?? 0) + 1) : units;
-      const doubling = (before: number, after: number): number =>
-        (2 * (per(b, after) / Math.max(1, per(a, before)))) / scale;
-      const name = `${family.name}${reversed ? " reversed" : ""}`;
-      if (doubling(a!.total, b!.total) > DOUBLING)
-        steep.push(`${name}: ${doubling(a!.total, b!.total).toFixed(3)}`);
-      const checks = doubling(a!.counts.get("checks") ?? 0, b!.counts.get("checks") ?? 0);
-      if (checks > COUNTER_DOUBLING) steep.push(`${name} checks: ${checks.toFixed(3)}`);
-    }
-  }
-  assert.deepEqual(steep, []);
-});
-
-/**
- * A4 through copies (the owner's reviewer's F1 on #1049, TABLE r4.80): the inherited-field families, gated above with
- * the admission families, are gated with the sharing off too, so what a copy costs never hangs on equivalent answers
- * being shared; and his budget witness, a chain of 1,024 whole copies of a root of 1,024 written-typed fields (a source
- * of 6,153 syntax nodes that reached the allowance), completes within the default allowance.
- */
-test("the inherited-field families grow with the program with the sharing off, and the 1,024 chain completes", () => {
-  assert.deepEqual(steepCounters(INHERITED_FIELD_FAMILIES, true), []);
-  const chain = INHERITED_FIELD_FAMILIES.find((family) => family.name === "A4-inherited-chain")!;
-  assert.equal(analysed(sized(chain, 1_024)).outcome, "valid");
-});
-
-/**
- * S6c (TABLE r4.61, r4.69 (2), r4.85): the value side's inherited products, gated as W34 is: same-source adds, choices
- * and a literal's `get`s (S6-CARRIERS §4.5, §4.7: `ADMISSION_SAME_SOURCES`), product (c) of W34's class, k literals of
- * typed ingresses of one default (`ADMISSION_INGRESS_PRESETS`), and each discovery site's class (`VALUE_CLASS_SITES`),
- * their totals and each counter of at least 200 units in either order (they were gated at their measured doublings,
- * 2.04 to 3.65, while the value side read each copy at each field).
- */
-test("the value side's work on same sources and typed presets grows with the program in either order", () => {
-  assert.deepEqual(
-    steepCounters([...ADMISSION_SAME_SOURCES, ...ADMISSION_INGRESS_PRESETS, ...VALUE_CLASS_SITES]),
-    [],
-  );
-});
-
-/**
  * The value side's gated known limits (TABLE r4.83 (2), (5)): read chains through nested literals, each link's key one
  * step longer (`READ_CHAIN_PRODUCTS`), and adds of several sources into one list in turn (`MIXED_ADD_PRODUCTS`); a
  * regression check on the 64 → 128 step only, each held to its measured doubling in either order. On CI (GitHub
@@ -2026,19 +1234,6 @@ test("read chains and mixed-source adds grow no faster than measured", () => {
     }
   }
   assert.deepEqual(steep, []);
-});
-
-/**
- * S6c: an element selection reads its owner at its step and whole, so a chain of k `.first` read each link twice per
- * link below it, 2^k reads in all (`main` reached the allowance from k = 20); its whole answer is read once per value
- * now, so a list nested 32 deep read through 32 `.first` is answered within the allowance, in either order.
- */
-test("a list nested 32 deep read through 32 `.first` is answered within the allowance", () => {
-  const source = `let value = ${"[".repeat(32)}1${"]".repeat(32)}\nlet n: integer = value${".first".repeat(32)}\nexit`;
-  const request = coreRequest([{ path: "main.tease", source }]);
-  assert.ok(request !== null);
-  const named = { name: "the 32-deep `.first` chain", request };
-  assert.deepEqual([analysed(named).outcome, analysed(named, true).outcome], ["valid", "valid"]);
 });
 
 /**
@@ -2069,17 +1264,6 @@ test("a literal of 4,096 distinct records is searched in linear time", () => {
   assert.ok(inspected <= 64 * k, `${inspected} entries inspected`);
 });
 
-test("a chain of records over shared inputs is identified in linear space (round 13 B3)", () => {
-  const levels = Array.from(
-    { length: 32 },
-    (_, index) => `let a${index + 1} = {left: a${index}, right: a${index}}`,
-  );
-  const source = `let a0 = {n: 1}\n${levels.join("\n")}\nlet xs = [a32, a32]\nexit`;
-  const request = coreRequest([{ path: "main.tease", source }]);
-  assert.ok(request !== null);
-  assert.equal(analyseCore(request).outcome, "valid");
-});
-
 test("a chain of carriers over shared inputs is identified in linear space", () => {
   const levels = Array.from(
     { length: 32 },
@@ -2089,27 +1273,6 @@ test("a chain of carriers over shared inputs is identified in linear space", () 
   const request = coreRequest([{ path: "main.tease", source }]);
   assert.ok(request !== null);
   assert.equal(analyseCore(request).outcome, "valid");
-});
-
-/**
- * W34's two known products, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): a regression check on
- * the 64 → 128 growth step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at
- * larger sizes (128 → 256 grows 3.62 and 2.82), and no linearity is asserted for them.
- */
-test("W34's two known products grow no faster than measured", () => {
-  const steep: string[] = [];
-  for (const family of W34_KNOWN_PRODUCTS) {
-    const [at64, at128] = [sized(family, 64), sized(family, 128)];
-    for (const reversed of [false, true]) {
-      const small = analysed(at64, reversed).budget;
-      const large = analysed(at128, reversed).budget;
-      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
-      const doubling = (2 * (large.total / small.total)) / scale;
-      if (doubling > family.measured)
-        steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
-    }
-  }
-  assert.deepEqual(steep, []);
 });
 
 /** A program's published record in one order, as the oracle's analysis gives it, which the chain control reuses. */
@@ -2240,183 +1403,6 @@ test("resolving chains of copies changes no published record or writer, in both 
 });
 
 /**
- * S6-CARRIERS §4.4: a class's members are visited only where its side's quiet proof is not quiet, and each such visit
- * emits, so the visits are bounded by the output: per pass, at most the diagnostics, the checks and the decided paths.
- */
-test("every family's member visits are bounded by its output and its decided paths (§4.4)", () => {
-  const over: string[] = [];
-  for (const family of [
-    ...WORK_FAMILIES,
-    ...W34_VARIANTS,
-    ...W44_VARIANTS,
-    ...W45_VARIANTS,
-    ...ADMISSION_FAMILIES,
-  ]) {
-    const answers = analysed(sized(family, 32));
-    const counts = answers.budget.counts;
-    const visits = counts.get("c1Visits") ?? 0;
-    const bound =
-      (1 + (counts.get("rejectPasses") ?? 0)) *
-      (answers.diagnostics.length + answers.checks.length + answers.budget.facts.decidedPaths);
-    if (visits > bound) over.push(`${family.name}: ${visits} visits, ${bound} the bound`);
-  }
-  assert.deepEqual(over, []);
-});
-
-/**
- * TABLE r4.192 (#1403): what a decision's stop forgets by, each demand's reader and each key a demand asked whether it
- * stopped, is counted apart from the allowance (`countApart`), never in `total`, so no stop point moves. It is kept only
- * where a decision can still stop (#1599): what admission's walk asks of a place before that place's last decision
- * ends, and the readers of what a stop may then forget; nothing once every decision has run. So a program whose later
- * reads come after every decision keeps the same records however many there are, and one whose decisions read a place a
- * later decision can stop keeps records growing with them. On nested selections the records double at one doubling of
- * the source; on a chain of wrappers read through every link the charged reads themselves grow faster (G6's deep
- * shapes), and the records stay below one per charged read (`yields`). Both orders, the sharing on and off.
- */
-test("what a stop forgets by is counted apart and kept only where a decision can still stop (#1403, #1599)", () => {
-  const nest = (k: number, leaf: string): string =>
-    Array.from({ length: k }).reduce<string>((inner) => `[${inner}, "other"][0]`, leaf);
-  const program = (source: string): SourceFile[] => [{ path: "main.tease", source }];
-  const lines = (k: number, line: (i: number) => string): string =>
-    Array.from({ length: k }, (_, i) => line(i)).join("\n");
-  // (each shape: its name, its program, whether its records grow linearly, and whether a decision reads a place a later
-  // one can stop (records growing with the source), none does after the first decisions (the same records at both
-  // sizes), or neither is asserted)
-  type Kept = "growing" | "constant" | null;
-  const shapes: readonly (readonly [string, (k: number) => SourceFile[], boolean, Kept])[] = [
-    [
-      "nested selections of a variable",
-      (k) => program(`let seed = "origin"\nlet out = ${nest(k, "seed")}\nsay out\nexit\n`),
-      true,
-      null,
-    ],
-    [
-      "nested selections of a literal",
-      (k) => program(`let out = ${nest(k, '"origin"')}\nsay out\nexit\n`),
-      true,
-      null,
-    ],
-    [
-      "a chain of wrappers read through every link",
-      (k) =>
-        program(
-          [
-            "let typed: integer = 1",
-            "let root = {f: typed, q: null}",
-            ...Array.from(
-              { length: k },
-              (_, i) => `let a${i} = {q: ${i === 0 ? "root" : `a${i - 1}`}}`,
-            ),
-            `let out = a${k - 1}.${Array.from({ length: k }, () => "q").join(".")}.f`,
-            "exit",
-          ].join("\n") + "\n",
-        ),
-      false,
-      null,
-    ],
-    [
-      "reads after every decision",
-      (k) =>
-        program(`let seed = {n: "origin"}\n${lines(k, () => 'say [seed.n, "other"][0]')}\nexit\n`),
-      true,
-      "constant",
-    ],
-    [
-      "decisions reading a place a later decision can stop",
-      (k) =>
-        program(
-          `let seed = {n: "origin"}\n${lines(k, (i) => `let c${i} = seed.n`)}\nseed.n = "later"\nexit\n`,
-        ),
-      true,
-      "growing",
-    ],
-  ];
-  const apart: readonly WorkCounter[] = ["readerRecords", "stopAsks"];
-  const over: string[] = [];
-  for (const [shape, make, linear, kept] of shapes) {
-    const sizes = linear ? [32, 64] : [8, 16];
-    const family: WorkFamily = { name: shape, measures: shape, program: make };
-    const at = sizes.map((k) => sized(family, k));
-    for (const reversed of [false, true])
-      for (const unshared of [false, true]) {
-        const where = `${shape}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}`;
-        const [small, large] = at.map((one) => analysed(one, reversed, unshared).budget);
-        for (const budget of [small!, large!]) {
-          // (counted apart, never in the charged work, so never what stops the analysis)
-          assert.ok(
-            apart.every((counter) => !budget.counts.has(counter)),
-            where,
-          );
-          assert.equal(
-            [...budget.counts.values()].reduce((sum, units) => sum + units, 0),
-            budget.total,
-            where,
-          );
-          const records = apart.map((counter) => budget.apart.get(counter) ?? 0);
-          if (records[0]! + records[1]! > (budget.counts.get("yields") ?? 0))
-            over.push(
-              `${where}: ${records.join(" + ")} records, ${budget.counts.get("yields")} reads`,
-            );
-        }
-        const records = (budget: Answers["budget"]): number =>
-          apart.reduce((sum, counter) => sum + (budget.apart.get(counter) ?? 0), 0);
-        const [before, after] = [records(small!), records(large!)];
-        if (kept === "constant" && after !== before)
-          over.push(`${where}: ${before} → ${after} records after every decision`);
-        if (kept === "growing" && after < before + sizes[0]!)
-          over.push(`${where}: ${before} → ${after} records before a later decision`);
-        if (!linear) continue;
-        const scale =
-          (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
-        for (const counter of apart) {
-          const before = small!.apart.get(counter) ?? 0;
-          const doubling = (2 * ((large!.apart.get(counter) ?? 0) / Math.max(1, before))) / scale;
-          if (before > 0 && doubling > DOUBLING)
-            over.push(`${where} ${counter}: ${doubling.toFixed(3)}`);
-        }
-      }
-  }
-  assert.deepEqual(over, []);
-});
-
-/**
- * G3 stage 1 (TABLE r4.196): the retained wrapper pairs, one read through k wrappers by a short step and by a long one,
- * their decided paths' keys cursors from birth (`keyLane`), never texts or arrays per prefix: their work and each
- * counter grow with the program in either order, with the sharing on and off (on `main` 2.17 and 2.96 at 16 → 32). The
- * pairs at 64 → 128 and 40 → 80, the uncharged-work probe and the reversed schedule are the PR's evidence, outside CI.
- */
-const WRAPPER_PAIRS: readonly WorkFamily[] = ["q", "anUnusuallyLongPropertyName"].map((step) => ({
-  name: `wrapper by '${step}'`,
-  measures: "a read through k wrappers",
-  program: (k: number) => [
-    {
-      path: "main.tease",
-      source:
-        [
-          "let seed: integer = 1",
-          "let root = {f: seed}",
-          ...Array.from(
-            { length: k },
-            (_, i) => `let box${i} = {${step}: ${i ? `box${i - 1}` : "root"}}`,
-          ),
-          `let out = box${k - 1}.${Array.from({ length: k }, () => step).join(".")}.f`,
-          "exit",
-        ].join("\n") + "\n",
-    },
-  ],
-}));
-
-test("a read through wrappers decides its paths as cursors: its work and each counter grow with the program (G3 stage 1)", () => {
-  assert.deepEqual(
-    [
-      ...steepCounters(WRAPPER_PAIRS, false, undefined, [16, 32]),
-      ...steepCounters(WRAPPER_PAIRS, true, undefined, [16, 32]),
-    ],
-    [],
-  );
-});
-
-/**
  * #1456: a place replaced k times by objects of distinct properties, each read after its store, reads a property from
  * the objects holding it (one `missing` for the others), never every object at every property, so the work grows with
  * the program in every mode: the issue's shape and each control whose objects are closed (two properties each, a
@@ -2473,77 +1459,6 @@ test("a place replaced by objects of distinct properties takes work that grows w
       }
   }
   assert.deepEqual(steep, []);
-});
-
-/**
- * #1456: a prefix of closed objects read once costs what its levels do: its first property read is theirs, nothing
- * charged or kept for it (`propertyItems`). Every counter of a place replaced by two objects and of 8 places each
- * replaced by two wide objects, each read at one property, in either order with the sharing on and off, is `main`'s
- * at `465532f4a`, the wide places' `eventSteps` 40 fewer since #1221 charges its event searches by comparison, and since
- * #1251 no narrowing index made for these programs without a test (a regression oracle of this construction only; before it, the wide places took 2 `structureSteps` and
- * 2 `literalUnits` each).
- */
-test("a prefix of closed objects read once has main's counters, in either order, shared or not (#1456)", () => {
-  const wide = (k: number): string =>
-    `let a = {${many(k, (i) => `f${i}: hostValue`, ", ")}}\nlet b = {${many(k, (i) => `g${i}: hostOther`, ", ")}}\n` +
-    `${many(k, (i) => `let r${i} = a\nr${i} = b\nrepeat r${i}.f${i} {}`)}\nexit`;
-  const cases: readonly (readonly [string, string, readonly [string, string]])[] = [
-    [
-      "a place replaced by two objects",
-      'let a = {n: 1}\nlet b = {n: 2, m: "x"}\nlet c = a\nc = b\nsay c.n\nexit',
-      [
-        "checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 25 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 345 invSteps 105 literalUnits 504 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 26 syntaxNodes 28 yields 75",
-        "checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 25 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 345 invSteps 103 literalUnits 346 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 12 syntaxNodes 28 yields 75",
-      ],
-    ],
-    [
-      "8 places each replaced by two wide objects",
-      wide(8),
-      [
-        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 441 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 1744 invSteps 822 literalUnits 2533 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 124 syntaxNodes 144 yields 724",
-        "checks 708 checksSkipped 32 defScan 18 defSortElements 18 defs 18 domSteps 206 eventSteps 441 exactQueries 226 exactValues 26 frames 342 graphEdges 107 graphNodes 99 indexSteps 1744 invSteps 820 literalUnits 1785 mergeItems 114 ownerSteps 18 parentStackSteps 16 rdQueries 80 rdWalk 192 regionWalks 134 structureSteps 56 syntaxNodes 144 yields 724",
-      ],
-    ],
-  ];
-  for (const [name, source, [shared, unshared]] of cases) {
-    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
-    assert.ok(request !== null, name);
-    for (const reversed of [false, true])
-      for (const off of [false, true]) {
-        const measured: Measured = analysed({ name, request }, reversed, off).budget;
-        assert.equal(
-          [...measured.counts]
-            .sort(([a], [b]) => (a < b ? -1 : 1))
-            .map(([counter, units]) => `${counter} ${units}`)
-            .join(" "),
-          off ? unshared : shared,
-          `${name}${reversed ? " reversed" : ""}${off ? " unshared" : ""}`,
-        );
-      }
-  }
-});
-
-/**
- * #1456: a prefix the cheap checks refuse walks no holder's marks: whether its holders mark nothing is asked only of a
- * prefix every entry of which is otherwise a closed object. A place given one object, 16 property stores and then a
- * host value charges `main`'s total at `007a90112` under a demand allowance of 16 in either order, shared or not (a
- * regression oracle of that order only; asking each object's holder first moved 285 units into the decisions that stop,
- * reversed).
- */
-test("a prefix the cheap checks refuse walks no holder's marks, main's total under a demand allowance of 16 (#1456)", () => {
-  const source = `let b = {f0: 1}\n${many(16, (i) => `b.f${i} = ${i}`)}\nb = hostValue\nsay "AFTER"\nexit`;
-  const request = coreRequest([{ path: "main.tease", source }]);
-  assert.ok(request !== null);
-  const at = { name: "an object, 16 property stores and a host value", request };
-  assert.deepEqual(
-    [false, true].flatMap((reversed) =>
-      [false, true].map(
-        (unshared) =>
-          withTestDemandAllowance(16, () => analysed(at, reversed, unshared)).budget.total,
-      ),
-    ),
-    [3988, 3988, 4844, 4862],
-  );
 });
 
 /**
@@ -2665,35 +1580,4 @@ test("a long copied key's store check charges its positions' work, in every mode
       [9319, 64],
     ],
   ]);
-});
-
-/**
- * #1221: a search of a sorted list of event positions charges each comparison it makes, so its charge grows with the
- * list's logarithm (before, two flat units a pair of searches whatever the list's length: a warmed X6 query read a list
- * of 1,025 events 22 times). X6's first event of `n` in a span after k conditional stores of it, its list built by a
- * first query: the second query's charge is at least the comparisons a binary search over k + 1 positions makes; and
- * its one search a range finds an event at the range's end, none between two events and none past the last.
- */
-test("a search of a key's events charges each comparison it makes (#1221)", () => {
-  for (const k of [64, 1024]) {
-    const source = `let flag = askBoolean "Change it?"\nlet n = 1\n${many(k, (i) => `if flag { n = ${i + 2} }`)}\nsay n\nexit`;
-    const request = coreRequest([{ path: "main.tease", source }]);
-    assert.ok(request !== null);
-    const { definitions, lists, program } = narrowingPass(request);
-    // (`n`'s key: the one with k + 1 definitions)
-    const key = [...definitions.byKey].find(([, list]) => list.length === k + 1)![0];
-    const span = [[0, Number.MAX_SAFE_INTEGER]] as const;
-    assert.equal(lists.eventIn(key, span), "branch");
-    const before = program.work.total;
-    lists.eventIn(key, span);
-    const charged = program.work.total - before;
-    assert.ok(charged >= Math.log2(k + 1), `k = ${k}: ${charged} units`);
-    // (one search a range: an event is in a range ending at it, and none in a range between two events or past the last)
-    const [first, second] = [...lists.ownEvents(key).stores].sort((a, b) => a - b);
-    const last = Math.max(...lists.ownEvents(key).stores);
-    assert.ok(second! - first! >= 2, `k = ${k}: positions between the first two events`);
-    assert.equal(lists.eventIn(key, [[last, last]]), "branch", `k = ${k}`);
-    assert.equal(lists.eventIn(key, [[first! + 1, second! - 1]]), null, `k = ${k}`);
-    assert.equal(lists.eventIn(key, [[last + 1, Number.MAX_SAFE_INTEGER]]), null, `k = ${k}`);
-  }
 });
