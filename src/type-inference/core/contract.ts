@@ -758,8 +758,8 @@ export class Contract {
     return refReceiver(this, key);
   }
 
-  public receiverKinds(key: Key): Work<readonly Item[]> {
-    return receiverKinds(this, key);
+  public receiverKinds(key: Key, flow: FlowSink | null = null): Work<readonly Item[]> {
+    return receiverKinds(this, key, flow);
   }
 
   public valueReceiver(receiver: PlaceId): Work<readonly Item[]> {

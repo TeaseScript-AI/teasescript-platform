@@ -61,13 +61,15 @@ export function typedDefault(rest: readonly string[], writer: boolean): Decision
         : input.every((item) => item.tag === "null")
           ? "null"
           : "own",
-    // (#1668: every choice keeps its input's items, the null choice without their nulls: the input's inclusions, so
-    // qualified)
-    flow: (_choice, inclusions) =>
-      inclusions.map((inclusion) => ({
-        ...inclusion,
-        qualifiers: ["defaultChoice", ...inclusion.qualifiers],
-      })),
+    // (#1668: the default's own kinds (`own`, or open) keep its input's items, so its inclusions, qualified; `none`
+    // (no kinds) and `null` (only nulls, which it replaces) keep none of them)
+    flow: (choice, inclusions) =>
+      choice === "none" || choice === "null"
+        ? []
+        : inclusions.map((inclusion) => ({
+            ...inclusion,
+            qualifiers: ["defaultChoice", ...inclusion.qualifiers],
+          })),
     answer: (choice, input) => {
       if (choice === "none") return [unknownItem(REASON.external), ...withoutEmpty(input)];
       if (choice !== "null") return input;

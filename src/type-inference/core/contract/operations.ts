@@ -65,7 +65,8 @@ export function* contractOfOp(
     const left = (yield* contract.contractOfValueAt(c.left, rest, kept)).filter(
       (item) => rest.length > 0 || item.tag !== "null",
     );
-    if (kept !== null)
+    // (#1668: a side whose items the filter removes whole puts none into the answer)
+    if (kept !== null && left.length > 0)
       flow!.attach(kept, ...(rest.length === 0 ? (["operandFilter"] as const) : []));
     return mergeItems(
       [...left, ...(yield* contract.contractOfValueAt(c.right, rest, flow))],
@@ -143,8 +144,10 @@ export function* contractOfOp(
   if (method !== undefined && c.receiver !== null && method.gives.kind !== "copy") {
     const gives = method.gives;
     const out: Item[] = [];
-    // #1668: D, a declared result per receiver kind
-    for (const item of withoutEmpty(yield* contract.contractOfValue(c.receiver))) {
+    // (#1668: a declared result per receiver kind is made anew; the receiver's unknowns the answer holds as they are)
+    const kinds = flow?.child() ?? null;
+    let unknowns = false;
+    for (const item of withoutEmpty(yield* contract.contractOfValue(c.receiver, kinds))) {
       if (gives.kind === "declared") {
         if (rest.length === 0)
           out.push(
@@ -154,6 +157,7 @@ export function* contractOfOp(
           );
       } else if (item.tag === "unknown") {
         // a dict's removed value, or a list's or a set's `null` where it gives that
+        unknowns = true;
         out.push(item);
         if (gives.fromList === "null" && rest.length === 0)
           out.push(carried(makeItem("null"), [item]));
@@ -167,6 +171,7 @@ export function* contractOfOp(
           ),
         );
     }
+    if (kinds !== null && unknowns) flow!.attach(kinds, "unknown");
     return mergeItems(out, scope);
   }
   // F10: a copy of the elements, which may hold none where it takes a count: a receiver's own elements, or those its
@@ -281,8 +286,11 @@ export function* contractOfOp(
   // runtime's opaque answer on a known kind (r4.47 (1)); what the core cannot know keeps its own reasons. A receiver
   // without items yet is a provisional bottom: the result stays the bottom (S3 §1, r4.44)
   if (family === "method" && c.receiver !== null) {
-    // #1668: D, a declared result per receiver kind
-    const receiver = withoutEmpty(yield* contract.contractOfValue(c.receiver));
+    // (#1668: a declared result per receiver kind is made anew; the receiver's unknowns the answer holds as they are)
+    const kinds = flow?.child() ?? null;
+    const receiver = withoutEmpty(yield* contract.contractOfValue(c.receiver, kinds));
+    if (kinds !== null && receiver.some((item) => item.tag === "unknown"))
+      flow!.attach(kinds, "unknown");
     return mergeItems(
       receiver.flatMap((item) => {
         if (item.tag === "unknown") return [item];

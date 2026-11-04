@@ -157,7 +157,8 @@ function* advance(
     "key" in owner
       ? // #1668: R, a receiver decision
         yield* contract.receiverKinds(owner.key)
-      : yield* contract.valueReceiver(owner.value);
+      : // #1668: R, a value receiver decision
+        yield* contract.valueReceiver(owner.value);
   const noRef = from.noRef && !heldReference(receiver);
   const clean = from.clean && noRef && receiver.some(holdsBelow);
   if (!clean) return { items: yield* own(flow), proof: UNPOSITIONED };

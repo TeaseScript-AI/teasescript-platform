@@ -11,7 +11,11 @@ import {
   withFlowCheck,
   type Contributions,
 } from "../src/type-inference/core/contract/contributions.js";
-import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+  WorkLedger,
+} from "../src/type-inference/core/budget.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { checkedResult } from "../src/type-inference/core/consumer.js";
@@ -22,22 +26,42 @@ import { MODES, inMode, type Mode } from "./helpers/type-core-oracles.js";
 
 const GLOBALS = ["hostValue", "hostOther"];
 
-/** `source` analysed in `mode`, recording contributions where `record`: its last pass and its answers. */
-function analysed(source: string, mode: Mode, record: boolean) {
+/**
+ * `source` analysed in `mode`, recording contributions where `record`: its passes and its answers; each published
+ * slot given to `onPublish` with its pass's total work as it is published.
+ */
+function analysed(
+  source: string,
+  mode: Mode,
+  record: boolean,
+  onPublish?: (slot: string, total: number) => void,
+) {
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
   assert.ok(request !== null, source);
   const passes: CorePass[] = [];
   const check = Consumers.prototype.check;
+  // (the ledger charged last: the publishing pass's)
+  const charge = WorkLedger.prototype.charge;
+  let ledger: WorkLedger | null = null;
+  WorkLedger.prototype.charge = function (this: WorkLedger, ...args) {
+    ledger = this;
+    charge.apply(this, args);
+  };
   Consumers.prototype.check = function (this: Consumers) {
     passes.push(this.pass);
     check.call(this);
   };
   try {
-    const run = () => inMode(mode, () => analyseCore(request));
+    const solve = () => inMode(mode, () => analyseCore(request));
+    const run =
+      onPublish === undefined
+        ? solve
+        : () => withFlowCheck((slot) => onPublish(slot, ledger!.total), solve);
     const answers = record ? withContributions(run) : run();
-    return { answers, request, pass: passes.at(-1)! };
+    return { answers, request, pass: passes.at(-1)!, passes };
   } finally {
     Consumers.prototype.check = check;
+    WorkLedger.prototype.charge = charge;
   }
 }
 
@@ -160,6 +184,15 @@ test("each key's edges are the keys its contract includes: copies, written place
       ],
     ],
     ['let v = load("k", default: null)\nsay "${v}"\nexit\n', [["v", [], []]]],
+    // (a default or an `otherwise` side whose items the choice or the filter removes whole: none of its keys)
+    ['let a = null\nlet b = load("k", default: a)\nsay "${b}"\nexit\n', [["b", [], []]]],
+    ['let a = null\nlet b = a otherwise 1\nsay "${b}"\nexit\n', [["b", [], []]]],
+    // (an object's own selection replaces its elements: no key of them)
+    ['let a = {p: 1}\nlet b = a.first\nsay "${b}"\nexit\n', [["b", [], []]]],
+    // (a length, an iteration and a method's result of an unknown value: the value's unknown, so its key)
+    ['let a = hostValue\nlet b = a.length\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
+    ['let a = hostValue\nfor b in a {\n  say "${b}"\n}\nexit\n', [["b", [], ["a"]]]],
+    ['let a = hostValue\nlet b = a.remove("k")\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
   ];
   for (const mode of MODES)
     for (const [source, asks] of cases) {
@@ -210,6 +243,44 @@ test("an inclusion keeps the transforms its answer went through: a default's cho
   }
 });
 
+test("a declined summary includes none of its sources; a taken one includes them as its own", () => {
+  // (a whole copy's property read over its stores: summarised where its one source's answer is plain, read by itself
+  // where it holds a called item. Hand-derived, `b.g`'s own flow is `a`'s literal at `g` and the store `a.g = …`
+  // read once: through the summary where it is taken, by itself where it declines)
+  const declined =
+    'function f {\n  return hostValue\n}\nlet a = {g: 1}\na.g = f()\nlet b = a\nsay "${b.g}"\nexit\n';
+  const taken = 'let a = {g: 1}\na.g = 2\nlet b = a\nsay "${b.g}"\nexit\n';
+  for (const mode of MODES)
+    for (const [source, store] of [
+      [declined, "sub"],
+      [taken, "sub summary"],
+    ] as const) {
+      const { pass } = analysed(source, mode, true);
+      const place = pass.program.places.findIndex((at) => at?.label === "b");
+      const flow = pass.solver.flowOf(`c|${keyOf(place, ["g"])}`);
+      assert.ok(flow !== undefined, source);
+      const routes = flow.map((inclusion) =>
+        [inclusion.route, ...inclusion.qualifiers.filter((q) => q === "summary")].join(" "),
+      );
+      assert.deepEqual(routes, ["literal", store], source);
+    }
+});
+
+test("a snapshot charges each edge it follows", () => {
+  for (const mode of MODES) {
+    const costs: number[] = [];
+    for (const n of [8, 32]) {
+      const source = `${Array.from({ length: n }, (_, at) => `let a${at} = hostValue`).join("\n")}\nlet b = a0\n${Array.from({ length: n - 1 }, (_, at) => `b = a${at + 1}`).join("\n")}\nsay "\${b}"\nexit\n`;
+      const { pass } = analysed(source, mode, true);
+      const before = pass.program.work.total;
+      const found = edges(pass, "b");
+      assert.ok(typeof found !== "string" && found.length === n, `${String(found)}`);
+      costs.push(pass.program.work.total - before);
+    }
+    assert.ok(costs[1]! - costs[0]! >= 24, `${costs.join(" ")}`);
+  }
+});
+
 test("a cycle of copies publishes each member's edges once its component is solved", () => {
   for (const mode of MODES) {
     const pass = analysed('let a = 1\nlet b = a\na = b\nsay "${a} ${b}"\nexit\n', mode, true).pass;
@@ -241,28 +312,70 @@ test("every slot a run includes is one its run read", () => {
 });
 
 test("every producing read in the contract layer passes a flow, follows an inclusion or is classified", () => {
-  // (the inclusion matrix in code: a read of another slot's answer either includes it (a flow argument, or the slot
-  // recorded just before it) or carries its class (`// #1668: <class>`), so a new read cannot go unclassified)
-  const producing =
-    /\b(?:contract|self|this|c)\.(contractOf|contractOfValueAt|contractOfValue|subAt|contractOfLiteral|entryAt|receiverKinds|valueReceiver|severalElements|keyThrough|indexItems|gathered|defaultKinds|onlyNull|expectedOf|contractRead)\(|\.proven\(|yield (?:positioned|projected)\(/;
-  const flowing =
-    /\b(flow|staged|read|lead|source|literal|whole|element|stored|below|through|kept|frontier|fallback)\b/;
+  // (the inclusion matrix in code: every read of another slot's answer — a producing method, an inline producing helper
+  // (a generator of items defined in the layer), a raw demand or a proof — either passes a flow as an argument,
+  // follows the slot's `include` in its function, or carries its class on the line before (`// #1668: <class>`), so a
+  // new read cannot go unclassified)
   const folder = join(process.cwd(), "src/type-inference/core/contract");
+  const files = readdirSync(folder).filter((name) => name.endsWith(".ts"));
+  const sources = new Map(files.map((file) => [file, readFileSync(join(folder, file), "utf8")]));
+  const helpers = new Set<string>();
+  for (const text of sources.values())
+    for (const found of text.matchAll(
+      /function\*\s+(\w+)\s*(?:<[^>]*>)?\s*\([^)]*\)\s*:\s*Work<\s*(?:readonly Item\[\]|Item\[\]|Proven<)/g,
+    ))
+      helpers.add(found[1]!);
+  const method =
+    /\b(?:contract|self|this|c)\.(contractOf|contractOfValueAt|contractOfValue|subAt|contractOfLiteral|entryAt|receiverKinds|valueReceiver|severalElements|keyThrough|indexItems|gathered|defaultKinds|onlyNull|expectedOf|contractRead)\(|\.proven\(|yield (?:positioned|projected)\(/;
+  const helper = /yield\*\s+(?:inline\()?(\w+)\(/;
+  const raw = /(?<![\w*])yield\s+(?:\{|demand\b)/;
+  const argument =
+    /[(,]\s*(?:flow|staged|read|lead|source|literal|whole|element|stored|below|through|kept|frontier|fallback|given|kinds|"run"|contract\.pass\.solver\.sink\(\))\s*[,)]/;
   const unclassified: string[] = [];
-  for (const file of readdirSync(folder).filter((name) => name.endsWith(".ts"))) {
-    const lines = readFileSync(join(folder, file), "utf8").split("\n");
+  for (const [file, text] of sources) {
+    const lines = text.split("\n");
     lines.forEach((line, at) => {
       const trimmed = line.trim();
-      if (trimmed.startsWith("//") || trimmed.startsWith("*") || !producing.test(line)) return;
-      // (the statement from the read to its end, no comment after it)
+      if (trimmed.startsWith("//") || trimmed.startsWith("*")) return;
+      const named = helper.exec(line)?.[1];
+      const producing =
+        method.test(line) || raw.test(line) || (named !== undefined && helpers.has(named));
+      if (!producing) return;
+      // (the statement from the read to its end)
       const end = lines.findIndex((next, from) => from >= at && /[;{]\s*$/.test(next));
-      const call = lines.slice(at, end < 0 ? at + 1 : Math.min(end + 1, at + 6)).join(" ");
-      const before = lines.slice(Math.max(0, at - 3), at).join(" ");
-      if (flowing.test(call.slice(call.search(producing))) || /#1668:|\.include\(/.test(before))
-        return;
+      const call = lines.slice(at, end < 0 ? at + 1 : Math.min(end + 1, at + 10)).join(" ");
+      const tagged = /^\s*(?:[?:]\s*)?\/\/ #1668:/.test(lines[at - 1] ?? "");
+      // (a raw demand or a proof read by its key: its `include` earlier in the same function)
+      let start = at;
+      while (
+        start > 0 &&
+        !/^(?:export )?(?:async )?function|^\s*(?:public|private) /.test(lines[start]!)
+      )
+        start -= 1;
+      // (the demand's key, by its name: a raw demand's `key: <name>`, a proof's demand variable's `<name>.key`)
+      const body = lines.slice(start, at).join(" ");
+      // (a demand made by a factory and yielded by its variable: `<variable>.key`; a raw one: `key: <name>`, or `key`)
+      const variable = /yield\s+(\w+)\s*[;)]/.exec(line)?.[1];
+      const literal = /\bkey(?::\s*(\w+))?\s*[,}]/.exec(
+        // (a raw demand's object from its `yield {` on; a yielded variable's made in the lines before)
+        /yield\s+\{/.test(line)
+          ? lines.slice(at, at + 3).join(" ")
+          : lines.slice(Math.max(start, at - 12), at).join(" "),
+      );
+      const keyName = raw.test(line)
+        ? /yield\s+\{/.test(line)
+          ? literal === null
+            ? undefined
+            : (literal[1] ?? "key")
+          : (literal?.[1] ?? variable)
+        : /\.proven\(\s*(\w+)\s*\)/.exec(line)?.[1];
+      const included =
+        keyName !== undefined && new RegExp(`\\.include\\(\\s*${keyName}(?:\\.key)?\\b`).test(body);
+      if (argument.test(call) || tagged || included) return;
       unclassified.push(`${file}:${at + 1}: ${trimmed}`);
     });
   }
+  assert.ok(helpers.size > 20, `${helpers.size} producing helpers`);
   assert.deepEqual(unclassified, []);
 });
 
@@ -295,4 +408,28 @@ test("a stop's forgotten answers take their flows with them; a flow stands only 
         }
       }
   assert.ok(checked > 50, `${checked} flows checked`);
+});
+
+test("a program stop at any slot's publication leaves no flow without its answer", () => {
+  // (each published slot's total, and the unit before it, as the program's allowance: the stop falls on that slot's
+  // own charges, a proof's kept slot among them)
+  const source = 'let a = {p: {q: {f: 1}}}\nlet b = a.p\nlet c = b.q\nsay "${c.f}"\nexit\n';
+  let stopped = 0;
+  for (const mode of MODES) {
+    const totals = new Set<number>();
+    const natural = analysed(source, mode, true, (_slot, total) => totals.add(total));
+    for (const total of totals)
+      for (const allowance of [total - 1, total]) {
+        const slots = new Set<string>();
+        const run = withTestAllowance(allowance, () =>
+          analysed(source, mode, true, (slot) => slots.add(slot)),
+        );
+        if (run.answers.outcome !== natural.answers.outcome) stopped += 1;
+        for (const pass of run.passes)
+          for (const slot of slots)
+            if (pass.solver.flowOf(slot) !== undefined)
+              assert.ok(pass.solver.answer(slot) !== undefined, `${slot} at ${allowance}`);
+      }
+  }
+  assert.ok(stopped > 0, `${stopped} runs stopped`);
 });

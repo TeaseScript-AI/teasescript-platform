@@ -25,7 +25,8 @@ export type Qualifier =
   | "positioned"
   | "selected"
   | "operandFilter"
-  | "default";
+  | "default"
+  | "unknown";
 
 /** One slot's answer included in a run's: its demand key, `null` for a route that records no flow (`opaque`). */
 export interface Inclusion {
@@ -143,7 +144,8 @@ export type Contributions =
  * The contract slots a slot's answer includes, through the non-contract slots it includes (each by its own published
  * flow), from the published flows `flowOf` gives: `unavailable` where a slot on the way has none (unfinished, stopped,
  * forgotten or not recorded) or an included route recorded none (`opaque`). A contract slot reached ends that branch:
- * its own edges are its own (`edges` of it). Each slot visited charged one step to the analysis's total.
+ * its own edges are its own (`edges` of it). Each slot visited and each inclusion followed is charged to the analysis's
+ * total.
  */
 export function edgesOf(
   start: string,
@@ -164,6 +166,8 @@ export function edgesOf(
       if (inclusion.slot === null)
         return { state: "unavailable", reason: `${inclusion.route} records no flow` };
       const qualifiers = [...next.qualifiers, ...inclusion.qualifiers];
+      // (each inclusion followed, and the qualifier list it makes, charged as it is kept)
+      work.shared(() => keep(work, 1 + qualifiers.length));
       if (inclusion.slot.startsWith("c|")) {
         out.push({ ...inclusion, qualifiers });
         continue;

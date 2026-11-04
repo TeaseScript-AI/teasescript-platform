@@ -226,6 +226,7 @@ export function* gatherAt(
       site.below,
       true,
     );
+    // #1668: the value side's selected piece: its includer records `opaque`
     return yield* selectionPiece(
       contract,
       { ...site, kind: "absent", exact: true },
@@ -245,6 +246,7 @@ export function* gatherAt(
       site.below,
       site.exact,
     );
+    // #1668: the value side's absent run: its includer records `opaque`
     return yield* selectedObject(
       contract,
       selection.objects[selection.closed[at]!]!,
@@ -257,6 +259,7 @@ export function* gatherAt(
   }
   const group = gatherGroups(contract, site)[at]!;
   if (group === null)
+    // #1668: the value side's loads: its includer records `opaque`
     return yield* loadsBelow(contract, othersAt(contract, here?.others, true), rest, true, node);
   return yield* groupItems(contract, group, true, (entry) =>
     values.valueItems(entry.value, entry.g?.node ?? node, rest),
@@ -467,6 +470,7 @@ export function* selectionPiece(
   node: FlowNode | null,
 ): Work<readonly Item[]> {
   if (typeof piece === "number")
+    // #1668: a selection's object: the selection records no flow (`opaque`)
     return yield* selectedObject(
       contract,
       selection.objects[piece]!,
@@ -504,6 +508,7 @@ function* absentRun(
   }
   if (hi - lo <= WIDE) {
     for (let at = Math.max(lo, a); at < Math.min(hi, b); at += 1)
+      // #1668: a selection's absent run: the selection records no flow (`opaque`)
       for (const item of yield* gatherAt(contract, site, null, [], at)) out.push(item);
     return;
   }

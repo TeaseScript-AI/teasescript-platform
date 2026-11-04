@@ -781,9 +781,14 @@ export class Solver {
     const trace = node.trace;
     if (trace === null || !trace.rooted) return null;
     const decision = node.demand.decision;
-    return decision === undefined || decision.flow === undefined
-      ? trace.inclusions
-      : decision.flow(choice, trace.inclusions);
+    if (decision === undefined || decision.flow === undefined) return trace.inclusions;
+    // (a selection's copy charged as its sink charges what it keeps: shared, one unit per inclusion and qualifier)
+    const flow = decision.flow(choice, trace.inclusions);
+    const work = this.#work;
+    let units = 0;
+    for (const inclusion of flow) units += 1 + inclusion.qualifiers.length;
+    work.shared(() => keep(work, units));
+    return flow;
   }
 
   /** Runs frames, and solves the components they close, until `base` returns. */
@@ -893,10 +898,11 @@ export class Solver {
         node.value = held.items;
         node.proof = held.proof;
       }
+      // (#1668: its flow made, and its proof's slot charged, before its answer, proof and flow are kept: a stop here
+      // keeps none of them)
       const flow = this.#flow(node, choice);
-      if (flow !== null) this.#publish(node, flow);
-      // (its proof's slot charged before its answer and proof are kept: a stop here keeps neither)
       if (node.proof !== null) keep(this.#work, 1);
+      if (flow !== null) this.#publish(node, flow);
       this.#memo.set(node.demand.key, node.value);
       if (node.proof !== null) this.#proofs.set(node.demand.key, node.proof);
       this.#active.delete(node.demand.key);

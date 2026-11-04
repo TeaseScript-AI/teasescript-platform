@@ -137,6 +137,7 @@ export function* indexItems(
         const count = gatherCount(contract, site);
         if (count <= WIDE)
           for (let at = 0; at < count; at += 1)
+            // #1668: the value side's exact gather: its includer records `opaque`
             out.push(...(yield* gatherAt(contract, site, node, after(), at)));
         else
           // #1668: the value side's exact gather: its includer records `opaque`
@@ -240,6 +241,7 @@ function* selectedAt(
   else {
     const site: GatherSite = { kind: "absent", literal, path, byValue, below, exact };
     for (const piece of pieces)
+      // #1668: a selection's pieces: the selection records no flow (`opaque`)
       for (const item of yield* selectionPiece(contract, site, selection, piece, after, node))
         out.push(item);
   }

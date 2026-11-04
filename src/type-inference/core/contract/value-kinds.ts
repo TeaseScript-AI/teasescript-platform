@@ -114,16 +114,25 @@ function* listsAt(
   given: Flow = null,
 ): Work<readonly Item[]> {
   const flow = runFlow(contract, given);
-  // (#1668: the receiver read to decide its members, none of it included: no flow)
-  const receiver = yield* through(contract, value, stepsRest(stepsTo(rest, at)), from);
+  // (#1668: the receiver read to decide its members, its unknowns included where the answer holds them as they are)
+  const kinds = flow?.child() ?? null;
+  const receiver = yield* through(contract, value, stepsRest(stepsTo(rest, at)), from, kinds);
   // F19a, r4.44: a receiver that may be a reference has the runtime's members, decided once for a whole value
   // #1668: R, a receiver decision
   const decided = at === 0 ? yield* contract.valueReceiver(value) : receiver;
   if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
     return yield* through(contract, value, stepsRest(rest), at + 1, flow);
-  return yield* members(contract, rest, at, receiver, (path, start) =>
-    through(contract, value, stepsRest(path), start, flow),
+  let unknowns = false;
+  const items = yield* members(
+    contract,
+    rest,
+    at,
+    receiver,
+    (path, start) => through(contract, value, stepsRest(path), start, flow),
+    () => (unknowns = true),
   );
+  if (kinds !== null && unknowns) flow!.attach(kinds, "unknown");
+  return items;
 }
 
 /**
@@ -137,6 +146,8 @@ export function* members(
   at: number,
   receiver: readonly Item[],
   read: (path: Steps, from: number) => Work<readonly Item[]>,
+  // (#1668: told where the answer holds a receiver's unknown as it is)
+  onUnknown?: () => void,
 ): Work<readonly Item[]> {
   // (the steps after the member read by position; the path without it made only where a dict's values ask: a
   // record's joined, `stepsJoin`)
@@ -162,7 +173,10 @@ export function* members(
       // a temporal field or a calendar duration's part: its declared result (V30 §35)
       if (after === 0) out.push(carried(makeItem(declared, item.writer), [item]));
     } else if (item.tag === "object") own = true;
-    else if (item.tag === "unknown") out.push(item);
+    else if (item.tag === "unknown") {
+      onUnknown?.();
+      out.push(item);
+    }
   }
   if (own) out.push(...(yield* read(path, at + 1)));
   return mergeItems(out, contract.pass.program.scope);
@@ -220,11 +234,14 @@ function* valueAt(
         ref.after([stepName(projection.step)]),
         read,
       );
-      if (read !== null) flow!.attach(read, ...(selects ? (["selected"] as const) : []));
-      if (!selects) return elements;
+      if (!selects) {
+        if (read !== null) flow!.attach(read);
+        return elements;
+      }
       // (#1668: the owner read whole for its selection alone: no flow)
       // #1668: S, the owner read for its selection
       const owners = withoutEmpty(yield* contract.contractOfValue(projection.owner));
+      if (read !== null && keepsElements(owners)) flow!.attach(read, "selected");
       return withOwnSelection(elements, owners, contract.pass);
     }
     if (program.callOutOf.has(value))
@@ -370,10 +387,10 @@ function* selection(
     [stepName(projection.step)],
     read,
   );
-  if (read !== null) flow!.attach(read, "selected");
   // (#1668: the owner read whole for its selection alone: no flow)
   // #1668: S, the owner read for its selection
   const owners = withoutEmpty(yield* contract.contractOfValue(projection.owner));
+  if (read !== null && keepsElements(owners)) flow!.attach(read, "selected");
   return withOwnSelection(elements, owners, contract.pass);
 }
 
@@ -392,9 +409,11 @@ function* contractIteration(
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const out: Item[] = [];
-  // (#1668: the owner's kinds decide what a loop visits: no flow; its elements visited, included)
-  // #1668: S or D: the owner's kinds decide what is visited or measured
-  for (const item of withoutEmpty(yield* contract.contractOfValue(owner))) {
+  // (#1668: the owner's kinds decide what a loop visits; its elements visited are included, and its unknowns, which
+  // the answer holds as they are)
+  const kinds = flow?.child() ?? null;
+  let unknowns = false;
+  for (const item of withoutEmpty(yield* contract.contractOfValue(owner, kinds))) {
     if (item.tag === "list" || item.tag === "set")
       out.push(
         ...belowSelected(
@@ -409,8 +428,12 @@ function* contractIteration(
         ]),
       );
     // (an unknown's element: a collection below it may hold none)
-    else if (item.tag === "unknown") out.push(item, ...emptyAt(rest));
+    else if (item.tag === "unknown") {
+      unknowns = true;
+      out.push(item, ...emptyAt(rest));
+    }
   }
+  if (kinds !== null && unknowns) flow!.attach(kinds, "unknown");
   return mergeItems(out, contract.pass.program.scope);
 }
 
@@ -427,16 +450,22 @@ function* contractLength(
   if (heldReference(yield* contract.valueReceiver(owner)))
     return yield* contract.contractOfValueAt(owner, joinSteps([step], rest), flow);
   const out: Item[] = [];
-  // (#1668: the owner's kinds decide the length's kinds: no flow; an object's own member, included)
-  // #1668: S or D: the owner's kinds decide what is visited or measured
-  for (const item of withoutEmpty(yield* contract.contractOfValue(owner))) {
+  // (#1668: the owner's kinds decide the length's kinds; an object's own member is included, and its unknowns, which
+  // the answer holds as they are)
+  const kinds = flow?.child() ?? null;
+  let unknowns = false;
+  for (const item of withoutEmpty(yield* contract.contractOfValue(owner, kinds))) {
     if (item.tag === "string" || item.tag === "list" || item.tag === "set" || item.tag === "dict") {
       if (rest.length === 0) out.push(carried(makeItem("integer", item.writer), [item]));
     } else if (item.tag === "object" || REFERENCE.has(item.tag))
       // an object's own `length` (F11), a reference's member (F19a)
       out.push(...(yield* contract.contractOfValueAt(owner, joinSteps([step], rest), flow)));
-    else if (item.tag === "unknown") out.push(item);
+    else if (item.tag === "unknown") {
+      unknowns = true;
+      out.push(item);
+    }
   }
+  if (kinds !== null && unknowns) flow!.attach(kinds, "unknown");
   return mergeItems(out, contract.pass.program.scope);
 }
 
@@ -568,6 +597,7 @@ function runFlow(contract: Contract, flow: Flow): FlowSink | null {
 
 export function* onlyNull(contract: Contract, fallback: PlaceId): Work<readonly Item[]> {
   const site = contract.pass.program.places[fallback]?.site ?? null;
+  // #1668: D, the null-only predicate's demand: its answer is made anew (`ONLY_NULL.flow`)
   return yield {
     key: joinParts("dn", fallback),
     kind: "contract",
@@ -623,6 +653,13 @@ export function landsIn(
 
 /** The lookup cut by the nesting limit: an unknown destination (V30 §18). */
 const CUT: TypeTerm = { kind: "dynamic", why: "unknown member" };
+
+/** #1668: whether `withOwnSelection` keeps the elements: not where every owner is an object (only its own selection). */
+function keepsElements(owners: readonly Item[]): boolean {
+  return (
+    !owners.some((item) => item.tag === "object") || !owners.every((item) => item.tag === "object")
+  );
+}
 
 /**
  * F11 (r4.4): the collector reads an object's own `first`, `last` or `random` as an element selection; the core makes it

@@ -174,17 +174,27 @@ export function* keyListsAt(
   // (one prefix, found once per length, and the key read again as it is: a member chain reads each key at each of its
   // steps, so neither its prefixes are climbed nor the key rebuilt per step)
   const prefix = keyPrefixIn(contract, key, at);
-  // #1668: R, a receiver decision
-  const receiver = yield* contract.receiverKinds(prefix);
+  // (#1668: the receiver decision's answer, its unknowns included where the answer holds them as they are)
+  const kinds = flow?.child() ?? null;
+  const receiver = yield* contract.receiverKinds(prefix, kinds);
   if (heldReference(receiver)) return yield* keyContract(contract, key, flow);
   const path = keyStepsIn(contract, key);
-  return yield* members(contract, path, at, receiver, (along, start) =>
-    contract.keyThrough(
-      along === path ? key : keyBelowIn(contract, prefix, stepsFrom(along, at)),
-      start,
-      flow,
-    ),
+  let unknowns = false;
+  const items = yield* members(
+    contract,
+    path,
+    at,
+    receiver,
+    (along, start) =>
+      contract.keyThrough(
+        along === path ? key : keyBelowIn(contract, prefix, stepsFrom(along, at)),
+        start,
+        flow,
+      ),
+    () => (unknowns = true),
   );
+  if (kinds !== null && unknowns) flow!.attach(kinds, "unknown");
+  return items;
 }
 
 /** The contract of a key from its stores and its prefixes' (§3.2). */
@@ -252,6 +262,7 @@ export function* severalElements(contract: Contract, asked: Key): Work<boolean> 
   const site = contract.pass.program.places[place]?.site ?? null;
   // a demand per element step, so a chain of collections read from collections (a function's result returning
   // another's) is followed on the solver's explicit stack, and a copy cycle is solved as its component
+  // #1668: N, the several demand counts; nothing of it included
   const several = yield {
     key: joinParts("s", at),
     kind: "contract",
@@ -456,18 +467,29 @@ function* receiverWalk(
 }
 
 /** A receiver's contract as a demand of its own, with F19a's decision whether it is a reference's (r4.44). */
-export function* receiverKinds(contract: Contract, asked: Key): Work<readonly Item[]> {
+export function* receiverKinds(
+  contract: Contract,
+  asked: Key,
+  flow: FlowSink | null = null,
+): Work<readonly Item[]> {
   const key = canonicalKey(contract, asked);
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
+  // (#1668: included only by a reader whose answer holds its unknowns as they are; its run's answer is the key's)
+  const slot = joinParts("rc", key);
+  flow?.include(slot, "receiver");
   return yield {
-    key: joinParts("rc", key),
+    key: slot,
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
-    // #1668: R, the receiver demand's run: never included
-    make: () => contract.contractOf(key),
+    make: () => receiverRun(contract, key),
     decision: RECEIVER,
   };
+}
+
+/** A receiver decision's run (`receiverKinds`): the key's contract, its run's flow taken as it starts. */
+function* receiverRun(contract: Contract, key: Key): Work<readonly Item[]> {
+  return yield* contractOf(contract, key, contract.pass.solver.sink());
 }
 
 /**
@@ -476,6 +498,7 @@ export function* receiverKinds(contract: Contract, asked: Key): Work<readonly It
  */
 export function* valueReceiver(contract: Contract, receiver: PlaceId): Work<readonly Item[]> {
   const site = contract.pass.program.places[receiver]?.site ?? null;
+  // #1668: R, the value receiver decision's demand: never included
   return yield {
     key: joinParts("cv", receiver),
     kind: "contract",
