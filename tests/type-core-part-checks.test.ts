@@ -272,7 +272,7 @@ test("after a demand stop, a store checks the parts the natural walk owes there,
       source:
         'let seed: object = {payload: 7}\nlet copy = hostInit\ncopy.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n',
       init: { open: {} },
-      values: [{ open: 3 }, { open: { x: 1 } }],
+      values: [{ open: 3 }, { open: { x: 1 } }, 3],
     },
     {
       // the replacement's own check `{}` does not reach the owed part below its open level
@@ -336,8 +336,8 @@ test("after a demand stop, a store checks the parts the natural walk owes there,
 
 test("at every stop a store's parts are the natural store's or fewer, never uncovered or stricter (#1682)", () => {
   // (the family over the part's depth, several children, elements and their properties, an open or a checked root, an
-  // initializer, a replacement and a copy's store; each part a covered one only where the natural whole check's type
-  // there is the part's own)
+  // initializer, a replacement and a copy's store, and a literal whose whole check a stop drops: its part is one the
+  // natural whole check covers, of the type that check has there)
   const covered: string[] = [];
   let parts = 0;
   for (const source of [
@@ -349,6 +349,7 @@ test("at every stop a store's parts are the natural store's or fewer, never unco
     'let seed: integer = 7\nlet copy = {inner: hostInit}\ncopy.inner.open = seed\ncopy.inner = hostValue\nsay "REACHED"\nexit\n',
     'let seed: integer = 7\nlet copy = {known: 1, inner: hostInit}\ncopy.inner.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n',
     'let seed: integer = 7\nlet copy = hostInit\ncopy.open = seed\nlet other = copy\nother = hostValue\nsay "REACHED"\nexit\n',
+    'let xs = [hostValue, 4]\nsay "BEFORE"\nsay xs[0]\nsay "AFTER"\nexit\n',
   ]) {
     const natural = plan(source);
     for (const mode of HELD_MODES)
@@ -361,6 +362,7 @@ test("at every stop a store's parts are the natural store's or fewer, never unco
       }
   }
   assert.ok(parts > 0);
+  assert.ok(covered.length > 0);
   assert.ok(
     covered.every((line) => line.endsWith(" =")),
     covered.join("; "),
