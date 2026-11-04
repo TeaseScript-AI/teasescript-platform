@@ -1927,6 +1927,45 @@ test("an askChoice of more than one type errs where its type would be inferred, 
     if (!getDefault(pasted))
       assert.deepEqual(v1Errors(pasted), [], `the current checker: ${pasted}`);
   }
+  // (where a demand stop holds the walk's read of the answer, the kept form proves its union by a read that answers, or
+  // is words: never a plain `let`, Codex r7 on #1660)
+  // ([source, demand allowance, whether a read that answers proves the union there, as code or in words; else no read
+  // does, and the kept form is words])
+  for (const [source, allowance, union] of [
+    [`repeat (${S}) {}\nexit\n`, 25, true],
+    [`let xs = []\nrepeat xs.get(0, default: ${S}) {}\nexit\n`, 64, true],
+    [`let xs = []\nrepeat xs.get(0, default: ${S}) {}\nexit\n`, 1, false],
+    [`repeat ((${S}) otherwise 1) {}\nexit\n`, 4, true],
+    // (the walk's read stopped, and a block past the nesting limit ran the finishing walk, so the read again answers
+    // nothing either)
+    [
+      `repeat (${S}) {}\n${"if true {\n".repeat(257)}say "Done"\n${"}\n".repeat(257)}exit\n`,
+      1,
+      false,
+    ],
+  ] as const)
+    for (const mode of MODES) {
+      const stopped = coreRequest(main(source));
+      assert.ok(stopped !== null);
+      const { diagnostics } = inMode(mode, () =>
+        withTestDemandAllowance(allowance, () => analyseCore(stopped)),
+      );
+      const text = messageSource([source], diagnostics);
+      const kept = diagnostics
+        .map((diagnostic) => coreMessage(diagnostic, text))
+        .filter((message) => message.includes("in a new variable"));
+      assert.ok(
+        kept.length > 0 &&
+          kept.every(
+            (message) =>
+              !message.includes("as in 'let value = ") &&
+              (!union ||
+                message.includes("let value: integer | string = ") ||
+                message.includes("in a new variable declared with the type 'integer | string'")),
+          ),
+        `${allowance} ${JSON.stringify(mode)} ${source}: ${JSON.stringify(kept)}`,
+      );
+    }
   // (a program that holds no mixed askChoice gets nothing of this rule: no kept-value field, also where a stopped
   // decision leaves a subject unfound, and a warning whose facts a stop did not ask keeps main's plain kept `let`)
   const box =

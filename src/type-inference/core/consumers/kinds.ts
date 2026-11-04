@@ -139,29 +139,27 @@ export function oneType(kinds: readonly ItemTag[]): boolean {
 
 /**
  * The known types of a value as its contract holds them, its `null` included, in their one order: the alternatives an
- * answer brings (#1352); an unknown beside them adds none and never stands for one type.
+ * answer brings (#1352); an unknown beside them adds none and never stands for one type. With whether the read stopped
+ * at its demand allowance (`unsettledItem`), where the known types prove nothing of the rest (Codex r7 on #1660).
  */
-export function knownKinds(walk: Consumers, value: PlaceId): ItemTag[] {
-  return kindsInOrder(
-    new Set(
-      withoutEmpty(walk.run(walk.pass.contract.contractOfValueAt(value, [])))
-        .filter((item) => item.tag === "null" || concrete(item))
-        .map((item) => item.tag),
+export function answerRead(
+  walk: Consumers,
+  value: PlaceId,
+): { readonly kinds: ItemTag[]; readonly stopped: boolean } {
+  const items = withoutEmpty(walk.run(walk.pass.contract.contractOfValueAt(value, [])));
+  return {
+    kinds: kindsInOrder(
+      new Set(
+        items.filter((item) => item.tag === "null" || concrete(item)).map((item) => item.tag),
+      ),
     ),
-  );
+    stopped: items.some(unsettledItem),
+  };
 }
 
-/**
- * V30 §19: the types an `askChoice`'s buttons return where they are more than one (whole numbers with numbers are one,
- * `null` beside a type makes it optional, ADR 0021 1.2, 1.3), its `null` among them, in their one order: the types a
- * place keeps only where it is declared with their union; `null` for any other value. The known values decide it,
- * whatever a button the script cannot know adds, as the current checker's `#reportMixedChoice` does.
- */
-export function mixedAnswer(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
-  const c = walk.pass.program.opOf.get(value);
-  if (c?.kind !== "operation" || c.evidence?.kind !== "choice") return null;
-  const tags = knownKinds(walk, value);
-  return oneType(tags) ? null : tags;
+/** `answerRead`'s known types alone. */
+export function knownKinds(walk: Consumers, value: PlaceId): ItemTag[] {
+  return answerRead(walk, value).kinds;
 }
 
 /**
@@ -175,30 +173,42 @@ export function passedOperands(c: ValueConstraint | undefined): readonly PlaceId
 
 /**
  * Per pass, the walk's record of the values a mixed answer reaches unchanged (`passedOperands`), the choice's own result
- * first, each with its known types where they are more than one, none where they are one (#1352). Only the walk records,
- * where its reads answer: a choice in a unit past the nesting limit is decided only by the finishing walk, whose
- * warnings are deferred into the stop's (TSV076) and never published, so no published warning reads its record.
+ * first, each with its known types where they are more than one, none where they are one, and of each such value or
+ * choice whose read stopped at its demand allowance where its known types are one (`stopped`: the walk proved nothing
+ * of it, #1352). Only the walk records, where its reads answer: a choice in a unit past the nesting limit is decided
+ * only by the finishing walk, whose warnings are deferred into the stop's (TSV076) and never published, so no
+ * published warning reads its record.
  */
-const ANSWERED = new WeakMap<Consumers, Map<PlaceId, readonly ItemTag[]>>();
+const ANSWERED = new WeakMap<Consumers, Map<PlaceId, readonly ItemTag[] | "stopped">>();
 
-/** `mixedChoice`'s record of a value a mixed answer reaches and its known types (none for one type). */
-export function recordAnswer(walk: Consumers, value: PlaceId, types: readonly ItemTag[]): void {
+/** `mixedChoice`'s record of a value and its answer types (none for one type), or that its read stopped. */
+export function recordAnswer(
+  walk: Consumers,
+  value: PlaceId,
+  types: readonly ItemTag[] | "stopped",
+): void {
   let answered = ANSWERED.get(walk);
   if (answered === undefined) ANSWERED.set(walk, (answered = new Map()));
   answered.set(value, types);
 }
 
-/** Whether a mixed answer reaches any value of the pass (`recordAnswer`). */
+/** Whether a mixed answer, or a stopped read of one, reaches any value of the pass (`recordAnswer`). */
 export function anyCarried(walk: Consumers): boolean {
   return ANSWERED.has(walk);
 }
 
 /**
  * What a new variable keeping a warning's subject declares (#1352, the kept-value fix of every warning), from the
- * walk's record alone, never a read after it (a finishing walk's reads answer nothing, Codex r6 on #1660): the types the
- * walk recorded where a mixed answer reaches the subject; else none (`[]`: a `let` without a type infers no union there).
- * Asked only where the subject's value is found; where it is not, `anyCarried` says whether a plain `let` is proved.
+ * walk's record (a read after the walk alone answers nothing where a finishing walk ran, Codex r6 on #1660): the types
+ * the walk recorded where a mixed answer reaches the subject; where the walk's read stopped (Codex r7), the read made
+ * again now, proof only where it did not stop: its types, none for one type, else `null` (unproved, the fix in
+ * words); else none (`[]`: a `let` without a type infers no union there). Asked only where the subject's value is
+ * found; where it is not, `anyCarried` says whether a plain `let` is proved.
  */
-export function keptTypes(walk: Consumers, value: PlaceId): readonly ItemTag[] {
-  return ANSWERED.get(walk)?.get(value) ?? [];
+export function keptTypes(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
+  const recorded = ANSWERED.get(walk)?.get(value);
+  if (recorded === undefined) return [];
+  if (recorded !== "stopped") return recorded;
+  const read = answerRead(walk, value);
+  return read.stopped ? null : oneType(read.kinds) ? [] : read.kinds;
 }
