@@ -129,16 +129,13 @@ function keptChoice(
   // its operands; else a plain `let` is proved, Codex r8 to r11 on #1660)
   const unfound = (span: SourceSite): readonly ItemTag[] | null =>
     heldWithin(walk, span) ? null : [];
-  // (a site with no expression of its own, a default's: its value where the core places one; a member's or a
-  // selection's receiver there is the site's start, its own text, else the whole site)
+  // (a site with no expression of its own, a default's or a `get` call's: its value where the core places one; a
+  // receiver there the `get`'s own, by its place, never by text, Codex r12 on #1660; else unfound in the whole site)
   if (expression === undefined) {
-    const place = receiver ? undefined : program.placeBySite.get(siteKey(site));
-    if (place !== undefined) return keptTypes(walk, place);
-    const own =
-      rule.rule === "member" ? rule.receiver : rule.rule === "selection" ? rule.collection : null;
-    const span =
-      own === null ? site : { file: site.file, start: site.start, end: site.start + own.length };
-    return unfound(own !== null && program.textAt(span) === own ? span : site);
+    const place = program.placeBySite.get(siteKey(site));
+    const c = place === undefined ? undefined : program.opOf.get(place);
+    const value = !receiver ? place : c?.kind === "get" ? c.receiver : undefined;
+    return value === undefined ? unfound(site) : keptTypes(walk, value);
   }
   let subject = !receiver
     ? expression

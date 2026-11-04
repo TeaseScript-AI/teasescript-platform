@@ -2069,6 +2069,24 @@ test("an askChoice of more than one type errs where its type would be inferred, 
       `${JSON.stringify(mode)} settles at 4`,
     );
   }
+  // (a `get` call's receiver is its own place, however it is grouped or chained: the choice in its arguments never
+  // makes the receiver's kept form unproved, Codex r12 on #1660)
+  for (const receiverForm of ["(xs)", "((xs))", "(xs.get(0, default: hostValue))", "(f())"]) {
+    const grouped = `let xs = []\nfunction f {\n  return hostValue\n}\nrepeat ${receiverForm}.get(0, default: askChoice 1, 2) {}\nexit\n`;
+    const at = grouped.indexOf(`${receiverForm}.get(0, default: askChoice`);
+    for (const mode of MODES) {
+      const request = coreRequest(main(grouped));
+      assert.ok(request !== null);
+      const { diagnostics } = inMode(mode, () =>
+        withTestDemandAllowance(1, () => analyseCore(request)),
+      );
+      const onReceiver = diagnostics.filter((d) => d.code === "TSV043" && d.site.start === at);
+      assert.ok(
+        onReceiver.length > 0 && onReceiver.every((d) => !("keeps" in d)),
+        `${JSON.stringify(mode)} ${receiverForm}`,
+      );
+    }
+  }
   // (an unfound subject is unproved where its own span holds the recorded choice: the receiver of the outer `get`;
   // the inner `get`'s receiver `xs` holds none, Codex r11 on #1660)
   const holding = `let xs = []\nrepeat (xs.get(0, default: ${S})).get(0, default: 1) {}\nexit\n`;
