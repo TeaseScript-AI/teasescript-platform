@@ -1,0 +1,21 @@
+// Fixed-step motion and collision response with bounded pure numeric state.
+let x = 0.25
+let y = 0.75
+let vx = 0.017
+let vy = 0.023
+let bounces = 0
+let energy = 0
+for step in 0..30000 {
+    vy -= 0.00031
+    x += vx
+    y += vy
+    if x < 0 or x > 1 { vx = -vx
+        x = max(0, min(1, x))
+        bounces += 1 }
+    if y < 0 { y = 0
+        vy = abs(vy) * 0.96 + 0.003
+        bounces += 1 }
+    energy += vx * vx + vy * vy
+}
+say "physics:${bounces}:${round(energy * 1000000)}:${round(x * 1000000)}:${round(y * 1000000)}", instant
+exit

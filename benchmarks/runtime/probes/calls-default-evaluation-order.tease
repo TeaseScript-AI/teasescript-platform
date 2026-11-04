@@ -1,0 +1,8 @@
+let markers = [1, 2, 3, 4]
+function pair(first = markers.removeFirst(), second = markers.removeFirst()) {
+  return first * 10 + second
+}
+let a = pair(second: markers.removeFirst())
+let b = pair(first: markers.removeFirst())
+say "defaults:${a}:${b}:${markers.length}", instant
+exit

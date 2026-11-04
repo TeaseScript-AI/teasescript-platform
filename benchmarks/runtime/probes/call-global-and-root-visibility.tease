@@ -1,0 +1,10 @@
+global total = 5
+let root = 40
+global function readGlobal {
+    return total
+}
+function readRoot {
+    return root + readGlobal()
+}
+say "visibility:${readRoot()}", instant
+exit

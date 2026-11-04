@@ -1,0 +1,11 @@
+let progressValue = 0
+while progressValue < 3 {
+ progressValue += 1
+ if progressValue > 1 {
+  wait 1 ms
+  continue
+ }
+ let dormant = (0..8192).toList()
+}
+say "dead:${progressValue}", instant
+exit

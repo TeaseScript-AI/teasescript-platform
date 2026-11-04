@@ -1,0 +1,17 @@
+let defaults = 0
+function nextDefault {
+    defaults += 1
+    return defaults
+}
+function inner(value) {
+    let parked = value
+    say "inner:${parked}", instant
+    return parked + 1
+}
+function outer(value, extra = nextDefault()) {
+    let parked = value
+    return parked + inner(extra)
+}
+let total = outer(10) + outer(20, extra: 4)
+say "calls:${total}:${defaults}", instant
+exit

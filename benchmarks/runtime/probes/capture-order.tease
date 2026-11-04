@@ -1,0 +1,4 @@
+let rows = [[1], [2]]
+let result = { before: rows, removed: rows.removeLast() }
+say "capture:${result.before.length}:${result.removed[0]}:${rows.length}", instant
+exit

@@ -1,0 +1,22 @@
+let rows = [[1], [2], [3]]
+let sumValue = 0
+for row in rows {
+ rows[0][0] = 90
+ row[0] += 10
+ sumValue += row[0]
+ wait 1 ms
+}
+let stock = dict{ a: { n: 1 }, b: { n: 2 } }
+for key, item in stock {
+ stock[key].n += 10
+ item.n += 1
+ sumValue += item.n
+ wait 1 ms
+}
+let bag = set[[1], [2]]
+for item in bag {
+ item[0] += 20
+ sumValue += item[0]
+}
+say "iteration:${sumValue}:${rows[0][0]}:${stock["a"].n}:${bag.first[0]}", instant
+exit

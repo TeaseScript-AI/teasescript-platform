@@ -1,0 +1,18 @@
+let item = [3]
+let original = { a: item, b: [item] }
+let nested = [[item], [[4]]]
+item[0] = 9
+original.a[0] = 8
+nested[0][0][0] = 7
+let dictValue = dict{ a: [item], b: [[4]] }
+let setValue = set[[item], [[4]]]
+item[0] = 15
+function produce(input) {
+ let result = { a: input, b: [input] }
+ input[0] += 1
+ return result
+}
+let answer = produce(item)
+answer.a[0] = 99
+say "fresh:${original.b[0][0]}:${nested[0][0][0]}:${dictValue["a"][0][0]}:${setValue.first[0][0]}:${item[0]}:${answer.b[0][0]}", instant
+exit

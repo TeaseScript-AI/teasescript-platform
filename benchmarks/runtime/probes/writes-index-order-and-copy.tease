@@ -1,0 +1,10 @@
+let keys = [1, 0]
+let values = [10, 20, 30]
+values[keys.removeFirst()] = keys.removeFirst()
+values[0] += values.removeLast()
+let root = { count: 1, nested: [3, 4] }
+let copied = root
+root.count += 2
+root.nested[1] = 9
+say "writes:${values.join(",")}:${keys.length}:${root.count}:${copied.count}:${copied.nested[1]}", instant
+exit
