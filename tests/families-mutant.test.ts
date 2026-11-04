@@ -22,9 +22,13 @@ const magic = ":(exclude)never";
 
 /**
  * A head (files, a symlink named like pathspec magic, an ignored `dist/`), the patch `change` makes against it, that
- * patch applied as the queue applies it (or `instead`, another change), and the proof's status and output.
+ * patch applied as the queue applies it (or `instead`, another change), `after` then, and the proof's status and output.
  */
-function proved(change: (cwd: string) => void, instead?: (cwd: string) => void) {
+function proved(
+  change: (cwd: string) => void,
+  instead?: (cwd: string) => void,
+  after?: (cwd: string) => void,
+) {
   const cwd = mkdtempSync(join(tmpdir(), "mutant-proof-"));
   try {
     git(cwd, "init", "-q");
@@ -50,6 +54,7 @@ function proved(change: (cwd: string) => void, instead?: (cwd: string) => void) 
       if (spawnSync("git", ["apply", "--whitespace=nowarn", patch], { cwd }).status !== 0)
         return { status: -1, stdout: "", stderr: "the queue would not apply it" };
     } else instead(cwd);
+    after?.(cwd);
     const ran = spawnSync(process.execPath, [tool, cwd, patch], { encoding: "utf8" });
     rmSync(patch, { force: true });
     return { status: ran.status, stdout: ran.stdout, stderr: ran.stderr };
@@ -155,4 +160,12 @@ test("a mutant's proof refuses any other patch, Codex r4's three shapes on #1680
   );
   assert.equal(other.status, 1, other.stderr);
   assert.match(other.stderr, /not the head with the patch applied at "kept.ts"/);
+  // (a sound patch applied as the queue applies it, its file edited after the apply: a result no apply of it gives)
+  const edited = proved(
+    (cwd) => writeFileSync(join(cwd, "kept.ts"), "a2\n"),
+    undefined,
+    (cwd) => writeFileSync(join(cwd, "kept.ts"), "a2\nedited after the apply\n"),
+  );
+  assert.equal(edited.status, 1, edited.stderr);
+  assert.match(edited.stderr, /not the head with the patch applied at "kept.ts"/);
 });
