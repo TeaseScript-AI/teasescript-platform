@@ -1,0 +1,61 @@
+// Perfect maze generation followed by shortest-path BFS on the carved grid.
+let rooms = 12
+let width = rooms * 2 + 1
+let cells = []
+let distances = []
+for i in 0..(width * width) {
+    cells.add(0)
+    distances.add(-1)
+}
+let start = width + 1
+let goal = (width - 2) * width + width - 2
+cells[start] = 1
+let stack = [start]
+let carved = 1
+let dx = [0, 1, 0, -1]
+let dy = [-1, 0, 1, 0]
+while stack.length > 0 {
+    let current = stack[stack.length - 1]
+    let x = current % width
+    let y = floor(current / width)
+    let choices = []
+    for direction in 0..4 {
+        let nx = x + dx[direction] * 2
+        let ny = y + dy[direction] * 2
+        if nx > 0 and nx < width - 1 and ny > 0 and ny < width - 1 {
+            let next = ny * width + nx
+            if cells[next] == 0 { choices.add(next) }
+        }
+    }
+    if choices.length == 0 {
+        stack.removeLast()
+    } else {
+        let next = choices[randomInteger(0..choices.length)]
+        cells[floor((current + next) / 2)] = 1
+        cells[next] = 1
+        stack.add(next)
+        carved += 1
+    }
+}
+let queue = [start]
+let head = 0
+distances[start] = 0
+while head < queue.length {
+    let current = queue[head]
+    head += 1
+    let x = current % width
+    let y = floor(current / width)
+    for direction in 0..4 {
+        let nx = x + dx[direction]
+        let ny = y + dy[direction]
+        if nx >= 0 and nx < width and ny >= 0 and ny < width {
+            let next = ny * width + nx
+            if cells[next] == 1 and distances[next] == -1 {
+                distances[next] = distances[current] + 1
+                queue.add(next)
+            }
+        }
+    }
+}
+say "maze:${carved}:${queue.length}:${distances[goal]}", instant
+exit

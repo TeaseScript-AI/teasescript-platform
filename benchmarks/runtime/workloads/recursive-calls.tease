@@ -1,0 +1,11 @@
+// Evaluate a branching encounter tree using calls, arguments, returns and recursion.
+let calls = 0
+function encounter(depth, branch) {
+    calls += 1
+    if depth == 0 { return branch % 97 }
+    return encounter(depth - 1, branch * 2) + encounter(depth - 1, branch * 2 + 1)
+}
+let checksum = 0
+for turn in 0..150 { checksum += encounter(6, turn + 1) }
+say "calls:${calls}:${checksum}", instant
+exit

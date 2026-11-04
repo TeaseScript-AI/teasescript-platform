@@ -1,0 +1,31 @@
+// Build, shuffle and sort ranked IDs, then answer binary-search queries.
+let checksum = 0
+let found = 0
+for batch in 0..24 {
+    let rankings = []
+    for i in 0..256 { rankings.add(i * 3) }
+    rankings.shuffle()
+    checksum += rankings[0] + rankings[255]
+    rankings.sort()
+    for query in 0..64 {
+        let target = (query * 19 + batch * 7) % 800
+        let low = 0
+        let high = rankings.length - 1
+        let index = -1
+        while low <= high {
+            let middle = floor((low + high) / 2)
+            if rankings[middle] == target {
+                index = middle
+                break
+            } else if rankings[middle] < target {
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+        if index >= 0 { found += 1
+        checksum += index }
+    }
+}
+say "search:${found}:${checksum}", instant
+exit

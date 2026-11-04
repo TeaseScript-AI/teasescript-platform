@@ -1,0 +1,41 @@
+// Copy capture, collections, equality and Unicode text.
+let original = [{ count: 1, items: [1, 2] }]
+let duplicate = original
+duplicate[0].items[0] = 9
+let appended = []
+appended.add(original[0])
+original[0].count = 3
+say "copy:${original[0].items[0]}:${duplicate[0].items[0]}:${appended[0].count}", instant
+
+let stock = dict{ alpha: { value: 1 }, beta: { value: 2 } }
+stock["alpha"].value += 3
+let values = stock.values
+values[0].value = 99
+let total = 0
+for key, item in stock { total += item.value }
+stock.remove("alpha")
+stock["alpha"] = { value: 7 }
+let keys = stock.keys.join(",")
+let sameDict = stock == dict{ alpha: { value: 7 }, beta: { value: 2 } }
+let sameRecord = { a: 1, b: [2] } == { b: [2], a: 1 }
+say "dict:${total}:${keys}:${sameDict}:${sameRecord}", instant
+
+let bag = set[[1, 2], [1, 2], [2, 1]]
+let member = bag.first
+member.add(3)
+let sameSet = bag == set[[2, 1], [1, 2]]
+let hasList = bag.contains([1, 2])
+say "set:${bag.length}:${member.length}:${bag.first.length}:${sameSet}:${hasList}", instant
+
+let numbers = [10, 2, 2, -1]
+numbers.sort()
+let removed = numbers.removeLast()
+let missing = numbers.get(-1, default: null)
+say "list:${numbers.join(",")}:${removed}:${missing}", instant
+
+let unicode = "A😀é"
+let normalized = "  ITEM-item-item  ".trim().replace("item", "$1").lowercase()
+let pieces = "😀x😀".split("😀")
+let decimal = toInteger("  -1.9e1  ")
+say "text:${unicode.length}:${unicode.substring(1, 2)}:${unicode.split("").length}:${normalized}:${pieces.join("|")}:${decimal}", instant
+exit

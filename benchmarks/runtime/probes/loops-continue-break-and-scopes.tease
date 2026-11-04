@@ -1,0 +1,13 @@
+let n = 0
+let totalValue = 0
+while n < 6 {
+  n += 1
+  if n == 2 { continue }
+  if n == 5 { break }
+  if n > 2 { totalValue += n }
+  totalValue += 10
+}
+for i in 0..3 { totalValue += i }
+repeat 2 { totalValue += 100 }
+say "loop:${n}:${totalValue}", instant
+exit

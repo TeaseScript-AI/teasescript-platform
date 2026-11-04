@@ -1,0 +1,4 @@
+let values = [0, 0, 0]
+repeat 6 { values[randomInteger(0..3)] += randomInteger(1..4) }
+say "rng:${values.join(",")}", instant
+exit

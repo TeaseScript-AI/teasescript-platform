@@ -1,0 +1,22 @@
+// Build a session event log, then parse, normalize and summarize its records.
+let lines = []
+let transcript = ""
+for event in 0..1200 {
+    let tag = "common"
+    if event % 11 == 0 { tag = "rare" }
+    let line = "  pickup:item-${event % 64}:${tag}:${event % 7 + 1}  "
+    lines.add(line)
+    transcript += line + "\n"
+}
+let source = lines.join("\n")
+let records = source.split("\n")
+let checksum = 0
+let rares = 0
+for record in records {
+    let normalized = record.trim().replace("item-", "slot-").lowercase()
+    let fields = normalized.split(":")
+    if normalized.contains(":rare:") { rares += 1 }
+    checksum += (toInteger(fields[3])) + fields[1].length
+}
+say "text:${records.length}:${rares}:${checksum}:${transcript.length}", instant
+exit

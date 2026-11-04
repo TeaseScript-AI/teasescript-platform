@@ -698,7 +698,10 @@ smoke does not predetermine that later tooling decision.
 
 The repository does not use an arbitrary mandatory line-coverage threshold such as 95 percent. Coverage may later help identify untouched branches and error paths, but correctness, determinism, restore equivalence, and boundary validation are more important than maximizing a percentage.
 
-Performance benchmarks are separate from correctness tests. [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md) tracks the Beta outcome **Establish a runtime performance baseline and optimization plan**.
+Performance benchmarks are separate from correctness tests. The runtime benchmark
+([`benchmarks/runtime/README.md`](../benchmarks/runtime/README.md)) keeps the two apart in one tool: CI checks its exact
+instruction counts and results against a baseline that a PR updates on purpose, and its paired CPU comparison runs on
+demand on a queue worker, reported and never a threshold. [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md) tracks the Beta outcome **Establish a runtime performance baseline and optimization plan**.
 
 Performance workloads should measure long-running runtime-state growth as well as instruction throughput. This includes growth in runtime-managed identities, snapshots, checkpoints, cloning, validation, and serialization costs. Repeated timer or media creation is a representative workload, but measurements and reachability/lifetime analysis must precede any reclamation or garbage-collection rule.
 

@@ -1,0 +1,31 @@
+// Apply purchases and restocks through nested records indexed by dynamic dict keys.
+let inventory = dict{}
+let sold = dict{}
+let scores = dict{}
+for item in 0..64 {
+    let key = "item-${item}"
+    inventory[key] = { stock: item % 7, price: item + 1 }
+    sold[key] = 0
+}
+for side in 0..8 { scores["side-${side}"] = 0 }
+let restocks = 0
+for turn in 0..4000 {
+    let key = "item-${turn * 17 % 64}"
+    let quantity = turn % 2 + 1
+    if inventory[key].stock < quantity {
+        inventory[key].stock += 10
+        restocks += 1
+    }
+    inventory[key].stock -= quantity
+    sold[key] += quantity
+    let who = "side-${turn % 8}"
+    scores[who] += inventory[key].price * quantity
+}
+let value = 0
+let units = 0
+for key, item in inventory { value += item.stock * item.price
+        units += sold[key] }
+let points = 0
+for side, score in scores { points += score }
+say "inventory:${units}:${points}:${value}:${restocks}", instant
+exit

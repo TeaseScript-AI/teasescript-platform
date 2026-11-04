@@ -1,0 +1,9 @@
+let values = []
+let checksum = 0
+for i in 0..30000 {
+ values.add(i)
+ values[i] = values[i] + 1
+ checksum += values[i]
+}
+say "${values.length}:${checksum}", instant
+exit

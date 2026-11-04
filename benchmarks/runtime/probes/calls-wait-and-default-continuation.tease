@@ -1,0 +1,10 @@
+let counter = 0
+function slow {
+  counter += 1
+  wait 1 ms
+  return counter
+}
+function outer(value = slow()) { return value + 10 }
+let result = outer() + outer(5)
+say "wait:${result}:${counter}", instant
+exit

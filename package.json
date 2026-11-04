@@ -26,6 +26,7 @@
     "playground": "npm run build && node dist/playground/server.js",
     "playground:https": "npm run build && node dist/playground/server.js --https",
     "probe": "node tools/probe.mjs",
+    "benchmark:runtime": "node tools/benchmark-runtime.mjs",
     "test:property": "npm run build && node dist/tests/property/replay.js",
     "test:build:typescript": "node ./tools/test-clean-typescript-build.mjs",
     "test:compiled:full-output": "node ./tools/test-output-filter.mjs --full-output",
@@ -35,7 +36,7 @@
     "test:player:preview": "node tools/player-preview-checks.mjs",
     "test:player:firefox-camera": "node tools/player-firefox-camera.mjs",
     "dev:player": "vite --config player/vue/vite.config.ts",
-    "test:verification": "node --test tools/run-parallel.test.mjs tools/test-shards.test.mjs",
+    "test:verification": "node --test tools/run-parallel.test.mjs tools/test-shards.test.mjs tools/benchmark-runtime.test.mjs",
     "test:families": "node tests/families/check.mjs",
     "test:lint:design": "node --test tools/design-lint/test.mjs"
   },

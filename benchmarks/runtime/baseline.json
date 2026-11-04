@@ -1,0 +1,526 @@
+{
+  "cases": {
+    "maze-dfs-bfs": {
+      "sourceSha256": "d99b8ca6eda03ba43306ac439e059ca0b6fde36a4d0805405b46734bddb4e355",
+      "instructions": 33532,
+      "said": ["maze:144:287:104"],
+      "cuts": [
+        {"kind":"step","instructions":33531,"status":"running","rng":{"algorithm":"xorshift32-v1","state":1909150382},"events":1,"eventsDigest":"a561f41a38c2ba428a239afb12db5279137ddb8e14afe36771d302fa2a49ce09","stateDigest":"1b5cf67771031a54eccba2648e3182d5279f1a9f8d39c48913e1e3fae607ef92"},
+        {"kind":"step","instructions":33532,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":1909150382},"events":1,"eventsDigest":"8f5eea8042d40bad2d2fae5de440358b6bac8c961d40544870aef5387ce96b31","stateDigest":"8389b2c6c3b7ea4fb2a50d0cac47c05d1264b1d85fb073ec3b7f102a238d572c"}
+      ]
+    },
+    "minimax-tictactoe": {
+      "sourceSha256": "a862724d03a37010e281c216c1ae0735f328ef22f1a1c050f899dbcd3a198088",
+      "instructions": 515137,
+      "said": ["minimax:930:5430:30"],
+      "cuts": [
+        {"kind":"step","instructions":515136,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"97ab91a6b594b2616a07aa73f1126401e66fe7e2019aa493da96b4ac282b3d4b","stateDigest":"6555c065d9290fbb780d010204516026b763070c6d3f5b90e270f0484f177134"},
+        {"kind":"step","instructions":515137,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"4ca987b82f439f5fceb6399a10927cbdcee369d54952178c6a556c97d55e7548","stateDigest":"6bf53588a784ba8d707452150733080300296472e59c3f131f591282d37df46f"}
+      ]
+    },
+    "shuffle-sort-search": {
+      "sourceSha256": "0ada2e0d847627d0bda23444f1cbfc55bf30b9c8bfa9e5c109db5665c0c100be",
+      "instructions": 131905,
+      "said": ["search:499:75199"],
+      "cuts": [
+        {"kind":"step","instructions":131904,"status":"running","rng":{"algorithm":"xorshift32-v1","state":3816083966},"events":1,"eventsDigest":"19b34e57370bb312dfbbbc317e50c33f1fe1ea535d37676205bfec34ddeaecb9","stateDigest":"4d7304eb47b12aa113015dee839fc37cb2da3afd31e527abaeb9b9f67e3cb273"},
+        {"kind":"step","instructions":131905,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":3816083966},"events":1,"eventsDigest":"e230032aeaf778fa71e81628c045a7dee6f5131fc5d8745ac53f0a752783db87","stateDigest":"fc15e81f698e4ce8f572cdbcee10fe37c465430a44f794d86627b595fcbeba26"}
+      ]
+    },
+    "log-text-processing": {
+      "sourceSha256": "2178e0158f128237b76c21876efc63787027288551a78f7dbd5be951f967bcee",
+      "instructions": 16270,
+      "said": ["text:1200:110:13004:33190"],
+      "cuts": [
+        {"kind":"step","instructions":16269,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"48c71fe502556ba6ff4ff6311e161c683d432c817a41d4c109f8be7d081a4837","stateDigest":"14618e21a7625c34a97dad0f295bf22f5b4e2d07a164f8c9ef212010f37f7653"},
+        {"kind":"step","instructions":16270,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"36f9a1dc350e2cf24dffba929d804b1045da2c6fcde8c6e7932f3ffcb89459ca","stateDigest":"c9af7d5c805146c1afa51cc4cf1d61022538611c6c85a024899a813f65409a11"}
+      ]
+    },
+    "inventory-scores": {
+      "sourceSha256": "d5b4d8d604c880ccd2b7143297d0f5839e02d7523c454b0d9b6feaa97c823bac",
+      "instructions": 93581,
+      "said": ["inventory:6000:196000:8730:609"],
+      "cuts": [
+        {"kind":"step","instructions":93580,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c03fcdcca29fc7ed2a7a37f3ff8b6af17c144ce424633baff0b4b207bc27d5b1","stateDigest":"b8839ea5d94c8ebd5ae5e097a4369c0a08516fb1936247c3e2de4f729ef597ea"},
+        {"kind":"step","instructions":93581,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"6c28c421722a395ecdf1683e3a670d0f713333549e4136bb1c8f2969c2bc5d47","stateDigest":"5c7d3db986cf88edcf27754ab2dacbb934c0b24428472ea0e14aeff3b4f49586"}
+      ]
+    },
+    "recursive-calls": {
+      "sourceSha256": "d1308f08d2972b57cb4c3f98e507780822656600f9256a2254f44cc5895e0a77",
+      "instructions": 201005,
+      "said": ["calls:19050:460758"],
+      "cuts": [
+        {"kind":"step","instructions":201004,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"f88f3d4007db68f0398c02eb5d9f351d12f6435909d9a7b70432c356475dec79","stateDigest":"de2669470e80578119ccc0ced80940f79bca924ac4eee7caef6dd25ccba24618"},
+        {"kind":"step","instructions":201005,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"e0ceab4c209a0d38c227ba5fcdf58f2d2495950ad816c305d301a9cbdc9b88ff","stateDigest":"8b00adf1336dd247bbdfb0a0e1c5e7d727993f021db0746f397cd167c29653e4"}
+      ]
+    },
+    "numeric-physics": {
+      "sourceSha256": "416035553d78a61766e13c16aa3b8f38de1396a86f5d68c59e9fbcacacf96aa7",
+      "instructions": 242939,
+      "said": ["physics:586:46855166:714000:7948342"],
+      "cuts": [
+        {"kind":"step","instructions":242938,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0e3ae0b98eab19520ebd140ab9ecb8a649a706d639df0b1fed1c8bc123572b86","stateDigest":"c62cd1200cd5305b7777932371123d8212f609a3dff667f4f00dfca2f577a769"},
+        {"kind":"step","instructions":242939,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"a31c23a3abe03f85b466d16e55bf0d8353c3d22fadfa6345c99cc01aa025dbd1","stateDigest":"81cb16e9ef9ae1b3dca22546f6e8b3593082f3800b41546b73f11e3f825475cb"}
+      ]
+    },
+    "issue": {
+      "sourceSha256": "5d50ad947bdff13c20a4c67282f1985cdca5d056de021747fd644de82b5fdbf6",
+      "instructions": 1800307,
+      "said": ["200000"],
+      "cuts": [
+        {"kind":"step","instructions":1800306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":413075112},"events":1,"eventsDigest":"3a5d2694e7e41e07d6dca665a79374f1083411c426a848ad7700f297beac33e9","stateDigest":"25131ebb814892640d8fa954591431c72c5c8521f761548b4b1a9fbf58dc44bc"},
+        {"kind":"step","instructions":1800307,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":413075112},"events":1,"eventsDigest":"7e4819f7f471b9042b63f74e050255ba60cb29c67db84c2f7993e7587fe5da52","stateDigest":"65cdbd784fe8fd7b177ae7dc3dacad398f2771002584114d5bebe83b8e0c4bd3"}
+      ]
+    },
+    "list": {
+      "sourceSha256": "d1be0b3e706b4f3f96c1a8a1ab8a7fc289b22fcbc6a297cc5cb0ae42c8652a0b",
+      "instructions": 300005,
+      "said": ["30000:450015000"],
+      "cuts": [
+        {"kind":"step","instructions":300004,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"94ca598e65fde5ee54505a274c897d71ed0aedcdb3291cfc49cea0bb0c7e4a1a","stateDigest":"f2d4765767fa570577518ba1d3b869622a159042e2b0f33c652cd37c0037a2df"},
+        {"kind":"step","instructions":300005,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"6bfe0a52e05aae8293c4cd532ce6614c715b0073d24474b7969f817e87ccbcda","stateDigest":"842920f82bcc3560dd4ae17ff5f83b67d03086637043f4a2548e9927c3b3cf49"}
+      ]
+    },
+    "battleship-three-hits-500": {
+      "sourceSha256": "7490e4e88a11620febada693a7cfc5114d7ff2b46f50565ea187a8c58ae05757",
+      "instructions": 4036439,
+      "said": ["Battleship benchmark: Thinking","Battleship benchmark: Thinking.","Battleship benchmark: Thinking..","Battleship benchmark: Thinking...","Battleship benchmark: Thinking....","Battleship benchmark: Thinking.....","Battleship benchmark: Thinking......","Battleship benchmark: Thinking.......","Battleship benchmark: Thinking........","Battleship benchmark: Thinking.........","B5"],
+      "cuts": [
+        {"kind":"step","instructions":36,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"60ac8f9f046d870de52af47320d4553d96aaf03f271cd882ee8a7f6e1b06a34d","stateDigest":"3d378867c8bed0aa9493b375823c29daa02910b221c380e2a715230f4272fd3d"},
+        {"kind":"step","instructions":349961,"status":"running","rng":{"algorithm":"xorshift32-v1","state":336280516},"events":1,"eventsDigest":"fc5f4a07baa58a9946db88471bf709f64f52a537eba86deb803a1dd38cb493b1","stateDigest":"f12413cd17ba797e278f695d9fb13e3a7ccccd73ada10d52ef829d432266eb8f"},
+        {"kind":"step","instructions":709867,"status":"running","rng":{"algorithm":"xorshift32-v1","state":387834419},"events":1,"eventsDigest":"de82a68781dbacd49548954fa40babfe1d31954678c1caac6d4d365203d4567c","stateDigest":"3fa66fd202a7cc31b3cc3fad708ca858df7f69fe76824803539af0ede3ee62a9"},
+        {"kind":"step","instructions":1113911,"status":"running","rng":{"algorithm":"xorshift32-v1","state":1335491410},"events":1,"eventsDigest":"b7baf1a08d3d485fe495676a02438ea512e758242f3bdd10138bf4eefa0a3306","stateDigest":"d115cb131ee83a077e5b1ad8aaf69e3a43b1d349b8bd9ab4eff28a10d64a9bd7"},
+        {"kind":"step","instructions":1643729,"status":"running","rng":{"algorithm":"xorshift32-v1","state":2678714197},"events":1,"eventsDigest":"29c859a4dd52bdb1986f6860f9f38d6207b6a657917ba722292936e0e537c276","stateDigest":"ccb4962a36f388c66e668be5ec9427562571e4074af111e7781d5a332ee81949"},
+        {"kind":"step","instructions":2176673,"status":"running","rng":{"algorithm":"xorshift32-v1","state":2223083393},"events":1,"eventsDigest":"281ff3b9cf81d7df40c8f230d7ce4a9c8b14c341210ed965f9ae76fa2f7fa0d1","stateDigest":"d1da689879be5e871e577b140816d427518ad1c1dda4aa0738d479acab5a9295"},
+        {"kind":"step","instructions":2525121,"status":"running","rng":{"algorithm":"xorshift32-v1","state":3027321336},"events":1,"eventsDigest":"35d0b57d1cfceb9c20a3263fdb2033e7e80ebe7fbe4ef9eff4b38ed61b68411b","stateDigest":"a98f1f69381da96260047b1af39fc543f94fa0ea10cc52c29b28b377e19a71b9"},
+        {"kind":"step","instructions":2944001,"status":"running","rng":{"algorithm":"xorshift32-v1","state":3817578860},"events":1,"eventsDigest":"6c189d0ac3b37d47313bc3f62870dec9dd25173daf27e331f22dc4a2c454f811","stateDigest":"a45aed46a6471aceeee3e2b96a8ab1e3c63142ce9d558b751f32812541e6b323"},
+        {"kind":"step","instructions":3355833,"status":"running","rng":{"algorithm":"xorshift32-v1","state":1357701738},"events":1,"eventsDigest":"fdbcae9077dc676b62ab6c5d566375c38b910a8688bc64aac6f9ad36cbafe8d8","stateDigest":"c6cc3df8455c8375b56cf12ba8a96ef867ab17d82a3f7127acae9162da114f1c"},
+        {"kind":"step","instructions":3734485,"status":"running","rng":{"algorithm":"xorshift32-v1","state":3186638383},"events":1,"eventsDigest":"d418973b15b0b0a8c8e2fed474de1414c39807edf6445baf699863fe9d8fb632","stateDigest":"08a01d5ff70f7bb50725cd03bca589976dd695e0a728aa48cbdc3fa8b6a19812"},
+        {"kind":"step","instructions":4036438,"status":"running","rng":{"algorithm":"xorshift32-v1","state":1874213333},"events":1,"eventsDigest":"62b670399f74d44cdf3e75cc0d3cb060d912e3653e99e18c928a39942ee33611","stateDigest":"24fb01e1859b8822987d726d691fde7c97d0d4b15683a05f6bf5e1330a7af592"},
+        {"kind":"step","instructions":4036439,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":1874213333},"events":1,"eventsDigest":"99f6b510af5833a9246446c60544c1f14784f055093b9e5706368d6f1ef43a74","stateDigest":"939ff94eb52e89313df6bac285d8a6dd41c6d27855e459f31140032fb3678de6"}
+      ]
+    },
+    "battleship-empty": {
+      "sourceSha256": "b9639d4abe6712fd7afaf88159b17578beee288caed3e0b2f1f619a5f7a4b9ed",
+      "instructions": 13117034,
+      "said": ["Battleship benchmark: Thinking","Battleship benchmark: Thinking.","Battleship benchmark: Thinking..","Battleship benchmark: Thinking...","Battleship benchmark: Thinking....","Battleship benchmark: Thinking.....","Battleship benchmark: Thinking......","Battleship benchmark: Thinking.......","Battleship benchmark: Thinking........","Battleship benchmark: Thinking.........","D4"],
+      "cuts": [
+        {"kind":"step","instructions":36,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"22293e21dd34e7ef7e73fb5c94c6cca6760576710c1512b261a9891aa3d9507a","stateDigest":"e6b9e7137d527fc673c344875c3849d0ed2348b5db6aacc3d95273e9fa04414b"},
+        {"kind":"step","instructions":1313910,"status":"running","rng":{"algorithm":"xorshift32-v1","state":814268048},"events":1,"eventsDigest":"823fa05976a873a26c15b9540ef1ed27b7e4b3fd475d237759832cfae215b9d9","stateDigest":"55c0ff3b0b3a4301c925a0eca8524f6e189b785c0e13eaf8a72cc956d67be0c8"},
+        {"kind":"step","instructions":2623062,"status":"running","rng":{"algorithm":"xorshift32-v1","state":2123416947},"events":1,"eventsDigest":"ce883b5b42f943674b6840228cbbc6691f0c5c86309a53603f2a750dcd4d4ea3","stateDigest":"aadb003a296eeb5189cf9b3094b659fce8fcdc2c406840fd5cb9cded888eaf36"},
+        {"kind":"step","instructions":3938584,"status":"running","rng":{"algorithm":"xorshift32-v1","state":803346562},"events":1,"eventsDigest":"7e7c9ecfc30fecc2f10dbf3385458a81c03e1044c481b6344ab718c0c8e17fbd","stateDigest":"32a219b211efa30fc55bfb9289191645499bb268f4a7693b60686dad6a8d3287"},
+        {"kind":"step","instructions":5246580,"status":"running","rng":{"algorithm":"xorshift32-v1","state":3367331975},"events":1,"eventsDigest":"ea6f0a99484c2939b33f763df5e846185aa639580631d1b3cefb8e2b1cea0e30","stateDigest":"ada95d79d9c1b10e3bb93f21d7e83548f8c4b68d6b55afd5a083088964369d8a"},
+        {"kind":"step","instructions":6560154,"status":"running","rng":{"algorithm":"xorshift32-v1","state":196612300},"events":1,"eventsDigest":"1d9ad3c96016f984f8f138fb514652304fd1654bb56d0f81d4ae476f33b0445a","stateDigest":"a6a5d5b16c5b51a6a273d4ad222bef9d01a00ca2aad80c719ba428c8651055ba"},
+        {"kind":"step","instructions":7875834,"status":"running","rng":{"algorithm":"xorshift32-v1","state":2937430861},"events":1,"eventsDigest":"dd87aaf0dc5883b75b31d1881972f211e5ac289bc72999889bcf3e31baa7f143","stateDigest":"7594db0c4d3b64f80609c58923efd35faa7118560415a1e2fa246bd2ab81fb7a"},
+        {"kind":"step","instructions":9188855,"status":"running","rng":{"algorithm":"xorshift32-v1","state":2019584534},"events":1,"eventsDigest":"a9d9f664e951ab028e6d277f3463c7e42a202aa947149b708ad8f380ff5b3f73","stateDigest":"b9f39e90021eb57d407b1c68fc62a6dd6c7f8b8b4f6e87cc5a4a227f9a32cb76"},
+        {"kind":"step","instructions":10502978,"status":"running","rng":{"algorithm":"xorshift32-v1","state":1728717839},"events":1,"eventsDigest":"2521b88219ec751942fe8f529065afef7a3141cf9c3df0b3ce070a21aeef622d","stateDigest":"33371e4c2859c6221e8a6d7fd784932ec8ba8f06c8e7e27d19463e99e99249c5"},
+        {"kind":"step","instructions":11815678,"status":"running","rng":{"algorithm":"xorshift32-v1","state":410269875},"events":1,"eventsDigest":"da03944c80bac1f441b170034501ffdf89987d0feb8612b50c1247c118809102","stateDigest":"e6aed97aaa765fd72c2a08a3bb5193bbcb9ee323a5cc007ebc1fb797c5dc9f41"},
+        {"kind":"step","instructions":13117033,"status":"running","rng":{"algorithm":"xorshift32-v1","state":870874580},"events":1,"eventsDigest":"58151bf92b7df94a6d5fbfe3fbb26de64bed7cb8e1fa64dcd057a57edb359b83","stateDigest":"bc2ec6ca5413aa1fd82d6c779d07cea5cca0b1027dfa100327f4d03767a64f6a"},
+        {"kind":"step","instructions":13117034,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":870874580},"events":1,"eventsDigest":"68b3472be3078ff4e7f0ec246ad3954291fa0a35a61d487f3fe6e286fb5270a2","stateDigest":"221afff734286753fd222556b6e45817e04d7300097de67f5647f79c0dc766b5"}
+      ]
+    },
+    "battleship-three-hits": {
+      "sourceSha256": "b8bb6a2b352140867c660bf834116ccc149a73ae626afa953f7f959aa268ddf7",
+      "instructions": 82860507,
+      "said": ["Battleship benchmark: Thinking","Battleship benchmark: Thinking.","Battleship benchmark: Thinking..","Battleship benchmark: Thinking...","Battleship benchmark: Thinking....","Battleship benchmark: Thinking.....","Battleship benchmark: Thinking......","Battleship benchmark: Thinking.......","Battleship benchmark: Thinking........","Battleship benchmark: Thinking.........","B5"],
+      "cuts": [
+        {"kind":"step","instructions":36,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"228018c4e29138418efdf912632f27f626f1e82bf3fae6a7b5be7cd7d18c38ad","stateDigest":"215a7615afec9200ca0f507388fc01f120a46123713eda859e7b965940d199a2"},
+        {"kind":"step","instructions":8169550,"status":"running","rng":{"algorithm":"xorshift32-v1","state":2269988459},"events":1,"eventsDigest":"e568edbfde09e35e420c32ffb38ca9b670679541e0d2c164980a723494878159","stateDigest":"813a4ae8c01e5ec0bc4d83f64a0362b6a88271df3c83470546ba9ba9d78daea4"},
+        {"kind":"step","instructions":16734165,"status":"running","rng":{"algorithm":"xorshift32-v1","state":3926643563},"events":1,"eventsDigest":"af927458b42cee673d31e6cd569da8d39b999edb526b944ec9e283a948f074a1","stateDigest":"0277fe7fc4e63c40e75abc8ecbb46a4b0c0ef4c48d6222d30f2597ea04fa374c"},
+        {"kind":"step","instructions":24240901,"status":"running","rng":{"algorithm":"xorshift32-v1","state":1277763194},"events":1,"eventsDigest":"226c4df066ab13d688d696004ad4b847968d4636b7f6ee754fcac33bc77c850e","stateDigest":"75bdd13288e41268547a14de0d23dd3c74ad996552c461cc88c50d76f69f6192"},
+        {"kind":"step","instructions":32805709,"status":"running","rng":{"algorithm":"xorshift32-v1","state":1104604020},"events":1,"eventsDigest":"844426f4c1ed2f239e3b9bd7e8c217683338eec27b3c88eb78554685abdaa23a","stateDigest":"dc28f9c06a2eead2cc9fd806fcf55f28d3d8a91a1b9092a3ac71596e7a0aed6d"},
+        {"kind":"step","instructions":41608747,"status":"running","rng":{"algorithm":"xorshift32-v1","state":60876165},"events":1,"eventsDigest":"87093cf28ce4d83a2d9fbe5134c29cdb4f3085f7074ed66ae2747ebbbd51e522","stateDigest":"8c79e880dfeed37320c97f0a1903014b13191a8b1931d4e844ad7a40e9e332cd"},
+        {"kind":"step","instructions":49973015,"status":"running","rng":{"algorithm":"xorshift32-v1","state":545259631},"events":1,"eventsDigest":"ca1bf0a08647db70448c02fe4e339f647a7c558b3379be5a986635aa8cfa22d9","stateDigest":"0482bfdba944e727e4ea4bc7e19224966ae26a617c56f958dac937f53d42290e"},
+        {"kind":"step","instructions":58412369,"status":"running","rng":{"algorithm":"xorshift32-v1","state":4009101872},"events":1,"eventsDigest":"286753e7e4c3216752436bb9d9a582acb53803564b4203f50b72a78febeed1ae","stateDigest":"429fc8d34f2e98aaec15d9520d0a125c8dfb1b4156af37a46fedc936460ccd7a"},
+        {"kind":"step","instructions":66893041,"status":"running","rng":{"algorithm":"xorshift32-v1","state":1958504806},"events":1,"eventsDigest":"91e2167a1641fcb95c6d2193b155055d84ad4b9b500c3690507f9097dd98bdfe","stateDigest":"3acf3c9c782699d7eccafb5a87066fd84abab323398499d056ac6d2fe58a5e84"},
+        {"kind":"step","instructions":74948090,"status":"running","rng":{"algorithm":"xorshift32-v1","state":3970305517},"events":1,"eventsDigest":"49b331aa9d208c2c5d126b675dde570f93a4f094f74db4e92f93a6adaefa1830","stateDigest":"51b10de77663a8dd0f97531f396f34a7761c6024da572041a1caf34814dab7c9"},
+        {"kind":"step","instructions":82860506,"status":"running","rng":{"algorithm":"xorshift32-v1","state":2593107734},"events":1,"eventsDigest":"3c0f57b5216f1ccc3739d578cb4271edd66ceac80df87211008d9e45046fa2f5","stateDigest":"44df2e11d3fd333be41dcd8790655d8be048701843b7cfb9f66dbc27fb76605a"},
+        {"kind":"step","instructions":82860507,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":2593107734},"events":1,"eventsDigest":"c5dd2c2f52b445e3ac8d3c7bf0f1672bb1ba42d8e1978c8b5dc169d9024b8e33","stateDigest":"88e113a1b2d0cfd82fdab3470f7cdfbf6a4d33cb54a795f9f4d26ae16fd27de1"}
+      ]
+    },
+    "wait-1024-20": {
+      "sourceSha256": "1da4cc54226b658cf6d53dc0ff1f2502fb1c8bc2a0ff20f10fb9c600b5c0f2e4",
+      "instructions": 3318,
+      "said": ["boundary:132:1024:121"],
+      "cuts": [
+        {"kind":"step","instructions":3094,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"8a36aee0d54f839775c359072a54453b94010c4ec0d13a2689e324fe137f021e","stateDigest":"dc8e9278b69585253c6dcc15fcb63287ae217815ac8dbb2ea67b13ad22d71d48"},
+        {"kind":"observe","instructions":3094,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"f0bd2356ed0e9e256702d3607d03ca17447bd9470302244baae1d8ca83661beb","stateDigest":"82d2b6ec11f63f9faee6e47030675e26c3e05ac8d2f71aa778aace783c75723c"},
+        {"kind":"step","instructions":3114,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"36f5b9e1cf82bd185bc4a1d50b46a2d570b25632721b90460152be09d354a2e6","stateDigest":"9165cd0d615833124587797d7949954d06ecc1af85d046403cbc647650902c3b"},
+        {"kind":"observe","instructions":3114,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"6e9cd5a86673ccca35f7f1311c7dce3443e8c035f321e5e2ff4f6687697e6c4d","stateDigest":"3ff6d9709e62591db31a19e8d97acc9e368b1370ac55fb3516fb5b2380d62a8e"},
+        {"kind":"step","instructions":3134,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"207373342fcc9ac29c97418fa15860bd632b12cbcbc70526e8c2f53adc805d4a","stateDigest":"6205200047b1c30c3b0cbc7603ced8d26100fa892abe9477c80fc07b6eb47b6e"},
+        {"kind":"observe","instructions":3134,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"63bfc559d31c0692c0ff27917ed565b87c76c75fad7625ca2ea27dd6686358a7","stateDigest":"12a555613cc2b2078d75104606d38b567b9bf2f615606d1374ab4f7bf52ec3ca"},
+        {"kind":"step","instructions":3154,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c9f177601607b29f2113d5f7a933fa77b6de389ded9e6a56c5a741e4ed0ea2cd","stateDigest":"0ccef19412d1c5bbe940f8443094e1f49899a00dbf38eb92a0c77bfaea98a98c"},
+        {"kind":"observe","instructions":3154,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"8f5be920298a1de246edcc83b81c05d7ca1e344e48f330755af49f748084ce95","stateDigest":"118c21732d9b3d31cfe40d5dade9305f35f70a4516437682f90d52c16b7019b8"},
+        {"kind":"step","instructions":3174,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0029bf1c3cb7339581e25e506a28f9fb5b5b6bedd3f0a6e96008aeba5b1e6189","stateDigest":"a59e1b6440047eb60be4620173eedbef9ef2a89e56f0c7a6cba2ea9a969f9542"},
+        {"kind":"observe","instructions":3174,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"456acd9037ac0b3e51c1a961c2ff369abc66f4bfe76d80dfe67832424e965589","stateDigest":"39630ffca5c79dc521a47bbb7200b707167b42b6f503906847dd9e51d82b6f67"},
+        {"kind":"step","instructions":3194,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0aacabe4c7ec3a5b5197bf262f311eaaacd5f718cc99acb15ab393f31052e6d8","stateDigest":"612bb9014d2a9dfd4cefdbfa7fef6f95c02de9bf4769c3d22d6104858b6f07c4"},
+        {"kind":"observe","instructions":3194,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b1054b2b1f1957ba45c30a5342f2ce10993681b5c26a326deaecc90cb4ba8df4","stateDigest":"8e378fa3264b11b57249c0c51f4b05241cb35b4e56efb3af5d959886d13b0464"},
+        {"kind":"step","instructions":3214,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d9a268e1deaf4a8f3d101551adf920e6a02a1367998d33d7ab863495e1d5ec4e","stateDigest":"804d6f7b5bacbc555623706642e836c88954f73a2fe3185988db1de1f9b28ef3"},
+        {"kind":"observe","instructions":3214,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"31c708d816ab6d5b9072f2a7dfffb7daeaabaf0b011013a1aaaf6867905a7ffe","stateDigest":"3add6f30825d6836c4b3b6a27dc4974888435188cbf3903ca62efa8f97d751d9"},
+        {"kind":"step","instructions":3234,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"31880e288cf79228d984db5187fa671bf1b84143cbde73cdd7d20b48325fc1a9","stateDigest":"3e401fccfbd15c2b02beebadcd7de620855a501fd6a55ce854a6e0123efa45c4"},
+        {"kind":"observe","instructions":3234,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d03e120606118b875255a7b48a5b6dd415efaec63d38f366346dc1bec3fd9b61","stateDigest":"6c7dc93d8d2069f8ffc03ce4ee6b214fd6a3ddfa27e5ea400a6057ba8722fc0a"},
+        {"kind":"step","instructions":3254,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"90cc8638504aded8776847ee62944df942a0fa47ab0342bc5056ef190d9c55b5","stateDigest":"a91d8f257d30ad4949162040b8a424a3fd0e0061afb92e7440ad8f385ff43da9"},
+        {"kind":"observe","instructions":3254,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"e58cf9584cba11888ed3f8106482894a24f53843f149533f882af42dc27a89dd","stateDigest":"a1be629eaf5cca98910f79fb8e4e5f6cdba61d643cb3826b6fa291d4a2351cfd"},
+        {"kind":"step","instructions":3274,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"a53b6201c50977e9733be037d4b23b564727c1355813c36634cd7e6802309e63","stateDigest":"7b7b4e20ba7cb4f62590efaa55d72dfd7629bfbdf66236128d7134c38c65f65d"},
+        {"kind":"observe","instructions":3274,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c42944f76944c5aab83580a4fd202a1b917458d24a751cd8dc4517bf96f65587","stateDigest":"38d7f8e054bb368e7626202e39c53c865919dd5f08bf45f74f46f3e718eb2289"},
+        {"kind":"step","instructions":3294,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"8fcea2a7fe85e1df6b0fa43d85b095a8b3c083a6f84a6cf86b48ef9e3d72f8b6","stateDigest":"f3d77c8d60eda129895787bc1cf57729758de2cbe46ccc2de9fbcd670ebac1f0"},
+        {"kind":"observe","instructions":3294,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2dd17b7e080620d77279c16aea19d9c4a6b0079b9da53bca24d5846928e2f4f2","stateDigest":"0a0bceed671ffd9d62dfa36b19a7bb64a6bd92bda42806d64a4ddeaa81e1d15d"},
+        {"kind":"step","instructions":3314,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"23b5d3b726e05de3acf45e7baf80ef153cf5b93862fee37f088ca80bf79a1d02","stateDigest":"b6692538af61ad27fe5a365d5c2c89629cbeb74f156ec9de062e5490ee50e5bf"},
+        {"kind":"observe","instructions":3314,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"02fa52a8be63dcfaffd13299f8da6d953f61cd538dfe30b61379bd00f5d24f12","stateDigest":"3619cbc6ad9e09dff3c6d5b62c8325fa1d43a936db6e16f29ba587de47cc2a84"},
+        {"kind":"step","instructions":3317,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"441d4bdae50333613503801ed8a0bb44d544faa39258e602ecade4b8820c2302","stateDigest":"a2eea2771f2dc7936404fd4d4ea480a63dac5594bafe367d4b2b0854247cd06d"},
+        {"kind":"step","instructions":3318,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"4b2624757c5f4ff0483de24b14f4be4638fba0d76756f799233a9d97ec35ef20","stateDigest":"6109b41394516051f0b9c074c21e038460dec67a1518bd40d23c82679095767e"}
+      ]
+    },
+    "wait-1024-2000": {
+      "sourceSha256": "30a6db2c3b1b4383008a6042e2c5268093717652b93c669d3b833e49fe6a4513",
+      "instructions": 27078,
+      "said": ["boundary:23892:1024:21901"],
+      "cuts": [
+        {"kind":"step","instructions":5074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"27d44c4103ae99a135869c92ee9d339f62eacdf7f10e5157eb375becdef30f15","stateDigest":"9807ed793bd01116183fa44a005085b16f656fb4385f150ab7da09571d4fc949"},
+        {"kind":"observe","instructions":5074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d7ea857067efddcddee828b34ee48193d41655bf4b57d8a1357551e4c274d479","stateDigest":"bfd63e179609a9dc6c9f4a2c4224d7bad22494deee346e62707a6b3d1b5e2bb3"},
+        {"kind":"step","instructions":7074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"7e69eaaf1365cd6a3238c32f6542fe33b2e421a3076b50772161876323c92a66","stateDigest":"b5d5457e14a45dc362c442eaf69c9d46e8f78dbc3598fe08d6dab8ebf025c47c"},
+        {"kind":"observe","instructions":7074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"91f6930cda0f391a8b45b882199bf7210234cdf6d54430197011be1810c49cdf","stateDigest":"a1b76b5a759f8c3b396a751b51a0cedb6d61c165a602a7eb1f088f7588037e7f"},
+        {"kind":"step","instructions":9074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"20d3af7d7e275cf6873bc5947319a46d267bb0fa2dae6541abf4063c88936985","stateDigest":"de211ede3372491650a96036df71df193f67bf6b96c38cdc27c7b0d9752779cf"},
+        {"kind":"observe","instructions":9074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2d1da27e2d18d76a09beef7eea0b071ed0c77f58706fe45a9dbf3750c7db66ba","stateDigest":"ad848eaeff8bfb35a00e75963d7a475d3c1bd08bb35fbb625ddda38ec9404286"},
+        {"kind":"step","instructions":11074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c70aeb50e575ded07bc790552e08df0f699d830ce93f9aedcb512d400f5e344a","stateDigest":"63ea1ca0650055bb719250fe7949c8174ab17e245ae3460aa4b98576517271dc"},
+        {"kind":"observe","instructions":11074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"bec50289bbfb6a27a3a39b9199563f8d4b351a25cf19ae877f311878d2eae131","stateDigest":"23bf6ec2a8e5d44b9e7e252ff11a96c525dcf4c42ab5a643840a14a4b0fb3978"},
+        {"kind":"step","instructions":13074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b22ee1a3096ccd811002f4784f64de658a9723d302bee371df6dab7d3947437b","stateDigest":"1b42b6977a8cce0a36ce81806ab838b0c3bcba1054e9396c0aa8ca74d83b8c7a"},
+        {"kind":"observe","instructions":13074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"338fa17a8503db8a2d8a2a144725d92ee26bf1cc3cff504a30c4c8920a1cdab6","stateDigest":"4a94145fe77b87807ac5050b34d2629c9a3062d19079162221f8ff43bb0239a9"},
+        {"kind":"step","instructions":15074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"a90943e5bd401464154a2185100e2d0f79ae67b04e12f33e29789b21d05dc908","stateDigest":"fde4be491bd94794c76b139be3b6fda2882f6096320ffbf429547dc25642106c"},
+        {"kind":"observe","instructions":15074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2d2a54e74b2972fbb67917dbf93d3b21f6c0c656ff7d55b52164384e3bd25569","stateDigest":"0364337e4bd6d84f17fbfb0a68443e90c000394fe5aaa320bd4d5917d4c38fd5"},
+        {"kind":"step","instructions":17074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d935eb17f55dabf9f2db6900519ed6a3c6f1f9a8a578310c08d6b01cbf6d69ee","stateDigest":"98d52885e333c024679be16ea3ef49cd2fc01fdece3f77c867d420e115473907"},
+        {"kind":"observe","instructions":17074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b84053d6f5b6d02336c9d8141a3d8ddcd55a30da4e8d1ed3ea07eaaf81500826","stateDigest":"eb16e913c777655f4e1ee1bba69a7d6cf5fc31d0ad11aa328095e50e0846b849"},
+        {"kind":"step","instructions":19074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"59b13fe17dd0a7bc2183cacfea5bfbf5374b2b4bb77953c40cf78cee7efedb8c","stateDigest":"399aa48a910b30ba0931e5104c93b2a94693df59e8e9b884b417889381bafcd7"},
+        {"kind":"observe","instructions":19074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2d980785043eaaf95e3241dbce2e7a15f241ee39c62b0bda7437acdfcdebcad0","stateDigest":"e7ed06bf2e1a3fd50bd7cb4a40cdc80406c3ea6f9a50365d33e0e28bc1eaa06d"},
+        {"kind":"step","instructions":21074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"cebd295bce6c82c74904033372213141fd67c8b92b5acf76580b81b0319eb430","stateDigest":"5afc16e882b89ce573753cf4d061db4658a4e6c846e6411a13f4d3606f87940f"},
+        {"kind":"observe","instructions":21074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"603e52fd8781aa74aa2326f2a4ee740d5f39534ba923fc46608447b777fe85b9","stateDigest":"d320a55e8569b12440b77b065991c2c44967a98d3ee2fc3d9e47b074d95d5f49"},
+        {"kind":"step","instructions":23074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"6c868a355bc9769ab9c5153d85091217063d342bfdd78b8cf95540de436bd30e","stateDigest":"a23fcc3279f38709ea40a9b60a8455498393ca253c8c4d9315588ae628516c62"},
+        {"kind":"observe","instructions":23074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"dbe1352f65e7472683c44cab1f54712cb4358e073ff58a11417f4d047e312a5a","stateDigest":"bb87f38e698ca627868b521e71518bbd78c311a74ae4ed45da20db80bff46ece"},
+        {"kind":"step","instructions":25074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"ae6eaeea1100a4aa1b137bd47c6521bfd704379d199240523422dc2bbe5cdbf0","stateDigest":"1b6345d128ae08cc39a5646728c104a3b484cc2831842cf8613cd1316f0f42dd"},
+        {"kind":"observe","instructions":25074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"350216226446f93eeffbcea864965724702332209fe3f10f57276975e98363ae","stateDigest":"fb61a08755d8b1795359bb142a5662c0f172bb737c2c839e78956e08626b286d"},
+        {"kind":"step","instructions":27074,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"a57e2c0821e2981f372dfd854d5ed8d9a8213903183de437b187ac4f2add894d","stateDigest":"57e5a80c072142fcd6335b8d635ef1cf091ceba855d466bfc1ca777e02b3e39c"},
+        {"kind":"observe","instructions":27074,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"dc830ac5102535e95f3e4f3b7bbd06219634cb000df85b1d3bc450becd8bf0ce","stateDigest":"dc5bf1790d67593a07a2584204ec52a96afb3f4f5ef081d7eb530fca8af80e09"},
+        {"kind":"step","instructions":27077,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"9dddc58c8ecc04b968bfdc1e902d11e391875485ce9d4f8783a618fed0732683","stateDigest":"764990fdd2eca2faf1c44a49f6ba2c613b481990143e79401d024ad6a2ae8124"},
+        {"kind":"step","instructions":27078,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"99fb3ae1ee0bd9564f767035cc0b82562f9e93d7b53f53841365211ed13495e2","stateDigest":"de216f9b02c48c8df13c2db97588bb9ac741f6ff685677cb42a479eb8917d9d5"}
+      ]
+    },
+    "wait-8192-20": {
+      "sourceSha256": "95f4d249acdb294ac0dc1b5e3489a3a02540f50e8f75931ccb72b0e42269d0a4",
+      "instructions": 24822,
+      "said": ["boundary:132:8192:121"],
+      "cuts": [
+        {"kind":"step","instructions":24598,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"8a36aee0d54f839775c359072a54453b94010c4ec0d13a2689e324fe137f021e","stateDigest":"2bf0f1ad3e2e7ecd8ff94dbd93e4ffe13f336cf4abe56320c9e2c831e2156869"},
+        {"kind":"observe","instructions":24598,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"f0bd2356ed0e9e256702d3607d03ca17447bd9470302244baae1d8ca83661beb","stateDigest":"2dacae1c07744896b1a69dc14f039e3fe00419aa5f12fbd1671a45844107bfcb"},
+        {"kind":"step","instructions":24618,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"36f5b9e1cf82bd185bc4a1d50b46a2d570b25632721b90460152be09d354a2e6","stateDigest":"46faa8eae6dbaec33516320afc896519c3c7f346af4266fd91c60ec008432bd9"},
+        {"kind":"observe","instructions":24618,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"6e9cd5a86673ccca35f7f1311c7dce3443e8c035f321e5e2ff4f6687697e6c4d","stateDigest":"4bd0c62273ade6c9a3f7c7e5a02cd893f87b7653fdbd3b9d9069d64d27992c67"},
+        {"kind":"step","instructions":24638,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"207373342fcc9ac29c97418fa15860bd632b12cbcbc70526e8c2f53adc805d4a","stateDigest":"f535aaaea20e797b082e1d3b556a361494445aa4c22d7cbcd415341307e9965e"},
+        {"kind":"observe","instructions":24638,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"63bfc559d31c0692c0ff27917ed565b87c76c75fad7625ca2ea27dd6686358a7","stateDigest":"3e56dda6ef1f558e17e1dfa15f2e984c19812ed9c8f5cef29bece5cca113c3c6"},
+        {"kind":"step","instructions":24658,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c9f177601607b29f2113d5f7a933fa77b6de389ded9e6a56c5a741e4ed0ea2cd","stateDigest":"a010053cea7283bde429dfbce4fb0b90972704516512dcb57e1eb87fcaf31981"},
+        {"kind":"observe","instructions":24658,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"8f5be920298a1de246edcc83b81c05d7ca1e344e48f330755af49f748084ce95","stateDigest":"f20eab3f88e31e9ff3a112c163d93d05f70b0a796e5735dbb3817eabcff9f2d2"},
+        {"kind":"step","instructions":24678,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0029bf1c3cb7339581e25e506a28f9fb5b5b6bedd3f0a6e96008aeba5b1e6189","stateDigest":"77763f0204b358dbf9ddcfa071e24b2be0eb28e739b64f5a99ca32fa15a5a628"},
+        {"kind":"observe","instructions":24678,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"456acd9037ac0b3e51c1a961c2ff369abc66f4bfe76d80dfe67832424e965589","stateDigest":"11bf8bb0f6c02fd9257002c877ad988ca223f0d9ddf8de9f4c3d562f80d858c3"},
+        {"kind":"step","instructions":24698,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0aacabe4c7ec3a5b5197bf262f311eaaacd5f718cc99acb15ab393f31052e6d8","stateDigest":"38c4303a1258bba7824d9f059f87b21f07cd4afceb07d54e684e9dd5a0db7ca7"},
+        {"kind":"observe","instructions":24698,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b1054b2b1f1957ba45c30a5342f2ce10993681b5c26a326deaecc90cb4ba8df4","stateDigest":"8eeb10eebdf82091cba05044c894a99f664f200ec9c62deabf2d4010f7dfa46a"},
+        {"kind":"step","instructions":24718,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d9a268e1deaf4a8f3d101551adf920e6a02a1367998d33d7ab863495e1d5ec4e","stateDigest":"5486aa45800b12de5cd31b17a2be3753107abe803e390e5288ef1d8307fbef24"},
+        {"kind":"observe","instructions":24718,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"31c708d816ab6d5b9072f2a7dfffb7daeaabaf0b011013a1aaaf6867905a7ffe","stateDigest":"eeed49a58e0befd40f24628f5b11d7c10960b79f1d2bd553205eb2555401800e"},
+        {"kind":"step","instructions":24738,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"31880e288cf79228d984db5187fa671bf1b84143cbde73cdd7d20b48325fc1a9","stateDigest":"5fd53e1d72468b60df6aaeeda7cb4a9718f7934a80833cd47eca63cf983f6b96"},
+        {"kind":"observe","instructions":24738,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d03e120606118b875255a7b48a5b6dd415efaec63d38f366346dc1bec3fd9b61","stateDigest":"d186254665d80cde70511305167183d6ba99fa87c7eace5502a093b00bd476c2"},
+        {"kind":"step","instructions":24758,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"90cc8638504aded8776847ee62944df942a0fa47ab0342bc5056ef190d9c55b5","stateDigest":"a65f2d86a1679147d364d2a9d195aa839fd82785d91397a9f7e114faa296d04f"},
+        {"kind":"observe","instructions":24758,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"e58cf9584cba11888ed3f8106482894a24f53843f149533f882af42dc27a89dd","stateDigest":"0ad1d21dfae890d3588ececb53d7c60a9d57b8e27cb2254f09bc1440336d00ad"},
+        {"kind":"step","instructions":24778,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"a53b6201c50977e9733be037d4b23b564727c1355813c36634cd7e6802309e63","stateDigest":"a8eff3a088fb61c724cafdfa5141177cddfbb0e9b42d79bf0c2b1e1bed2e89f0"},
+        {"kind":"observe","instructions":24778,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c42944f76944c5aab83580a4fd202a1b917458d24a751cd8dc4517bf96f65587","stateDigest":"34b217235c22ea9d470992ee4ceef855eca3210214d6ff8b27415c6f79b63e00"},
+        {"kind":"step","instructions":24798,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"8fcea2a7fe85e1df6b0fa43d85b095a8b3c083a6f84a6cf86b48ef9e3d72f8b6","stateDigest":"dbcef15386bf3a420c8c35278204dc958167e6b9b04cdd758bed10dbae39e4e7"},
+        {"kind":"observe","instructions":24798,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2dd17b7e080620d77279c16aea19d9c4a6b0079b9da53bca24d5846928e2f4f2","stateDigest":"f4262001973453a1301c4c302b1e3a51504d46c4869399d28d3e4849f16f7f30"},
+        {"kind":"step","instructions":24818,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"23b5d3b726e05de3acf45e7baf80ef153cf5b93862fee37f088ca80bf79a1d02","stateDigest":"43b8a00733856443b564ecce9290b061fa241fea92796395bf03b30c750f1f5b"},
+        {"kind":"observe","instructions":24818,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"02fa52a8be63dcfaffd13299f8da6d953f61cd538dfe30b61379bd00f5d24f12","stateDigest":"d7c1da4a5328463cc4adabe5cfa17f07f5fbace04949970f9aa2eaf6d0b823bb"},
+        {"kind":"step","instructions":24821,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"83a1bc48a27ed60cdf92fcbdf4beeb2ea3ceb168ed238d8ed97c1b8caa75cb4f","stateDigest":"46a627d68162dbb53cca03b3b5d8d9581a28fcfbe8e10a1fb51a52a091e26c7b"},
+        {"kind":"step","instructions":24822,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"4b2624757c5f4ff0483de24b14f4be4638fba0d76756f799233a9d97ec35ef20","stateDigest":"b2951df894c3d258c88ede3c8ce209debaf1d2780a06f14f2d7aa3b3d65b206a"}
+      ]
+    },
+    "wait-8192-2000": {
+      "sourceSha256": "42db894c5354052b4f91490bfeb672fd199ab2211eddfd0e6e7d52f9ab04bc81",
+      "instructions": 48582,
+      "said": ["boundary:23892:8192:21901"],
+      "cuts": [
+        {"kind":"step","instructions":26578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"27d44c4103ae99a135869c92ee9d339f62eacdf7f10e5157eb375becdef30f15","stateDigest":"5e78473cc171be0595a487d8ef49bea9a0ca252ba9f69a9a5feba0adc1d63f7c"},
+        {"kind":"observe","instructions":26578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d7ea857067efddcddee828b34ee48193d41655bf4b57d8a1357551e4c274d479","stateDigest":"d5131a563f601d99d96269e1abc0decf59b35ff67f9340d6e3ffe70b48e26cd7"},
+        {"kind":"step","instructions":28578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"7e69eaaf1365cd6a3238c32f6542fe33b2e421a3076b50772161876323c92a66","stateDigest":"b1184f3ccf947ba3dac32d518a5aeb56bfcbd61150e9f40a1c7dbe0e357bcbbb"},
+        {"kind":"observe","instructions":28578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"91f6930cda0f391a8b45b882199bf7210234cdf6d54430197011be1810c49cdf","stateDigest":"a12fd04e447f6cc574dfa468b7e28d6b13030a407a3796190dc9420536d70b44"},
+        {"kind":"step","instructions":30578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"20d3af7d7e275cf6873bc5947319a46d267bb0fa2dae6541abf4063c88936985","stateDigest":"62a6d44a4a3a6c18ae9342bfe257fe794e922f427c83464277daa219cc0abf20"},
+        {"kind":"observe","instructions":30578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2d1da27e2d18d76a09beef7eea0b071ed0c77f58706fe45a9dbf3750c7db66ba","stateDigest":"d0945f1075361c338c848275d6e233e92515daad6f2e0c7e54444235d934105b"},
+        {"kind":"step","instructions":32578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c70aeb50e575ded07bc790552e08df0f699d830ce93f9aedcb512d400f5e344a","stateDigest":"1e20d061abad132ada70952c1f7da91ad86b3c61043a88d0ed26af7da495cad2"},
+        {"kind":"observe","instructions":32578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"bec50289bbfb6a27a3a39b9199563f8d4b351a25cf19ae877f311878d2eae131","stateDigest":"1e46c7414893fac6d3405c7fe3b1452f3fdd4521adcc1414ecddfbd5896a8577"},
+        {"kind":"step","instructions":34578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b22ee1a3096ccd811002f4784f64de658a9723d302bee371df6dab7d3947437b","stateDigest":"0bf0e749f1d7a41265159e99e5b17d956fd119188412b12b6d397eef2afec644"},
+        {"kind":"observe","instructions":34578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"338fa17a8503db8a2d8a2a144725d92ee26bf1cc3cff504a30c4c8920a1cdab6","stateDigest":"a4d7086b7b6e916788854709892bdc98e7ce95b093643a86ddcf12f99dec4455"},
+        {"kind":"step","instructions":36578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"a90943e5bd401464154a2185100e2d0f79ae67b04e12f33e29789b21d05dc908","stateDigest":"988f33a363c75b162d287e2f9309a9f32cb8b6eabac6f96adb543975f804dbf1"},
+        {"kind":"observe","instructions":36578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2d2a54e74b2972fbb67917dbf93d3b21f6c0c656ff7d55b52164384e3bd25569","stateDigest":"0f9d7f17beb67c80f0ee78bc2d237ce749e0ce55a01b721ccdbc25b3b509bfaa"},
+        {"kind":"step","instructions":38578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d935eb17f55dabf9f2db6900519ed6a3c6f1f9a8a578310c08d6b01cbf6d69ee","stateDigest":"d40028c855f0c2d24f2981d17b7bfab74192bc99b8a2416088238e453343d9ab"},
+        {"kind":"observe","instructions":38578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b84053d6f5b6d02336c9d8141a3d8ddcd55a30da4e8d1ed3ea07eaaf81500826","stateDigest":"4143da2cd26c287e8c0b5bb1fed8b898e36724ee6d7e1c2f15577c520c7944d0"},
+        {"kind":"step","instructions":40578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"59b13fe17dd0a7bc2183cacfea5bfbf5374b2b4bb77953c40cf78cee7efedb8c","stateDigest":"c8cc942a5ad5c2e6c5e0ec198a9c00c1ef82df225bd261de53f91e713c4c537f"},
+        {"kind":"observe","instructions":40578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2d980785043eaaf95e3241dbce2e7a15f241ee39c62b0bda7437acdfcdebcad0","stateDigest":"62bc82aa4eb8cb0cd900f516c9c1ec66b5d8a243e89fae5a8053a8d4258e6b64"},
+        {"kind":"step","instructions":42578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"cebd295bce6c82c74904033372213141fd67c8b92b5acf76580b81b0319eb430","stateDigest":"fe7976464be39c8fb2f46fb24d561cc3dcf336f1dacd6ad6f1276e10d5981083"},
+        {"kind":"observe","instructions":42578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"603e52fd8781aa74aa2326f2a4ee740d5f39534ba923fc46608447b777fe85b9","stateDigest":"6cdd879e0c2f3992b7c8b191dc6309c357ba9abd0afd789ad7dc7af9cd33c8b2"},
+        {"kind":"step","instructions":44578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"6c868a355bc9769ab9c5153d85091217063d342bfdd78b8cf95540de436bd30e","stateDigest":"806de3ab65b3db7edcb67d8ad5369e35683f5e80dfb05030130913bec1707541"},
+        {"kind":"observe","instructions":44578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"dbe1352f65e7472683c44cab1f54712cb4358e073ff58a11417f4d047e312a5a","stateDigest":"16b5e0a7ab59a24419bcebbcc1ce8ebdff1a9c3b0789751e0928facab1c69afa"},
+        {"kind":"step","instructions":46578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"ae6eaeea1100a4aa1b137bd47c6521bfd704379d199240523422dc2bbe5cdbf0","stateDigest":"f14151fa38eb21cb5c3250477f325d25445d7780c8dc0e6d5b97522461c8793e"},
+        {"kind":"observe","instructions":46578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"350216226446f93eeffbcea864965724702332209fe3f10f57276975e98363ae","stateDigest":"9c1a72f5c79da55bf4e700ce1896307a5262a2745e1e819a23dfc7a7b803f7a7"},
+        {"kind":"step","instructions":48578,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"a57e2c0821e2981f372dfd854d5ed8d9a8213903183de437b187ac4f2add894d","stateDigest":"8ab552dc0b22a23bfe52c5e1b2c9b24ece94f0f99eb7e5435fc5302867e37e7e"},
+        {"kind":"observe","instructions":48578,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"dc830ac5102535e95f3e4f3b7bbd06219634cb000df85b1d3bc450becd8bf0ce","stateDigest":"f132d6f9748dba4c00f2fda9be1094d0c0c95dddf22dd92f4867306f61178bbd"},
+        {"kind":"step","instructions":48581,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"132148d3e634c40103ae38e4cbfd0463ce4e9ce20a793430551042a38edf23e0","stateDigest":"e0ef0bbb70b722e66fede88dd4fa6d0b5d275f4128955b612a65098e31db338f"},
+        {"kind":"step","instructions":48582,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"99fb3ae1ee0bd9564f767035cc0b82562f9e93d7b53f53841365211ed13495e2","stateDigest":"b82bfc35fbb2e5e3a04373d84d611135142e0df880fd84221532c2a3fedcbb0e"}
+      ]
+    },
+    "wait-32768-20": {
+      "sourceSha256": "6cf490e43a049bb9554ca89940426ec4df6a88a2c1ffb02865ec32c1d5451834",
+      "instructions": 98550,
+      "said": ["boundary:132:32768:121"],
+      "cuts": [
+        {"kind":"step","instructions":98326,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d728b27d329237544a0a297914c12f8200bf672b5ba5b2b50a4a0d976521f9c1","stateDigest":"1cfb03db3cc3a8109a8770067d9a75b3c20efbe95622e44ff4d9e8dde89a1a0f"},
+        {"kind":"observe","instructions":98326,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d8ec3dd5e603f627a39ec7be0177b99770be1bd2bd68491179ab0524c255b42c","stateDigest":"4f4bacda3a88069845397b0a8953670bb7f084466a1427be2d2756d54721fb2d"},
+        {"kind":"step","instructions":98346,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c047c924e44c8a6e07726e3c6faaf2568e772e1b59ccee9e780b7769892acd46","stateDigest":"a6a7fa8052f380ab7afe3ba554372f53cc5ce135348546763bb2794b4c6445d7"},
+        {"kind":"observe","instructions":98346,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"373b8071302764878e9291fd88e76071a0afff6c32eb1c835e500ea70db81276","stateDigest":"18f8c8302f1fb4061cd1b5b8b614792e2d89fd4bc6cc061f1f2c31af882c9738"},
+        {"kind":"step","instructions":98366,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"e0d7569617edc74229fcef5696612a6da8b60387e5922c2ee2c0dbe8cf2bcec8","stateDigest":"dc6b94731e9374488b57b4a4fd0fb802c74b0277506ae9fa5826bcab4f64760b"},
+        {"kind":"observe","instructions":98366,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2cc2e87cb826672254da0f4dc1fa17d927c2bb1432d1e8f9723c3114fd676179","stateDigest":"fe21563ddd6a5b483b912528aa0f12702b1f7904ac1aca46478e21ec7fcb228c"},
+        {"kind":"step","instructions":98386,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"e99aee43cf0eda0b9e8aba8c8f8accb693cf3397fcbe01345c72ce3ad4c96841","stateDigest":"c49dbcf540059eeade38b6c1c1a51cadd6442fd2f17c1b3311be1760bbb6d27f"},
+        {"kind":"observe","instructions":98386,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2386cdcca1c2c3f1fa30b59d39584e259b63325decf6dd78f5e4de5899fffbc9","stateDigest":"d0e5fe9729f9212ae62f180adce107c57a8bd37bd70ffe7866aa0836a0021919"},
+        {"kind":"step","instructions":98406,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"960ddee3fada62e5b39974a6f388c6a805f7dfbaaa7b1c8a1c24c354757157fb","stateDigest":"dddf2ce41f09d805cbcfbb8e4cbab08990f9fd2ab2f9f2eb5e73683463519284"},
+        {"kind":"observe","instructions":98406,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0fa04b1e4e9a243a35c397086a42c9e921b2e0ff8eba014cdffc66cdab92ed85","stateDigest":"a04020a268383ee38a24acec901b1263f4fd5874eacb6137d4a22551ddac6f36"},
+        {"kind":"step","instructions":98426,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b194ac12918ad02a178651a055e3cab17e44e87c008dfe27ef296df447e5113a","stateDigest":"c3deb62714586735de5bf10fbb6fc5d1fab2f15e77ef989d87c8b20da101e6e1"},
+        {"kind":"observe","instructions":98426,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d64bea601e1dfda1fd4ca9f5be4ec99c82f2fc5f52bad6bd450fef74e2096bcd","stateDigest":"879044a4b4248d246bfbf1345a133bd739ad00fb00ad53303c1c6f47aae5ddec"},
+        {"kind":"step","instructions":98446,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b3db46b58cb780edd11301322dee366ebb5e17c316e9e3684d1368463188c3f6","stateDigest":"04611c3ccf98647326a941b2518850956f274495e75875d1a62dea5409eec955"},
+        {"kind":"observe","instructions":98446,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"8ec207408973456ff70998be30bf3953b84e67a0bac4f31ffbfb67b66c59f289","stateDigest":"6c874c32a0ffb96041cf69324eaacbbe3df8461138a38e376946955e622134c7"},
+        {"kind":"step","instructions":98466,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d5b9af278d2f5c8d7425722f14d4694a54e77d551461f19dca3c7f7b5e8d7d1f","stateDigest":"a5b71cdf8a788546e4cfd228f5383607298b3e42f1796a287eabc6421cdd8ed5"},
+        {"kind":"observe","instructions":98466,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"ef0e8627c61202ed9490b13ef7d2593351b9503a92674beb79801890f699c70e","stateDigest":"c67265e39cd18360a29b3a371596f32164a30e77e7bccdb8f71e6a9313578b88"},
+        {"kind":"step","instructions":98486,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"184d7a7642eedceb48f92a9eeff2721b4a4755f1e621149ce10183699f89253f","stateDigest":"859351064e9e341ead6a12407d39dcc209026c5efbdcb035ca53a659ea834667"},
+        {"kind":"observe","instructions":98486,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"eef656097aa287cd95061f11caa7c21b7da626873dd5b17f0052435dd4f4c721","stateDigest":"d0012544238c297862207460b79df8acb1642dfcdb254ed54e9f5a15495a718d"},
+        {"kind":"step","instructions":98506,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"bfdc083d7ee57223d9ba9a62420e5a97a9ed520cf742685b2940f5998e5eb24b","stateDigest":"dce9d4a1d62615c526d3cd6533cae976693de5889ccaea9033c0b400f2431459"},
+        {"kind":"observe","instructions":98506,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"1e4102d4735669a70e15511f8acdb497f25ffcf2b46b9ac664b72baacf2abe80","stateDigest":"19c5b6be30b6df4a0020007413bdf8e383906ea4e4d3ee288e2937f3d3a52e2b"},
+        {"kind":"step","instructions":98526,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"111b6278bafe6399a92daf87aeedc15bc4dfe78970786f43404398b24c770a68","stateDigest":"e14e9045890d99446a8703bdd019a9e0f532b61ea83c4e15e1b7391f0de7fca9"},
+        {"kind":"observe","instructions":98526,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d51533972fad91d445646f72773e64d66fd8b3438827e5fb8d42cc3d7e0c2e61","stateDigest":"ff67bc60292bb0d4c2f60a6df6d3e9a1d5a913c24a2160c77f2bfdb1fbb5947a"},
+        {"kind":"step","instructions":98546,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"4e6a21a62075a4ca5ce8bbc801e3ab7a3f87e445b60ab93089b0ec3125347f52","stateDigest":"ad5aee7948f966fa5592bb918e22343bd2f16d13aa5921a3df6a28b9b6c44dcf"},
+        {"kind":"observe","instructions":98546,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"ee0126b09cf6f629b7bd4c5788b04a3e7aa585169124b721486e5a1927c168a9","stateDigest":"d32c90631d5f8062e378ee82d577e5495dd343e5746fbdca2425b2d767e528eb"},
+        {"kind":"step","instructions":98549,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"61759c989568b2f3faa25a79d28644b8fd2b9e1b430bf93837b1643641ee9152","stateDigest":"5e95e5be7332afd1bfce0b8d16f26feb9133953b5afdfd845cc8c7fa7531cf23"},
+        {"kind":"step","instructions":98550,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b4527c51aad8f1119ddde9860ea2d74ef84b5870f1ddc980d7aaa94fa32471a0","stateDigest":"764f43ef9d69320b95b50a149541cf30999093babbdb3eddd4344104ef1d50f3"}
+      ]
+    },
+    "wait-32768-2000": {
+      "sourceSha256": "7228f31b8bf2f665d535b340710f352bfb1a1f6bc310f3f81566d3436cb15184",
+      "instructions": 122310,
+      "said": ["boundary:23892:32768:21901"],
+      "cuts": [
+        {"kind":"step","instructions":100306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2a97dda7e02c9efe0a41b0cf87a776aae6c87dfc42f8ea47f4d1d289b6204ab1","stateDigest":"6dc42a5036128d850d56937700dfaa85093fc1c45b462429bb6d4ef61143aa9d"},
+        {"kind":"observe","instructions":100306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"327a91cdea725fdf681bcdd69941096ec419708ff242c26a22ddc430b1f947c2","stateDigest":"f14b6844b736d36d71f5e3d2a48c9e79982276defa85e778fce0e11a34841e96"},
+        {"kind":"step","instructions":102306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c1bf25c283013aa96218625faf6a3b357fb7c926612731b7a2185c616fe6d0cd","stateDigest":"ba5ac156c5224f0790afb608051957a3cd9e59e282949d312db019e7f82ecf51"},
+        {"kind":"observe","instructions":102306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"303c6b5c14db20bd6cfe1f8fae583575eecdfb00a3fbda1153d9d628ab7713e9","stateDigest":"de9b6bc8f7aafddfcc2b2638ecd912449d5b1b5f0f6ff19d0008b592b6b53049"},
+        {"kind":"step","instructions":104306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"474f034a9c7fff5a3ce25f5983525d618ef680c6557710f0df1daa4f0adf60b8","stateDigest":"420456143f6266a3d2df6165a140d64dae31e03544b314ad1143d09c529c3711"},
+        {"kind":"observe","instructions":104306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c80cdf6ae880fe38b3d0fde58e6df07fc0f33da67d1f406fea4da6589abef6aa","stateDigest":"85784fde82dc53eb8e2a652614da88bbeb6b0dba3204663d374d03e78891b0a4"},
+        {"kind":"step","instructions":106306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"313df0af999af2220ce1dc67f39dfe01149503ddca0b32a6b0726b4d50dc3ccf","stateDigest":"8756d39e84bacb8b4651f5f5376943caf6e598fcc5e6e727c088f388f9af0f00"},
+        {"kind":"observe","instructions":106306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0d7b89aeab01b2b511ef49c3ee10880190c975a6987943fffe10076a8cffbdd8","stateDigest":"078061ca37623434675932c2d9da133fe131bd07416c78becf462a3d6d2da87a"},
+        {"kind":"step","instructions":108306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"a7b7958ad92213659843f118ec60640cea38e2acf62545f44045dc8c3771ade2","stateDigest":"274f7bcb3071860db08c2351acc9a23712888758d96d76bb6867ae9170aa67c5"},
+        {"kind":"observe","instructions":108306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"5e3abb8449a8014c3e90e38d9c237fa4aa13a5c5bc75bbb2a3971b04532af9dc","stateDigest":"f4eb1d8f17687d4b002edc8c3faae9cf10d9d3ebe59461c994d00e295be9976a"},
+        {"kind":"step","instructions":110306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"176aed32dd5340e29714a02d59a43d72208b73b52edf08ceec536b4357d2a6e0","stateDigest":"2d74292820c2768a315a8d09d999fb1fd0abcd7a8fa87960cab30e5757ea25ef"},
+        {"kind":"observe","instructions":110306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"ca277dc8b6a0a218d0c5549b107c1b44bef8b5d393d657294786049972f29e9d","stateDigest":"353875c8d93a4d4769f2135e6280b0b91f6be610abc45721e4cc51806555bf4b"},
+        {"kind":"step","instructions":112306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0cf50233f564641faa069bcf599b85f17b838574d1bf66a1011f862a4defdc59","stateDigest":"6a4a4d4e896f20afb37ee0512b8111257b3b5127d6b81fed7101e1371cdd528b"},
+        {"kind":"observe","instructions":112306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"28c2c1b212bfe8e7f829f4fbdef6bbcda401e8dc11c1302c3492f59164e7ce46","stateDigest":"204dba270817d59e0aa13735fa15fcc2625fc36577189026dc1762929d04ac86"},
+        {"kind":"step","instructions":114306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"6a855e43a4892e29359ac71dd3eb6727e019fcd9608ff5fd8e29d514c47cc262","stateDigest":"7ffecaa629a173711b4090bb33659c87a4f3bb1c78a2e454a472e0f9750ed6dd"},
+        {"kind":"observe","instructions":114306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"ee65fd5b880d641eab68cc781cf003fd0784e400dbc36211f56afc8389be3689","stateDigest":"32f7ed71bd08ffdc656b5358fa51ea50755f61fe86d60d83275d8fe361ff20d7"},
+        {"kind":"step","instructions":116306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"23e188810e34f6ae34415ab928084ef3eb5e9e216d26ddf97e07a649f0d2d8f8","stateDigest":"cc81b437fb355e6ef9e622e513b937e7673a2b063d82c348b610f136be332cf7"},
+        {"kind":"observe","instructions":116306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"4eccd7ec6f107e0d66899ee4799144f0f46f90a51b6199aed9bd246903f6ca6c","stateDigest":"11ebcc3b64f7779a0b852a444487d79f129b317d00db6f2194b1abfab523f469"},
+        {"kind":"step","instructions":118306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"1c0399f060b8e6f5e2133161004de5e0dda4a59d2b1f25f52fd15c4134e858ba","stateDigest":"60caacd8f687f517fb3a319678a916ff77d543381d23e250de9282b95a9d7627"},
+        {"kind":"observe","instructions":118306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"8e640fe1dd7105e61ab1dcd4cef0c225bf36473eda7e512ae40e00d5a572dc23","stateDigest":"f18a1d0d302e651f565eaf9939e05f2c4595977d7b6229db7de1e160a51c8bda"},
+        {"kind":"step","instructions":120306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c5ab68825180adffc434e44b8e70a17402b5316f0582c0ee26af7bae93c3a53b","stateDigest":"f634eb4fc4e2dd665e3d5e71fa2c645e997ffb8f1032ed518a7ac52f82e952ba"},
+        {"kind":"observe","instructions":120306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"113fa784bee9513ae651f66d450c24472c898d51bfe70388a7b4b067f5fb45bf","stateDigest":"e21afc43dd0930049424e2125d15c4b449b7247997559d727c77e107f2dfb705"},
+        {"kind":"step","instructions":122306,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d825741e6c67879f31223f2f4b2507250e6855467706b4f3295a9ee9abda50db","stateDigest":"b9dfb5ebe56b05d1d3040f9155637163870897a3dc514c7ff95b8c28e2e07d4b"},
+        {"kind":"observe","instructions":122306,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"1d64670295e4290c83efb75235b4aef4e67d4abb5ec10085aa0b4ed0cf02ef70","stateDigest":"3081e1361673f4c190f1549db5abf943a2f62a150ac75ea21be5cc491e5ab131"},
+        {"kind":"step","instructions":122309,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"f06aab519e857cd525ce2a405804ba10ce030153c0796d49ae76e944140e293e","stateDigest":"637fe23f9ebfec4b3e2ae1b3c940dbe02890e1ae56a80322fd526df74c421ef6"},
+        {"kind":"step","instructions":122310,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"6f431d463d89567a51d47f3688b84b67e92c0c9f74d3ff4f6f35b4f71621ef24","stateDigest":"1e845f8b8c002cf7e343658f5945b47694bf072616e121fc6b1c07bd468ddb01"}
+      ]
+    },
+    "capture-order": {
+      "sourceSha256": "fa98ea14fab32d7881db6bf5b047335693fe1fab525fd498ca80e9d2837e8baf",
+      "instructions": 4,
+      "said": ["capture:2:2:1"],
+      "cuts": [
+        {"kind":"step","instructions":3,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"084a432a9f4e9e03600c1dab77bed3396d97de2bfb2289ed4be795988f4081de","stateDigest":"406f96e5678ebe796a147de49c82d7f67fa1707803522daeb9da7c64050aee8c"},
+        {"kind":"step","instructions":4,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"ffe5288ab93d453fea361d7c61abdf58deb8f47565239a9409a93551b22498fa","stateDigest":"4589fa7dde865cab14bfa0fd4f87c3bb791c4437bfa47e83525f34493066d881"}
+      ]
+    },
+    "writes-index-order-and-copy": {
+      "sourceSha256": "36c286646475078c95ef31b0d8bc622fc6b5d5887f6d461fbde77c76bb79b54b",
+      "instructions": 28,
+      "said": ["writes:40,0:0:3:1:4"],
+      "cuts": [
+        {"kind":"step","instructions":27,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"004e7b8064cbe532e11d047982a206f0f66c072d9ae2e6c762acffefddc8c871","stateDigest":"456726fbd9b7297649c3c2e31b16228cc675a2abaa846dc3e4be2fe7d6ed6840"},
+        {"kind":"step","instructions":28,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"50b6f7f6432af1bba1d2814b52f3d844499aa768f840611f22c732d6c451e1af","stateDigest":"1af286408102f6d2f135828c92b6402bb1e4b7a3aaf0e6ad9b5267c5ba99fbd1"}
+      ]
+    },
+    "calls-default-evaluation-order": {
+      "sourceSha256": "31bbef2d77c0a4f21aab412503f7ee87d9ae6892d7648a8af12c34ec7cd4ec5d",
+      "instructions": 25,
+      "said": ["defaults:21:34:0"],
+      "cuts": [
+        {"kind":"step","instructions":24,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"28c73d40bb950b0cad837f4e5d4dfa568ffff5fc380f37971528f4514b840ac9","stateDigest":"c4bc9d98bbab89fa0473cb22eee44347f7e35458fec1615a3417023a6a7e33dc"},
+        {"kind":"step","instructions":25,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"201a432b95ef76cb7681464d973c8158fd37f4a60555557f1e3ba4eb51b178c6","stateDigest":"a5648981903b1171d7884c7ac43c410816393e8857f1e0bd3fa9012f0cce5792"}
+      ]
+    },
+    "loops-continue-break-and-scopes": {
+      "sourceSha256": "fe2e425244495fd8105883c966500703a95556c6bcb77dc76aa1f78f4a33dbe2",
+      "instructions": 59,
+      "said": ["loop:5:240"],
+      "cuts": [
+        {"kind":"step","instructions":58,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d6bd3c2a825b8cd7c6769ee2c281d5795f791bb51eec5d00599fe7a7176dbf3a","stateDigest":"13f003b22bc51389b41cbcfac49d666b4ff457b5a10daa039404a69b3e3c5724"},
+        {"kind":"step","instructions":59,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b955ae0843b4631e18a7bda7ed478c013335c3d81b2584bd92810de3b606d707","stateDigest":"25ab0b0cd9867ed6452572eb7a985b7e113dbc39601e7a35f8aa7248ee1ad3ec"}
+      ]
+    },
+    "rng-atomic-index-and-rhs": {
+      "sourceSha256": "e1c6589c425ae70c618378037567e5d4ec24e74c226c6cefdcffeb6f98b8a661",
+      "instructions": 52,
+      "said": ["rng:3,0,8"],
+      "cuts": [
+        {"kind":"step","instructions":51,"status":"running","rng":{"algorithm":"xorshift32-v1","state":3658212825},"events":1,"eventsDigest":"8a80286eb62e77a965fc07edd4105b8e6cb7bb6f1e21cdd66ff6643ffccb9681","stateDigest":"f2927876c9aab27abcf7a6df149e8f922e41817271d991de5f9978e1dc0829e9"},
+        {"kind":"step","instructions":52,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":3658212825},"events":1,"eventsDigest":"b62821b213cef2c2c32012b2475cd3829ac5b5fc0a7b959a5c228e8c2726ad83","stateDigest":"e7040a0d264b9cd93de929ab944425ac912295726033f6b8949ad24cce5a8d9c"}
+      ]
+    },
+    "scalar-tail-branches-and-scopes": {
+      "sourceSha256": "9e5e02905a65cbe733922f418b7c63fbd750eeb5afa5d006cc898ceda216227f",
+      "instructions": 70,
+      "said": ["scalar:0:21:abb"],
+      "cuts": [
+        {"kind":"step","instructions":69,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0f2251e6306fdaf2854a035b763e67ef998270e076a19d0b10414f6ccbb7d3ab","stateDigest":"f5673453f889570ddac3e72ca5c9aa41157b6dbffda8ba6dc205523a39d24b0c"},
+        {"kind":"step","instructions":70,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"8df39c76c9c451e52fea8122f50d106865743fb478e5b25f25c3b10a4c841f5d","stateDigest":"0dc11d1c3e613a3953cb9ee2a057542edd35bcb73a8a0adc519887ae5c81abc1"}
+      ]
+    },
+    "calls-wait-and-default-continuation": {
+      "sourceSha256": "e5b6a514facf996b140faa9aa40dabb96aa8c3c0f4d8413140ad3a03c2fdb240",
+      "instructions": 26,
+      "said": ["wait:26:1"],
+      "cuts": [
+        {"kind":"step","instructions":10,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"ed4d0f45b0a7078fadf58ffed20404b9416550d71231fc9e44458915e481b778","stateDigest":"b625996f553eef91bfe97db3205a2469f4cabc2cb751a9ffe9c3e77327ccdc88"},
+        {"kind":"observe","instructions":10,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"7839d4def5512487fb399e1a8fd3736c0b86bc9344fa1b1ce97de20f72e985b5","stateDigest":"e3c36bda25e2ee452c9cadfb2626f88482993a9b1bfa98ea696accd05985c940"},
+        {"kind":"step","instructions":25,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"83654f72acb1112c0b8efbd0feaf37f0c77f2a85b477ee5ee98346b1434f3b21","stateDigest":"c8254164845a7c57ad3d83d62e13d3797992c4ff89f003574fc47207d71b2ad4"},
+        {"kind":"step","instructions":26,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0923d1b38d806216a5f2c593d9dab9b632b3e98132ff0937983a01a51be88fc2","stateDigest":"fec11bf580d39cf6014f7082ea2d981cf0e45cbb195bc2bf073f44a2c3d29c32"}
+      ]
+    },
+    "call-default-and-parked-scalar": {
+      "sourceSha256": "081f96287e3e2a5b118240b709d8b70b4c2da4ded8571d5a4d928b4748e89440",
+      "instructions": 49,
+      "said": ["inner:1","inner:4","calls:37:1"],
+      "cuts": [
+        {"kind":"step","instructions":24,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"101562fbe6b2f18349a7572428aef40a4542635fb5ac4d5555dcde00682a1111","stateDigest":"48b66be1cb5a67cbb7a0f51075acd2ddfe0b947bf10abf91defdaf561b5d2134"},
+        {"kind":"step","instructions":42,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"1158fa8f3184738d8b1acbd7f3ca18743f19e9078712401321b6c9e1402b2e9f","stateDigest":"58ace82f4d0274a2d89c964fe512c91db26e60873a6e71e9392b5f45764f6eb7"},
+        {"kind":"step","instructions":48,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"390c5dfb9cc4828fb20b4fc26dd6b590fc1f9b56ed2f23b7403e55765b34395e","stateDigest":"9c86b1e23faba98ae562efe42d570e13c9d1629e5bd9d324b8f6f2c8f35f74ba"},
+        {"kind":"step","instructions":49,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"99ace50cbc3ce523cc7311c67fc0da78db01433b84daa9e67b36f2ab6cb7e599","stateDigest":"49e56f9005f19989e949b916e9475b4bc70b0000f11253d40c78f9244b126137"}
+      ]
+    },
+    "call-recursive-loop-ownership": {
+      "sourceSha256": "4a204f84c2e6f74c663f8fdad33a0ee80a8abdedca5c600731c9bff1805d0918",
+      "instructions": 188,
+      "said": ["leaf:0","leaf:0","leaf:0","leaf:0","tree:12"],
+      "cuts": [
+        {"kind":"step","instructions":32,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"f4e7c9c373fa52a3e6ddbe16f53bcc7c4f16d4da50b726545e993c37af532388","stateDigest":"ac3f0b94b78aa66e42f9776003989182d6687540b7d4d22922612d8be3b33959"},
+        {"kind":"step","instructions":67,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"e5f0d400c6d7de18edfdf233908eaccfde77025588a21feef143fbd1c2736de6","stateDigest":"afe1d477b516f3df56ad89abe711b447dcd90d1ea34ef8ffce53c74a912e82d7"},
+        {"kind":"step","instructions":120,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"7cfb93ce065d8adf6cc56d06046f75f8ecc8bdf65ec80eb66c35cb3e4e245944","stateDigest":"c1c972e61a2bfdfa18cb73e77f8abf6fde5759a638f31c6043f06e8186b659ff"},
+        {"kind":"step","instructions":155,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"56c7be8df490037367a5f23ad141f5529c955bddef84e49567a634dc94c0208c","stateDigest":"db4e81376dd1e0a199949f279d3e7510c45a2024487c88119f53a8fdbc89e9fd"},
+        {"kind":"step","instructions":187,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"5f3d0008e83c3382745480fa3caf8b58824d0dbea70ef80889cf354c75079a1a","stateDigest":"6b354797b1e3ae00f12f61b7f7d6288dac22192eb07de8b89bafaee68efee4b6"},
+        {"kind":"step","instructions":188,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"4fc44057dec9ab069c092d8a7123f3f01a2d9ca9022b61d2461f5d3b1e74749d","stateDigest":"2886fbcbcf6e7f247ed2277bf3ea24db800798b6db1ea14016e809d46ca7bcd7"}
+      ]
+    },
+    "call-list-value-ownership-and-void": {
+      "sourceSha256": "3e9a90e008c99cd015951c4981509a39be390b50a8da79d2d6e3320a4cc3f723",
+      "instructions": 25,
+      "said": ["inside","lists:1:1:9"],
+      "cuts": [
+        {"kind":"step","instructions":20,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"a03657f2a62b0a17f52fcb2cb49e1a317521cd6e36babdc515c6ec83293311b1","stateDigest":"5873e594e81c70d34b3652dd546ab9aa756b4943fc2a834e2105d55c0db49896"},
+        {"kind":"step","instructions":24,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"14c8be65a47bd9ccc0f15a7cc2faefb2affc4faa5a80f7c9a44dbcc201c42ce0","stateDigest":"d54ebbde0a049457a33c6ad071e0615bfa9e532c58cca42f56cc44b05986d64f"},
+        {"kind":"step","instructions":25,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2a8ea55bdc9370d6d22251be8ef92144f52f263a6f74ce59c3734bbc2d5d3865","stateDigest":"99cc8c41994e00bfeb2faca2c20c8e2ae9679a5f393cdbd6400cc72d83fa289e"}
+      ]
+    },
+    "call-global-and-root-visibility": {
+      "sourceSha256": "c9ff06fb1b0f13bf19434f9c958bec02dd03676ba949a50f1342b5edd3112eda",
+      "instructions": 18,
+      "said": ["visibility:45"],
+      "cuts": [
+        {"kind":"step","instructions":14,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"afdcfb1f97f8a5be4e612d236fea639c92b02fe412bb535ff60285467753c1c4","stateDigest":"b09dbb518e13416ed4b5b3786d92ae4422ff014728fb555bafbb4a1319a36fc9"},
+        {"kind":"step","instructions":18,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"15fd5d96d7ece5a65f28740ba90a932dec441521c870aabb1e107a229b56a84f","stateDigest":"606189f6d8322349e02f204c116b0ff682f3e3947575a30babe76ef7735686a6"}
+      ]
+    },
+    "values-alias-and-equality": {
+      "sourceSha256": "2904b8563ab67a21053818995ae9c741c75066e2ab64136d96f4a6dd939b6cd4",
+      "instructions": 61,
+      "said": ["copy:1:9:1","dict:6:beta,alpha:true:true","set:2:3:2:true:true","list:-1,2,2:10:null","text:3:😀:3:item-$1-$1:|x|:-19"],
+      "cuts": [
+        {"kind":"step","instructions":15,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"5313393557443d8f582674c6183c0f3d7cd446939740105c2ca1e7405ab715f8","stateDigest":"d7c9cc52844907ec99efbaafe5685b070d94e489584eba0698ea1b7f480e4eb9"},
+        {"kind":"step","instructions":44,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"81898eb5044773e23ee42903a898453e2918e911c8e0d684ec096c585095a472","stateDigest":"c4f1b5f981491c4ed79414b58a928220b46911aa442d35df4c154b1c02734064"},
+        {"kind":"step","instructions":50,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"fc0e9842f7b07ff767d4d882449fd93decc9c2d95b02045d693cdac48cef92c5","stateDigest":"970a1df8d79d9f60985062180661de7d2804f765810c710c48ca3d3da6d61e8b"},
+        {"kind":"step","instructions":55,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2ee67e7fc6e0e6c8d91b7d2c065b3c756a5c8d99c62f6c186449c0ebc10d7bfb","stateDigest":"8be38fa0cbd79982cf78d50e0b30483e928ef19c53ac92a9e93e7ec879a7c3f3"},
+        {"kind":"step","instructions":60,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"9d6d22321b223924888ad0a43c3e1579d507db45f7a3735e68f11249caef16bf","stateDigest":"57d4f19debce69bc0a0ab3d087f86f127f89e72ef22e656c1bc3c58ded4e3b90"},
+        {"kind":"step","instructions":61,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"5cd8657aff8526647cb20b4df0518b56c5f2ab2e69deb89e43ed920b7001836c","stateDigest":"88bc1a6302cbb8ba3164e5a5749b77f6a5b7bb87eec5af4ae769371731f034d5"}
+      ]
+    },
+    "loop-source-mutation": {
+      "sourceSha256": "53f8ce38740df0e69d4f06c827c5b9171f48378f898242126815a02bd8ac5e01",
+      "instructions": 99,
+      "said": ["iteration:84:90:11:1"],
+      "cuts": [
+        {"kind":"step","instructions":17,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"39255f0dce6707d83ca995a70778423b744495b93c42779bf1c3319991b5600b","stateDigest":"7fa88d8b5eb5a82d0932be1077d6d50708c1dc830d9dc9207c95abd06b86a67f"},
+        {"kind":"observe","instructions":17,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"b3247a0a76d82d9945bb35332c4e26aa3f2b09929325aa1a0397f9392698987d","stateDigest":"0c2f20a633e639c5c727ae3627c612319006c32e51ee444eee17c1d149ab3963"},
+        {"kind":"step","instructions":33,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"75f674dc006bbd061be4305aba86e2f0fad6f2c2b1297505f15133f6be4a3c8b","stateDigest":"84cf693716507c88497e7906a522efe3d9531f80dcbf375ae46b09cc3f3db5cf"},
+        {"kind":"observe","instructions":33,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"ca655a2570d736eb645ecdf8f6e8ee31786f2a937d06fa13807f9b172585c829","stateDigest":"787f60a8ecc1981412b979f40864a2e470dfdaeead2d9eeda3985f0f26eacd44"},
+        {"kind":"step","instructions":49,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"6c12856e7d0950d6bd8bcac1cabfb510ac8fb2d3a82bbece33e1b888e9510812","stateDigest":"adef63947c9b5891c85e4c99ede5fe6f9aea9cad3db8773078a67cc8445f0243"},
+        {"kind":"observe","instructions":49,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"59a5f21e8f1e02764bb4a6aa5bff54d41bc1ee37e01a364a4f205a1b35da6a95","stateDigest":"9d0a670740880cde1fc7616c93a332ad944650c5af7106623e30b1a45b820887"},
+        {"kind":"step","instructions":63,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c9a7c8c1efae937520c61d0e1735d7a81982b1033dc46c91af275f1a023acbea","stateDigest":"1c49c9ed6e1a2af85a0540d0d277eae0f542ad58082ccbd091106f3edde188f3"},
+        {"kind":"observe","instructions":63,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"7bed437ebbd13398ff90f2568a0116eb521935b875933d4bc8eb38e419127de5","stateDigest":"2db09c74949907dff3eecbd51a2fd57ab1ae4a29e0f6cb6d80f087a51dcefdcc"},
+        {"kind":"step","instructions":75,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2ea93e10f9d60edb4bdab722ff3709a120bdafe7dfd6c6aa69a14a2a48b9f226","stateDigest":"c5b03366eac7968ef3106d27f736722c42ed44cd559f4a305db4968d51266df6"},
+        {"kind":"observe","instructions":75,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"bce33b0efd17351ed16dd68ff8d7705c79469bcbead79a517fbc4c95219fa8db","stateDigest":"3644cb1eadb3cac23e16bf00c43b8cdd5be46ca3e7cd153717c624b6db01df2b"},
+        {"kind":"step","instructions":98,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"48fa7fc63174ec723cf099670277208f7dae58fbf7c5f90a5fc10e539454cfcc","stateDigest":"3e5c99708834c27a3c35c6b2afe3b05b4ca761734fd8b7a45d8a879d0b6383ec"},
+        {"kind":"step","instructions":99,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"1a260031ed378c65a988a0a9ca0c39f67ca887879c245bb8c320c1574223dffb","stateDigest":"da7aca3ffdd1d250be58454fbd9cedafc5e44d924106d4f8221ebd70e7e6e6c1"}
+      ]
+    },
+    "fresh-nested-alias": {
+      "sourceSha256": "a0c5fd7dd15cc71e47ab782624748c05fe89ff890915a14a8ee7454007f01d91",
+      "instructions": 52,
+      "said": ["fresh:3:7:9:9:15:15"],
+      "cuts": [
+        {"kind":"step","instructions":51,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"f21ad473be1f1f1283f9de1ab544e68b2401c06cde8d4b149ded7b53016f5c0b","stateDigest":"33d0f7276617d8b3e3f80cc27ae9d08dd5174083d7e1d46febb1d5718755e5d2"},
+        {"kind":"step","instructions":52,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"57fdd55bef09e5ea504f02c940c9fc14f9d7e440ad6f0a255425c70ac5b2f47d","stateDigest":"ce90560dbf9b761b2e2558014652baf2d7e9b11a4bc6e6641a423915e491e2b0"}
+      ]
+    },
+    "scope-dead-values": {
+      "sourceSha256": "e0d2f6bbaa01539d144fb3dd59dd8e1e4e35f3dca90b4681e331edab117f1a4b",
+      "instructions": 21,
+      "said": ["dead:3"],
+      "cuts": [
+        {"kind":"step","instructions":11,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"886f5e886358285f4b43d94fb92aaa90d3c63fb2a403320b4de9a119f49ab53b","stateDigest":"fad25f7a82065c78c2fcfb49fb9341ba76f99b6f08b1cb1b72bd64b27121c024"},
+        {"kind":"observe","instructions":11,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"a9e6993ae8c999dc483a886ea32758e94dda86dbea4ec6479234c92e23520e39","stateDigest":"bc92cd298bf1f3c39b47e1951c989b9603fb9d327dd1b459a04a0be958ab605d"},
+        {"kind":"step","instructions":17,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"c6e79a93fe99eeb087e51ecc4edcb7ea5833296cff20fe4ab3364f2eb2d381a1","stateDigest":"c80b58a5cb8a2961dcfbfe34507ac1191f33e110cf95bd08967412112ba85482"},
+        {"kind":"observe","instructions":17,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"0387959318c9901a6d2faab735ba387936fc96263a7c704dceda4b009f42b502","stateDigest":"5acb3fe7c1ae3852c4110706d69fd626a1569a4c10898d4bc60098adc87f9b47"},
+        {"kind":"step","instructions":20,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"cc18a4a9ff990b8b6fc278591af8a3a7f97ba1f24b1c54e196770299d06f6ff7","stateDigest":"92a528cdc0d6f978c586729d6778a1328f699050da89d4f1a42762e151209f28"},
+        {"kind":"step","instructions":21,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"2c73fb7af119feeb9efe0142f8284ef384e846f53ebf49e2b5ad8e465478495c","stateDigest":"5a446a74843e7aa3ad5c4f6db83ef4819c113403bc65c44d3f47bc765eefcc2f"}
+      ]
+    },
+    "error-target-before-rhs-seed-1": {
+      "sourceSha256": "46641b3882387353c2a2b9c0051a0b76b22e4ae56605306ba830ff3414ca16d0",
+      "instructions": 6,
+      "said": [],
+      "cuts": [
+        {"kind":"step","instructions":6,"status":"failed","rng":{"algorithm":"xorshift32-v1","state":270369},"events":1,"eventsDigest":"58795a519fcb39ca6a4d2f0e064d603cce5485c2f458b56b379f54854df9cd9f","stateDigest":"ce4ef9118734524615fd6938b24d0da667652b086097f833efa2c84721a2c97f"}
+      ]
+    },
+    "error-target-before-rhs-seed-5": {
+      "sourceSha256": "46641b3882387353c2a2b9c0051a0b76b22e4ae56605306ba830ff3414ca16d0",
+      "instructions": 6,
+      "said": [],
+      "cuts": [
+        {"kind":"step","instructions":6,"status":"failed","rng":{"algorithm":"xorshift32-v1","state":1351845},"events":1,"eventsDigest":"58795a519fcb39ca6a4d2f0e064d603cce5485c2f458b56b379f54854df9cd9f","stateDigest":"be3d471829bfcd56c013abfcde66003c450836ac0a971e9e6a1121563e73d882"}
+      ]
+    },
+    "error-target-before-rhs-seed-42": {
+      "sourceSha256": "46641b3882387353c2a2b9c0051a0b76b22e4ae56605306ba830ff3414ca16d0",
+      "instructions": 6,
+      "said": [],
+      "cuts": [
+        {"kind":"step","instructions":6,"status":"failed","rng":{"algorithm":"xorshift32-v1","state":11355432},"events":1,"eventsDigest":"58795a519fcb39ca6a4d2f0e064d603cce5485c2f458b56b379f54854df9cd9f","stateDigest":"81946f3a99ce69300eb57e62d189d8f58a87f22c2d207374b480c09d970574c2"}
+      ]
+    }
+  }
+}

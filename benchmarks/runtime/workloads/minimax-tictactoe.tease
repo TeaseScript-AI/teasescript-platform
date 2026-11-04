@@ -1,0 +1,47 @@
+// Negamax chooses a move by searching every legal continuation of a midgame.
+let lines = [[0,1,2], [3,4,5], [6,7,8], [0,3,6], [1,4,7], [2,5,8], [0,4,8], [2,4,6]]
+let nodes = 0
+function winner(board) {
+    for line in lines {
+        let score = board[line[0]] + board[line[1]] + board[line[2]]
+        if score == 3 { return 1 }
+        if score == -3 { return -1 }
+    }
+    return 0
+}
+function evaluate(board, side) {
+    nodes += 1
+    let won = winner(board)
+    if won != 0 { return won * side }
+    let best = -2
+    for move in 0..9 {
+        if board[move] == 0 {
+            board[move] = side
+            let score = -evaluate(board, -side)
+            board[move] = 0
+            if score > best { best = score }
+        }
+    }
+    if best == -2 { return 0 }
+    return best
+}
+let checksum = 0
+let choices = []
+for turn in 0..30 {
+    let board = [1,-1,0, 0,1,0, -1,0,0]
+    let best = -2
+    let choice = -1
+    for move in 0..9 {
+        if board[move] == 0 {
+            board[move] = 1
+            let score = -evaluate(board, -1)
+            board[move] = 0
+            if score > best { best = score
+        choice = move }
+        }
+    }
+    checksum += choice * 10 + best
+    choices.add(choice)
+}
+say "minimax:${checksum}:${nodes}:${choices.length}", instant
+exit

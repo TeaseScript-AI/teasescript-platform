@@ -1,0 +1,13 @@
+let root = [[1, 2]]
+function change(board) {
+    board[0][0] = 9
+    return board
+}
+function emit {
+    say "inside", instant
+}
+let original = root
+let result = change(root)
+emit()
+say "lists:${root[0][0]}:${original[0][0]}:${result[0][0]}", instant
+exit
