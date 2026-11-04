@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSourceWithBackend } from "../src/compiler.js";
+import { compileProjectWithBackend, compileSourceWithBackend } from "../src/compiler.js";
 import { INSTRUCTION_PLAN_VERSION, type InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
@@ -22,7 +22,7 @@ import { withoutRecords } from "../src/type-inference/core/consumers.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { completedCore, coreRequest } from "./helpers/type-core-analysis.js";
 import { HELD_MODES } from "./helpers/type-core-held-host.js";
-import { partProblems } from "./helpers/type-core-oracles.js";
+import { partProblems, storeFile } from "./helpers/type-core-oracles.js";
 
 /*
  * A typed part below a variable that holds host data (#1224, the lead's ruling (c)): the analysis owes the part's check
@@ -406,6 +406,68 @@ test("the invariant's projection walks nested unions, so a part stricter than th
   const { problems, covered } = partProblems(whole, part);
   assert.equal(problems.length, 1, problems.join("; "));
   assert.deepEqual(covered, []);
+});
+
+test("a store is known by its file and offset: a part changed in one of two files with a store at one offset is caught (#1682)", () => {
+  // (Astra r1's B1 on #1690: offsets are each file's own, so the two replacements below share one)
+  const typed =
+    'let seed: integer = 7\nlet copy = hostInit\ncopy.open = seed\ncopy = hostValue\nsay "REACHED"\nexit\n';
+  const untyped =
+    'let seed: integer = 7\nlet copy = hostInit\ncopy.open = 1000\ncopy = hostValue\nsay "REACHED"\nexit\n';
+  assert.equal(typed.indexOf("copy = hostValue"), untyped.indexOf("copy = hostValue"));
+  const files = [
+    { path: "main.tease", source: typed },
+    { path: "other.tease", source: untyped },
+  ];
+  const project = (): InstructionPlan => {
+    const { plan, diagnostics } = compileProjectWithBackend(
+      files,
+      { globals: GLOBALS },
+      CORE_BACKEND,
+    );
+    assert.ok(plan !== null, diagnostics.map((d) => d.code).join(","));
+    return plan;
+  };
+  /** Each store's part checks as `file:kind@start path type`. */
+  const parts = (planned: InstructionPlan): string[] =>
+    planned.instructions.flatMap((instruction, index) =>
+      (instruction.kind === "declareBinding" || instruction.kind === "assign") &&
+      instruction.partChecks !== undefined
+        ? instruction.partChecks.map(
+            (part) =>
+              `${storeFile(planned, index)}:${instruction.kind}@${instruction.span.so} ${part.path.map((step) => ("property" in step ? `.${step.property}` : "[]")).join("")} ${JSON.stringify(part.type)}`,
+          )
+        : [],
+    );
+  const natural = project();
+  const at = typed.indexOf("copy = hostValue");
+  assert.ok(parts(natural).includes(`main.tease:assign@${at} .open {"kind":"integer"}`));
+  assert.ok(!parts(natural).some((part) => part.startsWith("other.tease:")));
+  for (const mode of HELD_MODES)
+    for (const demand of DEMANDS) {
+      const stopped = mode.run(() => withTestDemandAllowance(demand, project));
+      assert.deepEqual(parts(stopped), parts(natural), `${mode.name}, demand ${demand}`);
+      assert.deepEqual(
+        partProblems(natural, stopped).problems,
+        [],
+        `${mode.name}, demand ${demand}`,
+      );
+    }
+  // the harmful variant: the first file's part made stricter; the second file's store at the same offset has none
+  const copy: EditablePlan = JSON.parse(JSON.stringify(natural));
+  const store = copy.instructions.findIndex(
+    (instruction, index) =>
+      instruction["kind"] === "assign" &&
+      Array.isArray(instruction["partChecks"]) &&
+      storeFile(natural, index) === "main.tease",
+  );
+  assert.ok(store >= 0);
+  copy.instructions[store]!["partChecks"] = [
+    { path: [{ property: "open" }], type: { kind: "string" }, place: "'copy.open'" },
+  ];
+  const harmful: InstructionPlan = JSON.parse(JSON.stringify(copy));
+  assert.deepEqual(validateInstructionPlan(harmful).errors, []);
+  assert.equal(partProblems(natural, harmful).problems.length, 1);
 });
 
 test("a stopped store's parts from the settled pass and the completion come in the natural order (#1682)", () => {

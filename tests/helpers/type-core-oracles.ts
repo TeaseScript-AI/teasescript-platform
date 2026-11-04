@@ -930,11 +930,22 @@ function accepts(wide: TypePlan, narrow: TypePlan): boolean {
 }
 
 /**
+ * The file a plan's instruction belongs to, by the files' instruction ranges (its path; `-` for one outside every file's):
+ * a store's offset is its file's, so a store is known by its file and offset (Astra r1's B1 on #1690).
+ */
+export function storeFile(plan: InstructionPlan, index: number): string {
+  return (
+    plan.files.find((file) => index >= file.startInstruction && index < file.endInstruction)
+      ?.path ?? "-"
+  );
+}
+
+/**
  * The invariant of a stopped plan's part checks (#1682, the lead's ruling on HEAD 0): each stopped store's parts are a
  * subsequence of the natural store's (path, type and place equal), except a part whose path the natural store's whole
  * check covers with that same projected type (`projectedType`), or one the part accepts all of (the part is then fewer);
  * never a part the natural plan neither has nor covers, never one narrower than what covers it. `problems`: each a line
- * naming the store (`kind@start`) and the part; `covered`: each covered part with `=` (the projected type itself) or
+ * naming the store (`file:kind@start`) and the part; `covered`: each covered part with `=` (the projected type itself) or
  * `wider`.
  */
 export function partProblems(
@@ -944,12 +955,15 @@ export function partProblems(
   type Store = { readonly parts: readonly PartCheckPlan[]; readonly whole: TypePlan | null };
   const stores = (plan: InstructionPlan): Map<string, Store> => {
     const out = new Map<string, Store>();
-    for (const instruction of plan.instructions)
-      if (instruction.kind === "declareBinding" || instruction.kind === "assign")
-        out.set(`${instruction.kind}@${instruction.span.so}`, {
-          parts: instruction.partChecks ?? [],
-          whole: instruction.typeCheck?.type ?? null,
-        });
+    plan.instructions.forEach((instruction, index) => {
+      if (instruction.kind !== "declareBinding" && instruction.kind !== "assign") return;
+      const at = `${storeFile(plan, index)}:${instruction.kind}@${instruction.span.so}`;
+      if (out.has(at)) throw new Error(`Two stores of one plan at ${at}.`);
+      out.set(at, {
+        parts: instruction.partChecks ?? [],
+        whole: instruction.typeCheck?.type ?? null,
+      });
+    });
     return out;
   };
   const text = (part: PartCheckPlan): string => JSON.stringify([part.path, part.type, part.place]);
