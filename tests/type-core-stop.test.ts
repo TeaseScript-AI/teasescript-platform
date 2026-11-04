@@ -6018,48 +6018,60 @@ test("a combined stop's more precise label is proved by its written type exactly
           ["hostValue", "hostOther"],
         )!,
       ).graph;
-      for (const chain of chains(shape.levels)) {
-        const u = [...root.path, ...chain.map(({ step }) => step)];
-        const labels: { target: string; form: string; entries?: readonly number[] }[] = [];
-        // (E: each subset of the chain's steps spelled `entry`, element steps or not)
-        for (let mask = 1; mask < 1 << chain.length; mask += 1) {
-          const entries = chain.flatMap((_, i) => ((mask >> i) & 1 ? [i] : []));
-          labels.push({
-            target: [
-              ...root.path,
-              ...chain.map(({ step }, i) => (entries.includes(i) ? "entry" : step)),
-            ].join("."),
-            form: "E",
-            entries,
-          });
-        }
-        const ownText = (spell: (i: number, step: string) => string) =>
-          root.own + chain.map(({ step }, i) => spell(i, step)).join("");
-        const asWritten = (_: number, step: string) => (step === "element" ? "[0]" : `.${step}`);
-        labels.push({ target: ownText(asWritten), form: "E2" });
-        for (const [i, { step }] of chain.entries()) {
-          const at = (other: string) =>
-            ownText((j, each) => (j === i ? other : asWritten(j, each)));
-          if (step === "element") {
-            labels.push({ target: at(".element"), form: "mixed" });
-            labels.push({ target: at(".entry"), form: "mixed" });
-          } else
-            labels.push({ target: at(step === "values" ? ".keys" : ".values"), form: "mixed" });
-        }
-        // (each target once, by its first form: a mixed variant spelled as an E label is that label)
-        const seen = new Set([u.join(".")]);
-        for (const label of labels) {
-          if (seen.has(label.target)) continue;
-          seen.add(label.target);
-          pairs += 1;
-          const accepted =
-            provenRelabel(check(u.join(".")), [check(label.target)], [], graph) !== undefined;
-          if (accepted !== expected(chain, label))
-            disagree.push(
-              `${written} ${root.name}: ${u.join(".")} -> ${label.target} (${label.form}): walk ${accepted}`,
+      for (const chain of chains(shape.levels))
+        for (const partial of [false, true]) {
+          // (the reference generic, or already spelling `entry` at its first element step a dictionary owns, as a
+          // reference that read part of its key settled does)
+          const first = chain.findIndex(
+            ({ step, owner }) => step === "element" && (owner === "dict" || owner === "dicts"),
+          );
+          if (partial && first < 0) continue;
+          const u = [
+            ...root.path,
+            ...chain.map(({ step }, i) => (partial && i === first ? "entry" : step)),
+          ];
+          const labels: { target: string; form: string; entries?: readonly number[] }[] = [];
+          // (E: each subset of the chain's steps spelled `entry`, element steps or not)
+          for (let mask = 1; mask < 1 << chain.length; mask += 1) {
+            const entries = chain.flatMap((_, i) =>
+              (mask >> i) & 1 || (partial && i === first) ? [i] : [],
             );
+            labels.push({
+              target: [
+                ...root.path,
+                ...chain.map(({ step }, i) => (entries.includes(i) ? "entry" : step)),
+              ].join("."),
+              form: "E",
+              entries,
+            });
+          }
+          const ownText = (spell: (i: number, step: string) => string) =>
+            root.own + chain.map(({ step }, i) => spell(i, step)).join("");
+          const asWritten = (_: number, step: string) => (step === "element" ? "[0]" : `.${step}`);
+          labels.push({ target: ownText(asWritten), form: "E2" });
+          for (const [i, { step }] of chain.entries()) {
+            const at = (other: string) =>
+              ownText((j, each) => (j === i ? other : asWritten(j, each)));
+            if (step === "element") {
+              labels.push({ target: at(".element"), form: "mixed" });
+              labels.push({ target: at(".entry"), form: "mixed" });
+            } else
+              labels.push({ target: at(step === "values" ? ".keys" : ".values"), form: "mixed" });
+          }
+          // (each target once, by its first form: a mixed variant spelled as an E label is that label)
+          const seen = new Set([u.join(".")]);
+          for (const label of labels) {
+            if (seen.has(label.target)) continue;
+            seen.add(label.target);
+            pairs += 1;
+            const accepted =
+              provenRelabel(check(u.join(".")), [check(label.target)], [], graph) !== undefined;
+            if (accepted !== expected(chain, label))
+              disagree.push(
+                `${written} ${root.name}: ${u.join(".")} -> ${label.target} (${label.form}): walk ${accepted}`,
+              );
+          }
         }
-      }
     }
   assert.deepEqual(disagree, []);
   assert.ok(pairs > 1000, `${pairs} pairs`);

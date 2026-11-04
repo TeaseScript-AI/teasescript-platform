@@ -1165,7 +1165,8 @@ function relabelForm(
   if (!below.some((step) => DERIVED.has(step))) return null;
   return below.every((step, i) => {
     const spelled = x[i + 1]!;
-    return step === "element"
+    // (an element step, spelled `entry` already or not, as written; any other step itself)
+    return step === "element" || step === "entry"
       ? spelled.startsWith("[") ||
           (spelled.startsWith("get(") && spelled.endsWith(")")) ||
           SELECTIONS.has(spelled)
@@ -1214,7 +1215,8 @@ const elementsOf = (members: readonly (TypeAnnotation | null)[]): (TypeAnnotatio
 
 /**
  * Whether a written type at the key proves `x`'s form (#1595, the lead's ruling on Q4: the author's own proof, as the
- * compiler reads it). The root's written type is followed along `u`'s element steps through its elements, optionals and
+ * compiler reads it). The root's written type is followed along `u`'s element steps (an `entry` it already spells among
+ * them) through its elements, optionals and
  * unions as `termAt` follows them; a step it cannot follow proves nothing past it. One clause per form:
  * - `"entry"`: every step `x` spells `entry` has a written dictionary as its owner, every kind of it
  *   (`elementStepOf`), and no `values` or `keys` step on the way has a dictionary among its owner's kinds, where the
@@ -1237,7 +1239,8 @@ function writtenProves(
     if (form === "entry" && x[at] === "entry" && !writtenDict(members)) return false;
     // (a derived list: its own text, never an `entry` path, the two forms exclusive as `keyLabel` makes them)
     if (DERIVED.has(step) && writtenSomeDict(members)) return form === "own";
-    if (step !== "element") return form === "entry" && at > last;
+    // (an element step, the reference's own `entry` among them: an element spelled as its dictionary's already)
+    if (step !== "element" && step !== "entry") return form === "entry" && at > last;
     members = elementsOf(members);
   }
   return form === "entry";
