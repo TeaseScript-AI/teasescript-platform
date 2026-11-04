@@ -182,6 +182,27 @@ A mutant is a head tree with one file changed. Its verdict counts only beside pr
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
 "killed", the same way identical exceptions on both trees are not agreement (#1439).
 
+## A seeded family
+
+`seeded.mjs` (#1652's builder, for #1646) generates one program per seed, objects copied into each other's properties
+and lists then a host value stored below them, compiles it on two built trees in the source order, and prints one
+JSON line per seed: each tree's units, whether the outcomes (each diagnostic's code and offset and the plan's checks, or
+a thrown error) are the same, and both and the source where they differ. It is not an area of `run.mjs`: its sources
+are generated, not recorded. `seeded.sh` runs it as a central-queue item pool, each item `<first seed> <count>`:
+
+```sh
+for i in $(seq 0 39); do echo "$((i * 50)) 50"; done > seeds.txt
+sx-job submit --commit base=<base> --commit head=<head> --items seeds.txt --target 10m --campaign <T> \
+  -- bash -c 'bash "$SX_TREE_head/tests/families/seeded.sh" pair'
+git diff > mutant.diff   # one clause changed, on the head
+sx-job submit --checkout <head> --patch mutant.diff --commit head=<head> --items seeds.txt --target 10m \
+  --campaign <T> -- bash -c 'bash "$SX_TREE_head/tests/families/seeded.sh" mutant'
+```
+
+`pair` compares the base tree with the head tree. `mutant` compares the head tree with the head's checkout under the
+patch, which it builds, and writes each changed file's hash before and after into `mutant.sha256`, the mutant's proof
+(above): a seed whose outcome differs reaches the mutated code, and a mutant no seed tells apart survives the family.
+
 ## The unit limit and the safety net (#1647)
 
 The rule is orchestrator 2's, on the owner's delegation of its threshold (#1647, 2026-11-03). It was measured with this
