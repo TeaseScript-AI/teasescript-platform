@@ -8,7 +8,7 @@ import { selectsElement } from "../method-categories.js";
 import { siteKey } from "../program.js";
 import type { CoreDiagnostic, DiagnosticKind, DiagnosticRule, Presence } from "../result.js";
 import { expected } from "./expected.js";
-import { heldWithin, keptTypes } from "./kinds.js";
+import { anyRecorded, keptTypes } from "./kinds.js";
 
 // The consumers' diagnostics: an error at its site, and the facts a fix's code forms read (TABLE r4.151).
 
@@ -125,17 +125,17 @@ function keptChoice(
   const { program } = walk.pass;
   const expression = program.exprAt(site)?.expression;
   const receiver = rule.rule === "member" || rule.rule === "selection";
-  // (a value not found, asked only then: unproved where a value the stage recorded lies within the subject's own span,
-  // its operands; else a plain `let` is proved, Codex r8 to r11 on #1660)
-  const unfound = (span: SourceSite): readonly ItemTag[] | null =>
-    heldWithin(walk, span) ? null : [];
+  // (a value not found: words, never a plain `let`, where the stage recorded an answer (a mixed or a stopped one may
+  // reach it); where it recorded none, every choice's read settled as one type or there is none, so the plain `let` is
+  // proved, the lead's ruling on Codex r12 on #1660)
+  const unfound = (): readonly ItemTag[] | null => (anyRecorded(walk) ? null : []);
   // (a site with no expression of its own, a default's or a `get` call's: its value where the core places one; a
-  // receiver there the `get`'s own, by its place, never by text, Codex r12 on #1660; else unfound in the whole site)
+  // receiver there the `get`'s own, by its place, never by text, Codex r12 on #1660; else unfound)
   if (expression === undefined) {
     const place = program.placeBySite.get(siteKey(site));
     const c = place === undefined ? undefined : program.opOf.get(place);
     const value = !receiver ? place : c?.kind === "get" ? c.receiver : undefined;
-    return value === undefined ? unfound(site) : keptTypes(walk, value);
+    return value === undefined ? unfound() : keptTypes(walk, value);
   }
   let subject = !receiver
     ? expression
@@ -147,7 +147,7 @@ function keptChoice(
   while (subject.kind === "parenthesizedExpression") subject = subject.expression;
   const span = { file: site.file, start: subject.span.start.offset, end: subject.span.end.offset };
   const place = program.placeBySite.get(siteKey(span));
-  return place === undefined ? unfound(span) : keptTypes(walk, place);
+  return place === undefined ? unfound() : keptTypes(walk, place);
 }
 
 /**
