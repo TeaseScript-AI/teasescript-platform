@@ -271,9 +271,13 @@ test("a stop's forgotten answers take their flows with them; a flow stands only 
   const sources = [
     'let a = {p: {f: 1}}\nlet b = a\nb.p.f = hostValue\nlet c = [b, {p: {f: 2}}][0]\nsay "${c.p.f}"\nexit\n',
     'let typed: integer | string = 1\nlet y = {q: [typed]}\nlet x = [{q: [1]}, y][0]\nx.q.add(hostValue)\nsay "${x.q.length}"\nexit\n',
+    // (#1646's rejected cell and `otherwise` witnesses, whose decisions stop at 256 in every mode: a stopped key's
+    // answer forgotten and never made again)
+    'let a={f:[[1]],q:1}\na.q=[{r:1},{r:a}][0].r\na=hostValue\nsay "AFTER"\nexit\n',
+    "let a={f:[[1]],q:1}\na.q=a otherwise 1\na=hostValue\nexit\n",
   ];
   let checked = 0;
-  for (const allowance of [1, 4, 16])
+  for (const allowance of [1, 4, 16, 256])
     for (const mode of MODES)
       for (const source of sources) {
         const slots: string[] = [];
