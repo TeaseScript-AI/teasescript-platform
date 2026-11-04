@@ -802,6 +802,8 @@ export interface LandingOps {
   retained: number;
   /** The listings the call kept or left pending (`census`). */
   readonly kept: Listing[];
+  /** The trie nodes the call made (`Admission.listings`), roots and prefixes. */
+  trieNodes: number;
 }
 
 /**
@@ -1031,7 +1033,9 @@ export function landedBelow(
   const work = admission.pass.program.work;
   const outer = currentOps;
   currentOps =
-    opsHook === null ? null : { ops: noOps(), debited: noOps(), units: 0, retained: 0, kept: [] };
+    opsHook === null
+      ? null
+      : { ops: noOps(), debited: noOps(), units: 0, retained: 0, kept: [], trieNodes: 0 };
   const counts = currentOps;
   const before = work.total;
   try {
@@ -1070,15 +1074,17 @@ function keepListing(admission: Admission, listing: Listing): void {
   happened("publish");
   debit(work, "publish");
   let node: ListingNode | undefined = admission.listings.get(listing.frame.place);
-  if (node === undefined)
+  if (node === undefined) {
     admission.listings.set(listing.frame.place, (node = { listing: null, next: new Map() }));
+    madeNode();
+  }
   for (const step of listing.frame.below) {
     happened("publish");
     debit(work, "publish");
     let next: ListingNode | undefined = node.next.get(step);
     if (next === undefined) {
       node.next.set(step, (next = { listing: null, next: new Map() }));
-      if (currentOps !== null) currentOps.retained += 1;
+      madeNode();
     }
     node = next;
   }
@@ -1096,6 +1102,13 @@ function trieOf(admission: Admission, place: PlaceId): ListingNode | undefined {
     for (const listing of pending) keepListing(admission, listing);
   }
   return admission.listings.get(place);
+}
+
+/** A trie node made, a place's root or a prefix's (test-only, `withLandingOps`: one retained slot each). */
+function madeNode(): void {
+  if (currentOps === null) return;
+  currentOps.retained += 1;
+  currentOps.trieNodes += 1;
 }
 
 /** The listing of a place's node at `below`, or `null`: each trie node walked debited. */

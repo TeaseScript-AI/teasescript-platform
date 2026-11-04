@@ -9,9 +9,10 @@ import {
   withLandingOps,
   type LandingOp,
 } from "../src/type-inference/core/admission/landings.js";
+import { Admission } from "../src/type-inference/core/admission.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { WorkLedger } from "../src/type-inference/core/budget.js";
-import type { TapePoint } from "../src/type-inference/core/admission/model.js";
+import type { ListingNode, TapePoint } from "../src/type-inference/core/admission/model.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { MODES, inMode } from "./helpers/type-core-oracles.js";
 
@@ -213,5 +214,43 @@ test("a fixed-width chain's landings take its listings: linear, and at most half
       2 * large.listed <= large.walked,
       `${name}: ${large.listed} of the walk's ${large.walked}`,
     );
+  }
+});
+
+test("the census counts every trie node a pass's listings hold, each place's root among them", async () => {
+  // (the admissions a pass makes, seen at their decisions; their tries counted apart from the calls' own count)
+  const shapes = await families();
+  const nodes = (node: ListingNode): number =>
+    1 + [...node.next.values()].reduce((sum, next) => sum + nodes(next), 0);
+  const decide = Admission.prototype.decide;
+  for (const name of ["narrow-repeat-3", "diamond-2", "skip-cross-3"]) {
+    const request = coreRequest([{ path: "main.tease", source: shapes[name]!(8) }], GLOBALS);
+    assert.ok(request !== null);
+    const admissions = new Set<Admission>();
+    Admission.prototype.decide = function (
+      this: Admission,
+      ...args: Parameters<Admission["decide"]>
+    ) {
+      admissions.add(this);
+      return decide.apply(this, args);
+    };
+    let made = 0;
+    try {
+      withLandingOps(
+        (_place, _prefix, counts) => {
+          made += counts.trieNodes;
+        },
+        () => analyseCore(request),
+      );
+    } finally {
+      Admission.prototype.decide = decide;
+    }
+    const held = [...admissions].reduce(
+      (sum, admission) =>
+        sum + [...admission.listings.values()].reduce((all, root) => all + nodes(root), 0),
+      0,
+    );
+    assert.ok(held > 0, name);
+    assert.equal(made, held, name);
   }
 });
