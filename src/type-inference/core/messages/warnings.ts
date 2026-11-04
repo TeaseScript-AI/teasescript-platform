@@ -329,16 +329,11 @@ function checkFix(
  * property by its way from the load, of the place's type, which its reader then takes where the stored property misfits
  * or is missing; anything else
  * gives no check that discharges the warning (a property's check does not reach a copy of the whole object, Astra r1's
- * A1, #1496), so the words say where the type must come from: the narrowest expression that owns the property below the
- * value (`MessageSource.owner`, #1495), never the whole literal where a part of it owns it. `null` where the place is the
- * value itself or its element, whose own check is the fix; `strict`, also where the value's landing is unknown.
+ * A1, #1496), so the words say where the type must come from: the narrowest expression that owns the property below
+ * the value (`MessageSource.owner`, #1495), never the whole literal where a part of it owns it. `null` where the place
+ * is the value itself or its element, whose own check is the fix.
  */
-function propertyFix(
-  rule: StoreRule,
-  site: SourceSite,
-  source: MessageSource,
-  strict = false,
-): string | null {
+function propertyFix(rule: StoreRule, site: SourceSite, source: MessageSource): string | null {
   if (!rule.steps.some((step) => "property" in step)) return null;
   const type = described(rule.type);
   const landing = source.landing(site);
@@ -359,7 +354,7 @@ function propertyFix(
     above.length > rule.steps.length ||
     !above.every((step, index) => same(step, rule.steps[index]!))
   )
-    return strict ? null : otherwise;
+    return otherwise;
   const below = rule.steps.slice(above.length);
   if (!below.some((step) => "property" in step)) return null;
   const found = originOf(rule);
@@ -542,10 +537,9 @@ export function warningFix(
   }
   // (no test where the read itself stops, a property an object may lack, nor of a literal, whose type is its own)
   if (isLiteral(text) || context === "missing") return "";
-  // (a store's place below a value part of which fits, a property of what it holds where its landing shows it: that
-  // property's fix, #1495; a value whose landing is unknown keeps its own check)
+  // (a store's place below a value part of which fits, a property of what it holds: that property's fix, #1495)
   if (rule.rule === "store" && kinds.includes("unknown")) {
-    const property = propertyFix(rule, site, source, true);
+    const property = propertyFix(rule, site, source);
     if (property !== null) return property;
   }
   const test = typeTest(fits);
