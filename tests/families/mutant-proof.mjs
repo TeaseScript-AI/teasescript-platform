@@ -6,9 +6,10 @@
 //   head, and no path created, deleted, renamed, copied or re-moded (`git apply --summary` prints nothing), so the
 //   queue's `git apply` of it changes those files and nothing else.
 // - Equality: the patch applied again to the head in a private index gives each path's expected blob without the
-//   checkout; each path's file in the checkout must hash to it.
+//   checkout; each path's file in the checkout must hold that blob's bytes as a checkout writes them (its attributes'
+//   conversions applied; a patch of a `.gitattributes` is refused).
 // Prints the proof as one JSON object: the patch's sha256 and, per path, its blob at the head, the expected blob and
-// the checkout's; exits 2 for a patch it refuses, 1 where the checkout is not the head with the patch applied.
+// the sha256 of the expected file's bytes and the checkout's file's; exits 2 for a patch it refuses, 1 where the checkout is not the head with the patch applied.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -46,9 +47,16 @@ if (git(["apply", "--summary", patch]).length > 0)
 const records = git(["apply", "--numstat", "-z", patch]).toString("utf8").split("\0");
 const paths = [];
 for (let index = 0; index < records.length - 1; index += 1) {
-  const [added, deleted, path] = records[index].split("\t");
+  // (a record is `added<TAB>deleted<TAB>path`, the path whole after the second tab: it may hold tabs itself)
+  const [added = "", deleted = ""] = records[index].split("\t", 2);
+  const path = records[index].slice(added.length + deleted.length + 2);
   if (added === "-" || deleted === "-") refuse(2, `${JSON.stringify(path)} is a binary change`);
-  if (path === undefined || path === "") refuse(2, "the patch renames or copies a path");
+  if (path === "") refuse(2, "the patch renames or copies a path");
+  if (path.split("/").at(-1) === ".gitattributes")
+    refuse(
+      2,
+      `${JSON.stringify(path)} changes how files convert; a mutant changes source text only`,
+    );
   paths.push(path);
 }
 if (paths.length === 0) refuse(2, "the patch changes nothing");
@@ -74,17 +82,21 @@ try {
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
+// (the file's bytes as the build reads them, against the expected blob written out as a checkout writes it, its
+// attributes' conversions included, as `git apply` writes it)
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const proof = {
-  patch: createHash("sha256").update(readFileSync(patch)).digest("hex"),
+  patch: sha256(readFileSync(patch)),
   paths: paths.map((path) => ({
     path,
     head: head.get(path),
     expected: expected.get(path),
-    checkout: git(["hash-object", "--", path]).toString("utf8").trim(),
+    expectedFile: sha256(git(["cat-file", "--filters", `--path=${path}`, expected.get(path)])),
+    checkoutFile: sha256(readFileSync(join(checkout, path))),
   })),
 };
 process.stdout.write(`${JSON.stringify(proof)}\n`);
-const differing = proof.paths.filter((each) => each.checkout !== each.expected);
+const differing = proof.paths.filter((each) => each.checkoutFile !== each.expectedFile);
 if (differing.length > 0)
   refuse(
     1,

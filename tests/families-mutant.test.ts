@@ -19,15 +19,18 @@ function git(cwd: string, ...args: string[]): string {
 
 const newline = "line\nname.ts";
 const magic = ":(exclude)never";
+const tabbed = "kept.ts\textra.ts";
 
 /**
- * A head (files, a symlink named like pathspec magic, an ignored `dist/`), the patch `change` makes against it, that
- * patch applied as the queue applies it (or `instead`, another change), `after` then, and the proof's status and output.
+ * A head (files, a symlink named like pathspec magic, a path with a tab, an ignored `dist/`, `attributes` as its
+ * `.gitattributes`), the patch `change` makes against it, that patch applied as the queue applies it (or `instead`,
+ * another change), `after` then, and the proof's status and output.
  */
 function proved(
   change: (cwd: string) => void,
   instead?: (cwd: string) => void,
   after?: (cwd: string) => void,
+  attributes?: string,
 ) {
   const cwd = mkdtempSync(join(tmpdir(), "mutant-proof-"));
   try {
@@ -39,6 +42,8 @@ function proved(
       [newline, "x\n"],
       [":literal.ts", "l\n"],
       ["exec.ts", "e\n"],
+      [tabbed, "before\n"],
+      ...(attributes === undefined ? [] : [[".gitattributes", attributes]]),
     ])
       writeFileSync(join(cwd, path!), text!);
     symlinkSync("kept.ts", join(cwd, magic));
@@ -78,20 +83,32 @@ test("a mutant's proof accepts a patch of files' text applied as written, with e
       "a path like pathspec magic",
       (cwd: string) => writeFileSync(join(cwd, ":literal.ts"), "l2\n"),
     ],
+    ["a tab in its path", (cwd: string) => writeFileSync(join(cwd, tabbed), "after\n")],
   ] as const) {
     const ran = proved(change);
     assert.equal(ran.status, 0, `${name}: ${ran.stderr}`);
     // EVIDENCE: mutant-proof.mjs prints this object as its one line of output; each field is asserted below.
     const proof = JSON.parse(ran.stdout) as {
       patch: string;
-      paths: { path: string; head: string; expected: string; checkout: string }[];
+      paths: {
+        path: string;
+        head: string;
+        expected: string;
+        expectedFile: string;
+        checkoutFile: string;
+      }[];
     };
     assert.match(proof.patch, /^[0-9a-f]{64}$/, name);
     assert.ok(proof.paths.length > 0, name);
     for (const each of proof.paths) {
-      assert.equal(each.checkout, each.expected, `${name}: ${each.path}`);
+      assert.equal(each.checkoutFile, each.expectedFile, `${name}: ${each.path}`);
       assert.notEqual(each.head, each.expected, `${name}: ${each.path}`);
     }
+    if (name === "a tab in its path")
+      assert.deepEqual(
+        proof.paths.map((each) => each.path),
+        [tabbed],
+      );
   }
 });
 
@@ -168,4 +185,35 @@ test("a mutant's proof refuses any other patch, Codex r4's three shapes on #1680
   );
   assert.equal(edited.status, 1, edited.stderr);
   assert.match(edited.stderr, /not the head with the patch applied at "kept.ts"/);
+  // (Codex r1 on #1686: a path with a tab, its patch left unapplied; a file under `ident`, the expansion the queue's
+  // apply wrote accepted and one replaced after it refused, compared as the bytes the build reads)
+  const unapplied = proved(
+    (cwd) => writeFileSync(join(cwd, tabbed), "after\n"),
+    () => {},
+  );
+  assert.equal(unapplied.status, 1, unapplied.stderr);
+  assert.ok(unapplied.stderr.includes(JSON.stringify(tabbed)), unapplied.stderr);
+  const ident = (cwd: string) => writeFileSync(join(cwd, "kept.ts"), 'export const v = "$Id$";\n');
+  const expanded = proved(ident, undefined, undefined, "*.ts ident\n");
+  assert.equal(expanded.status, 0, expanded.stderr);
+  const injected = proved(
+    ident,
+    undefined,
+    (cwd) => writeFileSync(join(cwd, "kept.ts"), 'export const v = "$Id: injected $";\n'),
+    "*.ts ident\n",
+  );
+  assert.equal(injected.status, 1, injected.stderr);
+  assert.match(injected.stderr, /not the head with the patch applied at "kept.ts"/);
+  // (a patch of an existing `.gitattributes` changes how the other files convert: refused)
+  const attributes = proved(
+    (cwd) => {
+      writeFileSync(join(cwd, ".gitattributes"), "*.ts ident\n");
+      writeFileSync(join(cwd, "kept.ts"), "a2\n");
+    },
+    undefined,
+    undefined,
+    "\n",
+  );
+  assert.deepEqual([attributes.status, attributes.stdout], [2, ""], attributes.stderr);
+  assert.match(attributes.stderr, /changes how files convert/);
 });
