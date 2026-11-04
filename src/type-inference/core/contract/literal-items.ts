@@ -150,6 +150,7 @@ export function* indexItems(
     const step = length < rest.length ? rest.at(length) : undefined;
     if (step === SELECTED_VALUE || step === SELECTED_TEXT) {
       flow?.opaque("selection");
+      // #1668: a selection's alternatives: its includer records `opaque`
       const selected = yield* selectedAt(
         contract,
         literal,

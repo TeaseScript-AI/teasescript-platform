@@ -2054,6 +2054,7 @@ export function* summaryCount(
     const items = yield* contract.subAt(sub, rest);
     return summarised(items) ? (withoutEmpty(items).length > 0 ? 1 : 0) : null;
   }
+  // #1668: N, a count over the layers' summaries
   const root = yield* unionOf(contract, at);
   return root === undefined ? null : (root?.count ?? 0);
 }
@@ -2086,6 +2087,7 @@ export function summaryPresence(
         if (summarised(items)) after = presenceSteps(items)[mask]!;
         return [];
       }
+      // #1668: K, a presence test over the layers' summaries
       const root = yield* unionOf(contract, at);
       if (root !== undefined)
         after = root === null ? { mask, unknown: false, literal: null } : root.presence![mask]!;
