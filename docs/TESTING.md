@@ -140,10 +140,11 @@ counts. CI runs only `npm run test:families`, which checks that every module sti
 
 CI runs `npm run check` as two jobs side by side, `check-1` and `check-2`, each meant to stay at least 3 minutes under
 its 15-minute limit at the slow end of runner variance (#1638): each builds and runs one half of the compiled tests
-(`npm test -- --shard=i/2`), `check-2` also the checks before them (`npm run check:pretest`). The test files whose tests
-take 30 s or more together in a measured run of the suite as CI runs it are listed, costliest first, with their
-seconds in `tools/costly-test-files.mjs`; the full suite starts them first, and `tools/test-shards.mjs` shares the files
-out by those seconds. Their costliest sweeps
+(`npm test -- --shard=i/2`), `check-2` also the checks before them (`npm run check:pretest`). Every type-core test file
+and every other of 10 s or more is listed, costliest first, with its seconds in a measured run of the suite as CI runs
+it, in `tools/costly-test-files.mjs`, beside the seconds of `check:pretest` (its header names the command that
+regenerates it); the full suite starts them first, and `tools/test-shards.mjs` shares the files out so that the jobs end
+together, `check-2`'s after its checks before the tests. Their costliest sweeps
 that claim something at every member of a list of settled stops or allowances (`testedStops`, the stops before admission
 settled in `type-core-stop`, `completionAllowances`) visit of each list the first, the last and two evenly between
 (`sampled`, `tests/helpers/sweep.ts`), and `type-core-sharing` runs its fixture and matrix programs in the source order

@@ -1,20 +1,23 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { costlyTestFiles, costlyTestSeconds, otherTestSeconds } from "./costly-test-files.mjs";
-import { shardFiles, shardOption } from "./test-shards.mjs";
+import {
+  costlyTestFiles,
+  costlyTestSeconds,
+  pretestSeconds,
+  testFilesAtOnce,
+} from "./costly-test-files.mjs";
+import { shardFiles, shardOption, shardSeconds } from "./test-shards.mjs";
 
-// The suite's files: the costly ones and 298 others, as main had them when the seconds were measured (#1638).
+// The suite's files: the costly ones and 298 others.
 const files = [
   ...costlyTestFiles,
   ...Array.from({ length: 298 }, (_, i) => `other-${String(i).padStart(3, "0")}.test.js`),
 ].reverse();
-const seconds = (list) =>
-  list.reduce((sum, file) => sum + (costlyTestSeconds[file] ?? otherTestSeconds), 0);
 
 test("every test file is in exactly one shard, the costly ones first in each", () => {
   for (const count of [1, 2, 3, 4]) {
@@ -29,9 +32,13 @@ test("every test file is in exactly one shard, the costly ones first in each", (
   assert.deepEqual(shardFiles([...files].reverse(), 2, 3), shardFiles(files, 2, 3));
 });
 
-test("the shards' estimated seconds differ by no more than the costliest file", () => {
+test("the shards' estimated ends, the last after the pre-test checks, differ by no more than the costliest file", () => {
+  assert.equal(shardSeconds([], 1, 2), 0);
+  assert.equal(shardSeconds([], 2, 2), pretestSeconds);
   for (const count of [2, 3]) {
-    const loads = Array.from({ length: count }, (_, i) => seconds(shardFiles(files, i + 1, count)));
+    const loads = Array.from({ length: count }, (_, i) =>
+      shardSeconds(shardFiles(files, i + 1, count), i + 1, count),
+    );
     assert.ok(
       Math.max(...loads) - Math.min(...loads) <= Math.max(...Object.values(costlyTestSeconds)),
       `${count} shards: ${loads.map((load) => load.toFixed(0)).join(", ")}`,
@@ -41,6 +48,23 @@ test("the shards' estimated seconds differ by no more than the costliest file", 
     ...costlyTestFiles,
     ...files.filter((f) => !costlyTestFiles.includes(f)).sort(),
   ]);
+});
+
+test("every type-core test file has measured seconds, and every file with seconds exists", () => {
+  const suite = readdirSync(new URL("../tests/", import.meta.url))
+    .filter((file) => file.endsWith(".test.ts"))
+    .map((file) => file.replace(/\.ts$/, ".js"));
+  const typeCore = suite.filter((file) => file.startsWith("type-core-"));
+  assert.ok(typeCore.length > 0);
+  assert.deepEqual(
+    typeCore.filter((file) => costlyTestSeconds[file] === undefined),
+    [],
+    "regenerate tools/costly-test-files.mjs (its header says how)",
+  );
+  assert.deepEqual(
+    costlyTestFiles.filter((file) => !suite.includes(file)),
+    [],
+  );
 });
 
 test("--shard=i/N names shard i of N, and anything else malformed is refused", () => {
@@ -62,10 +86,9 @@ test("the filter's two shards run every compiled test file once between them, an
   const cwd = mkdtempSync(join(tmpdir(), "test-shards-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(join(cwd, "dist", "tests"), { recursive: true });
-  // (two costly files and three others, one a name no list holds)
+  // (one costly file more than a shard runs at once, and three others, one a name no list holds)
   const names = [
-    costlyTestFiles[0],
-    costlyTestFiles[1],
+    ...costlyTestFiles.slice(0, testFilesAtOnce + 1),
     "a.test.js",
     "b.test.js",
     "unlisted-new.test.js",
