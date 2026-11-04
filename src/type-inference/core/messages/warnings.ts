@@ -232,9 +232,11 @@ function guardForms(
   kept: boolean,
   test: Test,
 ): { readonly check: string; readonly keep: string | null } | null {
-  // (the kept variable's name, free in the whole project: `value`, else the first free `value2`, `value3`, … #1274)
-  const name = use.source.freeName("value");
-  const held = ownText(subject) ? guarded(use.source, use.site, subject, kept, name) : null;
+  if (!ownText(subject)) return null;
+  // (the kept variable's name, free in the whole project: `value`, else the first free `value2`, `value3`, … #1274;
+  // asked only where the fix keeps a value, as its survey is charged, Astra r1 on #1715)
+  const name = kept ? use.source.freeName("value") : "";
+  const held = guarded(use.source, use.site, subject, kept, name);
   if (held === null) return null;
   const form = (code: string, holds: SourceSite): string | null =>
     codeAt(
