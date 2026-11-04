@@ -1561,6 +1561,45 @@ test("a for loop's range bound that is a number or text is an error at the bound
   );
 });
 
+/**
+ * #1173 (the owner's option C): an integer-only use is checked against the type of the place it reads, a place of the
+ * type `number` (written, or copied from one) an error whatever value it holds. The current checker is the reference
+ * here: over every integer-only use the candidate route reaches (a repeat count, a list index, a `for` range's start
+ * and end) and the places a use reads (written `number`, `integer` or none, a whole or fractional start value, a copy of
+ * a `number` place, host data into a `number`), the candidate's errors are the current checker's, in both orders.
+ */
+test("an integer-only use of a number place is the current checker's error at every use (#1173)", () => {
+  const uses = [
+    (read: string) => `repeat ${read} { say "x" }`,
+    (read: string) => `let xs = [1, 2]\nsay xs[${read}]`,
+    (read: string) => `for i in ${read}..3 { say i }`,
+    (read: string) => `for i in 1..${read} { say i }`,
+  ];
+  const reads = [
+    ["", "1"],
+    ["", "1.5"],
+    ["let p: number = 1\n", "p"],
+    ["let p: number = 1.5\n", "p"],
+    ["let p: integer = 1\n", "p"],
+    ["let p = 1\n", "p"],
+    ["let p = 1.5\n", "p"],
+    ["let q: number = 1\nlet p = q\n", "p"],
+    ["let p: number = hostValue\n", "p"],
+  ] as const;
+  const errors = (result: CompilationResult) =>
+    sited(result).filter((diagnostic) => diagnostic.startsWith("error"));
+  for (const use of uses)
+    for (const [before, read] of reads) {
+      const source = `${before}${use(read)}\nexit\n`;
+      const current = errors(compileSource(source, OPTIONS));
+      assert.deepEqual(
+        inBothOrders(() => errors(candidate(source))),
+        current,
+        source,
+      );
+    }
+});
+
 test("parentheses answer for their content: a parenthesised count and index read as bare ones (S3 3.4)", () => {
   // the flow graph's node of a parenthesised expression is its content's, the value the parentheses hold
   const source = "let n = 2\nrepeat ((n)) {}\nlet xs = [1, 2]\nlet y = xs[(n)]\nexit\n";

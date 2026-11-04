@@ -239,7 +239,11 @@ export function domainItems(
 }
 
 /** The admitted type at `rest` of the place a read reads (a copy's of a written type, A4), `null` with an unknown. */
-function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[]): ItemTag[] | null {
+export function admittedKinds(
+  walk: Consumers,
+  value: PlaceId,
+  rest: readonly string[],
+): ItemTag[] | null {
   const key = readKey(walk, value);
   if (key === null) return null;
   const tags = walk.admission
