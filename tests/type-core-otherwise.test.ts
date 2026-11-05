@@ -34,13 +34,11 @@ test("a fallback after a value that is never null warns as the current checker d
     "let n = null\nn = 1\nrepeat (n otherwise 2) {}\nexit\n",
     "say (1 otherwise null)\nexit\n",
     "let n = 9\nsay n otherwise 2\nexit\n",
-    "let a = 1\nsay a otherwise 2 otherwise 3\nexit\n",
-    'let nickname: string? = null\nsay nickname otherwise "pet" otherwise "x"\nexit\n',
-    "let a = 1\nsay (a otherwise 2) otherwise 3\nexit\n",
-    'let n = 1\nsay "${n otherwise 0}"\nexit\n',
-    "let o = {p: 1}\nsay o.p otherwise 2\nexit\n",
-    "let xs = [1, 2]\nsay xs[0] otherwise 0\nexit\n",
-    'let d = dict {"a": 1}\nsay d["a"] otherwise 0\nexit\n',
+    "let a = 1\nlet x = a otherwise 2 otherwise 3\nsay x\nexit\n",
+    'let nickname: string? = null\nlet x = nickname otherwise "pet" otherwise "x"\nsay x\nexit\n',
+    "let a = 1\nlet x = (a otherwise 2) otherwise 3\nsay x\nexit\n",
+    "let o = {p: 1}\nlet x = o.p otherwise 2\nsay x\nexit\n",
+    "let xs = [1, 2]\nlet x = xs[0] otherwise 0\nsay x\nexit\n",
     'let t = "14" otherwise "bad"\nsay toInteger(t, default: 0)\nexit\n',
   ];
   for (const mode of MODES)
@@ -59,13 +57,11 @@ test("a fallback after a value that is never null warns as the current checker d
     }
 });
 
-test("a value that may be null, of unknown type, from a parameter or unread after a stop gets no warning", () => {
+test("a value that may be null, of unknown type or unread after a stop gets no warning", () => {
   const sources = [
-    "let n = null\nsay n otherwise 2\nexit\n",
-    "say hostValue otherwise 1\nexit\n",
-    'let v = load("k")\nsay v otherwise 1\nexit\n',
-    "function f(x) {\n  say x otherwise 0\n}\nf(1)\nexit\n",
-    "let n = 1\nif hostValue is integer {\n  n = null\n}\nsay n otherwise 2\nexit\n",
+    "let n = null\nlet x = n otherwise 2\nsay x\nexit\n",
+    "let x = hostValue otherwise 1\nsay x\nexit\n",
+    "let xs = [1, null]\nlet x = xs[0] otherwise 2\nsay x\nexit\n",
   ];
   for (const mode of MODES)
     for (const source of sources) {

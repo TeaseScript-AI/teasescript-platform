@@ -4,6 +4,17 @@ Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fabl
 port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, §2 row S0, §3.1 "Host globals"). S4
 commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; nothing here is in the repository.
 
+## A fallback that is never used (#1072)
+
+The #1072 builder (Opus) edited 20 records of `cells.jsonl` by hand: each gains the warning TSV062 (V30 §18) as a
+`static` warning at the current checker's site, from the operator of the first `otherwise` whose left side is never
+`null` to the chain's end, and a `valid` record's outcome becomes `warning`. The records: `cp9-cells/F17a/otherwise`
+and `…/lazy`; `cp9-cells/C10/otherwise`, `…/union` and `…/null-fallback`; `cp9-cells/r4/null-otherwise`;
+`cp9-cells/guard/{fallback-compatible,fallback-incompatible,direct-written-union,no-written-union,null-fallback,string-fallback,non-null-direct-family}`;
+`cp9-cells/r46/m3/astra-m3/fallback/{null,1,"word",union-context,nonunion-context}`; and
+`cp9-cells/s4/followup/temporal/{year-string-fallback,year-fallback-written-union}`. Each warning's site is the
+current checker's (compared record for record); no other record changed.
+
 ## One member warning per access (#1469)
 
 The #1469 builder (Opus) edited one record of `cells.jsonl` by hand: `cp9-cells/r42/store-mixed-unknown-property`, a

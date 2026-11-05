@@ -1053,6 +1053,17 @@ const INTENDED: readonly Intended[] = [
     replacement: () => exact(SAME_TYPE),
     count: 5,
   },
+  {
+    rule:
+      "#1072 (V30 §18): the new checker decides a chain of 'otherwise' from its answer at each left read; where the " +
+      "inner chain's value may be null there (a branch stores null into it), the parenthesized chain is the first " +
+      "value never null, so the warning names the outer fallback",
+    matches: ({ current, message }) =>
+      / is never null here, so the fallback/.test(current) &&
+      /^'\(.* otherwise .*\)' is never null here/.test(message),
+    replacement: () => exact("Remove 'otherwise null'."),
+    count: 1,
+  },
 ];
 
 /** The rule that explains a pair that differs, with its replacement, or `undefined`. */

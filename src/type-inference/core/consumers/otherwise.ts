@@ -8,18 +8,15 @@ import type { StaticRule } from "../result.js";
 
 /**
  * Whether a left read's answer proves it never `null` (`fallbackUse`): it holds a kind, and none of its kinds is `null`
- * or unknown (external, opaque, a stopped read's), and none came through a call (a parameter's or a result's, F20–F22:
- * a value that depends on a parameter without a type gets no warning, V30 §18). A possible kind proves as a definite one
- * does: the question is whether `null` can be there, not whether every kind is certain (not C13's all-definite test).
- * `null` (no answer at the read) proves nothing.
+ * or unknown (external, opaque, a stopped read's: a value of unknown type gets no warning, V30 §18). A possible kind
+ * proves as a definite one does: the question is whether `null` can be there, not whether every kind is certain (not
+ * C13's all-definite test). `null` (no answer at the read) proves nothing. (A function is outside the candidate's slice,
+ * so no left side here depends on a parameter.)
  */
 export function provesNonNull(items: readonly Item[] | null): boolean {
   if (items === null) return false;
   const kinds = items.filter((item) => item.tag !== "empty");
-  return (
-    kinds.length > 0 &&
-    kinds.every((item) => item.tag !== "null" && item.tag !== "unknown" && item.called !== true)
-  );
+  return kinds.length > 0 && kinds.every((item) => item.tag !== "null" && item.tag !== "unknown");
 }
 
 /** Whether `expression` is an `otherwise`. */
