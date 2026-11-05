@@ -60,6 +60,7 @@ const prepare = async (client: BridgeClient, args: unknown) =>
   prepared(await client.request("prepare", args));
 
 const SOURCE = [
+  "---",
   'title: "Bridge"',
   'author: "Lane 3"',
   "---",

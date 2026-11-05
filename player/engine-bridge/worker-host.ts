@@ -45,6 +45,8 @@ export interface HostSessions {
  */
 export interface BridgeOp {
   readonly session: "none" | "existing";
+  /** Whether a session op acts on what its caller saw, and so needs a basis the session accepts; yes by default. */
+  readonly readsBasis?: boolean;
   readonly checkArguments: (args: unknown) => boolean;
   readonly run: (
     args: unknown,
@@ -82,6 +84,7 @@ function engineError(error: unknown, ended: boolean): BridgeError {
 const HOST_OPS: BridgeOps = {
   release: {
     session: "existing",
+    readsBasis: false,
     checkArguments: (args) => args === null,
     run: (_args, sessions, session) => {
       sessions.delete(session!.id);
@@ -163,7 +166,7 @@ export function startBridgeHost(port: HostPort, ops: BridgeOps, build: BuildIden
           request,
           refusal("session", "The request names no session the Worker holds."),
         );
-      if (!value.accepts(request.basis))
+      if (op.readsBasis !== false && !value.accepts(request.basis))
         return refuse(
           request,
           refusal("basis", "The request was made from a revision the session no longer accepts."),
