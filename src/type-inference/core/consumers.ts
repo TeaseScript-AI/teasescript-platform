@@ -370,9 +370,17 @@ export class Consumers {
     rest: readonly string[],
     requirement = false,
   ): readonly Item[] {
-    return this.finishing
-      ? finishingRead(this, value, node, rest, requirement)
-      : this.valueRun(value, node, rest);
+    if (this.finishing) return finishingRead(this, value, node, rest, requirement);
+    const items = this.valueRun(value, node, rest);
+    // (a stopped read of an ingress's data keeps its C9 check, structurally: the stop leaves its kinds unknown and its
+    // reason `budget`, never its provenance, so its unknown is that ingress's data for C9, entering by the ingress as an
+    // unnarrowed read's, Codex r4 on #1770)
+    const stopped = (item: Item) => (item.reasons & REASON.budget) !== 0;
+    if (!items.some(stopped) || this.pass.contract.ingressOf(value) === null) return items;
+    return this.pass.contract.entered(
+      value,
+      items.map((item) => (stopped(item) ? { ...item, fromExternal: true } : item)),
+    );
   }
 
   public finishedItems(

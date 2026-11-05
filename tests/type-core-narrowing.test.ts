@@ -13,12 +13,13 @@ import {
 } from "../src/type-inference/core/items.js";
 import { narrowedItems, type NarrowingForm } from "../src/type-inference/core/narrowing.js";
 import { siteKey } from "../src/type-inference/core/program.js";
+import type { Obligation } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingAt, narrowingPass, nodeAt, routeAt } from "./helpers/type-core-narrowing.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
-import { inMode, MODES } from "./helpers/type-core-oracles.js";
+import { inMode, MODES, stopSet } from "./helpers/type-core-oracles.js";
 import type { CompactRecord } from "./helpers/type-core-records.js";
 
 /*
@@ -1559,6 +1560,35 @@ test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 P
         expected,
         `${name}, ${where}`,
       );
+  // a stopped read keeps its C9 check: the stop leaves the kinds unknown, never the ingress (Codex r4), at the read's
+  // root occurrence or at the store that brought the data in, with its target, site and domain
+  for (const [source, expected] of [
+    ["if hostValue is integer {repeat hostValue {}}", "hostValue [unknown] 32-41"],
+    ['if hostValue is string[] {say "${hostValue}"}', "hostValue [unknown] 33-42"],
+    ["if hostValue is integer {let out:integer=hostValue\nrepeat out {}}", "out [integer] 41-50"],
+    [
+      "if hostValue is integer[] {let out:integer=hostValue[0]\nrepeat out {}}",
+      "out [integer] 43-52",
+    ],
+  ] as const)
+    for (const mode of MODES) {
+      const stopped = stopSet(
+        [{ path: "main.tease", source: `${source}\nexit\n` }],
+        mode,
+        ["hostValue"],
+        1,
+      )!;
+      const { checks } = JSON.parse(stopped.record) as { checks: readonly Obligation[] };
+      assert.ok(stopped.record.includes('"context":"budget"'), `${source}: a read stops`);
+      assert.equal(
+        checks
+          .filter((c) => c.boundary === true)
+          .map((c) => `${c.target} [${c.against.join("|")}] ${c.site.start}-${c.site.end}`)
+          .join("; "),
+        expected,
+        `${source} ${JSON.stringify(mode)}`,
+      );
+    }
   // #1320: a scalar under its test needs no operand check; a list under an element test keeps C6's emptiness, read
   // directly and at a row (a consumer's descendant demand takes its path's G)
   assert.equal(
