@@ -1578,6 +1578,7 @@ test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 P
         ["hostValue"],
         1,
       )!;
+      // EVIDENCE: `stoppedRecord` serializes the answers' `checks`, a list of `Obligation`s.
       const { checks } = JSON.parse(stopped.record) as { checks: readonly Obligation[] };
       assert.ok(stopped.record.includes('"context":"budget"'), `${source}: a read stops`);
       assert.equal(
