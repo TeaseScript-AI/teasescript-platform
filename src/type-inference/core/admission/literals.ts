@@ -364,10 +364,10 @@ export function literalElements(
         readonly written: boolean;
         readonly own: readonly ItemTag[];
         readonly d: Definition;
+        // (#1765: its layers at this path, `layersAt`'s, once asked)
+        layers?: boolean[];
       }
     >();
-    // (#1765: the earliest element's layers at each path, `layersAt`'s, once asked)
-    const earliestLayers = new Map<string, boolean[]>();
     // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
     // number fits a written integer, a fraction does not), an earliest element's by their family
     const offends = (at: string, tags: readonly ItemTag[]): boolean => {
@@ -398,9 +398,9 @@ export function literalElements(
       const depths = intermediateDepths(path);
       const layers = (of: Definition): boolean[] =>
         layersAt(admission, of.value!, of.node, path, depths);
-      let earliest = earliestLayers.get(at);
-      if (earliest === undefined) earliestLayers.set(at, (earliest = layers(first.get(at)!.d)));
-      const optional = mixedOptional(earliest, layers(d));
+      const earliest = first.get(at)!;
+      earliest.layers ??= layers(earliest.d);
+      const optional = mixedOptional(earliest.layers, layers(d));
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,
         cell,
