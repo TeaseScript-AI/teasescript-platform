@@ -1278,7 +1278,7 @@ function lostCheck(
       continue;
     throw new OutsideContract(
       store.kind === "letStatement" ? store.initializer : store.value,
-      "a store of external data whose check was lost at the budget",
+      "a store whose check was lost at the budget",
     );
   }
 }

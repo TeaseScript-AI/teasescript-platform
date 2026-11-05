@@ -16,7 +16,7 @@ import { runGlobals } from "./helpers/type-core-route.js";
 // plan that lets the invalid value through unchecked. Sol's #1645 and #1648 witnesses, at a settled decision stop.
 
 const GLOBALS = ["hostValue", "hostOther"];
-const LOST = "a store of external data whose check was lost at the budget";
+const LOST = "a store whose check was lost at the budget";
 const END = '\nsay "AFTER"\nexit\n';
 const lines = (k: number, line: (at: number) => string): string =>
   Array.from({ length: k }, (_, at) => line(at)).join("\n");
@@ -30,11 +30,12 @@ const object = (fields: Record<string, SerializableRuntimeValue>): SerializableR
   createSerializableObject(Object.entries(fields).map(([name, value]) => ({ name, value })));
 const nested = (value: SerializableRuntimeValue): SerializableRuntimeValue => list([list([value])]);
 
-/** A witness and the host values of its forbidden run. */
+/** A witness, the host values of its forbidden run, and the start of the stored value a decline names (unique). */
 interface Witness {
   readonly name: string;
   readonly source: string;
   readonly forbidden: Readonly<Record<string, SerializableRuntimeValue>>;
+  readonly at: string;
 }
 
 const witness = (
@@ -44,18 +45,22 @@ const witness = (
     hostValue: nested("x"),
     hostOther: 3,
   },
-): Witness => ({ name, source: source + END, forbidden });
+  at = "hostValue",
+): Witness => ({ name, source: source + END, forbidden, at });
 
 /** At demand 16 in four modes: a required check is Lost at a settled decision stop (the witnesses' r4.295 column (2)). */
 const DECLINED: readonly Witness[] = [
   witness(
     "1645-whole-object",
     'let a = {f: [[1]], g: ["s"]}\nlet b = a\nsay "BEFORE"\nb = {f: hostValue, g: ["t"]}',
+    undefined,
+    '{f: hostValue, g: ["t"]}',
   ),
   witness(
     "1645-property-order",
     'let a = {z: [[1]], a: ["s"]}\nlet b = a\nsay "BEFORE"\nb = {a: hostOther, z: hostValue}',
     { hostValue: nested("x"), hostOther: list(["t"]) },
+    "{a: hostOther, z: hostValue}",
   ),
   witness("1648-retarget-exact", retarget(4)),
   witness("1648-retarget-whole", retarget(16)),
@@ -70,6 +75,15 @@ const DECLINED: readonly Witness[] = [
     "let b = {first: {n: null}}\nb.first.n = [[1]]\nlet c = {q: b}\nc.q = hostValue",
     { hostValue: object({ first: object({ n: nested("x") }) }) },
   ),
+  // (a store role's obligation, internal data: the natural compile rejects `combined={v:wide}`, the stop moves that to a
+  // check against bare `unknown` at `let combined=base`)
+  witness(
+    "store-role-moved-error",
+    'let wide:number=53\nlet narrow:string="s"\nlet base={v:narrow}\nlet combined=base\ncombined={v:wide}\nlet outcome=[base,combined]',
+    {},
+    "base\ncombined",
+  ),
+  // (declined at the first Lost store in source order: the retarget's, before the independent store's)
   witness(
     "1648-independent-beside-retarget",
     `${retarget(4)}\nlet independent = {value: [[1]]}\nindependent.value = hostOther`,
@@ -100,7 +114,7 @@ const said = (run: ReturnType<typeof runGlobals>): boolean =>
 
 test("a program whose required check a settled stop lost is declined at its store, in four modes (#1526 decision 2, condition 1)", () => {
   for (const mode of MODES)
-    for (const { name, source, forbidden } of DECLINED) {
+    for (const { name, source, forbidden, at } of DECLINED) {
       const where = `${name} (mode ${JSON.stringify(mode)})`;
       // (natural: no stop, no registry, nothing declined; the natural compile or its plan rejects the forbidden input)
       const natural = inMode(mode, () => compiled(source, null));
@@ -112,7 +126,11 @@ test("a program whose required check a settled stop lost is declined at its stor
         );
       assert.throws(
         () => inMode(mode, () => compiled(source, 16)),
-        (error) => error instanceof CandidateOutsideSlice && error.what === LOST,
+        (error) =>
+          error instanceof CandidateOutsideSlice &&
+          error.what === LOST &&
+          source.indexOf(at) === source.lastIndexOf(at) &&
+          error.site.start === source.indexOf(at),
         where,
       );
     }
