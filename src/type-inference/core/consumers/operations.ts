@@ -17,7 +17,7 @@ import type { DiagnosticRule, RequiredKind } from "../result.js";
 import { choiceValues } from "../checks/interactions.js";
 import { error } from "./diagnostics.js";
 import { jsonArgument, methodArguments, methodElements } from "./signatures.js";
-import { fallbackFits } from "./fallbacks.js";
+import { domainFamily, fallbackFits } from "./fallbacks.js";
 import { BOOLEAN, hasMethod, operandDomain, SHOWN, TEXT } from "./kinds.js";
 import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel } from "./names.js";
 import { consume, indexUse, integerOnly } from "./operands.js";
@@ -67,6 +67,8 @@ export function operations(walk: Consumers): void {
         (rest) =>
           withoutEmpty(walk.valueItems(c.receiver, node, joinSteps(["element"], rest), true)),
         c.fallback,
+        false,
+        (rest) => domainFamily(walk, c.receiver, joinSteps(["element"], rest)),
       );
       continue;
     }
@@ -77,6 +79,8 @@ export function operations(walk: Consumers): void {
         node,
         (rest) => withoutEmpty(walk.valueItems(c.left, node, rest, true)),
         c.right,
+        false,
+        (rest) => domainFamily(walk, c.left, rest),
       );
       continue;
     }
