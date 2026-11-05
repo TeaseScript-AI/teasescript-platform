@@ -14,6 +14,11 @@ import {
   type SourceDebugSidecar,
   type SourceSpan,
 } from "../src/index.js";
+import {
+  ARRAY_ITERATOR_PROTOTYPE,
+  type PrototypeChange,
+  withPrototypeChange,
+} from "./helpers/prototype-changes.js";
 
 /*
  * The source debug sidecar (docs/DEBUGGER.md "Random draws") carries what a source view shows of each plan file, for a
@@ -206,7 +211,6 @@ test("a sidecar loads and binds as natively when Array.prototype or Object.proto
     ["valid", "stale", "stale", "invalid"],
   );
 
-  const arrayIteratorPrototype: object = Object.getPrototypeOf([][Symbol.iterator]());
   const hook = [
     Array.prototype,
     "toJSON",
@@ -215,9 +219,7 @@ test("a sidecar loads and binds as natively when Array.prototype or Object.proto
     },
   ] as const;
   // Each change: the properties it sets, and whether it bites. A `toJSON` takes the serializer's hook-free writer.
-  const changes: ReadonlyArray<
-    readonly [string, ReadonlyArray<readonly [object, PropertyKey, unknown]>, () => boolean]
-  > = [
+  const changes: ReadonlyArray<readonly [string, PrototypeChange, () => boolean]> = [
     ["every", [[Array.prototype, "every", () => true]], () => [0].every(() => false)],
     ["some", [[Array.prototype, "some", () => false]], () => ![0].some(() => true)],
     ["toJSON", [[Object.prototype, "toJSON", hook[2]]], () => "toJSON" in []],
@@ -256,7 +258,7 @@ test("a sidecar loads and binds as natively when Array.prototype or Object.proto
     ],
     [
       "iterator ending at once",
-      [[arrayIteratorPrototype, "next", () => ({ done: true, value: undefined })]],
+      [[ARRAY_ITERATOR_PROTOTYPE, "next", () => ({ done: true, value: undefined })]],
       () => [...new Int32Array(1)].length === 0,
     ],
     [
@@ -269,36 +271,11 @@ test("a sidecar loads and binds as natively when Array.prototype or Object.proto
       },
     ],
   ];
-  for (const [name, properties, bites] of changes) {
+  for (const [name, change, bites] of changes) {
     const plan = freshPlan();
-    const natives = properties.map(([target, key]) => Object.getOwnPropertyDescriptor(target, key));
-    let bit: boolean;
-    let changed: ReturnType<typeof loadAll>;
-    // Indexed access only while changed: a changed iterator would also change destructuring here.
-    try {
-      for (let index = 0; index < properties.length; index += 1) {
-        const property = properties[index]!;
-        const value = property[2];
-        Object.defineProperty(
-          property[0],
-          property[1],
-          typeof value === "object" && value !== null
-            ? { ...value, configurable: true }
-            : { value, writable: true, configurable: true },
-        );
-      }
-      bit = bites();
-      changed = loadAll(plan);
-    } finally {
-      for (let index = properties.length - 1; index >= 0; index -= 1) {
-        const property = properties[index]!;
-        const descriptor = natives[index];
-        if (descriptor === undefined) Reflect.deleteProperty(property[0], property[1]);
-        else Object.defineProperty(property[0], property[1], descriptor);
-      }
-    }
+    const { bit, result } = withPrototypeChange(change, bites, () => loadAll(plan));
     assert.ok(bit, `${name} bites`);
-    assert.deepEqual(changed, native, name);
+    assert.deepEqual(result, native, name);
     // The digest kept for the plan under the change is its own.
     assert.deepEqual(loadAll(plan), native, `${name}, restored`);
   }

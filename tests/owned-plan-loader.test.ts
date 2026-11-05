@@ -19,10 +19,19 @@ import {
   type InstructionPlanLoad,
   type ProjectSourceFile,
 } from "../src/index.js";
-import { isValidatedImmutableInstructionPlan } from "../src/plan/validated-immutable.js";
+import {
+  isValidatedImmutableInstructionPlan,
+  markValidatedImmutableInstructionPlan,
+} from "../src/plan/validated-immutable.js";
+import { createCapturedArray } from "../src/external-data-capture.js";
 import { validateCapturedInstructionPlan } from "../src/plan/validation.js";
 import { classifyCapturedRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import {
+  ARRAY_ITERATOR_PROTOTYPE,
+  type PrototypeChange,
+  withPrototypeChange,
+} from "./helpers/prototype-changes.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 /*
@@ -668,5 +677,115 @@ test("checkpoint text keeps the external route's decision when Array.prototype m
     assert.equal(typeof owned === "object" && owned !== null ? owned.code : owned, "TSK002");
   } finally {
     Object.defineProperty(Array.prototype, "some", native);
+  }
+});
+
+test("loaded plan and checkpoint text give a wholly frozen plan or none when Array.prototype is changed", () => {
+  // A small plan: the larger fixtures' validation itself fails under these changes, which is not defended.
+  const plan = compileValidPlan('let xs = [1, 2]\nxs.add(3)\nsay "${xs.length}"\nwait 1 s\nexit');
+  const planText = JSON.stringify(plan);
+  const session = createFreshRuntimeSession(plan, { seed: 3 });
+  session.run({ instructionBudget: 2_000 });
+  const checkpointText = serializeCheckpoint(session.exportCheckpoint());
+  const capturedArrayPrototype: unknown = Object.getPrototypeOf(createCapturedArray(0));
+  /** Its containers that are not frozen, and its arrays not on capture's prototype. */
+  const shape = (root: unknown) => {
+    let unfrozen = 0;
+    let ambientArrays = 0;
+    const pending = [root];
+    while (pending.length > 0) {
+      const value = pending.pop();
+      if (typeof value !== "object" || value === null) continue;
+      if (!Object.isFrozen(value)) unfrozen += 1;
+      if (Array.isArray(value) && Object.getPrototypeOf(value) !== capturedArrayPrototype) {
+        ambientArrays += 1;
+      }
+      pending.push(...Object.values(value));
+    }
+    return { unfrozen, ambientArrays };
+  };
+  // Run while changed; `outcome` describes the results once the native properties are back. Validating a plan's
+  // content under changed intrinsics is not defended: a route may then reject, but never register a part-frozen plan.
+  const rejected = <T>(route: () => T): T | "rejected" => {
+    try {
+      return route();
+    } catch {
+      return "rejected";
+    }
+  };
+  const run = () => {
+    // A plan frozen at its root only must not be registered as immutable.
+    const partial: InstructionPlan = Object.freeze(JSON.parse(planText));
+    markValidatedImmutableInstructionPlan(partial);
+    return {
+      load: rejected(() => loadInstructionPlan(planText)),
+      checkpoint: rejected(() => deserializeCheckpoint(checkpointText)),
+      partial,
+    };
+  };
+  const outcome = (result: ReturnType<typeof run>) => {
+    const { load, checkpoint } = result;
+    return {
+      load:
+        load === "rejected" || load.kind !== "valid"
+          ? "rejected"
+          : {
+              json: JSON.stringify(load.plan) === planText,
+              registered: isValidatedImmutableInstructionPlan(load.plan),
+              ...shape(load.plan),
+            },
+      checkpoint:
+        checkpoint === "rejected"
+          ? "rejected"
+          : {
+              json: serializeCheckpoint(checkpoint) === checkpointText,
+              registered: isValidatedImmutableInstructionPlan(checkpoint.plan),
+              plan: shape(checkpoint.plan),
+              snapshotAmbientArrays: shape(checkpoint.snapshot).ambientArrays,
+            },
+      partialRegistered: isValidatedImmutableInstructionPlan(result.partial),
+    };
+  };
+  const native = outcome(run());
+  // Natively the whole plan is frozen, on capture's prototype and registered; a partly frozen one is not.
+  const frozenPlan = { unfrozen: 0, ambientArrays: 0 };
+  assert.deepEqual(native.load, { json: true, registered: true, ...frozenPlan });
+  const nativeCheckpoint = native.checkpoint;
+  assert.ok(typeof nativeCheckpoint !== "string", "the checkpoint loads natively");
+  assert.deepEqual(nativeCheckpoint, {
+    json: true,
+    registered: true,
+    plan: frozenPlan,
+    snapshotAmbientArrays: nativeCheckpoint.snapshotAmbientArrays,
+  });
+  assert.equal(native.partialRegistered, false);
+  const changes: ReadonlyArray<readonly [string, PrototypeChange, () => boolean]> = [
+    [
+      "push not adding",
+      [
+        [
+          Array.prototype,
+          "push",
+          function (this: unknown[]) {
+            return this.length;
+          },
+        ],
+      ],
+      () => [0].push(1) === 1,
+    ],
+    [
+      "iterator ending at once",
+      [[ARRAY_ITERATOR_PROTOTYPE, "next", () => ({ done: true, value: undefined })]],
+      () => [...[1]].length === 0,
+    ],
+  ];
+  for (const [name, change, bites] of changes) {
+    const { bit, result } = withPrototypeChange(change, bites, run);
+    assert.ok(bit, `${name} bites`);
+    const changed = outcome(result);
+    if (changed.load !== "rejected") assert.deepEqual(changed.load, native.load, name);
+    if (changed.checkpoint !== "rejected")
+      assert.deepEqual(changed.checkpoint, native.checkpoint, name);
+    assert.equal(changed.partialRegistered, false, name);
   }
 });
