@@ -2139,10 +2139,11 @@ function readsPlace(fallback: Expression): boolean {
 }
 
 /**
- * Whether a projection reads a scalar literal a literal's own syntax holds at a literal property or a literal index
- * (`({n: 0}).n`, `[0][0]`, through parentheses and nested projections): #1460's syntax route proves it after a stop.
- * Any other projection, one of a structured value among them (`({p: {n: 0}}).p`, whose properties a stop leaves
- * unproven), or of anything but a literal, reads a place (Astra r1's B1 on #1775).
+ * Whether a projection reads literal data a literal's own syntax holds at a literal property or a literal index, with
+ * no object literal in it: scalars, and lists or sets of them (`({n: 0}).n`, `[0][0]`, `[[1]][0]`, through parentheses
+ * and nested projections), which #1460's syntax route proves after a stop. Any other projection, one reaching an object
+ * among them (`({p: {n: 0}}).p`, `[{n: 0}][0]`, whose property names a stop leaves unproven below it), or of anything
+ * but a literal, reads a place (Astra r1's B1 on #1775).
  */
 function projectedScalar(at: PropertyAccessExpression | IndexExpression): boolean {
   const steps: (PropertyAccessExpression | IndexExpression)[] = [];
@@ -2171,13 +2172,20 @@ function projectedScalar(at: PropertyAccessExpression | IndexExpression): boolea
     }
     if (value === undefined) return false;
   }
-  const leaf = unwrap(value);
-  return (
-    leaf.kind === "numberLiteral" ||
-    leaf.kind === "booleanLiteral" ||
-    leaf.kind === "nullLiteral" ||
-    (leaf.kind === "stringLiteral" && leaf.parts.every((part) => part.kind === "stringText"))
-  );
+  // (literal data with no object literal in it: an object's names below a projection are what a stop leaves unproven)
+  const pending: Expression[] = [value!];
+  for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
+    const leaf = unwrap(at);
+    if (leaf.kind === "listLiteral" || leaf.kind === "setLiteral") pending.push(...leaf.elements);
+    else if (!(
+      leaf.kind === "numberLiteral" ||
+      leaf.kind === "booleanLiteral" ||
+      leaf.kind === "nullLiteral" ||
+      (leaf.kind === "stringLiteral" && leaf.parts.every((part) => part.kind === "stringText"))
+    ))
+      return false;
+  }
+  return true;
 }
 
 /**

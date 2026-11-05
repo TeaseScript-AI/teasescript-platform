@@ -612,6 +612,16 @@ test("after a stop a typed call's reader type a stop left open declines the plan
       "2",
     ],
     [
+      "literal index's list of scalars",
+      'let result = fromJson(hostValue, default: [[1]][0], files: false)\nsay result[0]\nsay "after"\nexit\n',
+      "[2]",
+    ],
+    [
+      "a literal's object element",
+      'let result = fromJson(hostValue, default: [{n: 0}][0], files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":2}',
+    ],
+    [
       "a literal's structured property",
       'let result = fromJson(hostValue, default: ({p: {n: 0}}).p, files: false)\nsay result.n\nsay "after"\nexit\n',
       '{"n":2}',
