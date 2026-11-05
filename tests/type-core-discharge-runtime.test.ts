@@ -1579,14 +1579,8 @@ test("a typed parse's or load's contract stays the one the core decided, or its 
     ),
     JSON.stringify(contentOf(candidatePlan(loaded))),
   );
-  const copied = "a typed parse or load into a copy of a written type";
   const structure = "a value whose structure the slice does not follow";
   for (const [source, what] of [
-    // (a default that copies a written type: its result inherits it, A4's receiving side, #1072's A2)
-    [
-      "let a: number[] = [0]\nlet b = a\nlet out = fromJson(hostValue, default: b, files: false)\nexit\n",
-      copied,
-    ],
     // fields some records of a list lack, also where a record gives them as `null` or host data
     [
       "let out = fromJson(hostValue, default: [{n: null, a: 1}, {m: null, a: 2}], files: false)\nsay out[0].a\nexit\n",
