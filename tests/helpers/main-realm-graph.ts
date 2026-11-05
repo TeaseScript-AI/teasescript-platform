@@ -7,7 +7,8 @@ import { compileTemplate, parse as parseSfc } from "vue/compiler-sfc";
  * The main-realm walk behind `tests/player-main-realm.test.ts`. It is a progress ratchet for the L5 series and a guard
  * against honest mistakes, not the proof that the main bundle holds no engine code: the bundle provenance check at
  * activation is that proof. It handles exactly:
- * - ESM imports, re-exports and literal `import()` in `.ts`;
+ * - ESM imports, re-exports and literal `import()` in `.ts`, read from TypeScript's own emit under
+ *   `verbatimModuleSyntax` (the Player's Vue build), so the compiler decides what is type syntax and erased;
  * - a `.vue` file's inline blocks, its template compiled by `compileTemplate`;
  * - Vite's `?raw` import, `?url` glob and `new Worker(new URL(…, import.meta.url))`;
  * - local specifiers that name one file.
@@ -67,8 +68,18 @@ function isImportMeta(node: ts.Node, name: string): boolean {
   );
 }
 
+/** TypeScript's emit of one module as the Player's Vue build keeps it: every import not written as a type import. */
+const EMIT: ts.TranspileOptions = {
+  compilerOptions: {
+    module: ts.ModuleKind.ESNext,
+    target: ts.ScriptTarget.ESNext,
+    verbatimModuleSyntax: true,
+  },
+  fileName: "module.ts",
+};
+
 /**
- * The value imports of one module's code, each with the names it takes (`*` for a whole module). Of Vite's own loading
+ * The value imports of one module's code, read from its emit, each with the names it takes (`*` for a whole module). Of Vite's own loading
  * forms it models the ones the Player uses, none of which loads code into the main realm: a `?raw` import (text), an
  * `import.meta.glob` with `query: "?url"` (URLs), and `new Worker(new URL(…, import.meta.url))` (another realm). It
  * refuses any other query, glob, `new URL(…, import.meta.url)`, or `import()` of a computed specifier.
@@ -78,23 +89,33 @@ function valueImports(
   file: string,
   label: string,
 ): { specifier: string; names: string[] }[] {
-  const source = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  // The emit for ES modules drops `import x = require(…)`, so that form is refused before it.
+  const typed = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  if (
+    typed.statements.some(
+      (statement) =>
+        ts.isImportEqualsDeclaration(statement) &&
+        ts.isExternalModuleReference(statement.moduleReference),
+    )
+  )
+    refuse(label, "CommonJS require()");
+  const emitted = ts.transpileModule(code, EMIT).outputText;
+  const source = ts.createSourceFile(file, emitted, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const found: { specifier: string; names: string[] }[] = [];
   const pending: ts.Node[] = [source];
   for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const clause = node.importClause;
       if (clause === undefined) found.push({ specifier: node.moduleSpecifier.text, names: ["*"] });
-      else if (!clause.isTypeOnly) {
+      else {
         const names: string[] = [];
         if (clause.name !== undefined) names.push("default");
         const bindings = clause.namedBindings;
         if (bindings !== undefined && ts.isNamespaceImport(bindings)) names.push("*");
         if (bindings !== undefined && ts.isNamedImports(bindings))
           for (const element of bindings.elements)
-            if (!element.isTypeOnly) names.push((element.propertyName ?? element.name).text);
-        // `import { type A } from "m"` still loads `m` under `verbatimModuleSyntax` (the Player's Vue build), so a
-        // declaration that is not `import type` always counts.
+            names.push((element.propertyName ?? element.name).text);
+        // `import { type A } from "m"` emits `import {} from "m"`, which still loads `m`.
         found.push({
           specifier: node.moduleSpecifier.text,
           names: names.length > 0 ? names : ["*"],
@@ -103,22 +124,16 @@ function valueImports(
     } else if (
       ts.isExportDeclaration(node) &&
       node.moduleSpecifier !== undefined &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      !node.isTypeOnly
+      ts.isStringLiteral(node.moduleSpecifier)
     ) {
       const clause = node.exportClause;
       const names =
         clause === undefined || !ts.isNamedExports(clause)
           ? ["*"]
-          : clause.elements
-              .filter((element) => !element.isTypeOnly)
-              .map((element) => (element.propertyName ?? element.name).text);
-      // `export { type A } from "m"` and `export {} from "m"` still load `m` under `verbatimModuleSyntax`.
+          : clause.elements.map((element) => (element.propertyName ?? element.name).text);
+      // `export { type A } from "m"` emits `export {} from "m"`, which still loads `m`.
       found.push({ specifier: node.moduleSpecifier.text, names: names.length > 0 ? names : ["*"] });
-    } else if (
-      (ts.isIdentifier(node) && node.text === "require" && refersToBinding(node)) ||
-      (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference))
-    ) {
+    } else if (ts.isIdentifier(node) && node.text === "require" && refersToBinding(node)) {
       // Any reference to `require`, not only a direct call: `(require)(…)`, `require!(…)` and an alias call it too.
       refuse(label, "CommonJS require()");
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
@@ -166,9 +181,8 @@ function valueImports(
         parent.arguments?.[0] === node;
       if (!workerEntry) refuse(label, "new URL(…, import.meta.url) outside new Worker(…)");
     }
-    // Type syntax is erased and loads nothing; a class's `extends` clause is an expression, though TypeScript types it.
     ts.forEachChild(node, (child) => {
-      if (!ts.isTypeNode(child) || ts.isExpressionWithTypeArguments(child)) pending.push(child);
+      pending.push(child);
     });
   }
   return found.filter(({ specifier }) => {
