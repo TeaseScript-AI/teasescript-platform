@@ -566,6 +566,24 @@ const WITNESSES: readonly {
     derived: "number",
   },
   {
+    name: "X2 written, a store in a nested arm ruled out",
+    source: `let d: number = 0\nif ${FLAG} {\n  if false { d = 1.5 }\n}\n@`,
+    read: "d",
+    derived: "integer",
+  },
+  {
+    name: "X2 written, a store in an else ruled out",
+    source: `let d: number = 0\nif ${FLAG} { say "a" } else if true { say "b" } else { d = 1.5 }\n@`,
+    read: "d",
+    derived: "integer",
+  },
+  {
+    name: "X2 written, a store after a nested exit",
+    source: `let d: number = 0\nif ${FLAG} {\n  if true { exit }\n  d = 1.5\n}\n@`,
+    read: "d",
+    derived: "integer",
+  },
+  {
     name: "a self-copy after a join",
     source: `let d = 0\nif ${FLAG} { d = 1 }\nd = d\n@`,
     read: "d",
@@ -594,6 +612,48 @@ const WITNESSES: readonly {
     source: "for entry in [0] {\n  let e = entry\n}\nlet d = 0\n@",
     read: "d",
     derived: "integer",
+  },
+  {
+    name: "a call after an exit",
+    source: "let d: number = 0\nexit\n@",
+    read: "d",
+    derived: { refused: "a variable read where no path reaches" },
+  },
+  {
+    name: "a call in an arm ruled out",
+    source: "let d: number = 0\nif false {\n  @\n}",
+    read: "d",
+    derived: { refused: "a variable read where no path reaches" },
+  },
+  {
+    name: "a call in a loop reading an outer variable",
+    source: "let d: number = 0\nfor entry in [0] {\n  @\n}",
+    read: "d",
+    derived: { refused: "a variable read inside a loop" },
+  },
+  {
+    name: "a call in a repeat reading an outer variable",
+    source: "let d: number = 0\nrepeat 1 {\n  @\n}",
+    read: "d",
+    derived: { refused: "a variable read inside a loop" },
+  },
+  {
+    name: "a default that computes from a variable",
+    source: "let d = 0\n@",
+    read: "toInteger(d, default: 0)",
+    derived: { refused: "a default that computes from a variable" },
+  },
+  {
+    name: "a stored selection of a literal's element",
+    source: "let d = 0\nlet e = [d][0]\n@",
+    read: "e",
+    derived: "integer",
+  },
+  {
+    name: "a stored read through an unmodelled value",
+    source: "let d = 0\nlet e = [d, 1][hostValue]\n@",
+    read: "e",
+    derived: { refused: "a read through an unmodelled value" },
   },
   {
     name: "a stored computation",

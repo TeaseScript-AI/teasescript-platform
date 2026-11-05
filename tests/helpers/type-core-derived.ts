@@ -220,7 +220,11 @@ function selected(expression: Expression | null): Expression | null {
   return at;
 }
 
-/** Source structure carried by a selection: unknown operands contribute no settled structure. */
+/**
+ * Source structure carried by a selection: the joined shape of a place's sources and stores, as the rule records read it;
+ * unknown operands contribute no settled structure. It is never a value at a typed call's snapshot: a default's value at
+ * its call is `literalType`'s, which reads variables through the snapshot reader (#1760).
+ */
 function sourceShape(
   expression: Expression,
   statements: readonly Statement[],
@@ -532,7 +536,11 @@ function structuredType(
   ]);
 }
 
-/** A default's source structure (F18), following admitted places and typed ingress calls. */
+/**
+ * A default's value at its typed call (F18): literal data, typed ingress calls, and reads of variables at the call's
+ * snapshot (`resolve`, #1760); never a place's joined shape (`sourceShape`). `null` is no structure (host data, a value
+ * with none); an unmodelled expression that reads a variable is refused, never taken as open.
+ */
 function literalType(
   expression: Expression,
   statements: readonly Statement[],
@@ -586,12 +594,40 @@ function literalType(
     case "loadExpression":
       return expectedType(at, statements, seen, resolve);
     case "callExpression":
-      return at.callee.kind === "identifier" && at.callee.name === "fromJson"
-        ? expectedType(at, statements, seen, resolve)
-        : null;
+      if (at.callee.kind === "identifier" && at.callee.name === "fromJson")
+        return expectedType(at, statements, seen, resolve);
+      return refuseVariableRead(at, statements, "a default that computes from a variable");
     default:
-      return null;
+      return refuseVariableRead(at, statements, "a default that computes from a variable");
   }
+}
+
+/** No structure for an unmodelled expression, or its refusal when it reads a variable (`why`). */
+function refuseVariableRead(
+  expression: Expression,
+  statements: readonly Statement[],
+  why: string,
+): null {
+  if (variableReads(expression, statements)) throw new Underivable(why);
+  return null;
+}
+
+/** Whether an expression reads a variable the program declares: an identifier in a value's place, not a name. */
+function variableReads(expression: Expression, statements: readonly Statement[]): boolean {
+  const nodes = nodesIn(expression, false);
+  const names = new Set<unknown>();
+  for (const node of nodes) {
+    if (node.kind === "propertyAccessExpression") names.add(node.property);
+    if (node.kind === "objectLiteral")
+      for (const property of node.properties) names.add(property.name);
+    if (node.kind === "callExpression")
+      for (const argument of node.arguments)
+        if (argument.kind === "namedArgument") names.add(argument.name);
+  }
+  const declared = declaredNames(statements);
+  return nodes.some(
+    (node) => node.kind === "identifier" && !names.has(node) && declared.has(node.name),
+  );
 }
 
 /**
@@ -610,7 +646,9 @@ function readDefault(
     steps.unshift(root.kind === "propertyAccessExpression" ? root.property.name : "element");
     root = unwrap(root.object);
   }
-  if (root.kind !== "identifier" || !declaredNames(statements).has(root.name)) return null;
+  if (root.kind !== "identifier")
+    return refuseVariableRead(root, statements, "a read through an unmodelled value");
+  if (!declaredNames(statements).has(root.name)) return null;
   if (resolve === null) throw new Underivable("a default that reads a variable");
   return valueType(partAt(resolve(root.name), steps));
 }
@@ -883,9 +921,9 @@ function knownTruth(expression: Expression): boolean | null {
  * value at each typed call (`load`, `fromJson`), as the compiler keys a default's reads by its call (TABLE r4.81 (1)):
  * the state when the call's statement starts, on the call's own branch. Values are finite `DerivedType` trees copied when
  * stored, so a copy holds what its source held at the copy and a self-copy cannot recurse. Derived from the syntax alone.
- * An `if`'s arms walk from one state and join (`joinSnaps`) what an arm stores, its written type (X2) the binding's in
- * scope; an arm its condition's syntax rules out (`knownTruth`) or that does not fall through (`exit`, `end`) is left
- * out, though its calls are recorded. Refused
+ * An `if`'s arms walk from one state and join (`joinSnaps`) what a joining arm's paths store, its written type (X2) the
+ * binding's in scope; an arm its condition's syntax rules out (`knownTruth`) or that does not fall through (`exit`,
+ * `end`) is left out. A call no path reaches, and a read inside a loop body, are refused. Refused
  * wherever it is read: a variable stored (or called a method on) where source order does not tell when, in a loop, a
  * block an expression holds (a handler), or a statement kind the walk does not model, and every stored variable in a
  * program with a `goto` or a file call. Refused from its store on: a stored computation, a method call on the variable,
@@ -960,9 +998,18 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
         why: "a variable read where the reader holds no value of it",
       };
   // (each typed call of a statement reads the values of the names its statement holds, captured as they stand)
-  const record = (statement: Statement, state: State) => {
+  // (a call no path reaches reads no value: the compiler takes none at a dead node, X1)
+  const dead: Resolve = () => ({ t: "refused", why: "a variable read where no path reaches" });
+  const record = (statement: Statement, state: State, live: boolean) => {
     const calls = ownCalls(statement).filter((call) => !table.has(call));
     if (calls.length === 0) return;
+    if (!live) {
+      for (const call of calls) {
+        table.set(call, dead);
+        snapshotAt.set(call, dead);
+      }
+      return;
+    }
     const names = new Set(
       nodesIn(statement, false).flatMap((node) => (node.kind === "identifier" ? [node.name] : [])),
     );
@@ -1003,7 +1050,10 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
           steps.unshift(root.kind === "propertyAccessExpression" ? root.property.name : "element");
           root = unwrap(root.object);
         }
-        return root.kind === "identifier" && declaredNames(statements).has(root.name)
+        // (host data is open; a read through an unmodelled value is refused, never open)
+        if (root.kind !== "identifier")
+          return { t: "refused", why: "a read through an unmodelled value" };
+        return declaredNames(statements).has(root.name)
           ? partAt(lookup(state)(root.name), steps)
           : OPEN;
       }
@@ -1040,26 +1090,39 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
       },
     };
   };
-  /** A block walked from `incoming`: the state after it, and whether it falls through to what follows. */
+  /**
+   * A block walked from `incoming`, reached or not (`live`): the state after it, whether it falls through to what
+   * follows, and the names declared before it that a path through it to its end stores.
+   */
   const walk = (
     block: readonly Statement[],
     incoming: State,
     outer: ReadonlyMap<string, DerivedType>,
-  ): { readonly state: Map<string, Snap>; readonly falls: boolean } => {
+    live: boolean,
+  ): {
+    readonly state: Map<string, Snap>;
+    readonly falls: boolean;
+    readonly stored: ReadonlySet<string>;
+  } => {
     const state = new Map(incoming);
     // (the written type of each binding in scope, by its name: a block's own `let`s are its own, a sibling's not seen)
     const written = new Map(outer);
-    let falls = true;
+    const stored = new Set<string>();
+    let reached = live;
+    const store = (name: string, snap: Snap) => {
+      state.set(name, snap);
+      // (a block that stops does not fall through, so what it stores after its stop never joins)
+      if (incoming.has(name)) stored.add(name);
+    };
     for (const statement of block) {
       visits.statements += 1;
       // (a method call on a variable may change it: refused from its statement on, its own typed calls included)
       for (const node of nodesIn(statement, false))
         if (node !== statement && !isBlockOrStatement(node)) {
           const name = receiverOf(node);
-          if (name !== null)
-            state.set(name, { t: "refused", why: "a method call on the variable" });
+          if (name !== null) store(name, { t: "refused", why: "a method call on the variable" });
         }
-      record(statement, state);
+      record(statement, state, reached);
       switch (statement.kind) {
         case "letStatement":
           if (statement.typeAnnotation !== null)
@@ -1080,62 +1143,71 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
             statement.operator === "="
               ? valueOf(statement.value, state)
               : { t: "refused", why: "a stored computation" };
-          state.set(target.name, replaced(state.get(target.name) ?? OPEN, steps, value));
+          store(target.name, replaced(state.get(target.name) ?? OPEN, steps, value));
           break;
         }
         case "ifStatement": {
           // (each arm from the state before the `if`, an `else if`'s condition read there too; no `else`: the state as
-          // it was. An arm joins when it can run and falls through)
+          // it was. An arm that can run and falls through joins what its paths store)
           const arms: State[] = [];
-          const stored = new Set<string>();
-          let reached = true;
+          const joined = new Set<string>();
+          let open = reached;
           const arm = (block: readonly Statement[], runs: boolean) => {
-            const out = walk(block, state, written);
-            for (const name of storedNames(block)) stored.add(name);
-            if (runs && out.falls) arms.push(out.state);
+            const out = walk(block, state, written, runs);
+            if (runs && out.falls) {
+              arms.push(out.state);
+              for (const name of out.stored) joined.add(name);
+            }
           };
           let at: Statement | null = statement;
           while (at !== null && at.kind === "ifStatement") {
-            if (at !== statement) record(at, state);
+            if (at !== statement) record(at, state, open);
             const truth = knownTruth(at.condition);
-            arm(at.thenBlock.statements, reached && truth !== false);
-            if (truth === true) reached = false;
+            arm(at.thenBlock.statements, open && truth !== false);
+            if (truth === true) open = false;
             const next: IfStatement["elseBlock"] = at.elseBlock;
             if (next === null) {
-              if (reached) arms.push(state);
+              if (open) arms.push(state);
               at = null;
             } else if (next.kind === "ifStatement") at = next;
             else {
-              arm(next.statements, reached);
+              arm(next.statements, open);
               at = null;
             }
           }
           if (arms.length === 0) {
-            falls = false;
+            reached = false;
             break;
           }
-          // (a name an arm declares is its block's own; a name declared before that an arm stores joins each arm's
-          // value, X2 by its binding's written type)
-          for (const name of [...state.keys()])
-            if (stored.has(name))
-              state.set(
-                name,
-                arms
-                  .map((each) => each.get(name) ?? OPEN)
-                  .reduce((a, b) => joinSnaps(a, b, written.get(name) ?? null)),
-              );
+          // (a name declared before that a joining arm's path stores joins each arm's value, X2 by its binding's
+          // written type)
+          for (const name of joined)
+            store(
+              name,
+              arms
+                .map((each) => each.get(name) ?? OPEN)
+                .reduce((a, b) => joinSnaps(a, b, written.get(name) ?? null)),
+            );
           break;
         }
         case "repeatStatement":
         case "forStatement":
-        case "whileStatement":
-          // (its stores are refused (`unordered`); the calls in its body read the state before the loop)
-          walk(statement.body.statements, state, written);
+        case "whileStatement": {
+          // (its stores are refused (`unordered`); a value read in its body may come from another iteration, whose
+          // reading the walk does not model: refused there, X5)
+          const inLoop = new Map<string, Snap>(
+            [...state.keys()].map((name) => [
+              name,
+              { t: "refused", why: "a variable read inside a loop" },
+            ]),
+          );
+          walk(statement.body.statements, inLoop, written, reached);
           break;
+        }
         case "exitStatement":
         case "endStatement":
-          // (what follows does not run; its calls are still recorded)
-          falls = false;
+          // (what follows does not run: its calls are recorded as unreached)
+          reached = false;
           break;
         case "expressionStatement":
         case "sayStatement":
@@ -1148,9 +1220,9 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
         // not reached, and so refused where it is read)
       }
     }
-    return { state, falls };
+    return { state, falls: reached, stored };
   };
-  walk(program, new Map(), new Map());
+  walk(program, new Map(), new Map(), true);
   snapshotTables.set(program, table);
   return table;
 }
