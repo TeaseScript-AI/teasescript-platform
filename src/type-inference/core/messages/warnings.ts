@@ -410,14 +410,13 @@ function receivingType(
     parsed.diagnostics.length > 0 || statement?.kind !== "letStatement"
       ? null
       : statement.typeAnnotation;
-  // (each collection step's element type, through the layer's `?`; a union there, or another collection, is none)
+  // (each collection step's element type, through the layer's `?`; a union there, or an unrestricted collection, is none)
   const element = (type: TypeAnnotation | null, step: StoreStep): TypeAnnotation | null => {
     const at = type?.kind === "optionalType" ? type.value : type;
     return at !== null &&
       at !== undefined &&
       "collection" in step &&
-      (at.kind === "listType" || at.kind === "setType" || at.kind === "dictType") &&
-      at.kind === `${step.collection}Type`
+      (at.kind === "listType" || at.kind === "setType" || at.kind === "dictType")
       ? at.element
       : null;
   };
