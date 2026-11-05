@@ -1341,10 +1341,12 @@ function keeps(
     .map((step) =>
       step === "element" || step === "entry" || step === "index" ? "[]" : propertyName(step),
     );
-  const carries = (type: TypePlan | null | undefined): boolean =>
-    type !== null &&
-    type !== undefined &&
-    JSON.stringify(typeAt(type, below)) === JSON.stringify(contract.ref);
+  // (a reader at least as strict as the contract there: one that checks more, as a typed parse's of an object whose
+  // field the contract leaves open, still checks all the contract does)
+  const carries = (type: TypePlan | null | undefined): boolean => {
+    const at = type === null || type === undefined ? null : typeAt(type, below);
+    return at !== null && narrower(at, contract.ref);
+  };
   const reader =
     value.kind === "loadExpression"
       ? checks.get(value)?.type
@@ -1367,6 +1369,32 @@ function keeps(
       return at === null || JSON.stringify(part.type) === JSON.stringify(at);
     })
   );
+}
+
+/**
+ * Whether every value a check against `narrow` passes also passes one against `wide` (a check checks only the listed
+ * properties an object has, and every element of a collection whose element type is not `null`): a reader that carries
+ * a contract (`keeps`).
+ */
+export function narrower(narrow: TypePlan, wide: TypePlan): boolean {
+  if (narrow.kind === "union") return narrow.members.every((member) => narrower(member, wide));
+  if (wide.kind === "union") return wide.members.some((member) => narrower(narrow, member));
+  if (wide.kind === "object")
+    return (
+      narrow.kind === "object" &&
+      wide.properties.every((property) => {
+        const own = narrow.properties.find((each) => each.name === property.name);
+        return own !== undefined && narrower(own.type, property.type);
+      })
+    );
+  if (wide.kind === "list" || wide.kind === "set" || wide.kind === "dict") {
+    if (narrow.kind !== "list" && narrow.kind !== "set" && narrow.kind !== "dict") return false;
+    return (
+      narrow.kind === wide.kind &&
+      (wide.element === null || (narrow.element !== null && narrower(narrow.element, wide.element)))
+    );
+  }
+  return narrow.kind === wide.kind;
 }
 
 /** A type plan's part at a path of property names and `[]` (an element, entry or value), `null` where it has none. */

@@ -2068,7 +2068,7 @@ test("the stop oracle refuses a stopped run whose without leaves the run's allow
  * #1631: a rerun without the run's demand allowance can stop in the same phase, settled, at the same program allowance,
  * yet under another demand allowance none of its decisions stops, so its compile differs. The issue's witness at program
  * allowance 1,886 (2,039 before #1251 made no narrowing index for it) and demand allowance 27, whose stopped compile the
- * candidate now declines (#1832): on its analysis with the reference's plan one check changed, the run's own `without` is
+ * candidate now declines (#1832): on its analysis with the reference's plan one text changed, the run's own `without` is
  * judged, the uncapped run's refused.
  */
 test("the stop oracle refuses a stopped run whose without leaves the run's demand allowance (#1631)", () => {
@@ -2107,25 +2107,32 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
       error instanceof CandidateOutsideSlice &&
       error.what === "a store whose check was lost at the budget",
   );
-  // (the oracle's scope check, on the stopped analysis with the reference's plan and one of its checks changed, so the
-  // oracle reruns the stopped run: its own rerun is judged, the uncapped run's refused)
-  const plan = structuredClone(unstopped.result.plan);
+  // (the oracle's scope check, on the stopped analysis with the reference's plan and its `say "BEFORE"` text changed, so
+  // the oracle reruns the stopped run: its own rerun is judged, the uncapped run's refused)
+  // (the reference under demand allowance 27 is declined too, at its decision stop; the natural plan stands for it)
+  const base: StopRun = {
+    ...unstopped,
+    result: { ...unstopped.result, plan: unstopped.result.plan ?? heldRun(c, mode).result.plan },
+  };
+  assert.ok(base.result.plan !== null);
+  const plan = structuredClone(base.result.plan);
   const pending: unknown[] = [plan];
   let changed = 0;
   while (pending.length > 0 && changed === 0) {
     const node = pending.pop();
     if (node === null || typeof node !== "object") continue;
-    if ("typeCheck" in node && node.typeCheck !== undefined) {
-      node.typeCheck = { type: { kind: "integer" }, place: "wrong target" };
-      changed += 1;
-    }
+    for (const [key, value] of Object.entries(node))
+      if (value === "BEFORE" && changed === 0) {
+        Reflect.set(node, key, "OTHER");
+        changed += 1;
+      }
     pending.push(...Object.values(node));
   }
   assert.equal(changed, 1);
   const edited: StopRun = { ...stopped, result: { ...stopped.result, plan } };
   // (a combined stop, judged under its rule: its finishing read answers `first` from its stores' syntax through the copy
   // of `root`, as the natural analysis does, where the demand-only run's read stopped, #1604)
-  const rule = combinedStopRule(c, mode, unstopped, stopped.answers);
+  const rule = combinedStopRule(c, mode, base, stopped.answers);
   const excused = {
     records: new Set([...rule.records.keys(), ...rule.relabelled.records, ...rule.coarse.records]),
     checks: new Set([
@@ -2136,7 +2143,7 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
     ]),
   };
   const judge = (run: StopRun): string[] =>
-    stopProblems({ unstopped, stopped: run, fitting: [], violating: [], excused });
+    stopProblems({ unstopped: base, stopped: run, fitting: [], violating: [], excused });
   assert.notDeepEqual(judge(edited), []);
   assert.throws(
     () => judge({ ...edited, without: uncapped.without }),

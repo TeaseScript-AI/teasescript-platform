@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSourceWithBackend } from "../src/compiler.js";
+import type { TypePlan } from "../src/plan/model.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../src/runtime/host-data/script-storage.js";
 import {
   createSerializableList as list,
@@ -9,6 +10,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/runtime/values/serializable-values.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { narrower } from "../src/type-inference/core/consumer.js";
 import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
@@ -123,6 +125,13 @@ const DECLINED: readonly Witness[] = [
     { hostValue: '[["x"]]' },
     "{f:fromJson",
   ),
+  // (a typed parse's reader weaker than the completed contract, a listed property missing: `{}` against `{n: [[int]]}`)
+  witness(
+    "reader-property-missing",
+    "let a={n:[[1]]}\nlet b=a\nb=fromJson(hostValue,default:{},files:false)\nsay toJson(b)",
+    { hostValue: '{"n":[["x"]]}' },
+    "fromJson",
+  ),
   // (declined at the first Lost store in source order: the retarget's, before the independent store's)
   witness(
     "1648-independent-beside-retarget",
@@ -170,11 +179,13 @@ test("a program whose required check a settled stop lost is declined at its stor
         );
       assert.throws(
         () => inMode(mode, () => compiled(source, 16)),
+        // (the gate at the store's value; rule (R) at the typed call inside it)
         (error) =>
           error instanceof CandidateOutsideSlice &&
-          (error.what === OPEN_BY_STOP || error.what === LOST) &&
           source.indexOf(at) === source.lastIndexOf(at) &&
-          error.site.start === source.indexOf(at),
+          (error.what === LOST
+            ? error.site.start === source.indexOf(at)
+            : error.what === OPEN_BY_STOP && error.site.start >= source.indexOf(at)),
         where,
       );
     }
@@ -244,4 +255,34 @@ test("a program the analysis rejects is rejected, not declined, whatever check a
       JSON.stringify(mode),
     );
   }
+});
+
+test("a reader keeps a contract it is at least as strict as, never one it is weaker than on any dimension", () => {
+  // (on the public route a reader weaker in an element or a union member comes with the store's complete check, which
+  // keeps the obligation; the reader's own comparison is pinned here)
+  const int = { kind: "integer" } as const;
+  const listOf = (element: TypePlan | null): TypePlan => ({ kind: "list", element });
+  const objectOf = (properties: Record<string, TypePlan>): TypePlan => ({
+    kind: "object",
+    properties: Object.entries(properties).map(([name, type]) => ({ name, type })),
+  });
+  const anyOrNull: TypePlan = {
+    kind: "union",
+    members: [int, { kind: "string" }, { kind: "null" }],
+  };
+  for (const [reader, contract, kept] of [
+    [objectOf({ n: listOf(int), m: int }), objectOf({ n: listOf(int) }), true],
+    [objectOf({ n: int }), objectOf({}), true],
+    [listOf(int), listOf(null), true],
+    [int, { kind: "union", members: [int, { kind: "null" }] }, true],
+    // (a listed property missing, an element untyped, a union member that does not fit)
+    [objectOf({}), objectOf({ n: listOf(int) }), false],
+    [listOf(null), listOf(listOf(int)), false],
+    [objectOf({ n: anyOrNull }), objectOf({ n: int }), false],
+  ] as const)
+    assert.equal(
+      narrower(reader, contract),
+      kept,
+      `${JSON.stringify(reader)} against ${JSON.stringify(contract)}`,
+    );
 });
