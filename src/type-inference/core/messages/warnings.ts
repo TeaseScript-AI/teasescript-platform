@@ -1,3 +1,4 @@
+import type { TypeAnnotation } from "../../../ast.js";
 import type { SourceSite } from "../../graph.js";
 import { WRITABLE_JSON_FIX } from "../../../conversions.js";
 import { dictMethod } from "../../../dict-operations.js";
@@ -5,7 +6,7 @@ import { listMethod } from "../../../list-methods.js";
 import { ROUND_COUNT_FIX } from "../../../loop-rules.js";
 import { JOIN_FIX } from "../../../shown-text-rules.js";
 import { PERSON_FIELDS, PLAYER } from "../../../speaker-terms.js";
-import { hasIdentity } from "../../../value-kinds.js";
+import { hasIdentity, VALUE_KINDS } from "../../../value-kinds.js";
 import { originOf } from "../consumers/origins.js";
 import { REFERENCE } from "../contract.js";
 import type { ContextWord, ItemTag } from "../items.js";
@@ -18,7 +19,7 @@ import type {
   StoreStep,
   WorkPlace,
 } from "../result.js";
-import type { MessageSource } from "./site.js";
+import type { Landing, MessageSource } from "./site.js";
 import {
   argumentFixOf,
   capitalized,
@@ -323,6 +324,125 @@ function checkFix(
 }
 
 /**
+ * The steps from a store's value at its site down to the rule's place: those of the place below the value's landing
+ * (`MessageSource.landing`), where the landing is on the place's path; else `null`.
+ */
+function stepsBelow(rule: StoreRule, landing: Landing | null): readonly StoreStep[] | null {
+  const above = landing?.steps ?? [];
+  const same = (a: StoreStep, b: StoreStep): boolean =>
+    "property" in a
+      ? "property" in b && a.property === b.property
+      : "collection" in b && a.collection === b.collection;
+  return landing === null ||
+    rule.root === null ||
+    rule.root.kind === "result" ||
+    landing.root !== rule.root.name ||
+    above.length > rule.steps.length ||
+    !above.every((step, index) => same(step, rule.steps[index]!))
+    ? null
+    : rule.steps.slice(above.length);
+}
+
+/**
+ * #1753: the check of a stored value whose place is an element below it through collections alone (`stepsBelow`): the
+ * test of the whole receiving type at the value (ADR 0021 rule 4.2: a collection test checks every element), as code
+ * (`hostValue is integer[]?[]`) and in words (`is a list (integer[]?[])`), where the place's root is declared with a
+ * written type that proves every layer of it, `null` at each (Codex r1's B1 on #1764: `integer[]?[]`): the declaration's
+ * type followed down the value's landing to the place (`receivingType`). Anywhere else the rule's leaf alone does not
+ * prove the layers between (a copy of a written type), so a leaf's words name the elements the check tests, and a layer
+ * between keeps its own check. `undefined`
+ * where the place is the value itself, a property below it, or off its landing: the place's own test.
+ */
+function wholeCheck(
+  rule: StoreRule,
+  site: SourceSite,
+  source: MessageSource,
+): { readonly test: Test } | { readonly words: string; readonly leaf: string } | undefined {
+  // (its landing asked, and charged, only for a place below a collection)
+  if (!rule.steps.some((step) => "collection" in step)) return undefined;
+  const landing = source.landing(site);
+  const below = stepsBelow(rule, landing);
+  if (below === null || below.length === 0 || !below.every((step) => "collection" in step))
+    return undefined;
+  const type = receivingType(rule, landing!.steps, below, source);
+  // (unproved, a layer between keeps its own check, no test of the elements: the leaf's words name them)
+  if (
+    type === null &&
+    rule.type.some((kind) => kind === "list" || kind === "set" || kind === "dict")
+  )
+    return undefined;
+  if (type === null)
+    return {
+      words: `every ${below
+        .toReversed()
+        .map((step) => (step.collection === "dict" ? "value" : "element"))
+        .join(" of every ")} of`,
+      leaf: described(rule.type),
+    };
+  const optional = type.kind === "optionalType";
+  const outer = below[0]!.collection;
+  const written = annotationText(type);
+  return {
+    test: {
+      code: (value) => `${value} is ${written}`,
+      words: `is ${VALUE_KINDS[outer].description}${optional ? " or null" : ""} (${written})`,
+      rulesOut: (kind) => kind !== outer && !(optional && kind === "null"),
+    },
+  };
+}
+
+/**
+ * The written type a store's value receives (`wholeCheck`): its root's declared type (a `let`'s, a `global`'s or a
+ * parameter's, as the parser read the declaration: Codex r2's B2, no text of it is searched), followed through the collections `above` the value, which must
+ * reach the place through the collections `below`; else `null`.
+ */
+function receivingType(
+  rule: StoreRule,
+  above: readonly StoreStep[],
+  below: readonly { readonly collection: "list" | "set" | "dict" }[],
+  source: MessageSource,
+): TypeAnnotation | null {
+  const { root } = rule;
+  if (root === null || root.site === null) return null;
+  const declared = source.declared(root.site);
+  // (each collection step's element type, through the layer's `?`; a union there, or an unrestricted collection, is none)
+  const element = (type: TypeAnnotation | null, step: StoreStep): TypeAnnotation | null => {
+    const at = type?.kind === "optionalType" ? type.value : type;
+    return at !== null &&
+      at !== undefined &&
+      "collection" in step &&
+      (at.kind === "listType" || at.kind === "setType" || at.kind === "dictType")
+      ? at.element
+      : null;
+  };
+  let value = declared;
+  for (const step of above) value = element(value, step);
+  let leaf = value;
+  for (const step of below) leaf = element(leaf, step);
+  return leaf === null ? null : value;
+}
+
+/** A written type as code (V30 §13): `integer[]?[]`, `(integer | string) dict`. */
+function annotationText(type: TypeAnnotation): string {
+  const operand = (inner: TypeAnnotation): string =>
+    inner.kind === "unionType" ? `(${annotationText(inner)})` : annotationText(inner);
+  switch (type.kind) {
+    case "namedType":
+      return type.name;
+    case "optionalType":
+      return `${operand(type.value)}?`;
+    case "listType":
+      return `${operand(type.element)}[]`;
+    case "setType":
+      return `${operand(type.element)} set`;
+    case "dictType":
+      return `${operand(type.element)} dict`;
+    case "unionType":
+      return type.members.map(annotationText).join(" | ");
+  }
+}
+
+/**
  * #1468: the fix of a store's place below the warned value, a property of what the value holds (ADR 0021 rule 1.4), in
  * words by construction, with no form and no value of its own (the lead's ruling after Codex r2). Where the checker's
  * definitions prove the value a load with a default (`originOf`, `loadOrigin`), that load's default given the
@@ -342,25 +462,11 @@ function propertyFix(
 ): string | null {
   if (!rule.steps.some((step) => "property" in step)) return null;
   const type = described(rule.type);
-  const landing = source.landing(site);
-  const above = landing?.steps ?? [];
   // (where the place's type must come from: the expression that owns the property, the value where no part of it does)
   const where = (steps: readonly StoreStep[]): string =>
     `Give ${rule.into} ${type} where '${source.text(source.owner(site, steps))}' gets its value.`;
-  const same = (a: StoreStep, b: StoreStep): boolean =>
-    "property" in a
-      ? "property" in b && a.property === b.property
-      : "collection" in b && a.collection === b.collection;
-  if (
-    landing === null ||
-    rule.root === null ||
-    rule.root.kind === "result" ||
-    landing.root !== rule.root.name ||
-    above.length > rule.steps.length ||
-    !above.every((step, index) => same(step, rule.steps[index]!))
-  )
-    return strict ? null : where([]);
-  const below = rule.steps.slice(above.length);
+  const below = stepsBelow(rule, source.landing(site));
+  if (below === null) return strict ? null : where([]);
   if (!below.some((step) => "property" in step)) return null;
   const found = originOf(rule);
   // (a type with null takes no default that discharges yet: a value of its other type narrows what the place takes,
@@ -428,6 +534,19 @@ export function warningFix(
     source.target(site) && variable(subject) === null
       ? `Check that '${subject}' ${test.words} first.`
       : null;
+  // (a store whose place is an element below the value: the test of the whole receiving type, no fallback, which would
+  // replace the whole value, #1753)
+  const whole = rule.rule === "store" ? wholeCheck(rule, site, source) : undefined;
+  if (whole !== undefined) {
+    if (isLiteral(text) || context === "missing") return "";
+    if ("test" in whole)
+      return (
+        inPlace(whole.test) ?? checkFix(subject, whole.test, null, { source, site, diagnosed })
+      );
+    return variable(subject) !== null || source.target(site)
+      ? `Check that ${whole.words} '${subject}' is ${whole.leaf} first.`
+      : `Keep '${subject}' in a new variable and check that ${whole.words} it is ${whole.leaf} first.`;
+  }
   if (kinds.includes("null")) {
     // (no fallback for a value a store or a method changes in place, a compound assignment's target among them: the
     // change would be lost)
