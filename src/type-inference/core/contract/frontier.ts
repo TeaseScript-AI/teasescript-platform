@@ -699,7 +699,7 @@ function cyclic(frontier: Frontier, place: PlaceId): boolean {
   const low = new Map<PlaceId, number>();
   const open: PlaceId[] = [];
   const held = new Set<PlaceId>();
-  const marked = new Map<PlaceId, boolean>();
+  const edges = new Map<PlaceId, readonly (readonly [PlaceId, boolean])[]>();
   const frames: {
     readonly place: PlaceId;
     readonly to: readonly (readonly [PlaceId, boolean])[];
@@ -740,7 +740,9 @@ function cyclic(frontier: Frontier, place: PlaceId): boolean {
     low.set(at, index.size - 1);
     open.push(at);
     held.add(at);
-    frames.push({ place: at, to: edgesOf(at), at: 0 });
+    const to = edgesOf(at);
+    edges.set(at, to);
+    frames.push({ place: at, to, at: 0 });
   };
   enter(place);
   while (frames.length > 0) {
@@ -765,11 +767,10 @@ function cyclic(frontier: Frontier, place: PlaceId): boolean {
       members.push(member);
       if (member === top.place) break;
     }
-    marked.set(top.place, false);
     const inside = new Set(members);
     let isCyclic = false;
     for (const member of members)
-      for (const [to, projected] of edgesOf(member))
+      for (const [to, projected] of edges.get(member)!)
         if (projected && inside.has(to)) isCyclic = true;
     for (const member of members) frontier.cyclic.set(member, isCyclic);
   }
