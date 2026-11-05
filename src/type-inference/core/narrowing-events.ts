@@ -246,7 +246,7 @@ export class NarrowingEvents {
       lists.push([this.#texts(prefix, false), "branch"]);
     for (const variable of each(work, "eventSteps", g.variables))
       lists.push([this.#texts(variable, true), "branch"]);
-    for (const collection of each(work, "eventSteps", this.index.collectionsOf(g)))
+    for (const collection of each(work, "eventSteps", g.collections))
       lists.push([this.index.invalidations(collection)?.texts, "branch"]);
     if (this.#ownedAway(g)) lists.push([this.index.statements.callTexts, "call"]);
     return lists;
@@ -381,7 +381,7 @@ export class NarrowingEvents {
       });
     for (const variable of each(this.#work, "eventSteps", g.variables))
       events.push({ positions: this.pass.lists.eventList(variable), word: "branch", own: false });
-    for (const collection of each(this.#work, "eventSteps", this.index.collectionsOf(g))) {
+    for (const collection of each(this.#work, "eventSteps", g.collections)) {
       const invalidations = this.index.invalidations(collection);
       if (invalidations !== undefined)
         events.push({ positions: invalidations.positions, word: "branch", own: false });
@@ -405,7 +405,7 @@ export class NarrowingEvents {
       some(work, "ownerSteps", g.variables, (variable) => definitions.ownedAway(variable))
     )
       return true;
-    return some(work, "ownerSteps", this.index.collectionsOf(g), (collection) =>
+    return some(work, "ownerSteps", g.collections, (collection) =>
       this.#invalidatedOutside(collection),
     );
   }
@@ -447,7 +447,7 @@ export class NarrowingEvents {
       some(
         work,
         "eventSteps",
-        this.index.collectionsOf(g),
+        g.collections,
         (collection) => this.index.invalidations(collection)?.inBlock === true,
       )
     );

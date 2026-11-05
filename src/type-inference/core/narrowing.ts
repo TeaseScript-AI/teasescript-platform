@@ -7,7 +7,7 @@ import type { ValueKind } from "../../value-kinds.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
 import { joinParts, keepText, keptArray, keptParts, type WorkLedger } from "./budget.js";
-import { keyBelow, keyOf, KeyTrie, type Key } from "./definitions.js";
+import { keyBelow, keyOf, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import {
   mergeItems,
@@ -133,20 +133,16 @@ function childrenOf(expression: Expression, work: WorkLedger): readonly Expressi
   return expressionChildren(expression);
 }
 
-/** A path step's step in its contract key (`pathKey`): a property's own, `element` for every index, key and element. */
-function keyStep(step: PathStep, work: WorkLedger): string {
-  return step.kind === "property" && !readsElement(step, work)
-    ? propertyStep(step.name)
-    : "element";
-}
-
 /** The contract key a path's read asks (§1: every index, key and selection is `element`), a step charged per step. */
 export function pathKey(path: StablePath, work: WorkLedger): Key {
   work.charge("eventSteps");
   let index = 0;
   const made: string[] = [];
   for (const _ of steps(work, "eventSteps", () => index < path.steps.length)) {
-    made.push(keyStep(path.steps[index]!, work));
+    const step = path.steps[index]!;
+    made.push(
+      step.kind === "property" && !readsElement(step, work) ? propertyStep(step.name) : "element",
+    );
     index += 1;
   }
   return keyOf(path.root, made);
@@ -512,6 +508,8 @@ export interface Narrowing {
   readonly key: Key;
   /** The index and key variables of the tested path (dependency keys beside the key and its prefixes). */
   readonly variables: readonly Key[];
+  /** The collections the tested path reads an element of that hold an invalidation, by their keys (N2's lists). */
+  readonly collections: readonly Key[];
   /** The guarded region's entry; for an operand region, the test's own node, which every part of it follows. */
   readonly node: FlowNode;
   /**
@@ -638,6 +636,12 @@ export interface Invalidations {
   readonly inBlock: boolean;
 }
 
+/** A node of the trie of invalidated keys: a key's step below its parent's, and the key ending there, if one does. */
+interface KeyNode {
+  readonly children: Map<string, KeyNode>;
+  key: Key | null;
+}
+
 /**
  * A node of the trie of tested paths: a path's steps from its root, each by its label; the refined locations of the
  * path ending here followed by k element steps, by k (k = 0: the path's own).
@@ -675,10 +679,9 @@ export class NarrowingIndex {
   readonly #byOperand = new Map<string, Map<number, Laminar<Narrowing>>>();
   /** Per guarded region's entry and refined location, its narrowing definitions in evaluation order (N3's arms). */
   readonly #atEntry = new Map<string, Narrowing[]>();
-  /** Per collection key, its mutating method calls (N2); their keys as a trie, and per G its collections among them. */
+  /** Per collection key, its mutating method calls (N2); and those keys as a trie of their steps per root. */
   readonly #invalidations = new Map<Key, Invalidations>();
-  #invalidated: KeyTrie | null = null;
-  readonly #collections = new Map<Narrowing, readonly Key[]>();
+  readonly #invalidated = new Map<PlaceId, KeyNode>();
   /** Every narrowing definition, in the order they are made (the solver's component test finds one by its key). */
   readonly all: Narrowing[] = [];
   private constructor(
@@ -688,6 +691,8 @@ export class NarrowingIndex {
     program.work.charge("indexSteps");
     const work = program.work;
     const flow = program.flow;
+    // (the invalidations first: a definition reads its collections among them)
+    this.#invalidate();
     type Entry = { start: number; end: number; item: Narrowing };
     const lists = new Map<string, Entry[]>();
     const operands = new Map<string, Map<number, Entry[]>>();
@@ -720,8 +725,26 @@ export class NarrowingIndex {
       const variables = flatMapped(work, "indexSteps", path.steps, (step) =>
         step.kind === "variable" ? [kept(keyOf(step.place, []))] : [],
       );
-      // the tested path and, for a positive collection test, one more element step per element type it names (its
-      // collections, each element step's, are its key's prefixes there: `collectionsOf`)
+      // G's collections (N2): each element step's, the key's prefix there, where it holds an invalidation; one walk of
+      // the path's steps down the invalidated keys as far as they go, a key made for none (#1640)
+      let collections: Key[] = [];
+      let below = this.#invalidated.get(path.root);
+      let index = 0;
+      for (const _ of steps(
+        work,
+        "indexSteps",
+        () => below !== undefined && index < path.steps.length,
+      )) {
+        const step = path.steps[index]!;
+        const reads = readsElement(step, work);
+        if (reads && below!.key !== null) collections.push(below!.key);
+        below = below!.children.get(
+          step.kind === "property" && !reads ? propertyStep(step.name) : "element",
+        );
+        index += 1;
+      }
+      // the tested path and, for a positive collection test, one more element step per element type it names: each
+      // element step's collection, the tested path's key and those below it, is one of its G's collections too (N2)
       let { form, element } = outcome;
       let key = kept(pathKey(path, work));
       // the tested path in the trie of tested paths, its locations by the element steps they add
@@ -750,6 +773,7 @@ export class NarrowingIndex {
           elements,
           key,
           variables,
+          collections,
           node,
           region,
           window,
@@ -778,6 +802,12 @@ export class NarrowingIndex {
         const inner = testedType(element, work);
         form = { kind: "is", kinds: inner.kinds, test: inner.test };
         element = inner.element;
+        if (below !== undefined && below.key !== null) {
+          const more = copied(work, "indexSteps", collections);
+          more.push(below.key);
+          collections = more;
+        }
+        below = below?.children.get("element");
         key = kept(keyBelow(key, ["element"]));
       }
     };
@@ -820,7 +850,6 @@ export class NarrowingIndex {
         nests.set(file, new Laminar(work, list));
       this.#byOperand.set(location, nests);
     }
-    this.#invalidate();
   }
 
   /**
@@ -936,6 +965,17 @@ export class NarrowingIndex {
       if (list === undefined) {
         keepText(work, key.length);
         found.set(key, [entry]);
+        // (its steps in the trie of invalidated keys, which a G's walk reads its collections from)
+        let at = this.#invalidated.get(target.root);
+        if (at === undefined)
+          this.#invalidated.set(target.root, (at = { children: new Map(), key: null }));
+        for (const step of each(work, "indexSteps", path ?? target.path)) {
+          let child: KeyNode | undefined = at.children.get(step);
+          if (child === undefined)
+            at.children.set(step, (child = { children: new Map(), key: null }));
+          at = child;
+        }
+        at.key = key;
       } else list.push(entry);
     };
     for (const constraint of each(work, "indexSteps", program.constraints)) {
@@ -990,31 +1030,6 @@ export class NarrowingIndex {
         sorted(work, "indexSteps", offsets, (a, b) => a - b);
       this.#invalidations.set(collection, { positions, texts, owners, inBlock });
     }
-  }
-
-  /**
-   * The collections G's tested path reads an element of that hold an invalidation (N2's lists), the shortest first: its
-   * key's prefixes at each element step, the tested path's own and those below it for a positive collection test, by
-   * one walk of the key's steps down the invalidations' keys, once per G (#1640), each step charged; asked again, it is
-   * G's field, as its list was. A collection with none holds no list, so G's events, owners and handlers read it as
-   * nothing.
-   */
-  public collectionsOf(g: Narrowing): readonly Key[] {
-    const work = this.program.work;
-    const known = this.#collections.get(g);
-    if (known !== undefined) return known;
-    this.#invalidated ??= new KeyTrie(work, "eventSteps", () => this.#invalidations.keys());
-    // (G's key's steps, read off its path as `pathKey` makes them: no text is made)
-    const { root, steps: path } = g.path;
-    const steps = {
-      length: path.length + g.elements,
-      at: (depth: number) => (depth < path.length ? keyStep(path[depth]!, work) : "element"),
-    };
-    const found: Key[] = [];
-    for (const { key, depth } of this.#invalidated.along(root, steps, false))
-      if (depth >= path.length || readsElement(path[depth]!, work)) found.push(key);
-    this.#collections.set(g, found);
-    return found;
   }
 
   /** A collection key's invalidations (N2), or `undefined` without one. */

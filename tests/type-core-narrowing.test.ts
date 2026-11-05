@@ -2239,6 +2239,57 @@ test("a deep path's events are its prefixes' and collections' that hold one, whe
         "non-null: holds",
       ],
       [
+        "a quoted property's collection",
+        [
+          "let box = {element: [[1, null]]}",
+          "if box.element[0][0] != null { box.element[0].reverse()\n repeat box.element[0][0] {} }",
+        ],
+        "repeat box.element[0][0]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a collection below a variable index",
+        [
+          "let rows = [[1, null]]",
+          "let i = 0",
+          "if rows[i][0] != null { rows[i].reverse()\n repeat rows[i][0] {} }",
+        ],
+        "repeat rows[i][0]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a collection below a fixed key",
+        [
+          'let d = dict {"a": [1, null]}',
+          'if d["a"][0] != null { d["a"].reverse()\n repeat d["a"][0] {} }',
+        ],
+        'repeat d["a"][0]',
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a collection mutated in a later operand: that operand's read",
+        [
+          "let rows = [[1, null]]",
+          "if rows[0][0] != null and rows.reverse() == null and rows[0][0] > 0 { repeat rows[0][0] {} }",
+        ],
+        "rows[0][0] > 0",
+        0,
+        "non-null: branch",
+      ],
+      [
+        "a collection mutated in a later operand: the body's read",
+        [
+          "let rows = [[1, null]]",
+          "if rows[0][0] != null and rows.reverse() == null and rows[0][0] > 0 { repeat rows[0][0] {} }",
+        ],
+        "repeat rows[0][0]",
+        7,
+        "non-null: branch",
+      ],
+      [
         "a positive collection test's element step",
         [lists, "if m is integer[][] { m[0].reverse()\n repeat m[0][0] {} }"],
         "repeat m[0][0]",
