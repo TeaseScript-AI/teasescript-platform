@@ -50,6 +50,7 @@ export const costlyTestSeconds = {
   "type-core-plus-index.test.js": 3,
   "type-core-operator-table.test.js": 3,
   "type-core-f18.test.js": 2,
+  "type-core-lost-check.test.js": 2,
   "type-core-members.test.js": 2,
   "type-core-kept.test.js": 2,
   "type-core-labels.test.js": 2,
