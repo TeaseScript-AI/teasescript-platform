@@ -596,13 +596,19 @@ function literalType(
 /** Any value: an open part of a default's structure (a `null` field). */
 const OPEN: DerivedType = { kind: "kinds", kinds: VALUE_KIND_NAMES };
 
+/** A value the snapshot reader holds of a variable (`snapshotType`): a structure, or host data (`unknown`). */
+type Snapshot = DerivedType | { readonly kind: "unknown" };
+
+const UNKNOWN: Snapshot = { kind: "unknown" };
+const NULL: DerivedType = { kind: "kinds", kinds: ["null"] };
+
+/** The snapshots of a program's variables, by the expression they are read at and their name (`snapshotOf`). */
+const SNAPSHOTS = new WeakMap<Expression, Map<string, Snapshot>>();
+
 /**
  * F18 (TABLE r4.81 (1)): what a default that reads a variable holds at its call, as a default's own structure
- * (`literalType`): the variable's last whole store before the read, each property store after it replacing that
- * property (a `null` one leaving it open); a store inside an `if` that does not hold the read joins its value with the
- * one before. Each stored value is read where its store stands, so a copy holds what its source held then; a host
- * value has no structure. A store or a read in a loop, a store at an index or a read before its variable's first store
- * is underivable here.
+ * (`literalType`): the variable's snapshot at the read (`snapshotOf`), its part at the read's path, a part that is only
+ * `null` or host data open (`asDefault`).
  */
 function snapshotType(
   read: Expression,
@@ -620,7 +626,30 @@ function snapshotType(
       root = unwrap(root.object);
     } else break;
   if (root.kind !== "identifier") throw new Underivable("a default that reads no variable");
-  const name = root.name;
+  let at: Snapshot | null = snapshotOf(root.name, read, statements, seen);
+  for (const step of steps) at = at === null || at.kind === "unknown" ? at : partOf(at, step);
+  return at === null ? null : asDefault(at);
+}
+
+/**
+ * A variable's value where `read` stands, by its stores before it in source order: a whole store replaces it, a
+ * property store its property; a store inside an `if` that does not hold the read joins with what it replaces
+ * (`joined`), and a part so joined, unless a later store replaces it, takes its contract (`settledPart`). The values
+ * a store can give (`storedValue`): literal data, `null`, a read of a variable (its snapshot
+ * where the store stands, so a copy holds what its source held then), a host value (unknown), an object of those, and a
+ * typed parse or load. Anything else, a store or a read in a loop, a store at an index, and a read before its
+ * variable's first store are underivable here. Once per name and offset.
+ */
+function snapshotOf(
+  name: string,
+  read: Expression,
+  statements: readonly Statement[],
+  seen: Set<string>,
+): Snapshot {
+  let memo = SNAPSHOTS.get(read);
+  if (memo === undefined) SNAPSHOTS.set(read, (memo = new Map()));
+  const known = memo.get(name);
+  if (known !== undefined) return known;
   const inside = (outer: Statement, inner: { readonly span: Statement["span"] }): boolean =>
     outer.span.start.offset <= inner.span.start.offset &&
     inner.span.end.offset <= outer.span.end.offset;
@@ -629,7 +658,9 @@ function snapshotType(
   );
   const branches = statements.filter((statement) => statement.kind === "ifStatement");
   if (loops.some((loop) => inside(loop, read))) throw new Underivable("a default read in a loop");
-  let shape: DerivedType | null | undefined;
+  let shape: Snapshot | undefined;
+  // (the parts a branch's store joined since a store replaced them, by their steps)
+  const settled = new Set<string>();
   for (const statement of statements) {
     if (statement.span.end.offset > read.span.start.offset) continue;
     const store = storeOf(statement);
@@ -640,9 +671,28 @@ function snapshotType(
     if (target !== name) continue;
     if (loops.some((loop) => inside(loop, statement)))
       throw new Underivable("a store of a default in a loop");
-    const joined = branches.some((branch) => inside(branch, statement) && !inside(branch, read));
-    const value = literalType(store.value, statements, seen);
-    shape = replacedPart(shape ?? null, path, value, joined && shape !== undefined);
+    const joined =
+      shape !== undefined &&
+      branches.some((branch) => inside(branch, statement) && !inside(branch, read));
+    if (shape === undefined && path.length > 0)
+      throw new Underivable("a property store before its variable's first store");
+    shape = replacedPart(
+      shape ?? UNKNOWN,
+      path,
+      storedValue(store.value, statements, seen),
+      joined,
+    );
+    const at = path.join(".");
+    if (joined) settled.add(at);
+    else
+      for (const part of [...settled])
+        if (at === "" || part === at || part.startsWith(`${at}.`)) settled.delete(part);
+  }
+  // (a part a branch joined has no one store reaching the read: the read takes its contract, every store of it in the
+  // program, as the exact path declines a join, X2)
+  for (const part of settled) {
+    const path = part === "" ? [] : part.split(".");
+    shape = replacedPart(shape!, path, settledPart(name, path, statements, seen), false);
   }
   if (shape === undefined) {
     // (a host value: no structure; a variable read before its first store stands nowhere in these programs)
@@ -652,37 +702,183 @@ function snapshotType(
       )
     )
       throw new Underivable("a default read before its variable's first store");
-    return null;
+    shape = UNKNOWN;
   }
-  let type: DerivedType | null = shape;
-  for (const step of steps) type = partOf(type, step);
-  return type;
+  memo.set(name, shape);
+  return shape;
 }
 
-/** `type` with the part at `path` replaced by `value`, or joined with it (`snapshotType`); `null` as a part is open. */
-function replacedPart(
-  type: DerivedType | null,
+/**
+ * A variable's part at `path` as its contract answers it (`snapshotOf`): every store of it or of a prefix of it in the
+ * program, each read at its store, joined; a store below it is underivable here.
+ */
+function settledPart(
+  name: string,
   path: readonly string[],
-  value: DerivedType | null,
-  joined: boolean,
-): DerivedType | null {
-  if (path.length === 0) {
-    if (!joined) return value;
-    // (a whole number joined with a number is a number, as a place's stores settle one family)
-    return type === null || value === null ? (type ?? value) : admittedShape([type, value]);
+  statements: readonly Statement[],
+  seen: Set<string>,
+): Snapshot {
+  let joined: Snapshot | null = null;
+  for (const statement of statements) {
+    const store = storeOf(statement);
+    if (store === null) continue;
+    const [target, ...at] = store.name.split(".");
+    if (target !== name) continue;
+    if (at.length > path.length || at.some((step, index) => path[index] !== step))
+      throw new Underivable("a joined part with a store below it");
+    let value: Snapshot | null = storedValue(store.value, statements, seen);
+    for (const step of path.slice(at.length))
+      value = value === null || value.kind === "unknown" ? value : partOf(value, step);
+    if (value === null) throw new Underivable("a store that gives a joined part none");
+    joined = joined === null ? value : joinedSnapshot(joined, value);
   }
-  if (type?.kind !== "object") throw new Underivable("a property store into no object");
+  return joined ?? UNKNOWN;
+}
+
+/** What a store gives a variable (`snapshotOf`), its reads at the store; an unmodelled value is underivable. */
+function storedValue(
+  expression: Expression,
+  statements: readonly Statement[],
+  seen: Set<string>,
+): Snapshot {
+  const at = selected(expression)!;
+  switch (at.kind) {
+    case "nullLiteral":
+      return NULL;
+    case "numberLiteral":
+    case "booleanLiteral":
+    case "stringLiteral": {
+      const type = literalType(at, statements, seen);
+      if (type === null) throw new Underivable("a stored text with interpolation");
+      return type;
+    }
+    case "objectLiteral":
+      return {
+        kind: "object",
+        properties: at.properties.map((property) => {
+          const value = storedValue(property.value, statements, seen);
+          return { name: property.name.name, type: value.kind === "unknown" ? OPEN : value };
+        }),
+      };
+    case "identifier":
+    case "propertyAccessExpression":
+    case "indexExpression": {
+      const steps: string[] = [];
+      let root: Expression = at;
+      for (;;)
+        if (root.kind === "propertyAccessExpression") {
+          steps.unshift(root.property.name);
+          root = unwrap(root.object);
+        } else if (root.kind === "indexExpression") {
+          steps.unshift("element");
+          root = unwrap(root.object);
+        } else break;
+      if (root.kind !== "identifier") throw new Underivable("a stored read of no variable");
+      let value: Snapshot | null = snapshotOf(root.name, at, statements, seen);
+      for (const step of steps)
+        value = value === null || value.kind === "unknown" ? value : partOf(value, step);
+      if (value === null) throw new Underivable("a stored read of no part");
+      return value;
+    }
+    case "listLiteral":
+    case "setLiteral":
+      if (holdsRead(at)) throw new Underivable("a stored collection with a read in it");
+      return literalType(at, statements, seen) ?? UNKNOWN;
+    case "loadExpression":
+      return literalType(at, statements, seen) ?? UNKNOWN;
+    case "callExpression": {
+      const callee = unwrap(at.callee);
+      if (callee.kind !== "identifier" || callee.name !== "fromJson")
+        throw new Underivable("a stored call the snapshot reads no way");
+      return literalType(at, statements, seen) ?? UNKNOWN;
+    }
+    default:
+      throw new Underivable(`a stored ${at.kind} the snapshot reads no way`);
+  }
+}
+
+/** Whether a literal reads anything at any depth. */
+function holdsRead(expression: Expression): boolean {
+  const at = unwrap(expression);
+  if (at.kind === "listLiteral" || at.kind === "setLiteral") return at.elements.some(holdsRead);
+  if (at.kind === "objectLiteral")
+    return at.properties.some((property) => holdsRead(property.value));
+  return !(
+    at.kind === "numberLiteral" ||
+    at.kind === "booleanLiteral" ||
+    at.kind === "nullLiteral" ||
+    at.kind === "stringLiteral"
+  );
+}
+
+/** A snapshot as a default's structure: host data or only `null` no structure (open as a part), the rest as it is. */
+function asDefault(snapshot: Snapshot): DerivedType | null {
+  if (snapshot.kind === "unknown") return null;
+  if (snapshot.kind === "kinds")
+    return snapshot.kinds.every((kind) => kind === "null") ? null : snapshot;
+  if (snapshot.kind === "object")
+    return {
+      ...snapshot,
+      properties: snapshot.properties.map((property) => ({
+        name: property.name,
+        type: asDefault(property.type) ?? OPEN,
+      })),
+    };
+  return snapshot;
+}
+
+/**
+ * A snapshot with the part at `path` replaced by `value`, or joined with it (`snapshotOf`): host data joined with
+ * anything is host data; two objects join by property, a property only one holds underivable; a whole number joined
+ * with a number is a number, as a place's stores settle one family.
+ */
+function replacedPart(
+  type: Snapshot,
+  path: readonly string[],
+  value: Snapshot,
+  joined: boolean,
+): Snapshot {
+  if (path.length === 0) return joined ? joinedSnapshot(type, value) : value;
+  if (type.kind !== "object") throw new Underivable("a property store into no object");
   const own = type.properties.find((property) => property.name === path[0]);
-  const part = replacedPart(own?.type ?? null, path.slice(1), value, joined) ?? OPEN;
+  if (own === undefined && joined) throw new Underivable("a property only one branch stores");
+  const part = replacedPart(own?.type ?? UNKNOWN, path.slice(1), value, joined);
+  const stored: DerivedType = part.kind === "unknown" ? OPEN : part;
   return {
     ...type,
     properties:
       own === undefined
-        ? [...type.properties, { name: path[0]!, type: part }]
+        ? [...type.properties, { name: path[0]!, type: stored }]
         : type.properties.map((property) =>
-            property === own ? { name: property.name, type: part } : property,
+            property === own ? { name: property.name, type: stored } : property,
           ),
   };
+}
+
+/** Two snapshots joined (`replacedPart`). */
+function joinedSnapshot(a: Snapshot, b: Snapshot): Snapshot {
+  if (a.kind === "unknown" || b.kind === "unknown" || a === OPEN || b === OPEN) return UNKNOWN;
+  if (a.kind === "object" && b.kind === "object") {
+    const names = [...new Set([...a.properties, ...b.properties].map((property) => property.name))];
+    return {
+      kind: "object",
+      properties: names.map((name) => {
+        const [x, y] = [a, b].map((side) =>
+          side.properties.find((property) => property.name === name),
+        );
+        if (x === undefined || y === undefined)
+          throw new Underivable("a property only one branch's value holds");
+        const part = joinedSnapshot(x.type, y.type);
+        return { name, type: part.kind === "unknown" ? OPEN : part };
+      }),
+    };
+  }
+  // (scalars, `null` among them: a union of kinds is one too)
+  const flat = (x: Snapshot): x is DerivedType =>
+    x.kind === "kinds" ||
+    (x.kind === "union" && x.members.every((member) => member.kind === "kinds"));
+  if (flat(a) && flat(b)) return admittedShape([a, b])!;
+  throw new Underivable("a join of a structure and another");
 }
 
 function unionTypes(types: readonly DerivedType[]): DerivedType {

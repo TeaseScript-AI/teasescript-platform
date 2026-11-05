@@ -6,7 +6,7 @@ import { analyseCore, type Answers } from "../src/type-inference/core/answers.js
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { nodeOf, SliceIndex } from "../src/type-inference/core/consumer.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
-import { derive, syntaxOf } from "./helpers/type-core-derived.js";
+import { derive, syntaxOf, Underivable } from "./helpers/type-core-derived.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { narrowingPassIn } from "./helpers/type-core-narrowing.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
@@ -348,6 +348,14 @@ test("the S7 oracle derives a default that reads a variable at its call, as the 
     ["let d = 1.5\nd = 0", "{n: d}", "d = 2.5", "result.n"],
     ["let d = 1.5\nd = 0\nlet e = d", "e", "d = 2.5", "result"],
     ['let d = 0\nif load("flag", default: false) { d = 1.5 }', "d", "d = 2.5", "result"],
+    // (a branch's `null` kept beside the value before it, a branch's host data leaving the default open)
+    [
+      'let d = {n: 0}\nif load("flag", default: false) { d.n = null }',
+      "d",
+      "d.n = 2.5",
+      "result.n",
+    ],
+    ['let d = 0\nif load("flag", default: false) { d = hostValue }', "d", "d = 2.5", "result"],
   ] as const)
     for (const mode of MODES) {
       const source = `${before}\nlet result = fromJson(hostValue, default: ${fallback}, files: false)\n${later}\nsay ${shown}\nexit\n`;
@@ -365,4 +373,15 @@ test("the S7 oracle derives a default that reads a variable at its call, as the 
         );
       });
     }
+  // (a value the snapshot reader does not model is underivable, never a default with no structure)
+  for (const before of [
+    "let d = [0].get(0, default: 1)",
+    "let d = toInteger(hostValue, default: 0)",
+    "let d = {n: toInteger(hostValue, default: 0)}",
+  ]) {
+    const source = `${before}\nlet result = fromJson(hostValue, default: d, files: false)\nsay result\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+    assert.ok(request !== null, source);
+    assert.throws(() => derive(syntaxOf(source), compactAnalysis(request)), Underivable, source);
+  }
 });
