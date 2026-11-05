@@ -2085,8 +2085,8 @@ const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
 
 /**
  * Whether a default reads anything but literal data at any level: a variable, a property or an element of one, any
- * operation but a typed parse or load, or one whose own default does, or a load of a computed key (#1755's test, read
- * after a stop alone and through nested typed calls, #1767).
+ * operation but a typed parse or load, or one whose own default does (#1755's test, read after a stop alone and through
+ * nested typed calls, #1767).
  */
 function readsPlace(fallback: Expression): boolean {
   const pending = [fallback];
@@ -2109,11 +2109,10 @@ function readsPlace(fallback: Expression): boolean {
       case "objectLiteral":
         for (const property of at.properties) pending.push(property.value);
         break;
-      // a typed parse or load inside the default answers by its own default, which the outer call reads through: a
-      // computed key's load answers by nothing it proves (F19), so it reads a place (Codex r5's B1)
+      // a typed parse or load inside the default answers by its own default, which the outer call reads through,
+      // whatever its key (Codex r5's B1, r6's P2)
       case "loadExpression":
-        if (unwrap(at.key).kind !== "stringLiteral" || at.defaultValue === null) return true;
-        pending.push(at.defaultValue);
+        if (at.defaultValue !== null) pending.push(at.defaultValue);
         break;
       case "callExpression": {
         const inner = defaultOf(at);

@@ -587,6 +587,12 @@ test("after a stop a typed call's reader type a stop left open declines the plan
       'let k = "k"\nlet d: object = {n: 0}\nlet result: object = fromJson(hostValue, default: load(k, default: d), files: false)\nsay result.n\nsay "after"\nexit\n',
       '{"n":"bad"}',
     ],
+    // (a computed key's load answers by its literal default: Codex r6's P2)
+    [
+      "literal default through a computed-key load",
+      'let k = "k"\nlet result: object = fromJson(hostValue, default: load(k, default: {n: 0}), files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
     // (a written scalar destination is the reader type, whatever its default reads: Codex r5's P2)
     [
       "literal reader: a written scalar",
