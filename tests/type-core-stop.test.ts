@@ -599,8 +599,9 @@ test("after a stop a typed call's reader type a stop left open declines the plan
       'let d = 0\nlet result: integer = fromJson(hostValue, default: d, files: false)\nsay result\nsay "after"\nexit\n',
       "2",
     ],
-    // (a projection the syntax proves: a scalar at a literal's literal property or index, Astra r1's B1, through a
-    // projected part too, Codex r8; a structured one is not, its properties unproven after a stop)
+    // (a projection the syntax proves: literal data at a literal's property or element, Astra r1's B1, through a
+    // projected part, Codex r8, and at a projected or computed index or through a nested load, Codex r9; an object below
+    // a projection is not, its properties unproven after a stop)
     [
       "literal property's scalar",
       'let result = fromJson(hostValue, default: ({n: 0}).n, files: false)\nsay result\nsay "after"\nexit\n',
@@ -620,6 +621,26 @@ test("after a stop a typed call's reader type a stop left open declines the plan
       "literal property's projected scalar",
       'let result = fromJson(hostValue, default: ({p: ({n: 0}).n}).p, files: false)\nsay result\nsay "after"\nexit\n',
       "2",
+    ],
+    [
+      "literal index's scalar at a projected index",
+      'let result = fromJson(hostValue, default: ({p: [0][({i: 0}).i]}).p, files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's scalar at a computed index",
+      'let result = fromJson(hostValue, default: [0][load("i", default: 0)], files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal property's list of a load",
+      'let result = fromJson(hostValue, default: ({p: [load("k", default: 0)]}).p, files: false)\nsay result[0]\nsay "after"\nexit\n',
+      "[2]",
+    ],
+    [
+      "a literal's projected load of an object",
+      'let result = fromJson(hostValue, default: ({p: [load("k", default: {n: 0})]}).p, files: false)\nsay result[0].n\nsay "after"\nexit\n',
+      '[{"n":2}]',
     ],
     [
       "a literal's object element",

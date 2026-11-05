@@ -8,7 +8,6 @@ import type {
   ListLiteral,
   LoadExpression,
   Program,
-  IndexExpression,
   PropertyAccessExpression,
   Statement,
 } from "../../ast.js";
@@ -2092,11 +2091,15 @@ const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
 /**
  * Whether a default reads anything but literal data at any level: a variable, a property or an element of one, any
  * operation but a typed parse or load, or one whose own default does (#1755's test, read after a stop alone and through
- * nested typed calls, #1767).
+ * nested typed calls, #1767). A projection of a literal is the literal data it selects (`projectedLiteral`), where no
+ * object literal stands at any level below it: #1460's syntax route proves its items, not an object's names below a
+ * projection (Astra r1's B1 and Codex r8–r9 on #1775: `({n: 0}).n`, `[0][i]` and `({p: [load("k", default: 0)]}).p`
+ * are literal data, `({p: {n: 0}}).p` and `[{n: 0}][0]` are not).
  */
 function readsPlace(fallback: Expression): boolean {
-  const pending = [fallback];
-  for (let at = pending.pop(); at !== undefined; at = pending.pop())
+  const pending: { at: Expression; projected: boolean }[] = [{ at: fallback, projected: false }];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { at, projected } = next;
     switch (at.kind) {
       case "numberLiteral":
       case "booleanLiteral":
@@ -2106,100 +2109,78 @@ function readsPlace(fallback: Expression): boolean {
         if (at.parts.some((part) => part.kind !== "stringText")) return true;
         break;
       case "parenthesizedExpression":
-        pending.push(at.expression);
+        pending.push({ at: at.expression, projected });
         break;
       case "listLiteral":
       case "setLiteral":
-        for (const element of at.elements) pending.push(element);
+        for (const element of at.elements) pending.push({ at: element, projected });
         break;
       case "objectLiteral":
-        for (const property of at.properties) pending.push(property.value);
+        if (projected) return true;
+        for (const property of at.properties) pending.push({ at: property.value, projected });
         break;
-      // (a scalar a literal's literal property or index projects, which the syntax proves: Astra r1's B1)
       case "propertyAccessExpression":
-      case "indexExpression":
-        if (!projectedScalar(at)) return true;
+      case "indexExpression": {
+        const selected = projectedLiteral(at);
+        if (selected === undefined) return true;
+        for (const value of selected) pending.push({ at: value, projected: true });
         break;
+      }
       // a typed parse or load inside the default answers by its own default, which the outer call reads through,
       // whatever its key (Codex r5's B1, r6's P2)
       case "loadExpression":
-        if (at.defaultValue !== null) pending.push(at.defaultValue);
+        if (at.defaultValue !== null) pending.push({ at: at.defaultValue, projected });
         break;
       case "callExpression": {
         const inner = defaultOf(at);
         if (at.callee.kind !== "identifier" || at.callee.name !== "fromJson" || inner === null)
           return true;
-        pending.push(inner);
+        pending.push({ at: inner, projected });
         break;
       }
       default:
         return true;
     }
+  }
   return false;
 }
 
 /**
- * Whether a projection reads literal data a literal's own syntax holds at a literal property or a literal index, with
- * no object literal in it: scalars, and lists or sets of them (`({n: 0}).n`, `[0][0]`, `[[1]][0]`, through parentheses
- * and nested projections), which #1460's syntax route proves after a stop. Any other projection, one reaching an object
- * among them (`({p: {n: 0}}).p`, `[{n: 0}][0]`, whose property names a stop leaves unproven below it), or of anything
- * but a literal, reads a place (Astra r1's B1 on #1775).
+ * What an expression may select through parentheses and projections of literals: an object literal's literal property,
+ * a list literal's element at a non-negative integer index (an index itself such an expression, Codex r9), or any of
+ * its elements at any other index, whatever the index reads (Codex r9: `[0][load("i", default: 0)]` is an element of
+ * `[0]`); a selected part that is itself a projection is followed (Codex r8: `({p: ({n: 0}).n}).p`). `undefined` where a
+ * step leaves the literal's syntax: another receiver, a missing property or element. Recursive over the syntax alone.
  */
-function projectedScalar(at: PropertyAccessExpression | IndexExpression): boolean {
-  const value = projectedLiteral(at);
-  if (value === undefined) return false;
-  // (literal data with no object literal in it: an object's names below a projection are what a stop leaves unproven;
-  // a part that is itself a projection, by what it projects)
-  const pending: Expression[] = [value];
-  for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
-    const leaf = projectedLiteral(at);
-    if (leaf === undefined) return false;
-    if (leaf.kind === "listLiteral" || leaf.kind === "setLiteral") pending.push(...leaf.elements);
-    else if (!(
-      leaf.kind === "numberLiteral" ||
-      leaf.kind === "booleanLiteral" ||
-      leaf.kind === "nullLiteral" ||
-      (leaf.kind === "stringLiteral" && leaf.parts.every((part) => part.kind === "stringText"))
-    ))
-      return false;
-  }
-  return true;
-}
-
-/**
- * The literal an expression denotes through parentheses and projections of literals at literal properties and
- * non-negative integer indices, a projected part that is itself such a projection followed too (Codex r8 on #1775:
- * `({p: ({n: 0}).n}).p`); `undefined` where some step leaves the literal's syntax. One loop, its steps a stack.
- */
-function projectedLiteral(expression: Expression): Expression | undefined {
-  const steps: (PropertyAccessExpression | IndexExpression)[] = [];
-  let current = unwrap(expression);
-  for (;;) {
-    while (current.kind === "propertyAccessExpression" || current.kind === "indexExpression") {
-      steps.push(current);
-      current = unwrap(current.object);
-    }
-    const step = steps.pop();
-    if (step === undefined) return current;
-    let value: Expression | undefined;
-    if (step.kind === "propertyAccessExpression")
-      value =
-        current.kind === "objectLiteral"
-          ? current.properties.find((property) => property.name.name === step.property.name)?.value
-          : undefined;
+function projectedLiteral(expression: Expression): readonly Expression[] | undefined {
+  const at = unwrap(expression);
+  if (at.kind !== "propertyAccessExpression" && at.kind !== "indexExpression") return [at];
+  const holders = projectedLiteral(at.object);
+  if (holders === undefined) return undefined;
+  const selected: Expression[] = [];
+  for (const holder of holders) {
+    let values: readonly (Expression | undefined)[];
+    if (at.kind === "propertyAccessExpression")
+      values =
+        holder.kind === "objectLiteral"
+          ? [holder.properties.find((property) => property.name.name === at.property.name)?.value]
+          : [undefined];
+    else if (holder.kind !== "listLiteral") values = [undefined];
     else {
-      const index = unwrap(step.index);
-      value =
-        current.kind === "listLiteral" &&
-        index.kind === "numberLiteral" &&
-        Number.isInteger(index.value) &&
-        index.value >= 0
-          ? current.elements[index.value]
-          : undefined;
+      const index = projectedLiteral(at.index);
+      const literal = index?.length === 1 ? index[0]! : null;
+      values =
+        literal?.kind === "numberLiteral" && Number.isInteger(literal.value) && literal.value >= 0
+          ? [holder.elements[literal.value]]
+          : holder.elements;
     }
-    if (value === undefined) return undefined;
-    current = unwrap(value);
+    for (const value of values) {
+      const parts = value === undefined ? undefined : projectedLiteral(value);
+      if (parts === undefined) return undefined;
+      selected.push(...parts);
+    }
   }
+  return selected;
 }
 
 /**
