@@ -120,8 +120,12 @@ function isStackExhaustion(error: unknown): boolean {
   );
 }
 
+/**
+ * The writer used where native JSON could consult a hook: its own arrays are on capture's prototype, so a replaced
+ * `Array.prototype` method, iterator or index setter cannot change the JSON it writes.
+ */
 function serializeJsonIterative(value: unknown, limit: number): string {
-  const out: string[] = [];
+  const out = createCapturedArray<string>(0);
   // Counted as it grows, so JSON too long to join fails before the join.
   let length = 0;
   const write = (piece: string) => {
@@ -129,9 +133,10 @@ function serializeJsonIterative(value: unknown, limit: number): string {
     if (length > limit) throw stateTooLarge();
     out.push(piece);
   };
-  const stack: Array<{ value: unknown; state: "value" } | { value: string; state: "close" }> = [
-    { value, state: "value" },
-  ];
+  const stack = createCapturedArray<
+    { value: unknown; state: "value" } | { value: string; state: "close" }
+  >(0);
+  stack.push({ value, state: "value" });
   while (stack.length > 0) {
     // EVIDENCE: stack is non-empty because the loop condition was checked immediately before pop.
     const frame = stack.pop()!;

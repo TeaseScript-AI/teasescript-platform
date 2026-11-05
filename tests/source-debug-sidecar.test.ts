@@ -173,7 +173,7 @@ test("a malformed sidecar is rejected as a whole", () => {
     assert.equal(loadSourceDebugSidecar(text, PLAN).kind, "invalid", name);
 });
 
-test("a rejected sidecar stays rejected when Array.prototype methods are replaced", () => {
+test("a sidecar loads and binds as natively when Array.prototype or Object.prototype is changed", () => {
   // EVIDENCE: fixture: SIDECAR is createSourceDebugSidecar's JSON.
   const parsed = JSON.parse(SIDECAR) as {
     files: Array<{ path: string; enclosing: { blocks: number[] } }>;
@@ -182,21 +182,124 @@ test("a rejected sidecar stays rejected when Array.prototype methods are replace
   negativeSpan.files[0]!.enclosing.blocks = [-1, 0, -1, 0];
   const otherPath = structuredClone(parsed);
   otherPath.files[0]!.path = "other.tease";
-  const cases = [
-    ["every", () => true, negativeSpan, "invalid", () => [0].every(() => false)],
-    ["some", () => false, otherPath, "stale", () => ![0].some(() => true)],
+  // A plan with the same files whose JSON differs, and its genuine sidecar.
+  const otherFiles = [{ ...FILES[0]!, source: FILES[0]!.source.replace("😀", "😃") }, FILES[1]!];
+  const otherPlan = compiled(otherFiles);
+  const otherPlanJson = JSON.stringify(otherPlan);
+  const sidecars = [
+    SIDECAR,
+    createSourceDebugSidecar(otherFiles, otherPlan),
+    JSON.stringify(otherPath),
+    JSON.stringify(negativeSpan),
+  ];
+  // A fresh plan identity, so that its digest is computed under the change and kept for it.
+  const freshPlan = () => {
+    const load = loadInstructionPlan(JSON.stringify(PLAN));
+    assert.equal(load.kind, "valid");
+    return load.kind === "valid" ? load.plan : PLAN;
+  };
+  const loadAll = (plan: InstructionPlan) =>
+    sidecars.map((text) => loadSourceDebugSidecar(text, plan));
+  const native = loadAll(freshPlan());
+  assert.deepEqual(
+    native.map((load) => load.kind),
+    ["valid", "stale", "stale", "invalid"],
+  );
+
+  const arrayIteratorPrototype: object = Object.getPrototypeOf([][Symbol.iterator]());
+  const hook = [
+    Array.prototype,
+    "toJSON",
+    function (this: unknown) {
+      return this;
+    },
   ] as const;
-  for (const [method, replacement, sidecar, kind, replaced] of cases) {
-    const text = JSON.stringify(sidecar);
-    // Control: the sidecar is rejected with the native method.
-    assert.equal(loadSourceDebugSidecar(text, PLAN).kind, kind, method);
-    const native = Object.getOwnPropertyDescriptor(Array.prototype, method)!;
-    Object.defineProperty(Array.prototype, method, { ...native, value: replacement });
+  // Each change: the properties it sets, and whether it bites. A `toJSON` takes the serializer's hook-free writer.
+  const changes: ReadonlyArray<
+    readonly [string, ReadonlyArray<readonly [object, PropertyKey, unknown]>, () => boolean]
+  > = [
+    ["every", [[Array.prototype, "every", () => true]], () => [0].every(() => false)],
+    ["some", [[Array.prototype, "some", () => false]], () => ![0].some(() => true)],
+    ["toJSON", [[Object.prototype, "toJSON", hook[2]]], () => "toJSON" in []],
+    [
+      "toJSON, push not adding",
+      [
+        hook,
+        [
+          Array.prototype,
+          "push",
+          function (this: unknown[]) {
+            return this.length;
+          },
+        ],
+      ],
+      () => [0].push(1) === 1,
+    ],
+    ["toJSON, empty join", [hook, [Array.prototype, "join", () => ""]], () => [1].join() === ""],
+    [
+      "toJSON, join giving another plan",
+      [hook, [Array.prototype, "join", () => otherPlanJson]],
+      () => [1].join() === otherPlanJson,
+    ],
+    [
+      "reverse iterator",
+      [
+        [
+          Array.prototype,
+          Symbol.iterator,
+          function* (this: unknown[]) {
+            for (let index = this.length - 1; index >= 0; index -= 1) yield this[index];
+          },
+        ],
+      ],
+      () => new Int32Array([1, 2])[0] === 2,
+    ],
+    [
+      "iterator ending at once",
+      [[arrayIteratorPrototype, "next", () => ({ done: true, value: undefined })]],
+      () => [...new Int32Array(1)].length === 0,
+    ],
+    [
+      "toJSON, index setter",
+      [hook, [Array.prototype, "0", { set() {} }]],
+      () => {
+        const array: number[] = [];
+        array[0] = 1;
+        return array.length === 0;
+      },
+    ],
+  ];
+  for (const [name, properties, bites] of changes) {
+    const plan = freshPlan();
+    const natives = properties.map(([target, key]) => Object.getOwnPropertyDescriptor(target, key));
+    let bit: boolean;
+    let changed: ReturnType<typeof loadAll>;
+    // Indexed access only while changed: a changed iterator would also change destructuring here.
     try {
-      assert.ok(replaced(), `${method} is replaced`);
-      assert.equal(loadSourceDebugSidecar(text, PLAN).kind, kind, method);
+      for (let index = 0; index < properties.length; index += 1) {
+        const property = properties[index]!;
+        const value = property[2];
+        Object.defineProperty(
+          property[0],
+          property[1],
+          typeof value === "object" && value !== null
+            ? { ...value, configurable: true }
+            : { value, writable: true, configurable: true },
+        );
+      }
+      bit = bites();
+      changed = loadAll(plan);
     } finally {
-      Object.defineProperty(Array.prototype, method, native);
+      for (let index = properties.length - 1; index >= 0; index -= 1) {
+        const property = properties[index]!;
+        const descriptor = natives[index];
+        if (descriptor === undefined) Reflect.deleteProperty(property[0], property[1]);
+        else Object.defineProperty(property[0], property[1], descriptor);
+      }
     }
+    assert.ok(bit, `${name} bites`);
+    assert.deepEqual(changed, native, name);
+    // The digest kept for the plan under the change is its own.
+    assert.deepEqual(loadAll(plan), native, `${name}, restored`);
   }
 });

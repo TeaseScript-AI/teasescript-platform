@@ -304,8 +304,8 @@ export function adoptParsedJson(value: unknown, freeze: boolean): boolean {
   return true;
 }
 
-export function createCapturedArray(length: number): unknown[] {
-  const captured = new Array<unknown>(length);
+export function createCapturedArray<T = unknown>(length: number): T[] {
+  const captured = new Array<T>(length);
   Object.setPrototypeOf(captured, CAPTURED_ARRAY_PROTOTYPE);
   return captured;
 }

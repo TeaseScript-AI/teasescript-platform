@@ -1,3 +1,4 @@
+import { createCapturedArray } from "../../external-data-capture.js";
 import { captureOrReuseInstructionPlan } from "../../plan/capture.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { LANGUAGE_TOKEN_CLASSES, type LanguageTokenClass } from "../../token-classes.js";
@@ -53,7 +54,11 @@ export type SourceDebugSidecarLoad =
 
 const planDigests = new WeakMap<InstructionPlan, string>();
 
-/** The SHA-256 of the JSON of a validated plan, once per plan: only a source view needs it. */
+/**
+ * The SHA-256 of the JSON of a validated plan, once per plan: only a source view needs it. Like the sidecar's checks
+ * below, it reads no `Array.prototype` or `Object.prototype` method, iterator, index setter or `toJSON`, so a replaced
+ * one cannot change the digest kept for the plan.
+ */
 export function validatedPlanSha256(plan: InstructionPlan): string {
   let digest = planDigests.get(plan);
   if (digest === undefined) {
@@ -94,7 +99,7 @@ export function loadSourceDebugSidecar(
     return invalid("A source debug sidecar's planSha256 is 64 lowercase hexadecimal digits.");
   }
   if (!Array.isArray(parsed.files)) return invalid("A source debug sidecar's files are an array.");
-  const files: SourceDebugFile[] = [];
+  const files = createCapturedArray<SourceDebugFile>(0);
   for (let index = 0; index < parsed.files.length; index += 1) {
     const file = sidecarFile(parsed.files[index]);
     if (typeof file === "string") return invalid(`Source debug sidecar file ${index}: ${file}`);
@@ -111,7 +116,7 @@ export function loadSourceDebugSidecar(
   if (parsed.planSha256 !== validatedPlanSha256(validPlan)) {
     return stale("The source debug sidecar was made for another plan.");
   }
-  return Object.freeze({ kind: "valid", sidecar: Object.freeze({ files: Object.freeze(files) }) });
+  return Object.freeze({ kind: "valid", sidecar: Object.freeze({ files: frozenArray(files) }) });
 }
 
 /** One file of a sidecar, or what is wrong with it. */
@@ -141,7 +146,7 @@ function sidecarFile(value: unknown): SourceDebugFile | string {
 
 function sidecarTokens(value: unknown, sourceLength: number): readonly SourceDebugToken[] | null {
   if (!Array.isArray(value) || value.length % 3 !== 0) return null;
-  const tokens: SourceDebugToken[] = [];
+  const tokens = createCapturedArray<SourceDebugToken>(0);
   let previousEnd = 0;
   for (let index = 0; index < value.length; index += 3) {
     const kind: unknown = value[index];
@@ -161,12 +166,12 @@ function sidecarTokens(value: unknown, sourceLength: number): readonly SourceDeb
     tokens[tokens.length] = Object.freeze({ kind: LANGUAGE_TOKEN_CLASSES[kind]!, start, end });
     previousEnd = end;
   }
-  return Object.freeze(tokens);
+  return frozenArray(tokens);
 }
 
 function sidecarSpans(value: unknown, lines: readonly number[]): readonly SourceDebugSpan[] | null {
   if (!Array.isArray(value) || value.length % 4 !== 0) return null;
-  const spans: SourceDebugSpan[] = [];
+  const spans = createCapturedArray<SourceDebugSpan>(0);
   for (let index = 0; index < value.length; index += 4) {
     const startLine: unknown = value[index];
     const startColumn: unknown = value[index + 1];
@@ -188,12 +193,12 @@ function sidecarSpans(value: unknown, lines: readonly number[]): readonly Source
     }
     spans[spans.length] = Object.freeze({ startLine, startColumn, endLine, endColumn });
   }
-  return Object.freeze(spans);
+  return frozenArray(spans);
 }
 
 /** The length of each line of `source`, split at line feeds. */
 function lineLengths(source: string): number[] {
-  const lengths: number[] = [];
+  const lengths = createCapturedArray<number>(0);
   let start = 0;
   for (let index = source.indexOf("\n"); index >= 0; index = source.indexOf("\n", index + 1)) {
     lengths[lengths.length] = index - start;
@@ -201,6 +206,15 @@ function lineLengths(source: string): number[] {
   }
   lengths[lengths.length] = source.length - start;
   return lengths;
+}
+
+/**
+ * `items`, built on capture's array prototype so that no ambient index setter saw its writes, as a frozen ordinary
+ * array.
+ */
+function frozenArray<T>(items: T[]): readonly T[] {
+  Object.setPrototypeOf(items, Array.prototype);
+  return Object.freeze(items);
 }
 
 function isIndex(value: unknown): value is number {

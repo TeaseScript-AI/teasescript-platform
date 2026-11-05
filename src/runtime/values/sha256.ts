@@ -15,12 +15,16 @@ const ROUND_CONSTANTS = new Int32Array([
 ]);
 
 /** The initial hash: the first 32 bits of the fractional parts of the square roots of the first 8 primes. */
-const INITIAL_HASH = [
+const INITIAL_HASH = new Int32Array([
   0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-] as const;
+]);
 
-/** The SHA-256 of bytes given in parts, in order. */
+/**
+ * The SHA-256 of bytes given in parts, in order. After module load it uses no array iterator or `Array.prototype`
+ * method, so a replaced one cannot change a digest.
+ */
 class Sha256 {
+  // Copied from a typed array, which uses no iterator.
   readonly #hash = new Int32Array(INITIAL_HASH);
   readonly #schedule = new Int32Array(64);
   /** Bytes of an unfinished block, until it is full. */
@@ -63,7 +67,9 @@ class Sha256 {
       this.#finished = true;
     }
     let hex = "";
-    for (const word of this.#hash) hex += (word >>> 0).toString(16).padStart(8, "0");
+    for (let index = 0; index < 8; index += 1) {
+      hex += (this.#hash[index]! >>> 0).toString(16).padStart(8, "0");
+    }
     return hex;
   }
 
