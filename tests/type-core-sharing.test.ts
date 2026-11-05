@@ -2,7 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
-import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
+import {
+  WorkLedger,
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../src/type-inference/core/budget.js";
+import { prefixChains } from "../src/type-inference/core/admission/eligibility.js";
+import type { Admission } from "../src/type-inference/core/admission.js";
+import { Consumers } from "../src/type-inference/core/consumers.js";
+import {
+  keyAt,
+  keyWalk,
+  stepsFrom,
+  stepsText,
+  stepsTo,
+} from "../src/type-inference/core/contract/key-ids.js";
+import { prefixesOf } from "../src/type-inference/core/definitions.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import { ingressLeaves, type Item } from "../src/type-inference/core/items.js";
 import {
@@ -1367,5 +1382,151 @@ test("copies of a deep written list stop no decision and publish the same in the
         [],
         `depth ${depth}: ${JSON.stringify(mode)}`,
       );
+  }
+});
+
+/**
+ * #1712: the alias classes' eligibility index makes each prefix key once (per-level interned keys, TABLE r4.83 (2)):
+ * `demandsOf` through a trie of each root's decided steps, its rests references into their decided paths, and each
+ * class's prefixes of its demanded keys charged once each (`prefixChains`). Copies of a written list of depth 16, 32
+ * and 64 (two copies, sharing on, source and reversed order): the index's shared build (`WorkLedger.shared`'s units)
+ * grows at most 4.5 times a doubling (on main 8.8 and 9.4 times, its key texts made once per group and per demand).
+ * Its memos are the build's own, made and dropped with it: the same analysis made twice charges the same builds, and a
+ * restarted pass (the reversed order's depth 32 restarts, #1711's class) builds its index again whole, as the first.
+ */
+test("the eligibility index makes each prefix key once, its shared build quadratic in a written type's depth (#1712)", () => {
+  // (each outermost shared build's units, in order, read from the ledger's own `shared` for this test alone)
+  const sharedBuilds = (make: () => Answers): number[] => {
+    const builds: number[] = [];
+    const shared = WorkLedger.prototype.shared;
+    WorkLedger.prototype.shared = function <T>(this: WorkLedger, callback: () => T): T {
+      const build: typeof shared = shared.bind(this);
+      if (this.sharing) return build(callback);
+      const before = this.total;
+      try {
+        return build(callback);
+      } finally {
+        builds.push(this.total - before);
+      }
+    };
+    try {
+      make();
+    } finally {
+      WorkLedger.prototype.shared = shared;
+    }
+    return builds;
+  };
+  const source = (depth: number) =>
+    `let typed:integer${"[]".repeat(depth)}=hostValue\nlet out=typed\nout=typed\nout=hostValue\nexit\n`;
+  let rebuilt = 0;
+  for (const mode of MODES.filter((each) => !each.unshared)) {
+    const units = [16, 32, 64].map((depth) => {
+      const request = coreRequest([{ path: "main.tease", source: source(depth) }], GLOBALS)!;
+      const built = () => sharedBuilds(() => inMode(mode, () => analyseCore(request)));
+      const builds = built();
+      // (no memo outlives its build: the same analysis again charges the same builds; the index, its largest, built
+      // again whole where a pass restarts, as the first pass built it)
+      assert.deepEqual(built(), builds);
+      const index = Math.max(...builds);
+      if (builds.filter((each) => each === index).length > 1) rebuilt += 1;
+      return index;
+    });
+    for (let index = 1; index < units.length; index += 1)
+      assert.ok(units[index]! <= 4.5 * units[index - 1]!, `${JSON.stringify(mode)}: ${units}`);
+  }
+  assert.ok(rebuilt > 0, "a restarted pass builds its index again");
+  // (the demands are today's, every split of every decided path: its prefix's key as `keptKeyAt` makes it, its rest
+  // from that step on, in the groups' order; each walk's that made them, the sharing on, in both orders)
+  for (const mode of MODES) {
+    const admissions: Admission[] = [];
+    const check = Consumers.prototype.check;
+    Consumers.prototype.check = function (this: Consumers) {
+      admissions.push(this.admission);
+      return check.call(this);
+    };
+    try {
+      inMode(mode, () =>
+        analyseCore(coreRequest([{ path: "main.tease", source: source(16) }], GLOBALS)!),
+      );
+    } finally {
+      Consumers.prototype.check = check;
+    }
+    const built = admissions.filter((admission) => admission.demands !== null);
+    // (the index, and the demands it reads, a structure only the sharing makes, #1703)
+    assert.equal(built.length > 0, !mode.unshared, JSON.stringify(mode));
+    for (const admission of built) {
+      const { contract } = admission.pass;
+      const want = new Map<string, string[]>();
+      for (const group of admission.groups()) {
+        const path = admission.stepsAt(group);
+        const walk = group.key === undefined ? null : keyWalk(contract, group.key);
+        for (let length = 0; length < path.length; length += 1) {
+          const key =
+            walk === null
+              ? keyAt(contract, group.root, stepsTo(path, length))
+              : walk.prefix(length);
+          want.set(key, [...(want.get(key) ?? []), stepsText(stepsFrom(path, length))]);
+        }
+      }
+      const got = new Map(
+        [...admission.demands!].map(([key, list]) => [
+          key,
+          list.map(({ path, from }) => stepsText(stepsFrom(path, from))),
+        ]),
+      );
+      assert.deepEqual(got, want, JSON.stringify(mode));
+    }
+  }
+  // (a class's prefixes, `keptPrefixes`' list, each prefix's text charged once as it is first made, nearest first)
+  const work = new WorkLedger(1_000_000);
+  const charged: number[] = [];
+  const charge = work.charge.bind(work);
+  work.charge = (counter, units = 1) => {
+    charged.push(units);
+    charge(counter, units);
+  };
+  const prefixes = prefixChains(work);
+  // (another index's prefixes are its own: made and charged again, no memo shared between indexes)
+  const fresh = `7|${"z".repeat(16)}.${"y".repeat(16)}.${"x".repeat(16)}`;
+  const chargedBy = (): number => {
+    const before = charged.length;
+    prefixChains(work)(fresh);
+    return charged.length - before;
+  };
+  const once = chargedBy();
+  assert.ok(once > 0);
+  assert.equal(chargedBy(), once);
+  charged.length = 0;
+  const [a, b, c, d, e] = ["a", "b", "c", "d", "e"].map((step) => step.repeat(16));
+  const first = `7|${a}.${b}.${c}.${d}`;
+  const second = `7|${a}.${b}.${c}.${e}`;
+  const units = (length: number) => (length > 32 ? (length - 32 + 7) >> 3 : 0);
+  assert.deepEqual(prefixes(first), prefixesOf(first));
+  assert.deepEqual(
+    charged,
+    prefixesOf(first)
+      .map((key) => units(key.length))
+      .filter((each) => each > 0),
+  );
+  charged.length = 0;
+  assert.deepEqual(prefixes(second), prefixesOf(second));
+  assert.deepEqual(prefixes(`7|${a}.${b}`), prefixesOf(`7|${a}.${b}`));
+  assert.deepEqual(charged, []);
+  // (at `SHORT`'s edge: a parent of 31 or 32 characters charges nothing, of 33 and 40 one unit, of 41 two; a sibling
+  // below the same parent charges nothing more)
+  for (const [length, expected] of [
+    [31, 0],
+    [32, 0],
+    [33, 1],
+    [40, 1],
+    [41, 2],
+  ] as const) {
+    const parent = `7|${"p".repeat(length - 2)}`;
+    const edge = prefixChains(work);
+    charged.length = 0;
+    assert.deepEqual(edge(`${parent}.leaf`), prefixesOf(`${parent}.leaf`));
+    assert.deepEqual(charged, expected === 0 ? [] : [expected], `${length}`);
+    edge(`${parent}.other`);
+    assert.deepEqual(charged, expected === 0 ? [] : [expected], `${length}`);
   }
 });

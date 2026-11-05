@@ -8,13 +8,15 @@ import {
   stepsTo,
   type CanonicalKey,
   type Rest,
-  type Steps,
 } from "../contract/key-ids.js";
-import type { Admission } from "../admission.js";
+import type { Admission, Demand } from "../admission.js";
 import { joinParts, keepText, type WorkLedger } from "../budget.js";
 import {
   isCursor,
-  keptPrefixes,
+  keptPath,
+  keyOf,
+  keyPath,
+  keyPlace,
   prefixesOf,
   recordKey,
   sortCost,
@@ -155,14 +157,18 @@ function eligibility(
   const { guards } = admission.pass;
   const alias = admission.aliases.get(representative)!;
   const children = new Map<string, Set<string>>([["", new Set()]]);
-  for (const demanded of demandsOf(admission, prefix)) {
+  // (each prefix of a demanded key made and kept once in the class's index, #1712)
+  const prefixes = prefixChains(admission.work);
+  for (const { path, from } of demandsOf(admission, prefix)) {
     // (an add's class answers below its added value: a demand below the list's element)
     if (
       representative.kind === "add" &&
       representative.how !== "elements" &&
-      demanded.at(0) !== "element"
+      path.at(from) !== "element"
     )
       continue;
+    // (the demand's rest, kept where the index reads it: a reference into its decided path until then, #1712)
+    const demanded = keptStepsFrom(admission.work, path, from);
     // (a record's rest read as its steps, a view: `stepsRest`)
     const rest = stepsRest(demanded);
     const at = aliasKeyAt(
@@ -173,8 +179,12 @@ function eligibility(
     // (a cursor's binding no test names: its family's shape requires it, G3 stage 1)
     if (at === null || isCursor(at)) continue;
     const full = recordKey(at);
+    keptPath(admission.work, full);
     let parent = "";
-    for (const key of [...keptPrefixes(admission.work, full).reverse(), full]) {
+    // (its prefixes farthest first, then the key: the chain read backwards, no list made)
+    const chain = prefixes(full);
+    for (let at = chain.length; at >= 0; at -= 1) {
+      const key = at === 0 ? full : chain[at - 1]!;
       admission.pass.program.work.charge("eligibility");
       if (!tested(guards, key)) continue;
       if (!children.has(key)) children.set(key, new Set());
@@ -202,6 +212,31 @@ function eligibility(
     for (const child of children.get(key) ?? []) pending.push({ key: child, leave: false });
   }
   return out;
+}
+
+/**
+ * A class index's prefixes of its demanded keys (`keptPrefixes`' list, nearest first), each prefix's text made and kept
+ * once: a key's own prefixes once found, each a key one step shorter than the next, its text charged as it is first
+ * made, so a prefix two demanded keys share is charged once (per-level interned keys, TABLE r4.83 (2), #1712). The
+ * index's own, made and dropped with it: never across a class, a pass, a forget or a restart.
+ */
+export function prefixChains(work: WorkLedger): (key: Key) => readonly Key[] {
+  const chains = new Map<Key, readonly Key[]>();
+  const prefixes = (key: Key): readonly Key[] => {
+    let found = chains.get(key);
+    if (found === undefined) {
+      const path = keyPath(key);
+      if (path.length === 0) found = [];
+      else {
+        const parent = keyOf(keyPlace(key), path.slice(0, -1));
+        if (!chains.has(parent)) keepText(work, parent.length);
+        found = [parent, ...prefixes(parent)];
+      }
+      chains.set(key, found);
+    }
+    return found;
+  };
+  return prefixes;
 }
 
 /** A class's eligible member under a chain of tested keys, the index's walk for one chain (a path not demanded). */
@@ -323,30 +358,50 @@ function walkGuards(
   };
 }
 
-/** The rests below a key of the paths the pass decides (`groups()`): every split of every decided path, once. */
-function demandsOf(admission: Admission, asked: Key): readonly Steps[] {
+/**
+ * The rests below a key of the paths the pass decides (`groups()`): every split of every decided path, once, each a
+ * reference into its path (`Demand`), its rest kept where the index reads it. A text-keyed group's prefix keys are made
+ * once each, through a trie of its root's decided steps (per-level interned keys, TABLE r4.83 (2), #1712): every group
+ * below a prefix finds that prefix's key there, so a key's text is made and charged once, not once per group below
+ * it. The trie is the build's own, made and dropped with it, never across a pass.
+ */
+function demandsOf(admission: Admission, asked: Key): readonly Demand[] {
   if (admission.demands === null) {
-    const demands = new Map<CanonicalKey, Steps[]>();
+    const demands = new Map<CanonicalKey, Demand[]>();
+    const tries = new Map<PlaceId, PrefixNode>();
     for (const group of admission.groups()) {
       // (a cursor's steps made through the charged boundary, its prefixes its ancestors: G3 stage 1)
       const path = admission.stepsAt(group);
       const walk = group.key === undefined ? null : keyWalk(admission.pass.contract, group.key);
+      let node: PrefixNode = tries.get(group.root) ?? { key: null, below: new Map() };
+      tries.set(group.root, node);
       for (let length = 0; length < path.length; length += 1) {
         admission.pass.program.work.charge("eligibility");
-        const key =
-          walk === null
-            ? keptKeyAt(admission.pass.contract, group.root, stepsTo(path, length))
-            : walk.prefix(length);
-        const rest = keptStepsFrom(admission.work, path, length);
+        let key: CanonicalKey;
+        if (walk === null) {
+          if (length > 0) {
+            const step = path.at(length - 1)!;
+            let next: PrefixNode | undefined = node.below.get(step);
+            if (next === undefined) node.below.set(step, (next = { key: null, below: new Map() }));
+            node = next;
+          }
+          key = node.key ??= keptKeyAt(admission.pass.contract, group.root, stepsTo(path, length));
+        } else key = walk.prefix(length);
         const list = demands.get(key);
-        if (list === undefined) demands.set(key, [rest]);
-        else list.push(rest);
+        if (list === undefined) demands.set(key, [{ path, from: length }]);
+        else list.push({ path, from: length });
       }
     }
     admission.demands = demands;
   }
   // (a prefix in its identity, as the groups' prefixes hold it: G3 stage 1)
   return admission.demands.get(canonicalKey(admission.pass.contract, asked)) ?? [];
+}
+
+/** A decided path's prefix in a root's trie of decided steps (`demandsOf`): its key once made, and the steps below. */
+interface PrefixNode {
+  key: CanonicalKey | null;
+  readonly below: Map<string, PrefixNode>;
 }
 
 /**
