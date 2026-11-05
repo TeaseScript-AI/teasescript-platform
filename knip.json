@@ -29,6 +29,15 @@
     "tools/oxlint/**/*.ts",
     "tools/local-agent/**/*.{cjs,mjs}"
   ],
-  "ignoreDependencies": ["@vue/tsconfig", "shadcn-vue"],
-  "include": ["files", "exports", "dependencies", "unlisted", "unresolved"]
+  "ignoreDependencies": [
+    "@vue/tsconfig",
+    "shadcn-vue"
+  ],
+  "include": [
+    "files",
+    "exports",
+    "dependencies",
+    "unlisted",
+    "unresolved"
+  ]
 }
