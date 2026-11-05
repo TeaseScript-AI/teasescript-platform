@@ -1349,7 +1349,8 @@ export interface MixedOptional {
  * - another read or a call's result, by its place's admitted type where admission decides it;
  * - any other value (an undecided place's read, an operation's own result), by its own items.
  * An `otherwise`'s operand may be null where its items at its node hold null, narrowed as it is read there (Codex r3 on
- * #1819: a written copy narrowed by its assignment or a test never runs its fallback, as the current checker reads it).
+ * #1819: a written copy narrowed by its assignment or a test never runs its fallback, as the current checker reads it);
+ * an operand that is itself an `otherwise`, only where its own operand and fallback both may be (Codex r10's B1).
  * A join has no case of its own: the carrier table gives only its admitted operands (`joined`), so a rejected operand
  * brings nothing (ADR 0021 1.1, Astra r1's B1; Codex r9).
  * Each value at each path is asked once per pass (`OPTIONAL`), whichever literal's or join's error asks it, so a wide
@@ -1370,9 +1371,19 @@ function mayHoldNull(
       (item) => item.tag === "null",
     );
   // (an `otherwise`'s operand may be null where its items at its node hold null, narrowed as it is read there: a
-  // written copy narrowed by its assignment or a test never runs its fallback, as the current checker reads it)
-  const operandNull = (at: PlaceId, from: FlowNode): boolean =>
-    admission.items(at, from, []).some((item) => item.tag === "null");
+  // written copy narrowed by its assignment or a test never runs its fallback, as the current checker reads it; an
+  // operand that is itself an `otherwise` only where its operand and its fallback both may be, Codex r10's B1)
+  const operandNull = (operand: PlaceId, from: FlowNode): boolean => {
+    const open = [operand];
+    while (open.length > 0) {
+      const at = open.pop()!;
+      admission.work.charge("checks");
+      const op = program.opOf.get(at);
+      if (op?.kind === "fallback") open.push(op.right, op.left);
+      else if (!admission.items(at, from, []).some((item) => item.tag === "null")) return false;
+    }
+    return true;
+  };
   type Part = readonly [PlaceId, FlowNode, readonly string[]];
   // (a value's answer at a path where its form decides it, else the parts whose answers decide it)
   const expand = (at: PlaceId, from: FlowNode, steps: readonly string[]): boolean | Part[] => {
