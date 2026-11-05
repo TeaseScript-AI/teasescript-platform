@@ -271,14 +271,14 @@ sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> --
   --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
 ```
 
-`shadow-classify.mjs` (S11's classification, taxonomy version 3) reads the records of a campaign (and the S11 readiness
+`shadow-classify.mjs` (S11's classification, taxonomy version 4) reads the records of a campaign (and the S11 readiness
 research's `results.jsonl`, whose crashed sources have no rows) and gives every route pair (a source in one mode, legacy
 against core) exactly one class, and every source in each order one class of the sharing column, the core with sharing
 on against off (#1711). Each class has its rule in words, a witness and a gate state: `pass`, `attributed` (the rule
 class is known; S11 still owes each source's accepted expectation) or `open`. Pairs: `agree`; `differs/stop`,
 `/surviving`, `/integer`, `/rule` by the codes whose diagnostic identities (path, code, severity, offsets) changed, in
 that precedence, then `/checks`, `/plan`, `/wording` where the identities are equal (the other differing parts are
-columns of the pair); `excluded/<text>`, the research's 53 exclusion texts as 48 rules, and from version 2 `this return statement`, the camera and tag-query texts (#1744) and the open part of a typed default (#1072); `failed/ legacy-heap` (the
+columns of the pair); `excluded/<text>`, the research's 53 exclusion texts as 48 rules, and from version 2 `this return statement`, the camera and tag-query texts (#1744) and the open part of a typed default (#1072), and from version 4 a typed default a stop left open (#1775); `failed/ legacy-heap` (the
 legacy route's heap in its analysis with the core finished: legacy behaviour the switch resolves, #1075),
 `failed/other`, `exception`, `aborted-record`, `unavailable`. Sharing: `equal`, `one-mode-stop` and `both-stop-differ`
 (attributed, each row for the stop oracle's judgment), `neither-stops-differ`, `outside`, `uncompared`. Every rule is
