@@ -581,13 +581,7 @@ function literalType(
     case "identifier":
     case "propertyAccessExpression":
     case "indexExpression":
-      // F18 (TABLE r4.81 (1)): a default that reads a variable reads it at its call, as the stores before it give it
-      // (these programs have no loop around such a call)
-      return sourceShape(
-        at,
-        statements.filter((statement) => statement.span.end.offset <= at.span.start.offset),
-        seen,
-      );
+      return snapshotType(at, statements, seen);
     case "loadExpression":
       return expectedType(at, statements, seen);
     case "callExpression":
@@ -597,6 +591,98 @@ function literalType(
     default:
       return null;
   }
+}
+
+/** Any value: an open part of a default's structure (a `null` field). */
+const OPEN: DerivedType = { kind: "kinds", kinds: VALUE_KIND_NAMES };
+
+/**
+ * F18 (TABLE r4.81 (1)): what a default that reads a variable holds at its call, as a default's own structure
+ * (`literalType`): the variable's last whole store before the read, each property store after it replacing that
+ * property (a `null` one leaving it open); a store inside an `if` that does not hold the read joins its value with the
+ * one before. Each stored value is read where its store stands, so a copy holds what its source held then; a host
+ * value has no structure. A store or a read in a loop, a store at an index or a read before its variable's first store
+ * is underivable here.
+ */
+function snapshotType(
+  read: Expression,
+  statements: readonly Statement[],
+  seen: Set<string>,
+): DerivedType | null {
+  const steps: string[] = [];
+  let root = unwrap(read);
+  for (;;)
+    if (root.kind === "propertyAccessExpression") {
+      steps.unshift(root.property.name);
+      root = unwrap(root.object);
+    } else if (root.kind === "indexExpression") {
+      steps.unshift("element");
+      root = unwrap(root.object);
+    } else break;
+  if (root.kind !== "identifier") throw new Underivable("a default that reads no variable");
+  const name = root.name;
+  const inside = (outer: Statement, inner: { readonly span: Statement["span"] }): boolean =>
+    outer.span.start.offset <= inner.span.start.offset &&
+    inner.span.end.offset <= outer.span.end.offset;
+  const loops = statements.filter(
+    (statement) => statement.kind === "repeatStatement" || statement.kind === "forStatement",
+  );
+  const branches = statements.filter((statement) => statement.kind === "ifStatement");
+  if (loops.some((loop) => inside(loop, read))) throw new Underivable("a default read in a loop");
+  let shape: DerivedType | null | undefined;
+  for (const statement of statements) {
+    if (statement.span.end.offset > read.span.start.offset) continue;
+    const store = storeOf(statement);
+    if (store === null) continue;
+    if (store.name.startsWith(`${name}[`))
+      throw new Underivable("a store at an index of a default");
+    const [target, ...path] = store.name.split(".");
+    if (target !== name) continue;
+    if (loops.some((loop) => inside(loop, statement)))
+      throw new Underivable("a store of a default in a loop");
+    const joined = branches.some((branch) => inside(branch, statement) && !inside(branch, read));
+    const value = literalType(store.value, statements, seen);
+    shape = replacedPart(shape ?? null, path, value, joined && shape !== undefined);
+  }
+  if (shape === undefined) {
+    // (a host value: no structure; a variable read before its first store stands nowhere in these programs)
+    if (
+      statements.some(
+        (statement) => statement.kind === "letStatement" && statement.name.name === name,
+      )
+    )
+      throw new Underivable("a default read before its variable's first store");
+    return null;
+  }
+  let type: DerivedType | null = shape;
+  for (const step of steps) type = partOf(type, step);
+  return type;
+}
+
+/** `type` with the part at `path` replaced by `value`, or joined with it (`snapshotType`); `null` as a part is open. */
+function replacedPart(
+  type: DerivedType | null,
+  path: readonly string[],
+  value: DerivedType | null,
+  joined: boolean,
+): DerivedType | null {
+  if (path.length === 0) {
+    if (!joined) return value;
+    // (a whole number joined with a number is a number, as a place's stores settle one family)
+    return type === null || value === null ? (type ?? value) : admittedShape([type, value]);
+  }
+  if (type?.kind !== "object") throw new Underivable("a property store into no object");
+  const own = type.properties.find((property) => property.name === path[0]);
+  const part = replacedPart(own?.type ?? null, path.slice(1), value, joined) ?? OPEN;
+  return {
+    ...type,
+    properties:
+      own === undefined
+        ? [...type.properties, { name: path[0]!, type: part }]
+        : type.properties.map((property) =>
+            property === own ? { name: property.name, type: part } : property,
+          ),
+  };
 }
 
 function unionTypes(types: readonly DerivedType[]): DerivedType {

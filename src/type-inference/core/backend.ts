@@ -28,8 +28,8 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
  * number, boolean, null, regex and plain text literals, variables, host values, list and object literals, index and
  * property reads, ranges, `otherwise`, a list's `get` with its `default:`, a method of text, a list, a set or a dict that
  * changes nothing in its receiver and a list's `sort`, `toJson` of a value, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
- * `decryptText` and `decryptFile`, a `load` of a key written as text once in the project with a default that is no
- * `null`, and parentheses (S7: the constructs of the discharge map's new rows). Its consumers are C1 (a store into a
+ * `decryptText` and `decryptFile`, a `load` with a default that is no `null` of a key written as text once in the project
+ * or of a computed key (external data, F19), and parentheses (S7: the constructs of the discharge map's new rows). Its consumers are C1 (a store into a
  * place with a written or decided type, A1–A9, with A6's rejections and a literal's elements of one type), C2 (a repeat
  * count, an index), C5 (a member of a receiver at a read or a store), C10 (a fallback or a default) and C13 (a `for`
  * loop's iterable, a method's arguments and the elements `join` and `sort` read); its ingresses are a host value, a load
