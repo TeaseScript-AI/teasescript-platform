@@ -18,6 +18,8 @@ import { runGlobals } from "./helpers/type-core-route.js";
 
 const GLOBALS = ["hostValue", "hostOther"];
 const LOST = "a store whose check was lost at the budget";
+// (#1775's rule (R), which runs first: a typed parse's or load's default a stop left open declines before the gate)
+const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
 const END = '\nsay "AFTER"\nexit\n';
 const lines = (k: number, line: (at: number) => string): string =>
   Array.from({ length: k }, (_, at) => line(at)).join("\n");
@@ -170,7 +172,7 @@ test("a program whose required check a settled stop lost is declined at its stor
         () => inMode(mode, () => compiled(source, 16)),
         (error) =>
           error instanceof CandidateOutsideSlice &&
-          error.what === LOST &&
+          (error.what === OPEN_BY_STOP || error.what === LOST) &&
           source.indexOf(at) === source.lastIndexOf(at) &&
           error.site.start === source.indexOf(at),
         where,
