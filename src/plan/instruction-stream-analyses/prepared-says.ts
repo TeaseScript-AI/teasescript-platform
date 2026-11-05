@@ -2,39 +2,25 @@ import { type PlanValidationError, isRecord, planError } from "../validation-sup
 import { recordValidationTestWork } from "../../validation-testing.js";
 import type { InstructionExecutionRegion, PlanValidationIndex } from "./execution-regions.js";
 import { type RangeTree, buildRangeTree, rangeQuery, rangeTree } from "./range-tree.js";
+import { collectExpressionTemporaryReferences } from "./instruction-facts.js";
 import {
-  collectExpressionTemporaryReferences,
-  producedTemporaryIds,
-  explicitInstructionTargets,
-} from "./instruction-facts.js";
+  type IncomingSources,
+  type InstructionSummary,
+  incomingSources,
+} from "./instruction-summary.js";
 
 export function validateCanonicalPreparedSays(
   instructions: readonly unknown[],
   index: PlanValidationIndex,
+  summary: InstructionSummary,
   errors: PlanValidationError[],
 ): void {
-  const producers = new Map<number, number[]>();
-  let hasPreparedSay = false;
-  instructions.forEach((instruction, instructionIndex) => {
-    if (!isRecord(instruction)) return;
-    if (
-      instruction.kind === "say" &&
-      (Number.isSafeInteger(instruction.speakerTemporary) ||
-        Number.isSafeInteger(instruction.contextualSpeakerTemporary) ||
-        Number.isSafeInteger(instruction.textTemporary))
-    ) {
-      hasPreparedSay = true;
-    }
-    for (const temporaryId of producedTemporaryIds(instruction)) {
-      const entries = producers.get(temporaryId) ?? [];
-      entries.push(instructionIndex);
-      producers.set(temporaryId, entries);
-    }
-  });
+  const { producers } = summary;
   // Built for the first prepared say that reaches the clear and bypass checks.
   let rangesCache: PreparedSayRanges | null = null;
-  const ranges = (): PreparedSayRanges => (rangesCache ??= preparedSayRanges(instructions, index));
-  const payloadReferences = hasPreparedSay
+  const ranges = (): PreparedSayRanges =>
+    (rangesCache ??= preparedSayRanges(instructions, index, summary));
+  const payloadReferences = summary.hasPreparedSay
     ? collectPayloadTemporaryReferences(instructions)
     : new Map<number, readonly number[]>();
 
@@ -384,7 +370,7 @@ function collectPreparedSayPayloadTemporaryReferences(
  */
 interface PreparedSayRanges {
   readonly index: PlanValidationIndex;
-  readonly explicitIncomingSources: readonly (readonly number[])[];
+  readonly incoming: IncomingSources;
   /** The ascending indices of the instructions that clear each temporary. */
   readonly clears: ReadonlyMap<number, readonly number[]>;
   /** At `i + 1`: how many instructions up to `i` are the target of a `goto` or transfer. */
@@ -399,8 +385,10 @@ interface PreparedSayRanges {
 function preparedSayRanges(
   instructions: readonly unknown[],
   index: PlanValidationIndex,
+  summary: InstructionSummary,
 ): PreparedSayRanges {
-  const explicitIncomingSources = collectExplicitIncomingSources(instructions);
+  const incoming = incomingSources(summary, instructions.length);
+  const { offsets, sources } = incoming;
   const clears = new Map<number, number[]>();
   const addClear = (temporaryId: unknown, instructionIndex: number) => {
     if (typeof temporaryId !== "number") return;
@@ -427,7 +415,8 @@ function preparedSayRanges(
     )
       for (const temporaryId of instruction.temporaryIds) addClear(temporaryId, instructionIndex);
     let gotoTarget = false;
-    for (const sourceIndex of explicitIncomingSources[instructionIndex] ?? []) {
+    for (let at = offsets[instructionIndex]!; at < offsets[instructionIndex + 1]!; at += 1) {
+      const sourceIndex = sources[at]!;
       if (index.gotoSources.has(sourceIndex)) gotoTarget = true;
       else if (index.owners[sourceIndex] === index.owners[instructionIndex]) {
         const leaf = count + instructionIndex;
@@ -444,15 +433,7 @@ function preparedSayRanges(
   }
   buildRangeTree(lowestSource);
   buildRangeTree(highestSource);
-  return {
-    index,
-    explicitIncomingSources,
-    clears,
-    gotoTargets,
-    ownerChanges,
-    lowestSource,
-    highestSource,
-  };
+  return { index, incoming, clears, gotoTargets, ownerChanges, lowestSource, highestSource };
 }
 
 function preparedSayTemporaryIsCleared(
@@ -475,27 +456,6 @@ function preparedSayTemporaryIsCleared(
   return low < clears.length && clears[low]! < sayIndex;
 }
 
-function collectExplicitIncomingSources(
-  instructions: readonly unknown[],
-): readonly (readonly number[])[] {
-  const incoming: number[][] = Array.from({ length: instructions.length }, () => []);
-  for (let sourceIndex = 0; sourceIndex < instructions.length; sourceIndex += 1) {
-    const instruction = instructions[sourceIndex];
-    if (!isRecord(instruction)) continue;
-    for (const target of explicitInstructionTargets(instruction)) {
-      if (
-        typeof target === "number" &&
-        Number.isSafeInteger(target) &&
-        target >= 0 &&
-        target < instructions.length
-      ) {
-        incoming[target]!.push(sourceIndex);
-      }
-    }
-  }
-  return incoming;
-}
-
 /**
  * Whether an instruction after the producer, up to the say, is the target of a `goto` or transfer, or of a jump from
  * outside that range in the same region.
@@ -514,10 +474,13 @@ function preparedSayCanBeBypassed(
     index.owners[first] !== region ||
     ranges.ownerChanges[sayIndex] !== ranges.ownerChanges[first]
   ) {
-    // Only a malformed plan mixes regions here; check each target as written.
+    // Defensive: validated file and function ranges keep a producer and its say in one unbroken region, so no plan
+    // reaches this today. The answer below holds only for one region, so a mixed window is checked as written.
     recordValidationTestWork("preparedSayRangeSteps", sayIndex - first + 1);
     for (let target = first; target <= sayIndex; target += 1) {
-      for (const sourceIndex of ranges.explicitIncomingSources[target] ?? []) {
+      const { offsets, sources } = ranges.incoming;
+      for (let at = offsets[target]!; at < offsets[target + 1]!; at += 1) {
+        const sourceIndex = sources[at]!;
         if (index.gotoSources.has(sourceIndex)) return true;
         if (index.owners[sourceIndex] !== region) continue;
         if (sourceIndex < producerIndex || sourceIndex >= sayIndex) return true;
