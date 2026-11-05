@@ -130,6 +130,15 @@ test("prepare loads plan text through the owned loader, with the complete diagno
       client.request("prepare", { source: { kind: "plan", text: 1 } }),
       (error: unknown) => error instanceof BridgeRequestError && error.code === "arguments",
     );
+    // Arrays are read by index: an array's own `every` or a hole is a malformed argument, and the Worker still answers.
+    const tampered = Object.assign([{ path: "main.tease", source: "exit" }], { every: 0 });
+    const sparse: unknown[] = [];
+    sparse.length = 1;
+    for (const files of [tampered, sparse])
+      await assert.rejects(
+        client.request("prepare", { source: { kind: "source", script: { files } } }),
+        (error: unknown) => error instanceof BridgeRequestError && error.code === "arguments",
+      );
     assert.equal((await client.request("teardown", null)).result, null);
   });
 });
@@ -185,6 +194,17 @@ test("an op's error keeps its class, code, details and whether the session ended
       ["RangeError", "engine", "TSX001", { path: "$.count" }, true],
     );
     assert.equal(await refused(client.request("add", { by: 1 }, { session, basis: 0 })), "session");
+    const checkpoint = await client.request("checkpoint", null).catch((e: unknown) => e);
+    assert.ok(checkpoint instanceof BridgeRequestError);
+    assert.deepEqual(
+      [checkpoint.name, checkpoint.code, checkpoint.info, checkpoint.ended],
+      [
+        "CheckpointError",
+        "TSK001",
+        { code: "TSK001", message: "Checkpoint snapshot is invalid.", path: "$.snapshot" },
+        false,
+      ],
+    );
     const clone = await client.request("clone", null).catch((e: unknown) => e);
     assert.ok(clone instanceof BridgeRequestError);
     assert.deepEqual([clone.name, clone.kind], ["DataCloneError", "engine"]);

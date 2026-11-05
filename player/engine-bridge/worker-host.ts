@@ -64,18 +64,29 @@ type ReplyBody =
   | Omit<Extract<BridgeReply, { ok: true }>, "v" | "kind" | "id" | "session">
   | Omit<Extract<BridgeReply, { ok: false }>, "v" | "kind" | "id" | "session">;
 
-/** What an op threw, as data: the class name, code and details it had. */
+/**
+ * What an op threw, as data: the class name, and the code and details it had, whether it holds them itself (as a
+ * `RuntimeDataError`'s `code`) or in its `info` (as a `CheckpointError`'s diagnostic).
+ */
 function engineError(error: unknown, ended: boolean): BridgeError {
   if (!(error instanceof Error))
     return { kind: "engine", class: "Error", code: null, message: String(error), ended };
-  const code = "code" in error && typeof error.code === "string" ? error.code : null;
+  const info =
+    "info" in error && typeof error.info === "object" && error.info !== null ? error.info : null;
+  const code =
+    "code" in error && typeof error.code === "string"
+      ? error.code
+      : info !== null && "code" in info && typeof info.code === "string"
+        ? info.code
+        : null;
   const path = "path" in error && typeof error.path === "string" ? error.path : undefined;
+  const details = info ?? (path === undefined ? undefined : { path });
   return {
     kind: "engine",
     class: error.name,
     code,
     message: error.message,
-    ...(path === undefined ? {} : { info: { path } }),
+    ...(details === undefined ? {} : { info: details }),
     ended,
   };
 }
@@ -152,7 +163,12 @@ export function startBridgeHost(port: HostPort, ops: BridgeOps, build: BuildIden
       return;
     }
     lastId = request.id;
-    await dispatch(request);
+    try {
+      await dispatch(request);
+    } catch (error) {
+      // Whatever goes wrong in dispatch, the request still gets its reply.
+      refuse(request, engineError(error, false));
+    }
   }
 
   async function dispatch(request: BridgeRequest): Promise<void> {
@@ -175,7 +191,13 @@ export function startBridgeHost(port: HostPort, ops: BridgeOps, build: BuildIden
     } else if (request.session !== null) {
       return refuse(request, refusal("session", `Op '${request.op}' works on no session.`));
     }
-    if (!op.checkArguments(request.args))
+    let wellFormed: boolean;
+    try {
+      wellFormed = op.checkArguments(request.args);
+    } catch {
+      wellFormed = false;
+    }
+    if (!wellFormed)
       return refuse(request, refusal("arguments", `Malformed arguments for '${request.op}'.`));
     let outcome: OpOutcome;
     try {

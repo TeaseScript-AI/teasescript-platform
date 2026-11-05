@@ -52,8 +52,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const exactly = (value: Record<string, unknown>, required: string[], optional: string[] = []) =>
   required.every((key) => Object.hasOwn(value, key)) &&
   Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
-const isStringArray = (value: unknown) =>
-  Array.isArray(value) && value.every((item) => typeof item === "string");
+/**
+ * Whether `value` is an array whose every element passes `test`, read by index: a cloned array keeps own properties
+ * such as an `every` of its own, and a hole is no element.
+ */
+function everyItem(value: unknown, test: (item: unknown) => boolean): boolean {
+  if (!Array.isArray(value)) return false;
+  for (let index = 0; index < value.length; index += 1)
+    if (!Object.hasOwn(value, index) || !test(value[index])) return false;
+  return true;
+}
+const isStringArray = (value: unknown) => everyItem(value, (item) => typeof item === "string");
 
 function isProject(value: unknown): value is PlayerProject {
   if (!isRecord(value) || !exactly(value, ["files"], ["images", "unreadableFiles"])) return false;
@@ -61,8 +70,8 @@ function isProject(value: unknown): value is PlayerProject {
   const images = value.images;
   const unreadable = value.unreadableFiles;
   return (
-    Array.isArray(files) &&
-    files.every(
+    everyItem(
+      files,
       (file) =>
         isRecord(file) &&
         exactly(file, ["path", "source"]) &&
@@ -70,25 +79,25 @@ function isProject(value: unknown): value is PlayerProject {
         typeof file.source === "string",
     ) &&
     (images === undefined ||
-      (Array.isArray(images) &&
-        images.every(
-          (image) =>
-            isRecord(image) &&
-            exactly(image, ["path", "keywords"], ["tagsProblem"]) &&
-            typeof image.path === "string" &&
-            isStringArray(image.keywords) &&
-            (image.tagsProblem === undefined || typeof image.tagsProblem === "string"),
-        ))) &&
+      everyItem(
+        images,
+        (image) =>
+          isRecord(image) &&
+          exactly(image, ["path", "keywords"], ["tagsProblem"]) &&
+          typeof image.path === "string" &&
+          isStringArray(image.keywords) &&
+          (image.tagsProblem === undefined || typeof image.tagsProblem === "string"),
+      )) &&
     (unreadable === undefined ||
-      (Array.isArray(unreadable) &&
-        unreadable.every(
-          (file) =>
-            isRecord(file) &&
-            exactly(file, ["path", "reason"], ["folder"]) &&
-            typeof file.path === "string" &&
-            typeof file.reason === "string" &&
-            (file.folder === undefined || typeof file.folder === "boolean"),
-        )))
+      everyItem(
+        unreadable,
+        (file) =>
+          isRecord(file) &&
+          exactly(file, ["path", "reason"], ["folder"]) &&
+          typeof file.path === "string" &&
+          typeof file.reason === "string" &&
+          (file.folder === undefined || typeof file.folder === "boolean"),
+      ))
   );
 }
 

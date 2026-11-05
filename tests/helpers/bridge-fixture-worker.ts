@@ -1,6 +1,7 @@
 import { workerData } from "node:worker_threads";
 import { isBuildIdentity } from "../../player/engine-bridge/protocol.js";
 import { parentHostPort } from "../../player/engine-bridge/node-port.js";
+import { CheckpointError } from "../../src/runtime/snapshot/checkpoint.js";
 import {
   type BridgeOps,
   type HostSession,
@@ -67,6 +68,18 @@ const ops: BridgeOps = {
     run: async (args) => {
       await new Promise((resolve) => setTimeout(resolve, typeof args === "number" ? args : 0));
       return { result: args };
+    },
+  },
+  checkpoint: {
+    session: "none",
+    checkArguments: (args) => args === null,
+    // An engine error that keeps its diagnostic in `info`, as restoring a checkpoint throws it.
+    run: () => {
+      throw new CheckpointError({
+        code: "TSK001",
+        message: "Checkpoint snapshot is invalid.",
+        path: "$.snapshot",
+      });
     },
   },
   exit: {
