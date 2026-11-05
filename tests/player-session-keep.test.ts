@@ -299,3 +299,125 @@ test("Start and Continue record the zone and clock at the click, not those prepa
   assert.equal(go.zone, "America/Sao_Paulo");
   assert.ok(go.epochMs! >= resumed && go.epochMs! <= Date.now());
 });
+
+/** Holds `at`'s next publication until `release()`; `entered` gives its update once it is issued. */
+function holdNext(at: ReturnType<typeof browser>) {
+  let issue: (update: KeptSessionUpdate) => void = () => {};
+  let release: () => void = () => {};
+  const entered = new Promise<KeptSessionUpdate>((resolve) => (issue = resolve));
+  const released = new Promise<void>((resolve) => (release = resolve));
+  const publish = at.kept.publish;
+  let held = false;
+  at.kept.publish = async (scope, update) => {
+    if (!held) {
+      held = true;
+      issue(update);
+      await released;
+    }
+    return publish(scope, update);
+  };
+  return { entered, release };
+}
+
+/** Prepares `plan`'s Start again on `host`'s page, as a host does for another script or the same one. */
+async function prepareAgain(host: KeepHost, plan: InstructionPlan) {
+  await host.prepareScript(plan, (options) =>
+    createPlayerRuntimeSession(plan, {
+      ...options,
+      ...host.scriptStorageOptions(),
+      ...host.temporalCapture(),
+    }),
+  );
+}
+
+test("a save still being stored leaves the plan JSON prepared for the next Start, of the same plan or another", async (context) => {
+  stubBrowser(context);
+  const [ends, asks] = [planJson(ENDS), planJson(ASKS)];
+  const writes = { ends: planWrites(context, ENDS), asks: planWrites(context, ASKS) };
+  for (const next of [ENDS, ASKS]) {
+    const at = browser();
+    const pending = holdNext(at);
+    const { host } = await page(context, at, ENDS);
+    await tasks();
+    await host.activate();
+    const first = await pending.entered;
+    await prepareAgain(host, next);
+    assert.equal(host.activation.value, "start");
+    await tasks();
+    pending.release();
+    await until(() => at.published.length > 0, "the first session was not kept");
+    await host.activate();
+    await until(() => at.published.length > 1, "the next session was not kept");
+    assert.equal(first.planJson, ends);
+    assert.equal(at.published.at(-1)!.planJson, next === ENDS ? ends : asks);
+  }
+  // One write each for ENDS's two pages and ASKS's, all before a Start.
+  assert.deepEqual([writes.ends.writes, writes.asks.writes], [2, 1]);
+});
+
+test("keep requests during a write become one more save, which appends the events after it", async (context) => {
+  const shown = stubBrowser(context);
+  const at = browser();
+  const pending = holdNext(at);
+  const { host } = await page(context, at, ASKS);
+  await tasks();
+  await host.activate();
+  await pending.entered;
+  shown.hide();
+  shown.hide();
+  pending.release();
+  await until(() => at.published.length > 1, "the requests were not kept");
+  await tasks();
+  assert.equal(at.published.length, 2);
+  const [first, second] = at.published;
+  assert.equal(second!.eventsFrom, first!.events.length);
+  assert.equal(second!.planJson, null);
+  assertEventsJson(second!);
+});
+
+test("Start and Continue capture a zone not seen before ahead of the click, and the click reuses it", async (context) => {
+  stubBrowser(context);
+  const zone = process.env["TZ"];
+  context.after(() => {
+    if (zone === undefined) delete process.env["TZ"];
+    else process.env["TZ"] = zone;
+  });
+  // A zone's rules are captured with a `longOffset` formatter, once per zone and page.
+  const captured: string[] = [];
+  const RealFormat = Intl.DateTimeFormat;
+  const note = (options: Intl.DateTimeFormatOptions | undefined) => {
+    if (options?.timeZoneName === "longOffset") captured.push(String(options.timeZone));
+  };
+  Intl.DateTimeFormat = new Proxy(RealFormat, {
+    construct(target, args) {
+      note(args[1]);
+      return new target(args[0], args[1]);
+    },
+    apply(target, _self, args) {
+      note(args[1]);
+      return target(args[0], args[1]);
+    },
+  });
+  context.after(() => (Intl.DateTimeFormat = RealFormat));
+  const at = browser();
+  process.env["TZ"] = "Pacific/Marquesas";
+  const { host } = await page(context, at, ASKS);
+  assert.deepEqual(captured, [], "not within the preparation itself");
+  await tasks();
+  assert.deepEqual(captured, ["Pacific/Marquesas"]);
+  await host.activate();
+  await until(() => at.published.length > 0, "the session was not kept");
+  assert.deepEqual(captured, ["Pacific/Marquesas"], "Start captured the zone again");
+
+  process.env["TZ"] = "Pacific/Chatham";
+  const reloaded = (await page(context, at, ASKS)).host;
+  assert.equal(reloaded.activation.value, "continue");
+  await tasks();
+  assert.deepEqual(captured, ["Pacific/Marquesas", "Pacific/Chatham"]);
+  await reloaded.activate();
+  assert.deepEqual(
+    captured,
+    ["Pacific/Marquesas", "Pacific/Chatham"],
+    "Continue captured it again",
+  );
+});
