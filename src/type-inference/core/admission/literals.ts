@@ -388,11 +388,13 @@ export function literalElements(
             ? (drive(admission, earliestDecider(admission, of.value!, of.node, prefix, null))
                 ?.term ?? null)
             : null;
-          // (either: a join's other operand may bring the null a written copy's term lacks, Codex r1's B1)
-          return (
-            (copied !== null && typeTags(copied).includes("null")) ||
-            admission.valueAt(of, prefix).some((item) => item.tag === "null")
-          );
+          // (a plain copy of a written binding is its term, whatever a rejected store put there, Codex r2's B1; anything
+          // else holding one, a join, also what its other operands bring, Codex r1's B1)
+          const kind = program.place(of.value!).kind;
+          const plain = kind.kind === "value" && kind.node === "identifier";
+          const written = copied !== null && typeTags(copied).includes("null");
+          if (copied !== null && plain) return written;
+          return written || admission.valueAt(of, prefix).some((item) => item.tag === "null");
         });
       const optional = mixedOptional(layers(first.get(at)!.d), layers(d));
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {

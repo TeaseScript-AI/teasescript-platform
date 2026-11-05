@@ -2726,6 +2726,15 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let a:integer[][]=[[1]]\nlet xs=[a+[[1],null],[["x"]]]\nexit\n',
       `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
     ],
+    // (a plain copy of a written binding is its declared type, whatever a rejected store put there: Codex r2's B1)
+    [
+      'let a:integer[][]=[[1],null]\nlet xs=[a,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\na+=[null]\nlet xs=[a,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
     // (no layer that may hold null: plain)
     [
       'let a:integer[][]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
