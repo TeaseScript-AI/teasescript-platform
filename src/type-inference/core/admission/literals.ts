@@ -1339,15 +1339,17 @@ export interface MixedOptional {
 /**
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
  * items hold (the lead's ruling (A) on #1789, after Codex r1–r8 and Astra r1):
- * - at its own level (no step left), any value by its own items, but an `otherwise` by its fallback, where its operand's
- *   items hold null (`1 otherwise null` holds none: its fallback never runs);
+ * - at its own level (no step left), any value by its own items, but an `otherwise` by its fallback, where its operand
+ *   may be null (`1 otherwise null` holds none: its fallback never runs);
  * - a literal, by its children at the layer's next step, each by this same rule below;
  * - a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and
  *   default, a method's receiver, a dict's values, a `+` join's admitted operands), by each value it carries, at the
- *   path into it; an `otherwise`'s fallback only where its operand's own items hold null;
+ *   path into it; an `otherwise`'s fallback only where its operand may be null;
  * - a written copy, by its term alone, whatever a rejected store put there;
  * - another read or a call's result, by its place's admitted type where admission decides it;
  * - any other value (an undecided place's read, an operation's own result), by its own items.
+ * An `otherwise`'s operand may be null where its items at its node hold null, narrowed as it is read there (Codex r3 on
+ * #1819: a written copy narrowed by its assignment or a test never runs its fallback, as the current checker reads it).
  * A join has no case of its own: the carrier table gives only its admitted operands (`joined`), so a rejected operand
  * brings nothing (ADR 0021 1.1, Astra r1's B1; Codex r9).
  * Each value at each path is asked once per pass (`OPTIONAL`), whichever literal's or join's error asks it, so a wide
@@ -1367,16 +1369,20 @@ function mayHoldNull(
     withoutEmpty(admission.run(contract.contractOfValueAt(at, steps))).some(
       (item) => item.tag === "null",
     );
+  // (an `otherwise`'s operand may be null where its items at its node hold null, narrowed as it is read there: a
+  // written copy narrowed by its assignment or a test never runs its fallback, as the current checker reads it)
+  const operandNull = (at: PlaceId, from: FlowNode): boolean =>
+    admission.items(at, from, []).some((item) => item.tag === "null");
   type Part = readonly [PlaceId, FlowNode, readonly string[]];
   // (a value's answer at a path where its form decides it, else the parts whose answers decide it)
   const expand = (at: PlaceId, from: FlowNode, steps: readonly string[]): boolean | Part[] => {
     admission.work.charge("checks");
     if (steps.length === 0) {
-      // (an `otherwise`'s own null is its fallback's, where its operand's items hold one: the operand's null is what the
+      // (an `otherwise`'s own null is its fallback's, where its operand may be null: the operand's null is what the
       // fallback replaces, Codex r3 on #1819)
       const op = program.opOf.get(at);
       if (op?.kind === "fallback")
-        return itemsHold(op.left, []) ? [[op.right, from, []] as const] : false;
+        return operandNull(op.left, from) ? [[op.right, from, []] as const] : false;
       return itemsHold(at, []);
     }
     if (program.hasOf.has(at)) {
@@ -1388,7 +1394,7 @@ function mayHoldNull(
     const carried = admission.carriersOf(at, steps);
     if (carried.length > 0) {
       const operand = carried.find(([, , role]) => role === "otherwise/operand")?.[0];
-      const falls = operand === undefined || itemsHold(operand, []);
+      const falls = operand === undefined || operandNull(operand, from);
       return carried
         .filter(([, , role]) => role !== "otherwise/fallback" || falls)
         .map(([part, strip]) => [part, from, strip] as const);
