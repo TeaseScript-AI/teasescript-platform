@@ -1,6 +1,14 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, keptParts } from "../budget.js";
-import { keyBelowRef, restPart, restRef, restTo, stepsRest, type Rest } from "./key-ids.js";
+import { joinParts, joinSteps, keptParts } from "../budget.js";
+import {
+  isSteps,
+  keyBelowRef,
+  restPart,
+  restRef,
+  restTo,
+  stepsRest,
+  type Rest,
+} from "./key-ids.js";
 import type { Contract } from "../contract.js";
 import { type Key } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
@@ -19,7 +27,6 @@ import {
   propertyIndex,
   propertyLack,
 } from "./literal-index.js";
-import { lackingAt } from "./literal-items.js";
 import { annotated, collectMarks, depthOf, marksAt, marksNothing } from "./marks.js";
 import type {
   EntryGroup,
@@ -238,7 +245,8 @@ export function* propertyItems(
         group,
         rest,
         withWriter(
-          membersMissing(
+          // #1668: I, the read keeps its flow, its `missing` writer the members' (`membersMissing`)
+          yield* membersMissing(
             contract,
             group,
             rest,
@@ -439,69 +447,120 @@ function foldGroups(
 }
 
 /**
- * #1323: a group's items at `rest` (below its steps), F11's `missing` among them each member's own, the earliest of
- * them (F28), as each entry's answer with the sharing off: a member's literal is alike the group's below the path its
- * fold merged them at, so it lacks a step where the group's does, its own object there the one its entry names. The
- * group's first member's objects map to the earliest members' at each step of the path, one `lackingAt` per member
- * and step, each once per literal; only where the items hold a `missing` and the group more than one member.
+ * #1323 (TABLE r4.72): a group's items at `rest` (below its steps), F11's `missing` among them named as the unshared
+ * join names it: by the earliest (`firstWriter`, F28) `missing` writer among its members' own completed reads there,
+ * each `contractOfValueAt(member.literal, member.at + rest)`, the other items, reasons, context and the holder's
+ * position the group's (`EMPTY` has no writer). The fold's equivalence proves where its members hold a `missing`: only
+ * where the group's items do, and a group of one member is its entry. Reads that the equivalence proves alike share one
+ * scan (`absenceClass`); a scan is kept only where it rests on no solver answer (`ownAbsence`).
  */
-export function membersMissing(
+export function* membersMissing(
   contract: Contract,
   group: LevelGroup,
   rest: Rest,
   items: readonly Item[],
-): readonly Item[] {
+): Work<readonly Item[]> {
   const list = group.members;
-  if (
-    list === undefined ||
-    !items.some((item) => item.tag === "unknown" && item.reasons === REASON.missing)
-  )
-    return items;
-  // (once per group and path: a read asked again maps by what its first ask found)
-  const byPath = MEMBERS_MISSING.get(group) ?? new Map<string, Map<Writer, Writer>>();
-  MEMBERS_MISSING.set(group, byPath);
-  const memoKey = joinParts("missing", restPart(rest));
-  let earliest = byPath.get(memoKey);
+  const missing = (item: Item): boolean =>
+    item.tag === "unknown" && item.reasons === REASON.missing;
+  if (list === undefined || !items.some(missing)) return items;
+  const kept = keptAbsences(contract);
+  const shared = absenceClass(contract, group, list, items.filter(missing));
+  let earliest = shared === null ? undefined : kept.get(shared);
   if (earliest === undefined) {
-    earliest = new Map<Writer, Writer>();
-    contract.keepText(memoKey.length);
-    const own = walkLacking(contract, list[0]!, rest);
-    for (const member of list.slice(1)) {
-      const theirs = walkLacking(contract, member, rest);
-      for (const [step, token] of own.entries()) {
-        const other = theirs[step] ?? null;
-        if (token === null || other === null) continue;
-        contract.keep(1);
-        earliest.set(token, firstWriter(earliest.get(token) ?? token, other)!);
+    let own = true;
+    earliest = null;
+    for (const member of list) {
+      let found = false;
+      // #1668: K, a member's own read names the writer of the group's `missing`; none of its items is included
+      for (const item of yield* contract.contractOfValueAt(
+        member.literal,
+        isSteps(rest) ? joinSteps(member.at, rest) : rest.after(member.at),
+      )) {
+        if (!missing(item) || item.writer === null) continue;
+        found = true;
+        own &&= ownAbsence(contract, member.literal).has(item.writer);
+        earliest = firstWriter(earliest, item.writer);
       }
+      own &&= found;
     }
-    byPath.set(memoKey, earliest);
+    if (shared !== null && own) {
+      contract.keepText(shared.length);
+      kept.set(shared, earliest);
+    }
   }
-  const found = earliest;
-  return items.map((item) =>
-    item.tag === "unknown" && item.reasons === REASON.missing && item.writer !== null
-      ? { ...item, writer: found.get(item.writer) ?? item.writer }
-      : item,
+  const writer = earliest;
+  return writer === null
+    ? items
+    : items.map((item) => (missing(item) ? { ...item, writer } : item));
+}
+
+/**
+ * The scan a group's read shares with the other reads of its members (`membersMissing`), or `null`: where its
+ * members stand at the same steps and each `missing` it holds is its first member's own object, at a node of its own
+ * literal and a position there. Their fold keys hold, at each step and below, the same objects' names in the same
+ * order, so at each such node every member lacks a step at the same position as the first: every read whose missing
+ * stand there names the same objects of each member, whatever step below it lacks.
+ */
+function absenceClass(
+  contract: Contract,
+  group: LevelGroup,
+  list: readonly LevelGroup[],
+  missing: readonly Item[],
+): string | null {
+  const steps = group.at.join(".");
+  if (list.some((member) => member.at.join(".") !== steps)) return null;
+  const own = ownAbsence(contract, group.literal);
+  const places: string[] = [];
+  for (const item of missing) {
+    const place = item.writer === null ? undefined : own.get(item.writer);
+    if (place === undefined) return null;
+    places.push(place);
+  }
+  return joinParts(
+    "absent",
+    list.map((member) => member.literal).join(","),
+    steps,
+    [...new Set(places)].sort().join(","),
   );
 }
 
-/** `membersMissing`'s maps, per group (a pass's own groups) and path. */
-const MEMBERS_MISSING = new WeakMap<LevelGroup, Map<string, Map<Writer, Writer>>>();
-
-/** Each step's lacking object of a member's literal along its path (its steps, then `rest`), or `null`. */
-function walkLacking(contract: Contract, member: LevelGroup, rest: Rest): (Writer | null)[] {
-  const index = contract.literalIndex(member.literal);
-  const out: (Writer | null)[] = [];
-  let id = 0;
-  const length = member.at.length + rest.length;
-  contract.keep(length);
-  for (let step = 0; step < length; step += 1) {
-    const name = step < member.at.length ? member.at[step]! : rest.at(step - member.at.length)!;
-    if (step >= member.at.length) out.push(lackingAt(contract, index, id, name));
-    id = pathBelow(contract, id, name);
+/**
+ * A literal's own objects, by token, each its node's path id and position: a `missing` naming one is the literal's
+ * structure alone (`lackingAt`), never a solver answer, so a scan of such missing is kept for the pass. Once per
+ * literal, each node charged as it is found (`nodeAt`).
+ */
+function ownAbsence(contract: Contract, literal: PlaceId): ReadonlyMap<Writer, string> {
+  const index = contract.literalIndex(literal);
+  let known = OWN_ABSENCE.get(index);
+  if (known === undefined) {
+    known = new Map();
+    for (const [position, object] of (index.root.objects?.list ?? []).entries()) {
+      contract.keep(1);
+      known.set(object.token, `0:${position}`);
+    }
+    for (const [id] of indexPaths(contract, index))
+      for (const [position, object] of (
+        nodeAt(contract, index, id)?.objects?.list ?? []
+      ).entries()) {
+        contract.keep(1);
+        known.set(object.token, `${id}:${position}`);
+      }
+    OWN_ABSENCE.set(index, known);
   }
-  return out;
+  return known;
 }
+
+/** `ownAbsence`'s maps, per literal index. */
+const OWN_ABSENCE = new WeakMap<object, Map<Writer, string>>();
+
+/** `membersMissing`'s kept scans, per contract (a pass's): by class, the earliest writer. */
+function keptAbsences(contract: Contract): Map<string, Writer | null> {
+  let kept = KEPT_ABSENCES.get(contract);
+  if (kept === undefined) KEPT_ABSENCES.set(contract, (kept = new Map()));
+  return kept;
+}
+const KEPT_ABSENCES = new WeakMap<Contract, Map<string, Writer | null>>();
 
 /**
  * A literal's structure by path, once (§4.6): what stands at each path of its index itself (its own terms' kinds,

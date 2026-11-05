@@ -591,7 +591,8 @@ function* contractAlong(
                 group,
                 rest,
                 withWriter(
-                  membersMissing(
+                  // #1668: I, the read keeps its flow, its `missing` writer the members' (`membersMissing`)
+                  yield* membersMissing(
                     contract,
                     group,
                     rest,

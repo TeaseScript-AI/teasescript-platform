@@ -1012,7 +1012,7 @@ function* levelsAt(contract: Contract, prefix: Key, rest: Rest): Work<readonly I
           group,
           rest,
           withWriter(
-            membersMissing(
+            yield* membersMissing(
               contract,
               group,
               rest,

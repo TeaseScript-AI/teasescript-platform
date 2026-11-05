@@ -2068,7 +2068,8 @@ test("the stop oracle counts each check's content on both sides, a further copy 
     }).includes(`extra check ${owned0}`),
   );
   // (and a further copy of a boundary that forms only with the marks, #1448's, is an extra: what forms takes one credit,
-  // Codex r4's control on #1663, forward with the sharing, a settled walk stop at program allowance 1,218)
+  // Codex r4's control on #1663, forward with the sharing, a settled walk stop at program allowance 1,200: the boundary
+  // forms there on main and with #1323, whose natural total is lower)
   const formedCase: HeldCase = {
     name: "formed-boundary",
     source:
@@ -2077,7 +2078,7 @@ test("the stop oracle counts each check's content on both sides, a further copy 
     values: [],
   };
   const plainRun = heldRun(formedCase, HELD_MODES[0]!);
-  const walked = heldRun(formedCase, HELD_MODES[0]!, 1218);
+  const walked = heldRun(formedCase, HELD_MODES[0]!, 1200);
   const isBoundary = (x: Answers["checks"][number]): boolean =>
     x.boundary &&
     x.target === "root" &&

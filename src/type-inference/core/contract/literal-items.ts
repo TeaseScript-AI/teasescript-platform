@@ -33,7 +33,7 @@ import { selectionOf, selectionPieces } from "./selections.js";
 // A literal's items at a path from its index, and its type or its cell's stores at a path.
 
 /** F11: the first object at the path without the property, once per (path, property): its token, or `null`. */
-export function lackingAt(
+function lackingAt(
   contract: Contract,
   index: LiteralIndex,
   path: number,
