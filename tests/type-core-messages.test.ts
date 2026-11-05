@@ -2803,6 +2803,11 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let a:integer[]?=null\nlet xs=[[a otherwise [1]],[["x"]]]\nexit\n',
       `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
     ],
+    // (a value with no place, a method's result: its own items)
+    [
+      'let xs=[[[1],null].take(2),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
     // (a property read of a literal-bound binding holding no null: plain)
     [
       'let o={p:[[1]]}\nlet xs=[o.p,[["x"]]]\nexit\n',
