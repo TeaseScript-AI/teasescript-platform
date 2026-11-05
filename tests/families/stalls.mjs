@@ -523,7 +523,8 @@ if (replayFiles.length === 0 || (args.includes("--index") && indexFile === undef
 const replay = new Map();
 const areas = new Map();
 const areaNamed = (name) => {
-  if (!areas.has(name)) areas.set(name, { shards: new Set(), configuration: undefined });
+  if (!areas.has(name))
+    areas.set(name, { shards: new Set(), places: new Set(), configuration: undefined });
   return areas.get(name);
 };
 for (const shard of replayFiles.map(shardOf)) {
@@ -542,6 +543,7 @@ for (const shard of replayFiles.map(shardOf)) {
   if (area.shards.has(shard.ran.shard))
     refused(`${shard.file} records a shard another record holds`);
   area.shards.add(shard.ran.shard);
+  if (shard.ran.places !== undefined) area.places.add(shard.ran.places);
 }
 const rerun = new Map();
 for (const shard of rerunFiles.map(shardOf)) {
@@ -626,24 +628,32 @@ for (const [place, was] of replay) {
 const total = zeros();
 let closed = true;
 for (const [area, row] of rows) {
-  // complete: shards 0/N to N-1/N of one N, each once (a shard's sources are those whose index is i modulo N)
-  const { shards } = areas.get(area);
+  // complete: shards 0/N to N-1/N of one N, each once (a shard's sources are those whose index is i modulo N); or an
+  // item pool's batches alone (`items <hash>`, #1826), each naming the area's count of sources, which they hold
+  const { shards, places } = areas.get(area);
+  const batches = [...shards].filter((shard) => shard.startsWith("items "));
   const counts = new Set([...shards].map((shard) => shard.split("/")[1]));
   const [count] = counts;
   const missing =
-    counts.size === 1
+    batches.length === 0 && counts.size === 1
       ? Array.from({ length: Number(count) }, (_, index) => `${index}/${count}`).filter(
           (shard) => !shards.has(shard),
         )
       : [];
-  const complete = counts.size === 1 && missing.length === 0 && shards.size === Number(count);
+  const [held] = places;
+  const complete =
+    batches.length > 0
+      ? batches.length === shards.size && places.size === 1 && row.sources === held
+      : counts.size === 1 && missing.length === 0 && shards.size === Number(count);
   closed &&= complete;
   const recorded =
     shards.size === 0
       ? "stalls only"
-      : counts.size === 1
-        ? `${shards.size}/${count}`
-        : [...shards].sort();
+      : batches.length > 0
+        ? `${batches.length} batches, ${row.sources} of ${places.size === 1 ? held : [...places].join(" or ")} sources`
+        : counts.size === 1
+          ? `${shards.size}/${count}`
+          : [...shards].sort();
   const gaps = missing.length > 0 ? { missing } : {};
   console.log(JSON.stringify({ area, shards: recorded, complete, ...gaps, ...row }));
   for (const key of Object.keys(total)) total[key] += row[key];

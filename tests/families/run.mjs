@@ -1,6 +1,6 @@
 // node tests/families/run.mjs <area> <base> <head> [--sizes 4,8] [--allowances natural,16,256] [--shard i/N]
 //   [--units 4] [--timeout 1800] [--memory 2048] [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl]
-//   [--only <index>]
+//   [--only <index>] [--items <file> | --items-from-env]
 // node tests/families/run.mjs <area> <head> --baseline <folder> [options]
 // node tests/families/run.mjs <area> <tree> --store <folder> [--shard i/N]
 // Runs every generator of tests/families/<area>/ (or of the folder an absolute <area> names) against two built trees (a
@@ -28,7 +28,8 @@
 // cut. `--work` keeps a record of each source: each run's charged work (the units its analyses charge their work
 // ledgers), allowance and milliseconds on each tree (with `--baseline`, the stored base's units first), a stalled run's
 // up to the stall, and what the source counted (#1564), which `stalls.mjs` reads; `--only` runs the sources of the area
-// that a stall index lists.
+// that a stall index lists; `--items` (or `--items-from-env`, an item pool's batch in `$SX_ITEMS`) the sources whose
+// places its file lists (`items.mjs sources`, #1826), its `--work` record named `items <hash>` in place of a shard.
 // Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, unansweredAlike,
 // uncompared, uncharged, modes, runs, differences.
 import { fork } from "node:child_process";
@@ -330,12 +331,14 @@ if (process.argv[2] === "--child") {
     process.send(reply);
   });
 } else {
-  // each option takes one value; the other arguments are the area and its trees
+  // each option takes one value but a flag (`FLAGS`); the other arguments are the area and its trees
+  const FLAGS = new Set(["items-from-env"]);
   const args = process.argv.slice(2);
   const options = new Map();
+  const takes = (arg) => arg?.startsWith("--") && !FLAGS.has(arg.slice(2));
   const [area, ...roots] = args.filter((arg, index) => {
-    if (arg.startsWith("--")) options.set(arg.slice(2), args[index + 1]);
-    return !arg.startsWith("--") && !args[index - 1]?.startsWith("--");
+    if (arg.startsWith("--")) options.set(arg.slice(2), FLAGS.has(arg.slice(2)) || args[index + 1]);
+    return !arg.startsWith("--") && !takes(args[index - 1]);
   });
   const option = (name) => options.get(name);
   /** A usage the runner refuses (exit 2), before any source runs. */
@@ -390,6 +393,11 @@ if (process.argv[2] === "--child") {
   const memory = Number(option("memory") ?? DEFAULTS.memory);
   if (store !== undefined && options.has("only"))
     refused("--store stores whole shards: drop --only");
+  const itemized = options.has("items") || options.has("items-from-env");
+  if (itemized && (store !== undefined || options.has("shard") || options.has("only")))
+    refused("--items runs the sources it lists: drop --store, --shard and --only");
+  if (options.has("items") && options.has("items-from-env"))
+    refused("--items and --items-from-env: give one");
   // the runner's own files (`--out`, and `--work`'s record of each source, #1564) lie outside every baseline: not in the
   // folder it stores into or reads, nor in the folder of baselines of the baseline it reads, nor in any baseline (#1542
   // r4, r5), all as the system resolves them; each is a new file, never the old one truncated, so that another link to
@@ -576,7 +584,7 @@ if (process.argv[2] === "--child") {
   const every = await generatorsOf(folder, sizesOption);
   // with `--work` or `--only`, every source's place in the area's order, before a shard or `--only` selects any
   const places =
-    work === undefined && !options.has("only")
+    work === undefined && !options.has("only") && !itemized
       ? []
       : every.flatMap(({ name, sources }) => sources.map((source) => placeOf(name, source)));
   // `--only`: of this area, the sources a stall index lists (`stalls.mjs`), each of which the area must hold
@@ -598,12 +606,48 @@ if (process.argv[2] === "--child") {
     const missing = [...only].filter((place) => !held.has(place));
     if (missing.length > 0) refused(`--only names sources the area does not hold: ${missing}`);
   }
+  // `--items <file>` (or `--items-from-env`, the file the central queue's `$SX_ITEMS` names: an item pool's batch,
+  // #1826): the sources whose places the file lists, one `placeOf` line each (`items.mjs sources`), each once and each
+  // a source of the area; its record names the batch (`items <hash>`), so a pool's records are its batches
+  let items;
+  if (itemized) {
+    const file = options.has("items") ? option("items") : process.env.SX_ITEMS;
+    if (typeof file !== "string" || file === "")
+      refused("--items-from-env: $SX_ITEMS names no file of sources");
+    let lines;
+    try {
+      lines = readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => line.trim() !== "");
+    } catch (error) {
+      refused(`--items ${file}: ${error.message}`);
+    }
+    items = new Set();
+    for (const line of lines) {
+      let place;
+      try {
+        place = JSON.parse(line);
+      } catch {
+        place = undefined;
+      }
+      if (!Array.isArray(place) || place.length !== 3 || !place.every((x) => typeof x === "string"))
+        refused(`--items: ${line} is no source's place ([generator, name, key])`);
+      const text = JSON.stringify(place);
+      if (items.has(text)) refused(`--items lists ${text} twice`);
+      items.add(text);
+    }
+    if (items.size === 0) refused(`--items ${file} lists no source`);
+    const held = new Set(places);
+    const missing = [...items].filter((place) => !held.has(place));
+    if (missing.length > 0) refused(`--items names sources the area does not hold: ${missing}`);
+  }
   const generators = every.map(({ sources, ...generator }) => ({
     ...generator,
     sources: sources.filter(
       (source, index) =>
         index % shards === shard &&
-        (only === undefined || only.has(placeOf(generator.name, source))),
+        (only === undefined || only.has(placeOf(generator.name, source))) &&
+        (items === undefined || items.has(placeOf(generator.name, source))),
     ),
   }));
   /**
@@ -649,7 +693,7 @@ if (process.argv[2] === "--child") {
     const top = await owned(store, identity, `commit ${commit} ${tree}`);
     if (top.refused !== undefined) refused(top.refused);
     const name = path.basename(folder);
-    const plan = await planned(top.baseline, name, planOf(name, every, shards));
+    const plan = await planned(top.baseline, name, planOf(name, every, shards), true);
     if (plan.refused !== undefined) refused(plan.refused);
     // (the area as every reader reads it, `areaRead`, which `planned` gives)
     storing = await beginShard(top.baseline, plan.area, shard);
@@ -706,7 +750,15 @@ if (process.argv[2] === "--child") {
   worked({
     work: {
       area,
-      shard: `${shard}/${shards}`,
+      shard:
+        items === undefined
+          ? `${shard}/${shards}`
+          : `items ${createHash("sha256")
+              .update([...items].sort().join("\n"))
+              .digest("hex")
+              .slice(0, 16)}`,
+      // (a batch names the area's count of sources, so that its pool's batches together are known whole: `stalls.mjs`)
+      ...(items === undefined ? {} : { places: new Set(places).size }),
       roots,
       ...(baseline === undefined ? {} : { baseline }),
       ...(store === undefined ? {} : { store: option("store") }),

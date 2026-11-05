@@ -9,7 +9,8 @@
 # so that a pull request runs only its head against them (`run.mjs <area> <head> --baseline <baseline>/<area>`).
 # tests/families/baselines.mjs reads and writes every baseline, ~/work/baselines/<src tree>/: its MANIFEST (what its runs
 # depend on, the commits stored there, each area's PLAN), shards that count only once verified, and `state`. Nothing
-# removes a baseline. Builders store with `run.mjs <area> <tree> --store ~/work/baselines --shard i/16`, under
+# removes a baseline. Builders store with `run.mjs <area> <tree> --store ~/work/baselines --shard i/N` (N the area's PLAN
+# count: `copies` 64 where a baseline first plans it, every other area 16; #1826), under
 # `sx-sandbox --write ~/work/baselines/<src tree> --write <scratch>` (below). `status` prints `state --read-only` of the
 # commit's shared tree (`sx-tree` builds it once where it is missing) as one line, and exits as it does: 0 only when
 # every area is complete, 2 where the baseline is not this tool's or holds runs of other inputs.
@@ -47,7 +48,7 @@
 # runs of other inputs, every area is complete or a writer is storing one. Else `queue` leaves a copy of this script in
 # the baseline for its jobs, so that a later install does not change a fill already queued, and undoes the tree's
 # SUPERSEDED (the tree is the current one again); then the hook queues one job per shard to store that has no job
-# pending or running (`sx-queue status`): 16 per area or its PLAN's count (`sx-queue add --owner baseline`, priority 7,
+# pending or running (`sx-queue status`): its PLAN's count per area (`sx-queue add --owner baseline`, priority 7,
 # of which the queue runs at most two at once, lead 2026-10-31, so a fill takes idle cores). `sx-tree` runs its hooks
 # one at a time. A job runs the copy, decides with `start` (below) and runs the tree's runner (`--store`), which ends at
 # once where its shard verifies or another running writer stores it; a job ends 0 where its shard then verifies or is
@@ -292,7 +293,7 @@ while IFS=$'\t' read -r folder n shards; do
     fi
   done
 done < <(jq -r 'select(.area and .store and .store != [])
-  | [.folder, (.shards // 16), (if .store == "all" then "all" else (.store | map(tostring) | join(",")) end)] | @tsv' \
+  | [.folder, .shards, (if .store == "all" then "all" else (.store | map(tostring) | join(",")) end)] | @tsv' \
   <<< "$lines")
 jq -r 'select(.state == "another plan") | "baseline: \(.area) is planned otherwise, not filled"' <<< "$lines"
 [ "$unqueued" -eq 0 ] || fail "$unqueued jobs not queued ($queued queued now); call again to queue them"
