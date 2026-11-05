@@ -5,7 +5,8 @@ import { compileProjectWithBackend } from "../src/compiler.js";
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { nodeOf, SliceIndex } from "../src/type-inference/core/consumer.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
+import { derive, syntaxOf, Underivable } from "./helpers/type-core-derived.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { narrowingPassIn } from "./helpers/type-core-narrowing.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
@@ -332,6 +333,34 @@ test("a literal default keeps the contract's own walk: cp9-cells/F18/load-intege
       },
       { total: 246, decisions: [15], default: [4] },
       JSON.stringify(mode),
+    );
+  }
+});
+
+test("the S7 oracle leaves a typed default that reads a variable underived, a loop's own included (#1760)", () => {
+  // (a variable's state at the call is the core's, F18, which the oracle does not derive yet; never a default with no
+  // structure, as a host value's is)
+  for (const source of [
+    "let d = 0\nlet result = fromJson(hostValue, default: d, files: false)\nsay result\nexit\n",
+    "for entry in [0] {\n  let result = fromJson(hostValue, default: entry, files: false)\n  say result\n}\nexit\n",
+    'for entry in [0] {\n  let result = load("k", default: entry)\n  say result\n}\nexit\n',
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+    assert.ok(request !== null, source);
+    assert.notEqual(
+      compileProjectWithBackend(
+        [{ path: "main.tease", source }],
+        { globals: GLOBALS },
+        CORE_BACKEND,
+      ).plan,
+      null,
+      source,
+    );
+    assert.throws(
+      () => derive(syntaxOf(source), compactAnalysis(request)),
+      (error) =>
+        error instanceof Underivable && error.message === "a default that reads a variable",
+      source,
     );
   }
 });

@@ -594,19 +594,21 @@ function literalType(
 }
 
 /**
- * A typed default that reads a value (F18): a host value has no structure; a variable's state at the call is not
+ * A typed default that reads a value (F18): a host value has no structure; a variable's (a `let`'s or a loop's) state
+ * at the call is not
  * derived here (the snapshot reader is lane 3's tests item, #1760), so a default that reads one is underivable.
  */
 function readDefault(read: Expression, statements: readonly Statement[]): null {
   let root = unwrap(read);
   while (root.kind === "propertyAccessExpression" || root.kind === "indexExpression")
     root = unwrap(root.object);
-  if (
-    root.kind !== "identifier" ||
-    statements.some(
-      (statement) => statement.kind === "letStatement" && statement.name.name === root.name,
-    )
-  )
+  // (a variable is declared by a `let` or a `for` loop's variables)
+  const declares = (statement: Statement, name: string): boolean =>
+    statement.kind === "letStatement"
+      ? statement.name.name === name
+      : statement.kind === "forStatement" &&
+        (statement.variable.name === name || statement.valueVariable?.name === name);
+  if (root.kind !== "identifier" || statements.some((statement) => declares(statement, root.name)))
     throw new Underivable("a default that reads a variable");
   return null;
 }
