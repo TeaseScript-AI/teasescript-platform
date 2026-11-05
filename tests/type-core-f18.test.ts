@@ -390,6 +390,24 @@ const WITNESSES: readonly {
     read: "d.n",
     derived: "integer",
   },
+  {
+    name: "a property store to a property named element",
+    source: "let d = {element: 1.5}\nd.element = 0\n@",
+    read: "d",
+    derived: "{element: integer}",
+  },
+  {
+    name: "a property named element, read",
+    source: "let d = {element: 1.5}\nd.element = 0\n@",
+    read: "d.element",
+    derived: "integer",
+  },
+  {
+    name: "a nested property named element",
+    source: "let d = {n: {element: 1.5}}\nd.n.element = 0\n@",
+    read: "d",
+    derived: "{n: {element: integer}}",
+  },
   { name: "a null field", source: "let d = {n: null}\n@", read: "d", derived: `{n: ${EVERY}}` },
   {
     name: "a copy at the copy",

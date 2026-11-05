@@ -643,7 +643,7 @@ function readDefault(
   const steps: string[] = [];
   let root = unwrap(read);
   while (root.kind === "propertyAccessExpression" || root.kind === "indexExpression") {
-    steps.unshift(root.kind === "propertyAccessExpression" ? root.property.name : "element");
+    steps.unshift(root.kind === "propertyAccessExpression" ? root.property.name : INDEX);
     root = unwrap(root.object);
   }
   if (root.kind !== "identifier")
@@ -692,6 +692,8 @@ type Snap =
   | { readonly t: "open" }
   | { readonly t: "refused"; readonly why: string };
 type Resolve = (name: string) => Snap;
+/** An index step of a snapshot's path, apart from every property name (a property may be named `element`). */
+const INDEX = "[]";
 type State = ReadonlyMap<string, Snap>;
 const OPEN: Snap = { t: "open" };
 const NULL: DerivedType = { kind: "kinds", kinds: ["null"] };
@@ -731,13 +733,13 @@ function valueType(snap: Snap): DerivedType | null {
     : part(snap.type);
 }
 
-/** The part of a value at `steps` (property names, `element`): open where the value holds no such part. */
+/** The part of a value at `steps` (property names, `INDEX`): open where the value holds no such part. */
 function partAt(snap: Snap, steps: readonly string[]): Snap {
   if (snap.t !== "type" || steps.length === 0) return snap;
   const [step, ...rest] = steps;
   const parts = (type: DerivedType): DerivedType[] => {
     if (type.kind === "union") return type.members.flatMap(parts);
-    if (step === "element" && type.kind !== "kinds" && type.kind !== "object")
+    if (step === INDEX && type.kind !== "kinds" && type.kind !== "object")
       return type.element === null ? [] : [type.element];
     if (type.kind === "object") {
       const property = type.properties.find((each) => each.name === step);
@@ -1047,7 +1049,7 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
         const steps: string[] = [];
         let root: Expression = at;
         while (root.kind === "propertyAccessExpression" || root.kind === "indexExpression") {
-          steps.unshift(root.kind === "propertyAccessExpression" ? root.property.name : "element");
+          steps.unshift(root.kind === "propertyAccessExpression" ? root.property.name : INDEX);
           root = unwrap(root.object);
         }
         // (host data is open; a read through an unmodelled value is refused, never open)
@@ -1072,7 +1074,7 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
   const replaced = (snap: Snap, steps: readonly string[], part: Snap): Snap => {
     if (steps.length === 0) return part;
     if (snap.t === "refused") return snap;
-    if (snap.t !== "type" || snap.type.kind !== "object" || steps[0] === "element")
+    if (snap.t !== "type" || snap.type.kind !== "object" || steps[0] === INDEX)
       return { t: "refused", why: "a property store below a value of no modelled structure" };
     const [name, ...rest] = steps;
     const own = snap.type.properties.find((property) => property.name === name);
@@ -1134,7 +1136,7 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
           let target: Expression = statement.target;
           while (target.kind === "propertyAccessExpression" || target.kind === "indexExpression") {
             steps.unshift(
-              target.kind === "propertyAccessExpression" ? target.property.name : "element",
+              target.kind === "propertyAccessExpression" ? target.property.name : INDEX,
             );
             target = target.object;
           }
