@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { before, type TestContext } from "node:test";
+import test, { after, before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
 import {
@@ -42,6 +42,15 @@ let usePlayerSession: (options: {
   capturedMedia: { repository: FakeMediaRepository };
   keptSessions: KeptSessionStore;
 }) => KeepHost;
+
+// Every page captures the zone `TZ` names into one module cache, so the file starts from a known zone, which no test
+// below treats as one not seen before.
+const inheritedZone = process.env["TZ"];
+process.env["TZ"] = "UTC";
+after(() => {
+  if (inheritedZone === undefined) delete process.env["TZ"];
+  else process.env["TZ"] = inheritedZone;
+});
 
 before(async () => {
   const module: Record<string, unknown> = await loadPlayerModule(
@@ -112,18 +121,21 @@ function browser() {
   return { provider, repository: new FakeMediaRepository(), kept, published, state };
 }
 
-/** Counts how often `plan` is written as JSON: the engine's writer gives a plan to `JSON.stringify`. */
-function planWrites(context: TestContext, plan: InstructionPlan) {
+/**
+ * Counts how often each of `plans` is written as JSON (the engine's writer gives a plan to `JSON.stringify`): the
+ * result gives the count of a plan, by default the first.
+ */
+function planWrites(context: TestContext, ...plans: InstructionPlan[]) {
   const stringify = JSON.stringify;
-  const count = { writes: 0 };
+  const counts = new Map<unknown, number>();
   JSON.stringify = new Proxy(stringify, {
     apply(target, _self, args) {
-      if (args[0] === plan) count.writes += 1;
+      if (plans.includes(args[0])) counts.set(args[0], (counts.get(args[0]) ?? 0) + 1);
       return target(args[0], args[1], args[2]);
     },
   });
   context.after(() => (JSON.stringify = stringify));
-  return count;
+  return (plan: InstructionPlan | undefined = plans[0]) => counts.get(plan) ?? 0;
 }
 
 /** A page of the Player in `at` that prepares `plan`'s Start, or Continue for the session `at` keeps. */
@@ -179,10 +191,10 @@ test("the first save stores the plan's JSON written before Start, and the events
   const at = browser();
   const { host } = await page(context, at, ASKS);
   await tasks();
-  assert.equal(writes.writes, 1, "prepared before Start");
+  assert.equal(writes(), 1, "prepared before Start");
   await host.activate();
   await until(() => at.published.length > 0, "the session was not kept");
-  assert.equal(writes.writes, 1, "Start wrote the plan again");
+  assert.equal(writes(), 1, "Start wrote the plan again");
   const [first] = at.published;
   assert.equal(first!.planJson, expected);
   assert.equal(first!.eventsFrom, 0);
@@ -193,7 +205,7 @@ test("the first save stores the plan's JSON written before Start, and the events
   await until(() => at.published.length > count, "the session was not kept again");
   assert.equal(at.published.at(-1)!.planJson, null);
   assertEventsJson(at.published.at(-1)!);
-  assert.equal(writes.writes, 1);
+  assert.equal(writes(), 1);
 });
 
 test("a Start before the preparation ran writes the plan's JSON itself, once, with the same bytes", async (context) => {
@@ -207,7 +219,7 @@ test("a Start before the preparation ran writes the plan's JSON itself, once, wi
   await until(() => at.published.length > 0, "the session was not kept");
   assert.equal(at.published[0]!.planJson, expected);
   await tasks();
-  assert.equal(writes.writes, 1);
+  assert.equal(writes(), 1);
 });
 
 test("a save the store refused is kept again with the same plan JSON, written only once", async (context) => {
@@ -227,7 +239,7 @@ test("a save the store refused is kept again with the same plan JSON, written on
   assert.equal(retried!.planJson, refused!.planJson);
   assert.equal(retried!.eventsFrom, 0);
   assertEventsJson(retried!);
-  assert.equal(writes.writes, 1);
+  assert.equal(writes(), 1);
   // Kept now: the next save keeps the stored plan.
   shown.hide();
   await until(() => at.published.length > 2, "the session was not kept a third time");
@@ -246,14 +258,14 @@ test("a session that ended starts anew with the plan JSON its restore wrote, and
   await host.toStartPage();
   assert.equal(host.activation.value, "start");
   // The prepared JSON and the restore's comparison; the next Start's first save writes none.
-  assert.equal(writes.writes, 2);
+  assert.equal(writes(), 2);
   await host.activate();
   await until(
     () => at.published.filter((update) => update.planJson !== null).length > 1,
     "the new session was not kept",
   );
   await tasks();
-  assert.equal(writes.writes, 2);
+  assert.equal(writes(), 2);
   for (const update of at.published.filter((update) => update.planJson !== null))
     assert.equal(update.planJson, expected);
 
@@ -261,7 +273,7 @@ test("a session that ended starts anew with the plan JSON its restore wrote, and
   const { scope } = await page(context, closing, ENDS);
   scope.stop();
   await tasks();
-  assert.equal(writes.writes, 2);
+  assert.equal(writes(), 2);
 });
 
 test("Start and Continue record the zone and clock at the click, not those prepared before it", async (context) => {
@@ -333,7 +345,7 @@ async function prepareAgain(host: KeepHost, plan: InstructionPlan) {
 test("a save still being stored leaves the plan JSON prepared for the next Start, of the same plan or another", async (context) => {
   stubBrowser(context);
   const [ends, asks] = [planJson(ENDS), planJson(ASKS)];
-  const writes = { ends: planWrites(context, ENDS), asks: planWrites(context, ASKS) };
+  const writes = planWrites(context, ENDS, ASKS);
   for (const next of [ENDS, ASKS]) {
     const at = browser();
     const pending = holdNext(at);
@@ -352,7 +364,7 @@ test("a save still being stored leaves the plan JSON prepared for the next Start
     assert.equal(at.published.at(-1)!.planJson, next === ENDS ? ends : asks);
   }
   // One write each for ENDS's two pages and ASKS's, all before a Start.
-  assert.deepEqual([writes.ends.writes, writes.asks.writes], [2, 1]);
+  assert.deepEqual([writes(ENDS), writes(ASKS)], [2, 1]);
 });
 
 test("keep requests during a write become one more save, which appends the events after it", async (context) => {
