@@ -1,9 +1,8 @@
 import type { OwnedDiagnosticCode } from "../../diagnostic-codes.js";
-import { createCapturedArray } from "../../external-data-capture.js";
+import { adoptParsedJson, createCapturedArray } from "../../external-data-capture.js";
 import { MAX_TEXT_LENGTH } from "../values/text-length.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { captureOrReuseInstructionPlan } from "../../plan/capture.js";
-import { freezeInstructionPlan } from "../../plan/freeze.js";
 import { markValidatedImmutableInstructionPlan } from "../../plan/validated-immutable.js";
 import { validateCapturedInstructionPlan } from "../../plan/validation.js";
 import {
@@ -271,6 +270,11 @@ export function deserializeCheckpoint(json: string): RuntimeCheckpoint {
   return restoreParsedCheckpoint(parsed);
 }
 
+/**
+ * `restoreCheckpoint` of checkpoint data that `JSON.parse` just built, with the same result and errors, without capture's
+ * copy: the parsed plan and snapshot are left as capture would leave them (`adoptParsedJson`), and data holding a number
+ * that is not finite goes to `restoreCheckpoint` for capture's own error.
+ */
 function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
   const envelope = captureCheckpointEnvelope(value);
   if (envelope.format !== CHECKPOINT_FORMAT) {
@@ -279,6 +283,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
   if (envelope.version !== CHECKPOINT_VERSION) {
     throw checkpointError("TSK001", "Unsupported checkpoint revision.", "$.version");
   }
+  if (!adoptParsedJson(envelope.plan, true)) return restoreCheckpoint(value);
   const planValidation = validateCapturedInstructionPlan(envelope.plan);
   if (!planValidation.valid) {
     const first = planValidation.errors[0];
@@ -289,9 +294,8 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
     );
   }
   // EVIDENCE: validation: validateCapturedInstructionPlan accepted this JSON-parsed plan above.
-  const plan = markValidatedImmutableInstructionPlan(
-    freezeInstructionPlan(envelope.plan as InstructionPlan),
-  );
+  const plan = markValidatedImmutableInstructionPlan(envelope.plan as InstructionPlan);
+  if (!adoptParsedJson(envelope.snapshot, false)) return restoreCheckpoint(value);
   const snapshotValidation = classifyCapturedRuntimeSnapshot(envelope.snapshot, plan);
   if (!snapshotValidation.validation.valid) {
     throw checkpointError(

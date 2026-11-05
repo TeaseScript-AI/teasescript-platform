@@ -950,6 +950,12 @@ of a `say` in a block. Any other quote remains the outer string's recovery bound
 
 Ordinary TeaseScript source is compiled through `compileSource(...)` into a validated instruction plan, then executed with fresh or restored explicit serializable runtime state. AST data and lowering remain compiler and authoring-tool internals, not product execution APIs.
 
+`src/playback.ts` is the playback entry: loading, running, saving, restoring and inspecting a plan, without loading a
+compiler, parser, lexer or language-tooling module. `src/index.ts`, the authoring entry, adds compilation and language
+tooling. `loadInstructionPlan(text)` loads a plan from JSON text that the engine parses itself: it returns the plan,
+the complete `validateInstructionPlan(JSON.parse(text))` result of data that is not one, or `unreadable` for input that is
+not JSON text, and a loaded plan is reused by runtime entry points as compiler output is.
+
 ### Low-level runtime route
 
 The compiler internally lowers semantically valid parser-owned AST data after `compileSource(...)` validation. This
@@ -1823,8 +1829,10 @@ whose status is halted or failed. Engine-owned sessions capture and completely v
 or restore; between those boundaries their operations run on private canonical state without repeating whole-snapshot
 capture or validation, while host requests, observations, values, and capability results keep their complete capture and
 validation ([Runtime sessions](#runtime-sessions)). Runtime and checkpoint operations also reuse a plan already captured
-and validated by that operation when validating the snapshot, and checkpoint data freshly produced by `JSON.parse(...)`
-goes directly through complete structural validation. Checkpoint restore validates its envelope, plan, snapshot, and
+and validated by that operation when validating the snapshot. Plan and checkpoint JSON text that the engine parses
+itself (`loadInstructionPlan`, `deserializeCheckpoint`) is not copied: its arrays get capture's prototype and its plan is
+frozen before complete structural validation, so it is decided as capture of the parsed data would be, and data holding a
+number that is not finite goes to capture for its error. Checkpoint restore validates its envelope, plan, snapshot, and
 their consistency before execution resumes. A generic capture depth/work or detailed-validation counter alone does not
 make otherwise structurally valid data malformed. Malformed or inconsistent plan and snapshot data still produces the
 existing public invalid results, `TSR100`, `TSR101`, or `TSK002`. The compact user-function call representation and its
