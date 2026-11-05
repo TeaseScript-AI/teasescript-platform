@@ -353,11 +353,17 @@ function hosted(frontier: Frontier, set: number): boolean {
 
 /** A host read's leaf: the runtime's unknown at every path, its ingress entered (`hostAt`, `entered`). */
 function hostLeaf(frontier: Frontier, value: PlaceId): number {
-  return leafNode(
+  const { guards, program } = frontier.contract.pass;
+  // (a host read under a test of its path is marked, `marked`: declined)
+  if (!guards.untested(program.occurrenceOf.get(value)!) || guards.guardedRead(value))
+    throw new Decline("guarded");
+  const id = leafNode(
     frontier,
     joinParts("h", value),
     () => entered(frontier.contract, value, hostAt({ length: 0, at: () => undefined }))[0]!,
   );
+  frontier.hosts.add(id);
+  return id;
 }
 
 // --- the summaries -------------------------------------------------------------------------------------------------
@@ -597,8 +603,7 @@ function termOf(frontier: Frontier, id: number): { leaves: number[]; next: numbe
   const value = (v: PlaceId): void => {
     step(frontier);
     const binding = program.occurrenceOf.get(v);
-    if (binding !== undefined && program.isHost(binding)) leaves.push(hostLeaf(frontier, v));
-    else if (
+    if (
       binding !== undefined ||
       program.projOf.has(v) ||
       (program.hasOf.has(v) && !program.cellOwner.has(v))
@@ -873,14 +878,9 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
 export function pushedValueSlot(contract: Contract, value: PlaceId): string | null {
   const { program } = contract.pass;
   if (!pushing || !program.projOf.has(value)) return null;
-  let root = value;
-  for (
-    let projection = program.projOf.get(root);
-    projection !== undefined;
-    projection = program.projOf.get(root)
-  )
-    root = projection.owner;
-  const binding = program.occurrenceOf.get(root);
+  // (the chain's root read, memoised and charged once per value and pass: `chainOf`)
+  const chain = contract.chainOf(value);
+  const binding = chain === null ? undefined : program.occurrenceOf.get(chain.root);
   if (binding === undefined) return null;
   return reachSlot(contract, keptParts(contract.work, "pv", value), binding, () =>
     collect(frontierOf(contract), (then) => eachValue(frontierOf(contract), value, then)),
@@ -944,6 +944,7 @@ export function* pushedRead(
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
+    // #1668: I, the demand's own run: its frame's flow, taken as it starts
     make: () => pushedRun(contract, slot),
   };
 }

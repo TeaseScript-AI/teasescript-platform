@@ -152,6 +152,32 @@ test("where the native reader ends, a pushed read answers what it does, raw and 
       cycle: false,
       extra: ["p1.q.q.h={z:1}", "let v=p1.q.q.h", 'say "${v}"'],
     }),
+    // r1's witnesses: a host's data before a last element step through a variable, and a guarded host store below
+    // the projection (each declined)
+    [
+      "let p0={}",
+      "let p1={}",
+      "p1.q={q:{h:1}}",
+      "p1=p0",
+      "p0=p1",
+      "p1=p1.q",
+      "p0.q={q:hostOther}",
+      "let x=p1.q.q",
+      "let y=x[0]",
+      'say "${y}"',
+      "exit",
+    ].join("\n") + "\n",
+    [
+      "let p0={g:2}",
+      "let p1={g:1}",
+      "p1.q={q:{g:3}}",
+      "p1=p0",
+      "p0=p1",
+      "p1=p1.q",
+      "if hostValue is integer { p1.q.q.g=hostValue }",
+      'say "${p1.q.q.g}"',
+      "exit",
+    ].join("\n") + "\n",
     // a written binding below the projection, where the read ends there (its type answers: read natively)
     ring({ q: spine(3), cycle: false, extra: ['say "${p1.q.q.q.f}"'] }),
   ];
