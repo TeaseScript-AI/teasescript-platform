@@ -205,6 +205,11 @@ test("C10 takes a fallback's family from its value's domain where the read canno
       "compile-error | written-target@35:W written-target@75:E | copy-type:f.result[integer,null] copy-typeB:f.v[unknown]",
     ],
     [
+      "narrowed/not-null",
+      'let n: integer? = hostValue\nif n != null { say n otherwise "bad" }',
+      "compile-error | written-target@18:W written-target@59:E | copy-type:n[integer,null] copy-typeB:n[integer,null]",
+    ],
+    [
       "chain/three",
       'let a: integer? = hostValue\nlet b: integer? = hostValue\nlet c: integer? = hostValue\nlet result = a otherwise b otherwise c otherwise "bad"\nsay result',
       "compile-error | written-target@18:W written-target@46:W written-target@74:W written-target@133:E | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-type:b[integer,null] copy-typeB:b[integer,null] copy-type:c[integer,null] copy-typeB:c[integer,null]",
@@ -268,6 +273,12 @@ test("C10 takes a fallback's family from its value's domain where the read canno
       "otherwise/unwritten",
       'let input = hostValue\nlet result = input otherwise "bad"\nsay result',
       "warning-runtime-check | written-target@35:W | copy-typeB:input[unknown] copy-type:result[string]",
+    ],
+    // (Codex r1's N1 on #1824: a read the test proves only `null` takes no family, r4.106)
+    [
+      "narrowed/is-null",
+      'let n: integer? = hostValue\nif n is null { say n otherwise "bad" }',
+      "warning-runtime-check | written-target@18:W | copy-type:n[integer,null] copy-typeB:n[integer,null]",
     ],
     [
       "otherwise/call-result-fitting",
