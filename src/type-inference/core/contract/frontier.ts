@@ -54,6 +54,8 @@ interface Goal {
   value: Set<number>;
   readonly readers: Set<Goal>;
   final: boolean;
+  /** Whether it waits among the goals to evaluate again (`Frontier.dirty`). */
+  dirty: boolean;
 }
 
 /** The answer a pushed read takes from the graph: its leaves' items and the values read natively at its end. */
@@ -115,7 +117,10 @@ class Frontier {
   readonly declines = new Map<string, number>();
   /** The goals of the build running, finalised when it ends, dropped when it declines. */
   pending: Goal[] = [];
+  /** The goals not evaluated yet, newest first; those a read grew below, to evaluate again once none is new. */
   queue: Goal[] = [];
+  dirty: Goal[] = [];
+  dirtyAt = 0;
 
   public constructor(readonly contract: Contract) {}
 }
@@ -352,7 +357,14 @@ function goalOf(frontier: Frontier, node: number, stepName: string, reader: Goal
   let goal = bySteps.get(stepName);
   if (goal === undefined) {
     frontier.contract.keep(2);
-    goal = { node, step: stepName, value: new Set(), readers: new Set(), final: false };
+    goal = {
+      node,
+      step: stepName,
+      value: new Set(),
+      readers: new Set(),
+      final: false,
+      dirty: false,
+    };
     bySteps.set(stepName, goal);
     frontier.pending.push(goal);
     frontier.queue.push(goal);
@@ -485,15 +497,32 @@ function stepEntry(
   stepAll(frontier, nodes, s, goal, out);
 }
 
-/** Runs the queued goals to their least solution; each goal re-evaluated where a goal it read grew. */
+/**
+ * Runs the queued goals to their least solution: each new goal evaluated first, then each one a goal it read grew
+ * below, once for all the growth before it (so a reader of k goals is evaluated again once, not k times).
+ */
 function settle(frontier: Frontier): void {
-  for (let goal = frontier.queue.pop(); goal !== undefined; goal = frontier.queue.pop()) {
+  for (;;) {
+    let goal = frontier.queue.pop();
+    if (goal === undefined) {
+      goal = frontier.dirty[frontier.dirtyAt++];
+      if (goal === undefined) {
+        frontier.dirty = [];
+        frontier.dirtyAt = 0;
+        break;
+      }
+      goal.dirty = false;
+    }
     if (goal.final) continue;
     const next = evaluate(frontier, goal);
     if (next.size === goal.value.size) continue;
     keep(frontier.contract.work, next.size - goal.value.size);
     goal.value = next;
-    for (const reader of goal.readers) frontier.queue.push(reader);
+    for (const reader of goal.readers)
+      if (!reader.dirty) {
+        reader.dirty = true;
+        frontier.dirty.push(reader);
+      }
   }
   for (const goal of frontier.pending) {
     goal.final = true;
@@ -507,6 +536,8 @@ function rollback(frontier: Frontier): void {
   for (const goal of frontier.pending) frontier.goals.get(goal.node)?.delete(goal.step);
   frontier.pending = [];
   frontier.queue = [];
+  frontier.dirty = [];
+  frontier.dirtyAt = 0;
 }
 
 function intern(frontier: Frontier, nodes: Iterable<number>): number {
