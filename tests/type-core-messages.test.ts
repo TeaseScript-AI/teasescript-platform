@@ -2554,7 +2554,7 @@ test("a message's walk and owner index charge their work, to the analysis and no
       ]),
     },
   };
-  const five = source.indexOf("5");
+  const five = source.indexOf("volume: 5") + "volume: ".length;
   units = 0;
   assert.notEqual(landingOf([counted], { file: 0, start: five, end: five + 1 }, charge), null);
   assert.equal(units, 1 + 3 + count.reads);
