@@ -1,5 +1,3 @@
-import { isRecord } from "../validation-support.js";
-
 // Execution regions: file boundaries, validated function ranges, and the index of the region each instruction runs in.
 
 /** Validated instruction boundaries of one plan file. */
@@ -55,6 +53,7 @@ export function createPlanValidationIndex(
   instructions: readonly unknown[],
   files: readonly PlanFileBoundaries[] | null,
   functions: readonly ValidatedFunctionRange[],
+  gotoSources: ReadonlySet<number>,
 ): PlanValidationIndex | null {
   if (files === null) return null;
   const owners: Array<InstructionExecutionRegion | undefined> = new Array(instructions.length);
@@ -83,10 +82,5 @@ export function createPlanValidationIndex(
       owners[index] = region;
     }
   }
-  const gotoSources = new Set<number>();
-  instructions.forEach((instruction, index) => {
-    if (isRecord(instruction) && (instruction.kind === "goto" || instruction.kind === "transfer"))
-      gotoSources.add(index);
-  });
   return { owners, functionsById, files, gotoSources };
 }

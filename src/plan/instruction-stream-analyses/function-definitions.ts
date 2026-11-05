@@ -16,6 +16,7 @@ import {
   type PlanValidationIndex,
   createPlanValidationIndex,
 } from "./execution-regions.js";
+import { FUNCTION_ONLY_KINDS, type InstructionSummary } from "./instruction-summary.js";
 
 // The function table: function IDs, and each definition with its range, prologue, and parameters.
 
@@ -85,12 +86,30 @@ export function validateFunctionDefinitions(
   value: unknown,
   instructions: readonly unknown[],
   files: readonly PlanFileBoundaries[] | null,
+  summary: InstructionSummary,
   errors: PlanValidationError[],
 ): PlanValidationIndex | null {
   if (!Array.isArray(value)) {
     errors.push(planError("TSC002", "Function definitions must be an array.", "$.functions"));
-    return createPlanValidationIndex(instructions, files, []);
+    return createPlanValidationIndex(instructions, files, [], summary.gotoSources);
   }
+  // Where each instruction object first stands, as `instructions.indexOf` finds it: built once, on first use.
+  let firstIndexes: Map<unknown, number> | null = null;
+  const firstIndexOf = (instruction: Record<string, unknown>): number => {
+    if (firstIndexes === null) {
+      firstIndexes = new Map();
+      for (
+        let instructionIndex = instructions.length - 1;
+        instructionIndex >= 0;
+        instructionIndex -= 1
+      ) {
+        const candidate = instructions[instructionIndex];
+        if (typeof candidate === "object" && candidate !== null)
+          firstIndexes.set(candidate, instructionIndex);
+      }
+    }
+    return firstIndexes.get(instruction) ?? -1;
+  };
   const ids = new Set<number>();
   const validatedRanges: ValidatedFunctionRange[] = [];
   // Function ranges fill each file's block after its root region, file by file; names are unique within a file.
@@ -224,7 +243,7 @@ export function validateFunctionDefinitions(
         ),
       );
     }
-    validateFunctionPrologue(validatedRange, instructions, errors);
+    validateFunctionPrologue(validatedRange, instructions, firstIndexOf, errors);
     expectedEntry = end;
   });
   skipCompletedFiles();
@@ -238,7 +257,12 @@ export function validateFunctionDefinitions(
     );
   }
 
-  const index = createPlanValidationIndex(instructions, files, validatedRanges);
+  const index = createPlanValidationIndex(
+    instructions,
+    files,
+    validatedRanges,
+    summary.gotoSources,
+  );
   // A timer, media, or button block is a handler region of its own: a waiting block's resource, its activation, and its
   // shared variables are known from the one statement that uses the block.
   const blockFunctions = new Set<number>();
@@ -255,22 +279,18 @@ export function validateFunctionDefinitions(
       ),
     );
   };
-  instructions.forEach((instruction, instructionIndex) => {
-    if (!isRecord(instruction)) return;
+  // The parameter names of each called function, gathered once per validation.
+  const parameterNamesById = new Map<number, ReadonlySet<string>>();
+  // Every other instruction is a no-op for this loop.
+  for (const instructionIndex of summary.functionSites) {
+    const instruction = instructions[instructionIndex];
+    if (!isRecord(instruction)) continue;
     const ownerRegion = index?.owners[instructionIndex];
     const owner =
       ownerRegion?.kind === "function"
         ? index?.functionsById.get(ownerRegion.functionId)
         : undefined;
-    const functionOnly = isOneOf(instruction.kind, [
-      "bindSuppliedParameter",
-      "beginFunctionDefaults",
-      "prepareParameterDefault",
-      "bindDefaultParameter",
-      "enterFunctionBody",
-      "returnValue",
-      "returnVoid",
-    ]);
+    const functionOnly = isOneOf(instruction.kind, FUNCTION_ONLY_KINDS);
     if (functionOnly && owner === undefined) {
       errors.push(
         planError(
@@ -371,12 +391,17 @@ export function validateFunctionDefinitions(
         Array.isArray(target.parameters) &&
         Array.isArray(instruction.arguments)
       ) {
-        const parameterNames = new Set(
-          target.parameters
-            .filter(isRecord)
-            .map((parameter) => parameter.name)
-            .filter((name): name is string => typeof name === "string"),
-        );
+        const functionId = instruction.functionId;
+        let parameterNames = parameterNamesById.get(functionId);
+        if (parameterNames === undefined) {
+          parameterNames = new Set(
+            target.parameters
+              .filter(isRecord)
+              .map((parameter) => parameter.name)
+              .filter((name): name is string => typeof name === "string"),
+          );
+          parameterNamesById.set(functionId, parameterNames);
+        }
         const supplied = new Set<string>();
         instruction.arguments.forEach((argument, argumentIndex) => {
           if (!isRecord(argument) || typeof argument.parameterName !== "string") return;
@@ -418,13 +443,14 @@ export function validateFunctionDefinitions(
         });
       }
     }
-  });
+  }
   return index;
 }
 
 function validateFunctionPrologue(
   range: ValidatedFunctionRange,
   instructions: readonly unknown[],
+  firstIndexOf: (instruction: Record<string, unknown>) => number,
   errors: PlanValidationError[],
 ): void {
   const { definition, path } = range;
@@ -563,7 +589,7 @@ function validateFunctionPrologue(
       );
     }
     if (parameter.hasDefault === true && defaultBindings.length === 1) {
-      const bindingIndex = instructions.indexOf(defaultBindings[0]);
+      const bindingIndex = firstIndexOf(defaultBindings[0]!);
       for (
         let instructionIndex = regionStart;
         instructionIndex < regionEnd && instructionIndex < instructions.length;
