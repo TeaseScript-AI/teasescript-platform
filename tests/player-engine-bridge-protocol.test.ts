@@ -269,8 +269,8 @@ test("a lost Worker fails its pending requests and every later one; nothing is r
   assert.equal(losses.length, 1);
 });
 
-test("the browser Worker entry loads no compiler or language-tooling module until a source is prepared", () => {
-  const url = new URL("../player/engine-bridge/engine.worker.js", import.meta.url).href;
+test("the browser Worker's host loads no compiler or language-tooling module until a source is prepared", () => {
+  const url = new URL("../player/engine-bridge/engine-host.js", import.meta.url).href;
   const script = [
     'import { registerHooks } from "node:module";',
     "const loaded = new Set();",
