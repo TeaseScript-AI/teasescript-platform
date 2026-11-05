@@ -337,6 +337,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
   let plans = 0;
   let runs = 0;
   let compared = 0;
+  const unreadDefaults: string[] = [];
   for (const record of readFixture()) {
     if (heldBack(record) !== null) continue;
     positive += 1;
@@ -391,16 +392,24 @@ test("every positive-list record the candidate route reaches plans and runs as i
     plans += 1;
     // discharges and checked stores, by rule (a construct the rules do not cover fails here, named); the source's syntax
     // serves every evaluation of it below
-    const [syntax, { stores, discharges, content }] = (() => {
+    const derived = (() => {
       try {
         const syntax = syntaxOf(source);
         return [syntax, derive(syntax, record.expected)] as const;
       } catch (error) {
+        // (a typed default that reads a variable reads it at the call, F18, which the oracle does not derive: #1760;
+        // `type-core-f18.test.ts` checks its four layers)
+        if (error instanceof Underivable && error.message === "a default that reads a variable") {
+          unreadDefaults.push(record.name);
+          return null;
+        }
         if (error instanceof Underivable)
           throw new Error(`${record.name}: underivable: ${error.message}`);
         throw error;
       }
     })();
+    if (derived === null) continue;
+    const [syntax, { stores, discharges, content }] = derived;
     assert.deepEqual(
       plannedContent(result.plan, source),
       derivedContent(content, source),
@@ -540,6 +549,10 @@ test("every positive-list record the candidate route reaches plans and runs as i
       `discharges: ${listed(classes)}; outside the candidate slice (later port steps): ${listed(outside)}`,
   );
   assert.equal(accepted.length + counted, positive);
+  assert.deepEqual(unreadDefaults, [
+    "cp9-cells/s9b/f18-held/named/load/definite-integer",
+    "cp9-cells/s9b/f18-held/named/load/after-call",
+  ]);
   // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
   // each discharge by its kind and site: two at one site are classified each by its own check
   const verdicts: readonly (readonly [string, string, string])[] = [
