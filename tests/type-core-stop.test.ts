@@ -101,7 +101,8 @@ import {
 } from "./helpers/type-core-oracles.js";
 import { plannedContent, runGlobals } from "./helpers/type-core-route.js";
 import {
-  operandStandsForNullCheck,
+  repeatedDecisions,
+  standsForNullCheck,
   stopProblems,
   type Globals,
   type StopRun,
@@ -6316,7 +6317,7 @@ test("a combined stop's label after a call's result is one precise form, made wh
 
 /**
  * A stopped operand check stands for a lost null check only as the lead's ruling (A) on #1688 allows
- * (`operandStandsForNullCheck`). `null-divisors@4` (`tests/families/messages/1268-astra-r4-growth.mjs`, k = 4) under
+ * (`standsForNullCheck`). `null-divisors@4` (`tests/families/messages/1268-astra-r4-growth.mjs`, k = 4) under
  * demand allowance 32, both reversed modes, at the settled decision stop of `xs`'s element: the natural analysis owes
  * at each divisor "check that xs.element is not null before /" against `integer` and `number`; the stopped run owes an
  * operand check there instead, against the same two kinds at the first three divisors, and also against `duration`,
@@ -6372,8 +6373,8 @@ test("a stopped operand check stands for a lost null check only at its site, exc
     site: nullCheck.site,
     boundary: false,
   };
-  assert.equal(operandStandsForNullCheck(operand, nullCheck), true);
-  assert.equal(operandStandsForNullCheck({ ...operand, against: ["integer"] }, nullCheck), true);
+  assert.equal(standsForNullCheck(operand, nullCheck), true);
+  assert.equal(standsForNullCheck({ ...operand, against: ["integer"] }, nullCheck), true);
   const others: Obligation[] = [
     { ...operand, against: ["integer", "number", "null"] },
     { ...operand, against: ["integer", "number", "duration"] },
@@ -6383,8 +6384,8 @@ test("a stopped operand check stands for a lost null check only at its site, exc
     { ...operand, kind: "null-check" },
   ];
   for (const other of others)
-    assert.equal(operandStandsForNullCheck(other, nullCheck), false, JSON.stringify(other));
-  assert.equal(operandStandsForNullCheck(operand, { ...nullCheck, kind: "integer-check" }), false);
+    assert.equal(standsForNullCheck(other, nullCheck), false, JSON.stringify(other));
+  assert.equal(standsForNullCheck(operand, { ...nullCheck, kind: "integer-check" }), false);
   // (the ledger: a standing pair is accounted for, the other checks still compared in order; each operand check stands
   // for one lost copy: a divisor whose null check and operand check both publish, the null check left out of the
   // stopped side, its other checks reversed, or its null check published twice on the unstopped side)
@@ -6395,7 +6396,7 @@ test("a stopped operand check stands for a lost null check only at its site, exc
     const lost = checks.find(
       (check) => check.kind === "null-check" && check.on.endsWith(" before /"),
     )!;
-    assert.ok(checks.some((check) => operandStandsForNullCheck(check, lost)));
+    assert.ok(checks.some((check) => standsForNullCheck(check, lost)));
     const publishing = (each: StopRun, list: readonly Obligation[]): StopRun => ({
       ...each,
       answers: Object.defineProperty(Object.create(each.answers), "checks", { value: list }),
@@ -6456,11 +6457,11 @@ test("a stopped operand check stands for a lost null check only at its site, exc
     [operand, { ...nullCheck, against: ["non-null"] }],
   ];
   for (const [other, check] of unmatched)
-    assert.equal(operandStandsForNullCheck(other, check), false, JSON.stringify([other, check]));
+    assert.equal(standsForNullCheck(other, check), false, JSON.stringify([other, check]));
   // (a target that is a value's own text over several lines, its words whole)
   const multiline = "[4,\n null][1]";
   assert.equal(
-    operandStandsForNullCheck(
+    standsForNullCheck(
       { ...operand, target: multiline },
       { ...nullCheck, target: multiline, on: `check that ${multiline} is not null before /` },
     ),
@@ -6468,12 +6469,186 @@ test("a stopped operand check stands for a lost null check only at its site, exc
   );
   // (a domain holding null stands for nothing, even where the null check's own kinds would hold it: the clause alone)
   assert.equal(
-    operandStandsForNullCheck(
+    standsForNullCheck(
       { ...operand, against: ["integer", "null"] },
       { ...nullCheck, against: ["integer", "number", "null"] },
     ),
     false,
   );
+});
+
+/**
+ * #1741: a for loop's iterable and a repeat count, the other two consumers whose stopped run owes, for the null the
+ * natural analysis proved, the check of the kinds its use needs (`standsForNullCheck`, pairs 2 and 3). Under demand
+ * allowance 8 in every held mode, each witness's lost null check is a standing check by that consumer's replacement, at
+ * its whole site on the same target with the same domain: the iterable's operand check against list, set, dict and
+ * range, the count's integer check; Sol's allowance sweep found them as 13 contents in 379 copies (20 iterables, 359
+ * counts, two of them `f1-astra-b1-cases` `astra::duplicates/integer?/8` and `/"bad"`). Each clause refuses alone, a
+ * domain wider than the null check's by one kind included, by the predicate and through the ledger.
+ */
+test("a stopped iterable or repeat-count check stands for a lost null check only on its target, site and kinds (#1741)", () => {
+  const duplicates = (value: string) =>
+    `let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:${value},nest:{n:${value},keep:1},spare:1}\nlet a=[root,root,other,root]\nlet b=[root,other,root,root]\nlet out=[a,b]\nrepeat out[0][0].n {}\nexit\n`;
+  const witnesses: readonly (readonly [string, string, string])[] = [
+    [
+      "iterable",
+      "let ls = [[1], null]\nlet l = ls[1]\nfor x in l { say x }\nexit\n",
+      "operand l 44-45",
+    ],
+    ["count", "let ns = [2, null]\nlet n = ns[1]\nrepeat n {}\nexit\n", "integer-check n 40-41"],
+    ["duplicates/8", duplicates("8"), "integer-check out.element.element.n 182-193"],
+    ['duplicates/"bad"', duplicates('"bad"'), "integer-check out.element.element.n 190-201"],
+  ];
+  const named = (text: string) => {
+    const check: Obligation = JSON.parse(text);
+    return `${check.kind} ${check.target} ${check.site.start}-${check.site.end}`;
+  };
+  for (const [name, source, replacement] of witnesses)
+    for (const mode of HELD_MODES) {
+      const c: HeldCase = { name, source, slice: true, values: [] };
+      const problems = stopProblems({
+        unstopped: heldRun(c, mode),
+        stopped: heldRun(c, mode, undefined, 8),
+        fitting: [],
+        violating: [],
+      });
+      const at = `${name} ${mode.name}`;
+      assert.deepEqual(
+        problems.filter((p) => p.startsWith("lost check ")).map((p) => p.slice(11)),
+        [],
+        at,
+      );
+      const standing = problems.filter((p) => p.startsWith("standing check "));
+      assert.equal(standing.length, 1, at);
+      assert.equal(named(standing[0]!.slice(standing[0]!.indexOf(" by ") + 4)), replacement, at);
+      // (the replacing check is still its own content)
+      assert.ok(
+        problems.includes(`extra check ${standing[0]!.slice(standing[0]!.indexOf(" by ") + 4)}`),
+        at,
+      );
+    }
+  const iterableNull: Obligation = {
+    kind: "null-check",
+    target: "l",
+    against: ["list", "set", "dict", "range"],
+    on: "check that l is not null at the iterable of for",
+    site: { file: 0, start: 44, end: 45 },
+    boundary: false,
+  };
+  const iterable: Obligation = {
+    ...iterableNull,
+    kind: "operand",
+    on: "check the operand l at the iterable of for when it runs",
+  };
+  const countNull: Obligation = {
+    kind: "null-check",
+    target: "n",
+    against: ["integer"],
+    on: "check that the repeat count is not null when it runs",
+    site: { file: 0, start: 40, end: 41 },
+    boundary: false,
+  };
+  const count: Obligation = {
+    ...countNull,
+    kind: "integer-check",
+    on: "check that the repeat count is a whole number when it runs",
+  };
+  assert.equal(standsForNullCheck(iterable, iterableNull), true);
+  assert.equal(standsForNullCheck({ ...iterable, against: ["list"] }, iterableNull), true);
+  assert.equal(standsForNullCheck(count, countNull), true);
+  const refused: (readonly [Obligation, Obligation])[] = [
+    // (another target, spelled in the check's words as well: the same words on another value)
+    [
+      { ...iterable, target: "m", on: "check the operand m at the iterable of for when it runs" },
+      iterableNull,
+    ],
+    [{ ...count, target: "m" }, countNull],
+    // (another site, file or boundary)
+    [{ ...iterable, site: { file: 0, start: 44, end: 46 } }, iterableNull],
+    [{ ...count, site: { file: 1, start: 40, end: 41 } }, countNull],
+    [{ ...count, boundary: true }, countNull],
+    // (another consumer's words on either side, or the pair's checks crossed)
+    [{ ...iterable, on: "check the operand l at the index of for when it runs" }, iterableNull],
+    [iterable, { ...iterableNull, on: "check that l is not null before the read" }],
+    [{ ...count, on: "check that the index is a whole number when it runs" }, countNull],
+    [count, { ...countNull, on: "check that the index is not null when it runs" }],
+    [{ ...count, kind: "operand" }, countNull],
+    [{ ...iterable, kind: "integer-check" }, iterableNull],
+    // (a domain admitting null, or unknown)
+    [{ ...iterable, against: ["list", "null"] }, iterableNull],
+    [
+      { ...count, against: ["unknown"] },
+      { ...countNull, against: ["unknown"] },
+    ],
+    // (a domain wider than the null check's by one kind: a weaker check, never one in other words)
+    [iterable, { ...iterableNull, against: ["list", "set", "dict"] }],
+    [{ ...count, against: ["integer", "number"] }, countNull],
+  ];
+  for (const [check, nullCheck] of refused)
+    assert.equal(standsForNullCheck(check, nullCheck), false, JSON.stringify([check, nullCheck]));
+  // (through the ledger: the count's replacement one kind wider stays a lost check, its null check unaccounted for)
+  const c: HeldCase = { name: "count", source: witnesses[1]![1], slice: true, values: [] };
+  const mode = HELD_MODES[0]!;
+  const stopped = heldRun(c, mode, undefined, 8);
+  const wider = stopped.answers.checks.map((check) =>
+    check.kind === "integer-check" && check.target === "n"
+      ? { ...check, against: ["integer", "number"] }
+      : check,
+  );
+  const problems = stopProblems({
+    unstopped: heldRun(c, mode),
+    stopped: {
+      ...stopped,
+      answers: Object.defineProperty(Object.create(stopped.answers), "checks", { value: wider }),
+    },
+    fitting: [],
+    violating: [],
+  });
+  assert.deepEqual(
+    problems
+      .filter((p) => /^(lost|standing) check /.test(p))
+      .map((p) => `${p.split(" ")[0]} ${named(p.slice(p.indexOf("{")).split(" by ")[0]!)}`),
+    ["lost null-check n 40-41"],
+  );
+});
+
+/**
+ * #1757 (the lead's ruling on #1741's sweep): a pass can decide one place's path twice (`1310-astra-probe-stops.mjs`
+ * `chain/hostValue`: the root of `box`, 38 units and then 1 in the natural pass). The stop oracle compares such records
+ * by their occurrence, refusing a comparison only where the two runs decide the key a different number of times, and
+ * lists each repetition as a problem line (`repeated decision at …`), never a failure; why the core repeats is #1757's.
+ */
+test("a decision a pass makes twice is compared by its occurrence and listed apart, never a failure (#1757)", () => {
+  const c: HeldCase = {
+    name: "chain/hostValue",
+    source: `let box = {last: null}\nbox.last = {first: null}\nbox.last.first = {n: 1}\nsay "BEFORE"\nbox.last.first.n = hostValue\nsay "AFTER"\nexit\n`,
+    slice: true,
+    values: [],
+  };
+  const mode = HELD_MODES[0]!;
+  const unstopped = heldRun(c, mode);
+  for (const demand of [8, 16, 256]) {
+    const run = { unstopped, stopped: heldRun(c, mode, undefined, demand) };
+    // (judged, the repetition compared by occurrence: no refusal, no line of it among the problems)
+    const problems = stopProblems({ ...run, fitting: [], violating: [] });
+    assert.ok(!problems.some((p) => p.startsWith("repeated decision")), `${demand}`);
+    // (listed apart: the natural pass's repetitions, then the stopped one's where its units differ)
+    const lines = repeatedDecisions(run);
+    assert.deepEqual(
+      lines.slice(0, 2),
+      [
+        "repeated decision at [5,[]]: units 38, 1, 1",
+        'repeated decision at [5,["last"]]: units 305, 2',
+      ],
+      `${demand}`,
+    );
+    for (const line of lines)
+      assert.match(
+        line,
+        /^repeated decision at \[\d+,\[[^\]]*\]\]: units \d+(, \d+)+$/,
+        `${demand}`,
+      );
+  }
 });
 
 /**

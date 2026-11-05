@@ -159,20 +159,27 @@ function otherScope(own: Answers["budget"], other: Answers["budget"]): string | 
     return `another stop (${other.stoppedIn ?? "none"}, settled ${other.settled}) than the run's (${own.stoppedIn ?? "none"}, settled ${own.settled})`;
   if (own.allowance !== other.allowance)
     return `the program allowance ${other.allowance}, not the run's ${own.allowance}`;
-  // (each decision by its own key, place and exact path: a key twice in one run is refused, never overwritten)
-  const demands = (budget: Answers["budget"]): Map<string, number> =>
-    new Map([
-      ...[...decisionsByKey(budget.decisions)].map(
-        ([key, d]) => [`decision ${key}`, d.allowance] as const,
-      ),
-      ...budget.demands.flatMap((d) =>
-        d.bounded ? [[`read ${d.node}`, d.allowance] as const] : [],
-      ),
-    ]);
-  const mine = demands(own);
-  for (const [demand, allowance] of demands(other))
-    if (mine.has(demand) && mine.get(demand) !== allowance)
-      return `the demand allowance ${allowance} at its ${demand}, not the run's ${mine.get(demand)}`;
+  // (each decision by its key, place and exact path, and its occurrence there: a run can decide one place's path more
+  // than once in a pass, #1757, and the runs compare such records in order, never overwritten; a key the two runs
+  // decide a different number of times refuses the comparison)
+  const mine = decisionsByKey(own.decisions);
+  for (const [key, theirs] of decisionsByKey(other.decisions)) {
+    const ours = mine.get(key);
+    if (ours === undefined) continue;
+    if (ours.length !== theirs.length)
+      return `the decision at ${key} ${theirs.length} times, not the run's ${ours.length}`;
+    for (const [at, d] of theirs.entries())
+      if (d.allowance !== ours[at]!.allowance)
+        return `the demand allowance ${d.allowance} at its decision ${key}${ours.length > 1 ? ` (its record ${at + 1})` : ""}, not the run's ${ours[at]!.allowance}`;
+  }
+  const reads = (budget: Answers["budget"]): Map<string, number> =>
+    new Map(
+      budget.demands.flatMap((d) => (d.bounded ? [[`read ${d.node}`, d.allowance] as const] : [])),
+    );
+  const myReads = reads(own);
+  for (const [demand, allowance] of reads(other))
+    if (myReads.has(demand) && myReads.get(demand) !== allowance)
+      return `the demand allowance ${allowance} at its ${demand}, not the run's ${myReads.get(demand)}`;
   return null;
 }
 
@@ -228,40 +235,70 @@ function keeps(
 const OPERATOR_OPERAND_CHECK = /^check the operand of (.+) when it runs$/;
 
 /**
- * Whether the stopped run's `operand` check stands for the unstopped run's lost `null-check` (#1688, the lead's ruling
- * (A)): the same check in other words, where a stopped decision leaves an operand's kinds unknown and the operator's
- * consumer (`consumers/operations.ts`) owes its operand check for the null the natural analysis proved. It stands only
- * where all three hold:
- * - it is at the null check's whole site (file and offsets) on the same value: both are the operator consumer's own,
- *   for one operator (their words name it: "check that X is not null before /", "check the operand of / when it
- *   runs"), so both are at that operand's own span (`operandSite`), never a receiver's check at the same span nor the
- *   whole operation's operand check;
- * - its domain excludes `null`: it holds neither `null` nor `unknown`, which admits it;
- * - its domain is within the null check's `against`, each kind among them by name: a wider domain is a weaker check,
- *   never one in other words (option (A′), refused), and a domain this cannot compare by name (a null check's
- *   `unknown` or `non-null` beside a value kind) stands for nothing.
- * Nothing else stands for anything; the pair is reported apart (`standing check`), never as lost nor as equal, and the
- * operand check is still counted as its own content.
+ * Whether the stopped run's `check` stands for the unstopped run's lost `null-check`: the same check in other words,
+ * where a stopped decision leaves a value's kinds unknown and its consumer owes, for the null the natural analysis
+ * proved, the check of the kinds its use needs. It stands only for one of three consumers' pairs, each named by both
+ * checks' own words (a check that merely shares a span stands for nothing):
+ * 1. the operator's operand (#1688, the lead's ruling (A)): "check that X is not null before /" and "check the operand
+ *    of / when it runs", each at that operand's own span (`operandSite`), never a receiver's check at the same span nor
+ *    the whole operation's operand check; their targets are spelled apart, so the target is not compared;
+ * 2. a for loop's iterable (#1741): "check that X is not null at the iterable of for" and "check the operand X at the
+ *    iterable of for when it runs", on the same target X;
+ * 3. a repeat count (#1741): "check that the repeat count is not null when it runs" and its `integer-check`, "check that
+ *    the repeat count is a whole number when it runs", on the same target.
+ * Every pair also needs the null check's whole site (file and offsets) and boundary, and a domain that excludes `null`
+ * (it holds neither `null` nor `unknown`, which admits it) and lies within the null check's `against`, each kind among
+ * them by name: a wider domain is a weaker check, never one in other words (option (A′), refused), and a domain this
+ * cannot compare by name (a null check's `unknown` or `non-null` beside a value kind) stands for nothing. Nothing else
+ * stands for anything; the pair is reported apart (`standing check`), never as lost nor as equal, and the replacing
+ * check is still counted as its own content.
  */
-export function operandStandsForNullCheck(operand: Obligation, nullCheck: Obligation): boolean {
+export function standsForNullCheck(check: Obligation, nullCheck: Obligation): boolean {
+  if (
+    nullCheck.kind !== "null-check" ||
+    check.boundary !== nullCheck.boundary ||
+    siteKey(check.site) !== siteKey(nullCheck.site) ||
+    check.against.includes("null") ||
+    check.against.includes("unknown") ||
+    !check.against.every((kind) => nullCheck.against.includes(kind))
+  )
+    return false;
   // (the null check's words, its own target whole, a source's line breaks in it as well: Codex r2 on #1725)
-  const operator = OPERATOR_OPERAND_CHECK.exec(operand.on)?.[1];
+  const operator = OPERATOR_OPERAND_CHECK.exec(check.on)?.[1];
+  const same = check.target === nullCheck.target;
   return (
-    operand.kind === "operand" &&
-    nullCheck.kind === "null-check" &&
-    operand.boundary === nullCheck.boundary &&
-    siteKey(operand.site) === siteKey(nullCheck.site) &&
-    operator !== undefined &&
-    nullCheck.on === `check that ${nullCheck.target} is not null before ${operator}` &&
-    !operand.against.includes("null") &&
-    !operand.against.includes("unknown") &&
-    operand.against.every((kind) => nullCheck.against.includes(kind))
+    (check.kind === "operand" &&
+      operator !== undefined &&
+      nullCheck.on === `check that ${nullCheck.target} is not null before ${operator}`) ||
+    (check.kind === "operand" &&
+      same &&
+      check.on === `check the operand ${check.target} at the iterable of for when it runs` &&
+      nullCheck.on === `check that ${nullCheck.target} is not null at the iterable of for`) ||
+    (check.kind === "integer-check" &&
+      same &&
+      check.on === "check that the repeat count is a whole number when it runs" &&
+      nullCheck.on === "check that the repeat count is not null when it runs")
   );
 }
 
 /** Whether `inner` lies within `outer`. */
 function within(inner: Span, outer: Span): boolean {
   return outer.start <= inner.start && inner.end <= outer.end;
+}
+
+/**
+ * Where either run of `c` decides one place's path more than once in a pass (#1757), one line each, `repeated decision
+ * at [place, path]: units a, b`, the same line once: what a sweep or replay records beside `stopProblems`, never part of
+ * its verdict (the lead's ruling on #1741's sweep).
+ */
+export function repeatedDecisions(c: Pick<StopCase, "unstopped" | "stopped">): string[] {
+  const lines: string[] = [];
+  for (const run of [c.unstopped, c.stopped])
+    for (const [key, records] of decisionsByKey(run.answers.budget.decisions)) {
+      const line = `repeated decision at ${key}: units ${records.map((d) => d.units).join(", ")}`;
+      if (records.length > 1 && !lines.includes(line)) lines.push(line);
+    }
+  return lines;
 }
 
 /**
@@ -429,14 +466,14 @@ export function stopProblems(c: StopCase): string[] {
       left.set(text, [mine, theirs - 1]);
     }
   }
-  // (a lost null check the stopped run owes as an operand check, each operand check standing for one: reported apart,
-  // its operand check still counted as its own content, #1688)
+  // (a lost null check the stopped run owes as another check in other words, each standing for one: reported apart,
+  // the replacing check still counted as its own content, #1688, #1741)
   const standingFor = new Set<number>();
   const standingCopies = new Map<string, number>();
   const standsFor = (text: string): Obligation | undefined => {
     const lost: Obligation = JSON.parse(text);
     const index = stopped.answers.checks.findIndex(
-      (check, at) => !standingFor.has(at) && operandStandsForNullCheck(check, lost),
+      (check, at) => !standingFor.has(at) && standsForNullCheck(check, lost),
     );
     if (index < 0) return undefined;
     standingFor.add(index);
