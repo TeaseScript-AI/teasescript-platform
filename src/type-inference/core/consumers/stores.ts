@@ -54,6 +54,15 @@ const writerRank = (writer: Writer | null): number =>
  * pass's work at most doubles (TABLE r4.183). A stopped decision stands for its stores' obligations
  * (`stoppedStores`), whichever pass stopped it.
  */
+/**
+ * Whether an item is external data for C9's boundary: an external unknown, or a kind a type test proved of external
+ * data (`fromExternal`: the test proves the kind, never the ingress, the lead's ruling (a) on #1073 PR 2). Only the
+ * boundary requests ask it; a store's warnings stay with the external unknowns.
+ */
+function boundaryData(item: Item): boolean {
+  return isExternal(item) || item.fromExternal === true;
+}
+
 export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decision | null {
   const { root } = group;
   const ledger = walk.pass.program.work;
@@ -214,18 +223,19 @@ export function admittedStores(
           const against = admission.admitted(root, path());
           for (const { item } of offendingKinds(named))
             storeWarning(walk, site, label(), item, against, rule(), value.filter(fitting));
-          // C9: the named data's own ingress keeps its boundary, as at a decided store
-          for (const item of named)
-            admission.boundaryFor(item, () => {
-              const text = label();
-              return obligation(
-                "copy-type",
-                site,
-                text,
-                against.map(requiredKind),
-                `validate ${text} against ${against.join("|")}`,
-              );
-            });
+          // C9: the named data's own ingress keeps its boundary, as at a decided store (a kind a test proved of it too)
+          for (const item of value)
+            if (boundaryData(item) && !admission.ownIngress(item, d, at))
+              admission.boundaryFor(item, () => {
+                const text = label();
+                return obligation(
+                  "copy-type",
+                  site,
+                  text,
+                  against.map(requiredKind),
+                  `validate ${text} against ${against.join("|")}`,
+                );
+              });
         }
       continue;
     }
@@ -423,7 +433,7 @@ export function admittedStores(
         admission.boundaryAt(d);
       // (only external data owes it, `boundaryFor`: the label shown only where the check is owed, #1483)
       for (const item of items)
-        if (isExternal(item)) {
+        if (boundaryData(item)) {
           const cell = admission.cellSited(d.site, item, d);
           admission.boundaryFor(item, () => {
             const text = label();
