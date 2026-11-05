@@ -69,7 +69,8 @@ test("each export of runtime-adapter.ts and runtime-view.ts has its place in the
 });
 
 test("the walk reads every import form once and stops at Worker-side code", () => {
-  // Type-only imports, re-exports, `import()`, side-effect imports, `.vue` scripts, the `@/` alias and a cycle.
+  // Type-only imports, re-exports (also of no value), `import()`, side-effect imports, `.vue` scripts (also by `src`), the
+  // `@/` alias and a cycle.
   const fixture = mainRealmGraph({
     root: fileURLToPath(new URL("../../tests/fixtures/main-realm-graph/", import.meta.url)),
     entry: "player/entry.ts",
@@ -81,6 +82,8 @@ test("the walk reads every import form once and stops at Worker-side code", () =
   assert.deepEqual(fixture.modules, [
     "player/alias/aliased.ts",
     "player/entry.ts",
+    "player/external-script.ts",
+    "player/external.vue",
     "player/panel.vue",
     "player/side.ts",
     "src/allowed.ts",
@@ -88,7 +91,10 @@ test("the walk reads every import form once and stops at Worker-side code", () =
   assert.deepEqual(fixture.offenders.map(key), [
     "player/alias/aliased.ts → src/root.ts fromRoot",
     "player/entry.ts → src/dynamic.ts *",
+    "player/entry.ts → src/empty.ts *",
     "player/entry.ts → src/root.ts fromRoot",
+    "player/entry.ts → src/typed.ts *",
+    "player/external-script.ts → src/root.ts fromScript",
     "player/side.ts → player/worker-module.ts inWorker",
   ]);
 });

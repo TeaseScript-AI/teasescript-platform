@@ -61,7 +61,8 @@ function valueImports(code: string, file: string): { specifier: string; names: s
           : clause.elements
               .filter((element) => !element.isTypeOnly)
               .map((element) => (element.propertyName ?? element.name).text);
-      if (names.length > 0) found.push({ specifier: node.moduleSpecifier.text, names });
+      // `export { type A } from "m"` and `export {} from "m"` still load `m` under `verbatimModuleSyntax`.
+      found.push({ specifier: node.moduleSpecifier.text, names: names.length > 0 ? names : ["*"] });
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const [argument] = node.arguments;
       if (argument !== undefined && ts.isStringLiteralLike(argument))
@@ -74,14 +75,21 @@ function valueImports(code: string, file: string): { specifier: string; names: s
   return found;
 }
 
-/** A module's script code: the file itself, or a `.vue` file's script blocks. */
+/**
+ * A module's script code: the file itself, or a `.vue` file's script blocks. A `<script src>` block counts as a
+ * re-export of that file, as the Vue plugin compiles it.
+ */
 function scripts(file: string): string[] {
   const text = readFileSync(file, "utf8");
   if (!file.endsWith(".vue")) return [text];
   const { descriptor } = parseSfc(text, { filename: file });
-  return [descriptor.script?.content, descriptor.scriptSetup?.content].filter(
-    (content): content is string => content !== undefined,
-  );
+  const external = descriptor.script?.src;
+  return [
+    external === undefined
+      ? descriptor.script?.content
+      : `export * from ${JSON.stringify(external)};`,
+    descriptor.scriptSetup?.content,
+  ].filter((content): content is string => content !== undefined);
 }
 
 /** The repository file a local specifier names, or `null` for a package or a non-script file. */
