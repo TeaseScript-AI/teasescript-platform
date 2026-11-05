@@ -179,6 +179,9 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
   cannot hover. A corner grip, also by arrow keys, resizes a block by whole lines, keeping the draw's line in the
   middle. Expand shows the block large over the dimmed page, at most 80% of the view's height, with the breadcrumb as
   its title; its X, Escape, or a click beside it closes it.
+  The Player parses the file for this; the engine's source debug sidecar (`createSourceDebugSidecar`,
+  `loadSourceDebugSidecar`) carries the same token classes and spans for a playback without the parser, loading only for
+  the plan it was made for.
 - **Not modal**: while the picker asks, the page stays visible, and only an explicit allowlist takes input
   (`player/vue/src/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
   controls without a notice's action, panel resizing, and the Debug panel's tabs with Now, Variables, and Log. The tools

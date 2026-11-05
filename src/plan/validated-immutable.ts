@@ -1,3 +1,4 @@
+import { createWorklist } from "../external-data-capture.js";
 import type { InstructionPlan } from "./model.js";
 
 const validatedImmutablePlans = new WeakSet<object>();
@@ -13,19 +14,26 @@ export function isValidatedImmutableInstructionPlan(plan: InstructionPlan): bool
   return validatedImmutablePlans.has(plan);
 }
 
+/**
+ * Whether every object reachable from `root` is frozen and holds only data properties. It reads no `Array.prototype` or
+ * `Object.prototype` method, iterator, setter or property, so a replaced one cannot make it skip part of the graph.
+ */
 function isDeeplyFrozen(root: InstructionPlan): boolean {
   const visited = new Set<object>();
-  const pending = [root];
-  while (pending.length > 0) {
-    const value = pending.pop()!;
+  const pending = createWorklist<object>();
+  let size = 0;
+  pending[size++] = root;
+  while (size > 0) {
+    const value = pending[--size]!;
     if (visited.has(value)) continue;
     visited.add(value);
     if (!Object.isFrozen(value)) return false;
-    for (const key of Reflect.ownKeys(value)) {
-      const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
-      if (descriptor === undefined || !("value" in descriptor)) return false;
+    const keys = Reflect.ownKeys(value);
+    for (let index = 0; index < keys.length; index += 1) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, keys[index]!);
+      if (descriptor === undefined || !Object.hasOwn(descriptor, "value")) return false;
       const nested = descriptor.value;
-      if (typeof nested === "object" && nested !== null) pending.push(nested);
+      if (typeof nested === "object" && nested !== null) pending[size++] = nested;
     }
   }
   return true;

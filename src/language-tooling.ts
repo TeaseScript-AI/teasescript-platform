@@ -114,6 +114,7 @@ import {
 } from "./source.js";
 import type { ScriptHeader } from "./script-header.js";
 import { TokenKind, type Token } from "./token.js";
+import type { LanguageTokenClass } from "./token-classes.js";
 
 export interface LanguageDocument {
   readonly uri: string;
@@ -179,22 +180,7 @@ export interface LanguageFormatResult {
   readonly text: string;
 }
 
-/** What a token or comment is, for its colour (see `classifyTokens`). */
-export const LANGUAGE_TOKEN_CLASSES = Object.freeze([
-  "keyword",
-  "type",
-  "command",
-  "name",
-  "number",
-  "string",
-  "interpolation",
-  "regex",
-  "comment",
-  "operator",
-  "punctuation",
-] as const);
-
-export type LanguageTokenClass = (typeof LANGUAGE_TOKEN_CLASSES)[number];
+export { LANGUAGE_TOKEN_CLASSES, type LanguageTokenClass } from "./token-classes.js";
 
 export interface LanguageToken {
   readonly kind: LanguageTokenClass;

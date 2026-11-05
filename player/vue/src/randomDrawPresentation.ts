@@ -4,12 +4,13 @@ import {
   parse,
   randomDrawAlternatives,
   runtimeDebugPreview,
+  sourceEnclosingSpans,
   type LanguageToken,
   type LanguageTokenClass,
-  type ParseResult,
   type RandomDrawView,
   type RandomOutcome,
   type RandomSite,
+  type SourceEnclosingSpans,
   type SourceSpan,
 } from "../../../src/index.js";
 
@@ -223,7 +224,7 @@ interface FileCode {
   readonly source: string;
   readonly starts: readonly number[];
   readonly lines: readonly CodeLine[];
-  readonly spans: EnclosingSpans | null;
+  readonly spans: SourceEnclosingSpans | null;
 }
 
 // The file of the latest draw: parsing and classifying a long file is slow, and a file's draws often follow each other,
@@ -238,7 +239,7 @@ function fileCode(source: string): FileCode {
       source,
       starts,
       lines: renderLines(source, starts, classifyTokens(source, parsed), 1, starts.length),
-      spans: enclosingSpans(parsed),
+      spans: sourceEnclosingSpans(parsed),
     };
   }
   return latestFile;
@@ -316,50 +317,13 @@ function markLine(
   return { number: line.number, segments };
 }
 
-/** Every function's span and every statement's and statement block's, in the parser's zero-based lines and columns. */
-interface EnclosingSpans {
-  readonly functions: readonly SourceSpan[];
-  readonly blocks: readonly SourceSpan[];
-}
-
-/** The spans `enclosingRange` chooses from, or `null` when the file does not parse. */
-function enclosingSpans(parsed: ParseResult): EnclosingSpans | null {
-  if (parsed.diagnostics.some((diagnostic) => diagnostic.severity === "error")) return null;
-  // The tree is walked with a list rather than by recursion, as valid source may nest deeper than the call stack
-  // reaches.
-  const functions: SourceSpan[] = [];
-  const blocks: SourceSpan[] = [];
-  const pending: unknown[] = [parsed.program.statements];
-  while (pending.length > 0) {
-    const node = pending.pop();
-    if (typeof node !== "object" || node === null) continue;
-    if (Array.isArray(node)) {
-      for (const item of node) pending.push(item);
-      continue;
-    }
-    // EVIDENCE: the parser's syntax tree holds plain nodes, arrays, and values, and a node's `span` is its SourceSpan.
-    const record = node as {
-      readonly [key: string]: unknown;
-      readonly kind?: unknown;
-      readonly span?: SourceSpan;
-    };
-    if (record.span !== undefined && typeof record.kind === "string") {
-      if (record.kind === "functionDeclaration") functions.push(record.span);
-      else if (record.kind === "block" || record.kind.endsWith("Statement"))
-        blocks.push(record.span);
-    }
-    for (const key in record) if (key !== "span") pending.push(record[key]);
-  }
-  return { functions, blocks };
-}
-
 /**
  * The lines of the function the draw is in, the innermost; outside functions, of the smallest statement or block of
  * several lines around it that the `context` lines do not show whole, or of the whole file when none of several lines
  * is around it. `null` when the file does not parse, or when the `context` lines show every one around it.
  */
 function enclosingRange(
-  spans: EnclosingSpans | null,
+  spans: SourceEnclosingSpans | null,
   site: RandomSite,
   lineCount: number,
   context: readonly number[],
