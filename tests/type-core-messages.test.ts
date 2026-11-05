@@ -2560,7 +2560,7 @@ test("a message's walk and owner index charge their work, to the analysis and no
   assert.equal(units, 1 + 3 + count.reads);
   // (through the compile's consumer: what the messages charge is the analysis's, a demand's records as they were)
   const work = [64, 128, 256].map((k) => {
-    const program = `${Array.from({ length: k }, (_, at) => `let w${at} = {inner: {volume: 5}}\nw${at}.inner = hostValue\n`).join("")}exit\n`;
+    const program = `${Array.from({ length: k }, (_, at) => `let w${at} = {inner: [{volume: 5}, hostValue].random}\n`).join("")}exit\n`;
     const request = coreRequest([{ path: "main.tease", source: program }])!;
     const answers = analyseCore(request);
     const before = answers.budget;
