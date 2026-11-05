@@ -3571,3 +3571,222 @@ test("the stall index decides each stalled source from its record by one rule: t
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("the corpus runner runs a pool's batch of sources by their places as its shards run them, and refuses a list it cannot run whole (#1826)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const built = (name: string) => {
+      const folder = join(directory, name);
+      mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
+      mkdirSync(join(folder, "dist", "src", "type-inference", "core"), { recursive: true });
+      writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(folder, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
+      writeFileSync(join(folder, "dist", "tests", "helpers", "type-core-oracles.js"), FILLABLE);
+      return folder;
+    };
+    const [base, head] = [built("base"), built("head")];
+    const folder = join(directory, "pooled");
+    mkdirSync(folder);
+    const names = ["a", "b", "dup", "c", "dup"];
+    writeFileSync(
+      join(folder, "g.mjs"),
+      `export const cases = ${JSON.stringify(names.map((name) => [name, name]))};\n`,
+    );
+    const run = (env: Record<string, string>, ...args: string[]) =>
+      spawnSync(process.execPath, args, { encoding: "utf8", env: { ...process.env, ...env } });
+    const items = resolve("tests/families/items.mjs");
+    const write = (name: string, lines: string[]) => {
+      const file = join(directory, name);
+      writeFileSync(file, lines.map((line) => `${line}\n`).join(""));
+      return file;
+    };
+    // the area's sources, a repeated one once
+    const listed = run({}, items, "sources", folder);
+    assert.equal(listed.status, 0, listed.stderr);
+    const places = listed.stdout.trim().split("\n");
+    assert.equal(places.length, 4);
+    // two batches in no shard's order, the second as the queue gives it ($SX_ITEMS, the flag before the trees), judge
+    // as the area's two shards do
+    const [first, second] = [
+      write("first", [places[3]!, places[0]!]),
+      write("second", places.slice(1, 3)),
+    ];
+    const byItems = [join(directory, "i0.work.jsonl"), join(directory, "i1.work.jsonl")];
+    const one = run({}, runner, folder, base, head, "--items", first, "--work", byItems[0]!);
+    assert.equal(one.status, 0, one.stderr);
+    const two = run(
+      { SX_ITEMS: second },
+      runner,
+      folder,
+      "--items-from-env",
+      base,
+      head,
+      "--work",
+      byItems[1]!,
+    );
+    assert.equal(two.status, 0, two.stderr);
+    const byShards = [join(directory, "s0.work.jsonl"), join(directory, "s1.work.jsonl")];
+    for (const [shard, file] of byShards.entries())
+      assert.equal(
+        run({}, runner, folder, base, head, "--shard", `${shard}/2`, "--work", file).status,
+        0,
+      );
+    const judged = (files: string[]) => {
+      const result = run({}, stalls, ...files);
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim().split("\n").at(-1);
+    };
+    assert.equal(judged(byItems), judged(byShards));
+    // (a pool's batches close only together: one alone holds two of the area's four sources)
+    const part = run({}, stalls, byItems[0]!);
+    assert.equal(part.status, 1, part.stdout);
+    assert.match(part.stdout, /"shards":"1 batches, 2 of 4 sources","complete":false/);
+    // (each record names its batch, never a shard another holds)
+    const batch = (file: string) =>
+      JSON.parse(readFileSync(file, "utf8").split("\n")[0]!).work.shard;
+    assert.match(batch(byItems[0]!), /^items [0-9a-f]{16}$/);
+    assert.notEqual(batch(byItems[0]!), batch(byItems[1]!));
+    // a list the runner cannot run whole is refused before any source runs
+    const refusals: [string[], RegExp][] = [
+      [["--items", first, "--shard", "0/2"], /drop --store, --shard and --only/],
+      [["--items", first, "--items-from-env"], /give one/],
+      [["--items", write("unknown", ['["g.mjs","z","0"]'])], /does not hold/],
+      [["--items", write("twice", [places[0]!, places[0]!])], /twice/],
+      [["--items", write("empty", [])], /lists no source/],
+      [["--items", write("bad", ["g.mjs a"])], /no source's place/],
+      [["--items-from-env"], /\$SX_ITEMS names no file/],
+    ];
+    for (const [more, why] of refusals) {
+      const refused = run({ SX_ITEMS: "" }, runner, folder, base, head, ...more);
+      assert.equal(refused.status, 2, `${more.join(" ")}: ${refused.stderr}`);
+      assert.match(refused.stderr, why);
+    }
+    // `items.mjs check --area`: the area's every source once, no other
+    assert.equal(run({}, items, "check", write("whole", places), "--area", folder).status, 0);
+    assert.equal(run({}, items, "check", first, "--area", folder).status, 1);
+    const extra = write("extra", [...places, '["g.mjs","z","0"]']);
+    assert.equal(run({}, items, "check", extra, "--area", folder).status, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a baseline plans copies in 64 shards where it first plans it, keeps a count it recorded, and a head of any shard count compares with it (#1826)", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const built = join(directory, "built");
+    for (const part of [
+      "dist/src",
+      "dist/tests/helpers",
+      "src",
+      "tests/families/area",
+      "tests/families/copies",
+    ])
+      mkdirSync(join(built, part), { recursive: true });
+    writeFileSync(join(built, "src", "a.ts"), "a\n");
+    writeFileSync(join(built, "dist", "src", "a.js"), "compiled\n");
+    mkdirSync(join(built, "dist", "src", "type-inference", "core"), { recursive: true });
+    writeFileSync(join(built, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
+    writeFileSync(join(built, "dist", "tests", "helpers", "type-core-oracles.js"), FILLABLE);
+    writeFileSync(join(built, "package.json"), '{ "type": "module" }\n');
+    writeFileSync(join(built, "package-lock.json"), "{}\n");
+    writeFileSync(join(built, ".sha"), `${"1".repeat(40)}\n`);
+    for (const tool of ["baselines.mjs", "run.mjs", "sources.mjs"])
+      cpSync(join("tests", "families", tool), join(built, "tests", "families", tool));
+    const cases = (names: string[]) =>
+      `export const cases = ${JSON.stringify(names.map((name) => [name, name]))};\n`;
+    writeFileSync(
+      join(built, "tests", "families", "area", "g.mjs"),
+      cases(["p", "q", "r", "s", "t"]),
+    );
+    writeFileSync(join(built, "tests", "families", "copies", "g.mjs"), cases(["x", "y"]));
+    const { identityOf, planOf } = await import(pathToFileURL(baselines).href);
+    const { generatorsOf } = await import(
+      pathToFileURL(resolve("tests/families/sources.mjs")).href
+    );
+    const src: string = identityOf(built).src;
+    const at = (...parts: string[]) => join(directory, ...parts);
+    const tool = (...args: string[]) =>
+      spawnSync(process.execPath, [baselines, ...args], { encoding: "utf8" });
+    const run = (...args: string[]) => spawnSync(process.execPath, args, { encoding: "utf8" });
+    const store = (root: string, area: string, shard: string) =>
+      run(runner, join(built, "tests", "families", area), built, "--store", root, "--shard", shard);
+    const listed = (root: string) =>
+      readFileSync(at(root, "shards.tsv"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => line.split("\t"));
+
+    // a seed plans copies in 64 shards, every other area in 16, and lists each shard to store
+    assert.equal(tool("seed", built, at("seed")).status, 0);
+    const manifest = readFileSync(at("seed", src, "MANIFEST"), "utf8");
+    assert.match(manifest, /^area copies 64 [0-9a-f]{64}$/m);
+    assert.match(manifest, /^area area 16 [0-9a-f]{64}$/m);
+    const counts = (root: string) =>
+      Object.fromEntries(
+        ["area", "copies"].map((area) => {
+          const lines = listed(root).filter(([name]) => name === area);
+          return [area, [lines.length, new Set(lines.map(([, , n]) => n))]];
+        }),
+      );
+    assert.deepEqual(counts("seed"), {
+      area: [16, new Set(["16"])],
+      copies: [64, new Set(["64"])],
+    });
+    // a first store of copies in another count is refused; any other area keeps the first writer's count
+    mkdirSync(at("fresh"));
+    const fresh = store(at("fresh"), "copies", "0/16");
+    assert.equal(fresh.status, 2, fresh.stderr);
+    assert.match(fresh.stderr, /planned in 64 shards where a baseline first plans it/);
+    // a baseline that recorded copies in 16 shards (before #1826) keeps them: its seed lists 16, a store in 64 is
+    // refused, one in 16 stores
+    cpSync(at("seed"), at("old"), { recursive: true });
+    const copies = await generatorsOf(join(built, "tests", "families", "copies"));
+    const old = planOf("copies", copies, 16);
+    const id = createHash("sha256").update(old).digest("hex");
+    writeFileSync(at("old", src, "copies", "PLAN"), old);
+    writeFileSync(
+      at("old", src, "MANIFEST"),
+      manifest.replace(/^area copies 64 [0-9a-f]{64}$/m, `area copies 16 ${id}`),
+    );
+    rmSync(at("old", "shards.tsv"));
+    assert.equal(tool("seed", built, at("old")).status, 0);
+    assert.deepEqual(counts("old"), { area: [16, new Set(["16"])], copies: [16, new Set(["16"])] });
+    assert.match(store(at("old"), "copies", "0/64").stderr, /is planned otherwise/);
+    assert.equal(store(at("old"), "copies", "0/16").status, 0);
+    // a head compares with a baseline whatever the counts: `area` stored in 4 shards, run in 3 and by its sources
+    mkdirSync(at("four"));
+    for (const shard of [0, 1, 2, 3])
+      assert.equal(store(at("four"), "area", `${shard}/4`).status, 0);
+    const against = (...more: string[]) => {
+      const result = run(
+        runner,
+        join(built, "tests", "families", "area"),
+        built,
+        "--baseline",
+        at("four", src, "area"),
+        ...more,
+      );
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+    };
+    const totals = [0, 1, 2].map((shard) => against("--shard", `${shard}/3`));
+    assert.deepEqual(
+      [
+        totals.reduce((sum, t) => sum + t.sources, 0),
+        totals.reduce((sum, t) => sum + t.uncompared, 0),
+      ],
+      [5, 0],
+    );
+    const places = run(
+      resolve("tests/families/items.mjs"),
+      "sources",
+      join(built, "tests", "families", "area"),
+    );
+    writeFileSync(at("area.items"), places.stdout);
+    const byItems = against("--items", at("area.items"));
+    assert.deepEqual([byItems.sources, byItems.uncompared, byItems.differences], [5, 0, 0]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

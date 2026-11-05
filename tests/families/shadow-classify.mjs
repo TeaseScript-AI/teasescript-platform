@@ -20,14 +20,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 /** The taxonomy's version: a class added, removed or changed in its rule makes the next. */
-export const VERSION = 3;
+export const VERSION = 4;
 
 const S9B = "S9b #1072 (candidate coverage; retired or deferred syntax is no release requirement)";
 const S10 = "S10 #1073";
 /**
  * Sol's 53 exclusion texts as 48 rules (each text exact, the two that name a variable as one template each), and from
  * version 2 the next blocker of a function's body, the four texts #1744's presence sources reach, and the open part
- * of a typed default once its default may read a variable (#1072 A1).
+ * of a typed default once its default may read a variable (#1072 A1); from version 4 a typed default a stop left open
+ * (#1775).
  */
 const EXCLUSIONS = [
   ["this member or element read", S9B, "9a8e2a853d99 all:ar5-own::own/inferred-widens"],
@@ -125,6 +126,13 @@ const EXCLUSIONS = [
     "this tag query expression",
     S9B,
     "af90ea51aed2 1744-sol-v30-call-holes.mjs/plain-tag-predicate",
+  ],
+  // (v4, #1775's decline, `consumer.ts`'s `OPEN_BY_STOP`: a typed parse's or load's reader type a stop left open; no
+  // gate source has reached it yet, so its witness is #1767's own case in `type-core-stop.test.ts`)
+  [
+    "a typed parse's or load's default that a stop left open",
+    S9B,
+    "synthetic 'variable' (#1767's type-core-stop case: a typed default read after a stop)",
   ],
   [
     /^the name '[^']+'$/,

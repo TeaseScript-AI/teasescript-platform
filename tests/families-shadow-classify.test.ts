@@ -160,6 +160,8 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
       "excluded/this show camera expression",
       "excluded/this hide camera statement",
       "excluded/this tag query expression",
+      // (v4's: #1775's decline, which no gate source has reached yet)
+      "excluded/a typed parse's or load's default that a stop left open",
       "failed/legacy-heap",
       "failed/other",
       "exception",
@@ -480,6 +482,7 @@ test("every pair of a generated grid over the pair rule's axes takes exactly one
     "the name 'x'",
     "the variable 'v', whose lists nest deeper than the slice follows",
     "this return statement",
+    "a typed parse's or load's default that a stop left open",
   ])
     facts.push([{ kind: "outside", outside: text }, "excluded/"]);
   facts.push([{ kind: "outside", outside: "the name x" }, null]);
@@ -507,7 +510,7 @@ test("every pair of a generated grid over the pair rule's axes takes exactly one
     else assert.equal(got.id, expected);
     checked += 1;
   }
-  assert.equal(checked, 8 + 128 * 8 + 6 + 6);
+  assert.equal(checked, 8 + 128 * 8 + 7 + 6);
 });
 
 test("the command: the verdict line, the gate's exit, the files it writes", (t) => {
@@ -526,7 +529,7 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   assert.match(green.stdout, /^gate: green$/m);
   assert.match(
     readFileSync(join(folder, "out", "gate.md"), "utf8"),
-    /^# Shadow gate \(taxonomy v3\): green/,
+    /^# Shadow gate \(taxonomy v4\): green/,
   );
   // (a source the manifest owes without a record: open; the gate's run exits 1, the plain run 0)
   const owed = write("owed.jsonl", [{ key: "fine" }, { key: "missing" }]);

@@ -12,9 +12,9 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
   [--allowances natural,16,256] [--shard i/N] [--units 4] [--timeout 1800] [--memory 2048] \
-  [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl] [--only <stall index>]
+  [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl] [--only <stall index>] [--items <sources> | --items-from-env]
 node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base src tree>/<area> [the same options]
-node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/16]
+node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/N]
 node tests/families/stalls.mjs <shards' --work records>... [--rerun <rerun's records>...] [--index <new file>]
 node tests/families/stalls.mjs rerun <stall index> <base> <head> <new folder> [--timeout 600] [--shard i/N | --items <file>]
 ```
@@ -70,7 +70,10 @@ the options that cannot change or multiply them, by full name (`--name`, `--owne
 `--for`, `--mem`, `--class`, `--timeout`, `--host`, `--node`, `--commit`, `--checkout`, `--patch`, `--in`, `--after`,
 `--in-result`, `--needs-baseline`, `--data`, `--alone`, `--write`, `--target`, `--big`, `--writable-trees`,
 `--sandbox`, `--dry`), and refuses any other, as `--shards` or another `--items`. A job reads its batch from
-`$SX_ITEMS`, one item a line, its shard last. A replay's per-area report is `stalls.mjs`'s area lines and total, counted
+`$SX_ITEMS`, one item a line, its shard last. A pool can also hand out sources (#1826): `items.mjs sources <area>`
+prints one place a line (`[generator, name, key]`, a repeated source once), `check <file> --area <area>` asks it to hold
+the area's every source once, and a job runs its batch with `run.mjs <area> <base> <head> --items-from-env --work …`,
+whose record names the batch, so the queue's `--target` balances sources rather than shards. A replay's per-area report is `stalls.mjs`'s area lines and total, counted
 in sources, not a sum of the shards' log lines, whose `unansweredAlike` counts runs; a pool's shards run with `--work`,
 whose records it reads.
 
@@ -112,7 +115,8 @@ stalls are rerun by a runner since; the rerun's unit limit is added to its confi
 A replay since #1647 is judged by units. A record made before #1647 is judged by the rule then (a candidate, load or unknown, its time
 clause a heuristic). An
 area's records must share one configuration (another is refused, exit 2), so the area is complete only with its shards
-0/N to N-1/N of one N, together every source of one plan, and a source a plan lists more than once (a repeat, which the
+0/N to N-1/N of one N, together every source of one plan, or with an item pool's batches alone (#1826), each naming the
+area's count of sources and together holding that many (batches beside numbered shards are incomplete), and a source a plan lists more than once (a repeat, which the
 runner runs and counts each time) is one source where its repeats record the same counts, stall and runs, milliseconds
 apart, refused (exit 2, naming the place) where they differ; a source counts as `agreed` only where it was compared in
 every run and agrees, and as `unansweredAlike` where its runs agree but for some unanswered alike, each such source
@@ -171,7 +175,10 @@ removes a baseline.
 `bash tools/corpus/baseline.sh status <commit>` says in one line what each area of the commit's tree holds, and exits 0
 only when each one is complete. Before a base run, ask it: compare the head with a complete area through `--baseline`,
 and store an area that is not from the base tree's own runner and areas
-(`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/16`, one job per shard,
+(`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/N`, one job per shard,
+N the area's PLAN count: `copies` in 64 where a baseline first plans it, for a 60-minute wall on the slowest worker
+(#1826), every other area in 16; a baseline that recorded another count keeps it, and `--baseline` compares a head of
+any shard count with it,
 the fixture area as `<base tree>/tools/corpus/fixture`), so that it serves every later run on that tree. The script,
 installed as the desktop's `~/work/trees/hooks/baseline`, fills each new `main`'s tree at low priority where nobody
 stores it. A fill that began runs to its end (#1590, reversing #1567, whose fills cut short were never read); one none
@@ -265,14 +272,14 @@ sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> --
   --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
 ```
 
-`shadow-classify.mjs` (S11's classification, taxonomy version 3) reads the records of a campaign (and the S11 readiness
+`shadow-classify.mjs` (S11's classification, taxonomy version 4) reads the records of a campaign (and the S11 readiness
 research's `results.jsonl`, whose crashed sources have no rows) and gives every route pair (a source in one mode, legacy
 against core) exactly one class, and every source in each order one class of the sharing column, the core with sharing
 on against off (#1711). Each class has its rule in words, a witness and a gate state: `pass`, `attributed` (the rule
 class is known; S11 still owes each source's accepted expectation) or `open`. Pairs: `agree`; `differs/stop`,
 `/surviving`, `/integer`, `/rule` by the codes whose diagnostic identities (path, code, severity, offsets) changed, in
 that precedence, then `/checks`, `/plan`, `/wording` where the identities are equal (the other differing parts are
-columns of the pair); `excluded/<text>`, the research's 53 exclusion texts as 48 rules, and from version 2 `this return statement`, the camera and tag-query texts (#1744) and the open part of a typed default (#1072); `failed/ legacy-heap` (the
+columns of the pair); `excluded/<text>`, the research's 53 exclusion texts as 48 rules, and from version 2 `this return statement`, the camera and tag-query texts (#1744) and the open part of a typed default (#1072), and from version 4 a typed default a stop left open (#1775); `failed/ legacy-heap` (the
 legacy route's heap in its analysis with the core finished: legacy behaviour the switch resolves, #1075),
 `failed/other`, `exception`, `aborted-record`, `unavailable`. Sharing: `equal`, `one-mode-stop` and `both-stop-differ`
 (attributed, each row for the stop oracle's judgment), `neither-stops-differ`, `outside`, `uncompared`. Every rule is
