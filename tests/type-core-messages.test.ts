@@ -2859,6 +2859,21 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let a=null\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
       `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
     ],
+    // (at its own level, any value by its own items: a method's result is a new list whatever its receiver's null, and a
+    // choice's null is its own; Codex r6's B1 and B2)
+    [
+      'function use(a:integer[]?) {\n  if a != null {\n    let xs=[[a.take(1)],[["x"]]]\n  }\n}\nuse([1])\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict?=dict{k:[1]}\nif a != null {\n  let xs=[[a.values]]+[[[["x"]]]]\n}\nexit\n',
+      "'+' would mix a list (integer[][][]) and a list (string[][][]). A list holds one type. To allow both, declare " +
+        "the list as 'let xs: (integer | string)[][][][] =[[a.values]]+[[[[\"x\"]]]]'.",
+    ],
+    [
+      'let xs=[(askChoice null) otherwise [[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
     // (a value with no place, a method's result: its own items)
     [
       'let xs=[[[1],null].take(2),[["x"]]]\nexit\n',

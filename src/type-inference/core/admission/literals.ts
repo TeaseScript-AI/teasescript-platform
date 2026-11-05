@@ -358,6 +358,8 @@ export function literalElements(
       shared = paths;
       atCopy = atCopies.get(key)!;
     }
+    // (#1765: each definition's intermediate layers by path, asked once beside every later element, Codex r6's B3)
+    const layered = new Map<Definition, Map<string, boolean[]>>();
     const first = new Map<
       string,
       {
@@ -390,10 +392,20 @@ export function literalElements(
           : null;
       // (#1765: the layers between the element and the leaf that may hold null, each element's by its form
       // (`mayHoldNull`); the sentence's type alone, as the leaf's own null is, #1753)
-      const layers = (of: Definition): boolean[] =>
-        intermediateLayers(admission.work, path).map((prefix) =>
-          mayHoldNull(admission, of.value!, of.node, prefix),
-        );
+      // (each definition's layers at a path asked once: the earliest element's beside every later one, Codex r6's B3)
+      const layers = (of: Definition): boolean[] => {
+        let mine = layered.get(of);
+        if (mine === undefined) layered.set(of, (mine = new Map()));
+        let found = mine.get(at);
+        if (found === undefined)
+          mine.set(
+            at,
+            (found = intermediateLayers(admission.work, path).map((prefix) =>
+              mayHoldNull(admission, of.value!, of.node, prefix),
+            )),
+          );
+        return found;
+      };
       const optional = mixedOptional(layers(first.get(at)!.d), layers(d));
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,
@@ -1333,16 +1345,17 @@ export interface MixedOptional {
 
 /**
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
- * items hold (the lead's ruling (A) on #1789, after Codex r1–r5):
+ * items hold (the lead's ruling (A) on #1789, after Codex r1–r6):
+ * - at its own level (no step left), any value by its own items;
  * - a join, if any operand may;
- * - a literal, by its children at the layer's next step, each by this same rule below; at its own level, its kind;
+ * - a literal, by its children at the layer's next step, each by this same rule below;
  * - a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and
  *   default, a method's receiver, a dict's values), by each value it carries, at the path into it; an `otherwise`'s
- *   operand never at its own level, its fallback only where the operand may itself be null;
+ *   fallback only where its operand may itself be null;
  * - a written copy, by its term alone, whatever a rejected store put there;
  * - another read or a call's result, by its place's admitted type where admission decides it;
  * - any other value (an undecided place's read, an operation's own result), by its own items.
- * Each own-level question once per call (an `otherwise`'s operand), so nested `otherwise`s ask each value once.
+ * Each own-level question of an `otherwise`'s operand once per call, so nested `otherwise`s ask each value once.
  */
 function mayHoldNull(
   admission: Admission,
@@ -1360,6 +1373,12 @@ function mayHoldNull(
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     const [at, from, steps] = next;
     program.work.charge("checks");
+    // (at its own level, any value by its own items: a method's or a join's result is a new collection, whatever its
+    // receiver or operands hold, and a choice's own null is its own, Codex r6's B1 and B2)
+    if (steps.length === 0) {
+      if (itemsHold(at, [])) return true;
+      continue;
+    }
     const c = program.opOf.get(at);
     if (
       c !== undefined &&
@@ -1372,10 +1391,6 @@ function mayHoldNull(
       continue;
     }
     if (program.hasOf.has(at)) {
-      if (steps.length === 0) {
-        if (itemsHold(at, [])) return true;
-        continue;
-      }
       const rest = keptSlice(admission.work, steps, 1);
       for (const child of literalChildren(admission, at, steps[0]!))
         pending.push([child.value!, child.node ?? from, rest]);
@@ -1392,11 +1407,7 @@ function mayHoldNull(
         own.set(operand, falls);
       }
       for (const [part, strip, role] of carried)
-        if (
-          (role !== "otherwise/operand" || strip.length > 0) &&
-          (role !== "otherwise/fallback" || falls)
-        )
-          pending.push([part, from, strip]);
+        if (role !== "otherwise/fallback" || falls) pending.push([part, from, strip]);
       continue;
     }
     const copied = holdsSource(admission, at)
