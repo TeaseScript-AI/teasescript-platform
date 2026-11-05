@@ -93,6 +93,7 @@ const CHARGING = [
   ...core("type-inference/core/exact-path.ts", ["ExactPath.defVal"]),
   ...core("type-inference/core/definitions.ts", [
     "DefinitionLists.definitionsOf",
+    "keptParent",
     "DefinitionLists.eventList",
     "DefinitionLists.readSignature",
     "DefinitionLists.singleSite",
