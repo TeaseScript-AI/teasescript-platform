@@ -531,9 +531,10 @@ function drain(frontier: Frontier): void {
         try {
           rules(frontier, goal);
         } catch (error) {
-          if (error instanceof Decline)
+          if (error instanceof Decline) {
             if (!frontier.poisoned.has(goal.node)) frontier.poisoned.set(goal.node, new Map());
-          frontier.poisoned.get(goal.node)!.set(goal.step, error.reason);
+            frontier.poisoned.get(goal.node)!.set(goal.step, error.reason);
+          }
           throw error;
         }
         continue;
