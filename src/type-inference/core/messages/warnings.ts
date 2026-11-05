@@ -354,6 +354,8 @@ function wholeTest(
   site: SourceSite,
   source: MessageSource,
 ): Test | null | undefined {
+  // (its landing asked, and charged, only for a place below a collection)
+  if (!rule.steps.some((step) => "collection" in step)) return undefined;
   const below = stepsBelow(rule, source.landing(site));
   if (below === null || below.length === 0 || !below.every((step) => "collection" in step))
     return undefined;
