@@ -84,7 +84,13 @@ import {
   type Spelling,
   type Writer,
 } from "./items.js";
-import { Laminar, narrowedItems, type Narrowing, type NarrowingForm } from "./narrowing.js";
+import {
+  Laminar,
+  narrowedItems,
+  selectionLinks,
+  type Narrowing,
+  type NarrowingForm,
+} from "./narrowing.js";
 import { operationItems } from "./operator-table.js";
 import { indexedPlus } from "./plus-index.js";
 import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";
@@ -140,8 +146,9 @@ function keyOfSteps(place: PlaceId, rest: Steps): Key {
 export class Values {
   /** The route each read took, by key, node and `before`, recorded as the read is answered. */
   readonly #routes = new Map<string, ReadRoute>();
-  /** Per read, the narrowing it takes (`#narrowingOf`). */
+  /** Per read, the narrowing it takes (`#narrowingOf`), and per place, its stable chain's binding (`#stableBinding`). */
   readonly #narrowings = new Map<PlaceId, NarrowedRead | null>();
+  readonly #bindings = new Map<PlaceId, PlaceId | null>();
   /** Per type test's form, its spelling (`#testSpelling`). */
   readonly #testSpellings = new Map<NarrowingForm, Spelling>();
 
@@ -239,10 +246,11 @@ export class Values {
    * S10 part 2b: the narrowing a read takes, `null` for none. A read of a stable path at its own path (a binding's
    * occurrence, or a chain of its properties and indexes) inside a stored value (`#inStoredValue`) takes the nearest
    * narrowing definition its node finds (N2, `NarrowingIndex.nearestAt`: one walk of its steps down the tested paths);
-   * any other read keeps the mark until its consumer reads G (§13.2's order, the consumers' part). A selection as the
-   * read's own step (`xs.first`, `rows[0].random`) reads its element's (U4a: an element G proves its kinds, never its
-   * emptiness, which C6 asks of the owner); a selection below another step, a length or a member step answers by
-   * itself (N1: G proves kinds only). Once per read.
+   * any other read keeps the mark until its consumer reads G (§13.2's order, the consumers' part). A selection at any
+   * step (`xs.first`, `rows[0].random`, `rs.first.f`, `rows.first.last`) reads its element's (U4a, #1073: an element G
+   * proves its kinds, never its emptiness, which C6 asks of the owner), each selected owner's own selection beside it
+   * (`#narrowedChain`); an iteration, a length or a member step answers by itself (N1: G proves kinds only). Once per
+   * read.
    */
   #narrowingOf(value: PlaceId): NarrowedRead | null {
     const known = this.#narrowings.get(value);
@@ -252,36 +260,29 @@ export class Values {
     let found: NarrowedRead | null = null;
     const outer = program.projOf.get(value);
     const read = outer === undefined ? (program.occNode.get(value) ?? null) : outer.node;
-    // (the chain down to its binding, its steps as the exact path keys them, the node `#valueAt` passes down)
-    const steps: string[] = [];
-    let at = value;
-    let node: FlowNode | null = null;
-    let stable = read !== null && read.span !== null;
-    for (let projection = outer; projection !== undefined && stable;) {
-      program.work.charge("eventSteps");
-      const step = projection.step;
-      stable =
-        step !== "iteration" &&
-        (projection === outer || !selectsElement(step)) &&
-        !measuresLength(step) &&
-        memberStep([step], 0) < 0;
-      steps.push(stepName(step));
-      node = projection.node ?? node;
-      at = projection.owner;
-      projection = program.projOf.get(at);
-    }
-    const binding = stable ? program.occurrenceOf.get(at) : undefined;
+    const binding = read !== null && read.span !== null ? this.#stableBinding(value) : null;
     // (a root no test names is never narrowed: a program without a condition, a switch or an `and`/`or` makes no
     // narrowing definition and builds no narrowing index (#1251); else the index's lookup, the stored values and the
     // tested paths)
     if (
-      binding !== undefined &&
+      binding !== null &&
       !guards.testless &&
       guards.narrowing.tests(binding) &&
       this.#inStoredValue(read!)
     ) {
       const g = guards.narrowing.nearestAt(read!);
-      if (g !== null)
+      if (g !== null) {
+        // (the chain down to its binding, its steps as the exact path keys them, the node `#valueAt` passes down)
+        const steps: string[] = [];
+        let at = value;
+        let node: FlowNode | null = null;
+        for (let projection = outer; projection !== undefined;) {
+          program.work.charge("eventSteps");
+          steps.push(stepName(projection.step));
+          node = projection.node ?? node;
+          at = projection.owner;
+          projection = program.projOf.get(at);
+        }
         found = {
           g,
           read: read!,
@@ -289,9 +290,41 @@ export class Values {
           key: keptKey(program.work, binding, steps.reverse()),
           node: program.occNode.get(at) ?? node,
         };
+      }
     }
     this.#narrowings.set(value, found);
     return found;
+  }
+
+  /**
+   * The binding of a place's chain of projections where every step is stable (no iteration, length or member step),
+   * `null` for none: one memo per place, each projection step walked charged once, so the prefixes of one chain, each a read of
+   * its own (`#narrowedChain`'s owners), walk it once together, never once each (Codex r2 on #1742).
+   */
+  #stableBinding(value: PlaceId): PlaceId | null {
+    const { program } = this.pass;
+    const pending: PlaceId[] = [];
+    let at = value;
+    let known = this.#bindings.get(at);
+    while (known === undefined) {
+      const projection = program.projOf.get(at);
+      if (projection === undefined) {
+        known = program.occurrenceOf.get(at) ?? null;
+        break;
+      }
+      program.work.charge("eventSteps");
+      const step = projection.step;
+      if (step === "iteration" || measuresLength(step) || memberStep([step], 0) >= 0) {
+        known = null;
+        break;
+      }
+      pending.push(at);
+      at = projection.owner;
+      known = this.#bindings.get(at);
+    }
+    this.#bindings.set(at, known);
+    for (const place of pending) this.#bindings.set(place, known);
+    return known;
   }
 
   /**
@@ -861,21 +894,17 @@ export class Values {
       const { program, contract } = this.pass;
       if (program.speakerPlaces.has(value))
         return [makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled" })];
-      // S10 part 2b: a read in a stored value takes its narrowing; a selection its element's, beside its owner's own
-      // selection (U4a, F11)
+      // S10 part 2b: a read in a stored value takes its narrowing; a selection at any step its element's, beside each
+      // selected owner's own selection (U4a, #1073, F11)
       const narrowed = rest.length === 0 ? this.#narrowingOf(value) : null;
       if (narrowed !== null) {
         const site = program.places[value]?.site ?? null;
-        const selected = program.projOf.get(value);
         return yield {
           key: joinParts("vg", value, narrowed.node === null ? (node?.id ?? "-") : ""),
           kind: "value",
           file: site?.file ?? -1,
           offset: site?.start ?? -1,
-          make: () =>
-            selected !== undefined && selectsElement(selected.step)
-              ? this.#selection(selected.owner, selected.step, selected.node ?? node, [], narrowed)
-              : this.#narrowedRead(narrowed, node),
+          make: () => this.#narrowedChain(value, node, narrowed),
         };
       }
       const binding = program.occurrenceOf.get(value);
@@ -930,23 +959,38 @@ export class Values {
     }
   }
 
-  /**
-   * An element selection's value at a path (`#valueAt`): its owner's at the step, or its narrowing's read where it
-   * takes one (`#narrowingOf`), with the owner's own selection.
-   */
+  /** An element selection's value at a path (`#valueAt`): its owner's at the step, with the owner's own selection. */
   *#selection(
     owner: PlaceId,
     step: string,
     node: FlowNode | null,
     rest: Steps,
-    narrowed: NarrowedRead | null = null,
   ): Work<readonly Item[]> {
-    const elements =
-      narrowed === null
-        ? yield* this.valueItems(owner, node, stepsAfter([stepName(step)], rest))
-        : yield* this.#narrowedRead(narrowed, node);
+    const elements = yield* this.valueItems(owner, node, stepsAfter([stepName(step)], rest));
     const owners = withoutEmpty(yield* this.valueItems(owner, node, []));
     return withOwnSelection(elements, owners, this.pass);
+  }
+
+  /**
+   * A narrowed read's value (`#valueAt`, U4a, #1073): its narrowing's read of the whole path (`#narrowedRead`: G's
+   * items, the nearest definition's value, or on a failed G the read as before, marked), rebuilt as the ordinary route
+   * nests its links: at each selection, innermost first, the selected owner's own selection beside it, read at that
+   * link's node (F11), so where G holds and where it fails each owner that may be an object keeps its own selection.
+   * The links are one charged walk of the chain (`selectionLinks`); each owner's read is its own demand.
+   */
+  *#narrowedChain(
+    value: PlaceId,
+    node: FlowNode | null,
+    narrowed: NarrowedRead,
+  ): Work<readonly Item[]> {
+    const selections = selectionLinks(this.pass.program, value, node);
+    let items = yield* this.#narrowedRead(narrowed, node);
+    for (let index = selections.length - 1; index >= 0; index -= 1) {
+      const selected = selections[index]!;
+      const owners = withoutEmpty(yield* this.valueItems(selected.owner, selected.node, []));
+      items = withOwnSelection(items, owners, this.pass);
+    }
+    return items;
   }
 
   /** F27: the loop variable is the element of the iterable's value at loop entry; a dict's key is text, a range's a whole number. */
