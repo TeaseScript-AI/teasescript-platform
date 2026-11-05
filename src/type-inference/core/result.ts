@@ -99,7 +99,7 @@ export interface ContextDetail {
 }
 
 /** A count or an index (C2): what uses it. */
-export type CountUse = "repeat" | "index" | "get" | "removeAt" | "take" | "takeLast";
+export type CountUse = "repeat" | "range" | "index" | "get" | "removeAt" | "take" | "takeLast";
 
 /**
  * The rule a diagnostic's consumer applies (TABLE §4), with what its sentence names, in the source's own text (D2: the
@@ -364,6 +364,7 @@ export type StaticRule =
 
 /** The registry codes the core's diagnostics carry (D3: a rule's one code, with both severities where it warns). */
 export type CoreCode =
+  | "TSV010"
   | "TSV011"
   | "TSV012"
   | "TSV029"

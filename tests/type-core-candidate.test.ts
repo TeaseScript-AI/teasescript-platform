@@ -65,6 +65,7 @@ import {
   type PredictedRun,
 } from "./helpers/type-core-derived.js";
 import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
+import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import {
   assignments,
   derivedContent,
@@ -1282,12 +1283,12 @@ test("the candidate hears of each file it walks, as the production default does"
 
 test("C2's integer check warns with TSV011 at a count and TSV043 at a list index, and runs at the use", () => {
   const count = candidate(
-    'let count: number = hostValue\nsay "ready"\nrepeat count {\n  say "turn"\n}\nexit\n',
+    'let count = hostValue\nsay "ready"\nrepeat count {\n  say "turn"\n}\nexit\n',
   );
-  assert.deepEqual(sited(count), ["warning TSV041@20", "warning TSV011@49"]);
-  assert.ok(count.diagnostics[1]!.message.startsWith(REPEAT_COUNT_RULE));
+  assert.deepEqual(sited(count), ["warning TSV011@41"]);
+  assert.ok(count.diagnostics[0]!.message.startsWith(REPEAT_COUNT_RULE));
   assert.ok(count.plan !== null);
-  assert.deepEqual(checksOf(count.plan), ["0:29 number"]);
+  assert.deepEqual(checksOf(count.plan), []);
   assert.deepEqual(runWith(count.plan, 2), {
     status: "halted",
     says: ["ready", "turn", "turn"],
@@ -1296,29 +1297,31 @@ test("C2's integer check warns with TSV011 at a count and TSV043 at a list index
   assert.deepEqual(runWith(count.plan, 2.5), {
     status: "failed",
     says: ["ready"],
-    failure: "TSR043@49:54",
+    failure: "TSR043@41:46",
   });
-  assertRuns(count.plan, "the count", ["ready", "turn", "turn"], [["x", "TSR058@20:29"]]);
+  assertRuns(count.plan, "the count", ["ready", "turn", "turn"], [["x", "TSR043@41:46"]]);
 
-  const index = candidate(
-    "let rows = [10, 20]\nlet at: number = hostValue\nrepeat rows[at] {}\nexit\n",
-  );
-  assert.deepEqual(sited(index), ["warning TSV041@37", "warning TSV043@59"]);
+  const index = candidate("let rows = [10, 20]\nlet at = hostValue\nrepeat rows[at] {}\nexit\n");
+  assert.deepEqual(sited(index), ["warning TSV043@51"]);
   assert.ok(index.plan !== null);
-  assert.deepEqual(checksOf(index.plan), ["20:46 number"]);
+  assert.deepEqual(checksOf(index.plan), []);
   assertRuns(
     index.plan,
     "the index",
     [],
     [
       [1, null],
-      [0.5, "TSR024@59:61"],
-      [2, "TSR025@59:61"],
-      ["x", "TSR058@37:46"],
+      [0.5, "TSR024@51:53"],
+      [2, "TSR025@51:53"],
+      ["x", "TSR024@51:53"],
     ],
   );
 
-  // the proven cases stay errors under the same codes
+  // the proven cases stay errors under the same codes, a written `number` read among them (#1173)
+  assert.deepEqual(sited(candidate("let count: number = hostValue\nrepeat count {}\nexit\n")), [
+    "warning TSV041@20",
+    "error TSV011@37",
+  ]);
   assert.deepEqual(sited(candidate("let n = 2.5\nrepeat n {}\nexit\n")), ["error TSV011@19"]);
   assert.deepEqual(sited(candidate("let n: integer = 2.5\nexit\n")), ["error TSV041@17"]);
   assert.deepEqual(sited(candidate("let xs = [10, 20]\nlet i = 1.5\nrepeat xs[i] {}\nexit\n")), [
@@ -1505,6 +1508,237 @@ test("every method of text's known-argument errors are the current checker's (#1
   assert.ok(compared >= 75, `${compared} calls compared`);
 });
 
+/**
+ * V30 §6 (#1173): a range a `for` loop goes through as written has whole-number bounds. A bound the core knows to be a
+ * number or text is a compile error at the bound (TSV010, as the current checker gives); a whole one is quiet; one
+ * from outside the script warns and keeps the runtime's check of the range.
+ */
+test("a for loop's range bound that is a number or text is an error at the bound, its host bound checked when it runs (V30 §6, #1173)", () => {
+  const errors = [
+    [
+      "for i in 1..2.0 { say i }\nexit\n",
+      12,
+      "'2.0' is a number that can have decimals. Round the number with the floor, round or ceil function first.",
+    ],
+    [
+      "for i in 1.0..2 { say i }\nexit\n",
+      9,
+      "'1.0' is a number that can have decimals. Round the number with the floor, round or ceil function first.",
+    ],
+    [
+      "let x = 2.5\nfor i in 1..x { say i }\nexit\n",
+      24,
+      "'x' is a number that can have decimals. Round the number with the floor, round or ceil function first.",
+    ],
+    [
+      'let t = "a"\nfor i in 1..t.trim() { say i }\nexit\n',
+      24,
+      "'t.trim()' is text (string). Use a whole number here.",
+    ],
+  ] as const;
+  for (const [source, at, cause] of errors) {
+    const result = inBothOrders(() => candidate(source));
+    assert.deepEqual(sited(result), [`error TSV010@${at}`], source);
+    assert.equal(
+      result.diagnostics[0]!.message,
+      `A 'for' loop needs a range of whole numbers, but ${cause}`,
+      source,
+    );
+    assert.equal(result.plan, null, source);
+  }
+  const whole = candidate('let x: integer = 2\nfor i in x..=3 {\n  say "turn"\n}\nexit\n');
+  assert.deepEqual(sited(whole), []);
+  assert.ok(whole.plan !== null);
+  assertRuns(whole.plan, "a whole range", ["turn", "turn"], [[null, null]]);
+  const host = inBothOrders(() => candidate('for i in 1..=hostValue {\n  say "turn"\n}\nexit\n'));
+  assert.deepEqual(sited(host), ["warning TSV010@13"]);
+  assert.ok(host.plan !== null);
+  assertRuns(
+    host.plan,
+    "a host bound",
+    ["turn", "turn"],
+    [
+      [2, null],
+      [2.5, "TSR045@9:22"],
+    ],
+  );
+});
+
+/**
+ * #1173 (the owner's option C): an integer-only use is checked against the type of the place it reads, a place written
+ * `number` an error whatever value it holds (a copy of one, and a place widened by a later store, rule 1.2, are #1173's
+ * next part). The current checker is the reference here: over every integer-only use the candidate route reaches (a
+ * repeat count, a list index, a `for` range's start and end, `take`, a text method's position, count or length) and
+ * the places a use reads (written `number`, `number?`, `integer` or none, a whole or fractional start value, host data
+ * into a `number`), the candidate's errors are the current checker's, in the four modes. A `number` narrowed by `is integer` is quiet (`type-core-narrowing.test.ts`).
+ */
+test("an integer-only use of a written number place is the current checker's error at every use, in the four modes (#1173)", () => {
+  const uses = [
+    (read: string) => `repeat ${read} { say "x" }`,
+    (read: string) => `let xs = [1, 2]\nsay xs[${read}]`,
+    (read: string) => `for i in ${read}..3 { say i }`,
+    (read: string) => `for i in 1..${read} { say i }`,
+    (read: string) => `let ys = [1, 2, 3]\nsay ys.take(${read})`,
+    // (a text method's whole-number argument: its position, count or length, Astra r1)
+    (read: string) => `say "abc".substring(${read})`,
+    (read: string) => `say "abc".substring(0, ${read})`,
+    (read: string) => `say "abc".repeat(${read})`,
+    (read: string) => `say "abc".padStart(${read}, "x")`,
+    (read: string) => `say "abc".padEnd(${read}, "x")`,
+  ];
+  const programs = (use: (read: string) => string): readonly string[] => [
+    use("1"),
+    use("1.5"),
+    // (a `get` result reads its receiver's element: Codex r1 B1)
+    `let ps: number[] = [1]\n${use("ps.get(0, default: 0)")}`,
+    `let ps: integer[] = [1]\n${use("ps.get(0, default: 0)")}`,
+    // (every read form that gives a part of a written place, composed too: Codex r2)
+    `let ps: number[][] = [[1]]\n${use("ps.get(0, default: [0])[0]")}`,
+    `let ps: number[][] = [[1]]\n${use("ps.get(0, default: [0]).get(0, default: 0)")}`,
+    `let ps: integer[][] = [[1]]\n${use("ps.get(0, default: [0])[0]")}`,
+    // (a call's result reads its function's written result type, through `analyseCore`: functions are outside the
+    // candidate route's slice)
+    `function f: number {\n  return 1\n}\n${use("f()")}`,
+    `function f: integer {\n  return 1\n}\n${use("f()")}`,
+    `function f: number[] {\n  return [1]\n}\n${use("f().get(0, default: 0)")}`,
+    `function f: integer[] {\n  return [1]\n}\n${use("f().get(0, default: 0)")}`,
+    // (a `remove` gives a dict's value, a list's `null`; composed with an index and from a call's result: Codex r4)
+    `let ps: number dict = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: integer dict = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: number[] = [1, 2]\n${use("ps.remove(1)")}`,
+    `let ps: number[][] = [[1], [2]]\n${use("ps.removeFirst()[0]")}`,
+    `function f: number dict {\n  return dict{a: 1}\n}\n${use('f().remove("a")')}`,
+    // (a removal per member of an optional receiver, composed too; a written union of a collection beside another type
+    // is TSV075's error, so `?` is the union a receiver has: Codex r5)
+    `let ps: (number dict)? = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: (integer dict)? = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: number dict[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
+    `let ps: integer dict[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
+    `let ps: (number[])? = [1, 2]\n${use("ps.removeFirst()")}`,
+
+    ...["removeFirst()", "removeLast()", "removeAt(0)"].flatMap((removal) => [
+      `let ps: number[] = [1, 2]\n${use(`ps.${removal}`)}`,
+      `let ps: integer[] = [1, 2]\n${use(`ps.${removal}`)}`,
+    ]),
+    ...[
+      "let p: number = 1",
+      "let p: number = 1.5",
+      "let p: number? = 1",
+      "let p: integer = 1",
+      "let p = 1",
+      "let p = 1.5",
+      "let p: number = hostValue",
+    ].map((declaration) => `${declaration}\n${use("p")}`),
+  ];
+  // (the candidate's errors, or, for a use the candidate route does not lower yet (`take`), the core analysis's)
+  const errors = (result: CompilationResult) =>
+    result.diagnostics
+      .filter((d) => d.severity === "error")
+      .map((d) => `${d.code}@${d.span.start.offset}`);
+  const coreErrors = (source: string): string[] => {
+    const inside = insideSlice(() => errors(candidate(source)));
+    if (inside !== null) return inside;
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    return analyseCore(request)
+      .diagnostics.filter((d) => d.class === "compile-error")
+      .map((d) => `${d.code}@${d.site.start}`);
+  };
+  for (const use of uses)
+    for (const program of programs(use)) {
+      const source = `${program}\nexit\n`;
+      const current = errors(compileSource(source, OPTIONS));
+      assert.deepEqual(
+        inBothOrders(() => coreErrors(source)),
+        current,
+        source,
+      );
+      assert.deepEqual(
+        inBothOrders(() => withoutSharing(() => coreErrors(source))),
+        current,
+        `${source} (unshared)`,
+      );
+    }
+  // (a receiver that may be null: the current checker reports the receiver's null where the core reports the use, both
+  // an error at that site, the null contributing nothing to the removed value)
+  for (const use of uses)
+    for (const program of [
+      `let ps: (number dict)?[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
+      `function f: (number dict)? {\n  return dict{a: 1}\n}\n${use('f().remove("a")')}`,
+    ]) {
+      const source = `${program}\nexit\n`;
+      const sites = (found: readonly string[]) => found.map((error) => error.split("@")[1]);
+      const current = sites(errors(compileSource(source, OPTIONS)));
+      assert.ok(current.length > 0, source);
+      assert.deepEqual(
+        inBothOrders(() => sites(coreErrors(source))),
+        current,
+        source,
+      );
+    }
+  // (a set's `remove` gives `null`, no element: its error names the null, not a number, Codex r3)
+  const removed = coreRequest([
+    {
+      path: "main.tease",
+      source: 'let ps: number set = set[1]\nrepeat ps.remove(1) { say "X" }\nexit\n',
+    },
+  ]);
+  assert.ok(removed !== null);
+  assert.deepEqual(
+    analyseCore(removed)
+      .diagnostics.filter((d) => d.kind === "integer-use")
+      .map((d) => ("kinds" in d ? d.kinds : null)),
+    [["null"]],
+  );
+  // (a written type without `number` asks no key for the rule: main's counters, so no stop moves, Codex r1 B2)
+  const integer = coreRequest([
+    { path: "main.tease", source: 'let p: integer = 1\nrepeat p { say "X" }\nexit\n' },
+  ]);
+  assert.ok(integer !== null);
+  for (const mode of MODES) {
+    const units = inMode(mode, (): [number, number | undefined] => {
+      const { budget } = analyseCore(integer);
+      return [budget.total, budget.counts.get("checks")];
+    });
+    assert.deepEqual(units, [194, 17], JSON.stringify(mode));
+  }
+});
+
+/**
+ * #1173's narrowing exception: a read under a test of its key (`if p is integer`) is left to its items, so the use is
+ * no error there, as in the current checker; the same read untested is one. The core's own analysis (a type test is
+ * outside the candidate route's slice), in both orders.
+ */
+test("a written number read that 'is integer' narrows is no integer-use error, untested it is one (#1173)", () => {
+  const uses = [
+    (read: string) => `repeat ${read} { say "x" }`,
+    (read: string) => `let xs = [1, 2]\nsay xs[${read}]`,
+    (read: string) => `for i in ${read}..3 { say i }`,
+    (read: string) => `for i in 1..${read} { say i }`,
+  ];
+  const errors = (source: string): number => {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    return inBothOrders(
+      () =>
+        analyseCore(request).diagnostics.filter(
+          (diagnostic) => diagnostic.kind === "integer-use" && diagnostic.class === "compile-error",
+        ).length,
+    );
+  };
+  for (const use of uses) {
+    const narrowed = `let p: number = hostValue\nif p is integer {\n${use("p")}\n}\nexit\n`;
+    assert.equal(errors(narrowed), 0, narrowed);
+    assert.deepEqual(
+      sited(compileSource(narrowed, OPTIONS)).filter((d) => d.startsWith("error")),
+      [],
+      narrowed,
+    );
+    const untested = `let p: number = hostValue\n${use("p")}\nexit\n`;
+    assert.equal(errors(untested), 1, untested);
+  }
+});
+
 test("parentheses answer for their content: a parenthesised count and index read as bare ones (S3 3.4)", () => {
   // the flow graph's node of a parenthesised expression is its content's, the value the parentheses hold
   const source = "let n = 2\nrepeat ((n)) {}\nlet xs = [1, 2]\nlet y = xs[(n)]\nexit\n";
@@ -1524,7 +1758,7 @@ test("parentheses answer for their content: a parenthesised count and index read
   assert.deepEqual(sited({ diagnostics: count }), ["error TSV011@9"]);
   assert.equal(
     count[0]!.message,
-    "A repeat count must be a whole number (integer) of at least 0, but '2.5' is a number. Round the number with " +
+    "A repeat count must be a whole number (integer) of at least 0, but '2.5' is a number that can have decimals. Round the number with " +
       "the floor, round or ceil function first.",
   );
   const listed = inBothOrders(
@@ -1533,7 +1767,7 @@ test("parentheses answer for their content: a parenthesised count and index read
   assert.deepEqual(sited({ diagnostics: listed }), ["error TSV043@28"]);
   assert.equal(
     listed[0]!.message,
-    "A list index must be a whole number (integer), but '0.5' is a number. Round the number with the floor, round " +
+    "A list index must be a whole number (integer), but '0.5' is a number that can have decimals. Round the number with the floor, round " +
       "or ceil function first.",
   );
   const host = candidate("repeat ((hostValue)) {}\nexit\n");
@@ -2740,16 +2974,16 @@ function finish(
 
 test("a checkpoint after a passed check resumes with the same state, and the later check still runs", () => {
   const source =
-    'let count: number = hostValue\nsay "checked"\nrepeat count {\n  say "turn"\n}\nexit\n';
+    'let count: integer = hostValue\nsay "checked"\nrepeat count {\n  say "turn"\n}\nexit\n';
   const compiled = candidate(source);
   assert.ok(compiled.plan !== null);
   const plan = compiled.plan;
-  assert.deepEqual(checksOf(plan), ["0:29 number"]);
+  assert.deepEqual(checksOf(plan), ["0:30 integer"]);
   // (the repeat's own count check, the runtime's: TSR043 at the count, nothing said after it)
   const count = source.indexOf("count {");
   for (const [hostValue, ending] of [
     [2, "halted"],
-    [2.5, "failed"],
+    [-1, "failed"],
   ] as const) {
     // the store's check has passed when the session waits at the reading pause after it
     const waiting = run(plan, createFreshRuntimeSnapshot(plan, { globals: { hostValue } }));

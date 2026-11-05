@@ -46,6 +46,11 @@ export function described(kinds: readonly ItemTag[]): string {
     : either(found.map((kind) => VALUE_KINDS[kind].description));
 }
 
+/** Kinds as one value is described where a whole number is required: a `number` is "a number that can have decimals" (DIAGNOSTICS.md). */
+export function wholeDescribed(kinds: readonly ItemTag[]): string {
+  return described(kinds).replace(/\ba number\b/, "a number that can have decimals");
+}
+
 /** Kinds as many values are described: `whole numbers`, `texts or null`. */
 export function plural(kinds: readonly ItemTag[]): string {
   const found = named(kinds);
@@ -279,9 +284,11 @@ export function operandRule(rule: DiagnosticRule, text: string): string {
     case "count":
       return rule.use === "repeat"
         ? REPEAT_COUNT_RULE
-        : rule.use === "index" || rule.use === "get"
-          ? LIST_INDEX_RULE
-          : `${rule.use}() needs a whole number (integer)`;
+        : rule.use === "range"
+          ? "A 'for' loop needs a range of whole numbers"
+          : rule.use === "index" || rule.use === "get"
+            ? LIST_INDEX_RULE
+            : `${rule.use}() needs a whole number (integer)`;
     case "boolean":
       return rule.operator === null
         ? "A condition must be true or false (boolean)"

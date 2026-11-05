@@ -1,10 +1,11 @@
 import type { Expression } from "../../../ast.js";
-import type { PlaceId, SourceSite } from "../../graph.js";
+import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import { isExternal, isOpaque } from "../admission.js";
 import { joinSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { heldReference, REFERENCE } from "../contract.js";
 import { labelBelow, labelRoot, labelText, type Label } from "../contract/labels.js";
+import { termAt, writtenOf } from "../contract/terms.js";
 import { keptKey, keptKeyBelow, keyPath, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
@@ -246,6 +247,101 @@ function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[])
     .admitted(keyPlace(key), joinSteps(keyPath(key), rest))
     .filter((tag) => tag !== "empty");
   return tags.length === 0 || tags.includes("unknown") ? null : tags;
+}
+
+/**
+ * #1173 (the owner's option C): a value's written type where it is `number` or a written union with it (`number?`),
+ * else `null`. The written type a value carries (`writtenTermOf`) is its own written type alone, so no decision and no
+ * charged key is asked for it and no counter or stop moves.
+ */
+export function writtenNumber(walk: Consumers, value: PlaceId): TypeTerm | null {
+  const term = writtenTermOf(walk, value);
+  return term !== null && isNumber(term) ? term : null;
+}
+
+/** Whether a written term is `number` or a union with it, once per term (a written type is read at every use). */
+const IS_NUMBER = new WeakMap<TypeTerm, boolean>();
+function isNumber(term: TypeTerm): boolean {
+  let found = IS_NUMBER.get(term);
+  if (found === undefined) {
+    found =
+      term.kind === "union"
+        ? term.members.some(isNumber)
+        : term.kind === "atom" && term.name === "number";
+    IS_NUMBER.set(term, found);
+  }
+  return found;
+}
+
+/**
+ * The written type a value carries, through every read form that gives a part of a written place: a read of a
+ * binding or parameter, and a call's result, its written type; a property, element or selection its owner's at that step; a `get`
+ * result, and what a removing method removed, its receiver's element. `null` where no written type reaches it (a call,
+ * an operation, a literal, a written type's reference to another place). Each term's projection at a step is made once
+ * (`below`) and the `number` test once per term (`isNumber`), so a use costs a walk of its own read's steps.
+ */
+function writtenTermOf(walk: Consumers, value: PlaceId): TypeTerm | null {
+  const { program } = walk.pass;
+  // (a call's result reads its function's written result type, as a binding read its binding's)
+  const result = walk.resultOfCall.get(value);
+  if (result !== undefined) return writtenOf(program.place(result).kind);
+  const element = walk.getOf.get(value);
+  if (element !== undefined) return below(writtenTermOf(walk, element), "element");
+  // (a removal gives the element it removed, a `remove` only from a dict, its value: a list's or set's gives `null`)
+  const removal = walk.removedOf.get(value);
+  if (removal !== undefined)
+    return removedTerm(writtenTermOf(walk, removal.receiver), removal.always);
+  const projection = program.projOf.get(value);
+  if (projection !== undefined)
+    return projection.step === "iteration"
+      ? below(writtenTermOf(walk, projection.owner), "element")
+      : below(writtenTermOf(walk, projection.owner), stepName(projection.step));
+  const binding = program.occurrenceOf.get(value);
+  return binding === undefined ? null : writtenOf(program.place(binding).kind);
+}
+
+/**
+ * What a removal removes from a receiver of written type `term`, per member as a projection distributes (`termAt`): a
+ * collection's element where the removal always gives it (`removeFirst()`, `removeAt(i)`), else (`remove`) a dict's
+ * value and nothing from a list or set; nothing from `null` (the receiver's own check) or another kind; the members'
+ * results as one union. Once per term and kind of removal, so a union receiver's result keeps its identity.
+ */
+const REMOVED = new WeakMap<TypeTerm, Map<boolean, TypeTerm | null>>();
+function removedTerm(term: TypeTerm | null, always: boolean): TypeTerm | null {
+  if (term === null) return null;
+  let kinds = REMOVED.get(term);
+  if (kinds === undefined) REMOVED.set(term, (kinds = new Map()));
+  let found = kinds.get(always);
+  if (found === undefined) {
+    if (term.kind === "union") {
+      const members = term.members
+        .map((member) => removedTerm(member, always))
+        .filter((member) => member !== null);
+      found =
+        members.length === 0
+          ? null
+          : members.length === 1
+            ? members[0]!
+            : { kind: "union", members };
+    } else
+      found =
+        term.kind === "dict" || (always && (term.kind === "list" || term.kind === "set"))
+          ? term.element
+          : null;
+    kinds.set(always, found);
+  }
+  return found;
+}
+
+/** A written type's term one step below, or `null`: once per term and step, so a projected union keeps its identity. */
+const BELOW = new WeakMap<TypeTerm, Map<string, TypeTerm | null>>();
+function below(term: TypeTerm | null, step: string): TypeTerm | null {
+  if (term === null) return null;
+  let steps = BELOW.get(term);
+  if (steps === undefined) BELOW.set(term, (steps = new Map()));
+  let found = steps.get(step);
+  if (found === undefined) steps.set(step, (found = termAt(term, [step])));
+  return found;
 }
 
 /** §3.3, the quiet path: a value's contract kinds, asked before any read is evaluated; `null` with an unknown. */

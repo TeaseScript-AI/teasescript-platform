@@ -12,7 +12,7 @@ import {
 } from "../result.js";
 import { error } from "./diagnostics.js";
 import { TEXT } from "./kinds.js";
-import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel } from "./names.js";
+import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel, writtenNumber } from "./names.js";
 import { obligation, warnGroups, warning } from "./warnings.js";
 
 // C2, C3, C11, C12, C13: an operand's items against the kinds that fit, a whole number, an index by its receiver.
@@ -124,6 +124,43 @@ export function consume(
   );
 }
 
+/**
+ * #1173 (option C), every whole-number use's one rule: a read of a place written `number` is no whole number by its
+ * type, whatever value it holds now, an error under `rule`; a read under a test of its key (§3.2) is left to its items,
+ * which that test narrows (`if p is integer`); a read of a written union whose value is known to be only its other
+ * members (`number?` holding `null`) is the error its items give, naming that value and its fix (Codex r7), from the
+ * items asked here once (Codex r8). Whether it erred.
+ */
+export function writtenNumberUse(
+  walk: Consumers,
+  value: PlaceId,
+  node: FlowNode,
+  site: SourceSite,
+  kind: DiagnosticKind,
+  rule: DiagnosticRule,
+): boolean {
+  const term = writtenNumber(walk, value);
+  if (term === null || walk.pass.guards.guardedRead(value)) return false;
+  walk.pass.program.work.charge("checks");
+  let kinds: readonly ItemTag[] = ["number"];
+  if (term.kind === "union") {
+    const items = withoutEmpty(walk.valueItems(value, node, []));
+    if (
+      items.length > 0 &&
+      items.every(
+        (item) =>
+          item.cert === "def" &&
+          item.tag !== "unknown" &&
+          item.tag !== "integer" &&
+          item.tag !== "number",
+      )
+    )
+      kinds = items.map((item) => item.tag);
+  }
+  error(walk, kind, ownSpan(walk, value, site), rule, kinds);
+  return true;
+}
+
 /** C2: a whole number; a null here is never silent (`soft` as for `consume`). */
 export function integerOnly(
   walk: Consumers,
@@ -137,6 +174,7 @@ export function integerOnly(
   const { program } = walk.pass;
   const rule: DiagnosticRule = { rule: "count", use };
   const owedBy = typeof soft === "object" ? soft : null;
+  if (soft === false && writtenNumberUse(walk, value, node, site, "integer-use", rule)) return;
   // §3.3: a whole number on every run
   if (owedBy === null) {
     const quiet = quietKinds(walk, value);

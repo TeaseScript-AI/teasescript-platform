@@ -162,17 +162,25 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       ],
     ],
     // C2
-    ["repeat 2.5 {}\nexit\n", [`E TSV011 '2.5': ${COUNT}, but '2.5' is a number. ${ROUND}`]],
+    [
+      "repeat 2.5 {}\nexit\n",
+      [`E TSV011 '2.5': ${COUNT}, but '2.5' is a number that can have decimals. ${ROUND}`],
+    ],
+    // (a written `number?` known to hold null names the null, not the number: Codex r7 on #1717)
+    [
+      "let n: number? = null\nrepeat n {}\nexit\n",
+      [`E TSV011 'n': ${COUNT}, but 'n' is null. Use a whole number here.`],
+    ],
     [
       "let xs = [1, 2]\nlet y = xs[0.5]\nexit\n",
       [
-        `E TSV043 '0.5': A list index must be a whole number (integer), but '0.5' is a number. ${ROUND}`,
+        `E TSV043 '0.5': A list index must be a whole number (integer), but '0.5' is a number that can have decimals. ${ROUND}`,
       ],
     ],
     [
       "let xs = [1, 2]\nxs.removeAt(1.5)\nexit\n",
       [
-        `E TSV043 '1.5': removeAt() needs a whole number (integer), but '1.5' is a number. ${ROUND}`,
+        `E TSV043 '1.5': removeAt() needs a whole number (integer), but '1.5' is a number that can have decimals. ${ROUND}`,
       ],
     ],
     [
@@ -1294,8 +1302,21 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
       "TSV043 substring number",
       'let n = 1.5\nsay "abc".substring(n)\n',
       [
-        "E TSV043: substring() needs a whole number (integer) for 'start', but 'n' is a number. Convert the number with the toInteger function, which drops the fraction.",
+        "E TSV043: substring() needs a whole number (integer) for 'start', but 'n' is a number that can have decimals. Convert the number with the toInteger function, which drops the fraction.",
       ],
+    ],
+    [
+      // (a place written `number` is no whole number whatever it holds, as at every whole-number use: #1173)
+      "TSV043 repeat written number",
+      'let n: number = 1\nsay "abc".repeat(n)\n',
+      [
+        "E TSV043: repeat() needs a whole number (integer) for 'count', but 'n' is a number that can have decimals. Convert the number with the toInteger function, which drops the fraction.",
+      ],
+    ],
+    [
+      "TSV043 repeat written optional null",
+      'let n: number? = null\nsay "abc".repeat(n)\n',
+      ["E TSV043: repeat() needs a whole number (integer) for 'count', but 'n' is null."],
     ],
     [
       "TSV043 substring warning unknown",

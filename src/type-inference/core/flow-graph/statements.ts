@@ -213,6 +213,13 @@ function* statementTask(
       );
       if (isRepeat)
         builder.countUses.push({ file, span: statement.span, operand: unwrap(statement.count) });
+      else {
+        // (V30 §6: a range a loop goes through as written has whole-number bounds, each its own use)
+        const range = unwrap(statement.iterable);
+        if (range.kind === "rangeExpression")
+          for (const bound of [range.start, range.end])
+            builder.rangeUses.push({ file, span: bound.span, operand: unwrap(bound) });
+      }
       const rounds = isRepeat
         ? literalRounds(statement.count)
         : literalCollectionRounds(statement.iterable);
