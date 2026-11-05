@@ -988,9 +988,21 @@ test("the stop oracle sees every change no mark of the stop names", () => {
   const vessel = stopRun('let vessel = hostValue\nvessel.amount = 4\nsay "AFTER"\nexit\n');
   assert.deepEqual(problems(vessel, vessel), []);
   assert.notDeepEqual(problems(vessel, edited(vessel, withoutGuard)), []);
-  // a walk stop marks the default (r4.100), which excuses its own check and not the guard
-  const source =
+  // a walk stop marks the default (r4.100), which excuses its own check and not the guard; where `vessel` holds a host
+  // value, its lowest walk stop loses the vessel's check, which `{amount: "x"}` passes, and the candidate declines it
+  // (#1526 decision 2), so the oracle is judged on its variant, `vessel` a typed load's, which its reader carries
+  const original =
     'let nums: number?[] = [null,1.25]\nlet pack={nums:nums}\nlet twin=pack\nsay twin.nums.get(4, default:hostValue)\nlet vessel=hostOther\nvessel.amount=4\nsay "AFTER"\nexit\n';
+  assert.throws(
+    () => stopRun(original, walkEnds(original)[0]),
+    (error: unknown) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === "a store whose check was lost at the budget",
+  );
+  const source = original.replace(
+    "let vessel=hostOther",
+    'let vessel=load("v", default: {other: 1})',
+  );
   const unstopped = stopRun(source);
   const stopped = stopRun(source, walkEnds(source)[0]);
   const fallback = source.indexOf("hostValue");
@@ -2040,19 +2052,49 @@ test("the stop oracle refuses a stopped run whose without leaves the run's allow
  * allowance 1,886 (2,039 before #1251 made no narrowing index for it) and demand allowance 27: the run's own `without` gives no problem, the uncapped run's is refused.
  */
 test("the stop oracle refuses a stopped run whose without leaves the run's demand allowance (#1631)", () => {
+  const mode = HELD_MODES[0]!;
+  // (the issue's witness: there the candidate declines the stopped compile, #1526 decision 2, an accepted over-decline,
+  // #1832: no completion tells `root`'s partial check from the natural one)
+  const witness =
+    'let root = {inside: {f0: hostValue}}\nlet first = root\nroot = {inside: {f0: hostOther}}\nsay "BEFORE"\nrepeat first.inside.f0 {say "ok"}\nsay "AFTER"\nexit\n';
+  assert.throws(
+    () =>
+      mode.run(() =>
+        withTestDemandAllowance(27, () =>
+          withTestAllowance(1886, () =>
+            compileSourceWithBackend(
+              witness,
+              { globals: ["hostValue", "hostOther"] },
+              CORE_BACKEND,
+            ),
+          ),
+        ),
+      ),
+    (error: unknown) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === "a store whose check was lost at the budget",
+  );
+  // (its variant, each host value a typed parse's, which its reader carries, so the stopped compile publishes: the first
+  // settled walk stop, 1,598, of the lowest demand allowance, 8, of 8, 12, 16, …, 64 at which a decision stops while the
+  // rerun without that allowance stops in the same phase at the same allowance with none stopped; the assertions below
+  // hold the pin to that)
   const c: HeldCase = {
-    name: "domain-nested",
+    name: "domain-nested-parsed",
     slice: true,
     values: [],
     source:
-      'let root = {inside: {f0: hostValue}}\nlet first = root\nroot = {inside: {f0: hostOther}}\nsay "BEFORE"\nrepeat first.inside.f0 {say "ok"}\nsay "AFTER"\nexit\n',
+      'let root = fromJson(hostValue, default: {inside: {f0: 1}}, files: false)\nlet first = root\nroot = fromJson(hostOther, default: {inside: {f0: 2}}, files: false)\nsay "BEFORE"\nrepeat first.inside.f0 {say "ok"}\nsay "AFTER"\nexit\n',
   };
-  const mode = HELD_MODES[0]!;
-  const unstopped = heldRun(c, mode, undefined, 27);
-  const stopped = heldRun(c, mode, 1886, 27);
-  const uncapped = heldRun(c, mode, 1886);
+  const [allowance, demand] = [1598, 8];
+  const unstopped = heldRun(c, mode, undefined, demand);
+  const stopped = heldRun(c, mode, allowance, demand);
+  const uncapped = heldRun(c, mode, allowance);
+  assert.ok(stopped.result.plan !== null);
   for (const { budget } of [stopped.answers, uncapped.answers])
-    assert.deepEqual([budget.allowance, budget.stoppedIn, budget.settled], [1886, "walk", true]);
+    assert.deepEqual(
+      [budget.allowance, budget.stoppedIn, budget.settled],
+      [allowance, "walk", true],
+    );
   assert.ok(stopped.answers.budget.decisions.some((d) => d.stopped));
   assert.ok(!uncapped.answers.budget.decisions.some((d) => d.stopped));
   // (a combined stop, judged under its rule: its finishing read answers `first` from its stores' syntax through the copy
@@ -2072,7 +2114,9 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
   assert.deepEqual(judge(stopped), []);
   assert.throws(
     () => judge({ ...stopped, without: uncapped.without }),
-    /the demand allowance \d+ at its decision \[\d+,\[[^\]]*\]\], not the run's 27/,
+    new RegExp(
+      `the demand allowance \\d+ at its decision \\[\\d+,\\[[^\\]]*\\]\\], not the run's ${demand}`,
+    ),
   );
   // (and the reference's rerun without its completion, Codex r1's F1 on #1662: a decision of the reference stopped)
   const tally: HeldCase = {
