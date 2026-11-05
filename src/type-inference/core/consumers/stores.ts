@@ -56,11 +56,12 @@ const writerRank = (writer: Writer | null): number =>
  */
 /**
  * Whether an item is external data for C9's boundary: an external unknown, or a kind a type test proved of external
- * data (`fromExternal`: the test proves the kind, never the ingress, the lead's ruling (a) on #1073 PR 2). Only the
- * boundary requests ask it; a store's warnings stay with the external unknowns.
+ * data that still carries its ingress (`fromExternal`: the test proves the kind, never the ingress, the lead's ruling
+ * (a) on #1073 PR 2; a result computed from it brought no data in). Only the boundary requests ask it; a store's
+ * warnings stay with the external unknowns.
  */
 function boundaryData(item: Item): boolean {
-  return isExternal(item) || item.fromExternal === true;
+  return isExternal(item) || (item.fromExternal === true && item.ingress !== undefined);
 }
 
 export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decision | null {
