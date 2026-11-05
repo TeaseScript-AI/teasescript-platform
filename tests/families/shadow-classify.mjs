@@ -1,4 +1,4 @@
-// node tests/families/shadow-classify.mjs <records.jsonl>... [--expect keys.jsonl]... [--out DIR] [--gate]
+// node tests/families/shadow-classify.mjs <records.jsonl>... [--expect keys.jsonl]... [--out DIR] [--groups DIR|none] [--gate]
 // The S11 classification of the shadow comparison (`shadow.mjs`'s `--out` records, and the S11 readiness research's
 // `results.jsonl`, whose aborted records have no rows). Every route pair (a source in one mode, legacy against core)
 // gets exactly one class of `PAIR_CLASSES`, and every source in each order one class of `SHARING_CLASSES`, the sharing
@@ -13,13 +13,14 @@
 // classify). Exit 1 for unclassified or ambiguous pairs, invalid input or conflicting duplicates; with `--gate`
 // (the S11 checklist's run, which needs `--expect`) also while any row is `open`.
 import { createHash } from "node:crypto";
-import { createReadStream, mkdirSync, writeFileSync } from "node:fs";
+import { createReadStream, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { gunzipSync } from "node:zlib";
 
 /** The taxonomy's version: a class added, removed or changed in its rule makes the next. */
-export const VERSION = 2;
+export const VERSION = 3;
 
 const S9B = "S9b #1072 (candidate coverage; retired or deferred syntax is no release requirement)";
 const S10 = "S10 #1073";
@@ -612,7 +613,68 @@ export function readRecord(record) {
  * first record arrives, and only its reading's hash is kept, so a campaign of any size streams) and ends with
  * `finish(expected keys, or null where not checked)`.
  */
-export function classifier() {
+/** The classes whose pairs the group table decides (taxonomy v3, #1744's group table). */
+const GROUPED = new Set(["differs/rule", "differs/checks", "differs/plan", "differs/wording"]);
+/** The group states of a grouped pair: `conforms` attributed, the rest open. */
+export const GROUP_STATES = {
+  conforms: "attributed",
+  defect: "open",
+  pending: "open",
+  changed: "open",
+  unbound: "open",
+};
+
+/**
+ * A pair's guard: the sha256 of its reading (both routes, the delta and the plan paths, not the mode, which the binding
+ * keys), as the duplicate check reads them.
+ */
+export const pairGuard = ({ mode: _mode, ...row }) =>
+  createHash("sha256").update(canonical(row)).digest("hex");
+
+/**
+ * The group table (`tests/families/shadow-groups/`): `groups.json`, each leaf group's id, state (`conforms`, `defect`,
+ * `pending`), title, what closes it and its witness; `bindings.jsonl.gz`, one line a bound pair (its key's and guard's
+ * first 16 digits, its mode's index, its group and its class). Returns `{ groups, bindings, files }`, `files` each
+ * file's sha256, or throws where the table is malformed (a group twice, a binding twice, a binding to no group).
+ */
+export function loadGroups(dir) {
+  const groupsText = readFileSync(path.join(dir, "groups.json"));
+  const bindingsGz = readFileSync(path.join(dir, "bindings.jsonl.gz"));
+  const sha = (b) => createHash("sha256").update(b).digest("hex");
+  const groups = new Map();
+  for (const g of JSON.parse(groupsText).groups) {
+    if (groups.has(g.id)) throw new Error(`The group ${g.id} twice in the table.`);
+    if (!["conforms", "defect", "pending"].includes(g.state))
+      throw new Error(`The group ${g.id} has no known state.`);
+    groups.set(g.id, g);
+  }
+  const bindings = new Map();
+  for (const line of gunzipSync(bindingsGz).toString("utf8").split("\n")) {
+    if (line === "") continue;
+    const [key, mode, group, guard, ...cls] = line.split(" ");
+    const at = `${key} ${mode}`;
+    if (bindings.has(at)) throw new Error(`The pair ${at} bound twice.`);
+    if (!groups.has(group)) throw new Error(`The pair ${at} bound to no group (${group}).`);
+    bindings.set(at, { group, guard, class: cls.join(" ") });
+  }
+  return {
+    groups,
+    bindings,
+    files: { "groups.json": sha(groupsText), "bindings.jsonl.gz": sha(bindingsGz) },
+  };
+}
+
+/** The group state of a grouped pair: its binding's group's, or `changed` or `unbound`, with the group. */
+export function groupOf(table, key, modeIndex, cls, row) {
+  const binding = table.bindings.get(`${key.slice(0, 16)} ${modeIndex}`);
+  if (binding === undefined) return { state: "unbound", group: null };
+  if (binding.class !== cls || binding.guard !== pairGuard(row).slice(0, 16))
+    return { state: "changed", group: binding.group };
+  return { state: table.groups.get(binding.group).state, group: binding.group };
+}
+
+/** `groups`: the group table (`loadGroups`), or null where the grouped classes stay attributed as a class (v2's). */
+export function classifier(groups = null) {
   const problems = [];
   const byKey = new Map();
   const rows = new Map();
@@ -640,6 +702,7 @@ export function classifier() {
   };
   const pairs = [];
   const sharing = [];
+  const grouped = new Map();
   const sigs = new Map();
   const totals = {
     sources: 0,
@@ -751,6 +814,19 @@ export function classifier() {
       witness(r, record.key, name, bytes, mode);
       if (facts.kind === "outside")
         r.texts.set(facts.outside, (r.texts.get(facts.outside) ?? 0) + 1);
+      // (a grouped class's pair takes its group's state: by its key, mode and guard, never by its signature alone)
+      if (groups !== null && GROUPED.has(id)) {
+        const { state, group } = groupOf(groups, record.key, record.rows.indexOf(each), id, each);
+        pairs.at(-1).group = group;
+        pairs.at(-1).groupState = state;
+        const at = state === "changed" || state === "unbound" ? state : group;
+        if (!grouped.has(at))
+          grouped.set(at, { id: at, state, pairs: 0, sources: new Set(), witnesses: [] });
+        const g = grouped.get(at);
+        g.pairs += 1;
+        g.sources.add(record.key);
+        witness(g, record.key, name, bytes, mode);
+      }
     }
     // (the research's count: sources whose core published in all four modes, not the same in all)
     if (published.length === 4 && new Set(published).size > 1) totals.fourModeDifferences += 1;
@@ -839,8 +915,46 @@ export function classifier() {
       controlCompletionRuns: totals.controlCompletionRuns,
       controlFailedRuns: totals.controlFailedRuns,
     };
+    // (with the group table, a grouped class's row is its groups': each open group, changed and unbound pairs open)
+    const groupTable =
+      groups === null
+        ? null
+        : [
+            ...[...groups.groups.values()].map((g) => {
+              const r = grouped.get(g.id);
+              return {
+                id: g.id,
+                state: g.state,
+                gate: GROUP_STATES[g.state],
+                title: g.title,
+                closes: g.closes ?? null,
+                pairs: r?.pairs ?? 0,
+                sources: r?.sources.size ?? 0,
+                witnesses: r?.witnesses ?? [],
+              };
+            }),
+            ...["changed", "unbound"].map((state) => {
+              const r = grouped.get(state);
+              return {
+                id: state,
+                state,
+                gate: GROUP_STATES[state],
+                title:
+                  state === "changed"
+                    ? "a bound pair whose reading or class differs from its binding"
+                    : "a pair the table does not bind",
+                closes: "re-adjudication: a new table version",
+                pairs: r?.pairs ?? 0,
+                sources: r?.sources.size ?? 0,
+                witnesses: r?.witnesses ?? [],
+              };
+            }),
+          ];
     const open = [
       ...pairTable.filter((r) => r.state === "open" && r.pairs > 0).map((r) => r.id),
+      ...(groupTable ?? [])
+        .filter((r) => r.gate === "open" && r.pairs > 0)
+        .map((r) => `group ${r.id} (${r.state}${r.closes ? `: ${r.closes}` : ""})`),
       ...sharingTable
         .filter((r) => r.state === "open" && r.pairs > 0)
         .map((r) => `sharing ${r.id}`),
@@ -856,6 +970,8 @@ export function classifier() {
       totals,
       coverage,
       pairs: pairTable,
+      groups: groupTable,
+      groupFiles: groups?.files ?? null,
       sharing: sharingTable,
       signatures: [...sigs.values()].map((s) => ({ ...s, sources: s.sources.size })),
       perPair: pairs,
@@ -866,8 +982,8 @@ export function classifier() {
 }
 
 /** The classification of records (each `{ record, bytes, where }`) against the expected keys (null: not checked). */
-export function classifyRecords(entries, expected = null) {
-  const c = classifier();
+export function classifyRecords(entries, expected = null, groups = null) {
+  const c = classifier(groups);
   for (const entry of entries) c.add(entry);
   return c.finish(expected);
 }
@@ -886,6 +1002,22 @@ function markdown(result) {
     "| --- | --- | ---: | ---: | --- |",
     ...result.pairs.filter((r) => r.pairs > 0 || r.state !== "open").map(line),
     "",
+    ...(result.groups === null
+      ? []
+      : [
+          `| Group (grouped classes; table ${result.groupFiles["bindings.jsonl.gz"].slice(0, 12)}) | State | Pairs | Sources | Smallest witnesses |`,
+          "| --- | --- | ---: | ---: | --- |",
+          ...result.groups
+            .filter((r) => r.pairs > 0)
+            .map((r) =>
+              line({
+                ...r,
+                id: `${r.id} ${r.title}`,
+                state: `${r.gate} / ${r.state}${r.gate === "open" && r.closes ? ` / ${r.closes}` : ""}`,
+              }),
+            ),
+          "",
+        ]),
     "| Sharing column (core, sharing on against off, per order) | State | Orders | Sources | Smallest witnesses |",
     "| --- | --- | ---: | ---: | --- |",
     ...result.sharing.map(line),
@@ -919,20 +1051,26 @@ async function main(argv) {
   const expects = [];
   let out;
   let gate = false;
+  let groupsDir;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--expect") expects.push(argv[++i]);
     else if (argv[i] === "--out") out = argv[++i];
     else if (argv[i] === "--gate") gate = true;
+    else if (argv[i] === "--groups") groupsDir = argv[++i];
     else if (argv[i].startsWith("--")) refused(`unknown option ${argv[i]}`);
     else files.push(argv[i]);
   }
   if (files.length === 0)
     refused(
-      "usage: shadow-classify.mjs <records.jsonl>... [--expect keys.jsonl]... [--out DIR] [--gate]",
+      "usage: shadow-classify.mjs <records.jsonl>... [--expect keys.jsonl]... [--out DIR] [--groups DIR|none] [--gate]",
     );
   if (gate && expects.length === 0)
     refused("--gate needs --expect: the gate counts unavailable sources");
-  const classes = classifier();
+  const classes = classifier(
+    groupsDir === "none"
+      ? null
+      : loadGroups(groupsDir ?? fileURLToPath(new URL("./shadow-groups", import.meta.url))),
+  );
   const unreadable = [];
   for (const file of files)
     for await (const { line, where } of jsonLines(file)) {

@@ -265,7 +265,7 @@ sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> --
   --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
 ```
 
-`shadow-classify.mjs` (S11's classification, taxonomy version 2) reads the records of a campaign (and the S11 readiness
+`shadow-classify.mjs` (S11's classification, taxonomy version 3) reads the records of a campaign (and the S11 readiness
 research's `results.jsonl`, whose crashed sources have no rows) and gives every route pair (a source in one mode, legacy
 against core) exactly one class, and every source in each order one class of the sharing column, the core with sharing
 on against off (#1711). Each class has its rule in words, a witness and a gate state: `pass`, `attributed` (the rule
@@ -290,6 +290,19 @@ records it reproduces its aggregate (`~/work/evidence/1728/`):
 env -u NODE_OPTIONS node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --manifest > expect.jsonl
 node tests/families/shadow-classify.mjs <shards' shadow.jsonl>... --expect expect.jsonl --out <folder> [--gate]
 ```
+
+From version 3 the group table in `shadow-groups/` decides the pairs of the four grouped classes (`differs/rule`,
+`/checks`, `/plan`, `/wording`; `--groups <folder>` reads another, `--groups none` none). `groups.json` holds each
+adjudicated group: `conforms`, `defect` or `pending`, its title, what closes an open one, its witness.
+`bindings.jsonl.gz` holds one line a bound pair: its source key and guard by their first 16 digits, its mode, its group,
+its class. A pair takes its binding's group where its key, mode, class and guard (`pairGuard`, the sha256 of its
+reading) all match; otherwise it is `changed` (bound, but its reading or class differs) or `unbound` (no binding). Only
+`conforms` is attributed. `defect` stays open until its issue closes, `pending` until its construction lands, and
+`changed` and `unbound` until a re-adjudication; each closes only by a new table, never by a matching signature (one
+signature spans several groups). `gate.json` names both files' sha256. `shadow-groups/bind.mjs` writes the table from
+an adjudication and the run it adjudicated, refusing a binding whose raw publication differs from its record's. A
+re-adjudication replaces both files whole, so the table's history is by version, not by diff. The first table is Sol's
+preparation of gate run 2 (#1744 comment 6655890944).
 
 The #1704 witnesses (`copies`, `--only` with `1188-sol-candidate-neighbours.mjs/node-graft@8`, `node-mixed@8`,
 `node-graft@64`, `node-mixed@64`, `construction/node-graft@64`): at 8 both routes plan in every mode; at 64 the legacy
