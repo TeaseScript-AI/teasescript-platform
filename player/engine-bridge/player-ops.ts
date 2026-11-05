@@ -53,11 +53,11 @@ const exactly = (value: Record<string, unknown>, required: string[], optional: s
   required.every((key) => Object.hasOwn(value, key)) &&
   Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 /**
- * Whether `value` is an array whose every element passes `test`, read by index: a cloned array keeps own properties
- * such as an `every` of its own, and a hole is no element.
+ * Whether `value` is a plain array of elements that pass `test`, read by index: a cloned array keeps its own
+ * properties, such as an `every` or `map` of its own, so one with keys besides its indices is malformed, as is a hole.
  */
 function everyItem(value: unknown, test: (item: unknown) => boolean): boolean {
-  if (!Array.isArray(value)) return false;
+  if (!Array.isArray(value) || Object.keys(value).length !== value.length) return false;
   for (let index = 0; index < value.length; index += 1)
     if (!Object.hasOwn(value, index) || !test(value[index])) return false;
   return true;
