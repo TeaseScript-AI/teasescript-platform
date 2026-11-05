@@ -397,13 +397,16 @@ export function literalElements(
         let mine = layered.get(of);
         if (mine === undefined) layered.set(of, (mine = new Map()));
         let found = mine.get(at);
-        if (found === undefined)
+        if (found === undefined) {
+          // (the path's text kept as the key, charged)
+          keepText(admission.work, at.length);
           mine.set(
             at,
             (found = intermediateLayers(admission.work, path).map((prefix) =>
               mayHoldNull(admission, of.value!, of.node, prefix),
             )),
           );
+        }
         return found;
       };
       const optional = mixedOptional(layers(first.get(at)!.d), layers(d));
