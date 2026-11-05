@@ -1,4 +1,4 @@
-import type { Expression, Statement, TypeAnnotation } from "../../src/ast.js";
+import type { Expression, IfStatement, Statement, TypeAnnotation } from "../../src/ast.js";
 import {
   booleanFromText,
   CONVERSIONS,
@@ -537,6 +537,7 @@ function literalType(
   expression: Expression,
   statements: readonly Statement[],
   seen = new Set<string>(),
+  resolve: Resolve | null = null,
 ): DerivedType | null {
   const at = selected(expression)!;
   switch (at.kind) {
@@ -557,7 +558,7 @@ function literalType(
       const elements = at.elements.map((item) =>
         unwrap(item).kind === "nullLiteral"
           ? ({ kind: "kinds", kinds: ["null"] } as const)
-          : literalType(item, statements, seen),
+          : literalType(item, statements, seen, resolve),
       );
       return {
         kind: at.kind === "listLiteral" ? "list" : "set",
@@ -572,7 +573,7 @@ function literalType(
         kind: "object",
         properties: at.properties.map((property) => ({
           name: property.name.name,
-          type: literalType(property.value, statements, seen) ?? {
+          type: literalType(property.value, statements, seen, resolve) ?? {
             kind: "kinds",
             kinds: VALUE_KIND_NAMES,
           },
@@ -581,12 +582,12 @@ function literalType(
     case "identifier":
     case "propertyAccessExpression":
     case "indexExpression":
-      return readDefault(at, statements);
+      return readDefault(at, statements, resolve);
     case "loadExpression":
-      return expectedType(at, statements, seen);
+      return expectedType(at, statements, seen, resolve);
     case "callExpression":
       return at.callee.kind === "identifier" && at.callee.name === "fromJson"
-        ? expectedType(at, statements, seen)
+        ? expectedType(at, statements, seen, resolve)
         : null;
     default:
       return null;
@@ -594,23 +595,537 @@ function literalType(
 }
 
 /**
- * A typed default that reads a value (F18): a host value has no structure; a variable's (a `let`'s or a loop's) state
- * at the call is not
- * derived here (the snapshot reader is lane 3's tests item, #1760), so a default that reads one is underivable.
+ * A typed default that reads a value (F18): a host value has no structure; a variable's (a `let`'s) value is its state at
+ * the typed call (TABLE r4.81 (1)), which `resolve` reads from the program's snapshots (`snapshotsOf`, #1760). Without a
+ * call to read at (another rule's literal) such a read is underivable, as it is wherever the reader refuses.
  */
-function readDefault(read: Expression, statements: readonly Statement[]): null {
+function readDefault(
+  read: Expression,
+  statements: readonly Statement[],
+  resolve: Resolve | null,
+): DerivedType | null {
+  const steps: string[] = [];
   let root = unwrap(read);
-  while (root.kind === "propertyAccessExpression" || root.kind === "indexExpression")
+  while (root.kind === "propertyAccessExpression" || root.kind === "indexExpression") {
+    steps.unshift(root.kind === "propertyAccessExpression" ? root.property.name : "element");
     root = unwrap(root.object);
-  // (a variable is declared by a `let` or a `for` loop's variables)
-  const declares = (statement: Statement, name: string): boolean =>
-    statement.kind === "letStatement"
-      ? statement.name.name === name
-      : statement.kind === "forStatement" &&
-        (statement.variable.name === name || statement.valueVariable?.name === name);
-  if (root.kind !== "identifier" || statements.some((statement) => declares(statement, root.name)))
-    throw new Underivable("a default that reads a variable");
-  return null;
+  }
+  if (root.kind !== "identifier" || !declaredNames(statements).has(root.name)) return null;
+  if (resolve === null) throw new Underivable("a default that reads a variable");
+  return valueType(partAt(resolve(root.name), steps));
+}
+
+/** Whether a default is a read rooted at a variable the program declares. */
+function readsVariable(expression: Expression, statements: readonly Statement[]): boolean {
+  let root = selected(expression);
+  while (root?.kind === "propertyAccessExpression" || root?.kind === "indexExpression")
+    root = unwrap(root.object);
+  return root?.kind === "identifier" && declaredNames(statements).has(root.name);
+}
+
+/** Every name a `let` or a `for` loop declares, anywhere in the program. */
+const declared = new WeakMap<readonly Statement[], ReadonlySet<string>>();
+function declaredNames(statements: readonly Statement[]): ReadonlySet<string> {
+  let names = declared.get(statements);
+  if (names === undefined) {
+    names = new Set(
+      allStatements(statements).flatMap((statement) =>
+        statement.kind === "letStatement"
+          ? [statement.name.name]
+          : statement.kind === "forStatement"
+            ? [
+                statement.variable.name,
+                ...(statement.valueVariable ? [statement.valueVariable.name] : []),
+              ]
+            : [],
+      ),
+    );
+    declared.set(statements, names);
+  }
+  return names;
+}
+
+/**
+ * A variable's abstract value in the snapshot reader (#1760): a checked type, `null` alone, no structure (`open`: host
+ * data, or a value no source structure settles), or refused with why the reader does not model it.
+ */
+type Snap =
+  | { readonly t: "type"; readonly type: DerivedType }
+  | { readonly t: "open" }
+  | { readonly t: "refused"; readonly why: string };
+type Resolve = (name: string) => Snap;
+type State = ReadonlyMap<string, Snap>;
+const OPEN: Snap = { t: "open" };
+const NULL: DerivedType = { kind: "kinds", kinds: ["null"] };
+
+const ALL: DerivedType = { kind: "kinds", kinds: VALUE_KIND_NAMES };
+const isAll = (type: DerivedType) =>
+  type.kind === "kinds" && type.kinds.length === VALUE_KIND_NAMES.length;
+
+/**
+ * The snapshot's value as the call's default takes it, as a default's own structure (`literalType`): `null` beside other
+ * kinds kept; `null` alone or no structure open at the root, every kind as a part.
+ */
+function valueType(snap: Snap): DerivedType | null {
+  if (snap.t === "refused") throw new Underivable(snap.why);
+  if (snap.t === "open" || isAll(snap.type)) return null;
+  const part = (type: DerivedType): DerivedType =>
+    type.kind === "kinds" && type.kinds.every((kind) => kind === "null")
+      ? ALL
+      : type.kind === "object"
+        ? {
+            ...type,
+            properties: type.properties.map((each) => ({ ...each, type: part(each.type) })),
+          }
+        : type;
+  return snap.type.kind === "kinds" && snap.type.kinds.every((kind) => kind === "null")
+    ? null
+    : part(snap.type);
+}
+
+/** The part of a value at `steps` (property names, `element`): open where the value holds no such part. */
+function partAt(snap: Snap, steps: readonly string[]): Snap {
+  if (snap.t !== "type" || steps.length === 0) return snap;
+  const [step, ...rest] = steps;
+  const parts = (type: DerivedType): DerivedType[] => {
+    if (type.kind === "union") return type.members.flatMap(parts);
+    if (step === "element" && type.kind !== "kinds" && type.kind !== "object")
+      return type.element === null ? [] : [type.element];
+    if (type.kind === "object") {
+      const property = type.properties.find((each) => each.name === step);
+      return property === undefined ? [] : [property.type];
+    }
+    return [];
+  };
+  const found = parts(snap.type);
+  if (found.length === 0) return OPEN;
+  return partAt({ t: "type", type: unionTypes(found) }, rest);
+}
+
+/**
+ * Two values joined where an `if`'s arms meet: a refusal wins, then no structure; else `joinTypes`, or its refusal.
+ */
+function joinSnaps(a: Snap, b: Snap, written: DerivedType | null): Snap {
+  if (a.t === "refused") return a;
+  if (b.t === "refused") return b;
+  if (a.t === "open" || b.t === "open") return OPEN;
+  try {
+    return { t: "type", type: joinTypes(a.type, b.type, written) };
+  } catch (error) {
+    if (error instanceof Underivable) return { t: "refused", why: error.message };
+    throw error;
+  }
+}
+
+/**
+ * Two arms' values of a variable joined: a part no arm stored is kept; two objects join by property (a property one arm
+ * holds alone refused); any other part an arm stored takes the written type's part (X2), else the two as one family
+ * (`admittedShape`), `null` kept. Every kind, host data, wins.
+ */
+function joinTypes(a: DerivedType, b: DerivedType, written: DerivedType | null): DerivedType {
+  if (a === b) return a;
+  if (isAll(a) || isAll(b)) return ALL;
+  if (a.kind === "object" && b.kind === "object") {
+    const names = [...new Set([...a.properties, ...b.properties].map((property) => property.name))];
+    return {
+      kind: "object",
+      properties: names.map((name) => {
+        const left = a.properties.find((property) => property.name === name)?.type;
+        const right = b.properties.find((property) => property.name === name)?.type;
+        if (left === undefined || right === undefined)
+          throw new Underivable("a property only one arm's value holds");
+        const part =
+          written?.kind === "object"
+            ? (written.properties.find((property) => property.name === name)?.type ?? null)
+            : null;
+        return { name, type: joinTypes(left, right, part) };
+      }),
+    };
+  }
+  if (written !== null) return written;
+  if (derivedText(a) === derivedText(b)) return a;
+  const flat = (type: DerivedType): boolean =>
+    type.kind === "kinds" || (type.kind === "union" && type.members.every(flat));
+  if (flat(a) && flat(b)) return admittedShape([a, b])!;
+  throw new Underivable("a join of a structure and another value");
+}
+
+/** Whether a stored value is a computation the reader does not model: a call, an operation, a conversion. */
+function computes(expression: Expression): boolean {
+  const at = unwrap(expression);
+  switch (at.kind) {
+    case "numberLiteral":
+    case "booleanLiteral":
+    case "nullLiteral":
+    case "identifier":
+      return false;
+    case "stringLiteral":
+      return !at.parts.every((part) => part.kind === "stringText");
+    case "listLiteral":
+    case "setLiteral":
+      return at.elements.some(computes);
+    case "objectLiteral":
+      return at.properties.some((property) => computes(property.value));
+    case "propertyAccessExpression":
+      return computes(at.object);
+    case "indexExpression":
+      return computes(at.object) || computes(at.index);
+    case "loadExpression":
+      return (
+        unwrap(at.key).kind !== "stringLiteral" ||
+        (at.defaultValue !== null && computes(at.defaultValue))
+      );
+    case "callExpression": {
+      const callee = unwrap(at.callee);
+      if (callee.kind !== "identifier" || callee.name !== "fromJson") return true;
+      const fallback = fallbackOf(at);
+      return fallback !== null && computes(fallback);
+    }
+    default:
+      return true;
+  }
+}
+
+/**
+ * Every parser node at and below `node`, `span`s left out. With `nested` false a statement or block below is listed but
+ * not entered: what runs when that node runs, beside what runs later or elsewhere.
+ */
+function nodesIn(node: unknown, nested: boolean, top = true): (Statement | Expression)[] {
+  if (Array.isArray(node)) return node.flatMap((each) => nodesIn(each, nested, top));
+  if (node === null || typeof node !== "object" || !("kind" in node)) return [];
+  const kind = node.kind;
+  if (typeof kind !== "string") return [];
+  // EVIDENCE: invariant: every node listed is a parser node, each read below only by a kind it is first checked to have.
+  const found: (Statement | Expression)[] = [node as Statement | Expression];
+  if (!top && !nested && (kind === "block" || kind.endsWith("Statement"))) return found;
+  for (const [key, value] of Object.entries(node))
+    if (key !== "span") found.push(...nodesIn(value, nested, false));
+  return found;
+}
+
+/** Whether a node is a statement or a block (`nodesIn`). */
+function isBlockOrStatement(node: Statement | Expression): boolean {
+  const kind: string = node.kind;
+  return kind === "block" || kind.endsWith("Statement");
+}
+
+/** The typed calls (a `load`, a `fromJson`) that run when a statement runs, its nested blocks left out. */
+function ownCalls(statement: Statement): Expression[] {
+  const fromJson = (callee: Expression) => {
+    const at = unwrap(callee);
+    return at.kind === "identifier" && at.name === "fromJson";
+  };
+  return nodesIn(statement, false).filter(
+    (node): node is Expression =>
+      node.kind === "loadExpression" || (node.kind === "callExpression" && fromJson(node.callee)),
+  );
+}
+
+/** The root variable of a method call's receiver (`d.push(1)`, `d.n.get(0)`), or `null`. */
+function receiverOf(node: Statement | Expression): string | null {
+  if (node.kind !== "callExpression") return null;
+  let receiver = unwrap(node.callee);
+  if (receiver.kind !== "propertyAccessExpression") return null;
+  while (receiver.kind === "propertyAccessExpression" || receiver.kind === "indexExpression")
+    receiver = unwrap(receiver.object);
+  return receiver.kind === "identifier" ? receiver.name : null;
+}
+
+/** The names a node stores to, or calls a method on, anywhere within it, nested blocks included. */
+function storedNames(node: unknown): Set<string> {
+  const found = new Set<string>();
+  for (const at of nodesIn(node, true)) {
+    const receiver = receiverOf(at);
+    if (receiver !== null) found.add(receiver);
+    if (at.kind === "letStatement") found.add(at.name.name);
+    if (at.kind === "assignmentStatement") {
+      let target: Expression = at.target;
+      while (target.kind === "propertyAccessExpression" || target.kind === "indexExpression")
+        target = target.object;
+      if (target.kind === "identifier") found.add(target.name);
+    }
+    if (at.kind === "forStatement") {
+      found.add(at.variable.name);
+      if (at.valueVariable) found.add(at.valueVariable.name);
+    }
+  }
+  return found;
+}
+
+/**
+ * The snapshot reader (#1760): one forward walk over the program in source order, made once, recording each variable's
+ * value at each typed call (`load`, `fromJson`), as the compiler keys a default's reads by its call (TABLE r4.81 (1)):
+ * the state when the call's statement starts, on the call's own branch. Values are finite `DerivedType` trees copied when
+ * stored, so a copy holds what its source held at the copy and a self-copy cannot recurse. Derived from the syntax alone.
+ * An `if`'s arms walk from one state and join (`joinSnaps`), an arm that ends in `exit` or `end` left out. Refused
+ * wherever it is read: a variable stored (or called a method on) where source order does not tell when, in a loop, a
+ * block an expression holds (a handler), or a statement kind the walk does not model, and every stored variable in a
+ * program with a `goto` or a file call. Refused from its store on: a stored computation, a method call on the variable,
+ * a property store below a value of no modelled structure. A typed call the walk does not reach is refused.
+ */
+const snapshotTables = new WeakMap<readonly Statement[], ReadonlyMap<Expression, Resolve>>();
+/** The statements the snapshot reader's walks have visited, for its cost probe. */
+let visited = 0;
+export const snapshotVisits = (): number => visited;
+/** Each walked typed call's snapshot, by its node (`atCall`). */
+const snapshotAt = new WeakMap<Expression, Resolve>();
+function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Resolve> {
+  const cached = snapshotTables.get(program);
+  if (cached !== undefined) return cached;
+  const table = new Map<Expression, Resolve>();
+  // (the rules' flat list of the program's statements, as `derive` reads them)
+  const statements = allStatements(program);
+  // (written types, by the name a `let` declares with one)
+  const written = new Map<string, DerivedType>();
+  for (const statement of statements)
+    if (statement.kind === "letStatement" && statement.typeAnnotation !== null)
+      written.set(statement.name.name, writtenType(statement.typeAnnotation));
+  // (the names stored where source order does not tell when, with why: refused before and after)
+  const unordered = new Map<string, Snap>();
+  const refuse = (names: Iterable<string>, why: string) => {
+    for (const name of names) if (!unordered.has(name)) unordered.set(name, { t: "refused", why });
+  };
+  // (the statements and blocks an expression holds, which run later: a handler's)
+  const heldBlocks = (node: Statement | Expression) =>
+    nodesIn(node, false).filter((each) => each !== node && isBlockOrStatement(each));
+  const visit = (block: readonly Statement[]) => {
+    for (const statement of block)
+      switch (statement.kind) {
+        case "ifStatement": {
+          let at: Statement | null = statement;
+          while (at !== null && at.kind === "ifStatement") {
+            refuse(storedNames(heldBlocks(at.condition)), "a variable a handler block stores");
+            visit(at.thenBlock.statements);
+            const next: IfStatement["elseBlock"] = at.elseBlock;
+            if (next !== null && next.kind !== "ifStatement") visit(next.statements);
+            at = next?.kind === "ifStatement" ? next : null;
+          }
+          break;
+        }
+        case "repeatStatement":
+        case "forStatement":
+        case "whileStatement":
+          refuse(storedNames(statement), "a variable a loop stores");
+          break;
+        case "letStatement":
+        case "assignmentStatement":
+        case "expressionStatement":
+        case "sayStatement":
+        case "exitStatement":
+        case "waitStatement":
+        case "saveStatement":
+        case "deleteStatement":
+          refuse(storedNames(heldBlocks(statement)), "a variable a handler block stores");
+          break;
+        default:
+          refuse(storedNames(statement), `a variable a ${statement.kind} stores`);
+      }
+  };
+  visit(program);
+  const jumps = nodesIn(program, true).some(
+    (node) => node.kind === "gotoStatement" || node.kind === "callFileStatement",
+  );
+  if (jumps) refuse(storedNames(program), "a variable stored in a program with a jump");
+  const lookup =
+    (state: State) =>
+    (name: string): Snap =>
+      unordered.get(name) ??
+      state.get(name) ?? {
+        t: "refused",
+        why: "a variable read where the reader holds no value of it",
+      };
+  const record = (statement: Statement, state: State) => {
+    for (const call of ownCalls(statement))
+      if (!table.has(call)) {
+        table.set(call, lookup(state));
+        snapshotAt.set(call, lookup(state));
+      }
+  };
+  const valueOf = (value: Expression, state: State): Snap => {
+    if (computes(value)) return { t: "refused", why: "a stored computation" };
+    const at = selected(value)!;
+    switch (at.kind) {
+      case "nullLiteral":
+        return { t: "type", type: NULL };
+      case "objectLiteral": {
+        // (each property's value as stored, its null kept)
+        const properties: { name: string; type: DerivedType }[] = [];
+        for (const property of at.properties) {
+          const part = valueOf(property.value, state);
+          if (part.t === "refused") return part;
+          properties.push({ name: property.name.name, type: part.t === "open" ? ALL : part.type });
+        }
+        return { t: "type", type: { kind: "object", properties } };
+      }
+      case "identifier":
+      case "propertyAccessExpression":
+      case "indexExpression": {
+        // (a copy: the source's value at the copy)
+        const steps: string[] = [];
+        let root: Expression = at;
+        while (root.kind === "propertyAccessExpression" || root.kind === "indexExpression") {
+          steps.unshift(root.kind === "propertyAccessExpression" ? root.property.name : "element");
+          root = unwrap(root.object);
+        }
+        return root.kind === "identifier" && declaredNames(statements).has(root.name)
+          ? partAt(lookup(state)(root.name), steps)
+          : OPEN;
+      }
+      default:
+        // (a literal or a typed call: a refused read inside it refuses the store)
+        try {
+          const type = literalType(at, statements, new Set(), lookup(state));
+          return type === null ? OPEN : { t: "type", type };
+        } catch (error) {
+          if (error instanceof Underivable) return { t: "refused", why: error.message };
+          throw error;
+        }
+    }
+  };
+  /** The part at `steps` of `snap` replaced by `part`, or why it cannot be. */
+  const replaced = (snap: Snap, steps: readonly string[], part: Snap): Snap => {
+    if (steps.length === 0) return part;
+    if (snap.t === "refused") return snap;
+    if (snap.t !== "type" || snap.type.kind !== "object" || steps[0] === "element")
+      return { t: "refused", why: "a property store below a value of no modelled structure" };
+    const [name, ...rest] = steps;
+    const own = snap.type.properties.find((property) => property.name === name);
+    const next = replaced(own === undefined ? OPEN : { t: "type", type: own.type }, rest, part);
+    if (next.t === "refused") return next;
+    const type: DerivedType = next.t === "open" ? ALL : next.type;
+    return {
+      t: "type",
+      type: {
+        ...snap.type,
+        properties: [
+          ...snap.type.properties.filter((property) => property.name !== name),
+          { name: name!, type },
+        ],
+      },
+    };
+  };
+  const walk = (block: readonly Statement[], incoming: State): Map<string, Snap> => {
+    const state = new Map(incoming);
+    for (const statement of block) {
+      visited += 1;
+      // (a method call on a variable may change it: refused from its statement on, its own typed calls included)
+      for (const node of nodesIn(statement, false))
+        if (node !== statement && !isBlockOrStatement(node)) {
+          const name = receiverOf(node);
+          if (name !== null)
+            state.set(name, { t: "refused", why: "a method call on the variable" });
+        }
+      record(statement, new Map(state));
+      switch (statement.kind) {
+        case "letStatement":
+          state.set(statement.name.name, valueOf(statement.initializer, state));
+          break;
+        case "assignmentStatement": {
+          const steps: string[] = [];
+          let target: Expression = statement.target;
+          while (target.kind === "propertyAccessExpression" || target.kind === "indexExpression") {
+            steps.unshift(
+              target.kind === "propertyAccessExpression" ? target.property.name : "element",
+            );
+            target = target.object;
+          }
+          if (target.kind !== "identifier") break;
+          const value: Snap =
+            statement.operator === "="
+              ? valueOf(statement.value, state)
+              : { t: "refused", why: "a stored computation" };
+          state.set(target.name, replaced(state.get(target.name) ?? OPEN, steps, value));
+          break;
+        }
+        case "ifStatement": {
+          // (each arm from the state before the `if`, an `else if`'s condition read there too; no `else`: the state as it was)
+          const arms: State[] = [];
+          const arm = (block: readonly Statement[]) => {
+            const out = walk(block, state);
+            const last = block.at(-1)?.kind;
+            if (last !== "exitStatement" && last !== "endStatement") arms.push(out);
+          };
+          let at: Statement | null = statement;
+          while (at !== null && at.kind === "ifStatement") {
+            if (at !== statement) record(at, new Map(state));
+            arm(at.thenBlock.statements);
+            const next: IfStatement["elseBlock"] = at.elseBlock;
+            if (next === null) {
+              arms.push(state);
+              at = null;
+            } else if (next.kind === "ifStatement") at = next;
+            else {
+              arm(next.statements);
+              at = null;
+            }
+          }
+          if (arms.length === 0) break;
+          // (a name an arm declares is its block's own; a name declared before joins each arm's value)
+          for (const name of [...state.keys()])
+            state.set(
+              name,
+              arms
+                .map((each) => each.get(name) ?? OPEN)
+                .reduce((a, b) => joinSnaps(a, b, written.get(name) ?? null)),
+            );
+          break;
+        }
+        case "repeatStatement":
+        case "forStatement":
+        case "whileStatement":
+          // (its stores are refused (`unordered`); the calls in its body read the state before the loop)
+          walk(statement.body.statements, state);
+          break;
+        case "expressionStatement":
+        case "sayStatement":
+        case "exitStatement":
+        case "waitStatement":
+        case "saveStatement":
+        case "deleteStatement":
+          break;
+        default:
+        // (stores in a statement the walk does not model are refused (`unordered`); a typed call in its nested blocks is
+        // not reached, and so refused where it is read)
+      }
+    }
+    return state;
+  };
+  walk(program, new Map());
+  snapshotTables.set(program, table);
+  return table;
+}
+
+/**
+ * The reads each walked typed call's default makes at its snapshot, by the outermost such call: every expression of its
+ * default, a nested typed call's default included, as the compiler keys them (`FlowGraphBuilder.snapshotFrom`).
+ */
+export function snapshotReads(
+  program: readonly Statement[],
+): { readonly call: Expression; readonly reads: readonly Expression[] }[] {
+  const entries = [...snapshotsOf(program).keys()].map((call) => {
+    const fallback = fallbackOf(call);
+    return {
+      call,
+      reads:
+        fallback === null
+          ? []
+          : nodesIn(fallback, false).filter(
+              (node): node is Expression => !isBlockOrStatement(node),
+            ),
+    };
+  });
+  const inner = new Set(entries.flatMap((entry) => entry.reads));
+  return entries.filter((entry) => !inner.has(entry.call) && entry.reads.length > 0);
+}
+
+/** How the defaults of a typed call read the program's variables: at the call's snapshot. */
+function atCall(owner: Expression): Resolve {
+  return (name) => {
+    const resolve = snapshotAt.get(owner);
+    if (resolve === undefined)
+      throw new Underivable("a typed call the snapshot reader does not reach");
+    return resolve(name);
+  };
 }
 
 function unionTypes(types: readonly DerivedType[]): DerivedType {
@@ -738,7 +1253,10 @@ function expectedType(
   owner: DefaultOwner,
   statements: readonly Statement[],
   seen = new Set<string>(),
+  given: Resolve | null = null,
 ): DerivedType | null {
+  // (a default's reads read the program at this call: in the walk, the walk's state; elsewhere, the call's snapshot)
+  const resolve = given ?? atCall(owner);
   if (owner.kind === "loadExpression" && unwrap(owner.key).kind !== "stringLiteral") return null;
   const key = `ingress:${site(owner)}`;
   if (seen.has(key)) return null; // this contribution adds no source structure; an earlier store may decide it
@@ -753,10 +1271,15 @@ function expectedType(
           written,
           fallback === null || !holdsObject(written)
             ? null
-            : literalType(fallback, statements, next),
+            : literalType(fallback, statements, next, resolve),
         );
-  const literal = fallback === null ? null : literalType(fallback, statements, next);
-  return literal === null ? null : withoutNull(literal);
+  const literal = fallback === null ? null : literalType(fallback, statements, next, resolve);
+  // (a variable's snapshot keeps its null beside its other kinds, r3's B2 on #1755; a literal's null is dropped)
+  return literal === null
+    ? null
+    : readsVariable(fallback!, statements)
+      ? literal
+      : withoutNull(literal);
 }
 
 /** Whether a type has an object at some level. */
@@ -1068,6 +1591,8 @@ export function derive(
   readonly content: DerivedContent;
 } {
   const { source } = syntax;
+  // (each typed call's snapshot, walked once over the program's own nesting before any default is read, #1760)
+  snapshotsOf(syntax.statements);
   const statements = allStatements(syntax.statements);
   const all = expressions(syntax.statements).map(unwrap);
   const owners = all.filter(
