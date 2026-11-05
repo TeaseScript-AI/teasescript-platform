@@ -40,8 +40,8 @@ test("a fallback after a value that is never null warns as the current checker d
     "let o = {p: 1}\nlet x = o.p otherwise 2\nsay x\nexit\n",
     "let xs = [1, 2]\nlet x = xs[0] otherwise 0\nsay x\nexit\n",
     'let t = "14" otherwise "bad"\nsay toInteger(t, default: 0)\nexit\n',
-    // (a possible kind proves as a definite one: a selection's element is a possible string)
-    'let seed = "s"\nlet x = [[seed, "o"][0], "o"][0] otherwise "z"\nsay x\nexit\n',
+    // (a possible kind proves as a definite one: a `get` with a default gives a possible whole number)
+    "let xs = [1]\nlet x = xs.get(0, default: 2) otherwise 3\nsay x\nexit\n",
   ];
   for (const mode of MODES)
     for (const source of sources) {
