@@ -599,6 +599,23 @@ test("after a stop a typed call's reader type a stop left open declines the plan
       'let d = 0\nlet result: integer = fromJson(hostValue, default: d, files: false)\nsay result\nsay "after"\nexit\n',
       "2",
     ],
+    // (a projection the syntax proves: a scalar at a literal's literal property or index, Astra r1's B1; a structured
+    // one is not, its properties unproven after a stop)
+    [
+      "literal property's scalar",
+      'let result = fromJson(hostValue, default: ({n: 0}).n, files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's scalar",
+      'let result = fromJson(hostValue, default: [0][0], files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "a literal's structured property",
+      'let result = fromJson(hostValue, default: ({p: {n: 0}}).p, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":2}',
+    ],
     [
       "literal",
       'let result = fromJson(hostValue, default: {n: 0}, files: false)\nsay result.n\nsay "after"\nexit\n',

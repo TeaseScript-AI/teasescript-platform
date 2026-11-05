@@ -8,6 +8,7 @@ import type {
   ListLiteral,
   LoadExpression,
   Program,
+  IndexExpression,
   PropertyAccessExpression,
   Statement,
 } from "../../ast.js";
@@ -1678,7 +1679,7 @@ class Contracts {
         written.kinds.every((kind) => !STRUCTURED.has(kind))
       );
     };
-    if (fallback !== null && readsPlace(fallback) && stoppedAnalysis(this.answers) && !scalar())
+    if (fallback !== null && stoppedAnalysis(this.answers) && readsPlace(fallback) && !scalar())
       throw new OutsideContract(call, OPEN_BY_STOP);
     const expected = runCompileTask(
       this.#answerTask(
@@ -2114,6 +2115,11 @@ function readsPlace(fallback: Expression): boolean {
       case "objectLiteral":
         for (const property of at.properties) pending.push(property.value);
         break;
+      // (a scalar a literal's literal property or index projects, which the syntax proves: Astra r1's B1)
+      case "propertyAccessExpression":
+      case "indexExpression":
+        if (!projectedScalar(at)) return true;
+        break;
       // a typed parse or load inside the default answers by its own default, which the outer call reads through,
       // whatever its key (Codex r5's B1, r6's P2)
       case "loadExpression":
@@ -2130,6 +2136,48 @@ function readsPlace(fallback: Expression): boolean {
         return true;
     }
   return false;
+}
+
+/**
+ * Whether a projection reads a scalar literal a literal's own syntax holds at a literal property or a literal index
+ * (`({n: 0}).n`, `[0][0]`, through parentheses and nested projections): #1460's syntax route proves it after a stop.
+ * Any other projection, one of a structured value among them (`({p: {n: 0}}).p`, whose properties a stop leaves
+ * unproven), or of anything but a literal, reads a place (Astra r1's B1 on #1775).
+ */
+function projectedScalar(at: PropertyAccessExpression | IndexExpression): boolean {
+  const steps: (PropertyAccessExpression | IndexExpression)[] = [];
+  let base: Expression = at;
+  while (base.kind === "propertyAccessExpression" || base.kind === "indexExpression") {
+    steps.push(base);
+    base = unwrap(base.object);
+  }
+  let value: Expression | undefined = base;
+  for (const step of steps.toReversed()) {
+    const holder: Expression = unwrap(value!);
+    if (step.kind === "propertyAccessExpression")
+      value =
+        holder.kind === "objectLiteral"
+          ? holder.properties.find((property) => property.name.name === step.property.name)?.value
+          : undefined;
+    else {
+      const index = unwrap(step.index);
+      value =
+        holder.kind === "listLiteral" &&
+        index.kind === "numberLiteral" &&
+        Number.isInteger(index.value) &&
+        index.value >= 0
+          ? holder.elements[index.value]
+          : undefined;
+    }
+    if (value === undefined) return false;
+  }
+  const leaf = unwrap(value);
+  return (
+    leaf.kind === "numberLiteral" ||
+    leaf.kind === "booleanLiteral" ||
+    leaf.kind === "nullLiteral" ||
+    (leaf.kind === "stringLiteral" && leaf.parts.every((part) => part.kind === "stringText"))
+  );
 }
 
 /**
