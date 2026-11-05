@@ -1674,7 +1674,8 @@ test("a held choice object's button value is marked by a test of its selected ke
       const same =
         keyedOutcome === outcome
           ? JSON.stringify(got) === JSON.stringify(expected)
-          : JSON.stringify(got) === JSON.stringify(marked) && expected![0] === keyedOutcome;
+          : JSON.stringify(got) === JSON.stringify(marked) &&
+            JSON.stringify(expected) === JSON.stringify([keyedOutcome]);
       if (!same || got![0] !== outcome)
         differing.push(`${name}${reversed ? " reversed" : ""}: ${got!.join("; ")}`);
     }
