@@ -30,12 +30,12 @@ import {
   type ItemTag,
 } from "../../src/type-inference/core/items.js";
 import { hasMethod, hasProperty } from "../../src/type-inference/core/consumers/kinds.js";
-import { REFERENCE } from "../../src/type-inference/core/contract/kinds.js";
+import { MEMBER_KINDS, REFERENCE } from "../../src/type-inference/core/contract/kinds.js";
+import { described } from "../../src/type-inference/core/messages.js";
 import type { PlaceId, SourceSite } from "../../src/type-inference/graph.js";
 import type { Label } from "../../src/type-inference/core/contract/labels.js";
 import { propertyName, stepName } from "../../src/type-inference/core/program.js";
 import {
-  contextOf,
   type CoreDiagnostic,
   type DiagnosticRule,
   type Obligation,
@@ -1576,26 +1576,44 @@ export function provenRelabel(
     // (3)'s form, of the two labels as the compiler made them
     const [from, to] = [reference.of(u), stopped.of(x)];
     if (from === null || to === null) return false;
-    const form = relabelForm(from, to, reference, stopped);
-    if (form === null) return false;
-    const site = reference.site(from.place);
     // (1)
-    return (
-      natural.some(
-        (n) =>
-          siteKey(n.site) === siteKey(x.site) &&
-          (n.target === x.target ||
-            n.target.startsWith(`${x.target}.`) ||
-            n.target.startsWith(`${x.target}[`)),
-      ) ||
-      writtenProves(
-        site === null ? null : (declaredIn(graph).get(siteKey(site)) ?? null),
-        from.steps,
-        to.kind === "path" ? to.steps : [],
-        form,
-      )
-    );
+    return labelProved(x, from, to, natural, graph, reference, stopped);
   });
+}
+
+/**
+ * r4.322's proof of a more precise label (`provenRelabel`'s condition (1), #1595): the stopped label is one of the
+ * compiler's two precise forms of the reference's (`relabelForm`), and the natural analysis names that very value so
+ * (a check of its own at `x`'s whole site targeting the label or below it), or the written type at the reference
+ * label's root proves its form (`writtenProves`).
+ */
+function labelProved(
+  x: Obligation,
+  from: LabelIdentity,
+  to: LabelIdentity,
+  natural: readonly Obligation[],
+  graph: FlowGraph,
+  reference: LabelIdentities,
+  stopped: LabelIdentities,
+): boolean {
+  const form = relabelForm(from, to, reference, stopped);
+  if (form === null) return false;
+  const site = reference.site(from.place);
+  return (
+    natural.some(
+      (n) =>
+        siteKey(n.site) === siteKey(x.site) &&
+        (n.target === x.target ||
+          n.target.startsWith(`${x.target}.`) ||
+          n.target.startsWith(`${x.target}[`)),
+    ) ||
+    writtenProves(
+      site === null ? null : (declaredIn(graph).get(siteKey(site)) ?? null),
+      from.steps,
+      to.kind === "path" ? to.steps : [],
+      form,
+    )
+  );
 }
 
 /**
@@ -1646,23 +1664,22 @@ function memberTakes(
 
 /**
  * Condition (3)'s derived record (TABLE r4.363, the lead's ruling on #1708's decision note): the fields a consumer
- * derives from the read it made, each as the proven kinds and the proof's route imply it, never free to differ; every
+ * derives from the read it made, each as the proven kinds and the leaf proof imply it, never free to differ; every
  * other field the reference record's own. `null` where a field cannot be derived (a variant without its entry), which
  * refuses.
  * - `kinds`: the proven kinds (condition (1));
- * - `fits`: for a `member` call, the kinds that have the method or a reference's runtime members, as `memberChecks`
- *   lets through (`having`, `warning`'s `fits`); any other variant's the reference's;
+ * - `fits`: for a `member`, the kinds that have its member (`memberTakes`, each form's) or a reference's runtime
+ *   members, as `memberChecks` lets through (`having`, `warning`'s `fits`); any other variant's the reference's;
  * - `besides`: a stopped mark's none (the published answers' `withBesides` gives a published warning's), a published
  *   warning's from its answers' other diagnostics at its site and rule;
  * - `present`, `keeps`: none where the stopped analysis stopped (no fact is asked after a stop, `withFacts`), else the
  *   reference's;
- * - `provenance`: its writers the reference's; through the leaf proof the written read's (`unknown`, not direct, the
- *   detail's other parts the reference's), through a settled read that read's word and the reference's detail.
+ * - `provenance`: its writers the reference's; the written read's word (`unknown`, not direct, the detail's other parts
+ *   the reference's), the leaf proof the route a written read takes.
  */
 function derivedRecord(
   ru: Extract<CoreDiagnostic, { readonly obligation: unknown }>,
   kinds: readonly ItemTag[],
-  route: { readonly kind: "leaf" } | { readonly kind: "read"; readonly items: readonly Item[] },
   stopped: Answers,
   mark: boolean,
 ): string | null {
@@ -1692,13 +1709,6 @@ function derivedRecord(
     [...reported].filter((kind) => concrete(kind) && !kinds.includes(kind)),
   );
   const { provenance } = ru;
-  const word =
-    route.kind === "leaf"
-      ? "unknown"
-      : contextOf(
-          route.items.find((item) => item.tag !== "null" && item.tag !== "empty") ??
-            route.items[0]!,
-        );
   const { obligation: _obligation, present: _present, keeps: _keeps, ...rest } = ru;
   // (no fact is asked after a stop: `present` and `keeps` the reference's only where the stopped analysis ran to its end)
   const facts =
@@ -1716,33 +1726,58 @@ function derivedRecord(
     besides,
     provenance: {
       writers: provenance.writers,
-      context: word,
-      detail: route.kind === "leaf" ? { ...provenance.detail, direct: false } : provenance.detail,
+      context: "unknown",
+      detail: { ...provenance.detail, direct: false },
     },
   });
 }
 
 /**
- * Whether a `member` check's words are the sentence its own record's kinds select (`memberChecks`): `has <m>` for a kind
- * that lacks the member, `is not null` for a null, `is <the kinds that have it> with <m>` for an unknown, each `before the
- * <use>`, of the check's own label.
+ * The words `memberChecks` gives a member's check for one kind, as its consumer builds them (`receivers.ts`): the member
+ * as its use writes it (`what`: a call's and a read's member, a store's added method, `an element store`, `a store of
+ * .p`), then `is not null` for a null, `has <what>` for a kind that lacks the member, `is <the kinds that have it> with
+ * <what>` for an unknown (`MEMBER_KINDS` that take it, `described`), each `before the <use>`; `null` for a form or kind
+ * the table does not reconstruct, which refuses.
  */
+function memberWords(
+  rule: Extract<DiagnosticRule, { rule: "member" }>,
+  kind: ItemTag,
+): string | null {
+  const takes = memberTakes(rule);
+  if (takes === null) return null;
+  const property = /^\.(\w+)$/.exec(rule.member)?.[1];
+  const what =
+    rule.use !== "store"
+      ? rule.member.startsWith(".")
+        ? rule.member
+        : null
+      : rule.member.endsWith("()")
+        ? rule.member
+        : rule.member === "[i]"
+          ? "an element store"
+          : property === undefined
+            ? null
+            : `a store of .${property}`;
+  if (what === null) return null;
+  const ending = ` before the ${rule.use}`;
+  if (kind === "null") return `is not null${ending}`;
+  if (kind === "unknown") {
+    const takers = MEMBER_KINDS.filter((each) => takes(each));
+    return `is ${takers.length === 0 ? "a value" : described(takers)} with ${what}${ending}`;
+  }
+  if (kind === "empty" || REFERENCE.has(kind) || takes(kind)) return null;
+  return `has ${what}${ending}`;
+}
+
+/** Whether a `member` check's words are exactly those its own record's one kind gives (`memberWords`). */
 function memberSentence(
   check: Obligation,
   rule: Extract<DiagnosticRule, { rule: "member" }>,
-  kinds: readonly string[],
+  kinds: readonly ItemTag[],
 ): boolean {
-  const ending = ` before the ${rule.use}`;
-  const start = `check that ${check.target} `;
-  if (!check.on.startsWith(start) || !check.on.endsWith(ending)) return false;
-  const middle = check.on.slice(start.length, check.on.length - ending.length);
-  const known = kinds.filter((kind) => kind !== "null" && kind !== "empty");
-  if (kinds.length > 0 && known.length === 0) return middle === "is not null";
-  if (known.includes("unknown"))
-    return (
-      known.length === 1 && middle.startsWith("is ") && middle.endsWith(` with ${rule.member}`)
-    );
-  return known.length > 0 && middle === `has ${rule.member}`;
+  if (kinds.length !== 1) return false;
+  const words = memberWords(rule, kinds[0]!);
+  return words !== null && check.on === `check that ${check.target} ${words}`;
 }
 
 /** A written type's members as kinds (`integer`, `list`, …; `null` for an optional's), `null` where one names none. */
@@ -1777,6 +1812,8 @@ function leafKinds(
   let members = membersOf(written);
   for (const step of identity.steps) {
     if (step !== "element" && step !== "entry") return null;
+    // (an `entry` is a dictionary's value: a step the written type does not make so proves nothing)
+    if (step === "entry" && !writtenDict(members)) return null;
     members = elementsOf(members);
     if (members.length === 0) return null;
   }
@@ -1819,6 +1856,7 @@ export function provenRewording(
   stopped: Answers,
   referenceLabels: LabelIdentities | null,
   stoppedLabels: LabelIdentities | null,
+  natural: readonly Obligation[],
 ): Obligation | undefined {
   if (referenceLabels === null || stoppedLabels === null) return undefined;
   const recordOf = (answers: Answers, check: Obligation) => {
@@ -1836,7 +1874,6 @@ export function provenRewording(
   if (ru === undefined || !("rule" in ru) || !("kinds" in ru)) return undefined;
   const variant = SENTENCE_VARIANTS[ru.rule.rule];
   if (variant === undefined) return undefined;
-  const finished = readsOf(stopped);
   return owed.find((x) => {
     // (2)
     if (
@@ -1852,7 +1889,11 @@ export function provenRewording(
     // (3): the labels as recorded, the same or the relabel #1687 proves; the words
     const [from, to] = [referenceLabels.of(u), stoppedLabels.of(x)];
     if (from === null || to === null) return false;
-    if (x.target !== u.target && relabelForm(from, to, referenceLabels, stoppedLabels) === null)
+    // (a changed label carries r4.322's own proof, whatever the words: Codex r1's B2 on #1759)
+    if (
+      x.target !== u.target &&
+      !labelProved(x, from, to, natural, reference.graph, referenceLabels, stoppedLabels)
+    )
       return false;
     if (variant === null) {
       if (x.on !== u.on.split(u.target).join(x.target)) return false;
@@ -1862,33 +1903,13 @@ export function provenRewording(
       !memberSentence(x, ru.rule, rx.kinds)
     )
       return false;
-    // (1): the proof's route, and (3): the stopped record as that route and the proven kinds derive it
-    const route = (():
-      | { readonly kind: "leaf" }
-      | { readonly kind: "read"; readonly items: readonly Item[] }
-      | null => {
-      const leaf = leafKinds(stopped.graph, stoppedLabels, x);
-      if (leaf !== null && sameKinds(rx.kinds, leaf)) return { kind: "leaf" };
-      const text = JSON.stringify(x);
-      const units = new Set(
-        (finished?.emissions ?? []).filter((e) => e.obligation === text).map((e) => e.unit),
-      );
-      const read = [...(finished?.reads.values() ?? [])].flat().find(
-        (each) =>
-          units.has(each.unit) &&
-          !each.finishing &&
-          !each.skipped &&
-          !unsettled(each.items) &&
-          sameKinds(
-            each.items.map((item) => item.tag),
-            new Set(rx.kinds),
-          ),
-      );
-      return read === undefined ? null : { kind: "read", items: read.items };
-    })();
-    if (route === null) return false;
+    // (1): the declaration followed to the leaf (the strict leaf proof; a settled read of the same key is the ruling's
+    // other route, which this oracle does not take: Codex r1's B1 and B4 on #1759), and (3): the stopped record as the
+    // proven kinds derive it
+    const leaf = leafKinds(stopped.graph, stoppedLabels, x);
+    if (leaf === null || !sameKinds(rx.kinds, leaf)) return false;
     const mark = stopped.budget.deferred.some((each) => each === rx);
-    const derived = derivedRecord(ru, rx.kinds, route, stopped, mark);
+    const derived = derivedRecord(ru, rx.kinds, stopped, mark);
     if (derived === null) return false;
     const { obligation: _x, ...actual } = rx;
     return derived === canonical(actual);
@@ -2008,7 +2029,15 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
   for (const u of reference.checks) {
     const text = JSON.stringify(u);
     if (owedTexts.has(text)) continue;
-    const x = provenRewording(u, owed, reference, stopped, referenceLabels, stoppedLabels);
+    const x = provenRewording(
+      u,
+      owed,
+      reference,
+      stopped,
+      referenceLabels,
+      stoppedLabels,
+      natural.checks,
+    );
     if (x !== undefined) pairs.set(text, JSON.stringify(x));
   }
   const checks = new Map<string, "a" | "w" | "z">();

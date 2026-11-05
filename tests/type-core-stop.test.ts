@@ -6590,7 +6590,7 @@ test("a stopped receiver's words are refused where a condition of r4.363 breaks 
     ...answers.checks,
     ...answers.budget.deferred.map((m) => m.obligation),
   ];
-  assert.equal(provenRewording(u, owed(stopped), reference, stopped, from, to), x);
+  assert.equal(provenRewording(u, owed(stopped), reference, stopped, from, to, []), x);
   // (the stopped mark replaced by a changed copy: its check `changed`, its record `record`)
   const tampered = (record: Partial<typeof mark>, changed: Obligation = x): Answers => ({
     ...stopped,
@@ -6606,7 +6606,7 @@ test("a stopped receiver's words are refused where a condition of r4.363 breaks 
     const answers = tampered(record, changed);
     const labels = to === null ? null : withLabels(to, [[changed, to.of(x)!]]);
     assert.equal(
-      provenRewording(u, owed(answers), reference, answers, from, labels),
+      provenRewording(u, owed(answers), reference, answers, from, labels, []),
       undefined,
       why,
     );
@@ -6627,6 +6627,42 @@ test("a stopped receiver's words are refused where a condition of r4.363 breaks 
     ...x,
     on: `check that ${x.target} is a list, a set, or a dict with .clear() before the call`,
   });
+  // (Codex r1's B3 on #1759: an unknown's words are the method table's own takers, never any)
+  const banana = { ...u, on: `check that ${u.target} is a banana with .clear() before the call` };
+  const swapped: Answers = {
+    ...reference,
+    checks: reference.checks.map((each) => (each === u ? banana : each)),
+    diagnostics: reference.diagnostics.map((d) =>
+      "obligation" in d && d.obligation === u ? { ...d, obligation: banana } : d,
+    ),
+  };
+  assert.equal(
+    provenRewording(
+      banana,
+      owed(stopped),
+      swapped,
+      stopped,
+      from === null ? null : withLabels(from, [[banana, from.of(u)!]]),
+      to,
+      [],
+    ),
+    undefined,
+    "(3) an unknown's words not the method table's",
+  );
+  // (Codex r1's B2 on #1759: a label the declaration does not make, an `entry` of a list, is refused)
+  assert.equal(
+    provenRewording(
+      u,
+      owed(stopped),
+      reference,
+      stopped,
+      from,
+      to === null ? null : withLabels(to, [[x, { ...to.of(x)!, steps: ["entry", "entry"] }]]),
+      [],
+    ),
+    undefined,
+    "(1) a label the declaration does not make",
+  );
   assert.equal(SENTENCE_VARIANTS["member"], "memberChecks");
   assert.equal(Object.keys(SENTENCE_VARIANTS).length, 17);
 });
@@ -6689,39 +6725,58 @@ test("the sentence table and the derived record name every site that words or de
     return "(module)";
   };
   const READ_FIELDS = new Set(["fits", "besides", "present", "keeps", "provenance"]);
-  const words = new Set<string>();
-  const fields = new Set<string>();
-  for (const file of files(join(process.cwd(), "src/type-inference/core"))) {
-    const source = ts.createSourceFile(
-      file,
-      readFileSync(file, "utf8"),
-      ts.ScriptTarget.Latest,
-      true,
-    );
-    const imported = new Set<string>();
+  // (one file's sites: its words read from kinds, and its read-derived record fields)
+  const sitesOf = (file: string, text: string, words: Set<string>, fields: Set<string>): void => {
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    // (the word makers a file imports from the messages, by their own names however it binds them: named, renamed,
+    // the module's namespace or its default; codes and paths are no kind's words)
+    const NOT_WORDS = new Set(["codeOf", "pathPhrase"]);
+    const named = new Map<string, string>();
+    const spaces = new Set<string>();
     for (const statement of source.statements)
       if (
         ts.isImportDeclaration(statement) &&
         ts.isStringLiteral(statement.moduleSpecifier) &&
-        /\/messages(\/words)?\.js$/.test(statement.moduleSpecifier.text) &&
-        statement.importClause?.namedBindings !== undefined &&
-        ts.isNamedImports(statement.importClause.namedBindings)
-      )
-        for (const each of statement.importClause.namedBindings.elements)
-          if (!each.isTypeOnly) imported.add(each.name.text);
+        /\/messages(\/[\w-]+)?\.js$/.test(statement.moduleSpecifier.text) &&
+        statement.importClause !== undefined &&
+        !statement.importClause.isTypeOnly
+      ) {
+        const clause = statement.importClause;
+        if (clause.name !== undefined) spaces.add(clause.name.text);
+        if (clause.namedBindings !== undefined && ts.isNamespaceImport(clause.namedBindings))
+          spaces.add(clause.namedBindings.name.text);
+        if (clause.namedBindings !== undefined && ts.isNamedImports(clause.namedBindings))
+          for (const each of clause.namedBindings.elements)
+            if (!each.isTypeOnly) named.set(each.name.text, (each.propertyName ?? each.name).text);
+      }
+    const consumer = file.includes(join("core", "consumers"));
     const visit = (node: ts.Node): void => {
-      if (
-        file.includes(`${join("core", "consumers")}`) &&
-        ts.isCallExpression(node) &&
-        ts.isIdentifier(node.expression) &&
-        imported.has(node.expression.text) &&
-        node.expression.text !== "codeOf" &&
-        node.expression.text !== "pathPhrase"
-      )
-        words.add(`${basename(file)}:${enclosing(node)}`);
+      if (consumer && ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const word = ts.isIdentifier(callee)
+          ? (named.get(callee.text) ?? (spaces.has(callee.text) ? "default" : undefined))
+          : ts.isPropertyAccessExpression(callee) &&
+              ts.isIdentifier(callee.expression) &&
+              spaces.has(callee.expression.text)
+            ? callee.name.text
+            : undefined;
+        if (word !== undefined && !NOT_WORDS.has(word))
+          words.add(`${basename(file)}:${enclosing(node)}`);
+      }
+      // (a sentence that spells a kind itself: a template interpolating an item's tag)
+      if (consumer && ts.isTemplateExpression(node)) {
+        let reads = false;
+        const look = (each: ts.Node): void => {
+          if (ts.isPropertyAccessExpression(each) && each.name.text === "tag") reads = true;
+          ts.forEachChild(each, look);
+        };
+        for (const span of node.templateSpans) look(span.expression);
+        if (reads) words.add(`${basename(file)}:${enclosing(node)}`);
+      }
+      // (a read-derived field set in an object, by an identifier, a quoted or a shorthand key)
       if (
         (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
-        ts.isIdentifier(node.name) &&
+        (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
         READ_FIELDS.has(node.name.text) &&
         ts.isObjectLiteralExpression(node.parent)
       )
@@ -6729,6 +6784,40 @@ test("the sentence table and the derived record name every site that words or de
       ts.forEachChild(node, visit);
     };
     visit(source);
+  };
+  const words = new Set<string>();
+  const fields = new Set<string>();
+  for (const file of files(join(process.cwd(), "src/type-inference/core")))
+    sitesOf(file, readFileSync(file, "utf8"), words, fields);
+  // (Codex r1's B5 on #1759: each way a new site could hide, written as a consumer would, is found)
+  const consumerFile = join(process.cwd(), "src/type-inference/core/consumers/control.ts");
+  const controls: readonly (readonly [string, string, "words" | "fields"])[] = [
+    [
+      "renamed",
+      'import { described as codeOf } from "../messages.js";\nfunction a(k) { return `is ${codeOf(k)}`; }',
+      "words",
+    ],
+    [
+      "namespace",
+      'import * as m from "../messages.js";\nfunction a(k) { return `is ${m.described(k)}`; }',
+      "words",
+    ],
+    [
+      "default",
+      'import words from "../messages/words.js";\nfunction a(k) { return `is ${words(k)}`; }',
+      "words",
+    ],
+    [
+      "inline",
+      'function a(items) { return `saw ${items.map((item) => item.tag).join(" or ")}`; }',
+      "words",
+    ],
+    ["quoted", 'function a(d) { return { ...d, "fits": [] }; }', "fields"],
+  ];
+  for (const [name, text, kind] of controls) {
+    const [found, set] = [new Set<string>(), new Set<string>()];
+    sitesOf(consumerFile, text, found, set);
+    assert.ok((kind === "words" ? found : set).size > 0, `the guard misses a ${name} site`);
   }
   const tabled = Object.values(SENTENCE_VARIANTS).filter((site) => site !== null);
   assert.deepEqual([...words].sort(), tabled.map((site) => `receivers.ts:${site}`).sort());
@@ -6751,4 +6840,83 @@ test("the sentence table and the derived record name every site that words or de
     "warnings.ts:warning:fits",
     "warnings.ts:warning:provenance",
   ]);
+});
+
+/**
+ * TABLE r4.363 (#1708, Codex r1's B2 and B3 on #1759): each member form's words follow the proven leaf as its consumer
+ * makes them: an element store (`has an element store`), a property store (`has a store of .p`), and a list's element
+ * receiver, whose `element` label the list's own declaration proves (never an `entry`). Every 8th settled stop, four
+ * modes, demand 3: the stop oracle clean.
+ */
+test("a store's and a list receiver's words follow the proven leaf at every member form (#1708)", () => {
+  for (const source of [
+    'let xs: integer dict = dict {a: hostValue}\nsay "BEFORE"\nxs["a"][0] = hostOther\nsay "AFTER"\nexit\n',
+    'let xs: integer dict = dict {a: hostValue}\nsay "BEFORE"\nxs["a"].p = hostOther\nsay "AFTER"\nexit\n',
+    'let xs: integer[] = [hostValue]\nsay "BEFORE"\nxs[0].clear()\nsay "AFTER"\nexit\n',
+  ]) {
+    const c: HeldCase = { name: "member-forms", source, slice: true, values: [] };
+    for (const mode of HELD_MODES) {
+      const reference = heldRun(c, mode, undefined, 3);
+      for (const { allowance } of heldStops(c, mode, 8, 3)) {
+        assert.deepEqual(
+          heldProblems(c, mode, allowance, reference, 3),
+          [],
+          `${source} ${mode.name} @${allowance}`,
+        );
+        const stopped = heldRun(c, mode, allowance, 3).answers;
+        for (const [, x] of combinedStopRule(c, mode, reference, stopped).reworded.pairs)
+          if (source.includes("integer[]")) assert.ok(!x.includes(".entry"), x);
+      }
+    }
+  }
+});
+
+/**
+ * TABLE r4.363 (#1708, Codex r1's B2 on #1759): a list's element proves no dictionary entry. At a stop where the list
+ * receiver's words follow its leaf, the stopped check relabelled `xs.entry` (its record and recorded label with it) is
+ * refused: the label's own proof (r4.322) and the leaf's `entry` step both fail.
+ */
+test("a list receiver's check relabelled as a dictionary's entry is refused (#1708)", () => {
+  const c: HeldCase = {
+    name: "list-entry",
+    source: 'let xs: integer[] = [hostValue]\nsay "BEFORE"\nxs[0].clear()\nsay "AFTER"\nexit\n',
+    slice: true,
+    values: [],
+  };
+  const mode = HELD_MODES[0]!;
+  const reference = heldRun(c, mode, undefined, 3);
+  const owed = (answers: Answers) => [
+    ...answers.checks,
+    ...answers.budget.deferred.map((m) => m.obligation),
+  ];
+  let tried = 0;
+  for (const { allowance } of heldStops(c, mode, 1, 3)) {
+    const stopped = heldRun(c, mode, allowance, 3).answers;
+    const [from, to] = [labelIdentities(reference.answers), labelIdentities(stopped)];
+    const pairs = combinedStopRule(c, mode, reference, stopped).reworded.pairs;
+    const u = reference.answers.checks.find((each) => pairs.has(JSON.stringify(each)));
+    const mark = stopped.budget.deferred.find(
+      (each) => JSON.stringify(each.obligation) === pairs.get(JSON.stringify(u)),
+    );
+    if (u === undefined || mark === undefined || to === null) continue;
+    tried += 1;
+    const x = mark.obligation;
+    const entry = { ...x, target: "xs.entry", on: x.on.split(x.target).join("xs.entry") };
+    const answers: Answers = {
+      ...stopped,
+      budget: {
+        ...stopped.budget,
+        deferred: stopped.budget.deferred.map((each) =>
+          each === mark ? { ...mark, obligation: entry } : each,
+        ),
+      },
+    };
+    const labels = withLabels(to, [[entry, { ...to.of(x)!, steps: ["entry"] }]]);
+    assert.equal(
+      provenRewording(u, owed(answers), reference.answers, answers, from, labels, []),
+      undefined,
+      `@${allowance}`,
+    );
+  }
+  assert.ok(tried > 0, "no stop pairs the list receiver's words");
 });
