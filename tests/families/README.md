@@ -301,7 +301,7 @@ reading) all match; otherwise it is `changed` (bound, but its reading or class d
 `changed` and `unbound` until a re-adjudication; each closes only by a new table, never by a matching signature (one
 signature spans several groups). `gate.json` names both files' sha256. Keys and guards are kept by their first 16
 digits: two of the gate's sources sharing a key prefix would need a 64-bit collision, and none of today's 12,644 bound
-sources do. `shadow-groups/bind.mjs` writes the table from an adjudication and the run it adjudicated, refusing a
+sources do. `shadow-bind.mjs` writes the table from an adjudication and the run it adjudicated, refusing a
 binding whose raw publication differs from its record's. A re-adjudication replaces both files whole, so the table's
 history is by version, not by diff. The first table is Sol's preparation of gate run 2 (#1744 comment 6655890944).
 
