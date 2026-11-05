@@ -240,6 +240,40 @@ test("a pushed read's graph is built as shared work: counted to the total, never
   assert.equal(outside, 0);
 });
 
+test("a chain's root is read from the pass's index, its making shared work and a hit nothing (#1793)", () => {
+  // (the accessor itself, whatever reads it: the chain index made again from empty after the analysis, then read again)
+  const source = 'let a={b:{c:{d:1}}}\nlet x=a.b.c.d\nsay "${x}"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+  assert.ok(request !== null);
+  const passes: CorePass[] = [];
+  const check = Consumers.prototype.check;
+  Consumers.prototype.check = function (this: Consumers) {
+    passes.push(this.pass);
+    check.call(this);
+  };
+  try {
+    analyseCore(request);
+  } finally {
+    Consumers.prototype.check = check;
+  }
+  const { contract, program } = passes.at(-1)!;
+  const deepest = [...program.projOf.keys()].find(
+    (value) => ![...program.projOf.values()].some((projection) => projection.owner === value),
+  );
+  assert.ok(deepest !== undefined);
+  contract.chains.clear();
+  const work = program.work;
+  const read = () => {
+    const [total, own] = [work.total, work.own];
+    const chain = contract.chainOf(deepest);
+    return { chain, total: work.total - total, own: work.own - own };
+  };
+  const first = read();
+  assert.ok(first.chain !== null && first.total > 0, JSON.stringify(first));
+  assert.equal(first.own, 0);
+  assert.deepEqual(read(), { chain: first.chain, total: 0, own: 0 });
+});
+
 test("the producer graph grows with the ring and the projection's depth, each by a constant", () => {
   const rings = [4, 8, 16].map((n) => analysed(ring({ n })).facts);
   const plain = [4, 8, 16].map((n) => analysed(plainRing(n)).facts);
