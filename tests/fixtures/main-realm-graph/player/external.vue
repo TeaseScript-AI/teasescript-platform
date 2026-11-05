@@ -1,4 +1,2 @@
 <script lang="ts" src="./external-script.ts"></script>
-<template>
-  <p>{{ shown }}</p>
-</template>
+<template src="./external-template.html"></template>

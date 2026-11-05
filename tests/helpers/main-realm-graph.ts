@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { ts } from "ts-morph";
-import { parse as parseSfc } from "vue/compiler-sfc";
+import { compileTemplate, parse as parseSfc } from "vue/compiler-sfc";
 
 /** An import of a value from a module the main realm may not load: who imports it, from where, and which name. */
 export interface MainRealmOffender {
@@ -76,20 +76,35 @@ function valueImports(code: string, file: string): { specifier: string; names: s
 }
 
 /**
- * A module's script code: the file itself, or a `.vue` file's script blocks. A `<script src>` block counts as a
- * re-export of that file, as the Vue plugin compiles it.
+ * A module's executable code: the file itself, or each part of a `.vue` file that the Vue plugin turns into code. The
+ * parts are the scripts, where a `<script src>` counts as a re-export of that file, and the template, inline or by
+ * `src`, compiled by Vue's template compiler, whose code can `import()` too.
  */
 function scripts(file: string): string[] {
   const text = readFileSync(file, "utf8");
   if (!file.endsWith(".vue")) return [text];
   const { descriptor } = parseSfc(text, { filename: file });
-  const external = descriptor.script?.src;
-  return [
-    external === undefined
-      ? descriptor.script?.content
-      : `export * from ${JSON.stringify(external)};`,
-    descriptor.scriptSetup?.content,
-  ].filter((content): content is string => content !== undefined);
+  const { script, scriptSetup, template } = descriptor;
+  const code: string[] = [];
+  if (script !== null)
+    code.push(
+      script.src === undefined ? script.content : `export * from ${JSON.stringify(script.src)};`,
+    );
+  if (scriptSetup !== null) code.push(scriptSetup.content);
+  if (template !== null) {
+    const compiled = compileTemplate({
+      source:
+        template.src === undefined
+          ? template.content
+          : readFileSync(resolve(dirname(file), template.src), "utf8"),
+      filename: file,
+      id: file,
+      compilerOptions: { isTS: [script?.lang, scriptSetup?.lang].includes("ts") },
+    });
+    if (compiled.errors.length > 0) throw new Error(`${file}: ${String(compiled.errors[0])}`);
+    code.push(compiled.code);
+  }
+  return code;
 }
 
 /** The repository file a local specifier names, or `null` for a package or a non-script file. */

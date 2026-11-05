@@ -3,5 +3,5 @@ import { aliased } from "@/aliased.js";
 const shown = aliased;
 </script>
 <template>
-  <p>{{ shown }}</p>
+  <p @click="import('../src/template.js')">{{ shown }}</p>
 </template>
