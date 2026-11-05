@@ -23,6 +23,7 @@ import {
   ingressLeaves,
   type Item,
   itemsSignature,
+  spellingIdentity,
   writerKey,
 } from "../../src/type-inference/core/items.js";
 import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
@@ -684,6 +685,22 @@ export function publication(
   if (parts === null) return null;
   const unanswered = parts.unanswered === 0 ? "" : `,{"unanswered":${parts.unanswered}}`;
   return `[${parts.answers},${parts.record},[${parts.occurrences.join(",")}],${parts.route}${unanswered}]`;
+}
+
+/**
+ * #1655: every demand a pass's solver settled, by its key, its answer's items by `itemText` and their spelling: what each raw read answers,
+ * where a publication shows only what the checks and the occurrences take of it.
+ */
+export function settledAnswers(pass: CorePass): Map<string, string> {
+  const answers = new Map<string, string>();
+  for (const { key } of pass.solver.demandWork())
+    answers.set(
+      key,
+      (pass.solver.answer(key) ?? [])
+        .map((item) => `${itemText(item)}|${spellingIdentity(item.spelling)}`)
+        .join(" "),
+    );
+  return answers;
 }
 
 /** Which admission decisions an analysis stops, and when; its restarts and how it ended. */

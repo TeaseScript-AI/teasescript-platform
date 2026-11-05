@@ -644,6 +644,11 @@ export class Contract {
     return this.#stopped.size > 0;
   }
 
+  /** The places some decision stopped at (`stop`), each once, as a lookup: none of their keys made. */
+  public get stoppedPlaces(): ReadonlyMap<PlaceId, unknown> {
+    return this.#stopped;
+  }
+
   /** Whether the decision of `place` at `path`, or at a key above it, stopped (`stop`); the running demand asked. */
   public stopped(place: PlaceId, path: readonly string[]): boolean {
     // (a wrapper's family is asked by its cursor, so one key is never asked in two forms)
