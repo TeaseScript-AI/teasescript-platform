@@ -1491,25 +1491,74 @@ test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 P
     answer("let box = {n: 1.5}", "if box.n < 2 { repeat box.n {} }"),
     "warning-runtime-check, integer-use warning-runtime-check, integer-check",
   );
-  // the test proves a kind, never an ingress: external data keeps its boundary check (C9)
-  assert.equal(
-    answer("let raw = hostValue", "if raw is integer { repeat raw {} }"),
-    "valid, copy-type boundary",
-  );
-  // (also once the narrowed item is carried into a literal, merged there with another of its kind, read from there, and
-  // at a typed store, which admission answers: Codex r1 on #1770)
-  for (const body of [
-    "let xs = [raw]\n repeat xs[0] {}",
-    "let xs = [raw, 1]\n repeat xs[0] {}",
-    "let out: integer = raw\n repeat out {}",
-    // (a result computed from it brought no data in: the operand's ingress check alone, Codex r2 on #1770)
-    "let out: integer = raw + 1\n repeat out {}",
-  ])
-    assert.equal(
-      answer("let raw = hostValue", `if raw is integer { ${body} }`),
+  // the test proves a kind, never an ingress (C9, the lead's ruling (a)): external data keeps exactly one boundary
+  // check, at its ingress store or, where no store brought it, at the consumer (r4.10), through every transfer that
+  // keeps the value; a computed result brings no data in (Codex r1–r3 on #1770: the typed store, the operator, the
+  // selection without an ingress are rows)
+  const transfers: readonly (readonly [string, string, string, string, string])[] = [
+    ["a read", "", "integer", "repeat X {}", "valid, copy-type boundary"],
+    ["a copy", "", "integer", "let c = X\n repeat c {}", "valid, copy-type boundary"],
+    [
+      "a merge of one kind",
+      "",
+      "integer",
+      "let xs = [X, 1]\n repeat xs[0] {}",
       "valid, copy-type boundary",
-      body,
-    );
+    ],
+    [
+      "a literal's element",
+      "",
+      "integer",
+      "let xs = [X]\n repeat xs[0] {}",
+      "valid, copy-type boundary",
+    ],
+    ["a selection", "", "integer[]", "repeat X[0] {}", "valid, copy-type boundary"],
+    [
+      "an operator",
+      "",
+      "integer",
+      "let out: integer = X + 1\n repeat out {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a typed store",
+      "",
+      "integer",
+      "let out: integer = X\n repeat out {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "an argument",
+      "function f(p: integer) {\n repeat p {}\n}\n",
+      "integer",
+      "f(X)",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a result",
+      "function g(p): integer {\n return p\n}\n",
+      "integer",
+      "let out = g(X)\n repeat out {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a default",
+      "",
+      "integer",
+      "let out: integer = X otherwise 0\n repeat out {}",
+      "warning, static warning, copy-type boundary",
+    ],
+  ];
+  for (const [name, prelude, type, body, expected] of transfers)
+    for (const [where, before, read] of [
+      ["an ingress store", "let raw = hostValue\n", "raw"],
+      ["no ingress store", "", "hostValue"],
+    ] as const)
+      assert.equal(
+        answer(`${prelude}${before}if ${read} is ${type} {\n${body.replaceAll("X", read)}\n}`),
+        expected,
+        `${name}, ${where}`,
+      );
   // #1320: a scalar under its test needs no operand check; a list under an element test keeps C6's emptiness, read
   // directly and at a row (a consumer's descendant demand takes its path's G)
   assert.equal(

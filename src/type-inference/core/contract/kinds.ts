@@ -5,7 +5,7 @@ import { withoutEmpty } from "../exact-path.js";
 import {
   EMPTY,
   makeItem,
-  marksOf,
+  computedMarks,
   REASON,
   type Item,
   type ItemTag,
@@ -35,7 +35,8 @@ export function unknownItem(reasons: number, writer: Writer | null = null): Item
  * result, F10's conversion, F14's length, F27's key) is guarded, and possible, where one of them is.
  */
 export function carried(item: Item, from: readonly Item[]): Item {
-  const marks = marksOf(from);
+  // (a transfer's result is computed: never external data a test refined, `computedMarks`, #1073 PR 2)
+  const marks = computedMarks(from);
   const guard = from.find((each) => each.guarded === true);
   return guard === undefined
     ? { ...item, ...marks }

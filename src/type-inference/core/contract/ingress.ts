@@ -15,7 +15,7 @@ export function entered(
   if (leaf === undefined) return items;
   const ingress = contract.pass.program.scope.ingress;
   return items.map((item) =>
-    item.tag === "unknown" && (item.reasons & REASON.external) !== 0
+    (item.tag === "unknown" && (item.reasons & REASON.external) !== 0) || item.fromExternal === true
       ? { ...item, ingress: ingress.union(item.ingress, leaf)! }
       : item,
   );

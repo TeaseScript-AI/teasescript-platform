@@ -61,7 +61,7 @@ const writerRank = (writer: Writer | null): number =>
  * warnings stay with the external unknowns.
  */
 function boundaryData(item: Item): boolean {
-  return isExternal(item) || (item.fromExternal === true && item.ingress !== undefined);
+  return isExternal(item) || item.fromExternal === true;
 }
 
 export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decision | null {
