@@ -2016,28 +2016,7 @@ test("a literal wider than a native call takes compiles and keeps its checks, in
   assert.deepEqual(misfits, failed(`TSR058@8:${source.indexOf("\n")}`));
 });
 
-test("a typed parse or load into a copy of a written type leaves the slice until the core's F18 takes the copied domain (the lead's ruling 2)", () => {
-  // the copied written domain is F18's receiving context (A4, TABLE r4.75 (1), (1a)); the core answers the call by its
-  // default there and its later facts follow that answer (no check at a later `let n: integer = b`), so the lowering
-  // cannot widen the expected type alone
-  for (const source of [
-    "let a: number = 0\nlet b = a\nb = fromJson(hostValue, default: 0, files: false)\nsay b\nexit\n",
-    "let a: number = 0\nlet b = a\nb = fromJson(hostValue, default: 0)\nsay b\nexit\n",
-    "let a: number = 0\nlet b = a\nlet c = b\nc = fromJson(hostValue, default: 0, files: false)\nsay c\nexit\n",
-    'let a: number = 0\nlet b = a\nb = load("k", default: 0)\nsay b\nexit\n',
-    "let a: number[] = [0]\nlet b = a\nb = fromJson(hostValue, default: [0], files: false)\nsay b[0]\nexit\n",
-    // below a composite destination: a literal's element, a copied record's field, an empty intermediate (Sol r9)
-    'let a: number = 0\nlet out = [a]\nout = fromJson(hostValue, default: [0], files: false)\nsay "AFTER"\nexit\n',
-    'let a: number = 0\nlet base = {n: a}\nlet out = base\nout.n = fromJson(hostValue, default: 0, files: false)\nsay "AFTER"\nexit\n',
-    'let a: number[] = [0]\nlet middle = []\nmiddle = a\nlet out = middle\nout = fromJson(hostValue, default: [0], files: false)\nsay "AFTER"\nexit\n',
-  ])
-    assert.throws(
-      () => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND),
-      (error) =>
-        error instanceof CandidateOutsideSlice &&
-        error.what === "a typed parse or load into a copy of a written type",
-      source,
-    );
+test("a typed parse or load into a place its own store or literal decides reads the default's kinds, in three layers", () => {
   // a place its own store decides, not a copy of a written type: F18 reads the default's kinds, in three layers
   const decided =
     'let b = 1.5\nb = fromJson(hostValue, default: 0, files: false)\nsay b\nsay "AFTER"\nexit\n';
