@@ -1047,7 +1047,7 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
     outer: ReadonlyMap<string, DerivedType>,
   ): { readonly state: Map<string, Snap>; readonly falls: boolean } => {
     const state = new Map(incoming);
-    // (the written type of each binding in scope, by its name: a `let` without one hides an outer one)
+    // (the written type of each binding in scope, by its name: a block's own `let`s are its own, a sibling's not seen)
     const written = new Map(outer);
     let falls = true;
     for (const statement of block) {
@@ -1062,8 +1062,8 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
       record(statement, state);
       switch (statement.kind) {
         case "letStatement":
-          if (statement.typeAnnotation === null) written.delete(statement.name.name);
-          else written.set(statement.name.name, writtenType(statement.typeAnnotation));
+          if (statement.typeAnnotation !== null)
+            written.set(statement.name.name, writtenType(statement.typeAnnotation));
           state.set(statement.name.name, valueOf(statement.initializer, state));
           break;
         case "assignmentStatement": {
