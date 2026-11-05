@@ -10,7 +10,7 @@ import {
   type Rest,
 } from "./key-ids.js";
 import type { Contract } from "../contract.js";
-import { type Key } from "../definitions.js";
+import { keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
 import { EMPTY, firstWriter, mergeItems, REASON, type Item, type Writer } from "../items.js";
 import { stepName } from "../program.js";
@@ -89,7 +89,7 @@ export function* entryAt(
       ref,
       withWriter(
         pushed !== null
-          ? yield* pushedRead(contract, pushed, entry, below)
+          ? yield* pushedRead(contract, pushed, keyPlace(entry.key), below)
           : yield* contract.contractOf(keyBelowRef(contract, entry.key, ref), below),
         entry.w,
       ),

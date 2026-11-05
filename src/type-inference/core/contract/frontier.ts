@@ -797,7 +797,7 @@ export function pushedFacts(contract: Contract): {
 /**
  * #1655: the pushed read's slot for a prefix entry read at `ref` (`entryAt`'s key branch), or `null` where the native
  * reader answers: a key entry below its place's root, in a copy cycle through a projection, whose closure the graph
- * models. Its structure is built here, shared work (r4.349); a build that declines or stops keeps nothing.
+ * models.
  */
 export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef): string | null {
   if (!pushing)
@@ -810,11 +810,54 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
       : null;
   if (entry.key === undefined || isKeyId(entry.key) || ref.length === 0 || ref.kind !== "steps")
     return null;
-  const path = keyPath(entry.key);
+  const key = entry.key;
+  const path = keyPath(key);
   if (path.length === 0) return null;
-  const frontier = frontierOf(contract);
   const steps = stepsArray(ref.steps());
-  const slot = keptParts(contract.work, "pr", entry.key, steps);
+  return reachSlot(contract, keptParts(contract.work, "pr", key, steps), keyPlace(key), () => {
+    if (!steps.every(propertyOnly) || !path.every(propertyOnly)) throw new Decline("step");
+    const frontier = frontierOf(contract);
+    let set = intern(frontier, [rootNode(frontier, keyPlace(key))]);
+    for (const each of [...path, ...steps]) set = star(frontier, set, each);
+    return setMembers(frontier, set);
+  });
+}
+
+/**
+ * #1655: the pushed read's slot for a store's value read whole where the path ends (`contractAlong`'s definitions,
+ * below their writing edge): a chain of property reads (`p1 = p1.q.q…`) of a binding in a copy cycle through a
+ * projection, or `null` where the native reader answers, so the chain's own keys (`p1.q`, `p1.q.q`, …) are not the
+ * binding's root's.
+ */
+export function pushedValueSlot(contract: Contract, value: PlaceId): string | null {
+  const { program } = contract.pass;
+  if (!pushing || !program.projOf.has(value)) return null;
+  let root = value;
+  for (
+    let projection = program.projOf.get(root);
+    projection !== undefined;
+    projection = program.projOf.get(root)
+  )
+    root = projection.owner;
+  const binding = program.occurrenceOf.get(root);
+  if (binding === undefined) return null;
+  return reachSlot(contract, keptParts(contract.work, "pv", value), binding, () =>
+    collect(frontierOf(contract), (then) => eachValue(frontierOf(contract), value, then)),
+  );
+}
+
+/**
+ * A pushed read's slot where `place` is in a copy cycle through a projection and the nodes `start` finds the graph
+ * models, with their leaves; built once per slot and pass as shared work (r4.349), a build that declines or stops
+ * keeping nothing.
+ */
+function reachSlot(
+  contract: Contract,
+  slot: string,
+  place: PlaceId,
+  start: () => readonly number[],
+): string | null {
+  const frontier = frontierOf(contract);
   // (after a stop at a place the graph holds, the native reader answers: its keys ask their stops one by one)
   if (
     contract.anyStopped &&
@@ -825,13 +868,10 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
   const work = contract.pass.program.work;
   const reach = work.shared((): Reach | null => {
     try {
-      if (!cyclic(frontier, keyPlace(entry.key!))) return null;
-      if (!steps.every(propertyOnly) || !path.every(propertyOnly)) return null;
-      let set = intern(frontier, [rootNode(frontier, keyPlace(entry.key!))]);
-      for (const each of [...path, ...steps]) set = star(frontier, set, each);
+      if (!cyclic(frontier, place)) return null;
       const items: Item[] = [];
       const natives: PlaceId[] = [];
-      for (const leaf of leavesOf(frontier, setMembers(frontier, set))) {
+      for (const leaf of leavesOf(frontier, start())) {
         const node = frontier.nodes[leaf]!;
         if (node.kind === "leaf") items.push(node.item);
         else if (node.kind === "native") natives.push(node.value);
@@ -852,11 +892,11 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
 export function* pushedRead(
   contract: Contract,
   slot: string,
-  entry: PrefixEntry,
+  place: PlaceId,
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   if (slot === BEYOND) return [];
-  const site = contract.pass.program.places[keyPlace(entry.key!)]?.site ?? null;
+  const site = contract.pass.program.places[place]?.site ?? null;
   flow?.include(slot, "pushed");
   return yield {
     key: slot,

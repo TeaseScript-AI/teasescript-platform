@@ -52,6 +52,7 @@ import {
 } from "../items.js";
 import type { Decision, Work } from "../solver.js";
 import { heldAsIs, type FlowSink } from "./contributions.js";
+import { pushedRead, pushedValueSlot } from "./frontier.js";
 import type { ReadRoute } from "../values.js";
 import {
   HELD_REFERENCE,
@@ -619,9 +620,14 @@ function* contractAlong(
         // F21: several sites
         out.push(unknownItem(REASON.deferred, definitions.writerOf(d)));
       const whole = flow?.child() ?? null;
+      // #1655: a chain of property reads of a binding in a copy cycle through a projection, read one step at a time
+      // below the writing edge (`frontier.ts`)
+      const pushed = pushedValueSlot(contract, d.value!);
       out.push(
         ...withWriter(
-          yield* contract.contractOfValueAt(d.value!, [], whole),
+          pushed !== null
+            ? yield* pushedRead(contract, pushed, d.value!, whole)
+            : yield* contract.contractOfValueAt(d.value!, [], whole),
           definitions.writerOf(d),
         ),
       );
