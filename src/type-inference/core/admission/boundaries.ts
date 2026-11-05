@@ -357,6 +357,64 @@ export function publish(admission: Admission, written = false): void {
   }
 }
 
+/**
+ * #1767: after a stop before admission settled, a whole store or transfer of a typed call (F18) keeps the boundary the
+ * settled publication makes there (its destination's label, against the reader type, at the call's span) where that is
+ * the natural run's own check: the call's reader type its default gives (`f18Kinds`, not left open), and the store the
+ * only one into its destination, which the call so decides (A1), so the reader type is its admitted type. Anywhere else
+ * the fresh pass marks the store (r4.110 (3)): a stopped run's publication may defer or keep the natural run's checks,
+ * never publish one it lacks, and a narrower `against` is another check. Returns the call's site where it formed one.
+ */
+export function typedStoreBoundary(admission: Admission, d: Definition): SourceSite | null {
+  const { program } = admission.pass;
+  if (d.kind !== "whole" || d.value === undefined) return null;
+  const c = program.opOf.get(d.value);
+  if (c === undefined || !("result" in c) || c.result !== d.value || !typedIngress(c)) return null;
+  // (any other store or transfer at or above its path decides the destination too)
+  for (const other of placeStores(admission).get(d.place) ?? []) {
+    program.work.charge("checks");
+    if (
+      other !== d &&
+      other.path.every((step, at) => d.path[at] === step) &&
+      other.path.length <= d.path.length
+    )
+      return null;
+  }
+  const found = f18Kinds(admission, c);
+  if (found === null) return null;
+  const path = admission.destPath(d);
+  const label = admission.pathLabel(d.place, path);
+  const against = found.tags.map(requiredKind);
+  const message = `validate external data entering ${label} against ${against.join("|")}`;
+  keepText(admission.work, label.length);
+  keepText(admission.work, message.length);
+  const key = keptKeyAt(admission.pass.contract, d.place, path);
+  const check = boundaryCheck(c.site, label, against, message);
+  const list = admission.boundaries.get(key);
+  if (list === undefined) admission.boundaries.set(key, [check]);
+  else list.push(check);
+  return c.site;
+}
+
+/** Per admission, its stores and transfers by their place (`typedStoreBoundary`), made once. */
+const PLACE_STORES = new WeakMap<Admission, Map<PlaceId, Definition[]>>();
+
+function placeStores(admission: Admission): ReadonlyMap<PlaceId, readonly Definition[]> {
+  let found = PLACE_STORES.get(admission);
+  if (found === undefined) {
+    found = new Map();
+    const { definitions, program } = admission.pass;
+    for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
+      program.work.charge("checks");
+      const list = found.get(d.place);
+      if (list === undefined) found.set(d.place, [d]);
+      else list.push(d);
+    }
+    PLACE_STORES.set(admission, found);
+  }
+  return found;
+}
+
 /** A boundary check (C9): `copy-type` against the destination's own contract. */
 function boundaryCheck(
   site: SourceSite,
@@ -441,6 +499,15 @@ export const OBLIGATION_SITES = [
     published: "an ingress store's boundary against a written destination (C9, S6-CARRIERS §3.3)",
     undecided: "an ingress store into an inferred place, marked (storeMark)",
     declined: "an unrestricted destination (V30 §13)",
+  },
+  {
+    method: "typedStoreBoundary",
+    runs: "typedStoreBoundary",
+    published:
+      "a typed call's own store's boundary against its reader type, the only store into its destination, its default literal data (C9, F18, #1767)",
+    undecided:
+      "a typed call's store whose reader type the finishing read leaves open, or beside another store into its destination, marked (storeMark)",
+    declined: "a store whose value is no typed call itself",
   },
 ] as const;
 

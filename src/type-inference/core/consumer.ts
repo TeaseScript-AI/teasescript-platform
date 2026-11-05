@@ -1186,7 +1186,26 @@ function runtimeChecks(
     if (held === undefined) atStore.set(store, [obligation]);
     else held.push(obligation);
     if (checks.has(store)) continue;
-    const type = contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null);
+    // (after a stop before admission settled, a typed call's own store keeps its boundary, #1767: its check is the
+    // reader type, which the natural run's destination admits, where the stop left the destination's contract undecided)
+    const value = store.kind === "letStatement" ? unwrap(store.initializer) : null;
+    const reader =
+      obligation.boundary &&
+      !answers.budget.settled &&
+      store.kind === "letStatement" &&
+      store.typeAnnotation === null &&
+      value !== null &&
+      typed.has(value)
+        ? ((value.kind === "loadExpression"
+            ? checks.get(value)?.type
+            : value.kind === "callExpression"
+              ? core.expected.get(value)
+              : undefined) ?? null)
+        : null;
+    const type =
+      reader !== null && store.kind === "letStatement"
+        ? { type: reader, place: `'${store.name.name}'` }
+        : (contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null));
     if (type !== null) checks.set(store, type);
   }
   // after a demand stop, the obligations the receiving completion's own store checks owe (#1682): the natural walk's of
@@ -1505,8 +1524,9 @@ function unwrap(expression: Expression): Expression {
 
 /**
  * A contract the plan cannot carry exactly as the core decided it: one deeper than the slice follows (`SLICE_DEPTH`), a
- * record field that some records of a list lack, a typed parse or load into a copy of a written type. The candidate
- * route rejects its program, at `expression`, rather than check less than the core decided.
+ * record field that some records of a list lack, a typed parse or load into a copy of a written type, a typed parse's or
+ * load's default a stop left open (#1767). The candidate route rejects its program, at `expression`, rather than check
+ * less than the core decided.
  */
 export class OutsideContract extends Error {
   public constructor(
@@ -1656,7 +1676,7 @@ class Contracts {
   /**
    * The type a typed load or `fromJson` reads its value as (F18, S3 §3): the core's own answer at the call, level by
    * level (`#answerTask`); `null` where the call's kinds hold an unknown or only `null` (F19), or a load's key is
-   * computed.
+   * computed; the program leaves the slice where a stop left a level of the answer open (#1767).
    */
   public expected(call: CallExpression | LoadExpression): TypePlan | null {
     if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
@@ -1911,6 +1931,10 @@ class Contracts {
     // field its elements may lack is the plan's as it is; JSON's requires every listed field: #1458)
     if (lacking && path.includes("element") && at.call.kind !== "loadExpression")
       throw new OutsideContract(at.call, "a value whose structure the slice does not follow");
+    // (a level a stop left open is no open level: the plan would read every value there, the natural one its type, so
+    // the program leaves the slice rather than publish a check less, #1526 condition 1, #1767)
+    if (answer.items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0))
+      throw new OutsideContract(at.call, "a typed parse's or load's default that a stop left open");
     if (held.has("number")) held.delete("integer");
     // an unknown, or an empty collection's elements, is open; a known `null` is the `null` type
     if (held.has("unknown") || held.size === 0) {

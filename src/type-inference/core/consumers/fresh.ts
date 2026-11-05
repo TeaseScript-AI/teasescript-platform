@@ -23,7 +23,8 @@ import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
  * (`literalElements`), a literal whose element needs a decision marked through its holders or itself (`markHolder`);
  * F18's typed calls no store takes in (`ingressStores`); the ingress stores' boundaries against written types
  * (`publish`); the walk, which finishes every unit, the read boundaries. Every store and transfer into an inferred
- * place is marked at its site, its type undecided (r4.100); a mark stands for its records within its value (r4.111).
+ * place is marked at its site, its type undecided (r4.100); a mark stands for its records within its value (r4.111);
+ * but a typed call's own store keeps its boundary where its reader type is the natural run's (`typedStoreBoundary`).
  * A list join's mixed operands (`joinElements`, #1272) where its operands' own kinds decide them, a join with an
  * operand read through a decision marked as a literal is (`markValue`). No syntax decision is made here (TABLE
  * r4.135): admission decides an inferred place from its contract, which a fresh pass has not solved, so only a settled
@@ -31,6 +32,7 @@ import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
  */
 export function freshStores(walk: Consumers): void {
   const { program, definitions } = walk.pass;
+  const typedSites = new Set<string>();
   // (every store and transfer, an argument to a parameter several calls reach and one beside a default among them,
   // which `Admission.stores` leaves out of its decisions but whose obligations it owes: r4.138)
   for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
@@ -39,6 +41,12 @@ export function freshStores(walk: Consumers): void {
     const written = writtenOf(program.place(d.place).kind);
     const path = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
     if (written !== null && termAt(written, path) !== null) continue;
+    // (a typed call's own store keeps its boundary against the reader type its default gives, #1767)
+    const typed = walk.admission.typedStoreBoundary(d);
+    if (typed !== null) {
+      typedSites.add(siteKey(typed));
+      continue;
+    }
     storeMark(walk, d, path);
   }
   // (ranked as admission's own stages, C1 before the mixed elements; run after them, so C1 reads the elements they
@@ -59,7 +67,9 @@ export function freshStores(walk: Consumers): void {
   // (the publication first: its landing index, of the stores into written places alone, is the one F18's asks)
   walk.admission.publish(true);
   walk.rule = 2;
-  const open = walk.admission.ingressStores((site) => inMarkedValue(walk, site));
+  const open = walk.admission.ingressStores(
+    (site) => typedSites.has(siteKey(site)) || inMarkedValue(walk, site),
+  );
   for (const { site, label } of open) ingressMark(walk, site, label);
   walk.rule = 1;
   walk.published = true;
