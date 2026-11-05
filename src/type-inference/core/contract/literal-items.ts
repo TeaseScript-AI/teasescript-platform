@@ -3,21 +3,13 @@ import { joinParts } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { SELECTED_TEXT, SELECTED_VALUE } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
-import {
-  EMPTY,
-  firstContext,
-  makeItem,
-  mergeItems,
-  REASON,
-  type Item,
-  type Writer,
-} from "../items.js";
+import { EMPTY, firstContext, makeItem, mergeItems, REASON, type Item } from "../items.js";
 import type { Work } from "../solver.js";
 import type { FlowSink } from "./contributions.js";
 import { WIDE } from "./choices.js";
 import { gatherAt, gatherCount, selectionPiece } from "./gather.js";
 import { OPAQUE_MEMBER, unknownItem } from "./kinds.js";
-import { nodeAt, pathAt } from "./literal-index.js";
+import { lackingAt, nodeAt, pathAt } from "./literal-index.js";
 import type { GatherSite, IndexNode, IndexSite, LiteralIndex } from "./model.js";
 import {
   restPart,
@@ -31,31 +23,6 @@ import {
 import { selectionOf, selectionPieces } from "./selections.js";
 
 // A literal's items at a path from its index, and its type or its cell's stores at a path.
-
-/** F11: the first object at the path without the property, once per (path, property): its token, or `null`. */
-export function lackingAt(
-  contract: Contract,
-  index: LiteralIndex,
-  path: number,
-  step: string,
-): Writer | null {
-  const key = joinParts(path, step);
-  const known = index.lacking.get(key);
-  if (known !== undefined) return known;
-  contract.keepText(key.length);
-  const objects = nodeAt(contract, index, path)?.objects ?? null;
-  let token: Writer | null = null;
-  if (objects !== null && (objects.count.get(step) ?? 0) < objects.list.length)
-    for (const object of objects.list) {
-      contract.pass.program.work.charge("invSteps");
-      if (!object.names.has(step)) {
-        token = object.token;
-        break;
-      }
-    }
-  index.lacking.set(key, token);
-  return token;
-}
 
 /**
  * A literal's items at a path from its index: the value side (`exact`: F12 r4.7, a read below an element step is not

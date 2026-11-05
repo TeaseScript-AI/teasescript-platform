@@ -10,8 +10,7 @@ import type { FlowSink } from "./contributions.js";
 import { entered, ingressLeafOf } from "./ingress.js";
 import { canonicalKey, isKeyId, stepsArray, type PathRef } from "./key-ids.js";
 import { hostAt, propertyOnly, unknownItem } from "./kinds.js";
-import { pathAt } from "./literal-index.js";
-import { lackingAt } from "./literal-items.js";
+import { lackingAt, pathAt } from "./literal-index.js";
 import { marksNothing } from "./marks.js";
 import type { IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
 
