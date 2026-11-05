@@ -62,7 +62,7 @@ import {
   REFERENCE,
   unknownItem,
 } from "./kinds.js";
-import { entryGroups, groupsAt, prefixLevels, propertyItems } from "./levels.js";
+import { entryGroups, groupsAt, membersMissing, prefixLevels, propertyItems } from "./levels.js";
 import { annotated, marksAt } from "./marks.js";
 import type { PrefixEntry } from "./model.js";
 import { positionable, positioned, positionOf } from "./positions.js";
@@ -591,10 +591,15 @@ function* contractAlong(
                 group,
                 rest,
                 withWriter(
-                  yield* contract.contractOfValueAt(
-                    group.literal,
-                    isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
-                    literal,
+                  membersMissing(
+                    contract,
+                    group,
+                    rest,
+                    yield* contract.contractOfValueAt(
+                      group.literal,
+                      isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
+                      literal,
+                    ),
                   ),
                   group.w,
                 ),

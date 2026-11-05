@@ -663,14 +663,13 @@ const loadsFlows = new WeakMap<readonly OtherGroup[], readonly Inclusion[]>();
  * #1456: a prefix's property index over its sources (`PropertyIndex`), each a closed object literal stored whole: its
  * entries (the sharing off) or its groups at the prefix (`shared.groups`, on). Each source keeps its literal's one
  * object's property names and writer (`IndexObject`), each name its path below the prefix (`pathAt`) and the source a
- * holder there, each charged as it is made; the sources F11's `missing` names (each, the sharing off; on, the groups of
- * `shared.writers`, the first of those its levels fold alike where they lack a property) in their writers' order,
- * charged as a sort.
+ * holder there, each charged as it is made; every source in its writers' order, which F11's `missing` names the
+ * earliest lacking of (F28, also with the sharing on: #1323), charged as a sort.
  */
 export function propertyIndex(
   contract: Contract,
   entries: readonly PrefixEntry[],
-  shared: { readonly groups: readonly LevelGroup[]; readonly writers: ReadonlySet<PlaceId> } | null,
+  shared: { readonly groups: readonly LevelGroup[] } | null,
 ): PropertyIndex {
   const { work } = contract.pass.program;
   const sources: PropertySource[] = [];
@@ -695,10 +694,7 @@ export function propertyIndex(
   };
   if (shared === null) for (const entry of entries) add(entry.value!, entry, null);
   else for (const group of shared.groups) add(group.literal, null, group);
-  const writing =
-    shared === null
-      ? sources
-      : sources.filter((source) => shared.writers.has(source.group!.literal));
+  const writing = sources;
   contract.keep(writing.length);
   work.charge("structureSteps", sortCost(writing.length));
   const byWriter = [...writing].sort((a, b) =>

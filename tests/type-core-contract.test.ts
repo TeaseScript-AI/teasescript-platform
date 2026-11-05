@@ -26,7 +26,12 @@ import {
   stepsRest,
   type Rest,
 } from "../src/type-inference/core/contract/key-ids.js";
-import { entryGroups, groupsAt, prefixLevels } from "../src/type-inference/core/contract/levels.js";
+import {
+  entryGroups,
+  groupsAt,
+  membersMissing,
+  prefixLevels,
+} from "../src/type-inference/core/contract/levels.js";
 import { annotated } from "../src/type-inference/core/contract/marks.js";
 import { keyOf, type Key } from "../src/type-inference/core/definitions.js";
 import { withWriter } from "../src/type-inference/core/exact-path.js";
@@ -1007,9 +1012,14 @@ function* levelsAt(contract: Contract, prefix: Key, rest: Rest): Work<readonly I
           group,
           rest,
           withWriter(
-            yield* contract.contractOfValueAt(
-              group.literal,
-              isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
+            membersMissing(
+              contract,
+              group,
+              rest,
+              yield* contract.contractOfValueAt(
+                group.literal,
+                isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
+              ),
             ),
             group.w,
           ),
@@ -1022,8 +1032,8 @@ function* levelsAt(contract: Contract, prefix: Key, rest: Rest): Work<readonly I
  * #1456: a property of a place replaced by objects answers as the place's levels do: in every mode, for each family's
  * property read and one no object holds, the place's contract there equals its levels' items at the property, merged,
  * so the property index reading the objects holding it and one `missing` for the others keeps every holder's answer
- * (each store by itself with the sharing off), the missing status, its writer (the earliest literal, or with the
- * sharing on the first stored of objects alike there) and its place among the holders' answers. The objects are
+ * (each store by itself with the sharing off), the missing status, its writer (the earliest literal, its group's
+ * earliest member with the sharing on: #1323) and its place among the holders' answers. The objects are
  * indexed where every store is a closed object literal and, with the sharing on, a level's member, once the levels'
  * reads of the place's properties reach the index's size, from the second (here the second or third); a host value
  * among them or a test marking the reads leaves the place to its levels, and so does, with the sharing on, a tested

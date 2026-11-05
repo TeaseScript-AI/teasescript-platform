@@ -4,7 +4,7 @@ import { keyBelowRef, restPart, restRef, restTo, stepsRest, type Rest } from "./
 import type { Contract } from "../contract.js";
 import { type Key } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
-import { EMPTY, firstWriter, REASON, type Item } from "../items.js";
+import { EMPTY, firstWriter, REASON, type Item, type Writer } from "../items.js";
 import { stepName } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
@@ -19,6 +19,7 @@ import {
   propertyIndex,
   propertyLack,
 } from "./literal-index.js";
+import { lackingAt } from "./literal-items.js";
 import { annotated, collectMarks, depthOf, marksAt, marksNothing } from "./marks.js";
 import type {
   EntryGroup,
@@ -125,9 +126,6 @@ export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStore
   return levels;
 }
 
-/** #1456: a path no object holds, one step below a prefix (an author's property named `element` is quoted). */
-const LACKED: Rest = ["element"];
-
 /**
  * #1456: whether a prefix entry is a closed object literal stored whole, whose properties are its object's alone: one
  * object term, no projection, copied key, element or cell, unguarded, without ingress; its holder marking no path
@@ -198,17 +196,8 @@ export function* propertyItems(
       index.asked += 1;
       return null;
     }
-    let shared: { groups: readonly LevelGroup[]; writers: Set<PlaceId> } | null = null;
-    if (groups !== null) {
-      // (where groups lack a property the levels fold those alike there into the first, whose literal F11 names:
-      // alike by their root and marks, whatever the property, so as at a step no object holds)
-      const writers = new Set<PlaceId>();
-      for (const group of foldGroups(contract, LACKED, groups)) {
-        contract.keep(1);
-        writers.add(group.literal);
-      }
-      shared = { groups, writers };
-    }
+    // (#1323: with the sharing on every group, F11's earliest lacking named among them as among entries off)
+    const shared = groups === null ? null : { groups };
     index = propertyIndex(contract, stores.list, shared);
     contract.propertyIndexes.set(stores, index);
   }
@@ -248,7 +237,15 @@ export function* propertyItems(
         contract,
         group,
         rest,
-        withWriter(yield* contract.contractOfValueAt(group.literal, rest, literal), group.w),
+        withWriter(
+          membersMissing(
+            contract,
+            group,
+            rest,
+            yield* contract.contractOfValueAt(group.literal, rest, literal),
+          ),
+          group.w,
+        ),
       ))
         out.push(item);
       if (literal !== null) flow!.attach(literal, "groupFirst", "annotated", "writer");
@@ -391,6 +388,8 @@ function foldGroups(
   // each group's key, to its position in the list
   const merged = new Map<string, number>();
   const groups: LevelGroup[] = [];
+  // (#1323: each group's members, kept where a fold merges more than one)
+  const members: LevelGroup[][] = [];
   for (const group of parents) {
     program.work.charge("structureSteps");
     const levels = levelsOf(contract, group.literal);
@@ -419,9 +418,12 @@ function foldGroups(
     if (position === undefined) {
       merged.set(key, groups.length);
       groups.push(group);
+      members.push([...(group.members ?? [group])]);
       continue;
     }
     const into = groups[position]!;
+    contract.keep(group.members?.length ?? 1);
+    members[position]!.push(...(group.members ?? [group]));
     groups[position] = {
       literal: into.literal,
       at: into.at,
@@ -431,7 +433,74 @@ function foldGroups(
       ingress: program.scope.ingress.union(into.ingress, group.ingress),
     };
   }
+  for (const [position, list] of members.entries())
+    if (list.length > 1) groups[position] = { ...groups[position]!, members: list };
   return groups;
+}
+
+/**
+ * #1323: a group's items at `rest` (below its steps), F11's `missing` among them each member's own, the earliest of
+ * them (F28), as each entry's answer with the sharing off: a member's literal is alike the group's below the path its
+ * fold merged them at, so it lacks a step where the group's does, its own object there the one its entry names. The
+ * group's first member's objects map to the earliest members' at each step of the path, one `lackingAt` per member
+ * and step, each once per literal; only where the items hold a `missing` and the group more than one member.
+ */
+export function membersMissing(
+  contract: Contract,
+  group: LevelGroup,
+  rest: Rest,
+  items: readonly Item[],
+): readonly Item[] {
+  const list = group.members;
+  if (
+    list === undefined ||
+    !items.some((item) => item.tag === "unknown" && item.reasons === REASON.missing)
+  )
+    return items;
+  // (once per group and path: a read asked again maps by what its first ask found)
+  const byPath = MEMBERS_MISSING.get(group) ?? new Map<string, Map<Writer, Writer>>();
+  MEMBERS_MISSING.set(group, byPath);
+  const memoKey = joinParts("missing", restPart(rest));
+  let earliest = byPath.get(memoKey);
+  if (earliest === undefined) {
+    earliest = new Map<Writer, Writer>();
+    contract.keepText(memoKey.length);
+    const own = walkLacking(contract, list[0]!, rest);
+    for (const member of list.slice(1)) {
+      const theirs = walkLacking(contract, member, rest);
+      for (const [step, token] of own.entries()) {
+        const other = theirs[step] ?? null;
+        if (token === null || other === null) continue;
+        contract.keep(1);
+        earliest.set(token, firstWriter(earliest.get(token) ?? token, other)!);
+      }
+    }
+    byPath.set(memoKey, earliest);
+  }
+  const found = earliest;
+  return items.map((item) =>
+    item.tag === "unknown" && item.reasons === REASON.missing && item.writer !== null
+      ? { ...item, writer: found.get(item.writer) ?? item.writer }
+      : item,
+  );
+}
+
+/** `membersMissing`'s maps, per group (a pass's own groups) and path. */
+const MEMBERS_MISSING = new WeakMap<LevelGroup, Map<string, Map<Writer, Writer>>>();
+
+/** Each step's lacking object of a member's literal along its path (its steps, then `rest`), or `null`. */
+function walkLacking(contract: Contract, member: LevelGroup, rest: Rest): (Writer | null)[] {
+  const index = contract.literalIndex(member.literal);
+  const out: (Writer | null)[] = [];
+  let id = 0;
+  const length = member.at.length + rest.length;
+  contract.keep(length);
+  for (let step = 0; step < length; step += 1) {
+    const name = step < member.at.length ? member.at[step]! : rest.at(step - member.at.length)!;
+    if (step >= member.at.length) out.push(lackingAt(contract, index, id, name));
+    id = pathBelow(contract, id, name);
+  }
+  return out;
 }
 
 /**

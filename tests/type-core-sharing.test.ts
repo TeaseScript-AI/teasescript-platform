@@ -1530,3 +1530,67 @@ test("the eligibility index makes each prefix key once, its shared build quadrat
     assert.deepEqual(charged, expected === 0 ? [] : [expected], `${length}`);
   }
 });
+
+/**
+ * #1323: where the levels fold literals alike at a path, with the sharing on, F11's `missing` below the group is each
+ * member's own, the earliest standing, so it names the object the unshared join names (F28) whichever member stands
+ * for the group and whatever order the stores put them in: a prefix's first read and its property index (#1456), a
+ * wide object the index never takes (the levels' own read), a pair alike written before the first store, a property
+ * some members hold, a projection of an inline literal, literals in other files (Codex r1), a literal inside another's
+ * call argument at one and two steps, three calls deep and with the outer's object first (Astra r1), and below a list
+ * the fold merged them at, the earliest lacking object not each member's first (Codex r3).
+ */
+test("a property store missing from literals the levels fold names the object written first, in the four modes (#1323)", () => {
+  const reads =
+    "let alias0=container\nalias0.extra0=typed\nlet alias1=container\nalias1.extra1=typed\n";
+  const wide = (value: string): string =>
+    `{f0:${value}${Array.from({ length: 9 }, (_, i) => `,g${i + 1}:1`).join("")}}`;
+  const sources = [
+    "let exact={f0:typed}\nlet fraction={f0:1.5}\nlet container=fraction\ncontainer=exact\nlet alias0=container\nalias0.extra0=typed\n",
+    `let b=${wide("typed")}\nlet a=${wide("1.5")}\nlet container=a\ncontainer=b\n${reads}`,
+    `let c={f0:1.5}\nlet b={f0:typed}\nlet a={f0:1.5}\nlet container=a\ncontainer=b\ncontainer=c\n${reads}`,
+    `let c={f0:2.5,p:2}\nlet d={f0:typed,p:typed}\nlet b={f0:typed}\nlet a={f0:1.5,p:1}\nlet container=a\ncontainer=d\ncontainer=b\ncontainer=c\n${reads}let alias2=container\nlet got:integer=alias2.p\n`,
+    // (two members alike at a held property, the one written first stored last: its group stands at its first holder)
+    `let c={f0:typed,p:1.5}\nlet b={f0:1.5,p:typed}\nlet a={f0:"x",p:2.5}\nlet container=a\ncontainer=b\ncontainer=c\n${reads}let alias2=container\nlet got:integer=alias2.p\n`,
+  ];
+  const read = (path: string): string =>
+    `function read(x:object) { let alias=x.${path}\nalias.extra=1\nreturn 0 }\n`;
+  const nested = [
+    `${read("p")}let result=read({noise:read({noise:0,p:{f0:1.5}}),p:{f0:1.5}})\nexit\n`,
+    `${read("p.q")}let result=read({noise:read({noise:0,p:{q:{f0:1.5}}}),p:{q:{f0:1.5}}})\nexit\n`,
+    `${read("p")}let result=read({noise:read({noise:read({noise:0,p:{f0:1.5}}),p:{f0:1.5}}),p:{f0:1.5}})\nexit\n`,
+    `${read("p")}let result=read({p:{f0:1.5},noise:read({noise:0,p:{f0:1.5}})})\nexit\n`,
+    `${read("p[0]")}let result=read({noise:read({noise:0,p:[{}]}),p:[{}]})\nexit\n`,
+    `${read("p[0]")}let result=read({p:[{extra:1,noise:read({p:[{extra:1,noise:0},{f0:1.5}]})},{f0:1.5}]})\nexit\n`,
+    `${read("p[0].q")}let result=read({p:[{f0:1.5,noise:read({p:[{f0:1.5,noise:0},{q:{f0:1.5}}]})},{q:{f0:1.5}}]})\nexit\n`,
+  ];
+  const projects: SourceFile[][] = [
+    ...nested.map((source) => [{ path: "main.tease", source }]),
+    ...sources.map((source) => [
+      { path: "main.tease", source: `let typed:integer=17\n${source}exit\n` },
+    ]),
+    [
+      {
+        path: "main.tease",
+        source:
+          "let typed:integer=17\nlet early=({p:{f0:typed}}).p\nlet late=({p:{f0:1.5}}).p\nlet container=late\ncontainer=early\nlet alias=container\nalias.extra=typed\nexit\n",
+      },
+    ],
+    [
+      { path: "z.tease", source: "global late={f0:1.5}\n" },
+      {
+        path: "main.tease",
+        source:
+          "global typed:integer=17\nlet container=late\ncontainer=early\nlet alias=container\nalias.extra=typed\nexit\n",
+      },
+      { path: "a.tease", source: "global early={f0:typed}\n" },
+    ],
+  ];
+  for (const files of projects) {
+    const [first, ...others] = MODES.map((mode) => publication(files, mode, GLOBALS));
+    assert.ok(
+      first !== null && others.every((other) => other === first),
+      files.map((file) => file.source).join("\n---\n"),
+    );
+  }
+});
