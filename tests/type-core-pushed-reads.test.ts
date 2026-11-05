@@ -156,10 +156,18 @@ test("where the native reader ends, a pushed read answers what it does, raw and 
 });
 
 test("where the native reader does not end, its approximations from below reach the pushed read's answers", () => {
-  // (each slot both settle: the native one with every read past eight steps bottom)
+  // (each slot both settle, and the publication, the native one with every read past eight steps bottom: the plain
+  // ring's publication reads each binding at its element too)
   for (const source of [ring({}), plainRing(3), ring({ q: spine(2, "{q:p0,g:hostValue}") })])
-    for (const mode of [MODES[0]!, MODES[3]!])
+    for (const mode of [MODES[0]!, MODES[3]!]) {
       sameSettled(analysed(source, mode), analysed(source, mode, 8), source);
+      const files = [{ path: "main.tease", source }];
+      assert.equal(
+        publication(files, mode, GLOBALS),
+        withoutPushedReads(() => publication(files, mode, GLOBALS), 8),
+        source,
+      );
+    }
 });
 
 test("a pushed read's graph is built as shared work: counted to the total, never to the demand that asked (r4.349)", () => {

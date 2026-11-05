@@ -105,6 +105,8 @@ class Frontier {
   readonly leaves = new Map<number, readonly number[]>();
   /** Per pushed slot, its reach, or `null` where its closure declined. */
   readonly reads = new Map<string, Reach | null>();
+  /** The host reads' leaves (`hostLeaf`). */
+  readonly hosts = new Set<number>();
   /** Per binding, its root's node (`rootNode`). */
   readonly roots = new Map<PlaceId, number>();
   /** The bindings the graph holds a position of, which a stop at any of them makes decline (`stoppedAt`). */
@@ -324,15 +326,29 @@ function eachValue(frontier: Frontier, value: PlaceId, then: (node: number) => v
   below(frontier, root, steps, 0, then);
 }
 
-/** Declines a path with a step no property read takes (an element, a selection, a member a built-in answers). */
+/** Declines a path with a step no property read takes (a selection, a member a built-in answers, an index). */
 function properties(steps: readonly string[]): void {
   for (const each of steps) if (!propertyOnly(each)) throw new Decline(`step ${each}`);
+}
+
+/**
+ * Declines a rest with a step neither a property nor an element is: an element step reads an object as F11 reads a
+ * property it lacks, and a collection below it declines (`rules`).
+ */
+function propertiesOrElements(steps: readonly string[]): void {
+  for (const each of steps)
+    if (each !== "element" && !propertyOnly(each)) throw new Decline(`step ${each}`);
 }
 
 /** Whether a property read's chain passes a wrapper at its first step (G3's position, `positionOf`). */
 function passesWrapper(contract: Contract, value: PlaceId): boolean {
   const chain = contract.chainOf(value);
   return chain !== null && contract.wrapperHop(chain.root, chain.first) !== null;
+}
+
+/** Whether a set holds a host read's leaf. */
+function hosted(frontier: Frontier, set: number): boolean {
+  return frontier.members[set]!.some((node) => frontier.hosts.has(node));
 }
 
 /** A host read's leaf: the runtime's unknown at every path, its ingress entered (`hostAt`, `entered`). */
@@ -431,6 +447,8 @@ function rules(frontier: Frontier, goal: Goal): void {
   const { literal, index, at, id } = node;
   if (at.reference) throw new Decline("reference");
   if (at.others.length > 0) throw new Decline("native");
+  // (an element of a collection, or of an empty one, is a collection's: declined; an object's is F11's `missing`)
+  if (s === "element" && (at.children.has(s) || at.empty)) throw new Decline("collection");
   const child = at.children.get(s);
   if (child !== undefined) into(litNode(frontier, literal, pathAt(contract, id, s), child));
   const lacking = lackingAt(contract, index, id, s);
@@ -831,10 +849,17 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
   const steps = stepsArray(ref.steps());
   return reachSlot(contract, keptParts(contract.work, "pr", key, steps), keyPlace(key), () => {
     properties(path);
-    properties(steps);
+    propertiesOrElements(steps);
     const frontier = frontierOf(contract);
     let set = intern(frontier, [rootNode(frontier, keyPlace(key))]);
-    for (const each of [...path, ...steps]) set = star(frontier, set, each);
+    const word = [...path, ...steps];
+    word.forEach((each, at) => {
+      // (a host's data at a path ending in an element may hold none, `emptyAt`, where its read's frame holds a
+      // structure there and not where it does not: a frame's own, which the graph does not keep, so declined)
+      if (at === word.length - 1 && each === "element" && hosted(frontier, set))
+        throw new Decline("host element");
+      set = star(frontier, set, each);
+    });
     return setMembers(frontier, set);
   });
 }
