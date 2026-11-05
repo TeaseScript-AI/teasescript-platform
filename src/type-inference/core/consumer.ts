@@ -7,7 +7,6 @@ import type {
   LetStatement,
   ListLiteral,
   LoadExpression,
-  ObjectProperty,
   Program,
   PropertyAccessExpression,
   Statement,
@@ -1287,9 +1286,9 @@ function lostCheck(
  * Whether the plan keeps an obligation's check at its store (`lostCheck`): a shape the analysis proved, or one a complete
  * store check carries; a contract proved open; a complete store check (settled or received, its whole type); or a
  * contract the completion completed that a published check carries at the obligation's path, with the contract's own
- * type there: the store's check, a typed parse's or load's reader of the value stored (F18), or, where the natural plan
- * does not check the store whole, its part checks there (#1682); or one the stored literal's own kind meets. A check
- * against bare `unknown` where the contract owes a domain carries nothing.
+ * type there: a typed parse's or load's reader of the value stored (F18), or, where the natural plan does not check the
+ * store whole, its part checks there (#1682), or with none a stored literal (#1437). A check against bare `unknown`
+ * where the contract owes a domain carries nothing.
  */
 function keeps(
   answers: Answers,
@@ -1308,9 +1307,9 @@ function keeps(
   if (obligation.extent === "shape" || "shape" in result) return result.state !== "lost" || whole;
   if (result.state === "open" || whole) return true;
   const value = unwrap(store.kind === "letStatement" ? store.initializer : store.value);
-  // (a contract the completion completed is kept only by a published check that carries it at the obligation's path:
-  // the store's own check, a typed parse's or load's reader of the value stored, or the store's part checks there;
-  // where the natural plan checks the store whole, `completedCheck`, its parts stand for nothing, #1645's whole object)
+  // (a contract the completion completed is kept only by a published check that carries it at the obligation's path: a
+  // typed parse's or load's reader of the value stored, or the store's part checks there; where the natural plan checks
+  // the store whole, `completedCheck`, and publication did not, its parts stand for nothing, #1645's whole object)
   const contract = answers.received(obligation.place, obligation.path);
   const destination = answers.storedPlace(nodeOf(answers, index, store));
   if (
@@ -1336,26 +1335,8 @@ function keeps(
       : value.kind === "callExpression"
         ? core.expected.get(value)
         : undefined;
-  if (carries(checks.get(store)?.type) || carries(reader)) return true;
+  if (carries(reader)) return true;
   if (answers.completedCheck(index.site(value))) return false;
-  // (a contract the stored literal's own kind meets there, nothing below it constrained: `{}` for an object literal, a
-  // collection of any elements for one of its kind, which the natural plan does not check either)
-  let literal: Expression | undefined = value;
-  for (const step of below) {
-    const property: ObjectProperty | undefined =
-      literal?.kind === "objectLiteral"
-        ? literal.properties.find((each) => each.name.name === step)
-        : undefined;
-    literal = property === undefined ? undefined : unwrap(property.value);
-  }
-  const plan = contract.ref;
-  if (
-    literal !== undefined &&
-    ((plan.kind === "object" && plan.properties.length === 0 && literal.kind === "objectLiteral") ||
-      (plan.kind === "list" && plan.element === null && literal.kind === "listLiteral") ||
-      (plan.kind === "set" && plan.element === null && literal.kind === "setLiteral"))
-  )
-    return true;
   // (the part checks at or below the obligation's path, each the contract's type there where it has one: a weaker one
   // stands for nothing, #1645's whole object; with none, only a stored literal is kept, whose external data the natural
   // plan checks by the literal's own kind at its boundary and by the completion's warnings, none here, #1437: a value

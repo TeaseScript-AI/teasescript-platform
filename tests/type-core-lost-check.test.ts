@@ -175,6 +175,22 @@ test("a stopped program whose required checks are all published with their contr
     }
 });
 
+test("a stopped program whose checks its complete store check or a typed reader keeps compiles (#1526 decision 2, condition 1)", () => {
+  // (from the set: a cycle of stores whose settled contract the store check carries whole, at demand 64 in source order
+  // without sharing; a typed parse whose reader carries its default's contract, at demand 16)
+  const kept: readonly (readonly [string, number, readonly (typeof MODES)[number][]])[] = [
+    [
+      'let vi:integer=23\nlet vs:string="s"\nlet m0={f:vs,g:0}\nlet m1={f:vi,g:0}\nlet m2={f:vi,g:0}\nm1=m0\nm2=m1\nm0=m2\nlet final=[m0,m1]\nexit\n',
+      64,
+      [MODES[1]!],
+    ],
+    ['let x = fromJson("{}", default: {n: 1})\nsay x\nexit\n', 16, MODES],
+  ];
+  for (const [source, demand, modes] of kept)
+    for (const mode of modes)
+      assert.ok(inMode(mode, () => compiled(source, demand)).plan !== null, JSON.stringify(mode));
+});
+
 test("a check published against nothing where the natural plan checks a domain is lost: the open control at demand 32 (#1526)", () => {
   // (the natural plan checks `b.f` against `list`, so `5` fails there; at demand 32 in source order the stopped plan
   // would carry no check at the store, and the program is declined)
