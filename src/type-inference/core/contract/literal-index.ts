@@ -8,6 +8,7 @@ import { memberStep } from "../method-categories.js";
 import { propertyStep } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
+import type { FlowSink, Inclusion } from "./contributions.js";
 import { ingressLeafOf } from "./ingress.js";
 import type { Rest } from "./key-ids.js";
 import { emptyAt, positionStep, propertyOnly, REFERENCE } from "./kinds.js";
@@ -616,29 +617,47 @@ export function* loadsBelow(
   after: Rest,
   exact: boolean,
   node: FlowNode | null = null,
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const { program, values } = contract.pass;
   program.work.charge("invSteps");
   let merged = contract.loadsBelowOf.get(groups);
   if (merged === undefined) {
+    // (#1668: the members' reads staged and kept beside the merged answer, so each later reader of the kept answer
+    // includes what the first did)
+    const staged = flow?.child() ?? null;
     const items: Item[] = [];
     for (const group of groups) {
       if (!group.loads) continue;
       for (const members of [group.read, group.rest])
         for (const entry of members) {
+          const read = staged?.child() ?? null;
           const answer = exact
-            ? yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
-            : withWriter(yield* contract.contractOfValueAt(entry.value, after), group.writer);
+            ? // #1668: the value side's: its includer records `opaque`
+              yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
+            : withWriter(yield* contract.contractOfValueAt(entry.value, after, read), group.writer);
+          if (read !== null) staged!.attach(read, "writer", "withoutEmpty");
           for (const item of answer) items.push(item);
         }
     }
     merged = withoutEmpty(mergeItems(items, program.scope));
     contract.keep(1 + merged.length);
     contract.loadsBelowOf.set(groups, merged);
+    if (staged !== null) loadsFlows.set(groups, staged.inclusions);
+  }
+  if (flow !== null) {
+    const kept = loadsFlows.get(groups);
+    // (an answer kept by a reader that passed no flow: no flow of it)
+    if (kept === undefined) flow.opaque("loads");
+    // (read by the reader that made the kept answer, in its run: `kept`, which a run's own reads need not hold)
+    else flow.attachAll(kept.map((inclusion) => ({ ...inclusion, route: "kept" })));
   }
   // (the one answer is every step's but for the mark of an element step there, `hostAt`)
   return [...merged, ...emptyAt(after)];
 }
+
+/** #1668: per loads' groups, the inclusions their kept merged answer was made of (`loadsBelow`). */
+const loadsFlows = new WeakMap<readonly OtherGroup[], readonly Inclusion[]>();
 
 /**
  * #1456: a prefix's property index over its sources (`PropertyIndex`), each a closed object literal stored whole: its

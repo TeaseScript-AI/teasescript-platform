@@ -9,6 +9,12 @@ import {
   READ_DEPTH_LIMIT,
   type WorkLedger,
 } from "./budget.js";
+import {
+  activeFlowCheck,
+  contributionsAsked,
+  FlowSink,
+  type Inclusion,
+} from "./contract/contributions.js";
 import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } from "./items.js";
 
 /*
@@ -55,6 +61,11 @@ export interface Decision {
   readonly choose: (input: readonly Item[]) => string;
   /** The answer under a choice, or an open one (`null`): monotone in the input either way. */
   readonly answer: (choice: string | null, input: readonly Item[]) => readonly Item[];
+  /**
+   * #1668: the inclusions of the answer under a choice, from its input run's (`flow`): those it keeps of the input's,
+   * none where it makes its answer anew; the input run's where absent (the answer holds the input's items).
+   */
+  readonly flow?: (choice: string | null, inclusions: readonly Inclusion[]) => readonly Inclusion[];
 }
 
 export interface Demand {
@@ -100,6 +111,8 @@ export interface ProofDecision<P extends Proof> {
   choose(input: Proven<P>): string;
   /** The answer under a choice, or an open one (`null`): monotone in the input either way. */
   answer(choice: string | null, input: ProvenAnswer<P>): ProvenAnswer<P>;
+  /** #1668: as `Decision.flow`. */
+  flow?(choice: string | null, inclusions: readonly Inclusion[]): readonly Inclusion[];
 }
 
 /**
@@ -202,6 +215,8 @@ interface DemandNode {
   choice: string | null;
   /** The component being solved that it is a member of. */
   component: Component | null;
+  /** #1668: its last run's inclusions, provisional as its answer is; `null` where its run published none. */
+  trace: FlowSink | null;
 }
 
 interface Frame {
@@ -224,6 +239,8 @@ interface Frame {
   readDepth: number;
   /** The inline children on its run (`inline`), the innermost last. */
   readonly inline: Child[];
+  /** #1668: its run's inclusions where the pass records them (`Solver.sink`), else `null`. */
+  readonly trace: FlowSink | null;
 }
 
 interface Rerun {
@@ -428,6 +445,9 @@ export class Solver {
   #limit: number | null = null;
   /** The read chain the running frame's generators are inside: the levels of native calls a resumption runs through. */
   #readDepth = 0;
+  /** #1668: whether the pass records contribution provenance (`withContributions`), and each finished slot's flow. */
+  readonly #recording = contributionsAsked();
+  readonly #traces = new Map<string, readonly Inclusion[]>();
 
   public constructor(scope: ItemScope) {
     this.#scope = scope;
@@ -668,6 +688,7 @@ export class Solver {
       // (its key stays forgettable: what reached it before reaches it made again, `#forgettable`)
       this.#memo.delete(key);
       this.#proofs.delete(key);
+      this.#traces.delete(key);
       const readers = this.#readers.get(key);
       for (const reader of typeof readers === "string" ? [readers] : (readers ?? []))
         if (!seen.has(reader)) {
@@ -723,7 +744,51 @@ export class Solver {
       rerun,
       readDepth: 0,
       inline: [],
+      trace: this.#recording ? new FlowSink(this.#work) : null,
     };
+  }
+
+  /**
+   * #1668: the running demand's flow, where the pass records them: taken once, at the start of a run's code, which then
+   * passes it to the reads whose answers it includes; `null` in every pass that records none.
+   */
+  public sink(): FlowSink | null {
+    if (!this.#recording || !this.#running) return null;
+    const trace = this.#frames.at(-1)?.trace ?? null;
+    if (trace !== null) trace.rooted = true;
+    return trace;
+  }
+
+  /** #1668: whether the pass records contribution provenance (`withContributions`). */
+  public get recording(): boolean {
+    return this.#recording;
+  }
+
+  /** #1668: a finished slot's published flow (`edgesOf`), `undefined` where it has none. */
+  public flowOf(key: string): readonly Inclusion[] | undefined {
+    return this.#traces.get(key);
+  }
+
+  /** #1668: a finished node's flow published with its answer (and, under `withFlowCheck`, checked). */
+  #publish(node: DemandNode, flow: readonly Inclusion[]): void {
+    this.#traces.set(node.demand.key, flow);
+    const reads = node.trace?.reads;
+    if (reads !== null && reads !== undefined) activeFlowCheck()?.(node.demand.key, flow, reads);
+  }
+
+  /** #1668: the flow of a node's answer under `choice`: its decision's selection of its run's, if its run published one. */
+  #flow(node: DemandNode, choice: string | null): readonly Inclusion[] | null {
+    const trace = node.trace;
+    if (trace === null || !trace.rooted) return null;
+    const decision = node.demand.decision;
+    if (decision === undefined || decision.flow === undefined) return trace.inclusions;
+    // (a selection's copy charged as its sink charges what it keeps: shared, one unit per inclusion and qualifier)
+    const flow = decision.flow(choice, trace.inclusions);
+    const work = this.#work;
+    let units = 0;
+    for (const inclusion of flow) units += 1 + inclusion.qualifiers.length;
+    work.shared(() => keep(work, units));
+    return flow;
   }
 
   /** Runs frames, and solves the components they close, until `base` returns. */
@@ -765,6 +830,7 @@ export class Solver {
     // a new one's reader once it finishes, if a stop may forget it then: `#finish`, `#solved`, #1599)
     if (everyRecord || this.#forgettable.has(demand.key) || this.#active.has(demand.key))
       this.#keepReader(frame, demand.key);
+    frame.trace?.reads?.add(demand.key);
     const answer = this.#memo.get(demand.key);
     if (answer !== undefined) {
       frame.pending = answer;
@@ -783,6 +849,7 @@ export class Solver {
         inputProof: null,
         choice: null,
         component: null,
+        trace: null,
       };
       this.#active.set(demand.key, created);
       const pushed = this.#frame(created, demand.make(), created.index, null);
@@ -811,6 +878,7 @@ export class Solver {
     const { items, proof } = resultOf(result);
     node.input = items;
     node.inputProof = proof;
+    node.trace = frame.trace;
     const open = this.#answered(node, null);
     node.value = open.items;
     node.proof = open.proof;
@@ -823,13 +891,18 @@ export class Solver {
     }
     const members = this.#stack.splice(frame.base);
     if (members.length === 1 && !frame.selfRead) {
+      let choice: string | null = null;
       if (node.demand.decision !== undefined) {
-        const held = this.#answered(node, this.#choice(node));
+        choice = this.#choice(node);
+        const held = this.#answered(node, choice);
         node.value = held.items;
         node.proof = held.proof;
       }
-      // (its proof's slot charged before its answer and proof are kept: a stop here keeps neither)
+      // (#1668: its flow made, and its proof's slot charged, before its answer, proof and flow are kept: a stop here
+      // keeps none of them)
+      const flow = this.#flow(node, choice);
       if (node.proof !== null) keep(this.#work, 1);
+      if (flow !== null) this.#publish(node, flow);
       this.#memo.set(node.demand.key, node.value);
       if (node.proof !== null) this.#proofs.set(node.demand.key, node.proof);
       this.#active.delete(node.demand.key);
@@ -883,6 +956,7 @@ export class Solver {
     for (const member of solving.members) {
       member.value = [];
       member.proof = null;
+      member.trace = null;
     }
     solving.now = new PositionHeap();
     solving.done = new Set();
@@ -967,6 +1041,7 @@ export class Solver {
     component.reads.set(member, reads);
     member.input = input;
     member.inputProof = proof;
+    member.trace = frame.trace;
     const answered = this.#answered(member, member.choice);
     const items = this.#anchored(component, member, answered.items);
     const changed =
@@ -1010,11 +1085,16 @@ export class Solver {
     let proofs = 0;
     for (const member of solving.members) if (member.proof !== null) proofs += 1;
     keep(this.#work, proofs);
+    // (#1668: each member's flow under its held choice, all made before any is published, as its answer is)
+    const flows = solving.members.map((member) => this.#flow(member, member.choice));
     this.#solving.pop();
     const solved = solving.members.map((member) => ({
       key: member.demand.key,
       items: member.value,
     }));
+    solving.members.forEach((member, at) => {
+      if (flows[at] !== null) this.#publish(member, flows[at]!);
+    });
     for (const member of solving.members) {
       member.component = null;
       member.choice = null;

@@ -32,6 +32,7 @@ export const costlyTestSeconds = {
   "type-core-positions.test.js": 15,
   "type-core-key-ids.test.js": 12,
   "runtime-benchmark.test.js": 12,
+  "type-core-contributions.test.js": 11,
   "string-operations.test.js": 11,
   "downstream-expression-stack.test.js": 11,
   "async-timer-runtime.test.js": 10,

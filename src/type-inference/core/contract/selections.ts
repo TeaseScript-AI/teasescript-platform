@@ -449,6 +449,7 @@ export function* selectedObject(
     ];
   // (one by one: a selected property's items grow with its literal, past one call's arguments)
   if (selected.type.kind === "ref")
+    // #1668: a selection's pieces: its includer records `opaque`
     return yield* contract.indexItems(selected.type.place, after, node, exact, below);
   const at = termAt(selected.type, after);
   return at === null ? [] : typeKinds(at).map((tag) => makeItem(tag, object.token));

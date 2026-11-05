@@ -1,0 +1,283 @@
+import { keep, type WorkLedger } from "../budget.js";
+import { withoutEmpty } from "../exact-path.js";
+import type { Item } from "../items.js";
+
+/*
+ * #1668: which slots' answers each settled slot's answer includes (its contribution provenance), recorded where its
+ * final selected run includes them and published with its answer, only in a pass that asks for it (`withContributions`).
+ * A slot's flow is local: the slots it included, each by its demand key, never their own flows, so a key's edges to the
+ * keys it includes are found by following included slots that are not contract slots (`edges`). An included read whose
+ * route records no flow of its own (`opaque`) makes every edge set through it unavailable, never empty. Recording is
+ * passive: nothing running reads it, so answers, demands and stops are the pass's whether it records or not; its
+ * work is charged as shared work (`WorkLedger.shared`), to the analysis's total and to no demand's allowance.
+ */
+
+/** How an inclusion's answer was put into the including slot's: the existing transform applied before it was pushed. */
+export type Qualifier =
+  | "writer"
+  | "annotated"
+  | "marked"
+  | "called"
+  | "entered"
+  | "groupFirst"
+  | "withoutEmpty"
+  | "belowReceiver"
+  | "defaultChoice"
+  | "summary"
+  | "positioned"
+  | "selected"
+  | "operandFilter"
+  | "default"
+  | "unknown";
+
+/** `otherwise`'s filter on its left side's items at the value itself: what it keeps (`operandFilter`). */
+export function otherwiseKeeps(item: Item): boolean {
+  return item.tag !== "null";
+}
+
+/**
+ * The items of a receiver or owner its reader's answer holds as they are, where it makes every other kind's anew (a
+ * length, an iteration, a method's result, a member below it): its unknowns (`unknown`, `belowReceiver`).
+ */
+export function heldAsIs(item: Item): boolean {
+  return item.tag === "unknown";
+}
+
+/** The filters a qualifier stands for, as `edgesOf` applies them to a slot's answer: none, nulls, `empty`, all but unknowns. */
+const NULLS = 1;
+const EMPTY = 2;
+const UNKNOWNS = 4;
+function filtersOf(qualifier: Qualifier): number {
+  if (qualifier === "operandFilter") return NULLS;
+  if (qualifier === "withoutEmpty") return EMPTY;
+  if (qualifier === "unknown" || qualifier === "belowReceiver") return UNKNOWNS;
+  return 0;
+}
+
+/** What survives of `items` under `filters`, by the consumers' own (`otherwiseKeeps`, `withoutEmpty`, `heldAsIs`). */
+function surviving(items: readonly Item[], filters: number): readonly Item[] {
+  let kept = (filters & EMPTY) !== 0 ? withoutEmpty(items) : items;
+  if ((filters & NULLS) !== 0) kept = kept.filter(otherwiseKeeps);
+  return (filters & UNKNOWNS) !== 0 ? kept.filter(heldAsIs) : kept;
+}
+
+/** One slot's answer included in a run's: its demand key, `null` for a route that records no flow (`opaque`). */
+export interface Inclusion {
+  readonly slot: string | null;
+  /** The route it came through (`entry`, `sub`, `value`, `literal`, `position`, `summary`, `stopped`). */
+  readonly route: string;
+  readonly qualifiers: readonly Qualifier[];
+}
+
+let recording = false;
+
+/**
+ * Runs `callback` with every solver made inside it recording contribution provenance (test-only today; #1646's
+ * admitted builder will ask for it per pass). Every other pass records nothing and charges nothing for it.
+ */
+export function withContributions<T>(callback: () => T): T {
+  if (recording) throw new Error("Contributions are already recorded.");
+  recording = true;
+  try {
+    return callback();
+  } finally {
+    recording = false;
+  }
+}
+
+/** Whether a solver made now records contribution provenance (`withContributions`). */
+export function contributionsAsked(): boolean {
+  return recording;
+}
+
+/** Test-only: what `withFlowCheck` hears of each published flow: its slot, its inclusions and the slots its run read. */
+export type FlowCheck = (
+  slot: string,
+  inclusions: readonly Inclusion[],
+  reads: ReadonlySet<string>,
+) => void;
+
+let flowCheck: FlowCheck | null = null;
+
+/** Test-only: runs `callback` with every published flow given to `onPublish` beside the slots its run read. */
+export function withFlowCheck<T>(onPublish: FlowCheck, callback: () => T): T {
+  if (flowCheck !== null) throw new Error("Flows are already checked.");
+  flowCheck = onPublish;
+  try {
+    return callback();
+  } finally {
+    flowCheck = null;
+  }
+}
+
+/** The check `withFlowCheck` runs, or `null`. */
+export function activeFlowCheck(): FlowCheck | null {
+  return flowCheck;
+}
+
+/**
+ * A run's inclusions as its code makes them (a frame's, or a branch's staged in a child until its caller keeps or
+ * discards them, `child`, `attach`): each one retained slot, charged as shared work as it is made, kept or not.
+ */
+export class FlowSink {
+  readonly #work: WorkLedger;
+  readonly inclusions: Inclusion[] = [];
+  /** Whether its run's code took it (`Solver.sink`): only such a run's flow is published, any other is unavailable. */
+  rooted = false;
+  /** Test-only (`withFlowCheck`): the slots its run read, every yield of a demand. */
+  readonly reads: Set<string> | null = activeFlowCheck() === null ? null : new Set();
+
+  public constructor(work: WorkLedger) {
+    this.#work = work;
+  }
+
+  /** The answer of the slot `slot` (a demand key) included, through `route`. */
+  public include(slot: string, route: string): void {
+    this.#push({ slot, route, qualifiers: [] });
+  }
+
+  /** An answer included through a route that records no flow: every edge set through this run is unavailable. */
+  public opaque(route: string): void {
+    this.#push({ slot: null, route, qualifiers: [] });
+  }
+
+  /** A branch's staging: inclusions its caller keeps (`attach`) where it includes the branch's answer, else drops. */
+  public child(): FlowSink {
+    return new FlowSink(this.#work);
+  }
+
+  /** A child's inclusions kept, each under `qualifiers` (outermost first), each one charged as it is copied. */
+  public attach(child: FlowSink, ...qualifiers: Qualifier[]): void {
+    this.attachAll(child.inclusions, ...qualifiers);
+  }
+
+  /** Inclusions kept as `attach` keeps a child's: an answer kept elsewhere with the inclusions it was made of. */
+  public attachAll(inclusions: readonly Inclusion[], ...qualifiers: Qualifier[]): void {
+    for (const inclusion of inclusions)
+      this.#push(
+        qualifiers.length === 0
+          ? inclusion
+          : { ...inclusion, qualifiers: [...qualifiers, ...inclusion.qualifiers] },
+      );
+  }
+
+  #push(inclusion: Inclusion): void {
+    const work = this.#work;
+    work.shared(() => keep(work, 1 + inclusion.qualifiers.length));
+    this.inclusions.push(inclusion);
+  }
+}
+
+/**
+ * A path's qualifiers, outermost first, as a chain of links shared between the edges that reach through it: each link
+ * adds one qualifier to the path before it (`null`, none). A snapshot returns each edge's path as one link, never a
+ * copy, so its output is linear in its edges; `qualifiersOf` lists one where a reader needs it.
+ */
+export interface QualifierPath {
+  readonly qualifier: Qualifier;
+  readonly before: QualifierPath | null;
+}
+
+/** A path's qualifiers as a list, outermost first. */
+export function qualifiersOf(path: QualifierPath | null): Qualifier[] {
+  const list: Qualifier[] = [];
+  for (let link = path; link !== null; link = link.before) list.push(link.qualifier);
+  return list.reverse();
+}
+
+/** One contribution edge: the contract slot reached, the route it was included through, and its path's qualifiers. */
+export interface Edge {
+  readonly slot: string;
+  readonly route: string;
+  readonly qualifiers: QualifierPath | null;
+}
+
+/** A key's contribution edges in a settled pass, or why there are none to read. */
+export type Contributions =
+  | { readonly state: "complete"; readonly edges: readonly Edge[] }
+  | { readonly state: "unavailable"; readonly reason: string };
+
+/**
+ * The contract slots a slot's answer includes, through the non-contract slots it includes (each by its own published
+ * flow), from the published flows `flowOf` gives: `unavailable` where a slot on the way has none (unfinished, stopped,
+ * forgotten or not recorded) or an included route recorded none (`opaque`). A contract slot reached ends that branch:
+ * its own edges are its own (`edges` of it). Below a filter (`operandFilter`, `withoutEmpty`, `unknown`,
+ * `belowReceiver`), a slot whose settled answer (`answerOf`) the path's filters remove whole contributes none of its
+ * items: it is dropped with everything below it; one they remove in part stays, its surviving items its own. Each slot
+ * visited, each inclusion followed (with the links it adds) and each filter checked is charged to the analysis's total;
+ * an edge's path is its last link, shared.
+ *
+ * The result is a fresh walk of the pass's published flows: a caller that keeps it past a later settlement or forget
+ * of the pass keeps it at its own risk (the lease, `(pass, its forgets)`, is the caller's to hold).
+ */
+export function edgesOf(
+  start: string,
+  flowOf: (slot: string) => readonly Inclusion[] | undefined,
+  answerOf: (slot: string) => readonly Item[] | undefined,
+  work: WorkLedger,
+): Contributions {
+  const out: Edge[] = [];
+  // (a path's qualifiers as interned links, each to the path before it: a step adds only its inclusion's own, so a
+  // path is never copied, and equal paths are one link. A slot reached under other qualifiers is followed again under
+  // them: bounded by the qualifier paths the code makes. No text is made for either)
+  interface Link extends QualifierPath {
+    readonly next: Map<Qualifier, Link>;
+    /** The filters on the path to it (`filtersOf`). */
+    readonly filters: number;
+  }
+  const root = new Map<Qualifier, Link>();
+  const extended = (before: Link | null, qualifiers: readonly Qualifier[]): Link | null => {
+    let at = before;
+    for (const qualifier of qualifiers) {
+      const from = at === null ? root : at.next;
+      let next = from.get(qualifier);
+      if (next === undefined) {
+        next = {
+          qualifier,
+          before: at,
+          next: new Map(),
+          filters: (at?.filters ?? 0) | filtersOf(qualifier),
+        };
+        from.set(qualifier, next);
+      }
+      at = next;
+    }
+    return at;
+  };
+  // (each slot followed, with the links it was followed under)
+  const seen = new Map<string, Set<Link | null>>([[start, new Set([null])]]);
+  const todo: { readonly slot: string; readonly qualifiers: Link | null }[] = [
+    { slot: start, qualifiers: null },
+  ];
+  for (let next = todo.pop(); next !== undefined; next = todo.pop()) {
+    work.shared(() => work.charge("structureSteps"));
+    const flow = flowOf(next.slot);
+    if (flow === undefined) return { state: "unavailable", reason: `no flow for ${next.slot}` };
+    for (const inclusion of flow) {
+      if (inclusion.slot === null)
+        return { state: "unavailable", reason: `${inclusion.route} records no flow` };
+      // (each inclusion followed charged with the links it adds; an edge keeps its last link, shared)
+      work.shared(() => keep(work, 1 + inclusion.qualifiers.length));
+      const qualifiers = extended(next.qualifiers, inclusion.qualifiers);
+      const filters = qualifiers?.filters ?? 0;
+      if (filters !== 0) {
+        // (the slot's answer under the path's filters, charged as it is read)
+        const answer = answerOf(inclusion.slot);
+        if (answer === undefined)
+          return { state: "unavailable", reason: `no answer for ${inclusion.slot}` };
+        work.shared(() => work.charge("structureSteps", 1 + answer.length));
+        if (surviving(answer, filters).length === 0) continue;
+      }
+      if (inclusion.slot.startsWith("c|")) {
+        out.push({ slot: inclusion.slot, route: inclusion.route, qualifiers });
+        continue;
+      }
+      const under = seen.get(inclusion.slot) ?? new Set<Link | null>();
+      if (under.has(qualifiers)) continue;
+      under.add(qualifiers);
+      seen.set(inclusion.slot, under);
+      todo.push({ slot: inclusion.slot, qualifiers });
+    }
+  }
+  return { state: "complete", edges: out };
+}

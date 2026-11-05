@@ -14,6 +14,7 @@ import {
   type Item,
 } from "../items.js";
 import type { Work } from "../solver.js";
+import type { FlowSink } from "./contributions.js";
 import { WIDE } from "./choices.js";
 import { boundOf, classParts } from "./classes.js";
 import { ingressLeafOf } from "./ingress.js";
@@ -49,6 +50,7 @@ function* belowRead(contract: Contract, read: PlaceId, below: Steps): Work<reado
   }
   const copied = contract.copiedKey(read)!;
   const node = program.occNode.get(root);
+  // #1668: the value side's copies below an element step: its includer records `opaque`
   const items = contract.entered(
     root,
     node === undefined || node === null
@@ -79,6 +81,7 @@ export function* gathered(
   rest: Rest,
   lo: number,
   hi: number,
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const { program } = contract.pass;
   const at = program.places[site.literal]?.site ?? null;
@@ -88,24 +91,27 @@ export function* gathered(
       : site.deeper
         ? "d"
         : "";
+  const key = joinParts(
+    "lp",
+    site.kind,
+    site.literal,
+    lo,
+    hi,
+    node?.id ?? "-",
+    flags,
+    stepsOf(contract, site.path),
+    restPart(rest),
+  );
+  flow?.include(key, "gather");
   return yield {
-    key: joinParts(
-      "lp",
-      site.kind,
-      site.literal,
-      lo,
-      hi,
-      node?.id ?? "-",
-      flags,
-      stepsOf(contract, site.path),
-      restPart(rest),
-    ),
+    key,
     kind:
       site.kind === "reads" || site.kind === "groups" || (site.kind === "absent" && !site.exact)
         ? "contract"
         : "value",
     file: at?.file ?? -1,
     offset: at?.start ?? -1,
+    // #1668: the demand's own run: its frame's flow, taken as it starts
     make: () => gatheredMade(contract, site, node, rest, lo, hi),
   };
 }
@@ -120,14 +126,15 @@ function* gatheredMade(
   hi: number,
 ): Work<readonly Item[]> {
   contract.pass.program.work.charge("invSteps");
+  const flow = contract.pass.solver.sink();
   const out: Item[] = [];
   if (hi - lo <= WIDE)
     for (let at = lo; at < hi; at += 1)
-      out.push(...(yield* gatherAt(contract, site, node, rest, at)));
+      out.push(...(yield* gatherAt(contract, site, node, rest, at, flow)));
   else {
     const middle = (lo + hi) >> 1;
-    out.push(...(yield* contract.gathered(site, node, rest, lo, middle)));
-    out.push(...(yield* contract.gathered(site, node, rest, middle, hi)));
+    out.push(...(yield* contract.gathered(site, node, rest, lo, middle, flow)));
+    out.push(...(yield* contract.gathered(site, node, rest, middle, hi, flow)));
   }
   return mergeItems(out, contract.pass.program.scope);
 }
@@ -161,31 +168,56 @@ export function* gatherAt(
   node: FlowNode | null,
   rest: Rest,
   at: number,
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const { values } = contract.pass;
   const index = contract.literalIndex(site.literal);
   const here = siteNode(contract, site);
+  // (#1668: the contract side's gathers record their reads; the value side's (`exact`, `copies`, `others`, the
+  // selections) record none of their own)
+  if (site.kind !== "reads" && site.kind !== "groups") flow?.opaque("exact");
   if (site.kind === "exact") {
     const entry = here!.exact[at]!;
+    // #1668: the value side's exact gather: its includer records `opaque`
     return yield* values.valueItems(entry.value, entry.g?.node ?? node, rest);
   }
   if (site.kind === "copies" || site.kind === "reads") {
     const copies = site.kind === "copies";
     const group = readGroupsAt(contract, here!.reads, copies)[at]!;
     const self = contract;
-    return yield* groupItems(contract, group, copies, function* (entry) {
-      const items = copies
-        ? yield* belowRead(self, entry.value, restSteps(rest))
-        : yield* self.contractOfValueAt(entry.value, rest);
-      return annotated(self, entry, rest, items);
-    });
+    return yield* groupItems(
+      contract,
+      group,
+      copies,
+      function* (entry) {
+        const read = flow?.child() ?? null;
+        const items = copies
+          ? // #1668: the value side's copies: its includer records `opaque`
+            yield* belowRead(self, entry.value, restSteps(rest))
+          : yield* self.contractOfValueAt(entry.value, rest, read);
+        if (read !== null) flow!.attach(read, "annotated");
+        return annotated(self, entry, rest, items);
+      },
+      flow,
+    );
   }
   if (site.kind === "groups") {
     const group = gatherGroups(contract, site)[at]!;
     if (group === null)
-      return yield* loadsBelow(contract, othersAt(contract, here?.others, false), rest, false);
-    return yield* groupItems(contract, group, false, (entry) =>
-      contract.contractOfValueAt(entry.value, rest),
+      return yield* loadsBelow(
+        contract,
+        othersAt(contract, here?.others, false),
+        rest,
+        false,
+        null,
+        flow,
+      );
+    return yield* groupItems(
+      contract,
+      group,
+      false,
+      (entry) => contract.contractOfValueAt(entry.value, rest, flow),
+      flow,
     );
   }
   if (site.kind === "selected") {
@@ -198,6 +230,7 @@ export function* gatherAt(
       site.below,
       true,
     );
+    // #1668: the value side's selected piece: its includer records `opaque`
     return yield* selectionPiece(
       contract,
       { ...site, kind: "absent", exact: true },
@@ -217,6 +250,7 @@ export function* gatherAt(
       site.below,
       site.exact,
     );
+    // #1668: the value side's absent run: its includer records `opaque`
     return yield* selectedObject(
       contract,
       selection.objects[selection.closed[at]!]!,
@@ -229,7 +263,9 @@ export function* gatherAt(
   }
   const group = gatherGroups(contract, site)[at]!;
   if (group === null)
+    // #1668: the value side's loads: its includer records `opaque`
     return yield* loadsBelow(contract, othersAt(contract, here?.others, true), rest, true, node);
+  // #1668: the value side's groups: its includer records `opaque`
   return yield* groupItems(contract, group, true, (entry) =>
     values.valueItems(entry.value, entry.g?.node ?? node, rest),
   );
@@ -247,14 +283,17 @@ function* groupItems<E extends ValueEntry>(
   group: ClassGroup<E>,
   exact: boolean,
   answer: (entry: E) => Work<readonly Item[]>,
+  flow: FlowSink | null = null,
 ): Work<Item[]> {
   const out: Item[] = [];
   const answers: (readonly Item[])[] = [];
   const read = function* (entry: E): Work<readonly Item[]> {
+    // #1668: I, the caller's read takes its flow
     const items = yield* answer(entry);
     return exact ? items : withWriter(items, group.writer);
   };
   for (const entry of group.read) {
+    // #1668: I, the caller's read takes its flow
     const items = yield* read(entry);
     answers.push(items);
     for (const item of items) out.push(item);
@@ -263,8 +302,12 @@ function* groupItems<E extends ValueEntry>(
   const differing = out.find((item) => differsIn(item, group.mixed));
   if (group.rest.length === 0 || differing === undefined) return out;
   const leaves = othersLeaves(contract, group, answers, exact);
-  if (leaves !== null) out.push({ ...differing, ingress: leaves });
-  else for (const entry of group.rest) for (const item of yield* read(entry)) out.push(item);
+  // (#1668: the other members' leaves named from the read ones' (C9): their own answers not read, a qualified inclusion)
+  if (leaves !== null) {
+    flow?.opaque("leaves");
+    out.push({ ...differing, ingress: leaves });
+    // #1668: I, the caller's read takes its flow
+  } else for (const entry of group.rest) for (const item of yield* read(entry)) out.push(item);
   return out;
 }
 
@@ -435,6 +478,7 @@ export function* selectionPiece(
   node: FlowNode | null,
 ): Work<readonly Item[]> {
   if (typeof piece === "number")
+    // #1668: a selection's object: the selection records no flow (`opaque`)
     return yield* selectedObject(
       contract,
       selection.objects[piece]!,
@@ -466,11 +510,13 @@ function* absentRun(
   contract.pass.program.work.charge("invSteps");
   if (b <= lo || hi <= a) return;
   if (a <= lo && hi <= b) {
+    // #1668: a selection's absent run: the selection records no flow (`opaque`)
     for (const item of yield* contract.gathered(site, null, [], lo, hi)) out.push(item);
     return;
   }
   if (hi - lo <= WIDE) {
     for (let at = Math.max(lo, a); at < Math.min(hi, b); at += 1)
+      // #1668: a selection's absent run: the selection records no flow (`opaque`)
       for (const item of yield* gatherAt(contract, site, null, [], at)) out.push(item);
     return;
   }

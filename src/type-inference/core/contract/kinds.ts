@@ -61,6 +61,15 @@ export function typedDefault(rest: readonly string[], writer: boolean): Decision
         : input.every((item) => item.tag === "null")
           ? "null"
           : "own",
+    // (#1668: the default's own kinds (`own`, or open) keep its input's items, so its inclusions, qualified; `none`
+    // (no kinds) and `null` (only nulls, which it replaces) keep none of them)
+    flow: (choice, inclusions) =>
+      choice === "none" || choice === "null"
+        ? []
+        : inclusions.map((inclusion) => ({
+            ...inclusion,
+            qualifiers: ["defaultChoice", ...inclusion.qualifiers],
+          })),
     answer: (choice, input) => {
       if (choice === "none") return [unknownItem(REASON.external), ...withoutEmpty(input)];
       if (choice !== "null") return input;
@@ -78,6 +87,8 @@ export function typedDefault(rest: readonly string[], writer: boolean): Decision
 export const ONLY_NULL: Decision = {
   choose: (input) => (input.every((item) => item.tag === "null") ? "null" : "other"),
   answer: (choice) => (choice === "null" ? [ingressNull()] : []),
+  // (#1668: its answer is made anew, its input's items in neither choice's)
+  flow: () => [],
 };
 
 /** F11 (r4.4): an object's own `first`, `last` or `random`, which the core does not read. */

@@ -62,6 +62,7 @@ export function* choiceItems(
 ): Work<Item[]> {
   // r4.93: the answer is a scalar button (V30 §19, TSV029): an outer choice's selection of it is the button itself
   if (rest[0] === SELECTED_VALUE || rest[0] === SELECTED_TEXT)
+    // #1668: a choice's reads: its includer records `opaque`
     return yield* choiceItems(c, rest.slice(1), read, stored, options, part);
   const out: Item[] = [];
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
@@ -74,9 +75,11 @@ export function* choiceItems(
     path: readonly string[],
     element?: true,
   ): Work<Item[]> {
+    // #1668: a choice's reads: its includer records `opaque`
     const value = withoutEmpty(yield* read(place, path, element));
     if (rest.length === 0) return value.filter(returned);
     if (!value.some((item) => item.tag === "unknown")) return [];
+    // #1668: a choice's reads: its includer records `opaque`
     return withoutEmpty(yield* read(place, joinSteps(path, rest), element)).filter(
       (item) => item.tag === "unknown",
     );
@@ -87,19 +90,24 @@ export function* choiceItems(
   const held = function* (option: PlaceId, at: readonly string[]): Work<void> {
     const value =
       stored.value || stored.text
-        ? withoutEmpty(yield* read(option, joinSteps(at, ["value"])))
+        ? // #1668: a choice's reads: its includer records `opaque`
+          withoutEmpty(yield* read(option, joinSteps(at, ["value"])))
         : [];
     const lacking = value.some(isMissing);
     const present = withoutMissing(value);
+    // #1668: a choice's reads: its includer records `opaque`
     if (!stored.value) out.push(...(yield* buttonValue(option, joinSteps(at, [SELECTED_VALUE]))));
     else if (present.length > 0 || !lacking)
       out.push(
         ...(rest.length === 0
           ? present.filter(returned)
-          : yield* buttonValue(option, joinSteps(at, ["value"]))),
+          : // #1668: a choice's reads: its includer records `opaque`
+            yield* buttonValue(option, joinSteps(at, ["value"]))),
       );
+    // #1668: a choice's reads: its includer records `opaque`
     if (!stored.text) out.push(...(yield* buttonValue(option, joinSteps(at, [SELECTED_TEXT]))));
     else if (lacking) {
+      // #1668: a choice's reads: its includer records `opaque`
       const text = yield* buttonValue(option, joinSteps(at, ["text"]));
       out.push(...(present.length > 0 ? weaken(text) : text));
     }
@@ -114,9 +122,11 @@ export function* choiceItems(
     if (object !== null && selected !== null) {
       // an element of a written list or set reads as its literal analogue, below the list's element step (F12 r4.7)
       const key = object.value !== null ? "value" : "text";
+      // #1668: a choice's reads: its includer records `opaque`
       out.push(...(yield* element ? buttonValue(place, [key], true) : buttonValue(selected, [])));
       return;
     }
+    // #1668: a choice's reads: its includer records `opaque`
     const items = withoutEmpty(yield* read(place, []));
     if (items.some((item) => item.tag === "object")) yield* held(place, []);
     for (const item of items)
@@ -149,16 +159,20 @@ export function* choiceItems(
         );
       if (objects)
         for (const step of [SELECTED_VALUE, SELECTED_TEXT])
+          // #1668: a choice's reads: its includer records `opaque`
           out.push(...(yield* buttonValue(argument, ["element", step])));
       else if (part.wide !== undefined && content.elements.length > WIDE)
+        // #1668: a choice's reads: its includer records `opaque`
         out.push(...(yield* part.wide(index, content.elements.length, rest)));
       else
         for (const element of content.elements) yield* button(element.place, element.object, true);
       return;
     }
     // a computed option: a list's or a set's elements, a choice object, or a value
+    // #1668: a choice's reads: its includer records `opaque`
     const items = withoutEmpty(yield* read(argument, []));
     if (items.some((item) => item.tag === "list" || item.tag === "set"))
+      // #1668: a choice's reads: its includer records `opaque`
       for (const item of withoutEmpty(yield* read(argument, ["element"])))
         if (item.tag === "object") yield* held(argument, ["element"]);
         else if (rest.length === 0 ? returned(item) : item.tag === "unknown") out.push(item);

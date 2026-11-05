@@ -13,6 +13,7 @@ import {
   type Writer,
 } from "../items.js";
 import type { Work } from "../solver.js";
+import type { FlowSink } from "./contributions.js";
 import { WIDE } from "./choices.js";
 import { gatherAt, gatherCount, selectionPiece } from "./gather.js";
 import { OPAQUE_MEMBER, unknownItem } from "./kinds.js";
@@ -67,8 +68,11 @@ export function* indexItems(
   node: FlowNode | null,
   exact: boolean,
   below = false,
+  flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const { program } = contract.pass;
+  // (#1668: the value side's gathers are its own: a contract that reads a literal exactly records no flow of it)
+  if (exact) flow?.opaque("exact");
   // (a cursor's span read one step at a time as far as the index goes, its rests views: G3 stage 1)
   const rest = restRef(contract, asked);
   const index = contract.literalIndex(literal);
@@ -118,9 +122,9 @@ export function* indexItems(
         const count = gatherCount(contract, site);
         if (count <= WIDE)
           for (let at = 0; at < count; at += 1)
-            out.push(...(yield* gatherAt(contract, site, node, after(), at)));
+            out.push(...(yield* gatherAt(contract, site, node, after(), at, flow)));
         else
-          for (const item of yield* contract.gathered(site, node, after(), 0, count))
+          for (const item of yield* contract.gathered(site, node, after(), 0, count, flow))
             out.push(item);
       }
     } else {
@@ -133,8 +137,10 @@ export function* indexItems(
         const count = gatherCount(contract, site);
         if (count <= WIDE)
           for (let at = 0; at < count; at += 1)
+            // #1668: the value side's exact gather: its includer records `opaque`
             out.push(...(yield* gatherAt(contract, site, node, after(), at)));
         else
+          // #1668: the value side's exact gather: its includer records `opaque`
           for (const item of yield* contract.gathered(site, node, after(), 0, count))
             out.push(item);
       }
@@ -143,6 +149,8 @@ export function* indexItems(
     // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
     const step = length < rest.length ? rest.at(length) : undefined;
     if (step === SELECTED_VALUE || step === SELECTED_TEXT) {
+      flow?.opaque("selection");
+      // #1668: a selection's alternatives: its includer records `opaque`
       const selected = yield* selectedAt(
         contract,
         literal,
@@ -223,6 +231,7 @@ function* selectedAt(
   const pieces = selectionPieces(contract, selection, after);
   // (on the value side past `WIDE` parts as a tree of demands, `gathered`)
   if (exact && pieces.length > WIDE)
+    // #1668: the value side's selection: its includer records `opaque`
     for (const item of yield* contract.gathered(
       { kind: "selected", literal, path, byValue, below },
       node,
@@ -234,6 +243,7 @@ function* selectedAt(
   else {
     const site: GatherSite = { kind: "absent", literal, path, byValue, below, exact };
     for (const piece of pieces)
+      // #1668: a selection's pieces: the selection records no flow (`opaque`)
       for (const item of yield* selectionPiece(contract, site, selection, piece, after, node))
         out.push(item);
   }
@@ -248,9 +258,15 @@ export function* contractOfLiteral(
   contract: Contract,
   literal: PlaceId,
   rest: Rest,
+  given?: FlowSink | null,
 ): Work<readonly Item[]> {
   const { program, definitions } = contract.pass;
+  // (#1668: read inline, its caller's flow; as its own demand (`cl|`), its run's, taken as the run starts)
+  const flow = given === undefined ? contract.pass.solver.sink() : given;
   if (!program.hasOf.has(literal) && (definitions.cellDefs.get(literal) ?? []).length === 0)
     return [program.cellOwner.get(literal)?.kind === "cell" ? EMPTY : unknownItem(REASON.opaque)];
-  return mergeItems(yield* contract.indexItems(literal, rest, null, false), program.scope);
+  return mergeItems(
+    yield* contract.indexItems(literal, rest, null, false, false, flow),
+    program.scope,
+  );
 }
