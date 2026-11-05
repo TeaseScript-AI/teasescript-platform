@@ -488,6 +488,8 @@ export class Solver {
       // forgetting closes here (#1601's Codex r4: a charge may cut a return between the two structures read above)
       if (error instanceof BudgetExhausted) this.closeForgetting();
       else this.#keepPendingReaders();
+      // (#1323: a shared provenance read the stop left suspended counts as it would have at its end)
+      this.#work.closeShared();
       this.#active.clear();
       this.#stack.length = 0;
       this.#frames.length = 0;
