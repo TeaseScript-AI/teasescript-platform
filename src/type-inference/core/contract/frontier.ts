@@ -63,15 +63,25 @@ class Decline extends Error {
 }
 
 let pushing = true;
+let horizon: number | null = null;
 
-/** Test-only: runs `callback` with every pushed read answered by the native reader, the oracle of #1655's lemma. */
-export function withoutPushedReads<T>(callback: () => T): T {
+/** The slot of a key past the oracle's horizon (`withoutPushedReads`): it answers nothing, bottom. */
+const BEYOND = "pr|beyond";
+
+/**
+ * Test-only: runs `callback` with every pushed read answered by the native reader, the oracle of #1655's lemma; with a
+ * `depth`, a read of a key entry below its place's root at more steps than it answers nothing (bottom), so where the
+ * native reader does not end its answers are the least fixed point's approximations from below.
+ */
+export function withoutPushedReads<T>(callback: () => T, depth: number | null = null): T {
   if (!pushing) throw new Error("Pushed reads are already off.");
   pushing = false;
+  horizon = depth;
   try {
     return callback();
   } finally {
     pushing = true;
+    horizon = null;
   }
 }
 
@@ -652,13 +662,15 @@ export function pushedFacts(contract: Contract): {
  * models. Its structure is built here, shared work (r4.349); a build that declines or stops keeps nothing.
  */
 export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef): string | null {
-  if (
-    !pushing ||
-    entry.key === undefined ||
-    isKeyId(entry.key) ||
-    ref.length === 0 ||
-    ref.kind !== "steps"
-  )
+  if (!pushing)
+    return horizon !== null &&
+      entry.key !== undefined &&
+      !isKeyId(entry.key) &&
+      keyPath(entry.key).length > 0 &&
+      keyPath(entry.key).length + ref.length > horizon
+      ? BEYOND
+      : null;
+  if (entry.key === undefined || isKeyId(entry.key) || ref.length === 0 || ref.kind !== "steps")
     return null;
   const path = keyPath(entry.key);
   if (path.length === 0) return null;
@@ -703,6 +715,7 @@ export function* pushedRead(
   entry: PrefixEntry,
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
+  if (slot === BEYOND) return [];
   const site = contract.pass.program.places[keyPlace(entry.key!)]?.site ?? null;
   flow?.include(slot, "pushed");
   return yield {
