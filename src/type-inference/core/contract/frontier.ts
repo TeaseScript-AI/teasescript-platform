@@ -1,5 +1,5 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, keep, keptParts } from "../budget.js";
+import { joinParts, keep, keptParts, keptSteps } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
 import { makeItem, mergeItems, REASON, type Item } from "../items.js";
@@ -8,7 +8,7 @@ import { positions } from "../positions.js";
 import type { Work } from "../solver.js";
 import type { FlowSink } from "./contributions.js";
 import { entered, ingressLeafOf } from "./ingress.js";
-import { canonicalKey, isKeyId, stepsArray, type PathRef } from "./key-ids.js";
+import { canonicalKey, isKeyId, keyDepthIn, stepsArray, type PathRef } from "./key-ids.js";
 import { hostAt, propertyOnly, unknownItem } from "./kinds.js";
 import { lackingAt, pathAt } from "./literal-index.js";
 import { marksNothing } from "./marks.js";
@@ -114,7 +114,7 @@ class Frontier {
   /** Per place, whether a copy cycle through a projection holds it. */
   readonly cyclic = new Map<PlaceId, boolean>();
   /** Per goal (`node|step`) whose rules declined, the reason: a later build reaching it declines at once. */
-  readonly poisoned = new Map<string, string>();
+  readonly poisoned = new Map<number, Map<string, string>>();
   /** Per decline reason, the pushed reads it declined (`pushedFacts`). */
   readonly declines = new Map<string, number>();
   /** The goals of the build running, final when it ends, dropped when it declines. */
@@ -378,7 +378,7 @@ function goalOf(frontier: Frontier, node: number, stepName: string): Goal {
   if (bySteps === undefined) frontier.goals.set(node, (bySteps = new Map()));
   let goal = bySteps.get(stepName);
   if (goal === undefined) {
-    const poisoned = frontier.poisoned.get(`${node}|${stepName}`);
+    const poisoned = frontier.poisoned.get(node)?.get(stepName);
     if (poisoned !== undefined) throw new Decline(poisoned);
     frontier.contract.keep(2);
     goal = { node, step: stepName, value: new Set(), readers: [] };
@@ -423,7 +423,7 @@ function rules(frontier: Frontier, goal: Goal): void {
   if (node.kind === "leaf") return into(goal.node);
   if (node.kind === "native") throw new Decline("native");
   if (node.kind === "key") {
-    const below = [...node.path, s];
+    const below = keptSteps(contract.work, node.path, [s]);
     const inside = new Set(node.members);
     for (const member of node.members) {
       if (holds(contract, member, below)) into(keyNode(frontier, member, below));
@@ -503,11 +503,18 @@ function stepEntry(
     if (isKeyId(entry.key)) throw new Decline("cursor");
     const path = keyPath(entry.key);
     properties(path);
-    return below(frontier, rootNode(frontier, keyPlace(entry.key)), [...path, s], 0, into);
+    return below(
+      frontier,
+      rootNode(frontier, keyPlace(entry.key)),
+      keptSteps(contract.work, path, [s]),
+      0,
+      into,
+    );
   }
   const at = entry.at ?? [];
   properties(at);
-  eachValue(frontier, entry.value!, (found) => below(frontier, found, [...at, s], 0, into));
+  const steps = keptSteps(contract.work, at, [s]);
+  eachValue(frontier, entry.value!, (found) => below(frontier, found, steps, 0, into));
 }
 
 /**
@@ -525,7 +532,8 @@ function drain(frontier: Frontier): void {
           rules(frontier, goal);
         } catch (error) {
           if (error instanceof Decline)
-            frontier.poisoned.set(`${goal.node}|${goal.step}`, error.reason);
+            if (!frontier.poisoned.has(goal.node)) frontier.poisoned.set(goal.node, new Map());
+          frontier.poisoned.get(goal.node)!.set(goal.step, error.reason);
           throw error;
         }
         continue;
@@ -743,7 +751,10 @@ function cyclic(frontier: Frontier, place: PlaceId): boolean {
         step(frontier);
         if (entry.key !== undefined) {
           if (isKeyId(entry.key)) continue;
-          to.push([keyPlace(entry.key), keyPath(entry.key).length > keyPath(key).length]);
+          to.push([
+            keyPlace(entry.key),
+            keyDepthIn(contract, entry.key) > keyDepthIn(contract, key),
+          ]);
         } else if (entry.value !== undefined) {
           let value = entry.value;
           let projected = false;
@@ -857,7 +868,7 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
     propertiesOrElements(steps);
     const frontier = frontierOf(contract);
     let set = intern(frontier, [rootNode(frontier, keyPlace(key))]);
-    const word = [...path, ...steps];
+    const word = keptSteps(contract.work, path, steps);
     word.forEach((each, at) => {
       // (a host's data at a path ending in an element may hold none, `emptyAt`, where its read's frame holds a
       // structure there and not where it does not: a frame's own, which the graph does not keep, so declined)
