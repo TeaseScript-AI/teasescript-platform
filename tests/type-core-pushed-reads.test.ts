@@ -57,7 +57,9 @@ function analysed(source: string, mode = MODES[0]!) {
   };
   try {
     const answers = inMode(mode, () => analyseCore(request));
-    return { answers, facts: pushedFacts(passes.at(-1)!.contract) };
+    // (the publishing pass's graph, and every pass's)
+    const all = passes.map((pass) => pushedFacts(pass.contract));
+    return { answers, facts: all.at(-1)!, all };
   } finally {
     Consumers.prototype.check = check;
   }
@@ -74,9 +76,12 @@ test("a ring of whole copies read through a projection reaches its check in four
   ];
   for (const source of sources)
     for (const mode of MODES) {
-      const { answers, facts } = analysed(source, mode);
+      const { answers, all } = analysed(source, mode);
       assert.equal(answers.budget.exhausted, null, source);
-      assert.ok(facts.reads > 0 && facts.declines.size === 0, source);
+      assert.ok(
+        all.some((facts) => facts.reads > 0) && all.every((facts) => facts.declines.size === 0),
+        source,
+      );
     }
 });
 

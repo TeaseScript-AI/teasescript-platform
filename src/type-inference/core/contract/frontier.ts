@@ -30,7 +30,14 @@ import type { IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
  */
 
 type FNode =
-  | { readonly kind: "key"; readonly place: PlaceId; readonly path: readonly string[]; readonly key: Key }
+  | {
+      readonly kind: "key";
+      readonly place: PlaceId;
+      readonly path: readonly string[];
+      readonly key: Key;
+      /** The places it stands for: at a root, its cycle of whole copies (equal one step below every one), else itself. */
+      readonly members: readonly PlaceId[];
+    }
   | {
       readonly kind: "lit";
       readonly literal: PlaceId;
@@ -98,6 +105,8 @@ class Frontier {
   readonly leaves = new Map<number, readonly number[]>();
   /** Per pushed slot, its reach, or `null` where its closure declined. */
   readonly reads = new Map<string, Reach | null>();
+  /** Per binding, its root's node (`rootNode`). */
+  readonly roots = new Map<PlaceId, number>();
   /** The bindings the graph holds a position of, which a stop at any of them makes decline (`stoppedAt`). */
   readonly places = new Set<PlaceId>();
   /** Per place, whether a copy cycle through a projection holds it. */
@@ -135,12 +144,8 @@ function nodeId(frontier: Frontier, name: string, make: () => FNode): number {
   return id;
 }
 
-/** A binding's position, where the graph models it; declines otherwise. */
-function keyNode(frontier: Frontier, place: PlaceId, path: readonly string[]): number {
-  const name = keyOf(place, path);
-  const known = frontier.ids.get(name);
-  if (known !== undefined) return known;
-  const { contract } = frontier;
+/** Declines a place the graph does not model as a binding's position. */
+function eligible(contract: Contract, place: PlaceId): void {
   const { program } = contract.pass;
   const kind = program.places[place]?.kind;
   if (
@@ -155,13 +160,87 @@ function keyNode(frontier: Frontier, place: PlaceId, path: readonly string[]): n
     throw new Decline("place");
   if (kind.written !== null) throw new Decline("written");
   if (stoppedAt(contract, place)) throw new Decline("stopped");
-  if (path.length > 0) {
-    // (a key whose family is a cursor's, or whose first step passes a wrapper, is G3's)
-    if (isKeyId(canonicalKey(contract, name))) throw new Decline("cursor");
-    if (positions() && contract.wrapperHop(place, path[0]!) !== null) throw new Decline("wrapper");
-  }
+}
+
+/** A binding's position below its root, where the graph models it; declines otherwise. */
+function keyNode(frontier: Frontier, place: PlaceId, path: readonly string[]): number {
+  if (path.length === 0) return rootNode(frontier, place);
+  const name = keyOf(place, path);
+  const known = frontier.ids.get(name);
+  if (known !== undefined) return known;
+  const { contract } = frontier;
+  eligible(contract, place);
+  // (a key whose family is a cursor's, or whose first step passes a wrapper, is G3's)
+  if (isKeyId(canonicalKey(contract, name))) throw new Decline("cursor");
+  if (positions() && contract.wrapperHop(place, path[0]!) !== null) throw new Decline("wrapper");
   frontier.places.add(place);
-  return nodeId(frontier, name, () => ({ kind: "key", place, path, key: name }));
+  return nodeId(frontier, name, () => ({ kind: "key", place, path, key: name, members: [place] }));
+}
+
+/**
+ * A binding's root as a node: one per cycle of whole copies (its root's key entries of no step, Tarjan's components
+ * once per place and pass), whose members reach one another one step below at every step, so their summaries are one
+ * set, listed once (the ring's content by reference, never a copy per member).
+ */
+function rootNode(frontier: Frontier, place: PlaceId): number {
+  const known = frontier.roots.get(place);
+  if (known !== undefined) return known;
+  const { contract } = frontier;
+  const index = new Map<PlaceId, number>();
+  const low = new Map<PlaceId, number>();
+  const open: PlaceId[] = [];
+  const held = new Set<PlaceId>();
+  const frames: { readonly place: PlaceId; readonly to: readonly PlaceId[]; at: number }[] = [];
+  const enter = (at: PlaceId): void => {
+    eligible(contract, at);
+    const to: PlaceId[] = [];
+    for (const entry of contract.prefixStores(keyOf(at, [])).list) {
+      step(frontier);
+      if (entry.key !== undefined && !isKeyId(entry.key) && keyPath(entry.key).length === 0)
+        to.push(keyPlace(entry.key));
+    }
+    index.set(at, index.size);
+    low.set(at, index.size - 1);
+    open.push(at);
+    held.add(at);
+    frames.push({ place: at, to, at: 0 });
+  };
+  enter(place);
+  while (frames.length > 0) {
+    const top = frames.at(-1)!;
+    if (top.at < top.to.length) {
+      const to = top.to[top.at++]!;
+      if (frontier.roots.has(to)) continue;
+      if (!index.has(to)) enter(to);
+      else if (held.has(to)) low.set(top.place, Math.min(low.get(top.place)!, index.get(to)!));
+      continue;
+    }
+    frames.pop();
+    if (frames.length > 0) {
+      const parent = frames.at(-1)!.place;
+      low.set(parent, Math.min(low.get(parent)!, low.get(top.place)!));
+    }
+    if (low.get(top.place) !== index.get(top.place)) continue;
+    const members: PlaceId[] = [];
+    for (;;) {
+      const member = open.pop()!;
+      held.delete(member);
+      members.push(member);
+      if (member === top.place) break;
+    }
+    members.sort((a, b) => a - b);
+    const first = members[0]!;
+    for (const member of members) frontier.places.add(member);
+    const id = nodeId(frontier, keyOf(first, []), () => ({
+      kind: "key",
+      place: first,
+      path: [],
+      key: keyOf(first, []),
+      members,
+    }));
+    for (const member of members) frontier.roots.set(member, id);
+  }
+  return frontier.roots.get(place)!;
 }
 
 function stoppedAt(contract: Contract, place: PlaceId): boolean {
@@ -292,14 +371,28 @@ function evaluate(frontier: Frontier, goal: Goal): Set<number> {
   if (node.kind === "native") throw new Decline("native");
   if (node.kind === "key") {
     const below = [...node.path, s];
-    if (holds(contract, node.place, below)) out.add(keyNode(frontier, node.place, below));
-    if (node.path.length === 0 && positions() && contract.wrapperHop(node.place, s) !== null)
-      throw new Decline("wrapper");
-    const stores = contract.prefixStores(node.key);
-    if (stores.subs !== null || stores.also.length > 0) throw new Decline("layers");
-    for (const entry of stores.list) {
-      step(frontier);
-      stepEntry(frontier, entry, s, goal, out);
+    const inside = new Set(node.members);
+    for (const member of node.members) {
+      if (holds(contract, member, below)) out.add(keyNode(frontier, member, below));
+      if (node.path.length === 0 && positions() && contract.wrapperHop(member, s) !== null)
+        throw new Decline("wrapper");
+      const stores = contract.prefixStores(keyOf(member, node.path));
+      if (stores.subs !== null || stores.also.length > 0) throw new Decline("layers");
+      for (const entry of stores.list) {
+        step(frontier);
+        // (a whole copy of a member: the component's own summary, which adds nothing to itself)
+        if (
+          node.path.length === 0 &&
+          entry.key !== undefined &&
+          !isKeyId(entry.key) &&
+          keyPath(entry.key).length === 0 &&
+          inside.has(keyPlace(entry.key)) &&
+          entry.w !== null &&
+          plainRead(contract, entry)
+        )
+          continue;
+        stepEntry(frontier, entry, s, goal, out);
+      }
     }
     return out;
   }
@@ -457,13 +550,14 @@ function termOf(frontier: Frontier, id: number): { leaves: number[]; next: numbe
   };
   if (node.kind === "leaf" || node.kind === "native") leaves.push(id);
   else if (node.kind === "key") {
-    for (const d of definitions.byKey.get(node.key) ?? []) {
-      step(frontier);
-      if (!lists.live(d)) continue;
-      if (d.kind !== "whole" || d.how === "argument" || d.how === "parameter default")
-        throw new Decline("definition");
-      value(d.value!);
-    }
+    for (const member of node.members)
+      for (const d of definitions.byKey.get(keyOf(member, node.path)) ?? []) {
+        step(frontier);
+        if (!lists.live(d)) continue;
+        if (d.kind !== "whole" || d.how === "argument" || d.how === "parameter default")
+          throw new Decline("definition");
+        value(d.value!);
+      }
   } else {
     for (const [tag, token] of node.at.terms)
       leaves.push(
