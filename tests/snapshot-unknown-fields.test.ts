@@ -143,11 +143,17 @@ function records(root: unknown): Array<{ readonly path: string; readonly value: 
 function variant(path: string, value: JsonRecord): string {
   if (path === "$.loopFrames[]")
     return `${path} ${String(value.kind)}${"valueVariable" in value ? " valueVariable" : ""}`;
-  if (path === "$.callFrames[]") return `${path} ${String(value.kind)}`;
+  if (path === "$.callFrames[]")
+    return `${path} ${String(value.kind)}${isRecord(value.timerInterruption) ? " block" : ""}`;
   if (path === "$.callFrames[].parameterState") return `${path} ${String(value.phase)}`;
   if (path === "$.callFrames[].arguments[]")
     return `${path} ${value.supplied === false ? "unsupplied" : "value" in value ? "supplied with value" : "supplied and bound"}`;
   return path;
+}
+
+/** One mutation target per variant and structural shape: its kind and fields. */
+function shapeOf(path: string, value: JsonRecord): string {
+  return `${variant(path, value)}|${String(value.kind)}|${Object.keys(value).sort().join(",")}`;
 }
 
 function prototypeNamedKeys(snapshot: unknown): string[] {
@@ -158,7 +164,6 @@ function prototypeNamedKeys(snapshot: unknown): string[] {
 
 test("validation rejects an own __proto__ or other unknown key on each record of the snapshot", () => {
   const reached = new Set<string>();
-  // One state per structural shape: its path, kind and fields.
   const shapes = new Map<string, { plan: InstructionPlan; json: string; path: string }>();
   for (const scenario of SCENARIOS) {
     const plan = compileValidPlan(scenario.source);
@@ -170,7 +175,7 @@ test("validation rejects an own __proto__ or other unknown key on each record of
       const json = JSON.stringify(boundary);
       for (const { path, value } of records(JSON.parse(json))) {
         reached.add(variant(path, value));
-        const shape = `${path}|${String(value.kind)}|${Object.keys(value).sort().join(",")}`;
+        const shape = shapeOf(path, value);
         if (!shapes.has(shape)) shapes.set(shape, { plan, json, path });
       }
     }
@@ -181,10 +186,7 @@ test("validation rejects an own __proto__ or other unknown key on each record of
     for (const key of UNKNOWN_KEYS) {
       const state: unknown = JSON.parse(json);
       const target = records(state).find(
-        (record) =>
-          record.path === path &&
-          `${path}|${String(record.value.kind)}|${Object.keys(record.value).sort().join(",")}` ===
-            shape,
+        (record) => record.path === path && shapeOf(path, record.value) === shape,
       )!;
       // As `JSON.parse` makes it from text: an own property, not the prototype.
       Object.defineProperty(target.value, key, {

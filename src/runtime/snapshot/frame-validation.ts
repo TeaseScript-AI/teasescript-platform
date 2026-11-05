@@ -280,11 +280,12 @@ export function validateTemporaries(
   }
   const ids = new Set<number>();
   for (const temporary of value) {
-    if (!isPlainRecord(temporary) || !hasExactKeys(temporary, ["id", "value"])) {
+    if (isPlainRecord(temporary) && !hasExactKeys(temporary, ["id", "value"])) {
       errors.push(`${label} contain a malformed temporary.`);
       continue;
     }
     if (
+      !isPlainRecord(temporary) ||
       !nonNegativeSafeInteger(temporary.id) ||
       temporary.id < 1 ||
       (plan !== undefined && temporary.id > plan.temporaryCount)
