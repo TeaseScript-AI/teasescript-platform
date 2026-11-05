@@ -370,9 +370,18 @@ export class Consumers {
     rest: readonly string[],
     requirement = false,
   ): readonly Item[] {
-    return this.finishing
-      ? finishingRead(this, value, node, rest, requirement)
-      : this.valueRun(value, node, rest);
+    if (this.finishing) return finishingRead(this, value, node, rest, requirement);
+    const items = this.valueRun(value, node, rest);
+    // (a stopped read of an ingress keeps its C9 check, structurally: the stop leaves its kinds unknown and its reason
+    // `budget`, never its provenance, so its unknown is the ingress's data for C9, entering by it as an unnarrowed
+    // read's, Codex r4 on #1770; a projection's own read stays as it stopped, as its owner's read asks the occurrence's
+    // check, which validates the whole value, Codex r5)
+    const stopped = (item: Item) => (item.reasons & REASON.budget) !== 0;
+    if (!items.some(stopped) || this.pass.contract.ingressOf(value) !== value) return items;
+    return this.pass.contract.entered(
+      value,
+      items.map((item) => (stopped(item) ? { ...item, fromExternal: true } : item)),
+    );
   }
 
   public finishedItems(
@@ -446,9 +455,38 @@ export class Consumers {
 
   /** A value's items at a node and a path, as a consumer's demand: past its allowance, its own key's contract. */
   public valueRun(value: PlaceId, node: FlowNode | null, rest: Rest): readonly Item[] {
-    return this.run(this.pass.values.valueItems(value, node, rest), () =>
+    const items = this.run(this.pass.values.consumerItems(value, node, rest), () =>
       this.pass.contract.contractOfValueAt(value, rest),
     );
+    // C9 (#1073): an item a type test narrowed from external data brings its ingress stores' boundary checks, whatever
+    // its consumer then finds fitting, and host data no ingress store brought its check at the read's root (r4.10, at
+    // the site and with the target the consumers' own requests use, so one check); the test proves its kind, never its
+    // ingress (a look at each of the read's items, at most one per kind, inside the read's own charged step, r4.261)
+    for (const item of items)
+      if (item.fromExternal === true)
+        this.admission.boundaryFor(item, () => this.#hostCheck(value));
+    return items;
+  }
+
+  /** C9's check of host data at a read's root occurrence (`valueRun`): its site, its text as the target. */
+  #hostCheck(value: PlaceId): Obligation {
+    const program = this.pass.program;
+    let root = value;
+    for (let projection = program.projOf.get(root); projection !== undefined;) {
+      program.work.charge("checks");
+      root = projection.owner;
+      projection = program.projOf.get(root);
+    }
+    const site = program.places[root]?.site ?? program.places[value]!.site!;
+    const label = program.textAt(site);
+    return {
+      kind: "copy-type",
+      target: label,
+      against: [],
+      on: `validate external data ${label}`,
+      site: { file: site.file, start: site.start, end: site.end },
+      boundary: false,
+    };
   }
 
   /**

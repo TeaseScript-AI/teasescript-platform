@@ -13,12 +13,13 @@ import {
 } from "../src/type-inference/core/items.js";
 import { narrowedItems, type NarrowingForm } from "../src/type-inference/core/narrowing.js";
 import { siteKey } from "../src/type-inference/core/program.js";
+import type { Obligation } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingAt, narrowingPass, nodeAt, routeAt } from "./helpers/type-core-narrowing.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
-import { inMode, MODES } from "./helpers/type-core-oracles.js";
+import { inMode, MODES, stopSet } from "./helpers/type-core-oracles.js";
 import type { CompactRecord } from "./helpers/type-core-records.js";
 
 /*
@@ -1459,6 +1460,161 @@ test("a read below a selection takes its narrowing, each selected owner's own se
   }
 });
 
+test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 PR 2, #1320)", () => {
+  // (a record's outcome, its diagnostics' kinds and classes and its checks' kinds, in the three modes `record` asks)
+  const answer = (...lines: readonly string[]): string => {
+    const { outcome, diagnostics, checks } = record(...lines);
+    return [
+      outcome,
+      ...diagnostics.map((d) => `${d.kind} ${d.class}`),
+      ...checks.map((c) => `${c.kind}${c.boundary === true ? " boundary" : ""}`),
+    ].join(", ");
+  };
+  const flag = 'let flag = askBoolean "?"';
+  // G holds at a consumer: a fitting kind is quiet, as at a store
+  for (const [test, use] of [
+    ["n != null", "repeat n {}"],
+    ["n is integer", "repeat n {}"],
+    ["n != null", 'say "${n}"'],
+  ] as const)
+    assert.equal(
+      answer(flag, "let n = 1", "if flag { n = null }", `if ${test} { ${use} }`),
+      "valid",
+      `${test}: ${use}`,
+    );
+  // a nearer store after the test answers the consumer exactly: an invalid value stays invalid (V30 §13)
+  assert.equal(
+    answer(flag, "let n = 1", "if flag { n = null }", "if n != null { n = null\n repeat n {} }"),
+    "compile-error, integer-use compile-error",
+  );
+  // a test of the read's own key keeps its guard (§3.2)
+  assert.equal(
+    answer("let box = {n: 1.5}", "if box.n < 2 { repeat box.n {} }"),
+    "warning-runtime-check, integer-use warning-runtime-check, integer-check",
+  );
+  // the test proves a kind, never an ingress (C9, the lead's ruling (a)): external data keeps exactly one boundary
+  // check, at its ingress store or, where no store brought it, at the consumer (r4.10), through every transfer that
+  // keeps the value; a computed result brings no data in (Codex r1–r3 on #1770: the typed store, the operator, the
+  // selection without an ingress are rows)
+  const transfers: readonly (readonly [string, string, string, string, string])[] = [
+    ["a read", "", "integer", "repeat X {}", "valid, copy-type boundary"],
+    ["a copy", "", "integer", "let c = X\n repeat c {}", "valid, copy-type boundary"],
+    [
+      "a merge of one kind",
+      "",
+      "integer",
+      "let xs = [X, 1]\n repeat xs[0] {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a literal's element",
+      "",
+      "integer",
+      "let xs = [X]\n repeat xs[0] {}",
+      "valid, copy-type boundary",
+    ],
+    ["a selection", "", "integer[]", "repeat X[0] {}", "valid, copy-type boundary"],
+    [
+      "an operator",
+      "",
+      "integer",
+      "let out: integer = X + 1\n repeat out {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a typed store",
+      "",
+      "integer",
+      "let out: integer = X\n repeat out {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "an argument",
+      "function f(p: integer) {\n repeat p {}\n}\n",
+      "integer",
+      "f(X)",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a result",
+      "function g(p): integer {\n return p\n}\n",
+      "integer",
+      "let out = g(X)\n repeat out {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a default",
+      "",
+      "integer",
+      "let out: integer = X otherwise 0\n repeat out {}",
+      "warning, static warning, copy-type boundary",
+    ],
+  ];
+  for (const [name, prelude, type, body, expected] of transfers)
+    for (const [where, before, read] of [
+      ["an ingress store", "let raw = hostValue\n", "raw"],
+      ["no ingress store", "", "hostValue"],
+    ] as const)
+      assert.equal(
+        answer(`${prelude}${before}if ${read} is ${type} {\n${body.replaceAll("X", read)}\n}`),
+        expected,
+        `${name}, ${where}`,
+      );
+  // a stopped read keeps its C9 check: the stop leaves the kinds unknown, never the ingress (Codex r4), at the read's
+  // root occurrence or at the store that brought the data in, with its target, site and domain
+  for (const [source, expected] of [
+    ["if hostValue is integer {repeat hostValue {}}", "hostValue [unknown] 32-41"],
+    ['if hostValue is string[] {say "${hostValue}"}', "hostValue [unknown] 33-42"],
+    // (a projection's own read, data or computed, is the occurrence's check alone, Codex r5)
+    ["if hostValue is integer[] {repeat hostValue[0] {}}", "hostValue [unknown] 34-43"],
+    ["if hostValue is integer[] {repeat hostValue.length {}}", "hostValue [unknown] 34-43"],
+    ["if hostValue is integer {let out:integer=hostValue\nrepeat out {}}", "out [integer] 41-50"],
+    [
+      "if hostValue is integer[] {let out:integer=hostValue[0]\nrepeat out {}}",
+      "out [integer] 43-52",
+    ],
+  ] as const)
+    for (const mode of MODES) {
+      const stopped = stopSet(
+        [{ path: "main.tease", source: `${source}\nexit\n` }],
+        mode,
+        ["hostValue"],
+        1,
+      )!;
+      // EVIDENCE: `stoppedRecord` serializes the answers' `checks`, a list of `Obligation`s.
+      const { checks } = JSON.parse(stopped.record) as { checks: readonly Obligation[] };
+      assert.ok(stopped.record.includes('"context":"budget"'), `${source}: a read stops`);
+      assert.equal(
+        checks
+          .filter((c) => c.boundary === true)
+          .map((c) => `${c.target} [${c.against.join("|")}] ${c.site.start}-${c.site.end}`)
+          .join("; "),
+        expected,
+        `${source} ${JSON.stringify(mode)}`,
+      );
+    }
+  // #1320: a scalar under its test needs no operand check; a list under an element test keeps C6's emptiness, read
+  // directly and at a row (a consumer's descendant demand takes its path's G)
+  assert.equal(
+    answer("let v = hostValue", 'if v is string { say "${v}" }'),
+    "valid, copy-type boundary",
+  );
+  for (const [test, use] of [
+    ["xs is string[]", 'say "${xs}"'],
+    ["xs is string[][]", 'say "${xs[0]}"'],
+  ] as const)
+    assert.equal(
+      answer("let xs = hostValue", `if ${test} { ${use} }`),
+      "warning-runtime-check, member-read warning-runtime-check, copy-type boundary, empty-check",
+      `${test}: ${use}`,
+    );
+  // without the test, the operand check stays
+  assert.equal(
+    answer("let xs = hostValue", 'say "${xs}"'),
+    "warning-runtime-check, operator warning-runtime-check, copy-type boundary, operand",
+  );
+});
+
 /** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */
 function queryDoubling(source: (k: number) => string, marker: string, delta: number): number {
   const [small, large] = [64, 128].map((k) => {
@@ -1986,7 +2142,8 @@ test("a program without a test lists no narrowing (#1251)", () => {
 
 /**
  * #1251, Astra r1's witness: a root tested only in an `or`'s right operand keeps its narrowing for a stored read after
- * the early exit (an integer), with no warning or check.
+ * the early exit (an integer), with no warning; the test proves a kind, never an ingress, so `b`'s external data keeps
+ * its boundary check where it enters (C9, #1073 PR 2), as the fixture's `n1-unknown-positive` records.
  */
 test("a root tested in an or's right operand keeps its narrowing for a stored read (#1251)", () => {
   const source = [
@@ -2001,7 +2158,11 @@ test("a root tested in an or's right operand keeps its narrowing for a stored re
   for (const mode of MODES) {
     const answers = inMode(mode, () => analyseCore(request));
     assert.deepEqual(answers.diagnostics, [], JSON.stringify(mode));
-    assert.deepEqual(answers.checks, [], JSON.stringify(mode));
+    assert.deepEqual(
+      answers.checks.map((c) => [c.kind, c.target, c.boundary, c.site.start]),
+      [["copy-type", "b", true, source.indexOf("hostOther")]],
+      JSON.stringify(mode),
+    );
   }
 });
 

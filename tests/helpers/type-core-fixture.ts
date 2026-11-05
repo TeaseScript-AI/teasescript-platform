@@ -47,6 +47,114 @@ const RELEASED_ADAPTER_RECORDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Stage 3b's records the consumers' read of the narrowing completes (#1073 PR 2: every read takes its nearest G, an exact
+ * definition answers before the guard mark, a consumer's descendant demand takes its path's G), each proven complete in
+ * the four modes before its release.
+ */
+const RELEASED_S10_CONSUMER_RECORDS: ReadonlySet<string> = new Set([
+  "cp9-cells/3b/ad1/e1a/tested",
+  "cp9-cells/3b/ad1/e1b/tested",
+  "cp9-cells/3b/collection/nested",
+  "cp9-cells/3b/collection/root",
+  "cp9-cells/3b/collection/sibling-Gs",
+  "cp9-cells/3b/forms/and-operand",
+  "cp9-cells/3b/forms/equal-null-else/held",
+  "cp9-cells/3b/forms/is-integer",
+  "cp9-cells/3b/forms/is-not-integer",
+  "cp9-cells/3b/forms/is-not-null/held",
+  "cp9-cells/3b/forms/is-null-else/held",
+  "cp9-cells/3b/forms/leaving-break",
+  "cp9-cells/3b/forms/leaving-continue",
+  "cp9-cells/3b/forms/leaving-exit",
+  "cp9-cells/3b/forms/leaving-goto",
+  "cp9-cells/3b/forms/not-equal-else/held",
+  "cp9-cells/3b/forms/not-is-null/held",
+  "cp9-cells/3b/forms/not-null/held",
+  "cp9-cells/3b/forms/or-operand",
+  "cp9-cells/3b/forms/while-body",
+  "cp9-cells/3b/invalidation/add/held",
+  "cp9-cells/3b/invalidation/addAll/held",
+  "cp9-cells/3b/invalidation/clear/held",
+  "cp9-cells/3b/invalidation/removeFirst/held",
+  "cp9-cells/3b/invalidation/removeLast/held",
+  "cp9-cells/3b/invalidation/reverse/held",
+  "cp9-cells/3b/invalidation/shuffle/held",
+  "cp9-cells/3b/invalidation/sort/held",
+  "cp9-cells/3b/loop/after/held",
+  "cp9-cells/3b/loop/break/held",
+  "cp9-cells/3b/loop/continue/held",
+  "cp9-cells/3b/loop/nested/changed",
+  "cp9-cells/3b/loop/no-store",
+  "cp9-cells/3b/loop/save",
+  "cp9-cells/3b/loop/unconditional-null",
+  "cp9-cells/3b/numeric/negative-2.0",
+  "cp9-cells/3b/numeric/negative-2.5",
+  "cp9-cells/3b/numeric/overlap-18",
+  "cp9-cells/3b/numeric/overlap-19",
+  "cp9-cells/3b/numeric/overlap-20",
+  "cp9-cells/3b/numeric/positive-2.0",
+  "cp9-cells/3b/paths/fixed-index/held",
+  "cp9-cells/3b/paths/fixed-key/held",
+  "cp9-cells/3b/paths/property/held",
+  "cp9-cells/3b/paths/variable-index/held",
+  "cp9-cells/3b/paths/variable-key/held",
+  "cp9-cells/3b/r430/and-call/quiet",
+  "cp9-cells/3b/review-early/a1-exact-null-after-check",
+  "cp9-cells/3b/review-early/a1-reorder-saved-reverse",
+  "cp9-cells/3b/review-early/a1-reorder-saved-shuffle",
+  "cp9-cells/3b/review-early/a1-reorder-saved-sort",
+  "cp9-cells/3b/review-early/a2-division-preserves-number",
+  "cp9-cells/3b/review-early/a2-root-collection",
+  "cp9-cells/3b/review-early/a2-rows-index-scope",
+  "cp9-cells/3b/review-early/a2-same-location-loop",
+  "cp9-cells/3b/review-early/a4-fractional-case",
+  "cp9-cells/3b/review-early/a4-later-case-excludes-null",
+  "cp9-cells/3b/review-early/a4-number-case-3",
+  "cp9-cells/3b/review-early/a4-number-case-3dot0",
+  "cp9-cells/3b/review-early/a4-number-case-3e0",
+  "cp9-cells/3b/review-early/a4-number-case-plus3",
+  "cp9-cells/3b/review-early/a4-one-element-preserving",
+  "cp9-cells/3b/review-early/a4-root-shelves",
+  "cp9-cells/3b/review-early/astra-r1-fence-4",
+  "cp9-cells/3b/review-early/astra-r1-fence-6",
+  "cp9-cells/3b/review-early/astra-r1-fence-7",
+  "cp9-cells/3b/review-early/astra-r3-fence-2",
+  "cp9-cells/3b/review-early/loop-breaking-before",
+  "cp9-cells/3b/review-early/loop-preserving-after",
+  "cp9-cells/3b/review-early/loop-preserving-continue",
+  "cp9-cells/3b/review-early/n1-early-exit",
+  "cp9-cells/3b/review-early/n1-number-negative",
+  "cp9-cells/3b/review-early/n1-unknown-positive",
+  "cp9-cells/3b/review-early/n6-saved-computed",
+  "cp9-cells/3b/review-early/s1-nonreordering-control",
+  "cp9-cells/3b/review-early/s4-grid-scopes",
+  "cp9-cells/3b/review-early/s4-grid-use-selector-change",
+  "cp9-cells/3b/review-early/sol-r1-fence-5",
+  "cp9-cells/3b/review-early/sol-r1-fence-7",
+  "cp9-cells/3b/review-late/corridor/test-leaves",
+  "cp9-cells/3b/saved/held",
+  "cp9-cells/3b/switch/fractional",
+  "cp9-cells/3b/switch/later-case",
+  "cp9-cells/3b/switch/null-case-error",
+  "cp9-cells/3b/switch/null-default",
+  "cp9-cells/3b/switch/whole-2",
+  "cp9-cells/3b/switch/whole-2.0",
+  "cp9-cells/r42/guard/else-branch",
+  "cp9-cells/r42/guard/equals-null",
+  "cp9-cells/r42/guard/not-null",
+  "cp9-cells/r44/guard/null-member-guarded",
+  "cp9-cells/r46/guard/branch-null-eq/guarded",
+  "cp9-cells/r46/guard/branch-null-ne/guarded",
+  "cp9-cells/r46/m3/astra-m3/guard/get-index/guard",
+  "cp9-cells/r46/m3/astra-m3/guard/repeat/guard",
+  "cp9-cells/r46/m3/astra-m3/guard/same-path",
+  "cp9-cells/r46/m3/sol-m3/guard-null-16",
+  "cp9-cells/r46/m3/sol-m3/guard-null-18",
+  "cp9-cells/r46/m3/sol-m3/guard-null-20",
+  "cp9-cells/r8/n5/component-preserving",
+]);
+
+/**
  * Why a record is held back from the positive list, named by its cell or by its name, or `null` for an asserted record:
  * the tests that assert the set (the cells test's records, the candidate route's plans) hold back the same records.
  */
@@ -85,7 +193,11 @@ export function heldBack(record: FixtureRecord): string | null {
   // stage 3b (§13: N1–N10): narrowing definitions, N3's required checks for a possible null and for written unions, and
   // with them S0(c)'s class of expectations that rest on the null and written-union deviation and TABLE r4.52 AD-1's
   // re-derived records (each cites one of these cells), enter with S10
-  if (record.cells.some((cell) => /^N\d/.test(cell))) return "stage 3b's cells (S10)";
+  if (
+    record.cells.some((cell) => /^N\d/.test(cell)) &&
+    !RELEASED_S10_CONSUMER_RECORDS.has(record.name)
+  )
+    return "stage 3b's cells (S10)";
   return null;
 }
 

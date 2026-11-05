@@ -50,7 +50,7 @@ test("the core gives the expected record for every record of the cells it comple
   }
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 3,
-    "stage 3b's cells (S10)": 653,
+    "stage 3b's cells (S10)": 553,
     "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
     "S9b's F18 copy of a written type as the receiving context (r4.77 (2))": 18,
     "fromJson with files: true outside the slice, and C13's text operand": 2,
@@ -58,7 +58,7 @@ test("the core gives the expected record for every record of the cells it comple
     "a known-value error the record lacks (decision 3 on #1072)": 1,
     "C13's warning of a choice value from outside the script the record lacks (#1437)": 3,
   });
-  assert.equal(asserted.length, 1_331);
+  assert.equal(asserted.length, 1_431);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
@@ -543,9 +543,15 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
   ],
   [
     "§3.2 guarded dict keys",
-    "let xs = dict {x: 1}\nif xs != null { for key in xs { let wrong: integer = key } }",
+    "let xs = dict {x: 1}\nfunction refill { xs = dict {y: 2} }\nif xs != null { refill()\n for key in xs { let wrong: integer = key } }",
     "warning-runtime-check",
-    "branch",
+    "call",
+  ],
+  [
+    "N2 narrowed dict keys",
+    "let xs = dict {x: 1}\nif xs != null { for key in xs { let wrong: integer = key } }",
+    "compile-error",
+    "-",
   ],
   [
     "§3.2 guarded declared result",
@@ -1580,15 +1586,17 @@ test("a choice's written list element whose value is an object is TSV029's error
  * checks' targets aside.
  */
 test("a held choice object's button value is marked by a test of its selected key, as the keyed read is", () => {
-  // (each read at a count, which no stored value holds: the keyed read in a stored value takes its narrowing since S10
-  // part 2b, which the choice's value, no read of the tested path, does not)
-  const cases: readonly (readonly [string, string, string, string, string])[] = [
+  // (each read at a count: the keyed read of the tested path takes its narrowing at every consumer since #1073 PR 2,
+  // which the choice's value, no read of the tested path, does not; there the choice keeps the mark the keyed read had,
+  // and the keyed read is the tested kind, the last column)
+  const cases: readonly (readonly [string, string, string, string, string, string])[] = [
     [
       "a test of its value",
       'let o = {text: "unused", value: 2.0}\nif o.value is integer { repeat READ {} }\nexit',
       "askChoice o",
       "o.value",
       "warning-runtime-check",
+      "valid",
     ],
     [
       "a test of its text, without a value",
@@ -1596,12 +1604,14 @@ test("a held choice object's button value is marked by a test of its selected ke
       "askChoice o",
       "o.text",
       "warning-runtime-check",
+      "valid",
     ],
     [
       "a copy of a copy in the tested branch",
       'let o = {text: "unused", value: 2.0}\nif o.value is integer {\nlet p = o\nlet q = p\nrepeat READ {}\n}\nexit',
       "askChoice q",
       "q.value",
+      "warning-runtime-check",
       "warning-runtime-check",
     ],
     [
@@ -1610,6 +1620,7 @@ test("a held choice object's button value is marked by a test of its selected ke
       "askChoice opts",
       "opts[0].value",
       "warning-runtime-check",
+      "valid",
     ],
     [
       "a parameter",
@@ -1617,12 +1628,14 @@ test("a held choice object's button value is marked by a test of its selected ke
       "askChoice o",
       "o.value",
       "warning-runtime-check",
+      "valid",
     ],
     [
       "a test of the other key",
       "let o = {text: 2.0, value: 2.5}\nif o.text is integer { repeat READ {} }\nexit",
       "askChoice o",
       "o.value",
+      "compile-error",
       "compile-error",
     ],
   ];
@@ -1640,7 +1653,7 @@ test("a held choice object's button value is marked by a test of its selected ke
     ].sort(),
   ];
   const differing: string[] = [];
-  for (const [name, program, choice, keyed, outcome] of cases)
+  for (const [name, program, choice, keyed, outcome, keyedOutcome] of cases)
     for (const reversed of [false, true]) {
       const [got, expected] = [choice, keyed].map((read) => {
         const request = coreRequest([
@@ -1651,7 +1664,19 @@ test("a held choice object's button value is marked by a test of its selected ke
           withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
         return shape(reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run());
       });
-      if (JSON.stringify(got) !== JSON.stringify(expected) || got![0] !== outcome)
+      // (where the keyed read takes its narrowing, the choice keeps the mark it had: a warning and its check at the read)
+      const at = program.indexOf("READ");
+      const marked = [
+        outcome,
+        `integer-check [integer] @${at}`,
+        `integer-use warning-runtime-check branch @${at}`,
+      ];
+      const same =
+        keyedOutcome === outcome
+          ? JSON.stringify(got) === JSON.stringify(expected)
+          : JSON.stringify(got) === JSON.stringify(marked) &&
+            JSON.stringify(expected) === JSON.stringify([keyedOutcome]);
+      if (!same || got![0] !== outcome)
         differing.push(`${name}${reversed ? " reversed" : ""}: ${got!.join("; ")}`);
     }
   assert.deepEqual(differing, []);
@@ -1767,10 +1792,13 @@ test("a host list's selection keeps its empty-check under a written type or a co
        C null-check xs [non-null] 53:61
        C empty-check xs [list] 53:61`,
     ],
+    // (the collection test proves the kind, never the ingress: the external data keeps its boundary check where it
+    // enters, C9, the lead's ruling (a) on #1073 PR 2, as the fixture's `n1-unknown-positive` records)
     [
       'let xs = hostValue\nif xs is integer[] {\n    let out = xs.first\n    say "AFTER"\n}\nexit\n',
       `outcome warning-runtime-check
        D member-read warning 54:62 unknown
+       B copy-type xs [unknown] 9:18
        C empty-check xs [list] 54:62`,
     ],
   ];

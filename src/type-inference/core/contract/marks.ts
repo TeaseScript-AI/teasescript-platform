@@ -698,7 +698,8 @@ export function annotated(
     entry.ingress === undefined
       ? items
       : items.map((item) =>
-          item.tag === "unknown" && (item.reasons & REASON.external) !== 0
+          (item.tag === "unknown" && (item.reasons & REASON.external) !== 0) ||
+          item.fromExternal === true
             ? { ...item, ingress: ingress.union(item.ingress, entry.ingress)! }
             : item,
         );
