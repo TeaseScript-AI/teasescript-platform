@@ -116,11 +116,12 @@ function browser() {
 function planWrites(context: TestContext, plan: InstructionPlan) {
   const stringify = JSON.stringify;
   const count = { writes: 0 };
-  const counting = (value: unknown, ...rest: unknown[]): unknown => {
-    if (value === plan) count.writes += 1;
-    return Reflect.apply(stringify, JSON, [value, ...rest]);
-  };
-  Object.defineProperty(JSON, "stringify", { configurable: true, writable: true, value: counting });
+  JSON.stringify = new Proxy(stringify, {
+    apply(target, _self, args) {
+      if (args[0] === plan) count.writes += 1;
+      return target(args[0], args[1], args[2]);
+    },
+  });
   context.after(() => (JSON.stringify = stringify));
   return count;
 }

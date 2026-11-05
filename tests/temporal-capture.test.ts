@@ -26,7 +26,7 @@ interface HostTemporal {
 /** A host's Temporal as a test gives it, whose method may be missing. */
 interface GivenTemporal {
   readonly Instant: HostTemporal["Instant"];
-  readonly ZonedDateTime: { readonly prototype: { readonly getTimeZoneTransition?: () => void } };
+  readonly ZonedDateTime: { readonly prototype: { readonly getTimeZoneTransition?: unknown } };
 }
 
 // EVIDENCE: invariant: the repository's Node (.nvmrc) ships Temporal, so the native route is the one CI runs.
@@ -263,7 +263,7 @@ test("both ways read the window's edges and a change undone within a day as the 
     [temporal, true],
   ] as const) {
     const read = await withHost(host, (capture) => {
-      const format = (value: typeof RealFormat) =>
+      const format = (value: typeof RealFormat | typeof EdgesFormat) =>
         Object.defineProperty(Intl, "DateTimeFormat", {
           configurable: true,
           writable: true,
