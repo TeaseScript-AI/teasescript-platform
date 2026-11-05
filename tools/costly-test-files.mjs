@@ -52,6 +52,7 @@ export const costlyTestSeconds = {
   "type-core-kept.test.js": 2,
   "type-core-labels.test.js": 2,
   "type-core-oracles.test.js": 1,
+  "type-core-otherwise.test.js": 1,
   "type-core-flow-graph.test.js": 1,
   "type-core-floor.test.js": 1,
   "type-core-dominators.test.js": 1,

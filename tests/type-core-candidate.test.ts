@@ -256,6 +256,9 @@ const RECORD_CODES: Readonly<Record<string, readonly string[]>> = {
   // (C13: a `for` loop's iterable, a method's argument; the elements a `join` or a `sort` reads are a member's)
   operator: ["TSV012", "TSV043"],
   "member-read": ["TSV042", "TSV043"],
+  // (the checks that owe the runtime nothing, `staticCode`: a repeat count, a conversion, an empty range, a fallback
+  // never used)
+  static: ["TSV011", "TSV043", "TSV046", "TSV062"],
 };
 
 type ExpectedDiagnostic = ReturnType<typeof readFixture>[number]["expected"]["diagnostics"][number];

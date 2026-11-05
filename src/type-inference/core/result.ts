@@ -360,6 +360,21 @@ export type StaticRule =
       readonly start: string;
       readonly end: string;
       readonly inclusive: boolean;
+    }
+  /**
+   * V30 §18 (#1072): the fallbacks of a chain of `otherwise` from its first link whose left side is never `null`, which
+   * never run: that side and each fallback as code (`null` where a message cannot show it), and for an element read by
+   * index there, the collection's kind and its parts as code, so the warning names `get` with a `default:`.
+   */
+  | {
+      readonly rule: "unused-fallback";
+      readonly subject: string | null;
+      readonly fallbacks: readonly (string | null)[];
+      readonly read: {
+        readonly kind: "list" | "dict" | null;
+        readonly object: string | null;
+        readonly index: string | null;
+      } | null;
     };
 
 /** The registry codes the core's diagnostics carry (D3: a rule's one code, with both severities where it warns). */
@@ -373,6 +388,7 @@ export type CoreCode =
   | "TSV043"
   | "TSV044"
   | "TSV046"
+  | "TSV062"
   | "TSV075"
   | "TSV076";
 
