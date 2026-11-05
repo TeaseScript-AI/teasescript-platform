@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProjectWithBackend } from "../src/compiler.js";
-import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
+import { analyseCore, bySite, type Answers } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
+import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { ingressLeaves, REASON, type ItemTag } from "../src/type-inference/core/items.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
@@ -927,4 +928,93 @@ test("each option's nested choice selects what its own objects hold (#1233, revi
     ],
     ["compile-error", [["compile-error", "TSV029"]], []],
   );
+});
+
+/**
+ * #1734 (TABLE r4.370): a published list's order is its items' sites, then the consumers' order, then their JSON's
+ * lexical order, as before; an item is serialized only where its site and rule tie with another's, once.
+ */
+test("a published list sorts by site and rule, and serializes only the items that tie on both, once each (#1734)", () => {
+  type Record = {
+    readonly site: { file: number; start: number; end: number };
+    readonly text: string;
+  };
+  const at = (file: number, start: number, end: number, text: string): Record => ({
+    site: { file, start, end },
+    text,
+  });
+  const items = [
+    { item: at(0, 5, 9, "b"), rule: 2 },
+    { item: at(0, 5, 9, "c"), rule: 1 },
+    { item: at(0, 5, 9, "a"), rule: 2 },
+    { item: at(1, 0, 1, "z"), rule: 0 },
+    { item: at(0, 5, 7, "y"), rule: 3 },
+    { item: at(0, 2, 9, "x"), rule: 9 },
+    { item: at(0, 5, 9, "a"), rule: 2 },
+  ];
+  // (the order of the eager comparison every item's JSON took part in before)
+  const eager = [...items]
+    .map((each) => ({ ...each, text: JSON.stringify(each.item) }))
+    .sort(
+      (a, b) =>
+        a.item.site.file - b.item.site.file ||
+        a.item.site.start - b.item.site.start ||
+        a.item.site.end - b.item.site.end ||
+        a.rule - b.rule ||
+        (a.text < b.text ? -1 : a.text > b.text ? 1 : 0),
+    )
+    .map(({ item }) => item);
+  const stringify = JSON.stringify;
+  const serialized: string[] = [];
+  JSON.stringify = (value: unknown, ...rest: never[]) => {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "text" in value &&
+      typeof value.text === "string"
+    )
+      serialized.push(value.text);
+    return stringify(value, ...rest);
+  };
+  let sorted: Record[];
+  try {
+    sorted = bySite(items);
+  } finally {
+    JSON.stringify = stringify;
+  }
+  assert.deepEqual(sorted, eager);
+  // (the three at 0:5–9 under rule 2 tie on site and rule; each serialized once)
+  assert.deepEqual(serialized.sort(), ["a", "a", "b"]);
+});
+
+/**
+ * #1734: a stopped analysis's many records (a chain of `and`-ed guards stopped in admission at demand 16) publish
+ * without serializing their shared operand text, so what the sort keeps does not grow with the records' text: the
+ * serialized length is bounded at three doublings while the records grow with the chain.
+ */
+test("a stopped analysis's records sort without serializing their text, bounded at three doublings (#1734)", () => {
+  const source = (k: number): string =>
+    `let root = {a: 1, b: 1, n: [1, hostValue][1]}\nlet ok = ${Array.from({ length: k }, (_, i) => (i === 0 ? "root.a is integer" : "root.b is integer")).join(" and ")} and true\nlet box = root\nrepeat box.n {}\nexit\n`;
+  const stringify = JSON.stringify;
+  const measured = [16, 32, 64].map((k) => {
+    const request = coreRequest([{ path: "main.tease", source: source(k) }], ["hostValue"]);
+    assert.ok(request !== null);
+    let length = 0;
+    JSON.stringify = (value: unknown, ...rest: never[]) => {
+      const text = stringify(value, ...rest);
+      length += text?.length ?? 0;
+      return text;
+    };
+    let answers: Answers;
+    try {
+      answers = withTestDemandAllowance(16, () => analyseCore(request));
+    } finally {
+      JSON.stringify = stringify;
+    }
+    return { length, deferred: answers.budget.deferred.length, stopped: answers.budget.stoppedIn };
+  });
+  for (const each of measured) assert.equal(each.stopped, "admission", stringify(measured));
+  // (the records grow with the chain; what the sort serializes does not)
+  assert.ok(measured[2]!.deferred > 3 * measured[0]!.deferred, stringify(measured));
+  assert.ok(measured[2]!.length <= measured[0]!.length + 64, stringify(measured));
 });
