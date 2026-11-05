@@ -1502,6 +1502,8 @@ test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 P
     "let xs = [raw]\n repeat xs[0] {}",
     "let xs = [raw, 1]\n repeat xs[0] {}",
     "let out: integer = raw\n repeat out {}",
+    // (a result computed from it brought no data in: the operand's ingress check alone, Codex r2 on #1770)
+    "let out: integer = raw + 1\n repeat out {}",
   ])
     assert.equal(
       answer("let raw = hostValue", `if raw is integer { ${body} }`),
