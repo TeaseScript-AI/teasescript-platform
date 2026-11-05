@@ -646,6 +646,8 @@ export function loadGroups(dir) {
     if (groups.has(g.id)) throw new Error(`The group ${g.id} twice in the table.`);
     if (!["conforms", "defect", "pending"].includes(g.state))
       throw new Error(`The group ${g.id} has no known state.`);
+    if (g.state !== "conforms" && (typeof g.closes !== "string" || g.closes.trim() === ""))
+      throw new Error(`The open group ${g.id} names nothing that closes it.`);
     groups.set(g.id, g);
   }
   const bindings = new Map();
@@ -990,9 +992,11 @@ export function classifyRecords(entries, expected = null, groups = null) {
 
 /** The gate table as markdown: one line a class with pairs, sources, state and its first witness. */
 function markdown(result) {
+  // (a cell's text: a source's name can hold a | or a line break)
+  const cell = (text) => String(text).replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
   const line = (r) =>
-    `| ${r.id} | ${r.state} | ${r.pairs} | ${r.sources} | ${r.witnesses
-      .map((w) => `${w.key.slice(0, 12)} ${w.name ?? ""}${w.mode ? ` (${w.mode})` : ""}`)
+    `| ${cell(r.id)} | ${cell(r.state)} | ${r.pairs} | ${r.sources} | ${r.witnesses
+      .map((w) => cell(`${w.key.slice(0, 12)} ${w.name ?? ""}${w.mode ? ` (${w.mode})` : ""}`))
       .join("; ")} |`;
   const t = result.totals;
   return [

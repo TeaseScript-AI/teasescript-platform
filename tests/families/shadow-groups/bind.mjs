@@ -56,10 +56,14 @@ const wanted = new Map();
 for (const line of readFileSync(bindingsFile, "utf8").split("\n"))
   if (line.trim() !== "") {
     const b = JSON.parse(line);
-    wanted.set(`${b.key} ${MODES.indexOf(b.mode)}`, b);
+    const at = `${b.key} ${MODES.indexOf(b.mode)}`;
+    // (one adjudication a pair: a second, to whatever group, is refused, never an overwrite)
+    if (wanted.has(at)) throw new Error(`The pair ${at} adjudicated twice.`);
+    wanted.set(at, b);
   }
 const lines = [];
-const found = new Set();
+/** Each bound pair's line as its first record gave it: every later record of the pair must give the same. */
+const found = new Map();
 for (const file of readFileSync(recordsList, "utf8").split(/\s+/).filter(Boolean))
   for (const line of readFileSync(file, "utf8").split("\n")) {
     if (line.trim() === "") continue;
@@ -70,7 +74,7 @@ for (const file of readFileSync(recordsList, "utf8").split(/\s+/).filter(Boolean
     for (const [index, row] of reading.rows.entries()) {
       const at = `${raw.key} ${index}`;
       const b = wanted.get(at);
-      if (b === undefined || found.has(at)) continue;
+      if (b === undefined) continue;
       const rawRow = raw.rows.find(
         (r) => r.mode.reversed === row.mode.reversed && r.mode.unshared === row.mode.unshared,
       );
@@ -94,10 +98,15 @@ for (const file of readFileSync(recordsList, "utf8").split(/\s+/).filter(Boolean
       const cls = classes.find((p) => p.mode === MODES[index])?.class;
       if (cls !== b.class)
         throw new Error(`The binding ${at} is ${b.class}, the classifier reads ${cls}.`);
-      found.add(at);
-      lines.push(
-        `${raw.key.slice(0, 16)} ${index} ${b.group} ${pairGuard(row).slice(0, 16)} ${cls}`,
-      );
+      const bound = `${raw.key.slice(0, 16)} ${index} ${b.group} ${pairGuard(row).slice(0, 16)} ${cls}`;
+      // (a record of the pair again, as a repeated source in another set: checked as the first, and the same line)
+      if (found.has(at)) {
+        if (found.get(at) !== bound)
+          throw new Error(`The pair ${at} recorded twice with other readings.`);
+        continue;
+      }
+      found.set(at, bound);
+      lines.push(bound);
     }
   }
 const missing = [...wanted.keys()].filter((at) => !found.has(at));

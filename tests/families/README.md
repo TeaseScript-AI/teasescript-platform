@@ -299,10 +299,11 @@ its class. A pair takes its binding's group where its key, mode, class and guard
 reading) all match; otherwise it is `changed` (bound, but its reading or class differs) or `unbound` (no binding). Only
 `conforms` is attributed. `defect` stays open until its issue closes, `pending` until its construction lands, and
 `changed` and `unbound` until a re-adjudication; each closes only by a new table, never by a matching signature (one
-signature spans several groups). `gate.json` names both files' sha256. `shadow-groups/bind.mjs` writes the table from
-an adjudication and the run it adjudicated, refusing a binding whose raw publication differs from its record's. A
-re-adjudication replaces both files whole, so the table's history is by version, not by diff. The first table is Sol's
-preparation of gate run 2 (#1744 comment 6655890944).
+signature spans several groups). `gate.json` names both files' sha256. Keys and guards are kept by their first 16
+digits: two of the gate's sources sharing a key prefix would need a 64-bit collision, and none of today's 12,644 bound
+sources do. `shadow-groups/bind.mjs` writes the table from an adjudication and the run it adjudicated, refusing a
+binding whose raw publication differs from its record's. A re-adjudication replaces both files whole, so the table's
+history is by version, not by diff. The first table is Sol's preparation of gate run 2 (#1744 comment 6655890944).
 
 The #1704 witnesses (`copies`, `--only` with `1188-sol-candidate-neighbours.mjs/node-graft@8`, `node-mixed@8`,
 `node-graft@64`, `node-mixed@64`, `construction/node-graft@64`): at 8 both routes plan in every mode; at 64 the legacy

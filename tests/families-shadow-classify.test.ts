@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -746,10 +747,156 @@ test("the group table: its bindings decide a grouped pair's state, by key, mode 
       table([line(a, "G1", guard(a), "differs/checks")]),
     );
     assert.equal(recast.perPair[0].groupState, "changed");
+    // (an open group must name what closes it)
+    writeFileSync(
+      join(folder, "groups.json"),
+      JSON.stringify({ groups: [{ id: "C", state: "defect", title: "no issue" }] }),
+    );
+    assert.throws(() => C.loadGroups(folder), /names nothing that closes it/);
     // (a malformed table is refused: a pair bound twice, a binding to no group)
     assert.throws(() => table([line(a, "G1"), line(a, "G2")]), /bound twice/);
     assert.throws(() => table([line(a, "G9")]), /bound to no group/);
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }
+});
+
+test("bind.mjs joins an adjudication with its run, refusing a pair adjudicated twice or recorded twice with other readings, in either order", () => {
+  const folder = mkdtempSync(join(tmpdir(), "shadow-bind-"));
+  try {
+    const differing = (message: string) =>
+      record("k1", () => ({
+        core: planned([diagnostic("TSV041", 7, message)]),
+        delta: { ...SAME, diagnosticIdentity: true, diagnosticText: true },
+      }));
+    const canon = (x: unknown): string =>
+      JSON.stringify(x, (_, v) =>
+        v && typeof v === "object" && !Array.isArray(v)
+          ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+          : v,
+      );
+    const rawGuard = (r: ReturnType<typeof record>, i: number) =>
+      createHash("sha256")
+        .update(
+          canon(
+            Object.fromEntries(
+              (["legacy", "core"] as const).map((x) => [
+                x,
+                Object.fromEntries(
+                  (["outcome", "diagnostics", "checks", "planHash"] as const).map((f) => [
+                    f,
+                    r.rows[i]![x][f] ?? null,
+                  ]),
+                ),
+              ]),
+            ),
+          ),
+        )
+        .digest("hex");
+    const MODE_NAMES = [
+      "source order, sharing on",
+      "source order, sharing off",
+      "reversed, sharing on",
+      "reversed, sharing off",
+    ];
+    const write = (name: string, text: string) => {
+      writeFileSync(join(folder, name), text);
+      return join(folder, name);
+    };
+    const tableJson = write(
+      "table.json",
+      JSON.stringify({
+        schema: "test",
+        rows: [
+          { id: "G", parent: null, leaf: true, verdict: "conforms", title: "one", witness: null },
+          {
+            id: "D",
+            parent: null,
+            leaf: true,
+            verdict: "defect",
+            title: "a defect",
+            witness: null,
+          },
+        ],
+      }),
+    );
+    const tableMd = write(
+      "table.md",
+      "| G one | 4 / 1 | attributed / conforms |\n| D a defect | 4 / 1 | open / defect / #1 |\n",
+    );
+    const good = differing("one text");
+    const other = differing("another text");
+    const adjudication = (r: ReturnType<typeof record>, groups: string[]) =>
+      groups
+        .map((group, n) =>
+          JSON.stringify({
+            key: r.key,
+            mode: MODE_NAMES[n % 4],
+            group,
+            class: "differs/rule",
+            publicationSHA256: rawGuard(r, n % 4),
+          }),
+        )
+        .join("\n");
+    const run = (bindings: string, records: unknown[]) => {
+      const list = write(
+        "records.txt",
+        write("records.jsonl", records.map((r) => JSON.stringify(r)).join("\n")),
+      );
+      const out = mkdtempSync(join(folder, "out-"));
+      return spawnSync(
+        process.execPath,
+        [
+          resolve("tests/families/shadow-groups/bind.mjs"),
+          tableJson,
+          tableMd,
+          write("pairs.jsonl", bindings),
+          list,
+          out,
+        ],
+        { encoding: "utf8" },
+      );
+    };
+    const four = adjudication(good, ["G", "G", "G", "G"]);
+    assert.equal(run(four, [good]).status, 0, run(four, [good]).stderr);
+    // (the same pair recorded again with another reading: refused, in either order)
+    for (const records of [
+      [good, other],
+      [other, good],
+    ])
+      assert.notEqual(run(four, records).status, 0);
+    // (a pair adjudicated twice, to two groups: refused)
+    const twice = `${four}\n${adjudication(good, ["D"])}`;
+    const refused = run(twice, [good]);
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /adjudicated twice/);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("gate.md keeps a witness's | and line breaks inside their cell", async () => {
+  const C = await load();
+  const named = {
+    ...record("odd", () => ({ core: planned([], "q"), delta: { ...SAME, plan: true } })),
+    origins: [{ set: "x", name: "a | b\nc" }],
+  };
+  const folder = mkdtempSync(join(tmpdir(), "shadow-md-"));
+  try {
+    writeFileSync(join(folder, "odd.jsonl"), `${JSON.stringify(named)}\n`);
+    const ran = spawnSync(
+      process.execPath,
+      [tool, join(folder, "odd.jsonl"), "--groups", "none", "--out", join(folder, "out")],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 0, ran.stderr);
+    const row = readFileSync(join(folder, "out", "gate.md"), "utf8")
+      .split("\n")
+      .find((l) => l.startsWith("| differs/plan "))!;
+    assert.equal(row.split(/(?<!\\)\|/).length, 7, row);
+    assert.ok(row.includes("a \\| b c"), row);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+  void C;
 });
