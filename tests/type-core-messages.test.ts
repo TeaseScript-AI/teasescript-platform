@@ -2735,6 +2735,24 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let a:integer[][]=[[1]]\na+=[null]\nlet xs=[a,[["x"]]]\nexit\n',
       `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
     ],
+    // (an indirect copy, by index or `otherwise`: its declared type too, Codex r3's B1)
+    [
+      'let a:integer[][][]=[[[1],null]]\nlet xs=[a[0],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1],null]\nlet xs=[a otherwise [[2]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a nested join of a copy and a literal: the literal's null, the copy's declared type)
+    [
+      'let a:integer[][]=[[1],null]\nlet xs=[(a+[[1]])+[null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1],null]\nlet xs=[a+[[2]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
     // (no layer that may hold null: plain)
     [
       'let a:integer[][]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',

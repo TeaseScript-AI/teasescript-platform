@@ -350,6 +350,40 @@ export function literalElements(
       shared = paths;
       atCopy = atCopies.get(key)!;
     }
+    // (#1765: whether a value may hold null at a layer, by its own form, never by what a copy's items hold: a join, if
+    // any operand may, each by this same rule; anything a written copy decides, its term alone, whatever a rejected
+    // store put there; anything else, a null among its items; Codex r1–r3 on #1789, the lead's ruling (ii))
+    const mayHoldNull = (value: PlaceId, node: FlowNode, prefix: readonly string[]): boolean => {
+      const pending = [value];
+      for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
+        program.work.charge("checks");
+        const c = program.opOf.get(at);
+        if (
+          c !== undefined &&
+          c.kind === "operation" &&
+          c.contract.family === "operator" &&
+          c.contract.name === "+" &&
+          c.arguments.length === 2
+        ) {
+          pending.push(...c.arguments);
+          continue;
+        }
+        const copied = holdsSource(admission, at)
+          ? (drive(admission, earliestDecider(admission, at, node, prefix, null))?.term ?? null)
+          : null;
+        if (copied !== null) {
+          if (typeTags(copied).includes("null")) return true;
+          continue;
+        }
+        if (
+          withoutEmpty(admission.run(contract.contractOfValueAt(at, prefix))).some(
+            (item) => item.tag === "null",
+          )
+        )
+          return true;
+      }
+      return false;
+    };
     const first = new Map<
       string,
       {
@@ -383,19 +417,9 @@ export function literalElements(
       // (#1765: the layers between the element and the leaf that may hold null, each element's: a written copy's term
       // there, or a null among its items; the sentence's type alone, as the leaf's own null is, #1753)
       const layers = (of: Definition): boolean[] =>
-        intermediateLayers(admission.work, path).map((prefix) => {
-          const copied = named(of)
-            ? (drive(admission, earliestDecider(admission, of.value!, of.node, prefix, null))
-                ?.term ?? null)
-            : null;
-          // (a plain copy of a written binding is its term, whatever a rejected store put there, Codex r2's B1; anything
-          // else holding one, a join, also what its other operands bring, Codex r1's B1)
-          const kind = program.place(of.value!).kind;
-          const plain = kind.kind === "value" && kind.node === "identifier";
-          const written = copied !== null && typeTags(copied).includes("null");
-          if (copied !== null && plain) return written;
-          return written || admission.valueAt(of, prefix).some((item) => item.tag === "null");
-        });
+        intermediateLayers(admission.work, path).map((prefix) =>
+          mayHoldNull(of.value!, of.node, prefix),
+        );
       const optional = mixedOptional(layers(first.get(at)!.d), layers(d));
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,
