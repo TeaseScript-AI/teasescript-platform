@@ -346,11 +346,6 @@ function passesWrapper(contract: Contract, value: PlaceId): boolean {
   return chain !== null && contract.wrapperHop(chain.root, chain.first) !== null;
 }
 
-/** Whether a set holds a host read's leaf. */
-function hosted(frontier: Frontier, set: number): boolean {
-  return frontier.members[set]!.some((node) => frontier.hosts.has(node));
-}
-
 /** A host read's leaf: the runtime's unknown at every path, its ingress entered (`hostAt`, `entered`). */
 function hostLeaf(frontier: Frontier, value: PlaceId): number {
   const { guards, program } = frontier.contract.pass;
@@ -420,7 +415,12 @@ function rules(frontier: Frontier, goal: Goal): void {
   const s = goal.step;
   const into = (found: number): void => gain(frontier, goal, found);
   step(frontier);
-  if (node.kind === "leaf") return into(goal.node);
+  if (node.kind === "leaf") {
+    // (a host's data at an element step may hold none, `emptyAt`, where its read's frame holds a structure there and
+    // not where it does not: a frame's own, which the graph does not keep, so declined wherever the step reaches it)
+    if (s === "element" && frontier.hosts.has(goal.node)) throw new Decline("host element");
+    return into(goal.node);
+  }
   if (node.kind === "native") throw new Decline("native");
   if (node.kind === "key") {
     const below = keptSteps(contract.work, node.path, [s]);
@@ -716,7 +716,11 @@ function leavesOf(frontier: Frontier, start: readonly number[]): Set<number> {
     }
   }
   const out = new Set<number>();
-  for (const root of start) for (const leaf of frontier.leaves.get(root)!) out.add(leaf);
+  for (const root of start)
+    for (const leaf of frontier.leaves.get(root)!) {
+      step(frontier);
+      out.add(leaf);
+    }
   return out;
 }
 
@@ -869,14 +873,8 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
     propertiesOrElements(steps);
     const frontier = frontierOf(contract);
     let set = intern(frontier, [rootNode(frontier, keyPlace(key))]);
-    const word = keptSteps(contract.work, path, steps);
-    word.forEach((each, at) => {
-      // (a host's data at a path ending in an element may hold none, `emptyAt`, where its read's frame holds a
-      // structure there and not where it does not: a frame's own, which the graph does not keep, so declined)
-      if (at === word.length - 1 && each === "element" && hosted(frontier, set))
-        throw new Decline("host element");
-      set = star(frontier, set, each);
-    });
+    for (const each of path) set = star(frontier, set, each);
+    for (const each of steps) set = star(frontier, set, each);
     return setMembers(frontier, set);
   });
 }

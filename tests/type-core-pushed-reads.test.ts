@@ -178,6 +178,20 @@ test("where the native reader ends, a pushed read answers what it does, raw and 
       'say "${p1.q.q.g}"',
       "exit",
     ].join("\n") + "\n",
+    // r2's: a host a literal's read reaches at the element step itself (declined there too)
+    [
+      "let p0={}",
+      "let p1={}",
+      "p1.q={s:hostValue}",
+      "p1=p0",
+      "p0=p1",
+      "p1=p1.q",
+      "p0.q={s:{g:1}}",
+      "let x=p1.s",
+      "let y=x[0]",
+      'say "${y}"',
+      "exit",
+    ].join("\n") + "\n",
     // a written binding below the projection, where the read ends there (its type answers: read natively)
     ring({ q: spine(3), cycle: false, extra: ['say "${p1.q.q.q.f}"'] }),
   ];
