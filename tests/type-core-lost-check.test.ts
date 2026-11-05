@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSourceWithBackend } from "../src/compiler.js";
+import type { RuntimeScriptStorageEntrySnapshot } from "../src/runtime/host-data/script-storage.js";
 import {
   createSerializableList as list,
   createSerializableObject,
@@ -36,6 +37,7 @@ interface Witness {
   readonly source: string;
   readonly forbidden: Readonly<Record<string, SerializableRuntimeValue>>;
   readonly at: string;
+  readonly storage?: readonly RuntimeScriptStorageEntrySnapshot[];
 }
 
 const witness = (
@@ -46,7 +48,14 @@ const witness = (
     hostOther: 3,
   },
   at = "hostValue",
-): Witness => ({ name, source: source + END, forbidden, at });
+  storage?: Witness["storage"],
+): Witness => ({
+  name,
+  source: source + END,
+  forbidden,
+  at,
+  ...(storage === undefined ? {} : { storage }),
+});
 
 /** At demand 16 in four modes: a required check is Lost at a settled decision stop (the witnesses' r4.295 column (2)). */
 const DECLINED: readonly Witness[] = [
@@ -83,6 +92,22 @@ const DECLINED: readonly Witness[] = [
     {},
     "base\ncombined",
   ),
+  // (Codex r1: a boundary the stop checks against bare `unknown`, no store, reader or part check carrying its contract)
+  witness(
+    "r1-get-default",
+    "let a={n:[[1]]}\nlet b=a\nb.n=[hostValue].get(0,default:a.n)",
+    { hostValue: nested("x") },
+    "[hostValue]",
+  ),
+  witness(
+    "r1-parse",
+    "let a={n:[[1]]}\na=fromJson(hostValue,default:a,files:false)\nsay toJson(a)",
+    { hostValue: '{"n":[["x"]]}' },
+    "fromJson",
+  ),
+  witness("r1-load", 'let a={n:[[1]]}\nlet b=a\nb=load("k",default:a)\nsay toJson(b)', {}, "load", [
+    { key: "k", value: object({ n: nested("x") }) },
+  ]),
   // (declined at the first Lost store in source order: the retarget's, before the independent store's)
   witness(
     "1648-independent-beside-retarget",
@@ -111,16 +136,20 @@ function compiled(
 
 const said = (run: ReturnType<typeof runGlobals>): boolean =>
   run.said.some((at) => at.text === "AFTER");
+// (forbidden input passes when the run reaches AFTER, and where the witness shows its value, shows the forbidden text:
+// a typed parse or load that rejects its input takes its default and goes on)
+const passes = (source: string, run: ReturnType<typeof runGlobals>): boolean =>
+  said(run) && (!source.includes("toJson") || run.said.some((at) => at.text.includes('"x"')));
 
 test("a program whose required check a settled stop lost is declined at its store, in four modes (#1526 decision 2, condition 1)", () => {
   for (const mode of MODES)
-    for (const { name, source, forbidden, at } of DECLINED) {
+    for (const { name, source, forbidden, at, storage } of DECLINED) {
       const where = `${name} (mode ${JSON.stringify(mode)})`;
       // (natural: no stop, no registry, nothing declined; the natural compile or its plan rejects the forbidden input)
       const natural = inMode(mode, () => compiled(source, null));
       if (natural.plan !== null)
         assert.equal(
-          said(runGlobals(natural.plan, forbidden)),
+          passes(source, runGlobals(natural.plan, forbidden, storage)),
           false,
           `${where}: the natural plan rejects`,
         );

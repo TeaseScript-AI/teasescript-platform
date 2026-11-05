@@ -1285,10 +1285,11 @@ function lostCheck(
 
 /**
  * Whether the plan keeps an obligation's check at its store (`lostCheck`): a shape the analysis proved, or one a complete
- * store check carries; a contract proved open; a complete store check (settled or received, its whole type); a typed
- * parse's or load's own reader of the value stored (F18: the call reads its value with that type, its boundary its
- * own); or a contract the completion completed where the natural plan does not check the store whole and no part check
- * at the obligation's path is weaker than that contract (#1682).
+ * store check carries; a contract proved open; a complete store check (settled or received, its whole type); or a
+ * contract the completion completed that a published check carries at the obligation's path, with the contract's own
+ * type there: the store's check, a typed parse's or load's reader of the value stored (F18), or, where the natural plan
+ * does not check the store whole, its part checks there (#1682); or one the stored literal's own kind meets. A check
+ * against bare `unknown` where the contract owes a domain carries nothing.
  */
 function keeps(
   answers: Answers,
@@ -1307,21 +1308,14 @@ function keeps(
   if (obligation.extent === "shape" || "shape" in result) return result.state !== "lost" || whole;
   if (result.state === "open" || whole) return true;
   const value = unwrap(store.kind === "letStatement" ? store.initializer : store.value);
-  if (
-    value.kind === "loadExpression"
-      ? checks.has(value)
-      : value.kind === "callExpression" && core.expected.has(value)
-  )
-    return true;
-  // (a contract the completion completed, which the natural plan checks by the store's parts: a part check at the
-  // obligation's path carrying it; where the natural plan checks the store whole, `completedCheck`, or the part there is
-  // weaker than the contract, #1645's whole object, nothing stands for it)
+  // (a contract the completion completed is kept only by a published check that carries it at the obligation's path:
+  // the store's own check, a typed parse's or load's reader of the value stored, or the store's part checks there;
+  // where the natural plan checks the store whole, `completedCheck`, its parts stand for nothing, #1645's whole object)
   const contract = answers.received(obligation.place, obligation.path);
   const destination = answers.storedPlace(nodeOf(answers, index, store));
   if (
     result.state !== "complete" ||
     contract?.state !== "complete" ||
-    answers.completedCheck(index.site(value)) ||
     destination === null ||
     destination.id !== obligation.place ||
     destination.path.some((step, at) => obligation.path[at] !== step)
@@ -1332,6 +1326,18 @@ function keeps(
     .map((step) =>
       step === "element" || step === "entry" || step === "index" ? "[]" : propertyName(step),
     );
+  const carries = (type: TypePlan | null | undefined): boolean =>
+    type !== null &&
+    type !== undefined &&
+    JSON.stringify(typeAt(type, below)) === JSON.stringify(contract.ref);
+  const reader =
+    value.kind === "loadExpression"
+      ? checks.get(value)?.type
+      : value.kind === "callExpression"
+        ? core.expected.get(value)
+        : undefined;
+  if (carries(checks.get(store)?.type) || carries(reader)) return true;
+  if (answers.completedCheck(index.site(value))) return false;
   // (a contract the stored literal's own kind meets there, nothing below it constrained: `{}` for an object literal, a
   // collection of any elements for one of its kind, which the natural plan does not check either)
   let literal: Expression | undefined = value;
@@ -1350,26 +1356,40 @@ function keeps(
       (plan.kind === "set" && plan.element === null && literal.kind === "setLiteral"))
   )
     return true;
-  // (a part check at or below the obligation's path weaker than the contract there stands for nothing, #1645's whole
-  // object; where no part check stands there either, the natural plan checks the value by other content, a fallback's or
-  // an operand's, which the stop leaves as it is)
-  return (core.partChecks.get(store) ?? []).every((part) => {
+  // (the part checks at or below the obligation's path, each the contract's type there where it has one: a weaker one
+  // stands for nothing, #1645's whole object; with none, only a stored literal is kept, whose external data the natural
+  // plan checks by the literal's own kind at its boundary and by the completion's warnings, none here, #1437: a value
+  // that is itself external data, a call's or a read's, owes its contract at the store)
+  const parts = (core.partChecks.get(store) ?? []).filter((part) => {
     const steps = part.path.map((step) => ("element" in step ? "[]" : step.property));
-    if (steps.length < below.length || below.some((step, at) => steps[at] !== step)) return true;
-    let at: TypePlan | null = contract.ref;
-    for (const step of steps.slice(below.length))
-      at =
-        at === null
-          ? null
-          : step === "[]"
-            ? at.kind === "list" || at.kind === "set" || at.kind === "dict"
-              ? at.element
-              : null
-            : at.kind === "object"
-              ? (at.properties.find((property) => property.name === step)?.type ?? null)
-              : null;
+    return steps.length >= below.length && below.every((step, at) => steps[at] === step);
+  });
+  if (parts.length === 0)
+    return (
+      value.kind === "objectLiteral" || value.kind === "listLiteral" || value.kind === "setLiteral"
+    );
+  return parts.every((part) => {
+    const steps = part.path.map((step) => ("element" in step ? "[]" : step.property));
+    const at = typeAt(contract.ref, steps.slice(below.length));
     return at === null || JSON.stringify(part.type) === JSON.stringify(at);
   });
+}
+
+/** A type plan's part at a path of property names and `[]` (an element, entry or value), `null` where it has none. */
+function typeAt(type: TypePlan, steps: readonly string[]): TypePlan | null {
+  let at: TypePlan | null = type;
+  for (const step of steps)
+    at =
+      at === null
+        ? null
+        : step === "[]"
+          ? at.kind === "list" || at.kind === "set" || at.kind === "dict"
+            ? at.element
+            : null
+          : at.kind === "object"
+            ? (at.properties.find((property) => property.name === step)?.type ?? null)
+            : null;
+  return at;
 }
 
 /**
