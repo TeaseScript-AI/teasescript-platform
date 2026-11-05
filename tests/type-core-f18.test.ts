@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProjectWithBackend } from "../src/compiler.js";
-import { analyseCore } from "../src/type-inference/core/answers.js";
+import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { nodeOf, SliceIndex } from "../src/type-inference/core/consumer.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { readFixture } from "./helpers/type-core-fixture.js";
 import { narrowingPassIn } from "./helpers/type-core-narrowing.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import { plannedContent, runGlobals } from "./helpers/type-core-route.js";
@@ -311,5 +312,26 @@ test("two typed calls of one default read at different snapshots are two sharing
         source,
       );
     }
+  }
+});
+
+test("a literal default keeps the contract's own walk: cp9-cells/F18/load-integer costs main's units, in four modes (F18)", () => {
+  // (only a default that reads a variable or computes takes the value side's walk at its call; literal data costs what
+  // it did, its typed default's run 4 units and the decision of `x` 15, the analysis 246)
+  const record = readFixture().find((entry) => entry.name === "cp9-cells/F18/load-integer");
+  assert.ok(record !== undefined);
+  const request = coreRequest(record.files);
+  assert.ok(request !== null);
+  for (const mode of MODES) {
+    const { budget } = inMode(mode, (): Answers => analyseCore(request));
+    assert.deepEqual(
+      {
+        total: budget.total,
+        decisions: budget.decisions.map((d) => d.units),
+        default: budget.finished.filter((f) => f.key.startsWith("dk")).map((f) => f.units),
+      },
+      { total: 246, decisions: [15], default: [4] },
+      JSON.stringify(mode),
+    );
   }
 });
