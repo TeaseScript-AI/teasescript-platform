@@ -2,12 +2,18 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
+import {
+  analyseCore,
+  type Answers,
+  type DecisionWork,
+} from "../src/type-inference/core/answers.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
+  decisionOf,
+  decisionsByKey,
   everyAnswer,
   ingressAnswers,
   inMode,
@@ -256,3 +262,29 @@ type Nest = number | Nest[] | Wrapped;
 class Wrapped {
   public constructor(public readonly a: Nest) {}
 }
+
+test("a decision record is read by its place and its exact path, never by the first of its place or a joined text", () => {
+  const record = (place: number, path: string[], units = 1): DecisionWork => ({
+    place,
+    path,
+    units,
+    allowance: 100,
+    stopped: false,
+  });
+  const list = [record(1, []), record(1, ["a.b"]), record(1, ["a", "b"], 7), record(2, [])];
+  assert.equal(decisionOf(list, { place: 1, path: ["a", "b"] }).units, 7);
+  assert.deepEqual(decisionOf(list, { place: 1, path: ["a.b"] }).path, ["a.b"]);
+  assert.throws(
+    () => decisionOf(list, { place: 3, path: [] }),
+    /No decision records at \[3,\[\]\]/,
+  );
+  assert.throws(
+    () => decisionOf([...list, record(2, [])], { place: 2, path: [] }),
+    /2 decision records at \[2,\[\]\]/,
+  );
+  assert.equal(decisionsByKey(list).size, 4);
+  assert.throws(
+    () => decisionsByKey([...list, record(1, ["a", "b"])]),
+    /Two decision records at \[1,\["a","b"\]\]/,
+  );
+});
