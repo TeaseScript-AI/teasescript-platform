@@ -6,6 +6,7 @@ import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { nodeOf, SliceIndex } from "../src/type-inference/core/consumer.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { narrowingPassIn } from "./helpers/type-core-narrowing.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import { plannedContent, runGlobals } from "./helpers/type-core-route.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
@@ -276,4 +277,39 @@ test("the call-site snapshot costs work linear in the typed defaults, nested or 
           `${shape} (mode ${JSON.stringify(mode)}): ${totals.join(", ")}`,
         );
     }
+});
+
+test("two typed calls of one default read at different snapshots are two sharing classes, as their contracts differ (F18)", () => {
+  // (a class promises its members the same kinds at every path, `Contract.classOf`: a typed call's contract now follows
+  // its default at its call, so the default's snapshot is part of the call's class)
+  for (const call of [
+    (d: string) => `load("k", default: ${d})`,
+    (d: string) => `fromJson(hostValue, default: ${d}, files: false)`,
+  ]) {
+    const source = `let d = 0\nlet x = ${call("d")}\nd = 1.5\nlet y = ${call("d")}\nsay x\nsay y\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+    assert.ok(request !== null, source);
+    for (const reversed of [false, true]) {
+      const pass = narrowingPassIn(request, reversed);
+      const results = pass.program.constraints.flatMap((c) =>
+        c.kind === "load" || (c.kind === "operation" && c.contract.name === "fromJson")
+          ? [c.result]
+          : [],
+      );
+      assert.equal(results.length, 2, source);
+      const kinds = results.map((value) =>
+        pass.solver
+          .run(pass.contract.contractOfValue(value))
+          .map((item) => item.tag)
+          .sort()
+          .join("|"),
+      );
+      assert.deepEqual(kinds, ["integer", "number"], source);
+      assert.notEqual(
+        pass.contract.classOf(results[0]!, false),
+        pass.contract.classOf(results[1]!, false),
+        source,
+      );
+    }
+  }
 });
