@@ -1028,7 +1028,8 @@ operations stay as they are.
   it, or `null`, in work proportional to the scope depth. `inspect()` returns `inspectRuntimeState`'s detached debugger
   inspection after capturing and validating the whole state. Storage and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return plain
-  data that later operations do not change; importing it again crosses the external-data boundary. Data that crosses
+  data that later operations do not change; importing it again crosses the external-data boundary, where each object
+  of the state must have exactly the fields that the current snapshot revision defines. Data that crosses
   it is validated exactly once, by the factory it enters: the session runs the state that the factory validated, so a
   host restores a checkpoint with `restoreRuntimeSession` or `deserializeRuntimeSession` rather than `restoreCheckpoint`
   followed by `createRuntimeSession`, which would validate it twice. For trusted hosts
@@ -2079,8 +2080,8 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
 | Instruction plan | 105 | A check of a part of a stored value (#1224; only the new type analysis's plans carry it): a `declareBinding` or an `assign` may carry `partChecks`, each a path of properties and elements, a type and a place, which the runtime checks in the value it stores where the value has that part; plan validation previously rejected the field. |
-| Runtime snapshot | 91 | Form presentation (#1153): a form settlement carries `temporalPresentation`, the date and time presentation its answers were shown in, from which the Player rebuilds the summary; previously it used the presentation in force when the session was restored. |
-| Checkpoint | 130 | The plan contract of a check of a part of a stored value. |
+| Runtime snapshot | 92 | Exact fields (#1779): the RNG state, globals, bindings, speakers and their properties, the failure, loop frames, temporaries, function call frames with their arguments and prologue state, and source spans and positions have exactly the fields their revision defines; validation previously accepted others, an own `__proto__` included, which the trusted export dropped. |
+| Checkpoint | 131 | The exact-fields snapshot contract. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2323,6 +2324,9 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Runtime snapshot history
 
+- Revision 91: Form presentation (#1153): a form settlement carries `temporalPresentation`, the date and time
+  presentation its answers were shown in, from which the Player rebuilds the summary; previously it used the
+  presentation in force when the session was restored.
 - Revision 90: Player profile (owner decision, 2026-10-23): the person fields the host gave at the start are kept as
   `playerProfile`; previously they were kept as `account`.
 - Revision 89: Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `fallback` field, a script
@@ -2490,6 +2494,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 130: The plan contract of a check of a part of a stored value.
 - Revision 129: The plan contract of a typed reading into a written `object`.
 - Revision 128: The form-presentation snapshot contract.
 - Revision 127: The plan contract of the new type analysis's runtime checks.
