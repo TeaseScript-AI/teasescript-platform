@@ -2453,7 +2453,8 @@ test("TSV041's advice names the property an object literal types and its narrowe
 /**
  * #1753 (ADR 0021 rule 4.2): a store whose place is an element below the stored value, through collections alone, is
  * checked by the value's whole receiving type, which tests every element, where the root's written type proves every
- * layer of it with its `null` (a `let`, a `global`, a parameter: Codex r1's B1, `integer[]?[]`); pasted where `codeAt`
+ * layer of it with its `null` (a `let`, a `global`, a parameter, as the parser reads it: Codex r1's B1, `integer[]?[]`,
+ * and r2's B2, a comment beside it); pasted where `codeAt`
  * proves it, else in words, and with no fallback, which would replace the whole value. Where no written type proves
  * the layers (a copy of one), the words name the elements the check tests. An element store keeps its element's test.
  * Each pasted check compiles under both checkers, where the element's scalar test it replaces is an error. Below a
@@ -2565,6 +2566,25 @@ test("a store below its value checks the whole receiving type, null kept, and th
     ],
     [
       'function f(p: integer[]?[]) {\n    p=hostValue\n    say "${p.length}"\n}\nf([[1]])\nexit\n',
+      "hostValue",
+      warned(
+        "An element of an element of 'p' is declared as a whole number (integer)",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { p=hostValue }'.",
+      ),
+    ],
+    // (the annotation as the parser reads it, beside a comment and a default: Codex r2's B2)
+    [
+      'let a /* was: string[][] = [["old"]] */ : integer[]?[] = [[1]]\na=hostValue\nexit\n',
+      "hostValue",
+      warned(
+        "An element of an element of 'a' is declared as a whole number (integer)",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { a=hostValue }'.",
+      ),
+    ],
+    [
+      'function f(p: integer[]?[] = [[1]]) {\n    p=hostValue\n    say "${p.length}"\n}\nf()\nexit\n',
       "hostValue",
       warned(
         "An element of an element of 'p' is declared as a whole number (integer)",

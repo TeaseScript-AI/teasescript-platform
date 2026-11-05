@@ -1,4 +1,11 @@
-import type { Block, Program } from "../../ast.js";
+import type {
+  Block,
+  FunctionParameter,
+  GlobalStatement,
+  LetStatement,
+  Program,
+  TypeAnnotation,
+} from "../../ast.js";
 import { parse } from "../../parser.js";
 import { someNode } from "../../project-globals.js";
 import type { SourceSite } from "../graph.js";
@@ -249,6 +256,29 @@ export function messageSource(
       }
       return name;
     });
+  // the written type of each declaration (a `let`'s, a `global`'s, a parameter's) by its site, each file's gathered once
+  const annotations = new Map<number, Map<string, TypeAnnotation | null>>();
+  const declared = (site: SourceSite): TypeAnnotation | null => {
+    let found = annotations.get(site.file);
+    if (found === undefined) {
+      const bySite = new Map<string, TypeAnnotation | null>();
+      someNode(programOf(site.file), (node) => {
+        if (
+          node.kind === "letStatement" ||
+          node.kind === "globalStatement" ||
+          node.kind === "functionParameter"
+        ) {
+          // EVIDENCE: invariant: a parser-owned node of these kinds is the declaration its kind names.
+          const { span, typeAnnotation } = node as
+            LetStatement | GlobalStatement | FunctionParameter;
+          bySite.set(`${span.start.offset}:${span.end.offset}`, typeAnnotation);
+        }
+        return false;
+      });
+      annotations.set(site.file, (found = bySite));
+    }
+    return found.get(`${site.start}:${site.end}`) ?? null;
+  };
   const owner = (site: SourceSite, steps: readonly StoreStep[]): SourceSite =>
     metered((count) => ownerOf(givensOf(site.file), site, steps, count));
   return {
@@ -256,6 +286,7 @@ export function messageSource(
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
     landing,
     owner,
+    declared,
     target: (site) =>
       statementsOf(site.file)
         .get(line(site) - 1)

@@ -1,5 +1,4 @@
 import type { TypeAnnotation } from "../../../ast.js";
-import { parse } from "../../../parser.js";
 import type { SourceSite } from "../../graph.js";
 import { WRITABLE_JSON_FIX } from "../../../conversions.js";
 import { dictMethod } from "../../../dict-operations.js";
@@ -394,7 +393,7 @@ function wholeCheck(
 
 /**
  * The written type a store's value receives (`wholeCheck`): its root's declared type (a `let`'s, a `global`'s or a
- * parameter's, parsed from the declaration as written), followed through the collections `above` the value, which must
+ * parameter's, as the parser read the declaration: Codex r2's B2, no text of it is searched), followed through the collections `above` the value, which must
  * reach the place through the collections `below`; else `null`.
  */
 function receivingType(
@@ -405,18 +404,7 @@ function receivingType(
 ): TypeAnnotation | null {
   const { root } = rule;
   if (root === null || root.site === null) return null;
-  // (the annotation alone, between the name's `:` and any `=`, parsed as written: a declaration's start value is never
-  // read, so the work is the written type's)
-  const text = source.text(root.site);
-  const equals = text.indexOf("=");
-  const head = equals === -1 ? text : text.slice(0, equals);
-  // (no `:` there: no annotation, and the text left does not parse as one)
-  const parsed = parse(`let fix: ${head.slice(head.indexOf(":") + 1)} = null\nexit\n`);
-  const [statement] = parsed.program.statements;
-  const declared =
-    parsed.diagnostics.length > 0 || statement?.kind !== "letStatement"
-      ? null
-      : statement.typeAnnotation;
+  const declared = source.declared(root.site);
   // (each collection step's element type, through the layer's `?`; a union there, or an unrestricted collection, is none)
   const element = (type: TypeAnnotation | null, step: StoreStep): TypeAnnotation | null => {
     const at = type?.kind === "optionalType" ? type.value : type;

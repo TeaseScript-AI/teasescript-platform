@@ -4,6 +4,7 @@ import type {
   ObjectLiteral,
   ObjectProperty,
   Statement,
+  TypeAnnotation,
 } from "../../../ast.js";
 import { selectsElement } from "../method-categories.js";
 import {
@@ -44,6 +45,11 @@ export interface MessageSource {
    * list literal's element); `null` where it lands any other way.
    */
   readonly landing: (site: SourceSite) => Landing | null;
+  /**
+   * The written type of the declaration at `site` (a `let`, a `global` or a parameter, as a store's root names it), as
+   * the parser read it; `null` where it has none (#1753).
+   */
+  readonly declared: (site: SourceSite) => TypeAnnotation | null;
   /** The narrowest expression that owns the property `steps` lead to below the value at `site` (`ownerOf`, #1495). */
   readonly owner: (site: SourceSite, steps: readonly StoreStep[]) => SourceSite;
   /**
