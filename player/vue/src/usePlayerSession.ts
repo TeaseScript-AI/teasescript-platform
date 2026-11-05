@@ -761,6 +761,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   tryOnScopeDispose(() => {
     disposed = true;
     activationToken++;
+    dropPreparedPlanJson();
+    unsavedPlanJson = null;
     loads.clear();
     device.reset();
     for (const element of audioElements.splice(0)) {
@@ -1279,6 +1281,49 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   } = { plan: false, count: 0, last: null };
   let keeping: Promise<void> | null = null;
   let keepAgain = false;
+  // The plan's JSON for a new session's first save, written in a task of its own before Start, so that Start does not
+  // write it (#1707). Only unused: the save that takes it detaches it.
+  let preparedPlanJson: {
+    readonly plan: InstructionPlan;
+    json: string | null;
+    timer: ReturnType<typeof setTimeout> | null;
+  } | null = null;
+  // The plan's JSON a save took and has not yet stored, so that a retry after a failed write writes it again as it is.
+  let unsavedPlanJson: { readonly plan: InstructionPlan; readonly json: string } | null = null;
+  /** Prepares `plan`'s JSON in a later task, unless it is prepared or a save still holds it. */
+  function preparePlanJson(plan: InstructionPlan, json: string | null = null) {
+    if (preparedPlanJson?.plan === plan && (json === null || preparedPlanJson.json !== null))
+      return;
+    dropPreparedPlanJson();
+    const ready = json ?? (unsavedPlanJson?.plan === plan ? unsavedPlanJson.json : null);
+    const slot: NonNullable<typeof preparedPlanJson> = { plan, json: ready, timer: null };
+    if (ready === null)
+      slot.timer = setTimeout(() => {
+        slot.timer = null;
+        try {
+          slot.json = serializeValidatedRuntimeJson(plan);
+        } catch {
+          // The save writes it then, and fails as it would have.
+        }
+      }, 0);
+    preparedPlanJson = slot;
+  }
+  function dropPreparedPlanJson() {
+    if (preparedPlanJson?.timer != null) clearTimeout(preparedPlanJson.timer);
+    preparedPlanJson = null;
+  }
+  /**
+   * `plan`'s JSON for a save to store: prepared, held for a retry, or else written now, as a Start before its
+   * preparation ran needs. The save holds it until stored.
+   */
+  function takePlanJson(plan: InstructionPlan): NonNullable<typeof unsavedPlanJson> {
+    const prepared = preparedPlanJson?.plan === plan ? preparedPlanJson.json : null;
+    if (preparedPlanJson?.plan === plan) dropPreparedPlanJson();
+    const json =
+      prepared ??
+      (unsavedPlanJson?.plan === plan ? unsavedPlanJson.json : serializeValidatedRuntimeJson(plan));
+    return (unsavedPlanJson = { plan, json });
+  }
   /**
    * Keeps the shown session, where a reload continues it, together with the photos only it uses. One write runs at a
    * time; a request meanwhile keeps the session as it is once that is done. A state Debug's rewind shows for inspection
@@ -1321,9 +1366,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const count = events.length;
     const added = events.slice(from, count);
     const last = events[count - 1] ?? null;
-    const planJson = kept.plan && from > 0 ? null : serializeValidatedRuntimeJson(current.plan);
+    const planJson = kept.plan && from > 0 ? null : takePlanJson(current.plan);
     const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
-    const references = capturedMediaReferencesIn(snapshotJson, added);
+    // Written once, for the photos they show and for the store.
+    const eventsJson = added.map(serializeValidatedRuntimeJson);
+    const references = capturedMediaReferencesIn(snapshotJson, eventsJson);
     const inDebugRoom = room.value === "debug";
     const store = keptStore();
     // The room's saved data are in use once storage reached it.
@@ -1342,12 +1389,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           await store.media.add(photo).catch(() => {});
       }
       await store.publish(keptScope, {
-        planJson,
+        planJson: planJson?.json ?? null,
         snapshotJson,
         eventsFrom: from,
         events: added,
+        eventsJson,
         marks,
       });
+      if (unsavedPlanJson === planJson) unsavedPlanJson = null;
       kept = { plan: true, count, last };
       if (inDebugRoom) debugRoom.value = { session: true };
       notices.dismiss(playerNoticeKeys.sessionNotKept);
@@ -1456,7 +1505,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const explain = !found.events.some(
       (event) => event.kind === "exit" || event.kind === "runtimeFailure",
     );
-    if (found.planJson !== serializeValidatedRuntimeJson(plan)) {
+    const planJson =
+      preparedPlanJson?.plan === plan && preparedPlanJson.json !== null
+        ? preparedPlanJson.json
+        : serializeValidatedRuntimeJson(plan);
+    // Unless the session goes on, a new session's first save stores the plan's JSON written here.
+    preparePlanJson(plan, planJson);
+    if (found.planJson !== planJson) {
       // After a Player update the same script compiles to a plan of another revision; the plan has no runtime error.
       const revisions = explain ? revisionChange(found.planJson, INSTRUCTION_PLAN_VERSION) : null;
       return revisions === null
@@ -1476,6 +1531,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return { outdated: { code, path, message: `${message} ${revisions}` } };
     }
     if (restored.state.status === "halted" || restored.state.status === "failed") return null;
+    dropPreparedPlanJson();
     // The debug room reads its photos like its saved ones; a normal session's come back as session media.
     if (store === keptSessions)
       for (const reference of capturedMediaReferencesIn(found.snapshotJson, found.events))
@@ -1655,10 +1711,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           kept = { plan: false, count: 0, last: null };
           await keptSessions.discard(scope);
           discarded = true;
-          const references = capturedMediaReferencesIn(
-            review.snapshotJson,
-            transfer.session.events,
-          );
+          const eventsJson = transfer.session.events.map(serializeValidatedRuntimeJson);
+          const references = capturedMediaReferencesIn(review.snapshotJson, eventsJson);
           // Unlike keeping a session as it plays, every photo goes into a store the discard emptied, so a failure is real:
           // the session is not kept without the media it uses.
           for (const photo of capturedMedia.sessionRecords(references))
@@ -1668,6 +1722,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             snapshotJson: review.snapshotJson,
             eventsFrom: 0,
             events: transfer.session.events,
+            eventsJson,
             marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
           });
         } catch {
@@ -2034,6 +2089,24 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         }),
       ...(outdated === undefined ? {} : { outdated }),
     };
+    prepareActivation("start");
+  }
+  /**
+   * Prepares in a task of its own what the activation would otherwise compute within the click (#1707): the zone the
+   * browser's settings name, which Start and Continue still capture anew, and a Start's plan JSON for its first save.
+   */
+  function prepareActivation(kind: Activation["kind"]) {
+    if (kind === "start" && keptScope !== null && scriptPlan !== null) preparePlanJson(scriptPlan);
+    if (options.temporalContext !== undefined) return;
+    const token = activationToken;
+    setTimeout(() => {
+      if (disposed || token !== activationToken) return;
+      try {
+        playerTemporalContext();
+      } catch {
+        // Start and Continue capture it themselves and report what fails.
+      }
+    }, 0);
   }
   /**
    * What Start and Continue record about the player now: the zone and presentation, then the wall clock, sampled last so
@@ -2079,6 +2152,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       ...(marks === undefined ? {} : { marks }),
       restored,
     };
+    prepareActivation("continue");
   }
   /**
    * Runs the prepared Start or Continue; call it from the activating click. With the camera capability it first opens

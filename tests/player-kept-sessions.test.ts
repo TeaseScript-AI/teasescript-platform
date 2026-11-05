@@ -166,6 +166,7 @@ test("the store keeps one session per scope, extends it from a position, and dis
       snapshotJson: "1",
       eventsFrom: 0,
       events: [],
+      eventsJson: [],
       marks,
     }),
     /no plan/,
@@ -175,6 +176,7 @@ test("the store keeps one session per scope, extends it from a position, and dis
     snapshotJson: "1",
     eventsFrom: 0,
     events: events("say", "actionRequested"),
+    eventsJson: events("say", "actionRequested").map((event) => JSON.stringify(event)),
     marks,
   });
   // A later state keeps the plan and the events before its position.
@@ -183,6 +185,7 @@ test("the store keeps one session per scope, extends it from a position, and dis
     snapshotJson: "2",
     eventsFrom: 1,
     events: events("say", "say"),
+    eventsJson: events("say", "say").map((event) => JSON.stringify(event)),
     marks,
   });
   const kept = await store.session("script");
@@ -198,6 +201,7 @@ test("the store keeps one session per scope, extends it from a position, and dis
       snapshotJson: "3",
       eventsFrom: 9,
       events: [],
+      eventsJson: [],
       marks,
     }),
     /gap/,
@@ -235,6 +239,7 @@ test("a debug room keeps saved values of its own beside its session and photos, 
     snapshotJson: "1",
     eventsFrom: 0,
     events: [],
+    eventsJson: [],
     marks,
   });
   assert.deepEqual(await rooms.read("script"), { session: true });
@@ -255,12 +260,21 @@ test("a kept session's photos are found in its state and events one text at a ti
   const inJson = new Set(JSON.stringify(session).match(/captured-media:[0-9a-f-]+:[0-9]+/gu));
   assert.equal(inJson.size, 6);
   assert.deepEqual(capturedMediaReferencesIn(snapshotJson, kept), inJson);
+  // The events as the engine writes them for the store, as a save searches them.
+  assert.deepEqual(
+    capturedMediaReferencesIn(
+      snapshotJson,
+      kept.map((event) => JSON.stringify(event)),
+    ),
+    inJson,
+  );
   const store = memoryKeptSessionStore();
   await store.publish("script", {
     planJson: "{}",
     snapshotJson,
     eventsFrom: 0,
     events: kept,
+    eventsJson: kept.map((event) => JSON.stringify(event)),
     marks,
   });
   assert.deepEqual(await keptPhotoReferences(store)!("script"), inJson);
@@ -279,6 +293,7 @@ test("the sweep keeps every photo a stored kept session shows, and defers when t
       snapshotJson: playerRuntimeSnapshotJson(live),
       eventsFrom: 0,
       events: storedEvents,
+      eventsJson: storedEvents.map((event) => JSON.stringify(event)),
       marks,
     });
     return kept;
