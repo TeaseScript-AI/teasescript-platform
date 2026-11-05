@@ -1,13 +1,13 @@
-import {
-  RUNTIME_DEBUG_TRACE_LIMITS,
-  type RuntimeDebugContext,
-  type RuntimeDebugRecord,
-  type RuntimeDebugTraceStatus,
-  type RuntimeSessionCall,
-  type RuntimeSessionScopePreview,
-  type RuntimeSessionVariablePreview,
-  type RuntimeSessionVariablePreviews,
+import type {
+  RuntimeDebugContext,
+  RuntimeDebugRecord,
+  RuntimeDebugTraceStatus,
+  RuntimeSessionCall,
+  RuntimeSessionScopePreview,
+  RuntimeSessionVariablePreview,
+  RuntimeSessionVariablePreviews,
 } from "../src/index.js";
+import { RUNTIME_DEBUG_TRACE_LIMITS } from "../src/runtime/debug/debug-trace-limits.js";
 import { instructionSourcePath, type InstructionPlan } from "../src/plan/model.js";
 import { quotedText } from "../src/runtime/values/value-text.js";
 

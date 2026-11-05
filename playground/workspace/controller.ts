@@ -27,11 +27,11 @@ import type {
   RuntimeChatPacingGateActionSnapshot,
   RuntimeInteractionActionSnapshot,
 } from "../../src/runtime/actions/model.js";
+import { completePlayerRuntimeAction } from "../../player/runtime-adapter.js";
 import {
   activePlayerRuntimeInteraction,
   activePlayerRuntimePacingGate,
-  completePlayerRuntimeAction,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime-view.js";
 import {
   cloneCapturedRuntimeSnapshot,
   createFreshRuntimeSnapshotWithValidatedPlan,

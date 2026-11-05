@@ -1,10 +1,10 @@
+import type { InstructionPlan, RuntimeScriptStorageEntrySnapshot } from "../src/index.js";
 import {
   CheckpointError,
-  validateScriptStorageEntries,
-  type InstructionPlan,
-  type RuntimeScriptStorageEntrySnapshot,
-} from "../src/index.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
+  serializeValidatedRuntimeJson,
+} from "../src/runtime/snapshot/checkpoint-json.js";
+import { validateScriptStorageEntries } from "../src/runtime/host-data/script-storage.js";
+
 import { MAX_TEXT_LENGTH } from "../src/runtime/values/text-length.js";
 import {
   isWellFormedCapturedMediaReference,

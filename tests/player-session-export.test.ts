@@ -11,12 +11,12 @@ import {
   activatePlayerRuntimeButton,
   compilePlayerProject,
   createPlayerRuntimeSession,
-  playerRuntimeForeground,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import {
   readPlayerTransferFile,

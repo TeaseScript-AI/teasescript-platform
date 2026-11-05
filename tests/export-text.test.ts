@@ -7,10 +7,10 @@ import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   playerRuntimeDebugNow,
-  playerRuntimeForeground,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { compileSource } from "../src/compiler.js";
 import { MAX_INTERACTION_AGGREGATE_UTF8_BYTES } from "../src/interaction-limits.js";
 import type { InstructionPlan } from "../src/plan/model.js";

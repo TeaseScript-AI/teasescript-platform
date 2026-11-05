@@ -4,11 +4,13 @@ import test from "node:test";
 import {
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
+  type PlayerRuntimeSession,
+} from "../player/runtime-adapter.js";
+import {
   playerRuntimeAwaitsHost,
   playerRuntimeDeadlines,
   playerRuntimeTimers,
-  type PlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime-view.js";
 import { interruptFrame } from "../src/runtime/scopes/activations.js";
 import type { RuntimeForegroundActionSnapshot } from "../src/runtime/actions/model.js";
 import {

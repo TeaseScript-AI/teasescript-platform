@@ -4,6 +4,7 @@ import { defineConfig } from "vite";
 /** The Player browser-source modules that compiled Node tests load through `tests/helpers/player-modules.ts`. */
 const modules = [
   "player/runtime-adapter.ts",
+  "player/runtime-view.ts",
   "player/saved-data.ts",
   "player/theme/palette.ts",
   "player/theme/photo-theme.ts",

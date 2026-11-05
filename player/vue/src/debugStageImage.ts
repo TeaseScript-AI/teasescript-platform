@@ -1,6 +1,6 @@
 import { isCapturedMediaReference } from "../../captured-media.js";
 import { debugStageImageStatus, type DebugStageImageStatus } from "../../presentation.js";
-import { playerRuntimeMedia } from "../../runtime-adapter.js";
+import { playerRuntimeMedia } from "../../runtime-view.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 /**

@@ -6,13 +6,15 @@ import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
-  pendingPlayerRuntimeStorageWrite,
-  playerRuntimePacingGate,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import {
+  pendingPlayerRuntimeStorageWrite,
+  playerRuntimePacingGate,
+} from "../player/runtime-view.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import {

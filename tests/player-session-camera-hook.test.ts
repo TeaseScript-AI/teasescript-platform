@@ -5,10 +5,10 @@ import { effectScope, type Ref } from "vue";
 import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
-  pendingPlayerRuntimeStorageWrite,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { pendingPlayerRuntimeStorageWrite } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";

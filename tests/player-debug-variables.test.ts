@@ -15,14 +15,16 @@ import {
   advancePlayerRuntimeTime,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
-  playerRuntimeTranscriptEventSequence,
-  playerRuntimeTranscriptMessage,
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   playerRuntimeDebugVariables,
 } from "../player/runtime-adapter.js";
+import {
+  playerRuntimeTranscriptEventSequence,
+  playerRuntimeTranscriptMessage,
+} from "../player/runtime-view.js";
 
 /*
  * Player Debug's Variables view (DEBUGGER.md "Player Debug") as the Player derives it from a session and its value trace:

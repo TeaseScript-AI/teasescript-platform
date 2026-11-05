@@ -6,11 +6,10 @@ import { CapturedMediaStore } from "../player/captured-media.js";
 import {
   answerPlayerRuntimeImage,
   createPlayerRuntimeSession,
-  playerRuntimeForeground,
-  playerRuntimeMedia,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground, playerRuntimeMedia } from "../player/runtime-view.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 interface CaptureView {

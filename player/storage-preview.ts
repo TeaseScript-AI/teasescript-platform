@@ -1,4 +1,5 @@
-import { runtimeDebugPreview, type SerializableRuntimeValue } from "../src/index.js";
+import type { SerializableRuntimeValue } from "../src/index.js";
+import { runtimeDebugPreview } from "../src/runtime/debug/debug-preview.js";
 import { isWellFormedCapturedMediaReference } from "./captured-media.js";
 
 /**

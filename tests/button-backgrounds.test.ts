@@ -8,13 +8,13 @@ import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
-  playerRuntimeForeground,
   observePlayerRuntimeTime,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 const colours = ["gold", "oklch(0.7 0.18 45)"];

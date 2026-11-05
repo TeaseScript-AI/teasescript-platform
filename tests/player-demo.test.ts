@@ -4,13 +4,15 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import {
   activatePlayerRuntimeButton,
-  playerRuntimeForeground,
-  playerRuntimeMedia,
-  playerRuntimeTimers,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeControlResult,
 } from "../player/runtime-adapter.js";
+import {
+  playerRuntimeForeground,
+  playerRuntimeMedia,
+  playerRuntimeTimers,
+} from "../player/runtime-view.js";
 import { compileSource } from "../src/index.js";
 import { harness } from "./helpers/player-media.js";
 

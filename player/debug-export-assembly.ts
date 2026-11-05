@@ -6,7 +6,7 @@ import {
   type RuntimeFailureSnapshot,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { capturedMediaReferences } from "./captured-media-persistence.js";
 import {
   DEBUG_EXPORT_VERSION,

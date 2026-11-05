@@ -7,7 +7,7 @@ import {
 import type { RuntimePlayerProfileInput } from "../../../src/runtime/host-data/player-profile.js";
 import type { ScriptFailure } from "./ScriptProblems.vue";
 import type { PlayerSessionHost } from "./usePlayerSession";
-import { MAIN_FILE_PATH } from "../../../src/index.js";
+import { MAIN_FILE_PATH } from "../../../src/project-paths.js";
 import { scriptIdentity, type ScriptIdentity } from "../../script-identity.js";
 
 export type { ScriptIdentity };

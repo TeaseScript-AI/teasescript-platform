@@ -8,7 +8,6 @@ import { loadAge, loadTlock, readLock, type LockServices } from "../player/encry
 import { roundTimeMs } from "../player/encryption/drand.js";
 import { LockService, type LockDialog, type LockDialogInput } from "../player/lock-service.js";
 import {
-  activePlayerRuntimeLock,
   answerPlayerRuntimeLock,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
@@ -16,6 +15,7 @@ import {
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { activePlayerRuntimeLock } from "../player/runtime-view.js";
 import { bytesFromBase64 } from "../player/stored-files.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { fromBase64, openAge, sshIdentity, x25519Identity } from "./helpers/age-keyholder.js";

@@ -9,14 +9,13 @@ import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerRuntimeDeadlines,
-  playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
   restorePlayerRuntimeSessionAt,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeDeadlines, playerRuntimeMedia } from "../player/runtime-view.js";
 import { observeTime } from "../src/index.js";
 import { harness } from "./helpers/player-media.js";
 

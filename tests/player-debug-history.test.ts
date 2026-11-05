@@ -11,14 +11,13 @@ import {
 import { openDebugHistorySpill } from "../player/debug-history-indexeddb.js";
 import {
   createPlayerRuntimeSession,
-  playerRuntimeForeground,
-  playerTemporalContext,
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeForm,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground, playerTemporalContext } from "../player/runtime-view.js";
 import type { PlayerTranscriptEntryPresentation } from "../player/model.js";
 
 // Debug's rewind history keeps a point for each newly presented interaction and restores it exactly: its state, and its

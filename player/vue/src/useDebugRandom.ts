@@ -2,13 +2,13 @@ import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
 import {
   listRandomSites,
-  randomDrawAlternatives,
   type RandomControlOptions,
   type RandomDecision,
   type RandomDrawView,
   type RandomOutcome,
   type RandomSite,
 } from "../../../src/index.js";
+import { randomDrawAlternatives } from "../../../src/runtime/random/random-alternatives.js";
 import { randomOutcomeLabel } from "./randomDrawPresentation";
 import type { PlayerSessionHost } from "./usePlayerSession";
 

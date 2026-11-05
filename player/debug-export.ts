@@ -1,11 +1,7 @@
 import {
-  CHECKPOINT_FORMAT,
-  CHECKPOINT_VERSION,
-  CheckpointError,
   completeAction,
   createCheckpoint,
   createRuntimeSession,
-  INSTRUCTION_PLAN_VERSION,
   observeTime,
   pressPermanentButton,
   recordContinueCapture,
@@ -17,9 +13,7 @@ import {
   resumeRandomDraw,
   run,
   pendingRandomDraw,
-  RANDOM_DRAW_KINDS,
   replayRandomChoices,
-  RUNTIME_SNAPSHOT_VERSION,
   serializeCheckpoint,
   type InstructionPlan,
   type InterpreterEvent,
@@ -32,8 +26,36 @@ import {
   type RuntimeSnapshot,
   type StoredFileKind,
 } from "../src/index.js";
+import {
+  CHECKPOINT_FORMAT,
+  CHECKPOINT_VERSION,
+  CheckpointError,
+  serializeValidatedRuntimeJson,
+} from "../src/runtime/snapshot/checkpoint-json.js";
+import { INSTRUCTION_PLAN_VERSION } from "../src/plan/model.js";
+import { RANDOM_DRAW_KINDS } from "../src/runtime/random/random-kinds.js";
+import { RUNTIME_SNAPSHOT_VERSION } from "../src/runtime/snapshot/snapshot-format.js";
+import {
+  count,
+  DebugExportError,
+  exactly,
+  fail,
+  parseEditedWhileDebugging,
+  parseRewoundWhileDebugging,
+  record,
+  type DebugEditedWhileDebugging,
+  type DebugRewoundWhileDebugging,
+} from "./debug-history-marks.js";
+
+export {
+  DebugExportError,
+  parseEditedWhileDebugging,
+  parseRewoundWhileDebugging,
+  type DebugEditedWhileDebugging,
+  type DebugRewoundWhileDebugging,
+} from "./debug-history-marks.js";
 import { instructionSourcePath } from "../src/plan/model.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
+
 import { isWellFormedCapturedMediaReference } from "./captured-media.js";
 import {
   base64urlSlices,
@@ -99,16 +121,6 @@ export interface DebugPackage {
   readonly id: string | null;
   readonly version: string | null;
   readonly contentHash: string | null;
-}
-
-export interface DebugEditedWhileDebugging {
-  readonly firstEditSceneTimeMs: number;
-  readonly editCount: number;
-}
-
-export interface DebugRewoundWhileDebugging {
-  readonly restoredSceneTimeMs: number;
-  readonly rewindCount: number;
 }
 
 export interface DebugIncident {
@@ -208,17 +220,6 @@ export interface DebugPhotoUse {
   readonly relation: "capture" | "imageAnswer" | "savedValue";
   readonly operation: number | null;
   readonly actionId: number | null;
-}
-
-/** Why a file is not a debug export this tool can read; `unsupported` is a valid export of another version. */
-export class DebugExportError extends Error {
-  override readonly name = "DebugExportError";
-  constructor(
-    readonly kind: "invalid" | "unsupported",
-    message: string,
-  ) {
-    super(message);
-  }
 }
 
 export const DEBUG_EXPORT_FORMAT = "teasescript-debug-export";
@@ -469,32 +470,6 @@ function parsePackage(value: unknown): DebugPackage {
     id: nullableString(found["id"], "$.package.id"),
     version: nullableString(found["version"], "$.package.version"),
     contentHash: nullableString(found["contentHash"], "$.package.contentHash"),
-  };
-}
-
-export function parseEditedWhileDebugging(value: unknown): DebugEditedWhileDebugging | null {
-  if (value === null) return null;
-  const edited = record(value, "$.editedWhileDebugging");
-  exactly(edited, "$.editedWhileDebugging", ["firstEditSceneTimeMs", "editCount"]);
-  return {
-    firstEditSceneTimeMs: sceneTime(
-      edited["firstEditSceneTimeMs"],
-      "$.editedWhileDebugging.firstEditSceneTimeMs",
-    ),
-    editCount: count(edited["editCount"], "$.editedWhileDebugging.editCount"),
-  };
-}
-
-export function parseRewoundWhileDebugging(value: unknown): DebugRewoundWhileDebugging | null {
-  if (value === null) return null;
-  const rewound = record(value, "$.rewoundWhileDebugging");
-  exactly(rewound, "$.rewoundWhileDebugging", ["restoredSceneTimeMs", "rewindCount"]);
-  return {
-    restoredSceneTimeMs: sceneTime(
-      rewound["restoredSceneTimeMs"],
-      "$.rewoundWhileDebugging.restoredSceneTimeMs",
-    ),
-    rewindCount: count(rewound["rewindCount"], "$.rewoundWhileDebugging.rewindCount"),
   };
 }
 
@@ -1120,25 +1095,6 @@ function location(plan: InstructionPlan, snapshot: RuntimeSnapshot): DebugLocati
   };
 }
 
-function fail(path: string, message: string): never {
-  throw new DebugExportError("invalid", `${path} ${message}.`);
-}
-
-function record(value: unknown, path: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    fail(path, "must be an object");
-  // EVIDENCE: validation: the guard above proved a non-array object parsed from JSON.
-  return value as Record<string, unknown>;
-}
-
-function exactly(value: Record<string, unknown>, path: string, fields: readonly string[]): void {
-  const keys = Object.keys(value);
-  const unknown = keys.find((key) => !fields.includes(key));
-  if (unknown !== undefined) fail(path, `has an unknown field ${JSON.stringify(unknown)}`);
-  const missing = fields.find((field) => !Object.hasOwn(value, field));
-  if (missing !== undefined) fail(path, `is missing ${JSON.stringify(missing)}`);
-}
-
 function array(value: unknown, path: string): unknown[] {
   if (!Array.isArray(value)) fail(path, "must be an array");
   return value;
@@ -1159,19 +1115,6 @@ function strings(value: unknown, path: string): string[] {
 
 function boolean(value: unknown, path: string): boolean {
   if (typeof value !== "boolean") fail(path, "must be true or false");
-  return value;
-}
-
-/** A scene time in milliseconds: finite and not negative, fractions included, as the Player's clock observes it. */
-function sceneTime(value: unknown, path: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
-    fail(path, "must be a finite, non-negative number of milliseconds");
-  return value;
-}
-
-function count(value: unknown, path: string, allowZero = false): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < (allowZero ? 0 : 1))
-    fail(path, allowZero ? "must be a whole number" : "must be a positive whole number");
   return value;
 }
 
