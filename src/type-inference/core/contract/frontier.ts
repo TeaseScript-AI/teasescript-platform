@@ -296,12 +296,19 @@ function valueNodes(frontier: Frontier, value: PlaceId, reader: Goal | null): re
   }
   const projection = program.projOf.get(value);
   if (projection !== undefined) {
-    if (!propertyOnly(projection.step) || selectsElement(projection.step)) throw new Decline("step");
+    if (!propertyOnly(projection.step) || selectsElement(projection.step))
+      throw new Decline("step");
     if (ingressLeafOf(contract, value) !== undefined) throw new Decline("ingress");
     if (positions() && passesWrapper(contract, value)) throw new Decline("wrapper");
-    return advance(frontier, valueNodes(frontier, projection.owner, reader), projection.step, reader);
+    return advance(
+      frontier,
+      valueNodes(frontier, projection.owner, reader),
+      projection.step,
+      reader,
+    );
   }
-  if (program.hasOf.has(value) && !program.cellOwner.has(value)) return [literalRoot(frontier, value)];
+  if (program.hasOf.has(value) && !program.cellOwner.has(value))
+    return [literalRoot(frontier, value)];
   throw new Decline("value");
 }
 
@@ -309,8 +316,14 @@ function valueNodes(frontier: Frontier, value: PlaceId, reader: Goal | null): re
  * The nodes one step below `nodes`: settled (`star`) outside a goal's evaluation; inside one (`reader`), as its
  * dependencies stand now, each read registering the goal, so no build settles inside another.
  */
-function advance(frontier: Frontier, nodes: readonly number[], stepName: string, reader: Goal | null): readonly number[] {
-  if (reader === null) return setMembers(frontier, star(frontier, intern(frontier, nodes), stepName));
+function advance(
+  frontier: Frontier,
+  nodes: readonly number[],
+  stepName: string,
+  reader: Goal | null,
+): readonly number[] {
+  if (reader === null)
+    return setMembers(frontier, star(frontier, intern(frontier, nodes), stepName));
   const out = new Set<number>();
   stepAll(frontier, nodes, stepName, reader, out);
   return [...out];
@@ -324,8 +337,10 @@ function passesWrapper(contract: Contract, value: PlaceId): boolean {
 
 /** A host read's leaf: the runtime's unknown at every path, its ingress entered (`hostAt`, `entered`). */
 function hostLeaf(frontier: Frontier, value: PlaceId): number {
-  return leafNode(frontier, joinParts("h", value), () =>
-    entered(frontier.contract, value, hostAt({ length: 0, at: () => undefined }))[0]!,
+  return leafNode(
+    frontier,
+    joinParts("h", value),
+    () => entered(frontier.contract, value, hostAt({ length: 0, at: () => undefined }))[0]!,
   );
 }
 
@@ -354,10 +369,11 @@ function stepAll(
   reader: Goal,
   out: Set<number>,
 ): void {
-  for (const node of nodes) for (const below of goalOf(frontier, node, stepName, reader).value) {
-    step(frontier);
-    out.add(below);
-  }
+  for (const node of nodes)
+    for (const below of goalOf(frontier, node, stepName, reader).value) {
+      step(frontier);
+      out.add(below);
+    }
 }
 
 /** A goal's nodes from the rules, with what its dependencies hold now. */
@@ -419,7 +435,12 @@ function evaluate(frontier: Frontier, goal: Goal): Set<number> {
 /** Whether an entry or a literal's read carries no mark and no ingress of its own (`annotated` leaves it as it is). */
 function plainRead(
   contract: Contract,
-  read: { readonly guarded: boolean; readonly holder: PrefixEntry["holder"]; readonly ingress: PrefixEntry["ingress"]; readonly value?: PlaceId },
+  read: {
+    readonly guarded: boolean;
+    readonly holder: PrefixEntry["holder"];
+    readonly ingress: PrefixEntry["ingress"];
+    readonly value?: PlaceId;
+  },
 ): boolean {
   if (read.guarded || !marksNothing(contract, read.holder)) return false;
   return (
@@ -429,7 +450,13 @@ function plainRead(
 }
 
 /** A prefix entry one step below: a key entry its key's nodes then the step, a value's nodes at its steps then it. */
-function stepEntry(frontier: Frontier, entry: PrefixEntry, s: string, goal: Goal, out: Set<number>): void {
+function stepEntry(
+  frontier: Frontier,
+  entry: PrefixEntry,
+  s: string,
+  goal: Goal,
+  out: Set<number>,
+): void {
   const { contract } = frontier;
   if (entry.unk !== undefined || entry.empty === true || entry.elem !== undefined)
     throw new Decline("entry");
@@ -508,10 +535,11 @@ function star(frontier: Frontier, set: number, stepName: string): number {
   const goals = frontier.members[set]!.map((node) => goalOf(frontier, node, stepName, null));
   settle(frontier);
   const out = new Set<number>();
-  for (const goal of goals) for (const node of goal.value) {
-    step(frontier);
-    out.add(node);
-  }
+  for (const goal of goals)
+    for (const node of goal.value) {
+      step(frontier);
+      out.add(node);
+    }
   const id = intern(frontier, out);
   if (bySteps === undefined) frontier.below.set(set, (bySteps = new Map()));
   bySteps.set(stepName, id);
@@ -578,7 +606,10 @@ function leavesOf(frontier: Frontier, start: readonly number[]): Set<number> {
   const low = new Map<number, number>();
   const open: number[] = [];
   const held = new Set<number>();
-  const own = new Map<number, { readonly leaves: readonly number[]; readonly next: readonly number[] }>();
+  const own = new Map<
+    number,
+    { readonly leaves: readonly number[]; readonly next: readonly number[] }
+  >();
   const frames: { readonly node: number; readonly next: readonly number[]; at: number }[] = [];
   const enter = (node: number): void => {
     const term = termOf(frontier, node);
@@ -655,7 +686,11 @@ function cyclic(frontier: Frontier, place: PlaceId): boolean {
   const open: PlaceId[] = [];
   const held = new Set<PlaceId>();
   const marked = new Map<PlaceId, boolean>();
-  const frames: { readonly place: PlaceId; readonly to: readonly (readonly [PlaceId, boolean])[]; at: number }[] = [];
+  const frames: {
+    readonly place: PlaceId;
+    readonly to: readonly (readonly [PlaceId, boolean])[];
+    at: number;
+  }[] = [];
   const edgesOf = (at: PlaceId): (readonly [PlaceId, boolean])[] => {
     const to: (readonly [PlaceId, boolean])[] = [];
     if (program.places[at]?.kind.kind !== "binding") return to;
@@ -670,7 +705,11 @@ function cyclic(frontier: Frontier, place: PlaceId): boolean {
         } else if (entry.value !== undefined) {
           let value = entry.value;
           let projected = false;
-          for (let projection = program.projOf.get(value); projection !== undefined; projection = program.projOf.get(value)) {
+          for (
+            let projection = program.projOf.get(value);
+            projection !== undefined;
+            projection = program.projOf.get(value)
+          ) {
             step(frontier);
             projected = true;
             value = projection.owner;
@@ -772,7 +811,10 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
   const steps = stepsArray(ref.steps());
   const slot = keptParts(contract.work, "pr", entry.key, steps);
   // (after a stop at a place the graph holds, the native reader answers: its keys ask their stops one by one)
-  if (contract.anyStopped && contract.stoppedKeys().some((stopped) => frontier.places.has(stopped.place)))
+  if (
+    contract.anyStopped &&
+    contract.stoppedKeys().some((stopped) => frontier.places.has(stopped.place))
+  )
     return null;
   if (frontier.reads.has(slot)) return frontier.reads.get(slot) === null ? null : slot;
   const work = contract.pass.program.work;
