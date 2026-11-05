@@ -4,6 +4,14 @@ Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fabl
 port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, §2 row S0, §3.1 "Host globals"). S4
 commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; nothing here is in the repository.
 
+## F18's call-site snapshot (#1072)
+
+No record changed. `heldBack` releases 11 of the 32 `cp9-cells/s9b/f18-held/…` records: `named/*` (10) and
+`computed-key/integer-default-control`. It still holds:
+- `copy/*` (18): a copy of a written type as the receiving context (r4.77 (2)), awaiting the A4 receiving design;
+- `copy/scalar-json-host-value/*` (2): `files: true` is outside the slice, and their text operand's warning is C13's;
+- `computed-key/null-default`: N3's required check (S10).
+
 ## A fallback that is never used (#1072)
 
 The #1072 builder (Opus) edited 20 records of `cells.jsonl` by hand: each gains the warning TSV062 (V30 §18) as a

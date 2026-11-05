@@ -60,8 +60,12 @@ export function* expressionTask(
     }
     const accepted = remember(builder.own("default-accepted", context, expression.span));
     if (runs !== "never") {
+      const first = builder.nodes.length;
       const last = yield* compileChild(expressionTask(builder, lazy.value, context, out));
       builder.link(last, accepted);
+      // (F18: a typed parse's default reads the state at the call, which no event separates from it)
+      if (callee.kind === "identifier" && callee.name === "fromJson")
+        builder.snapshotFrom(first, out);
     } else {
       const first = builder.nodes.length;
       yield* compileChild(expressionTask(builder, lazy.value, context, null));
@@ -104,9 +108,12 @@ export function* expressionTask(
     const key = yield* compileChild(expressionTask(builder, expression.key, context, current));
     const probe = builder.own("default-probe", context, expression.span);
     builder.link(key, probe);
+    const first = builder.nodes.length;
     const value = yield* compileChild(
       expressionTask(builder, expression.defaultValue, context, probe),
     );
+    // (F18: a typed load's default reads the state at the load, which no event separates from it)
+    builder.snapshotFrom(first, probe);
     const node = remember(builder.own("expression", context, expression.span, { expression }));
     builder.link(value, node);
     builder.link(probe, node);

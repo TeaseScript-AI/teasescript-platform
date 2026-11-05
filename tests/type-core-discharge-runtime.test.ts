@@ -1542,27 +1542,50 @@ test("a typed parse's or load's expected type is the core's own answer at the ca
 });
 
 test("a typed parse's or load's contract stays the one the core decided, or its program leaves the slice, in three layers, in both orders (S7 review r4 B1, B2, N1)", () => {
-  // a default that reads a variable: the core's answer at the call follows the stores that reach the read, the result's
-  // place the type the program settled; the slice leaves both out until the core's F18 relates them (a lead question)
-  const reading = "a typed parse's or load's default that reads a variable";
-  const structure = "a value whose structure the slice does not follow";
-  for (const [source, what] of [
+  // a default that reads a variable reads it at the call (F18, r4.81 (1)): the plan's type is the core's answer there,
+  // a `null` field open (any value), in both orders
+  for (const [source, call, type] of [
     [
       "let d = {n: 0}\nd.n = null\nlet out = fromJson(hostValue, default: d, files: false)\nsay out.n\nexit\n",
-      reading,
+      "fromJson(hostValue, default: d, files: false)",
+      null,
     ],
     [
       "let d = {n: 1.5}\nd.n = 0\nlet out = fromJson(hostValue, default: d, files: false)\nsay out.n\nexit\n",
-      reading,
+      "fromJson(hostValue, default: d, files: false)",
+      "{n: integer}",
     ],
     [
       "let d = {a: {n: 0}}\nlet out = fromJson(hostValue, default: d.a, files: false)\nsay out.n\nexit\n",
-      reading,
+      "fromJson(hostValue, default: d.a, files: false)",
+      "{n: integer}",
     ],
-    ['let d = {n: 0}\nlet out = load("k", default: d)\nsay out.n\nexit\n', reading],
+  ] as const) {
+    const expected = contentOf(candidatePlan(source)).filter((entry) =>
+      entry.startsWith("expected "),
+    );
+    assert.equal(expected.length, 1, source);
+    assert.ok(expected[0]!.startsWith(`expected call@${at(source, call)} `), expected[0]);
+    if (type !== null) assert.equal(expected[0], `expected call@${at(source, call)} ${type}`);
+    // (an open field: any value, `null` among them)
+    else
+      for (const kind of ["null", "string", "list"])
+        assert.match(expected[0]!, new RegExp(`\\b${kind}\\b`));
+  }
+  const loaded = 'let d = {n: 0}\nlet out = load("k", default: d)\nsay out.n\nexit\n';
+  assert.ok(
+    contentOf(candidatePlan(loaded)).some(
+      (entry) => entry === `type storageLoad@${at(loaded, 'load("k", default: d)')} {n: integer}`,
+    ),
+    JSON.stringify(contentOf(candidatePlan(loaded))),
+  );
+  const copied = "a typed parse or load into a copy of a written type";
+  const structure = "a value whose structure the slice does not follow";
+  for (const [source, what] of [
+    // (a default that copies a written type: its result inherits it, A4's receiving side, #1072's A2)
     [
       "let a: number[] = [0]\nlet b = a\nlet out = fromJson(hostValue, default: b, files: false)\nexit\n",
-      reading,
+      copied,
     ],
     // fields some records of a list lack, also where a record gives them as `null` or host data
     [

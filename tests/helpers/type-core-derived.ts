@@ -581,8 +581,13 @@ function literalType(
     case "identifier":
     case "propertyAccessExpression":
     case "indexExpression":
-      // the candidate route leaves out a typed parse's or load's default that reads a variable
-      throw new Underivable("a default that reads a variable");
+      // F18 (TABLE r4.81 (1)): a default that reads a variable reads it at its call, as the stores before it give it
+      // (these programs have no loop around such a call)
+      return sourceShape(
+        at,
+        statements.filter((statement) => statement.span.end.offset <= at.span.start.offset),
+        seen,
+      );
     case "loadExpression":
       return expectedType(at, statements, seen);
     case "callExpression":

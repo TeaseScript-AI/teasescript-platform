@@ -532,7 +532,9 @@ function joinedClass(
   } else if (c.kind === "load") {
     if (c.receiver !== null || contract.landsIn(value, []) !== null) return NO_KEPT_CLASS;
     const below = c.fallback === null ? "" : guardsBelow(contract, c.fallback);
-    cls = keptParts(contract.work, c.key === null ? "load?" : "load", ...classes, below);
+    const snapshot = !exact && c.fallback !== null ? classOf(contract, c.fallback, true) : "";
+    if (snapshot === null) return NO_KEPT_CLASS;
+    cls = keptParts(contract.work, c.key === null ? "load?" : "load", ...classes, below, snapshot);
   } else if (c.kind === "operation" && isChoice(c)) {
     const options: string[] = [];
     let next = 0;
@@ -555,7 +557,19 @@ function joinedClass(
     const named = "named" in c ? c.named.map((argument) => argument.name).join(",") : "";
     const own = c.receiver === null ? "" : "r";
     // (its operands' classes joined first: an operation may take more of them than one call does)
-    cls = keptParts(contract.work, family, name, own, named, contract.joined(classes, "|"), below);
+    const snapshot =
+      !exact && parses && fallback !== undefined ? classOf(contract, fallback, true) : "";
+    if (snapshot === null) return NO_KEPT_CLASS;
+    cls = keptParts(
+      contract.work,
+      family,
+      name,
+      own,
+      named,
+      contract.joined(classes, "|"),
+      below,
+      snapshot,
+    );
   } else return NO_KEPT_CLASS;
   return { cls, mixed, own: [], parts };
 }
