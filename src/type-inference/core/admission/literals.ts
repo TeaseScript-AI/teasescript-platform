@@ -1340,8 +1340,9 @@ export interface MixedOptional {
  *   fallback only where its operand's own items hold null;
  * - a written copy, by its term alone, whatever a rejected store put there;
  * - another read or a call's result, by its place's admitted type where admission decides it;
- * - any other value (an undecided place's read, an operation's own result), by its own items: a `+` join's are its
- *   admitted operands' elements, so an operand admission rejected brings nothing (ADR 0021 1.1, Astra r1's B1).
+ * - any other value (an undecided place's read, an operation's own result, a `+` join), by its own items.
+ * A join has no case of its own: admission's join items hold exactly its admitted operands' elements, so walking its
+ * operands added only what a rejected operand brought (ADR 0021 1.1, Astra r1's B1).
  * Each value at each path is asked once per pass (`OPTIONAL`), whichever literal's or join's error asks it, so a wide
  * part shared by many joins is walked once (Astra r1's B2); a value asked again while its own answer is pending, never.
  */
