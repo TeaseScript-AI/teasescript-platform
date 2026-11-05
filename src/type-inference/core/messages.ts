@@ -34,6 +34,7 @@ import { inWords, type Diagnosed } from "./messages/code-forms.js";
 import { errorSentence, writtenTypeMessage } from "./messages/errors.js";
 import { budgetMessage, warningFix, warningSentence } from "./messages/warnings.js";
 import { contextSentence, originSentence } from "./messages/causes.js";
+import { unusedFallbackMessage } from "./consumers/otherwise.js";
 export type { Landing, MessageSource } from "./messages/site.js";
 export { described, pathPhrase } from "./messages/words.js";
 
@@ -330,6 +331,8 @@ export function staticCode(rule: StaticRule): CoreCode {
       return "TSV043";
     case "empty-range":
       return "TSV046";
+    case "unused-fallback":
+      return "TSV062";
     case "calendar-offset":
       return "TSV043";
   }
@@ -359,6 +362,8 @@ function staticMessage(rule: StaticRule): string {
           : `a range never counts down. Write '${end}${operator}${start}' to count up.`;
       return `This range contains no numbers, so ${rule.use === "loop" ? "the loop never runs" : "toList() returns []"}: ${reason}`;
     }
+    case "unused-fallback":
+      return unusedFallbackMessage(rule);
   }
 }
 

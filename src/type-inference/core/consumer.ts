@@ -53,6 +53,7 @@ import {
 } from "../../expression-children.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
 import { VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
+import { placeKey } from "../../way-facts.js";
 import type {
   CoreRuntimeChecks,
   FactSite,
@@ -83,6 +84,8 @@ import {
 } from "./contract-descriptors.js";
 import { typedDefault as defaultKinds } from "./contract.js";
 import { leftOutCheck, leftOutCompletion, leftOutWarning } from "./consumers.js";
+import { withoutEmpty } from "./exact-path.js";
+import { otherwiseChains, provesNonNull, unusedFallbackRule } from "./consumers/otherwise.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import { REASON, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
@@ -588,7 +591,8 @@ export function coreCheckResult(
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
   const { checks, core } = runtimeChecks(answers, index, request);
   const known = knownValues(answers, index, (call) => core.expected.get(call));
-  const result = checkedOf(answers, index, known);
+  const fallbacks = fallbackUses(answers, index);
+  const result = checkedOf(answers, index, known, fallbacks);
   const source = messageSource(
     request.files.map((file) => file.source),
     result.diagnostics,
@@ -624,7 +628,7 @@ export function coreCheckResult(
     runtimeChecks: checks,
     coreChecks: core,
     formShapes: new Map(),
-    ways: { paths, operands: new Map() },
+    ways: { paths, operands: operandWays(index, fallbacks) },
     unreachable: unreachable(answers, index),
     speakerFlow: { reads: new Map(), stores: new Map() },
     storageTypes: [],
@@ -661,10 +665,13 @@ function checkedOf(
   answers: Answers,
   index: SliceIndex,
   known: (expression: Expression) => KnownValue | undefined,
+  fallbacks: FallbackUses,
 ): CoreResult {
   // (each in the analysis's site order, before the first diagnostic of a later site: a record's lists are in source
   // order, r4.86 (1))
-  const found = staticDiagnostics(answers, index, known).sort((a, b) => siteOrder(a.site, b.site));
+  const found = staticDiagnostics(answers, index, known, fallbacks).sort((a, b) =>
+    siteOrder(a.site, b.site),
+  );
   // (a known calendar offset is one problem with one diagnostic, the runtime's sentence: the analysis's own warning of
   // the operation at that site, a hedge beside it, goes, decision 6)
   const at = (site: SourceSite): string => `${site.file}:${site.start}:${site.end}`;
@@ -684,6 +691,41 @@ function checkedOf(
   }
   diagnostics.push(...found.slice(next));
   return { outcome: outcomeOf(diagnostics), diagnostics, checks: coreResult(answers).checks };
+}
+
+/**
+ * V30 §18 (#1072): each chain of `otherwise` with the first link whose left side is never `null` (`provesNonNull` of
+ * the core's answer at that read, through the one read route, `Answers.at`), `null` for none: the one decision the
+ * warning that its fallbacks are never used (TSV062) and the ways the plan's checks follow (`operandWays`) both read,
+ * made once. A link's left side is read only while no earlier link proved its own: a chain is decided at its first.
+ */
+type FallbackUses = readonly {
+  readonly chain: readonly BinaryExpression[];
+  readonly first: number | null;
+}[];
+
+function fallbackUses(answers: Answers, index: SliceIndex): FallbackUses {
+  return otherwiseChains(index.expressions)
+    .map((chain) => ({
+      chain,
+      first: chain.findIndex((link) =>
+        provesNonNull(answers.at(nodeOf(answers, index, link.left))?.items ?? null),
+      ),
+    }))
+    .map(({ chain, first }) => ({ chain, first: first < 0 ? null : first }));
+}
+
+/**
+ * The ways of each `otherwise` the plan's checks follow (`WayFacts.operands`), from the one decision (`fallbackUses`):
+ * from a chain's first link whose left side is never `null` on, the fallback never runs and the value is always kept.
+ */
+function operandWays(index: SliceIndex, fallbacks: FallbackUses): Map<string, readonly boolean[]> {
+  const ways = new Map<string, readonly boolean[]>();
+  for (const { chain, first } of fallbacks)
+    if (first !== null)
+      for (const link of chain.slice(first))
+        ways.set(placeKey(index.fileOf(link), link.span), [false, true]);
+  return ways;
 }
 
 /** Two sites in source order: by file, start and end. */
@@ -730,7 +772,12 @@ export function checkedResult(answers: Answers, request: CoreAnalysisRequest): C
         throw error;
       }
     };
-    return checkedOf(answers, index, knownValues(answers, index, expected));
+    return checkedOf(
+      answers,
+      index,
+      knownValues(answers, index, expected),
+      fallbackUses(answers, index),
+    );
   });
 }
 
@@ -744,6 +791,7 @@ function staticDiagnostics(
   answers: Answers,
   index: SliceIndex,
   known: (expression: Expression) => KnownValue | undefined,
+  fallbacks: FallbackUses,
 ): StaticDiagnostic[] {
   const sited = new Set<string>();
   for (const diagnostic of answers.diagnostics)
@@ -769,6 +817,30 @@ function staticDiagnostics(
       sited.has(siteKey(index.fileOf(argument), unwrap(argument).span));
     for (const found of knownTextArguments(answers, index, call, known, diagnosed))
       report(index.site(found.at), { rule: "text-argument", message: found.message });
+  }
+  // V30 §18 (#1072): a chain's fallbacks from its first link whose left side is never `null` on never run, an ordinary
+  // warning with no runtime check, from the one decision (`fallbackUses`); they stay checked (ADR 0021 1.8)
+  for (const { chain, first } of fallbacks) {
+    if (first === null) continue;
+    const link = chain[first]!;
+    found.push({
+      class: "warning",
+      kind: "static",
+      code: "TSV062",
+      site: {
+        file: index.fileOf(link),
+        start: link.operatorSpan.start.offset,
+        end: chain.at(-1)!.span.end.offset,
+      },
+      rule: unusedFallbackRule(chain, first, (object) => {
+        const kinds = withoutEmpty(answers.at(nodeOf(answers, index, object))?.items ?? []);
+        return kinds.length > 0 && kinds.every((item) => item.tag === "list")
+          ? "list"
+          : kinds.length > 0 && kinds.every((item) => item.tag === "dict")
+            ? "dict"
+            : null;
+      }),
+    });
   }
   // V30 §6: a written range that holds no number, an ordinary warning where a loop or `toList()` reads it
   const empty = (range: Expression, use: "loop" | "list"): void => {
