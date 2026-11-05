@@ -12,7 +12,7 @@ import {
 import type { Contract } from "../contract.js";
 import { type Key } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
-import { EMPTY, firstWriter, REASON, type Item, type Writer } from "../items.js";
+import { EMPTY, firstWriter, mergeItems, REASON, type Item, type Writer } from "../items.js";
 import { stepName } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
@@ -32,6 +32,7 @@ import type {
   EntryGroup,
   Holder,
   LevelGroup,
+  LiteralIndex,
   PrefixEntry,
   PrefixLevels,
   PrefixStores,
@@ -239,24 +240,7 @@ export function* propertyItems(
       while (holders[first]!.group!.literal !== group.literal) first += 1;
       before(holders[first]!.at);
       // (a literal stored whole: its group stands at the prefix itself)
-      const literal = flow?.child() ?? null;
-      for (const item of annotated(
-        contract,
-        group,
-        rest,
-        withWriter(
-          // #1668: I, the read keeps its flow, its `missing` writer the members' (`membersMissing`)
-          yield* membersMissing(
-            contract,
-            group,
-            rest,
-            yield* contract.contractOfValueAt(group.literal, rest, literal),
-          ),
-          group.w,
-        ),
-      ))
-        out.push(item);
-      if (literal !== null) flow!.attach(literal, "groupFirst", "annotated", "writer");
+      for (const item of yield* groupRead(contract, group, rest, flow)) out.push(item);
     }
   }
   before(Infinity);
@@ -348,6 +332,7 @@ function levelMember(contract: Contract, entry: PrefixEntry): LevelGroup | null 
     holder: entry.holder,
     guarded: entry.guarded,
     ingress: entry.ingress,
+    entry,
   };
 }
 
@@ -396,8 +381,8 @@ function foldGroups(
   // each group's key, to its position in the list
   const merged = new Map<string, number>();
   const groups: LevelGroup[] = [];
-  // (#1323: each group's members, kept where a fold merges more than one)
-  const members: LevelGroup[][] = [];
+  // (#1323: a merged group's members, made where it first merges; an unmerged group keeps its own list)
+  const members: (LevelGroup[] | null)[] = [];
   for (const group of parents) {
     program.work.charge("structureSteps");
     const levels = levelsOf(contract, group.literal);
@@ -426,12 +411,20 @@ function foldGroups(
     if (position === undefined) {
       merged.set(key, groups.length);
       groups.push(group);
-      members.push([...(group.members ?? [group])]);
+      members.push(null);
       continue;
     }
     const into = groups[position]!;
-    contract.keep(group.members?.length ?? 1);
-    members[position]!.push(...(group.members ?? [group]));
+    // (#1323: the members kept for the group's reads, structure shared by them: r4.349)
+    program.work.shared(() => {
+      contract.keep(group.members?.length ?? 1);
+      let list = members[position]!;
+      if (list === null) {
+        contract.keep(into.members?.length ?? 1);
+        members[position] = list = [...(into.members ?? [into])];
+      }
+      list.push(...(group.members ?? [group]));
+    });
     groups[position] = {
       literal: into.literal,
       at: into.at,
@@ -441,75 +434,111 @@ function foldGroups(
       ingress: program.scope.ingress.union(into.ingress, group.ingress),
     };
   }
-  for (const [position, list] of members.entries())
-    if (list.length > 1) groups[position] = { ...groups[position]!, members: list };
+  for (const [position, list] of members.entries()) {
+    if (list === null) continue;
+    program.work.shared(() => {
+      // (its members' identity and whether they stand at the same steps, once: every read of the group asks them)
+      const first = contract.joined(list[0]!.at, ".");
+      const alike = list.every((member) => contract.joined(member.at, ".") === first);
+      // (a short name for the list, made once: a read's scan key never spells its members out)
+      const known = MEMBER_LISTS.get(contract) ?? 0;
+      MEMBER_LISTS.set(contract, known + 1);
+      const membersKey = `m${known}`;
+      groups[position] = { ...groups[position]!, members: list, membersKey, alike };
+    });
+  }
   return groups;
 }
 
 /**
- * #1323 (TABLE r4.72): a group's items at `rest` (below its steps), F11's `missing` among them named as the unshared
- * join names it: by the earliest (`firstWriter`, F28) `missing` writer among its members' own completed reads there,
- * each `contractOfValueAt(member.literal, member.at + rest)`, the other items, reasons, context and the holder's
- * position the group's (`EMPTY` has no writer). The fold's equivalence proves where its members hold a `missing`: only
- * where the group's items do, and a group of one member is its entry. Reads that the equivalence proves alike share one
- * scan (`absenceClass`); a scan is kept only where it rests on no solver answer (`ownAbsence`).
+ * #1323 (TABLE r4.72, r4.371): a group's items at `rest` (below its steps), annotated and with its writer, F11's pure
+ * `missing` among them named as the unshared join names it: by the earliest (`firstWriter`, F28) `missing` writer
+ * among its members' own completed reads there, each `contractOfValueAt(member.literal, member.at + rest)`, the other
+ * items, reasons, context and the holder's position the group's; `EMPTY` has no writer. The fold's equivalence proves
+ * where its members hold a `missing`: only where the group's items do. Reads the equivalence proves alike share one
+ * scan of the members (`absenceClass`); where none is proved (a member's read reaching a `.get`, a call's result,
+ * other steps), the read declines the fold and each member answers as its entry does with the sharing off. Either
+ * way the reads beyond the group's own are its provenance, counted to the total and not to the asking decision
+ * (`sharedSteps`, r4.349).
  */
-export function* membersMissing(
+export function* groupRead(
   contract: Contract,
   group: LevelGroup,
   rest: Rest,
-  items: readonly Item[],
+  flow: FlowSink | null,
 ): Work<readonly Item[]> {
-  const list = group.members;
+  const { work } = contract.pass.program;
   const missing = (item: Item): boolean =>
     item.tag === "unknown" && item.reasons === REASON.missing;
-  if (list === undefined || !items.some(missing)) return items;
-  const kept = keptAbsences(contract);
-  const shared = absenceClass(contract, group, list, items.filter(missing));
-  let earliest = shared === null ? undefined : kept.get(shared);
-  if (earliest === undefined) {
-    let own = true;
-    earliest = null;
-    for (const member of list) {
-      let found = false;
-      // #1668: K, a member's own read names the writer of the group's `missing`; none of its items is included
-      for (const item of yield* contract.contractOfValueAt(
-        member.literal,
-        isSteps(rest) ? joinSteps(member.at, rest) : rest.after(member.at),
-      )) {
-        if (!missing(item) || item.writer === null) continue;
-        found = true;
-        own &&= ownAbsence(contract, member.literal).has(item.writer);
-        earliest = firstWriter(earliest, item.writer);
+  const literal = flow?.child() ?? null;
+  let items = yield* contract.contractOfValueAt(
+    group.literal,
+    isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
+    literal,
+  );
+  const list = group.members;
+  if (list !== undefined && items.some(missing)) {
+    const shared = work.shared(() => absenceClass(contract, group, items.filter(missing)));
+    if (shared === null) {
+      // (the fold declined: each member as its entry; the first's is the group's own read, already made)
+      const first = list[0]!.entry!;
+      const out: Item[] = [
+        ...annotated(contract, first, restRef(contract, rest), withWriter(items, first.w)),
+      ];
+      if (literal !== null) flow!.attach(literal, "annotated", "writer");
+      for (const member of list.slice(1))
+        // #1668: I, each member's entry read takes the flow (`entryAt`)
+        for (const item of yield* work.sharedSteps(contract.entryAt(member.entry!, rest, flow)))
+          out.push(item);
+      // (merged here, so its reader merges what the group's own read would give it)
+      return work.shared(() => mergeItems(out, contract.pass.program.scope));
+    }
+    const kept = keptAbsences(contract);
+    let earliest = kept.get(shared);
+    if (earliest === undefined) {
+      let own = true;
+      earliest = null;
+      for (const member of list) {
+        let found = false;
+        // #1668: K, a member's own read names the writer of the group's `missing`; none of its items is included
+        for (const item of yield* work.sharedSteps(
+          contract.contractOfValueAt(
+            member.literal,
+            isSteps(rest) ? joinSteps(member.at, rest) : rest.after(member.at),
+          ),
+        )) {
+          if (!missing(item) || item.writer === null) continue;
+          found = true;
+          const writer = item.writer;
+          own &&= work.shared(() => ownAbsence(contract, member.literal).has(writer));
+          earliest = firstWriter(earliest, item.writer);
+        }
+        own &&= found;
       }
-      own &&= found;
+      // (kept where every writer is a member's own object: its literal's structure, never a solver answer)
+      const found = earliest;
+      if (own) work.shared(() => (contract.keepText(shared.length), kept.set(shared, found)));
     }
-    if (shared !== null && own) {
-      contract.keepText(shared.length);
-      kept.set(shared, earliest);
-    }
+    const writer = earliest;
+    if (writer !== null) items = items.map((item) => (missing(item) ? { ...item, writer } : item));
   }
-  const writer = earliest;
-  return writer === null
-    ? items
-    : items.map((item) => (missing(item) ? { ...item, writer } : item));
+  if (literal !== null) flow!.attach(literal, "groupFirst", "annotated", "writer");
+  return annotated(contract, group, rest, withWriter(items, group.w));
 }
 
 /**
- * The scan a group's read shares with the other reads of its members (`membersMissing`), or `null`: where its
- * members stand at the same steps and each `missing` it holds is its first member's own object, at a node of its own
- * literal and a position there. Their fold keys hold, at each step and below, the same objects' names in the same
- * order, so at each such node every member lacks a step at the same position as the first: every read whose missing
- * stand there names the same objects of each member, whatever step below it lacks.
+ * The scan a group's read shares with the other reads of its members (`groupRead`), or `null`: where its members
+ * stand at the same steps and each `missing` it holds is its first member's own object, at a node of its own literal
+ * and a position there. Their fold keys hold, at each step and below, the same objects' names in the same order, so at
+ * each such node every member lacks a step at the same position as the first: every read whose missing stand there
+ * names the same objects of each member, whatever step below it lacks.
  */
 function absenceClass(
   contract: Contract,
   group: LevelGroup,
-  list: readonly LevelGroup[],
   missing: readonly Item[],
 ): string | null {
-  const steps = group.at.join(".");
-  if (list.some((member) => member.at.join(".") !== steps)) return null;
+  if (group.alike !== true) return null;
   const own = ownAbsence(contract, group.literal);
   const places: string[] = [];
   for (const item of missing) {
@@ -519,9 +548,9 @@ function absenceClass(
   }
   return joinParts(
     "absent",
-    list.map((member) => member.literal).join(","),
-    steps,
-    [...new Set(places)].sort().join(","),
+    group.membersKey!,
+    contract.joined(group.at, "."),
+    contract.joined([...new Set(places)].sort(), ","),
   );
 }
 
@@ -534,27 +563,35 @@ function ownAbsence(contract: Contract, literal: PlaceId): ReadonlyMap<Writer, s
   const index = contract.literalIndex(literal);
   let known = OWN_ABSENCE.get(index);
   if (known === undefined) {
-    known = new Map();
-    for (const [position, object] of (index.root.objects?.list ?? []).entries()) {
-      contract.keep(1);
-      known.set(object.token, `0:${position}`);
-    }
-    for (const [id] of indexPaths(contract, index))
-      for (const [position, object] of (
-        nodeAt(contract, index, id)?.objects?.list ?? []
-      ).entries()) {
-        contract.keep(1);
-        known.set(object.token, `${id}:${position}`);
-      }
+    // (structure shared by every read of the literal, counted to the total and not to the asking decision: r4.349)
+    known = contract.pass.program.work.shared(() => ownObjects(contract, index));
     OWN_ABSENCE.set(index, known);
   }
   return known;
 }
 
+/** `ownAbsence`'s map of one literal index. */
+function ownObjects(contract: Contract, index: LiteralIndex): Map<Writer, string> {
+  const known = new Map<Writer, string>();
+  for (const [position, object] of (index.root.objects?.list ?? []).entries()) {
+    contract.keep(1);
+    known.set(object.token, `0:${position}`);
+  }
+  for (const [id] of indexPaths(contract, index))
+    for (const [position, object] of (nodeAt(contract, index, id)?.objects?.list ?? []).entries()) {
+      contract.keep(1);
+      known.set(object.token, `${id}:${position}`);
+    }
+  return known;
+}
+
+/** The member lists named so far, per contract (a pass's): their count. */
+const MEMBER_LISTS = new WeakMap<Contract, number>();
+
 /** `ownAbsence`'s maps, per literal index. */
 const OWN_ABSENCE = new WeakMap<object, Map<Writer, string>>();
 
-/** `membersMissing`'s kept scans, per contract (a pass's): by class, the earliest writer. */
+/** `groupRead`'s kept scans, per contract (a pass's): by class, the earliest writer. */
 function keptAbsences(contract: Contract): Map<string, Writer | null> {
   let kept = KEPT_ABSENCES.get(contract);
   if (kept === undefined) KEPT_ABSENCES.set(contract, (kept = new Map()));

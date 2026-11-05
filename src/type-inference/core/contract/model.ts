@@ -80,11 +80,15 @@ export interface LevelGroup {
   readonly holder: Holder | null;
   readonly guarded: boolean;
   readonly ingress: IngressNode | undefined;
+  /** #1323: its prefix entry, which answers for it where a read declines the fold (`groupRead`). */
+  readonly entry?: PrefixEntry;
   /**
-   * #1323: the members a fold merged into it, itself first, where more than one: F11's `missing` below the group is
-   * each member's own, the earliest standing (`membersMissing`), as each entry's with the sharing off.
+   * #1323: the members a fold merged into it, itself first, where more than one; F11's `missing` below the group is
+   * theirs (`groupRead`): `membersKey` names them, `alike` whether they stand at the same steps.
    */
   readonly members?: readonly LevelGroup[];
+  readonly membersKey?: string;
+  readonly alike?: boolean;
 }
 
 /** A prefix's entries as its levels read them (§4.6): the levels' members, and the entries that answer by themselves. */

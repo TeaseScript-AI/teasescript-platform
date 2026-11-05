@@ -1,5 +1,5 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, joinSteps } from "../budget.js";
+import { joinParts } from "../budget.js";
 import type { Contract } from "../contract.js";
 import {
   keyOf,
@@ -13,7 +13,6 @@ import {
   canonicalKey,
   isKeyId,
   isPathSteps,
-  isSteps,
   keyAt,
   keyBelowIn,
   keyBelowRef,
@@ -62,8 +61,8 @@ import {
   REFERENCE,
   unknownItem,
 } from "./kinds.js";
-import { entryGroups, groupsAt, membersMissing, prefixLevels, propertyItems } from "./levels.js";
-import { annotated, marksAt } from "./marks.js";
+import { entryGroups, groupRead, groupsAt, prefixLevels, propertyItems } from "./levels.js";
+import { marksAt } from "./marks.js";
 import type { PrefixEntry } from "./model.js";
 import { positionable, positioned, positionOf } from "./positions.js";
 import { summaryCount, summaryItems } from "./prefix-index.js";
@@ -583,31 +582,8 @@ function* contractAlong(
             for (const item of yield* contract.entryAt(entry, rest, flow)) out.push(item);
         }
         if (levels.base.length > 0)
-          for (const group of groupsAt(contract, prefix, levels.base, rest)) {
-            const literal = flow?.child() ?? null;
-            out.push(
-              ...annotated(
-                contract,
-                group,
-                rest,
-                withWriter(
-                  // #1668: I, the read keeps its flow, its `missing` writer the members' (`membersMissing`)
-                  yield* membersMissing(
-                    contract,
-                    group,
-                    rest,
-                    yield* contract.contractOfValueAt(
-                      group.literal,
-                      isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
-                      literal,
-                    ),
-                  ),
-                  group.w,
-                ),
-              ),
-            );
-            if (literal !== null) flow!.attach(literal, "groupFirst", "annotated", "writer");
-          }
+          for (const group of groupsAt(contract, prefix, levels.base, rest))
+            for (const item of yield* groupRead(contract, group, rest, flow)) out.push(item);
       }
       // a replaced source's own stores below the prefix, only where they lie: its layers' summary, their sources'
       // answers merged in order (#1466); where it declines, each source by itself, marked as its copies' entries are

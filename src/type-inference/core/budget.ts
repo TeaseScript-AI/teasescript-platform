@@ -289,6 +289,8 @@ export class WorkLedger {
   /** Units charged while building an index the program shares (`shared`), outermost builds only. */
   #shared = 0;
   #sharing = false;
+  /** A `sharedSteps` build's start, while it runs: `own` stands there. */
+  #windowStart: number | null = null;
   /** Units a demand counts for work the program did once for every reader (`repeat`). */
   #repeated = 0;
   readonly #spent: number[] = [0];
@@ -371,6 +373,26 @@ export class WorkLedger {
     }
   }
 
+  /**
+   * #1323: `shared` for a generator, the demands it yields and what they run included: a read made for a group's
+   * provenance counts to the total and never to the decision that asked (r4.349). While it runs the asker's `own`
+   * stands where it began, so no allowance is spent or checked by it; inside another shared build it is that build's.
+   */
+  public *sharedSteps<Y, R, N>(steps: Generator<Y, R, N>): Generator<Y, R, N> {
+    if (this.#sharing) return yield* steps;
+    const [before, repeated] = [this.#total, this.#repeated];
+    this.#sharing = true;
+    this.#windowStart = before;
+    try {
+      return yield* steps;
+    } finally {
+      this.#sharing = false;
+      this.#windowStart = null;
+      this.#shared += this.#total - before;
+      this.#repeated = repeated;
+    }
+  }
+
   /** Whether a `shared` build is running: its units count as shared once it ends (`own`). */
   public get sharing(): boolean {
     return this.#sharing;
@@ -381,7 +403,7 @@ export class WorkLedger {
    * measures (S3 §5).
    */
   public get own(): number {
-    return this.#total - this.#shared + this.#repeated;
+    return (this.#windowStart ?? this.#total) - this.#shared + this.#repeated;
   }
 
   /**

@@ -10,7 +10,6 @@ import {
   type Answers,
   type CorePass,
 } from "../src/type-inference/core/answers.js";
-import { joinSteps } from "../src/type-inference/core/budget.js";
 import type { Contract, ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
 import {
   offendingStores,
@@ -20,7 +19,6 @@ import {
 } from "../src/type-inference/core/contract/prefix-index.js";
 import {
   exportNames,
-  isSteps,
   PathSteps,
   spanRef,
   stepsRest,
@@ -29,10 +27,9 @@ import {
 import {
   entryGroups,
   groupsAt,
-  membersMissing,
+  groupRead,
   prefixLevels,
 } from "../src/type-inference/core/contract/levels.js";
-import { annotated } from "../src/type-inference/core/contract/marks.js";
 import { keyOf, type Key } from "../src/type-inference/core/definitions.js";
 import { withWriter } from "../src/type-inference/core/exact-path.js";
 import { mergeItems, REASON, writerKey, type Item } from "../src/type-inference/core/items.js";
@@ -1006,25 +1003,7 @@ function* levelsAt(contract: Contract, prefix: Key, rest: Rest): Work<readonly I
   }
   if (levels.base.length > 0)
     for (const group of groupsAt(contract, prefix, levels.base, rest))
-      out.push(
-        ...annotated(
-          contract,
-          group,
-          rest,
-          withWriter(
-            yield* membersMissing(
-              contract,
-              group,
-              rest,
-              yield* contract.contractOfValueAt(
-                group.literal,
-                isSteps(rest) ? joinSteps(group.at, rest) : rest.after(group.at),
-              ),
-            ),
-            group.w,
-          ),
-        ),
-      );
+      out.push(...(yield* groupRead(contract, group, rest, null)));
   return out;
 }
 
