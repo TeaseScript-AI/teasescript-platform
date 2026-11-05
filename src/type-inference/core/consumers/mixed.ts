@@ -194,6 +194,7 @@ export function mixed(
             : "list",
       path: found.path,
       type: found.earliest,
+      ...(found.optional === undefined ? {} : { optional: found.optional }),
       // (the variable the literal is the start value of)
       root: ((d) => (d === undefined ? null : storeRoot(walk, d.place)))(
         literal === undefined
@@ -239,6 +240,7 @@ export function mixedJoin(
       root: start === undefined ? null : storeRoot(walk, start.place),
       operator: compound ? "+=" : "+",
       levels: found.levels,
+      ...(found.optional === undefined ? {} : { optional: found.optional }),
     },
     found.kinds,
   );

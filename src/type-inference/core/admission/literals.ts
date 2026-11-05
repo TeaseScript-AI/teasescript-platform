@@ -247,6 +247,7 @@ export function literalElements(
       readonly earliest: readonly ItemTag[];
       readonly kinds: readonly ItemTag[];
       readonly atCopy: boolean;
+      readonly optional?: MixedOptional;
     },
   ) => void,
   undecided?: (cell: PlaceId) => void,
@@ -354,6 +355,7 @@ export function literalElements(
         readonly tags: readonly ItemTag[];
         readonly written: boolean;
         readonly own: readonly ItemTag[];
+        readonly d: Definition;
       }
     >();
     // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
@@ -377,6 +379,19 @@ export function literalElements(
               offends(at, [...new Set(deciding(items).map((item) => item.tag))]),
             )
           : null;
+      // (#1765: the layers between the element and the leaf that may hold null, each element's: a written copy's term
+      // there, else a null among its items; the sentence's type alone, as the leaf's own null is, #1753)
+      const layers = (of: Definition): boolean[] =>
+        intermediateLayers(path).map((prefix) => {
+          const copied = named(of)
+            ? (drive(admission, earliestDecider(admission, of.value!, of.node, prefix, null))
+                ?.term ?? null)
+            : null;
+          return copied !== null
+            ? typeTags(copied).includes("null")
+            : admission.valueAt(of, prefix).some((item) => item.tag === "null");
+        });
+      const optional = mixedOptional(layers(first.get(at)!.d), layers(d));
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,
         cell,
@@ -385,6 +400,7 @@ export function literalElements(
         earliest: first.get(at)!.own,
         kinds: [...new Set(deciding(admission.valueAt(d, path)).map((item) => item.tag))],
         atCopy: atCopy.has(at),
+        ...(optional === undefined ? {} : { optional }),
       });
       admission.reject(d, cell, path);
     };
@@ -425,10 +441,10 @@ export function literalElements(
           if (copied !== null) {
             const written = typeTags(copied);
             const tags = written.filter((tag) => tag !== "null");
-            first.set(at, { tags, written: true, own: below ? written : tags });
+            first.set(at, { tags, written: true, own: below ? written : tags, d });
           } else if (kinds.length === 1) {
             const nulls = below && items.some((item) => item.tag === "null");
-            first.set(at, { tags: kinds, written: false, own: nulls ? [...own, "null"] : own });
+            first.set(at, { tags: kinds, written: false, own: nulls ? [...own, "null"] : own, d });
           }
           continue;
         }
@@ -620,6 +636,7 @@ export function joinElements(
     readonly kinds: readonly ItemTag[];
     readonly value: PlaceId;
     readonly levels: readonly (readonly ItemTag[])[] | null;
+    readonly optional?: MixedOptional;
   }) => void,
   undecided?: (value: PlaceId) => void,
 ): void {
@@ -1191,7 +1208,20 @@ export function joinElements(
               ))
           )
             continue;
+          // (#1765: the layers between the element and the leaf that may hold null, each operand's decision there)
+          const layer = (held: Held, prefix: readonly string[]): boolean => {
+            const at = decisionOf(held, prefix, keptText(admission.work, prefix));
+            return (
+              at !== null && at.decided !== "open" && (at.nulls || at.decided.nullable === true)
+            );
+          };
+          const prefixes = intermediateLayers(path);
+          const optional = mixedOptional(
+            prefixes.map((prefix) => layer(ours, prefix)),
+            prefixes.map((prefix) => layer(theirs, prefix)),
+          );
           const found: Parameters<typeof error>[0] = {
+            ...(optional === undefined ? {} : { optional }),
             c,
             path,
             earliest:
@@ -1294,4 +1324,25 @@ function conflictClass(admission: Admission, value: PlaceId): string {
       ? ""
       : joinParts("snapshot", contract.classOf(fallback, true) ?? `site${fallback}`),
   );
+}
+
+/**
+ * #1765: whether each layer of a mixed element between the element and its leaf may hold null, the earliest element's
+ * (`type`) and the other's (`kinds`), for the sentence's written type; `undefined` where none may.
+ */
+export interface MixedOptional {
+  readonly type: readonly boolean[];
+  readonly kinds: readonly boolean[];
+}
+
+/** The paths of the layers strictly between a mixed path's last property (or the element) and its leaf. */
+function intermediateLayers(path: readonly string[]): (readonly string[])[] {
+  const property = path.findLastIndex((step) => step !== "element" && step !== "entry");
+  const layers: (readonly string[])[] = [];
+  for (let end = property + 2; end < path.length; end += 1) layers.push(path.slice(0, end));
+  return layers;
+}
+
+function mixedOptional(type: boolean[], kinds: boolean[]): MixedOptional | undefined {
+  return type.includes(true) || kinds.includes(true) ? { type, kinds } : undefined;
 }

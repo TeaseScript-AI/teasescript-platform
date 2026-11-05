@@ -33,6 +33,7 @@ import {
   joinElements,
   literalChildren,
   literalElements,
+  type MixedOptional,
   offendingAt,
   siteAt,
   storesAt,
@@ -915,6 +916,7 @@ export class Admission {
         readonly earliest: readonly ItemTag[];
         readonly kinds: readonly ItemTag[];
         readonly atCopy: boolean;
+        readonly optional?: MixedOptional;
       },
     ) => void,
     undecided?: (cell: PlaceId) => void,
@@ -931,6 +933,7 @@ export class Admission {
       readonly kinds: readonly ItemTag[];
       readonly value: PlaceId;
       readonly levels: readonly (readonly ItemTag[])[] | null;
+      readonly optional?: MixedOptional;
     }) => void,
     undecided?: (value: PlaceId) => void,
   ): void {

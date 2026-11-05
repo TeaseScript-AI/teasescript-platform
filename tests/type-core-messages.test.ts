@@ -2687,6 +2687,67 @@ test("a store below its value checks the whole receiving type, null kept, and th
 });
 
 /**
+ * #1765: a mixed element's written type keeps each layer between the element and its leaf that may hold `null`, on both
+ * sides and through a property, a literal's own null and a written copy's type alike, as the current checker's first
+ * sentence does; a layer that may not stays plain. The element itself stays as today (#1753). In four modes.
+ */
+test("a mixed element's type keeps the null of every layer between the element and its leaf (#1765)", () => {
+  const ONE = "A list holds one type. Use values of one type in it.";
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      'let a:integer[]?[]=[[1],null]\nlet xs=[a,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[]?[]=[[1],null]\nlet xs=[a,[["x"],null]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[]?[]). ${ONE}`,
+    ],
+    [
+      'let a:integer?[]?[]=[[1],null]\nlet xs=[{f:a},{f:[["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer?[]?[]) in one and a list (string[][]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[]?[]=[[1],null]\nlet ys=[a]+[[["x"]]]\nexit\n',
+      "'+' would mix a list (integer[]?[]) and a list (string[][]). A list holds one type. To allow both, declare " +
+        "the list as 'let ys: ((integer | string)[]?)[][] =[a]+[[[\"x\"]]]'.",
+    ],
+    // (a written copy's optional layer with no null among its values: its type's)
+    [
+      'let a:integer[]?[]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (no layer that may hold null: plain)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[[1]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+  // (a dict's value layer that may hold null keeps it too; the container's word is #1762's)
+  for (const mode of MODES) {
+    const [mixed] = inMode(mode, () =>
+      reported(main('let a:integer[]? dict=dict {}\nlet xs=[a,dict {k: [["x"]]}]\nexit\n')),
+    ).filter((each) => each.code === "TSV044");
+    assert.match(mixed?.message ?? "", /mixes a \w+ \(integer\[\]\?/u, JSON.stringify(mode));
+  }
+});
+
+/**
  * #1730 Codex r1 B1: a warning's landing and owner (`landingOf`, `ownerOf`) find the value a statement gives and a
  * literal's part by their start, so k warnings, each in its own statement or each an element of one list, read the
  * statements' values and the list's elements O(k log k) times, not once per earlier one (k = 64 to 256, at most ×2.5
