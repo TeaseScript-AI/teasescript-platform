@@ -1496,11 +1496,18 @@ test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 P
     answer("let raw = hostValue", "if raw is integer { repeat raw {} }"),
     "valid, copy-type boundary",
   );
-  // (also once the narrowed item is carried into a literal and read from there)
-  assert.equal(
-    answer("let raw = hostValue", "if raw is integer { let xs = [raw]\n repeat xs[0] {} }"),
-    "valid, copy-type boundary",
-  );
+  // (also once the narrowed item is carried into a literal, merged there with another of its kind, read from there, and
+  // at a typed store, which admission answers: Codex r1 on #1770)
+  for (const body of [
+    "let xs = [raw]\n repeat xs[0] {}",
+    "let xs = [raw, 1]\n repeat xs[0] {}",
+    "let out: integer = raw\n repeat out {}",
+  ])
+    assert.equal(
+      answer("let raw = hostValue", `if raw is integer { ${body} }`),
+      "valid, copy-type boundary",
+      body,
+    );
   // #1320: a scalar under its test needs no operand check; a list under an element test keeps C6's emptiness, read
   // directly and at a row (a consumer's descendant demand takes its path's G)
   assert.equal(
