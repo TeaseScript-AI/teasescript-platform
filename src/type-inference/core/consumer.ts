@@ -1666,14 +1666,19 @@ class Contracts {
     // the program leaves the slice rather than read what the natural plan may not, #1526 condition 1, #1767)
     const fallback = call.kind === "loadExpression" ? call.defaultValue : defaultOf(call);
     const landing = this.#landing(call);
-    // (a written scalar destination is the reader type itself, whatever its default reads: Codex r5's P2)
-    const written = landing === null ? null : this.answers.place(landing.id, landing.path).admitted;
-    const scalar =
-      written !== null &&
-      written.by === "written" &&
-      written.kinds.length > 0 &&
-      written.kinds.every((kind) => !STRUCTURED.has(kind));
-    if (fallback !== null && !scalar && readsPlace(fallback) && stoppedAnalysis(this.answers))
+    // (a written scalar destination is the reader type itself, whatever its default reads: Codex r5's P2; asked only
+    // after such a stop, so an unstopped compile asks nothing more)
+    const scalar = (): boolean => {
+      const written =
+        landing === null ? null : this.answers.place(landing.id, landing.path).admitted;
+      return (
+        written !== null &&
+        written.by === "written" &&
+        written.kinds.length > 0 &&
+        written.kinds.every((kind) => !STRUCTURED.has(kind))
+      );
+    };
+    if (fallback !== null && readsPlace(fallback) && stoppedAnalysis(this.answers) && !scalar())
       throw new OutsideContract(call, OPEN_BY_STOP);
     const expected = runCompileTask(
       this.#answerTask(
