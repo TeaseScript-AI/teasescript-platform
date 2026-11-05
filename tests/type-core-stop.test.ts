@@ -91,6 +91,7 @@ import {
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { sampled } from "./helpers/sweep.js";
 import {
+  decisionOf,
   inMode,
   itemText,
   keptErrors,
@@ -1877,7 +1878,7 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
   assert.deepEqual(judge(stopped), []);
   assert.throws(
     () => judge({ ...stopped, without: uncapped.without }),
-    /the demand allowance \d+ at its decision [^,]*, not the run's 27/,
+    /the demand allowance \d+ at its decision \[\d+,\[[^\]]*\]\], not the run's 27/,
   );
   // (and the reference's rerun without its completion, Codex r1's F1 on #1662: a decision of the reference stopped)
   const tally: HeldCase = {
@@ -1894,7 +1895,7 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
   assert.deepEqual(against(reference), []);
   assert.throws(
     () => against({ ...reference, without: heldRun(tally, mode).without }),
-    /the demand allowance \d+ at its decision [^,]*, not the run's 27/,
+    /the demand allowance \d+ at its decision \[\d+,\[[^\]]*\]\], not the run's 27/,
   );
 });
 
@@ -4620,9 +4621,7 @@ test("an admission decision past its allowance stops: its key undecided, its rea
       // half of `b`'s decision in the unbounded analysis in this order, still far above `count`'s (the solver's steps
       // decide where it stops: since A2, #1293, three quarters is crossed only after the last of them)
       const { decisions } = inOrder(() => analyseCore(request)).budget;
-      const own = decisions.filter((d) => d.place === b && d.path.length === 0);
-      assert.equal(own.length, 1);
-      const allowance = Math.floor(0.5 * own[0]!.units);
+      const allowance = Math.floor(0.5 * decisionOf(decisions, { place: b, path: [] }).units);
       const where = `reversed: ${reversed}, count: ${count}`;
       const answers: Answers = withTestDemandAllowance(allowance, () =>
         inOrder(() => completedCore(request)),
@@ -4698,7 +4697,7 @@ test("a stopped decision stays undecided at every reader, also after a settled p
           )
         : make();
     const { decisions } = inOrder(() => analyseCore(request)).budget;
-    const own = decisions.find((d) => d.place === tally && d.path.length === 0)!;
+    const own = decisionOf(decisions, { place: tally, path: [] });
     const capped = <T>(make: () => T): T =>
       withTestDemandAllowance(Math.floor(own.units / 2), () => inOrder(make));
     const unstopped = capped(() => stopRun(source));
@@ -4850,9 +4849,7 @@ test("a pass in which a decision stops is not settled: the next starts with its 
   for (const [mode, inMode] of modes) {
     const unbounded = inMode(() => analyseCore(tally.request));
     assert.equal(passes(unbounded), 0, mode);
-    const own = unbounded.budget.decisions.find(
-      (d) => d.place === tally.id && d.path.length === 0,
-    )!;
+    const own = decisionOf(unbounded.budget.decisions, { place: tally.id, path: [] });
     const capped = <T>(make: () => T): T =>
       withTestDemandAllowance(Math.floor(own.units / 2), () => inMode(make));
     const answers = capped(() => analyseCore(tally.request));
@@ -4901,9 +4898,10 @@ test("a pass in which a decision stops is not settled: the next starts with its 
     ].join("\n") + "\n";
   const scalar = place(single, "tally");
   for (const [mode, inMode] of modes.slice(0, 2)) {
-    const own = inMode(() => analyseCore(scalar.request)).budget.decisions.find(
-      (d) => d.place === scalar.id && d.path.length === 0,
-    )!;
+    const own = decisionOf(inMode(() => analyseCore(scalar.request)).budget.decisions, {
+      place: scalar.id,
+      path: [],
+    });
     const capped = <T>(make: () => T): T =>
       withTestDemandAllowance(Math.floor(own.units / 2), () => inMode(make));
     const unstopped = capped(() => stopRun(single));
@@ -4943,9 +4941,10 @@ test("a pass in which a decision stops is not settled: the next starts with its 
       "exit",
     ].join("\n") + "\n";
   const box = place(property, "box");
-  const root = reversed(() => analyseCore(box.request)).budget.decisions.find(
-    (d) => d.place === box.id && d.path.length === 0,
-  )!;
+  const root = decisionOf(reversed(() => analyseCore(box.request)).budget.decisions, {
+    place: box.id,
+    path: [],
+  });
   // (outside the candidate route's slice, `2 + 3`: its analysis alone; #1194's witness below runs the stop oracle)
   const twice: Answers = withTestDemandAllowance(root.units + 3, () =>
     reversed(() => analyseCore(box.request)),
@@ -4990,9 +4989,10 @@ test("a narrowed read of a stopped decision's key is what its test proves, ungua
               withConsumerOrder((list) => [...list].reverse(), make),
             )
           : make();
-      const own = inOrder(() => analyseCore(request)).budget.decisions.find(
-        (d) => d.place === tally && d.path.length === 0,
-      )!;
+      const own = decisionOf(inOrder(() => analyseCore(request)).budget.decisions, {
+        place: tally,
+        path: [],
+      });
       const answers: Answers = withTestDemandAllowance(Math.floor(own.units / 2), () =>
         inOrder(() => analyseCore(request)),
       );

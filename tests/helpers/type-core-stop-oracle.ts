@@ -8,6 +8,7 @@ import type { Omission } from "../../src/type-inference/core/consumers.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import type { SourceSite } from "../../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
+import { decisionsByKey } from "./type-core-oracles.js";
 import { siteKey } from "./site-keys.js";
 
 /*
@@ -158,10 +159,11 @@ function otherScope(own: Answers["budget"], other: Answers["budget"]): string | 
     return `another stop (${other.stoppedIn ?? "none"}, settled ${other.settled}) than the run's (${own.stoppedIn ?? "none"}, settled ${own.settled})`;
   if (own.allowance !== other.allowance)
     return `the program allowance ${other.allowance}, not the run's ${own.allowance}`;
+  // (each decision by its own key, place and exact path: a key twice in one run is refused, never overwritten)
   const demands = (budget: Answers["budget"]): Map<string, number> =>
     new Map([
-      ...budget.decisions.map(
-        (d) => [`decision ${d.place}:${d.path.join(".")}`, d.allowance] as const,
+      ...[...decisionsByKey(budget.decisions)].map(
+        ([key, d]) => [`decision ${key}`, d.allowance] as const,
       ),
       ...budget.demands.flatMap((d) =>
         d.bounded ? [[`read ${d.node}`, d.allowance] as const] : [],

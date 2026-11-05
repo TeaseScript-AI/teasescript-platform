@@ -827,6 +827,43 @@ export function requireRecords(
 let recordingDecisions = false;
 
 /**
+ * A decision record's key: its place (project-wide, so its file too) and its exact path, step by step. Units, allowance
+ * and stop are a record's values, not its key; the mode and the demand allowance are its compile's.
+ */
+export function decisionKey(decision: Pick<DecisionWork, "place" | "path">): string {
+  return JSON.stringify([decision.place, decision.path]);
+}
+
+/** One list's records by their keys (`decisionKey`); a key twice in one list is refused, never overwritten. */
+export function decisionsByKey(decisions: readonly DecisionWork[]): Map<string, DecisionWork> {
+  const keyed = new Map<string, DecisionWork>();
+  for (const d of decisions) {
+    const key = decisionKey(d);
+    if (keyed.has(key)) throw new Error(`Two decision records at ${key} in one list.`);
+    keyed.set(key, d);
+  }
+  return keyed;
+}
+
+/**
+ * The one record of `decisions` (one pass's list, or one completion's) at `place` and exactly `path`: a probe that
+ * takes the first record of a place, or a path by its joined text, can read another than it means. Throws where the
+ * list holds none or several.
+ */
+export function decisionOf(
+  decisions: readonly DecisionWork[],
+  at: Pick<DecisionWork, "place" | "path">,
+): DecisionWork {
+  const key = decisionKey(at);
+  const found = decisions.filter((d) => decisionKey(d) === key);
+  if (found.length !== 1)
+    throw new Error(
+      `${found.length === 0 ? "No" : found.length} decision records at ${key}; the list has ${decisions.map(decisionKey).join(", ") || "none"}.`,
+    );
+  return found[0]!;
+}
+
+/**
  * The decision records of `files` compiled through the public route (`publishedRoute`: `compileProjectWithBackend` with
  * the core backend, its receiving completion included, which `analyseCore` alone never runs), in `mode` (the source
  * order with the sharing on by default) at the test demand allowance `demand` (`null`, the default: the natural one).
