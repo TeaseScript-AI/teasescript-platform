@@ -1459,6 +1459,70 @@ test("a read below a selection takes its narrowing, each selected owner's own se
   }
 });
 
+test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 PR 2, #1320)", () => {
+  // (a record's outcome, its diagnostics' kinds and classes and its checks' kinds, in the three modes `record` asks)
+  const answer = (...lines: readonly string[]): string => {
+    const { outcome, diagnostics, checks } = record(...lines);
+    return [
+      outcome,
+      ...diagnostics.map((d) => `${d.kind} ${d.class}`),
+      ...checks.map((c) => `${c.kind}${c.boundary === true ? " boundary" : ""}`),
+    ].join(", ");
+  };
+  const flag = 'let flag = askBoolean "?"';
+  // G holds at a consumer: a fitting kind is quiet, as at a store
+  for (const [test, use] of [
+    ["n != null", "repeat n {}"],
+    ["n is integer", "repeat n {}"],
+    ["n != null", 'say "${n}"'],
+  ] as const)
+    assert.equal(
+      answer(flag, "let n = 1", "if flag { n = null }", `if ${test} { ${use} }`),
+      "valid",
+      `${test}: ${use}`,
+    );
+  // a nearer store after the test answers the consumer exactly: an invalid value stays invalid (V30 §13)
+  assert.equal(
+    answer(flag, "let n = 1", "if flag { n = null }", "if n != null { n = null\n repeat n {} }"),
+    "compile-error, integer-use compile-error",
+  );
+  // a test of the read's own key keeps its guard (§3.2)
+  assert.equal(
+    answer("let box = {n: 1.5}", "if box.n < 2 { repeat box.n {} }"),
+    "warning-runtime-check, integer-use warning-runtime-check, integer-check",
+  );
+  // the test proves a kind, never an ingress: external data keeps its boundary check (C9)
+  assert.equal(
+    answer("let raw = hostValue", "if raw is integer { repeat raw {} }"),
+    "valid, copy-type boundary",
+  );
+  // (also once the narrowed item is carried into a literal and read from there)
+  assert.equal(
+    answer("let raw = hostValue", "if raw is integer { let xs = [raw]\n repeat xs[0] {} }"),
+    "valid, copy-type boundary",
+  );
+  // #1320: a scalar under its test needs no operand check; a list under an element test keeps C6's emptiness, read
+  // directly and at a row (a consumer's descendant demand takes its path's G)
+  assert.equal(
+    answer("let v = hostValue", 'if v is string { say "${v}" }'),
+    "valid, copy-type boundary",
+  );
+  for (const [test, use] of [
+    ["xs is string[]", 'say "${xs}"'],
+    ["xs is string[][]", 'say "${xs[0]}"'],
+  ] as const)
+    assert.equal(
+      answer("let xs = hostValue", `if ${test} { ${use} }`),
+      "warning-runtime-check, member-read warning-runtime-check, copy-type boundary, empty-check",
+      `${test}: ${use}`,
+    );
+  // without the test, the operand check stays
+  assert.equal(
+    answer("let xs = hostValue", 'say "${xs}"'),
+    "warning-runtime-check, operator warning-runtime-check, copy-type boundary, operand",
+  );
+});
+
 /** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */
 function queryDoubling(source: (k: number) => string, marker: string, delta: number): number {
   const [small, large] = [64, 128].map((k) => {
@@ -1986,7 +2050,8 @@ test("a program without a test lists no narrowing (#1251)", () => {
 
 /**
  * #1251, Astra r1's witness: a root tested only in an `or`'s right operand keeps its narrowing for a stored read after
- * the early exit (an integer), with no warning or check.
+ * the early exit (an integer), with no warning; the test proves a kind, never an ingress, so `b`'s external data keeps
+ * its boundary check where it enters (C9, #1073 PR 2), as the fixture's `n1-unknown-positive` records.
  */
 test("a root tested in an or's right operand keeps its narrowing for a stored read (#1251)", () => {
   const source = [
@@ -2001,7 +2066,11 @@ test("a root tested in an or's right operand keeps its narrowing for a stored re
   for (const mode of MODES) {
     const answers = inMode(mode, () => analyseCore(request));
     assert.deepEqual(answers.diagnostics, [], JSON.stringify(mode));
-    assert.deepEqual(answers.checks, [], JSON.stringify(mode));
+    assert.deepEqual(
+      answers.checks.map((c) => [c.kind, c.target, c.boundary, c.site.start]),
+      [["copy-type", "b", true, source.indexOf("hostOther")]],
+      JSON.stringify(mode),
+    );
   }
 });
 

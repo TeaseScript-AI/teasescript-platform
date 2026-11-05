@@ -243,21 +243,23 @@ test("the copied and direct nested stores owe their checks at every mode's stop"
  */
 const frozen = `let a = {f: [[1]]}\nlet b = a\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\nb.f = hostValue`;
 const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
-  ["the C-R1 chain", chain(16), [11837, 12196, 11837, 12196, 17556, 13621, 17577, 13621]],
+  ["the C-R1 chain", chain(16), [11837, 12196, 11837, 12196, 17558, 13621, 17579, 13621]],
   [
     "the unmarked function result",
     'function make {\n  let r = {nest: {n: [[1]]}}\n  return r\n}\nlet out = make()\nsay "BEFORE"\nout.nest.n = hostValue',
     [1539, 1617, 1539, 1617, 2424, 2149, 2289, 2149],
   ],
+  // (at demand 64, a few units more since #1073 PR 2: a consumer's descendant demand looks up its path's narrowing)
   [
     "a checked argument",
     `${chain(4)}\nfunction take(x: integer[]) { }\nlet maybe = null\nif hostValue { maybe = [1] }\ntake(maybe)`,
-    [4958, 5428, 4958, 5156, 7190, 6187, 7211, 5915],
+    [4958, 5428, 4958, 5156, 7194, 6187, 7215, 5915],
   ],
+  // (the same lookup's units at demand 64, #1073 PR 2)
   [
     "a checked return",
     `${chain(4)}\nfunction give: integer[] {\n  let maybe = null\n  if hostValue { maybe = [1] }\n  return maybe\n}\nlet got = give()`,
-    [5090, 5528, 5090, 5255, 6979, 6350, 6871, 6077],
+    [5090, 5528, 5090, 5255, 6983, 6350, 6875, 6077],
   ],
   ["an add", "let b = [[1]]\nb.add(hostValue)", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],
   [
