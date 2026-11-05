@@ -95,8 +95,11 @@ test("where the native reader ends, a pushed read publishes what it does, in fou
     // a host's unknown beside the literals' `missing` (reasons that are not `missing` alone), an operation's (`fan`)
     ring({ q: spine(2, "hostValue"), extra: ['say "${p1.q.q.q}"'] }),
     ring({ q: spine(2, "{f:hostValue+1}"), extra: ['say "${p1.q.q.f}"'] }),
-    // the ring without its closing copy
+    // the ring without its closing copy, with a store below the projection read there
     ring({ cycle: false }),
+    ring({ cycle: false, extra: ["p1.q.q.g=5", 'say "${p1.q.q.g}"'] }),
+    // a chain of three whose literals all lack the step: a read that is `missing` alone, its earliest literal's
+    ring({ n: 3, q: spine(1, "{g:1}"), cycle: false, extra: ['say "${p2.q.q.q}"'] }),
   ];
   for (const source of controls)
     for (const mode of MODES) {
