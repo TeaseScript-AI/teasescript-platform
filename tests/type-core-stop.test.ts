@@ -1878,7 +1878,7 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
   assert.deepEqual(judge(stopped), []);
   assert.throws(
     () => judge({ ...stopped, without: uncapped.without }),
-    /the demand allowance \d+ at its decision [^,]*, not the run's 27/,
+    /the demand allowance \d+ at its decision \[\d+,\[[^\]]*\]\], not the run's 27/,
   );
   // (and the reference's rerun without its completion, Codex r1's F1 on #1662: a decision of the reference stopped)
   const tally: HeldCase = {
@@ -1895,7 +1895,7 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
   assert.deepEqual(against(reference), []);
   assert.throws(
     () => against({ ...reference, without: heldRun(tally, mode).without }),
-    /the demand allowance \d+ at its decision [^,]*, not the run's 27/,
+    /the demand allowance \d+ at its decision \[\d+,\[[^\]]*\]\], not the run's 27/,
   );
 });
 
