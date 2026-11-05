@@ -660,7 +660,12 @@ test("the group table: its bindings decide a grouped pair's state, by key, mode 
       core: planned([diagnostic("TSV041", 7)]),
       delta: { ...SAME, diagnosticIdentity: true, diagnosticText: true },
     }));
-  const [a, b, d, p, changed, unbound] = ["a", "b", "d", "p", "changed", "unbound"].map(differing);
+  const a = differing("a");
+  const b = differing("b");
+  const d = differing("d");
+  const p = differing("p");
+  const changed = differing("changed");
+  const unbound = differing("unbound");
   const guard = (r: ReturnType<typeof record>) =>
     C.pairGuard(C.readRecord(r).reading.rows[0]).slice(0, 16);
   const folder = mkdtempSync(join(tmpdir(), "shadow-groups-"));
