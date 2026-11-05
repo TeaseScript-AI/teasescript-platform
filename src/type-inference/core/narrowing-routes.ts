@@ -1,7 +1,14 @@
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import { joinParts, keepText, type WorkLedger } from "./budget.js";
-import { keptPrefixes, keyPath, keyPlace, type Definition, type Key } from "./definitions.js";
+import {
+  keptParent,
+  keptPrefixes,
+  keyPath,
+  keyPlace,
+  type Definition,
+  type Key,
+} from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
 import type { ItemTag } from "./items.js";
 import type { Work } from "./solver.js";
@@ -495,8 +502,10 @@ export class NarrowingRoutes {
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
     const { program, definitions, lists } = this.pass;
-    const prefix = keptPrefixes(program.work, key)[0];
-    const parent = prefix === undefined ? null : this.#killLayer(prefix, calls);
+    // (only the parent's text, made and charged once per key by the memo: the whole prefix list at every ancestor kept
+    // a chain's text cubic, #1748)
+    const prefix = keptParent(program.work, key);
+    const parent = prefix === null ? null : this.#killLayer(prefix, calls);
     const seeds: TreeStatement[] = [];
     for (const d of each(program.work, "indexSteps", definitions.byKey.get(key) ?? [])) {
       if (
