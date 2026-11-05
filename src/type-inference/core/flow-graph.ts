@@ -149,6 +149,11 @@ export class FlowGraphBuilder {
   public readonly pendingCalls: PendingCall[] = [];
   public readonly pendingTransfers: PendingTransfer[] = [];
   public readonly defaultChoices: DefaultChoice[] = [];
+  /** Each typed parse's or load's default: its nodes' range and the node whose state they read (`snapshotFrom`). */
+  readonly #defaults: { readonly first: number; readonly end: number; readonly call: FlowNode }[] =
+    [];
+  /** The typed calls whose default reads a variable or computes, which the value side answers (`snapshotNeedsValue`). */
+  readonly #valueDefaults = new Set<FlowNode>();
   /** The `end` statements of functions and blocks, which end whichever file is running. */
   public readonly ends: BuildNode[] = [];
   public readonly countUses: OperandUse[] = [];
@@ -229,6 +234,8 @@ export class FlowGraphBuilder {
     const statementNodes = this.statementNodes;
     const startupNodes = this.#startupNodes;
     const loopBindings = this.loopBindings;
+    const snapshots = this.#snapshotsOf();
+    const valueDefaults = this.#valueDefaults;
     const deadEdges = this.deadEdges;
     const callableOf = this.callableOf;
     const ownerOf = this.#ownerOf;
@@ -261,7 +268,61 @@ export class FlowGraphBuilder {
       statementAt: (site) => statementNodes.get(siteKey(site.file, site.start, site.end)),
       startupAt: (site) => startupNodes.get(siteKey(site.file, site.start, site.end)),
       loopBindingAt: (site) => loopBindings.get(siteKey(site.file, site.start, site.end)),
+      snapshotOf: (node) => snapshots.get(node) ?? node,
+      snapshotNeedsValue: (node) => valueDefaults.has(snapshots.get(node) ?? node),
     };
+  }
+
+  /**
+   * F18 (TABLE r4.81 (1)): the nodes made from `first` on, a typed parse's or load's default, read the state at `call`,
+   * the node before its default runs.
+   */
+  public snapshotFrom(first: number, call: FlowNode): void {
+    this.#defaults.push({ first, end: this.nodes.length, call });
+  }
+
+  /**
+   * The node whose state each default's node reads: its outermost typed call's, since a nested typed call's default
+   * runs at its call, which no event separates from the outer call. The ranges nest and each is recorded after those
+   * inside it, so taken last first an outer range comes before its own: an inner one, whose first node the outer has
+   * set, is skipped, and each node is set once. The same walk notes the calls whose default reads a variable or computes.
+   */
+  #snapshotsOf(): Map<FlowNode, FlowNode> {
+    const snapshots = new Map<FlowNode, FlowNode>();
+    for (let at = this.#defaults.length - 1; at >= 0; at -= 1) {
+      const { first, end, call } = this.#defaults[at]!;
+      if (first === end || snapshots.has(this.nodes[first]!)) continue;
+      for (let index = first; index < end; index += 1) {
+        const node = this.nodes[index]!;
+        snapshots.set(node, call);
+        // (literal data, a typed call's own result among it, keeps the contract's walk; a read or a computation needs the
+        // value side's, which reads the snapshot)
+        switch (node.expression?.kind) {
+          case undefined:
+          case "numberLiteral":
+          case "booleanLiteral":
+          case "nullLiteral":
+          case "stringLiteral":
+          case "listLiteral":
+          case "setLiteral":
+          case "objectLiteral":
+          case "parenthesizedExpression":
+          case "loadExpression":
+            break;
+          case "callExpression":
+            if (
+              node.expression.callee.kind === "identifier" &&
+              node.expression.callee.name === "fromJson"
+            )
+              break;
+            this.#valueDefaults.add(call);
+            break;
+          default:
+            this.#valueDefaults.add(call);
+        }
+      }
+    }
+    return snapshots;
   }
 
   // ------------------------------------------------------------------------------------------- nodes and regions

@@ -272,7 +272,7 @@ on against off (#1711). Each class has its rule in words, a witness and a gate s
 class is known; S11 still owes each source's accepted expectation) or `open`. Pairs: `agree`; `differs/stop`,
 `/surviving`, `/integer`, `/rule` by the codes whose diagnostic identities (path, code, severity, offsets) changed, in
 that precedence, then `/checks`, `/plan`, `/wording` where the identities are equal (the other differing parts are
-columns of the pair); `excluded/<text>`, the research's 53 exclusion texts as 48 rules, and from version 2 `this return statement` and the camera and tag-query texts (#1744); `failed/ legacy-heap` (the
+columns of the pair); `excluded/<text>`, the research's 53 exclusion texts as 48 rules, and from version 2 `this return statement`, the camera and tag-query texts (#1744) and the open part of a typed default (#1072); `failed/ legacy-heap` (the
 legacy route's heap in its analysis with the core finished: legacy behaviour the switch resolves, #1075),
 `failed/other`, `exception`, `aborted-record`, `unavailable`. Sharing: `equal`, `one-mode-stop` and `both-stop-differ`
 (attributed, each row for the stop oracle's judgment), `neither-stops-differ`, `outside`, `uncompared`. Every rule is

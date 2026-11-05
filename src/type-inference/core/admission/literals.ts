@@ -1248,7 +1248,7 @@ export function joinElements(
  * one its source identity. Values of one class have the same kinds at every path.
  */
 function conflictClass(admission: Admission, value: PlaceId): string {
-  const { program, contract, definitions } = admission.pass;
+  const { program, contract } = admission.pass;
   // (a class and an identity tagged apart, as an identity may read like any short id, a carrier's `c<n>` among
   // them; a short id per class, as a class's text may hold the "," that joins a literal's classes into its key)
   const tagged = (cls: string | null, of: PlaceId): string => {
@@ -1279,18 +1279,12 @@ function conflictClass(admission: Admission, value: PlaceId): string {
     admission.termIds.set(expected, term);
   }
   const by = c.kind === "load" ? "load" : c.contract.name;
-  const host =
-    fallback !== undefined &&
-    program.occurrenceOf.has(fallback) &&
-    definitions.ingress.has(fallback);
   return joinParts(
     "f18",
     by,
     term,
     fallback === undefined
       ? ""
-      : host
-        ? own(fallback)
-        : joinParts("identity", contract.identityOf(fallback).id),
+      : joinParts("snapshot", contract.classOf(fallback, true) ?? `site${fallback}`),
   );
 }

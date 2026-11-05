@@ -25,7 +25,8 @@ const S9B = "S9b #1072 (candidate coverage; retired or deferred syntax is no rel
 const S10 = "S10 #1073";
 /**
  * Sol's 53 exclusion texts as 48 rules (each text exact, the two that name a variable as one template each), and from
- * version 2 the next blocker of a function's body and the four texts #1744's presence sources reach.
+ * version 2 the next blocker of a function's body, the four texts #1744's presence sources reach, and the open part
+ * of a typed default once its default may read a variable (#1072 A1).
  */
 const EXCLUSIONS = [
   ["this member or element read", S9B, "9a8e2a853d99 all:ar5-own::own/inferred-widens"],
@@ -40,6 +41,11 @@ const EXCLUSIONS = [
   ["this assignment", S9B, "e20bcd61d295 compound-0-0"],
   ["this interaction expression", S9B, "efebe9cb1dc0 g3:nested-choice-literal-1"],
   ["a typed parse's or load's default that reads a variable", S9B, "246d7908638b named-3-3"],
+  [
+    "an open part of a typed parse's or load's default that its destination types",
+    S9B,
+    "df3084cf838f default-written-copy",
+  ],
   ["this call expression", S9B, "20d57c8b7a51 all:rv-cases-3::adds/null/xs.add(root)"],
   ["this global statement", S9B, "344a4bbad3e8 W1@8"],
   ["this load expression", S9B, "433896860299 varied"],

@@ -55,9 +55,16 @@ export function heldBack(record: FixtureRecord): string | null {
   // unchanged until its maintainer corrects this start as well as its end (r4.62).
   if (record.name === "cp9-cells/F16/invalid-datetime-difference")
     return "operator site awaiting set correction (TABLE §3.4, r4.62)";
-  // S9b's F18 shapes (TABLE r4.81 (1), r4.77 (2)): a named default's call-site answer and a copy of a written type as
-  // `fromJson`'s and `load`'s receiving context, which the core's rule takes with S9b
-  if (record.name.startsWith("cp9-cells/s9b/f18-held/")) return "S9b's F18 shapes (r4.81 (1))";
+  // S9b's F18 shapes (TABLE r4.77 (2)): a copy of a written type as `fromJson`'s and `load`'s receiving context, which
+  // the core takes with its A4 receiving design (#1072's A2); `files: true` is outside the slice's syntax, and the text
+  // operand's warning there is C13's, not F18's
+  if (record.name.startsWith("cp9-cells/s9b/f18-held/copy/scalar-json-host-value/"))
+    return "fromJson with files: true outside the slice, and C13's text operand";
+  if (record.name.startsWith("cp9-cells/s9b/f18-held/copy/"))
+    return "S9b's F18 copy of a written type as the receiving context (r4.77 (2))";
+  // a computed key's `default: null` owes N3's required check at its integer use (Sol's scoping r1 §4)
+  if (record.name === "cp9-cells/s9b/f18-held/computed-key/null-default")
+    return "N3's required check of a load's possible null (S10)";
   // Known text the conversion cannot convert is a compile error of its own (V30 §13, #1105), which the core's record
   // holds since the checks that owe the runtime nothing publish there (the lead's decision 3 on #1072): the record lacks
   // it until its maintainer adds it.

@@ -581,8 +581,7 @@ function literalType(
     case "identifier":
     case "propertyAccessExpression":
     case "indexExpression":
-      // the candidate route leaves out a typed parse's or load's default that reads a variable
-      throw new Underivable("a default that reads a variable");
+      return readDefault(at, statements);
     case "loadExpression":
       return expectedType(at, statements, seen);
     case "callExpression":
@@ -592,6 +591,26 @@ function literalType(
     default:
       return null;
   }
+}
+
+/**
+ * A typed default that reads a value (F18): a host value has no structure; a variable's (a `let`'s or a loop's) state
+ * at the call is not
+ * derived here (the snapshot reader is lane 3's tests item, #1760), so a default that reads one is underivable.
+ */
+function readDefault(read: Expression, statements: readonly Statement[]): null {
+  let root = unwrap(read);
+  while (root.kind === "propertyAccessExpression" || root.kind === "indexExpression")
+    root = unwrap(root.object);
+  // (a variable is declared by a `let` or a `for` loop's variables)
+  const declares = (statement: Statement, name: string): boolean =>
+    statement.kind === "letStatement"
+      ? statement.name.name === name
+      : statement.kind === "forStatement" &&
+        (statement.variable.name === name || statement.valueVariable?.name === name);
+  if (root.kind !== "identifier" || statements.some((statement) => declares(statement, root.name)))
+    throw new Underivable("a default that reads a variable");
+  return null;
 }
 
 function unionTypes(types: readonly DerivedType[]): DerivedType {

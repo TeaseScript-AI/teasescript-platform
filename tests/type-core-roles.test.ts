@@ -8,7 +8,7 @@ import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
-import { derive, evaluate, syntaxOf } from "./helpers/type-core-derived.js";
+import { derive, evaluate, syntaxOf, Underivable } from "./helpers/type-core-derived.js";
 import { recordDifferences, recordOf } from "./helpers/type-core-records.js";
 import {
   assignments,
@@ -37,6 +37,7 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
   const { classes, none } = roleClasses();
   const all = shapesOf(classes);
   const wrong: string[] = [];
+  const unread: string[] = [];
   const outside = new Map<string, number>();
   let routed = 0;
   let verified = 0;
@@ -91,6 +92,12 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
         );
       verified += 1;
     } catch (error) {
+      // (a typed default that reads a variable reads it at the call, F18, which the oracle does not derive: #1760;
+      // `type-core-f18.test.ts` checks its layers, and its records are compared above)
+      if (error instanceof Underivable && error.message === "a default that reads a variable") {
+        unread.push(shape.name);
+        continue;
+      }
       wrong.push(`${shape.name}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -101,6 +108,24 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
       `no shape: ${none.join("; ")}`,
   );
   assert.deepEqual(wrong, [], wrong.join("\n"));
+  // (the shapes whose typed default reads a named variable, its state at the call, F18: their records are compared
+  // above, their layers in type-core-f18.test.ts; their S7 content waits for the oracle's reader, #1760)
+  assert.deepEqual(
+    unread,
+    ["load", "parse"].flatMap((carrier) =>
+      [
+        "literal operand/scalar",
+        "own read/scalar",
+        "own read/collection",
+        "member receiver/scalar",
+        "member receiver/collection",
+      ].flatMap((placement) =>
+        ["no-later", "later"].map(
+          (later) => `${carrier} default/default/${placement}/named/${later}`,
+        ),
+      ),
+    ),
+  );
 });
 
 /**

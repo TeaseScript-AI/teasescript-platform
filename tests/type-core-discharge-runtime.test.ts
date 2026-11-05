@@ -1542,28 +1542,45 @@ test("a typed parse's or load's expected type is the core's own answer at the ca
 });
 
 test("a typed parse's or load's contract stays the one the core decided, or its program leaves the slice, in three layers, in both orders (S7 review r4 B1, B2, N1)", () => {
-  // a default that reads a variable: the core's answer at the call follows the stores that reach the read, the result's
-  // place the type the program settled; the slice leaves both out until the core's F18 relates them (a lead question)
-  const reading = "a typed parse's or load's default that reads a variable";
-  const structure = "a value whose structure the slice does not follow";
-  for (const [source, what] of [
+  // a default that reads a variable reads it at the call (F18, r4.81 (1)): the plan's type is the core's answer there,
+  // a `null` field open (any value), in both orders
+  for (const [source, call, type] of [
     [
       "let d = {n: 0}\nd.n = null\nlet out = fromJson(hostValue, default: d, files: false)\nsay out.n\nexit\n",
-      reading,
+      "fromJson(hostValue, default: d, files: false)",
+      null,
     ],
     [
       "let d = {n: 1.5}\nd.n = 0\nlet out = fromJson(hostValue, default: d, files: false)\nsay out.n\nexit\n",
-      reading,
+      "fromJson(hostValue, default: d, files: false)",
+      "{n: integer}",
     ],
     [
       "let d = {a: {n: 0}}\nlet out = fromJson(hostValue, default: d.a, files: false)\nsay out.n\nexit\n",
-      reading,
+      "fromJson(hostValue, default: d.a, files: false)",
+      "{n: integer}",
     ],
-    ['let d = {n: 0}\nlet out = load("k", default: d)\nsay out.n\nexit\n', reading],
-    [
-      "let a: number[] = [0]\nlet b = a\nlet out = fromJson(hostValue, default: b, files: false)\nexit\n",
-      reading,
-    ],
+  ] as const) {
+    const expected = contentOf(candidatePlan(source)).filter((entry) =>
+      entry.startsWith("expected "),
+    );
+    assert.equal(expected.length, 1, source);
+    assert.ok(expected[0]!.startsWith(`expected call@${at(source, call)} `), expected[0]);
+    if (type !== null) assert.equal(expected[0], `expected call@${at(source, call)} ${type}`);
+    // (an open field: any value, `null` among them)
+    else
+      for (const kind of ["null", "string", "list"])
+        assert.match(expected[0]!, new RegExp(`\\b${kind}\\b`));
+  }
+  const loaded = 'let d = {n: 0}\nlet out = load("k", default: d)\nsay out.n\nexit\n';
+  assert.ok(
+    contentOf(candidatePlan(loaded)).some(
+      (entry) => entry === `type storageLoad@${at(loaded, 'load("k", default: d)')} {n: integer}`,
+    ),
+    JSON.stringify(contentOf(candidatePlan(loaded))),
+  );
+  const structure = "a value whose structure the slice does not follow";
+  for (const [source, what] of [
     // fields some records of a list lack, also where a record gives them as `null` or host data
     [
       "let out = fromJson(hostValue, default: [{n: null, a: 1}, {m: null, a: 2}], files: false)\nsay out[0].a\nexit\n",
@@ -1999,28 +2016,7 @@ test("a literal wider than a native call takes compiles and keeps its checks, in
   assert.deepEqual(misfits, failed(`TSR058@8:${source.indexOf("\n")}`));
 });
 
-test("a typed parse or load into a copy of a written type leaves the slice until the core's F18 takes the copied domain (the lead's ruling 2)", () => {
-  // the copied written domain is F18's receiving context (A4, TABLE r4.75 (1), (1a)); the core answers the call by its
-  // default there and its later facts follow that answer (no check at a later `let n: integer = b`), so the lowering
-  // cannot widen the expected type alone
-  for (const source of [
-    "let a: number = 0\nlet b = a\nb = fromJson(hostValue, default: 0, files: false)\nsay b\nexit\n",
-    "let a: number = 0\nlet b = a\nb = fromJson(hostValue, default: 0)\nsay b\nexit\n",
-    "let a: number = 0\nlet b = a\nlet c = b\nc = fromJson(hostValue, default: 0, files: false)\nsay c\nexit\n",
-    'let a: number = 0\nlet b = a\nb = load("k", default: 0)\nsay b\nexit\n',
-    "let a: number[] = [0]\nlet b = a\nb = fromJson(hostValue, default: [0], files: false)\nsay b[0]\nexit\n",
-    // below a composite destination: a literal's element, a copied record's field, an empty intermediate (Sol r9)
-    'let a: number = 0\nlet out = [a]\nout = fromJson(hostValue, default: [0], files: false)\nsay "AFTER"\nexit\n',
-    'let a: number = 0\nlet base = {n: a}\nlet out = base\nout.n = fromJson(hostValue, default: 0, files: false)\nsay "AFTER"\nexit\n',
-    'let a: number[] = [0]\nlet middle = []\nmiddle = a\nlet out = middle\nout = fromJson(hostValue, default: [0], files: false)\nsay "AFTER"\nexit\n',
-  ])
-    assert.throws(
-      () => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND),
-      (error) =>
-        error instanceof CandidateOutsideSlice &&
-        error.what === "a typed parse or load into a copy of a written type",
-      source,
-    );
+test("a typed parse or load into a place its own store or literal decides reads the default's kinds, in three layers", () => {
   // a place its own store decides, not a copy of a written type: F18 reads the default's kinds, in three layers
   const decided =
     'let b = 1.5\nb = fromJson(hostValue, default: 0, files: false)\nsay b\nsay "AFTER"\nexit\n';

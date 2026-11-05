@@ -277,7 +277,7 @@ export class CoreProgram {
       switch (constraint.kind) {
         case "read":
           this.occurrenceOf.set(constraint.occurrence, constraint.binding);
-          this.occNode.set(constraint.occurrence, this.exprAt(constraint.point.site));
+          this.occNode.set(constraint.occurrence, this.readAt(constraint.point.site));
           break;
         case "project":
           this.projOf.set(constraint.into, {
@@ -481,6 +481,12 @@ export class CoreProgram {
   /** The node of the expression at `site`, or `null`. */
   public exprAt(site: SourceSite): FlowNode | null {
     return this.flow.expressionAt(site) ?? null;
+  }
+
+  /** The node a read at `site` reads its variable's state at: its own, or its typed call's snapshot (F18, r4.81 (1)). */
+  public readAt(site: SourceSite): FlowNode | null {
+    const node = this.exprAt(site);
+    return node === null ? null : this.flow.snapshotOf(node);
   }
 
   /** The node of the statement an expression at `site` belongs to: where a store takes effect. */

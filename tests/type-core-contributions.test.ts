@@ -130,7 +130,7 @@ test("each key's edges are the keys its contract includes: copies, written place
   // projection and default slots on the way; a key read only to decide (a receiver, a written type's marks) is no edge)
   const cases: readonly (readonly [
     string,
-    readonly (readonly [string, readonly string[], readonly string[]])[],
+    readonly (readonly [string, readonly string[], string | readonly string[]])[],
   ])[] = [
     [
       'let a = 1\nlet b = a\nlet c = b\nsay "${c}"\nexit\n',
@@ -184,12 +184,13 @@ test("each key's edges are the keys its contract includes: copies, written place
         ["g", ["f"], ["xs.element.f"]],
       ],
     ],
-    // (a load's default, its typed default decision's: the default's key, qualified by the choice; a `null` default none)
+    // (a load's default that reads a variable reads it at the call (F18, r4.81 (1)), by the value side's walk, which
+    // records no flow: no edges, never none; a `null` default none)
     [
       'let d = {f: 1}\nlet v = load("k", default: d)\nsay "${v.f}"\nexit\n',
       [
-        ["v", [], ["d"]],
-        ["v", ["f"], ["d.f"]],
+        ["v", [], "exact records no flow"],
+        ["v", ["f"], "exact records no flow"],
       ],
     ],
     ['let v = load("k", default: null)\nsay "${v}"\nexit\n', [["v", [], []]]],
@@ -291,13 +292,15 @@ test("each key's edges are the keys its contract includes: copies, written place
       for (const [name, path, expected] of asks)
         assert.deepEqual(
           edges(pass, name, path),
-          [...expected].sort(),
+          typeof expected === "string" ? expected : [...expected].sort(),
           `${source}: ${name}.${path.join(".")}`,
         );
     }
 });
 
-test("an inclusion keeps the transforms its answer went through: a default's choice, an `otherwise` side's null filter", () => {
+// (a typed default's choice, which qualifies what its default's run includes, is the solver test's below: a literal
+// default includes no key, and one that reads a key is the value side's walk, which records no flow, F18)
+test("an inclusion keeps the transforms its answer went through: an `otherwise` side's null filter, a group's first entry", () => {
   const qualifiers = (pass: CorePass, name: string): readonly string[] => {
     const place = pass.program.places.findIndex((at) => at?.label === name);
     const found = pass.contract.contributions(keyOf(place, []));
@@ -307,12 +310,6 @@ test("an inclusion keeps the transforms its answer went through: a default's cho
       : [];
   };
   for (const mode of MODES) {
-    const loaded = analysed(
-      'let d = {f: 1}\nlet v = load("k", default: d)\nsay "${v.f}"\nexit\n',
-      mode,
-      true,
-    ).pass;
-    assert.ok(qualifiers(loaded, "v").includes("defaultChoice"));
     const otherwise = analysed(
       'let a = {f: 1}\nlet b = hostValue otherwise a\nsay "${b.f}"\nexit\n',
       mode,

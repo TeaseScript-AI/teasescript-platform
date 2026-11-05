@@ -212,6 +212,13 @@ export interface FlowGraph {
   /** The files that hold a label. */
   readonly labelled: ReadonlySet<FileRegion>;
   isDeadEdge(from: FlowNode, to: FlowNode): boolean;
+  /**
+   * F18 (TABLE r4.81 (1)): the node whose state a node reads: for a node of a typed parse's or load's default, the node
+   * of its call before the default runs (the call-site snapshot); else the node itself.
+   */
+  snapshotOf(node: FlowNode): FlowNode;
+  /** Whether a typed default contains a state read or computation needing the value-side snapshot reader. */
+  snapshotNeedsValue(node: FlowNode): boolean;
   /** The function or file whose activation runs the region's code: a block's creator's; `null` for the startup. */
   callableOf(region: number): Callable | null;
   /** As {@link callableOf}, but `null` for a block's code, which a handler runs. */

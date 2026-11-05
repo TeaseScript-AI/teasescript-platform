@@ -174,9 +174,10 @@ export function outsideSyntax(
             key.kind === "stringLiteral" && key.parts.every((part) => part.kind === "stringText")
               ? key.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
               : null;
-          if (name === null || node.defaultValue === null || loaded.has(name))
+          // (a computed key is external data, F19: no other load's key)
+          if (node.defaultValue === null || (name !== null && loaded.has(name)))
             return outside(node.span, "this load expression");
-          loaded.add(name);
+          if (name !== null) loaded.add(name);
           push([node.key, node.defaultValue]);
           break;
         }

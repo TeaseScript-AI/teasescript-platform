@@ -579,7 +579,11 @@ function belowObject(written: TypeTerm, rest: readonly string[]): boolean {
   return false;
 }
 
-/** The kinds a `load` or `fromJson` takes from its default at `rest` (`typedDefault`), on the default's contract. */
+/**
+ * The kinds a `load` or `fromJson` takes from its default at `rest` (`typedDefault`): the default's value at its call's
+ * snapshot (F18, TABLE r4.81 (1)), as the value side reads it there (`Values.defaultKinds`), never the settled type of
+ * a place it reads, so the call's contract and its answer agree.
+ */
 export function* defaultKinds(
   contract: Contract,
   fallback: PlaceId,
@@ -594,9 +598,33 @@ export function* defaultKinds(
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
-    make: () => through(contract, fallback, rest, 0, "run"),
+    // #1668: D, the typed default's run: literal data passes the run's flow, a read the value side's (opaque)
+    make: () => snapshotKinds(contract, fallback, rest),
     decision: typedDefault(rest, false),
   };
+}
+
+/**
+ * `defaultKinds`' run (F18, TABLE r4.81 (1)): literal data by its contract, as before; a default that reads a variable
+ * or computes as the value side reads it at its call's snapshot (`FlowGraph.snapshotOf`), its marks, narrowing, copies
+ * and stops included, never the settled type of a place it reads, so the call's contract and its answer agree.
+ */
+function* snapshotKinds(
+  contract: Contract,
+  fallback: PlaceId,
+  rest: readonly string[],
+): Work<readonly Item[]> {
+  const { program, values, solver } = contract.pass;
+  const site = program.places[fallback]?.site;
+  const expression = site === undefined || site === null ? null : program.exprAt(site);
+  if (expression !== null && !program.flow.snapshotNeedsValue(expression))
+    return yield* through(contract, fallback, rest, 0, "run");
+  const node = expression === null ? null : program.flow.snapshotOf(expression);
+  // (#1668: the value side's walk records no contribution flow, so the slot's edges are unavailable, never empty, as
+  // an exact gather's are)
+  solver.sink()?.opaque("exact");
+  // #1668: D, the value side's read at the snapshot, its slot opaque above
+  return yield* values.valueItems(fallback, node, rest);
 }
 
 /** F19 (r4.1): whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`). */

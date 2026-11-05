@@ -1505,8 +1505,8 @@ function unwrap(expression: Expression): Expression {
 
 /**
  * A contract the plan cannot carry exactly as the core decided it: one deeper than the slice follows (`SLICE_DEPTH`), a
- * record field that some records of a list lack, a typed parse's or load's default that reads a variable
- * (`readsPlace`). The candidate route rejects its program, at `expression`, rather than check less than the core decided.
+ * record field that some records of a list lack, a typed parse or load into a copy of a written type. The candidate
+ * route rejects its program, at `expression`, rather than check less than the core decided.
  */
 export class OutsideContract extends Error {
   public constructor(
@@ -1660,12 +1660,6 @@ class Contracts {
    */
   public expected(call: CallExpression | LoadExpression): TypePlan | null {
     if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
-    const fallback = call.kind === "loadExpression" ? call.defaultValue : defaultOf(call);
-    if (fallback !== null && readsPlace(fallback))
-      throw new OutsideContract(
-        fallback,
-        "a typed parse's or load's default that reads a variable",
-      );
     const landing = this.#landing(call);
     const expected = runCompileTask(
       this.#answerTask(
@@ -2063,50 +2057,6 @@ function defaultOf(call: CallExpression): Expression | null {
       (argument) => argument.kind === "namedArgument" && argument.name.name === "default",
     )?.value ?? null
   );
-}
-
-/**
- * Whether a default reads anything but literal data: a variable, a property or an element of one, or any operation but
- * a typed parse or load, whose own default is checked as its own call's. Where the core answers a call by such a
- * default, its answer follows the stores that reach the read while the result's place keeps the type the program
- * settled (S9b's F18 completion), so the slice leaves it out.
- */
-function readsPlace(fallback: Expression): boolean {
-  const pending = [fallback];
-  for (let at = pending.pop(); at !== undefined; at = pending.pop())
-    switch (at.kind) {
-      case "numberLiteral":
-      case "booleanLiteral":
-      case "nullLiteral":
-        break;
-      case "stringLiteral":
-        if (at.parts.some((part) => part.kind !== "stringText")) return true;
-        break;
-      case "parenthesizedExpression":
-        pending.push(at.expression);
-        break;
-      case "listLiteral":
-      case "setLiteral":
-        for (const element of at.elements) pending.push(element);
-        break;
-      case "objectLiteral":
-        for (const property of at.properties) pending.push(property.value);
-        break;
-      // a typed parse or load inside the default is checked as its own call
-      case "loadExpression":
-        break;
-      case "callExpression":
-        if (
-          at.callee.kind !== "identifier" ||
-          at.callee.name !== "fromJson" ||
-          defaultOf(at) === null
-        )
-          return true;
-        break;
-      default:
-        return true;
-    }
-  return false;
 }
 
 /**

@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProjectWithBackend } from "../src/compiler.js";
 import { analyseCore, bySite, type Answers } from "../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
@@ -518,8 +516,7 @@ test("a value an add or an addAll inserts has its properties, never the collecti
  * path. A field read answers one unknown that holds the leaf of each load its list holds, whatever the key's form or the
  * default, and the root keeps a `null` default's `null`. With the sharing off (`withoutSharing`) each load is read at
  * each path by itself: every read's answer, its items whole with their leaves, and the program's diagnostics and checks
- * are the same either way, in both orders, for the controls too. These sources lie outside the candidate's slice: they
- * are analysed, never run.
+ * are the same either way, in both orders, for the controls too.
  */
 test("a field read of computed-key loads holds every load's leaf, as each load read by itself (#1203)", () => {
   const loads = (n: number, fallback = "0"): string =>
@@ -712,15 +709,6 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
         `${source}, reversed: ${reversed}`,
       );
   }
-  assert.throws(
-    () =>
-      compileProjectWithBackend(
-        [{ path: "main.tease", source: keyed("0") }],
-        { globals: ["hostValue"] },
-        CORE_BACKEND,
-      ),
-    (error) => error instanceof CandidateOutsideSlice && error.what === "this load expression",
-  );
 });
 
 /**
