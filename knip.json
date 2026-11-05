@@ -29,6 +29,7 @@
     "tools/oxlint/**/*.ts",
     "tools/local-agent/**/*.{cjs,mjs}"
   ],
+  "ignore": ["tests/fixtures/main-realm-graph/**"],
   "ignoreDependencies": [
     "@vue/tsconfig",
     "shadcn-vue"
