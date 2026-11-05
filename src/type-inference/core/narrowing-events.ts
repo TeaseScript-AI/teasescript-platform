@@ -1,7 +1,8 @@
 import type { CorePass } from "./answers.js";
 import { joinParts, keepText, keptParts, type WorkLedger } from "./budget.js";
 import {
-  keptPrefixes,
+  keyOf,
+  keyPath,
   keyPlace,
   type Definition,
   type Key,
@@ -120,9 +121,9 @@ export class NarrowingEvents {
   /** Per narrowing, the word of its condition's window (`#inWindow`), and its lists' static answers per range set. */
   readonly #windowWords = new Map<Narrowing, ContextWord | null>();
   readonly #statics = new Map<Narrowing, Map<number, Map<number, StaticEvents[]>>>();
-  /** Per narrowing, its event lists (X6's, by position) and its prefixes' keys, made once. */
+  /** Per narrowing, its event lists (X6's, by position), made once; per key, its prefixes' keys, made once. */
   readonly #eventsOf = new Map<Narrowing, readonly EventList[]>();
-  readonly #prefixesOf = new Map<Narrowing, readonly Key[]>();
+  readonly #prefixesOf = new Map<Key, readonly Key[]>();
   /** Per loop head, its loop. */
   readonly #loops = new Map<FlowNode, FlowLoop>();
   /** The program's ledger. */
@@ -353,13 +354,46 @@ export class NarrowingEvents {
     return ranges;
   }
 
-  /** G's prefixes' keys, made (and charged) once per G. */
+  /**
+   * G's prefixes' keys (`prefixesOf`'s list: the parent first, `place|` last), made once per key from its parent's
+   * list, so the Gs of every prefix of one path (a collection test over a chain of selections, #1073) make each
+   * prefix's text once, never once per G (Codex r1 on #1742): each new parent's text charged as kept, each prefix
+   * copied charged one unit.
+   */
   #prefixes(g: Narrowing): readonly Key[] {
     this.#work.charge("eventSteps");
-    const known = this.#prefixesOf.get(g);
+    const work = this.#work;
+    const known = this.#prefixesOf.get(g.key);
     if (known !== undefined) return known;
-    const made = keptPrefixes(this.#work, g.key);
-    this.#prefixesOf.set(g, made);
+    // (the keys from G's up to the first whose list is made, or to the place's own key, each with its parent)
+    const pending: (readonly [Key, Key | null])[] = [];
+    let at: Key | null = g.key;
+    for (const _ of steps(work, "eventSteps", () => at !== null && !this.#prefixesOf.has(at))) {
+      const path = keyPath(at!);
+      let parent: Key | null = null;
+      if (path.length > 0) {
+        path.pop();
+        parent = keyOf(keyPlace(at!), path);
+        keepText(work, parent.length);
+      }
+      pending.push([at!, parent]);
+      at = parent;
+    }
+    // (then each one's list, from the place's end: its parent and the parent's list)
+    let index = pending.length;
+    let made: readonly Key[] = [];
+    for (const _ of steps(work, "eventSteps", () => index > 0)) {
+      index -= 1;
+      const [key, parent] = pending[index]!;
+      const list: Key[] = [];
+      if (parent !== null) {
+        list.push(parent);
+        for (const prefix of each(work, "eventSteps", this.#prefixesOf.get(parent)!))
+          list.push(prefix);
+      }
+      this.#prefixesOf.set(key, list);
+      made = list;
+    }
     return made;
   }
 
