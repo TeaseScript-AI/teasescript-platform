@@ -44,7 +44,7 @@ import type { RuntimeScriptStorageEntrySnapshot } from "../host-data/script-stor
 import { isPlainRecord } from "../values/plain-data.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 91;
+export const RUNTIME_SNAPSHOT_VERSION = 92;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -448,10 +448,11 @@ export function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && typeof value === "number" && value >= 1;
 }
 
-/** Whether `value` is a source span: a start and an end position, the end not before the start. */
+/** Whether `value` is a source span: exactly a start and an end position, the end not before the start. */
 export function validSpan(value: unknown): value is SourceSpan {
   return (
     isPlainRecord(value) &&
+    hasExactKeys(value, ["start", "end"]) &&
     validPosition(value.start) &&
     validPosition(value.end) &&
     value.end.offset >= value.start.offset
@@ -461,6 +462,7 @@ export function validSpan(value: unknown): value is SourceSpan {
 function validPosition(value: unknown): value is { offset: number; line: number; column: number } {
   return (
     isPlainRecord(value) &&
+    hasExactKeys(value, ["offset", "line", "column"]) &&
     nonNegativeSafeInteger(value.offset) &&
     nonNegativeSafeInteger(value.line) &&
     nonNegativeSafeInteger(value.column)

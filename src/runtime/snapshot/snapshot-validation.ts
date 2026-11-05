@@ -119,6 +119,9 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "failure",
 ] as const;
 
+/** A binding's, a global's, or a speaker property's fields. */
+const NAMED_VALUE_KEYS = ["name", "value"] as const;
+
 export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
   const captured = captureRuntimeSnapshot(snapshot);
   if (!captured.validation.valid || captured.snapshot === null) {
@@ -300,6 +303,7 @@ function validateCapturedRuntimeSnapshotDetails(
   }
   if (
     !isPlainRecord(value.rng) ||
+    !hasExactKeys(value.rng, ["algorithm", "state"]) ||
     value.rng.algorithm !== XORSHIFT32_ALGORITHM ||
     value.rng.state === 0 ||
     !unsigned32(value.rng.state)
@@ -586,7 +590,12 @@ function validateGlobals(
   const values: unknown[] = [];
   const globalNames = new Set<string>();
   for (const binding of globals) {
-    if (!isPlainRecord(binding) || typeof binding.name !== "string" || binding.name.length === 0) {
+    if (
+      !isPlainRecord(binding) ||
+      !hasExactKeys(binding, NAMED_VALUE_KEYS) ||
+      typeof binding.name !== "string" ||
+      binding.name.length === 0
+    ) {
       errors.push("Runtime global is malformed.");
       return;
     }
@@ -770,6 +779,7 @@ function validateScopes(
     for (const binding of frame.bindings) {
       if (
         !isPlainRecord(binding) ||
+        !hasExactKeys(binding, NAMED_VALUE_KEYS) ||
         typeof binding.name !== "string" ||
         binding.name.length === 0
       ) {
@@ -819,6 +829,7 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
   for (const speaker of value) {
     if (
       !isPlainRecord(speaker) ||
+      !hasExactKeys(speaker, ["id", "identifier", "properties"]) ||
       !nonNegativeSafeInteger(speaker.id) ||
       typeof speaker.identifier !== "string" ||
       speaker.identifier.length === 0 ||
@@ -833,6 +844,7 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
     for (const property of speaker.properties) {
       if (
         !isPlainRecord(property) ||
+        !hasExactKeys(property, NAMED_VALUE_KEYS) ||
         typeof property.name !== "string" ||
         property.name.length === 0
       ) {
@@ -863,6 +875,7 @@ function validateFailure(
   }
   if (
     !isPlainRecord(value) ||
+    !hasExactKeys(value, ["code", "message", "path", "span"]) ||
     typeof value.code !== "string" ||
     typeof value.message !== "string" ||
     typeof value.path !== "string" ||
