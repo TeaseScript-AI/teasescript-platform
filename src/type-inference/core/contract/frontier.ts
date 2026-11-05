@@ -194,7 +194,7 @@ function literalRoot(frontier: Frontier, literal: PlaceId): number {
  * The nodes a value stands for, as a step reads it: a binding's read its root, a host's read its leaf, a property read
  * its owner's nodes one step below, a literal its root; declines for any other (and for a guarded or ingress read).
  */
-function valueNodes(frontier: Frontier, value: PlaceId): readonly number[] {
+function valueNodes(frontier: Frontier, value: PlaceId, reader: Goal | null): readonly number[] {
   const { contract } = frontier;
   const { program, guards } = contract.pass;
   step(frontier);
@@ -210,10 +210,21 @@ function valueNodes(frontier: Frontier, value: PlaceId): readonly number[] {
     if (!propertyOnly(projection.step) || selectsElement(projection.step)) throw new Decline("step");
     if (ingressLeafOf(contract, value) !== undefined) throw new Decline("ingress");
     if (positions() && passesWrapper(contract, value)) throw new Decline("wrapper");
-    return setMembers(frontier, star(frontier, intern(frontier, valueNodes(frontier, projection.owner)), projection.step));
+    return advance(frontier, valueNodes(frontier, projection.owner, reader), projection.step, reader);
   }
   if (program.hasOf.has(value) && !program.cellOwner.has(value)) return [literalRoot(frontier, value)];
   throw new Decline("value");
+}
+
+/**
+ * The nodes one step below `nodes`: settled (`star`) outside a goal's evaluation; inside one (`reader`), as its
+ * dependencies stand now, each read registering the goal, so no build settles inside another.
+ */
+function advance(frontier: Frontier, nodes: readonly number[], stepName: string, reader: Goal | null): readonly number[] {
+  if (reader === null) return setMembers(frontier, star(frontier, intern(frontier, nodes), stepName));
+  const out = new Set<number>();
+  stepAll(frontier, nodes, stepName, reader, out);
+  return [...out];
 }
 
 /** Whether a property read's chain passes a wrapper at its first step (G3's position, `positionOf`). */
@@ -297,7 +308,7 @@ function evaluate(frontier: Frontier, goal: Goal): Set<number> {
     );
   for (const read of at.reads) {
     if (!plainRead(contract, read)) throw new Decline("marks");
-    stepAll(frontier, valueNodes(frontier, read.value), s, goal, out);
+    stepAll(frontier, valueNodes(frontier, read.value, goal), s, goal, out);
   }
   return out;
 }
@@ -334,7 +345,7 @@ function stepEntry(frontier: Frontier, entry: PrefixEntry, s: string, goal: Goal
     stepAll(frontier, nodes, s, goal, out);
     return;
   }
-  let nodes: Iterable<number> = valueNodes(frontier, entry.value!);
+  let nodes: Iterable<number> = valueNodes(frontier, entry.value!, goal);
   for (const each of entry.at ?? []) {
     if (!propertyOnly(each)) throw new Decline("step");
     const next = new Set<number>();
@@ -426,7 +437,7 @@ function termOf(frontier: Frontier, id: number): { leaves: number[]; next: numbe
       // (a value the graph models stands for its nodes; one it declines is read natively)
       const before = frontier.pending.length;
       try {
-        next.push(...valueNodes(frontier, v));
+        next.push(...valueNodes(frontier, v, null));
       } catch (error) {
         // (a decline inside a summary's build declines the read; one at the value itself reads it natively)
         if (!(error instanceof Decline) || frontier.pending.length !== before) throw error;
