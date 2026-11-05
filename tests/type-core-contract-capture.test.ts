@@ -249,9 +249,10 @@ test("host data inside a stored object literal is captured with its whole store 
  * the store's type unknown, and the receiving completion completes its contract; the plan checks that contract at the
  * store. Judged by what the script does under the demand allowance alone, and at sampled settled stops past it (each
  * phase's first, last and two between): a stop always comes before the completion, which runs after everything that can
- * stop, so there no completion runs and the plan is the settled pass's, as without the completion.
+ * stop, so there no completion runs, and the settled pass's plan, which lets the forbidden value through, is declined
+ * (#1526 decision 2, condition 1), as without the completion.
  */
-test("a stopped decision's store is checked against its completed contract; at a stop the plan is the settled pass's (#1526 phase C)", () => {
+test("a stopped decision's store is checked against its completed contract; at a stop the settled pass's plan is declined (#1526 phase C, decision 2)", () => {
   for (const witness of WITNESSES) {
     const { source } = witness;
     const store = spanOf(source, witness.store);
@@ -285,11 +286,23 @@ test("a stopped decision's store is checked against its completed contract; at a
           assert.notEqual(stopped.budget.exhausted, null, at);
           assert.equal(stopped.budget.closure, null, at);
           assert.deepEqual(stopped.receiving, [], at);
-          const without = withoutRecords(
-            { diagnostic: () => false, check: () => false, completion: true },
+          // (#1526 decision 2, condition 1: there the plan is the settled pass's, whose store check lacks the completed
+          // contract, so the forbidden value would pass; the candidate declines it, as without the completion)
+          for (const run of [
             () => compiled(allowance),
-          );
-          assert.deepEqual(compiled(allowance).plan, without.plan, at);
+            () =>
+              withoutRecords(
+                { diagnostic: () => false, check: () => false, completion: true },
+                () => compiled(allowance),
+              ),
+          ])
+            assert.throws(
+              run,
+              (error) =>
+                error instanceof CandidateOutsideSlice &&
+                error.what === "a store whose check was lost at the budget",
+              at,
+            );
         }
       }
   }

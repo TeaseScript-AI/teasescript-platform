@@ -4904,8 +4904,21 @@ test("a stopped decision stays undecided at every reader, also after a settled p
     );
     for (const allowance of [undefined, first, total - 1]) {
       const where = `reversed: ${reversed}, allowance: ${allowance}`;
-      const run = allowance === undefined ? unstopped : capped(() => stopRun(source, allowance));
-      const { answers } = run;
+      // (at a settled program stop the candidate declines the compile, #1526 decision 2: an accepted over-decline, #1832,
+      // the store check of `tally`'s host value partial and no completion to tell it from the natural plan's; its analysis
+      // is judged alone)
+      if (allowance !== undefined)
+        assert.throws(
+          () => capped(() => stopRun(source, allowance)),
+          (error) =>
+            error instanceof CandidateOutsideSlice &&
+            error.what === "a store whose check was lost at the budget",
+          where,
+        );
+      const answers: Answers =
+        allowance === undefined
+          ? unstopped.answers
+          : capped(() => withTestAllowance(allowance, () => analyseCore(request)));
       assert.equal(answers.budget.settled, true, where);
       assert.ok(
         answers.budget.decisions.some((d) => d.place === tally && d.stopped),
@@ -4929,14 +4942,6 @@ test("a stopped decision stays undecided at every reader, also after a settled p
         ["unknown/16"],
         where,
       );
-      if (allowance !== undefined)
-        assert.deepEqual(
-          capped(() =>
-            stopProblems({ unstopped, stopped: run, fitting: [host(2)], violating: [host(2.5)] }),
-          ),
-          [],
-          where,
-        );
     }
   }
 });
