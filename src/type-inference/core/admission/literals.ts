@@ -1354,7 +1354,6 @@ function mayHoldNull(
   prefix: readonly string[],
 ): boolean {
   const { program, contract } = admission.pass;
-  const { work } = admission;
   let memo = OPTIONAL.get(admission.pass);
   if (memo === undefined) OPTIONAL.set(admission.pass, (memo = new Map()));
   const answers = memo;
@@ -1365,10 +1364,10 @@ function mayHoldNull(
   type Part = readonly [PlaceId, FlowNode, readonly string[]];
   // (a value's answer at a path where its form decides it, else the parts whose answers decide it)
   const expand = (at: PlaceId, from: FlowNode, steps: readonly string[]): boolean | Part[] => {
-    work.charge("checks");
+    admission.work.charge("checks");
     if (steps.length === 0) return itemsHold(at, []);
     if (program.hasOf.has(at)) {
-      const rest = keptSlice(work, steps, 1);
+      const rest = keptSlice(admission.work, steps, 1);
       return literalChildren(admission, at, steps[0]!).map(
         (child) => [child.value!, child.node ?? from, rest] as const,
       );
@@ -1415,7 +1414,7 @@ function mayHoldNull(
     mine.add(text);
     return { at, from, steps, text, parts: null, next: 0 };
   };
-  const rootText = keptText(work, prefix);
+  const rootText = keptText(admission.work, prefix);
   const already = known(value, rootText);
   if (already !== undefined) return already;
   const stack: Frame[] = [open(value, node, prefix, rootText)];
@@ -1436,7 +1435,7 @@ function mayHoldNull(
     let opened = false;
     while (frame.next < frame.parts.length) {
       const [at, from, steps] = frame.parts[frame.next]!;
-      const text = keptText(work, steps);
+      const text = keptText(admission.work, steps);
       const answer = known(at, text);
       if (answer === true) {
         holds = true;
