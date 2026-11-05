@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
+
+import { ts } from "ts-morph";
 
 import {
   compileProject,
@@ -76,6 +80,8 @@ import {
   type LabelIdentity,
   withLabels,
   provenRelabel,
+  provenRewording,
+  SENTENCE_VARIANTS,
   recordedAnalysis,
   runProblems,
   randomCopyGraph,
@@ -6506,4 +6512,230 @@ test("a stop that abandons a group's provenance read loses no check, with the sh
         `${mode.name} at ${demand}`,
       );
     }
+});
+
+/**
+ * TABLE r4.363 (#1708, A′): after a stop, a method receiver's words may follow a proven type (the declaration to the
+ * leaf, `xs: integer dict` → `integer`: `xs.entry has .clear()`) where the demand-only reference spells the method
+ * table's kinds (`xs.element is a list, a set, or a dict with .clear()`), and the stopped record stands as the proven
+ * kinds and the proof's route derive it. At every settled stop of the witness, at demands 1 and 3 in the four modes, the
+ * stop oracle accepts the pair on both sides of the inventory, and some stop pairs them.
+ */
+test("a stopped receiver's words may follow the declaration to its leaf, the pair one check on both sides (#1708)", () => {
+  const witness: HeldCase = {
+    name: "receiver-words",
+    source:
+      'let xs: integer dict = dict {a: hostValue}\nsay "BEFORE"\nxs["a"].clear()\nsay "AFTER"\nexit\n',
+    slice: true,
+    values: [],
+  };
+  let paired = 0;
+  for (const mode of HELD_MODES)
+    for (const demand of [1, 3]) {
+      const reference = heldRun(witness, mode, undefined, demand);
+      for (const { allowance } of heldStops(witness, mode, 4, demand)) {
+        assert.deepEqual(
+          heldProblems(witness, mode, allowance, reference, demand),
+          [],
+          `${mode.name} ${demand} @${allowance}`,
+        );
+        const stopped = heldRun(witness, mode, allowance, demand).answers;
+        paired += combinedStopRule(witness, mode, reference, stopped).reworded.pairs.size;
+      }
+    }
+  assert.ok(paired > 0, "no stop paired the receiver's words");
+});
+
+/**
+ * TABLE r4.363's refusals (#1708): the witness's own pair, each condition broken in turn, is refused: (1) kinds the
+ * declaration does not prove; (2) another `against`; (3) a record field the proven kinds do not imply (a `present` after
+ * the stop, an extra fitting type, a context neither route explains, another rule field) or a sentence its kinds do not
+ * select; and a variant missing from the table.
+ */
+test("a stopped receiver's words are refused where a condition of r4.363 breaks (#1708)", () => {
+  const witness: HeldCase = {
+    name: "receiver-words",
+    source:
+      'let xs: integer dict = dict {a: hostValue}\nsay "BEFORE"\nxs["a"].clear()\nsay "AFTER"\nexit\n',
+    slice: true,
+    values: [],
+  };
+  const mode = HELD_MODES[0]!;
+  const reference = heldRun(witness, mode, undefined, 3).answers;
+  const found = heldStops(witness, mode, 1, 3)
+    .map(({ allowance }) => heldRun(witness, mode, allowance, 3).answers)
+    .find((answers) =>
+      answers.budget.deferred.some((mark) => mark.obligation.on.includes(" has .clear()")),
+    );
+  assert.ok(found !== undefined, "no stop of the witness spells the leaf's words");
+  const stopped = found;
+  const u = reference.checks.find((check) => check.on.includes(".clear()"))!;
+  const mark = stopped.budget.deferred.find((each) =>
+    each.obligation.on.includes(" has .clear()"),
+  )!;
+  const x = mark.obligation;
+  const [from, to] = [labelIdentities(reference), labelIdentities(stopped)];
+  const owed = (answers: Answers) => [
+    ...answers.checks,
+    ...answers.budget.deferred.map((m) => m.obligation),
+  ];
+  assert.equal(provenRewording(u, owed(stopped), reference, stopped, from, to), x);
+  // (the stopped mark replaced by a changed copy: its check `changed`, its record `record`)
+  const tampered = (record: Partial<typeof mark>, changed: Obligation = x): Answers => ({
+    ...stopped,
+    budget: {
+      ...stopped.budget,
+      deferred: stopped.budget.deferred.map((each) =>
+        each === mark ? { ...mark, ...record, obligation: changed } : each,
+      ),
+    },
+  });
+  const refused = (record: Partial<typeof mark>, why: string, changed: Obligation = x): void => {
+    const answers = tampered(record, changed);
+    assert.equal(
+      provenRewording(u, owed(answers), reference, answers, from, labelIdentities(stopped)),
+      undefined,
+      why,
+    );
+  };
+  refused({ kinds: ["number"] }, "(1) kinds the declaration does not prove");
+  refused({}, "(2) another against", { ...x, against: ["integer"] });
+  refused({ present: "unproved" }, "(3) a present the stop does not ask");
+  refused({ fits: ["integer"] }, "(3) a fitting type the kinds do not have");
+  refused(
+    { provenance: { ...mark.provenance, context: "loop" } },
+    "(3) a context neither route explains",
+  );
+  refused(
+    { rule: mark.rule.rule === "member" ? { ...mark.rule, use: "read" } : mark.rule },
+    "(3) another rule field",
+  );
+  refused({}, "(3) a sentence its kinds do not select", {
+    ...x,
+    on: `check that ${x.target} is a list, a set, or a dict with .clear() before the call`,
+  });
+  assert.equal(SENTENCE_VARIANTS["member"], "memberChecks");
+  assert.equal(Object.keys(SENTENCE_VARIANTS).length, 17);
+});
+
+/**
+ * TABLE r4.363's refusal controls (#1708, Sol's): a stop that changes the check itself is no wording: an operand's
+ * `against` narrowed beside the receiver (`xs["a"] + hostOther`) or a fallback's expected domain (`xs["a"] otherwise
+ * hostOther`) is never paired, whatever its words.
+ */
+test("a stop that changes an operand's or a fallback's expected domain is never paired as words (#1708)", () => {
+  for (const source of [
+    'let xs: integer dict = dict {a: hostValue}\nsay "BEFORE"\nsay xs["a"] + hostOther\nsay "AFTER"\nexit\n',
+    'let xs: integer dict = dict {a: hostValue}\nsay "BEFORE"\nsay xs["a"] otherwise hostOther\nsay "AFTER"\nexit\n',
+  ]) {
+    const c: HeldCase = { name: "refused", source, slice: true, values: [] };
+    const mode = HELD_MODES[0]!;
+    const reference = heldRun(c, mode, undefined, 3);
+    let changed = 0;
+    for (const { allowance } of heldStops(c, mode, 2, 3)) {
+      const stopped = heldRun(c, mode, allowance, 3).answers;
+      const owed = [...stopped.checks, ...stopped.budget.deferred.map((m) => m.obligation)];
+      // (the reference's checks whose site and kind the stop keeps with another expected domain: a changed check)
+      const narrowed = new Set(
+        reference.answers.checks
+          .filter((u) =>
+            owed.some(
+              (x) =>
+                x.kind === u.kind &&
+                JSON.stringify(x.site) === JSON.stringify(u.site) &&
+                JSON.stringify(x.against) !== JSON.stringify(u.against),
+            ),
+          )
+          .map((u) => JSON.stringify(u)),
+      );
+      changed += narrowed.size;
+      const pairs = combinedStopRule(c, mode, reference, stopped).reworded.pairs;
+      for (const u of narrowed) assert.ok(!pairs.has(u), `${source} @${allowance}: ${u}`);
+    }
+    assert.ok(changed > 0, `${source}: no stop changes an expected domain`);
+  }
+});
+
+/**
+ * TABLE r4.363's drift guard (#1708, the lead's ruling on its HEAD 0): the sentence table and the derived record follow
+ * the consumers as they are. The obligation sites whose words read kinds (a consumer's call of a word maker from the
+ * messages, codes and paths apart) are the table's kind-reading entries, today `memberChecks`'s alone; and the sites
+ * that set a record's read-derived fields (`fits`, `besides`, `present`, `keeps`, `provenance`) are the ones the derived
+ * record mirrors or reads. A new one fails until the table or `derivedRecord` takes it.
+ */
+test("the sentence table and the derived record name every site that words or derives a record from kinds (#1708)", () => {
+  const files = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name);
+      return statSync(path).isDirectory() ? files(path) : path.endsWith(".ts") ? [path] : [];
+    });
+  const enclosing = (node: ts.Node): string => {
+    for (let at = node.parent; at !== undefined; at = at.parent)
+      if ((ts.isFunctionDeclaration(at) || ts.isMethodDeclaration(at)) && at.name !== undefined)
+        return at.name.getText();
+    return "(module)";
+  };
+  const READ_FIELDS = new Set(["fits", "besides", "present", "keeps", "provenance"]);
+  const words = new Set<string>();
+  const fields = new Set<string>();
+  for (const file of files(join(process.cwd(), "src/type-inference/core"))) {
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(file, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const imported = new Set<string>();
+    for (const statement of source.statements)
+      if (
+        ts.isImportDeclaration(statement) &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        /\/messages(\/words)?\.js$/.test(statement.moduleSpecifier.text) &&
+        statement.importClause?.namedBindings !== undefined &&
+        ts.isNamedImports(statement.importClause.namedBindings)
+      )
+        for (const each of statement.importClause.namedBindings.elements)
+          if (!each.isTypeOnly) imported.add(each.name.text);
+    const visit = (node: ts.Node): void => {
+      if (
+        file.includes(`${join("core", "consumers")}`) &&
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        imported.has(node.expression.text) &&
+        node.expression.text !== "codeOf" &&
+        node.expression.text !== "pathPhrase"
+      )
+        words.add(`${basename(file)}:${enclosing(node)}`);
+      if (
+        (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
+        ts.isIdentifier(node.name) &&
+        READ_FIELDS.has(node.name.text) &&
+        ts.isObjectLiteralExpression(node.parent)
+      )
+        fields.add(`${basename(file)}:${enclosing(node)}:${node.name.text}`);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  const tabled = Object.values(SENTENCE_VARIANTS).filter((site) => site !== null);
+  assert.deepEqual([...words].sort(), tabled.map((site) => `receivers.ts:${site}`).sort());
+  assert.deepEqual([...fields].sort(), [
+    // (a published warning's `besides`, which `derivedRecord` recomputes from the stopped answers)
+    "answers.ts:withBesides:besides",
+    // (a kept value's types, asked only where an analysis ran to its end, as `present`)
+    "consumer.ts:#answerTask:keeps",
+    "consumer.ts:expected:keeps",
+    "diagnostics.ts:withFacts:keeps",
+    "diagnostics.ts:withFacts:present",
+    // (the messages read them; a record carries what they read)
+    "messages.ts:coreMessage:keeps",
+    "messages.ts:coreMessage:present",
+    // (the record's serialized form)
+    "result.ts:coreRecord:provenance",
+    "warnings.ts:memberWarningFix:present",
+    // (the warning's own: `fits` by the kinds that fit, `besides` none, `provenance` by the item read)
+    "warnings.ts:warning:besides",
+    "warnings.ts:warning:fits",
+    "warnings.ts:warning:provenance",
+  ]);
 });
