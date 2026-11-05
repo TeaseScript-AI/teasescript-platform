@@ -143,11 +143,14 @@ test("where the native reader ends, a pushed read answers what it does, raw and 
     ring({ n: 3, q: spine(1, "{g:1}"), cycle: false, extra: ['say "${p2.q.q.q}"'] }),
     // an empty list below the projection read at its element (a collection's: declined), and a host's data read at
     // an element, alone there and beside an object (its frame decides whether it may hold none: declined)
-    ring({ q: spine(2, "{l:[],h:hostValue}"), extra: ['say "${p1.q.q.l}"', 'say "${p1.q.q.h}"'] }),
+    ring({
+      q: spine(2, "{l:[],h:hostValue}"),
+      extra: ["let w=p1.q.q.l", "let v=p1.q.q.h", 'say "${w} ${v}"'],
+    }),
     ring({
       q: spine(2, "{h:hostValue}"),
       cycle: false,
-      extra: ["p1.q.q.h={z:1}", 'say "${p1.q.q.h}"'],
+      extra: ["p1.q.q.h={z:1}", "let v=p1.q.q.h", 'say "${v}"'],
     }),
     // a written binding below the projection, where the read ends there (its type answers: read natively)
     ring({ q: spine(3), cycle: false, extra: ['say "${p1.q.q.q.f}"'] }),
