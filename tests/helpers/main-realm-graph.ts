@@ -24,8 +24,32 @@ export interface MainRealmGraphOptions {
   readonly exempt: ReadonlySet<string>;
 }
 
-/** The value imports of one module's code, each with the names it takes (`*` for a whole module). */
-function valueImports(code: string, file: string): { specifier: string; names: string[] }[] {
+/** Stops the walk at a loading form it does not model, rather than letting that load pass unseen. */
+function refuse(label: string, form: string): never {
+  throw new Error(`${label}: the main-realm walk does not model ${form}`);
+}
+
+/** Whether `node` is `import.meta.<name>`. */
+function isImportMeta(node: ts.Node, name: string): boolean {
+  return (
+    ts.isPropertyAccessExpression(node) &&
+    ts.isMetaProperty(node.expression) &&
+    node.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
+    node.name.text === name
+  );
+}
+
+/**
+ * The value imports of one module's code, each with the names it takes (`*` for a whole module). Of Vite's own loading
+ * forms it models the ones the Player uses, none of which loads code into the main realm: a `?raw` import (text), an
+ * `import.meta.glob` with `query: "?url"` (URLs), and `new Worker(new URL(…, import.meta.url))` (another realm). It
+ * refuses any other query, glob, `new URL(…, import.meta.url)`, or `import()` of a computed specifier.
+ */
+function valueImports(
+  code: string,
+  file: string,
+  label: string,
+): { specifier: string; names: string[] }[] {
   const source = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const found: { specifier: string; names: string[] }[] = [];
   const pending: ts.Node[] = [source];
@@ -65,43 +89,78 @@ function valueImports(code: string, file: string): { specifier: string; names: s
       found.push({ specifier: node.moduleSpecifier.text, names: names.length > 0 ? names : ["*"] });
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const [argument] = node.arguments;
-      if (argument !== undefined && ts.isStringLiteralLike(argument))
-        found.push({ specifier: argument.text, names: ["*"] });
+      if (argument === undefined || !ts.isStringLiteralLike(argument))
+        refuse(label, "an import() of a computed specifier");
+      found.push({ specifier: argument.text, names: ["*"] });
+    } else if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const glob = node.expression;
+      if (ts.isMetaProperty(glob.expression) && glob.name.text.startsWith("glob")) {
+        const settings = node.arguments[1];
+        const urls =
+          isImportMeta(glob, "glob") &&
+          settings !== undefined &&
+          ts.isObjectLiteralExpression(settings) &&
+          settings.properties.some(
+            (property) =>
+              ts.isPropertyAssignment(property) &&
+              property.name.getText(source) === "query" &&
+              ts.isStringLiteralLike(property.initializer) &&
+              property.initializer.text === "?url",
+          );
+        if (!urls) refuse(label, `${node.expression.getText(source)} without query "?url"`);
+      }
+    } else if (
+      ts.isNewExpression(node) &&
+      node.expression.getText(source) === "URL" &&
+      node.arguments?.[1] !== undefined &&
+      isImportMeta(node.arguments[1], "url")
+    ) {
+      const parent = node.parent;
+      const workerEntry =
+        ts.isNewExpression(parent) &&
+        parent.expression.getText(source) === "Worker" &&
+        parent.arguments?.[0] === node;
+      if (!workerEntry) refuse(label, "new URL(…, import.meta.url) outside new Worker(…)");
     }
     ts.forEachChild(node, (child) => {
       pending.push(child);
     });
   }
-  return found;
+  return found.filter(({ specifier }) => {
+    const query = /\?(.*)$/su.exec(specifier)?.[1];
+    if (query === undefined) return true;
+    if (query === "raw") return false;
+    return refuse(label, `the query of "${specifier}"`);
+  });
 }
 
 /**
- * A module's executable code: the file itself, or each part of a `.vue` file that the Vue plugin turns into code. The
- * parts are the scripts, where a `<script src>` counts as a re-export of that file, and the template, inline or by
- * `src`, compiled by Vue's template compiler, whose code can `import()` too.
+ * A module's executable code: the file itself, or a `.vue` file's inline `<script>`, `<script setup>` and template,
+ * compiled by Vue's template compiler, whose code can `import()` too. The walk refuses every other part the Vue plugin
+ * turns into code: a block with `src`, CSS `v-bind()`, and custom blocks.
  */
-function scripts(file: string): string[] {
+function scripts(file: string, label: string): string[] {
   const text = readFileSync(file, "utf8");
   if (!file.endsWith(".vue")) return [text];
-  const { descriptor } = parseSfc(text, { filename: file });
-  const { script, scriptSetup, template } = descriptor;
-  const code: string[] = [];
-  if (script !== null)
-    code.push(
-      script.src === undefined ? script.content : `export * from ${JSON.stringify(script.src)};`,
-    );
-  if (scriptSetup !== null) code.push(scriptSetup.content);
+  const { descriptor, errors } = parseSfc(text, { filename: file });
+  // Vue's parser itself refuses `<script setup src>`.
+  if (errors.length > 0) throw new Error(`${label}: ${String(errors[0])}`);
+  const { script, scriptSetup, template, styles, cssVars, customBlocks } = descriptor;
+  const external = [script, template, ...styles].find((block) => block?.src !== undefined);
+  if (external) refuse(label, `<${external.type} src>`);
+  if (cssVars.length > 0) refuse(label, "CSS v-bind()");
+  if (customBlocks[0] !== undefined) refuse(label, `the custom block <${customBlocks[0].type}>`);
+  const code = [script?.content, scriptSetup?.content].filter(
+    (content): content is string => content !== undefined,
+  );
   if (template !== null) {
     const compiled = compileTemplate({
-      source:
-        template.src === undefined
-          ? template.content
-          : readFileSync(resolve(dirname(file), template.src), "utf8"),
+      source: template.content,
       filename: file,
       id: file,
       compilerOptions: { isTS: [script?.lang, scriptSetup?.lang].includes("ts") },
     });
-    if (compiled.errors.length > 0) throw new Error(`${file}: ${String(compiled.errors[0])}`);
+    if (compiled.errors.length > 0) throw new Error(`${label}: ${String(compiled.errors[0])}`);
     code.push(compiled.code);
   }
   return code;
@@ -109,11 +168,10 @@ function scripts(file: string): string[] {
 
 /** The repository file a local specifier names, or `null` for a package or a non-script file. */
 function resolveSpecifier(from: string, specifier: string, aliasRoot: string): string | null {
-  const bare = specifier.replace(/\?.*$/u, "");
-  const base = bare.startsWith("@/")
-    ? join(aliasRoot, bare.slice(2))
-    : bare.startsWith(".")
-      ? resolve(dirname(from), bare)
+  const base = specifier.startsWith("@/")
+    ? join(aliasRoot, specifier.slice(2))
+    : specifier.startsWith(".")
+      ? resolve(dirname(from), specifier)
       : null;
   if (base === null) return null;
   for (const candidate of [
@@ -148,8 +206,8 @@ export function mainRealmGraph(options: MainRealmGraphOptions): {
     visited.add(file);
     const importer = name(file);
     if (options.exempt.has(importer)) continue;
-    for (const code of scripts(file))
-      for (const { specifier, names } of valueImports(code, file)) {
+    for (const code of scripts(file, importer))
+      for (const { specifier, names } of valueImports(code, file, importer)) {
         const resolved = resolveSpecifier(file, specifier, aliasRoot);
         if (resolved === null) continue;
         const target = name(resolved);

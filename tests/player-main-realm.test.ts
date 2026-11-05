@@ -68,22 +68,24 @@ test("each export of runtime-adapter.ts and runtime-view.ts has its place in the
   assert.deepEqual(Object.keys(view).sort(), [...VIEW_READERS].sort());
 });
 
-test("the walk reads every import form once and stops at Worker-side code", () => {
-  // Type-only imports, re-exports (also of no value), `import()`, side-effect imports, `.vue` scripts and templates (each
-  // also by `src`), the `@/` alias and a cycle.
-  const fixture = mainRealmGraph({
-    root: fileURLToPath(new URL("../../tests/fixtures/main-realm-graph/", import.meta.url)),
-    entry: "player/entry.ts",
+const FIXTURE = fileURLToPath(new URL("../../tests/fixtures/main-realm-graph/", import.meta.url));
+const fixtureGraph = (entry: string) =>
+  mainRealmGraph({
+    root: FIXTURE,
+    entry,
     aliasRoot: "player/alias",
     allowedSource: new Set(["src/allowed.ts"]),
     workerModules: new Set(["player/worker-module.ts"]),
     exempt: new Set(),
   });
+
+test("the walk reads every import form once and stops at Worker-side code", () => {
+  // Type-only imports, re-exports (also of no value), `import()`, side-effect imports, `.vue` scripts and templates, the
+  // `@/` alias, a cycle, and the Vite forms the Player uses.
+  const fixture = fixtureGraph("player/entry.ts");
   assert.deepEqual(fixture.modules, [
     "player/alias/aliased.ts",
     "player/entry.ts",
-    "player/external-script.ts",
-    "player/external.vue",
     "player/panel.vue",
     "player/side.ts",
     "src/allowed.ts",
@@ -94,9 +96,28 @@ test("the walk reads every import form once and stops at Worker-side code", () =
     "player/entry.ts → src/empty.ts *",
     "player/entry.ts → src/root.ts fromRoot",
     "player/entry.ts → src/typed.ts *",
-    "player/external-script.ts → src/root.ts fromScript",
-    "player/external.vue → src/template.ts *",
     "player/panel.vue → src/template.ts *",
     "player/side.ts → player/worker-module.ts inWorker",
   ]);
+});
+
+test("the walk refuses each loading form it does not model", () => {
+  const unmodelled = (form: string) => `the main-realm walk does not model ${form}`;
+  for (const [file, failure] of [
+    ["script-src.vue", unmodelled("<script src>")],
+    ["setup-src.vue", 'SyntaxError: <script setup> cannot use the "src" attribute'],
+    ["template-src.vue", unmodelled("<template src>")],
+    ["style-src.vue", unmodelled("<style src>")],
+    ["css-vars.vue", unmodelled("CSS v-bind()")],
+    ["custom-block.vue", unmodelled("the custom block <docs>")],
+    ["query.ts", unmodelled('the query of "./plain.js?worker"')],
+    ["glob.ts", unmodelled('import.meta.glob without query "?url"')],
+    ["url.ts", unmodelled("new URL(…, import.meta.url) outside new Worker(…)")],
+    ["computed-import.ts", unmodelled("an import() of a computed specifier")],
+  ])
+    assert.throws(
+      () => fixtureGraph(`refused/${file}`),
+      (error: Error) => error.message.startsWith(`refused/${file}: ${failure}`),
+      file,
+    );
 });
