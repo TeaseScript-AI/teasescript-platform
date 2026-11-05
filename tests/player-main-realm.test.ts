@@ -86,6 +86,7 @@ test("the walk reads every import form once and stops at Worker-side code", () =
   assert.deepEqual(fixture.modules, [
     "player/alias/aliased.ts",
     "player/entry.ts",
+    "player/names.ts",
     "player/panel.vue",
     "player/side.ts",
     "src/allowed.ts",

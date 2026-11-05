@@ -42,18 +42,19 @@ function refuse(label: string, form: string): never {
   throw new Error(`${label}: the main-realm walk does not model ${form}`);
 }
 
-/** Whether `node` names a member (`a.require`, `{ require: … }`) rather than referring to a binding. */
-function isMemberName(node: ts.Identifier): boolean {
-  const parent = node.parent;
-  return (
-    (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
-    ((ts.isPropertyAssignment(parent) ||
-      ts.isMethodDeclaration(parent) ||
-      ts.isPropertyDeclaration(parent) ||
-      ts.isPropertySignature(parent) ||
-      ts.isMethodSignature(parent)) &&
-      parent.name === node)
-  );
+/**
+ * Whether an identifier refers to a binding, rather than being a name that something declares or accesses, a key, or a
+ * label. A shorthand property `{ require }` refers to one.
+ */
+function refersToBinding(node: ts.Identifier): boolean {
+  // EVIDENCE: validation: each of these optional fields, where a node kind has it, holds a child node.
+  const parent = node.parent as ts.Node & {
+    name?: ts.Node;
+    propertyName?: ts.Node;
+    label?: ts.Node;
+  };
+  if (ts.isShorthandPropertyAssignment(parent)) return true;
+  return parent.name !== node && parent.propertyName !== node && parent.label !== node;
 }
 
 /** Whether `node` is `import.meta.<name>`. */
@@ -115,7 +116,7 @@ function valueImports(
       // `export { type A } from "m"` and `export {} from "m"` still load `m` under `verbatimModuleSyntax`.
       found.push({ specifier: node.moduleSpecifier.text, names: names.length > 0 ? names : ["*"] });
     } else if (
-      (ts.isIdentifier(node) && node.text === "require" && !isMemberName(node)) ||
+      (ts.isIdentifier(node) && node.text === "require" && refersToBinding(node)) ||
       (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference))
     ) {
       // Any reference to `require`, not only a direct call: `(require)(…)`, `require!(…)` and an alias call it too.
@@ -165,8 +166,9 @@ function valueImports(
         parent.arguments?.[0] === node;
       if (!workerEntry) refuse(label, "new URL(…, import.meta.url) outside new Worker(…)");
     }
+    // Type syntax is erased and loads nothing; a class's `extends` clause is an expression, though TypeScript types it.
     ts.forEachChild(node, (child) => {
-      pending.push(child);
+      if (!ts.isTypeNode(child) || ts.isExpressionWithTypeArguments(child)) pending.push(child);
     });
   }
   return found.filter(({ specifier }) => {
