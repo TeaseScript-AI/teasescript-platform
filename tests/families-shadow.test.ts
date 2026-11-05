@@ -23,7 +23,9 @@ const tool = resolve("tests/families/shadow.mjs");
  * mode, the legacy route's worker throws 50 ms after its outcome, while the core's run waits 300 ms; for `late` in the first
  * mode, it throws 200 ms after its outcome, holding the next run's request unread; the core reads one decision of `outside` and leaves the slice there;
  * the legacy analysis of `abort` aborts its process in the first mode; the core's of `costly` charges 100 units against an
- * allowance of 10 there.
+ * allowance of 10 there; `noisy` writes stderr text without a newline before its analysis, whose legacy route then
+ * exhausts the heap there; `large` plans 1 MB and its legacy route throws right after its outcome; `block` (an area of
+ * its own) waits 10 s in its legacy analysis.
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": "export class WorkLedger { charge() {} }\n",
@@ -49,8 +51,7 @@ export const CORE_BACKEND = {
   },
 };
 `,
-  "src/type-inference/legacy-rounds.js": `import { writeSync } from "node:fs";
-let compiled = 0;
+  "src/type-inference/legacy-rounds.js": `let compiled = 0;
 const exhaust = () => {
   const held = [];
   for (;;) held.push(new Array(100000).fill(held.length));
@@ -62,10 +63,7 @@ export const LEGACY_BACKEND = {
     const mode = globalThis.shadowMode;
     if (source === "crash" && mode.reversed && !mode.unshared) exhaust();
     if (source === "abort" && !mode.reversed && !mode.unshared) process.abort();
-    if (source === "noisy" && !mode.reversed && !mode.unshared) {
-      writeSync(2, "a diagnostic without a newline");
-      exhaust();
-    }
+    if (source === "noisy" && !mode.reversed && !mode.unshared) exhaust();
     if (source === "large" && !mode.reversed && !mode.unshared)
       queueMicrotask(() => {
         throw new Error("large worker error");
@@ -86,8 +84,11 @@ export const LEGACY_BACKEND = {
   },
 };
 `,
-  "src/compiler.js": `import { LEGACY_BACKEND } from "./type-inference/legacy-rounds.js";
+  "src/compiler.js": `import { writeSync } from "node:fs";
+import { LEGACY_BACKEND } from "./type-inference/legacy-rounds.js";
 export function compileProjectWithBackend(files, options, backend) {
+  // (stderr text without a newline before the analysis begins)
+  if (files[0].source === "noisy") writeSync(2, "a diagnostic without a newline");
   const program = { kind: "program", span: { start: { offset: 0 }, end: { offset: 1 } } };
   (backend ?? LEGACY_BACKEND).analyze({ files: [{ path: "main.tease", program, source: files[0].source }] });
   return { plan: { instructions: [files[0].source === "large" ? "x".repeat(1 << 20) : files[0].source] }, diagnostics: [] };
