@@ -2146,36 +2146,14 @@ function readsPlace(fallback: Expression): boolean {
  * but a literal, reads a place (Astra r1's B1 on #1775).
  */
 function projectedScalar(at: PropertyAccessExpression | IndexExpression): boolean {
-  const steps: (PropertyAccessExpression | IndexExpression)[] = [];
-  let base: Expression = at;
-  while (base.kind === "propertyAccessExpression" || base.kind === "indexExpression") {
-    steps.push(base);
-    base = unwrap(base.object);
-  }
-  let value: Expression | undefined = base;
-  for (const step of steps.toReversed()) {
-    const holder: Expression = unwrap(value!);
-    if (step.kind === "propertyAccessExpression")
-      value =
-        holder.kind === "objectLiteral"
-          ? holder.properties.find((property) => property.name.name === step.property.name)?.value
-          : undefined;
-    else {
-      const index = unwrap(step.index);
-      value =
-        holder.kind === "listLiteral" &&
-        index.kind === "numberLiteral" &&
-        Number.isInteger(index.value) &&
-        index.value >= 0
-          ? holder.elements[index.value]
-          : undefined;
-    }
-    if (value === undefined) return false;
-  }
-  // (literal data with no object literal in it: an object's names below a projection are what a stop leaves unproven)
-  const pending: Expression[] = [value!];
+  const value = projectedLiteral(at);
+  if (value === undefined) return false;
+  // (literal data with no object literal in it: an object's names below a projection are what a stop leaves unproven;
+  // a part that is itself a projection, by what it projects)
+  const pending: Expression[] = [value];
   for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
-    const leaf = unwrap(at);
+    const leaf = projectedLiteral(at);
+    if (leaf === undefined) return false;
     if (leaf.kind === "listLiteral" || leaf.kind === "setLiteral") pending.push(...leaf.elements);
     else if (!(
       leaf.kind === "numberLiteral" ||
@@ -2186,6 +2164,42 @@ function projectedScalar(at: PropertyAccessExpression | IndexExpression): boolea
       return false;
   }
   return true;
+}
+
+/**
+ * The literal an expression denotes through parentheses and projections of literals at literal properties and
+ * non-negative integer indices, a projected part that is itself such a projection followed too (Codex r8 on #1775:
+ * `({p: ({n: 0}).n}).p`); `undefined` where some step leaves the literal's syntax. One loop, its steps a stack.
+ */
+function projectedLiteral(expression: Expression): Expression | undefined {
+  const steps: (PropertyAccessExpression | IndexExpression)[] = [];
+  let current = unwrap(expression);
+  for (;;) {
+    while (current.kind === "propertyAccessExpression" || current.kind === "indexExpression") {
+      steps.push(current);
+      current = unwrap(current.object);
+    }
+    const step = steps.pop();
+    if (step === undefined) return current;
+    let value: Expression | undefined;
+    if (step.kind === "propertyAccessExpression")
+      value =
+        current.kind === "objectLiteral"
+          ? current.properties.find((property) => property.name.name === step.property.name)?.value
+          : undefined;
+    else {
+      const index = unwrap(step.index);
+      value =
+        current.kind === "listLiteral" &&
+        index.kind === "numberLiteral" &&
+        Number.isInteger(index.value) &&
+        index.value >= 0
+          ? current.elements[index.value]
+          : undefined;
+    }
+    if (value === undefined) return undefined;
+    current = unwrap(value);
+  }
 }
 
 /**
