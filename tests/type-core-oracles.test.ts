@@ -285,8 +285,11 @@ test("a decision record is read by its place and its exact path, never by the fi
   );
   assert.equal(decisionKey(record(1, ["a", "b"])), '[1,["a","b"]]');
   assert.equal(decisionsByKey(list).size, 4);
-  assert.throws(
-    () => decisionsByKey([...list, record(1, ["a", "b"])]),
-    /Two decision records at \[1,\["a","b"\]\]/,
+  // (a key twice in one list: both records, in the list's order, never one overwriting the other, #1757)
+  assert.deepEqual(
+    decisionsByKey([...list, record(1, ["a", "b"], 9)])
+      .get('[1,["a","b"]]')!
+      .map((d) => d.units),
+    [7, 9],
   );
 });

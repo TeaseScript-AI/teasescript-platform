@@ -101,6 +101,7 @@ import {
 } from "./helpers/type-core-oracles.js";
 import { plannedContent, runGlobals } from "./helpers/type-core-route.js";
 import {
+  repeatedDecisions,
   standsForNullCheck,
   stopProblems,
   type Globals,
@@ -6609,6 +6610,45 @@ test("a stopped iterable or repeat-count check stands for a lost null check only
       .map((p) => `${p.split(" ")[0]} ${named(p.slice(p.indexOf("{")).split(" by ")[0]!)}`),
     ["lost null-check n 40-41"],
   );
+});
+
+/**
+ * #1757 (the lead's ruling on #1741's sweep): a pass can decide one place's path twice (`1310-astra-probe-stops.mjs`
+ * `chain/hostValue`: the root of `box`, 38 units and then 1 in the natural pass). The stop oracle compares such records
+ * by their occurrence, refusing a comparison only where the two runs decide the key a different number of times, and
+ * lists each repetition as a problem line (`repeated decision at …`), never a failure; why the core repeats is #1757's.
+ */
+test("a decision a pass makes twice is compared by its occurrence and listed apart, never a failure (#1757)", () => {
+  const c: HeldCase = {
+    name: "chain/hostValue",
+    source: `let box = {last: null}\nbox.last = {first: null}\nbox.last.first = {n: 1}\nsay "BEFORE"\nbox.last.first.n = hostValue\nsay "AFTER"\nexit\n`,
+    slice: true,
+    values: [],
+  };
+  const mode = HELD_MODES[0]!;
+  const unstopped = heldRun(c, mode);
+  for (const demand of [8, 16, 256]) {
+    const run = { unstopped, stopped: heldRun(c, mode, undefined, demand) };
+    // (judged, the repetition compared by occurrence: no refusal, no line of it among the problems)
+    const problems = stopProblems({ ...run, fitting: [], violating: [] });
+    assert.ok(!problems.some((p) => p.startsWith("repeated decision")), `${demand}`);
+    // (listed apart: the natural pass's repetitions, then the stopped one's where its units differ)
+    const lines = repeatedDecisions(run);
+    assert.deepEqual(
+      lines.slice(0, 2),
+      [
+        "repeated decision at [5,[]]: units 38, 1, 1",
+        'repeated decision at [5,["last"]]: units 305, 2',
+      ],
+      `${demand}`,
+    );
+    for (const line of lines)
+      assert.match(
+        line,
+        /^repeated decision at \[\d+,\[[^\]]*\]\]: units \d+(, \d+)+$/,
+        `${demand}`,
+      );
+  }
 });
 
 /**

@@ -159,20 +159,27 @@ function otherScope(own: Answers["budget"], other: Answers["budget"]): string | 
     return `another stop (${other.stoppedIn ?? "none"}, settled ${other.settled}) than the run's (${own.stoppedIn ?? "none"}, settled ${own.settled})`;
   if (own.allowance !== other.allowance)
     return `the program allowance ${other.allowance}, not the run's ${own.allowance}`;
-  // (each decision by its own key, place and exact path: a key twice in one run is refused, never overwritten)
-  const demands = (budget: Answers["budget"]): Map<string, number> =>
-    new Map([
-      ...[...decisionsByKey(budget.decisions)].map(
-        ([key, d]) => [`decision ${key}`, d.allowance] as const,
-      ),
-      ...budget.demands.flatMap((d) =>
-        d.bounded ? [[`read ${d.node}`, d.allowance] as const] : [],
-      ),
-    ]);
-  const mine = demands(own);
-  for (const [demand, allowance] of demands(other))
-    if (mine.has(demand) && mine.get(demand) !== allowance)
-      return `the demand allowance ${allowance} at its ${demand}, not the run's ${mine.get(demand)}`;
+  // (each decision by its key, place and exact path, and its occurrence there: a run can decide one place's path more
+  // than once in a pass, #1757, and the runs compare such records in order, never overwritten; a key the two runs
+  // decide a different number of times refuses the comparison)
+  const mine = decisionsByKey(own.decisions);
+  for (const [key, theirs] of decisionsByKey(other.decisions)) {
+    const ours = mine.get(key);
+    if (ours === undefined) continue;
+    if (ours.length !== theirs.length)
+      return `the decision at ${key} ${theirs.length} times, not the run's ${ours.length}`;
+    for (const [at, d] of theirs.entries())
+      if (d.allowance !== ours[at]!.allowance)
+        return `the demand allowance ${d.allowance} at its decision ${key}${ours.length > 1 ? ` (its record ${at + 1})` : ""}, not the run's ${ours[at]!.allowance}`;
+  }
+  const reads = (budget: Answers["budget"]): Map<string, number> =>
+    new Map(
+      budget.demands.flatMap((d) => (d.bounded ? [[`read ${d.node}`, d.allowance] as const] : [])),
+    );
+  const myReads = reads(own);
+  for (const [demand, allowance] of reads(other))
+    if (myReads.has(demand) && myReads.get(demand) !== allowance)
+      return `the demand allowance ${allowance} at its ${demand}, not the run's ${myReads.get(demand)}`;
   return null;
 }
 
@@ -277,6 +284,21 @@ export function standsForNullCheck(check: Obligation, nullCheck: Obligation): bo
 /** Whether `inner` lies within `outer`. */
 function within(inner: Span, outer: Span): boolean {
   return outer.start <= inner.start && inner.end <= outer.end;
+}
+
+/**
+ * Where either run of `c` decides one place's path more than once in a pass (#1757), one line each, `repeated decision
+ * at [place, path]: units a, b`, the same line once: what a sweep or replay records beside `stopProblems`, never part of
+ * its verdict (the lead's ruling on #1741's sweep).
+ */
+export function repeatedDecisions(c: Pick<StopCase, "unstopped" | "stopped">): string[] {
+  const lines: string[] = [];
+  for (const run of [c.unstopped, c.stopped])
+    for (const [key, records] of decisionsByKey(run.answers.budget.decisions)) {
+      const line = `repeated decision at ${key}: units ${records.map((d) => d.units).join(", ")}`;
+      if (records.length > 1 && !lines.includes(line)) lines.push(line);
+    }
+  return lines;
 }
 
 /**

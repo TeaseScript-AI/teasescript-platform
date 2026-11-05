@@ -834,13 +834,16 @@ export function decisionKey(decision: Pick<DecisionWork, "place" | "path">): str
   return JSON.stringify([decision.place, decision.path]);
 }
 
-/** One list's records by their keys (`decisionKey`); a key twice in one list is refused, never overwritten. */
-export function decisionsByKey(decisions: readonly DecisionWork[]): Map<string, DecisionWork> {
-  const keyed = new Map<string, DecisionWork>();
+/**
+ * One list's records by their keys (`decisionKey`), each key's records in the list's order: a list can hold one place's
+ * decision at one path more than once (#1757), so a record is identified by its key and its occurrence there, never
+ * overwritten by a later one.
+ */
+export function decisionsByKey(decisions: readonly DecisionWork[]): Map<string, DecisionWork[]> {
+  const keyed = new Map<string, DecisionWork[]>();
   for (const d of decisions) {
     const key = decisionKey(d);
-    if (keyed.has(key)) throw new Error(`Two decision records at ${key} in one list.`);
-    keyed.set(key, d);
+    keyed.set(key, [...(keyed.get(key) ?? []), d]);
   }
   return keyed;
 }
