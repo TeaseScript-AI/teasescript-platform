@@ -98,8 +98,8 @@ snapshot for comparing two analyses of the same sources.
   checks the project again with what it found until a check finds nothing new; the last check alone reports.
   `legacy-state.ts` holds what one check carries to the next, and `legacy-facts.ts` reads its facts. The compiler uses
   no other backend.
-- **Constraint backend (O4), being built:** it collects the constraints of the whole project, solves them once, and
-  checks once. It is built in stages behind the legacy backend and has no production caller until the switch. Tests
+- **Constraint backend (O4), being built:** it collects the whole project's constraints. It is built in stages behind
+  the legacy backend and has no production caller until the switch. Tests
   reach it through the candidate compile route, `compileSourceWithBackend` and `compileProjectWithBackend`
   (`src/compiler.ts`, test-only and not exported by `src/index.ts`), with `CORE_BACKEND` (`core/backend.ts`). That
   backend covers a stated slice of the language and throws `CandidateOutsideSlice` at the first construct outside it.
@@ -114,8 +114,8 @@ snapshot for comparing two analyses of the same sources.
   - The consumer (`coreCheckResult`, `core/consumer.ts`) walks the source with those answers and makes the
     `TypeCheckResult` that lowering consumes.
 
-  The core also reads the built-in contracts' result relations (`adapters/`), the value-kind registry's view
-  (`registry-view.ts`) and the solver's interned type table (`solver/types.ts`). The condition-shape recognizer
+  Other O4 foundations include the built-in result relations (`adapters/`), the registry view (`registry-view.ts`)
+  and the interned type table (`solver/types.ts`). The condition-shape recognizer
   (`narrowing-shapes.ts`) is shared: the visitor's branch rules and the core read the same classification.
 - **The switch:** one change makes the constraint backend the compiler's backend in place of the legacy backend, and
   a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's. The
