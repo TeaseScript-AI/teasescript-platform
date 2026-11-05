@@ -598,6 +598,7 @@ export function readRecord(record) {
         rank: rank({ mode: m }),
         outcome: x.outcome,
         completion: (x.decisionCounts?.completion ?? []).some(Boolean),
+        outside: x.outcome === "outside" ? x.outside : null,
       });
     }
     runs.sort((a, b) => a.rank - b.rank);
@@ -702,6 +703,11 @@ export function classifier(groups = null) {
     r.witnesses.sort((a, b) => a.bytes - b.bytes || (a.key < b.key ? -1 : 1));
     r.witnesses.length = Math.min(r.witnesses.length, 3);
   };
+  // (the control's runs that left the slice, one row a rule of `EXCLUSIONS` as the pair classes match it, and one a text
+  // no rule matches; information only, r4.382)
+  const excluded = PAIR_CLASSES.filter((c) => c.id.startsWith("excluded/"));
+  const controlRows = new Map(excluded.map((c) => [c.id, { runs: 0, witnesses: [] }]));
+  const unlisted = new Map();
   const pairs = [];
   const sharing = [];
   const grouped = new Map();
@@ -773,6 +779,14 @@ export function classifier(groups = null) {
           totals.controlRuns += 1;
           if (run.completion) totals.controlCompletionRuns += 1;
           if (run.outcome === "failed") totals.controlFailedRuns += 1;
+          if (run.outcome === "outside") {
+            const rule = excluded.find((c) => c.match({ kind: "outside", outside: run.outside }));
+            if (rule === undefined && !unlisted.has(run.outside))
+              unlisted.set(run.outside, { runs: 0, witnesses: [] });
+            const r = rule === undefined ? unlisted.get(run.outside) : controlRows.get(rule.id);
+            r.runs += 1;
+            witness(r, record.key, name, bytes, MODE(each.mode));
+          }
         }
       const facts = pairFacts(each);
       const mode = MODE(each.mode);
@@ -916,6 +930,12 @@ export function classifier(groups = null) {
       controlRuns: totals.controlRuns,
       controlCompletionRuns: totals.controlCompletionRuns,
       controlFailedRuns: totals.controlFailedRuns,
+      controlOutside: [
+        ...excluded.map((c) => ({ rule: c.id, ...controlRows.get(c.id) })),
+        ...[...unlisted]
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([text, r]) => ({ rule: "unlisted", text, ...r })),
+      ],
     };
     // (with the group table, a grouped class's row is its groups': each open group, changed and unbound pairs open)
     const groupTable =
@@ -994,10 +1014,13 @@ export function classifyRecords(entries, expected = null, groups = null) {
 function markdown(result) {
   // (a cell's text: a source's name can hold a | or a line break)
   const cell = (text) => String(text).replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
-  const line = (r) =>
-    `| ${cell(r.id)} | ${cell(r.state)} | ${r.pairs} | ${r.sources} | ${r.witnesses
+  const shown = (witnesses) =>
+    witnesses
       .map((w) => cell(`${w.key.slice(0, 12)} ${w.name ?? ""}${w.mode ? ` (${w.mode})` : ""}`))
-      .join("; ")} |`;
+      .join("; ");
+  const line = (r) =>
+    `| ${cell(r.id)} | ${cell(r.state)} | ${r.pairs} | ${r.sources} | ${shown(r.witnesses)} |`;
+  const control = result.coverage.controlOutside;
   const t = result.totals;
   return [
     `# Shadow gate (taxonomy v${result.version}): ${result.verdict}`,
@@ -1028,8 +1051,16 @@ function markdown(result) {
     "",
     `Components of the differing pairs: identity ${t.identity}, same-identity wording ${t.wording}, checks ${t.checks}, plan ${t.plan}; outcomes ${JSON.stringify(t.outcomes)}; front-end rejections among compared pairs ${t.frontEnd}.`,
     `Coverage (${result.coverage.state}): natural ordinary record runs ${result.coverage.ordinaryRecordRuns}, natural completion runs ${result.coverage.completionRecordRuns}; at the demand control ${result.coverage.control}: runs ${result.coverage.controlRuns}, completion runs ${result.coverage.controlCompletionRuns}, failed ${result.coverage.controlFailedRuns}.`,
+    `Unlisted control texts: ${control.filter((r) => r.rule === "unlisted").length}.`,
     `Information (not gated): sources whose core publication differs across the four modes ${t.fourModeDifferences}.`,
     `Open: ${result.open.join(", ") || "none"}. Problems: ${result.problems.length}.`,
+    "",
+    `| Left the slice at the demand control (${result.coverage.control}), by exclusion rule | Runs | Smallest witnesses |`,
+    "| --- | ---: | --- |",
+    ...control.map(
+      (r) =>
+        `| ${cell(r.rule === "unlisted" ? `unlisted: ${r.text}` : r.rule)} | ${r.runs} | ${shown(r.witnesses)} |`,
+    ),
     "",
   ].join("\n");
 }

@@ -282,7 +282,9 @@ the classifier cannot read whole (a compared row without its four delta parts, a
 record outside `--expect` or a key recorded twice with different readings. The gate table (`gate.json`, `gate.md`) adds
 the differing pairs' parts, the research's inventory signatures (`signatures.tsv`), decision coverage (open unless the
 natural runs hold ordinary decision records and at least one run at the demand control, 16, reaches a receiving
-completion) and, as information only, the sources whose core differs across the four modes; the verdict line is `gate:
+completion) and, as information only, the sources whose core differs across the four modes and the control's runs that
+left the slice, one row a rule of `EXCLUSIONS` (zeros included) and one a text no rule names (`Unlisted control texts`,
+r4.382); the verdict line is `gate:
 green` only with no `open` row, and `--gate` (S11's final run, with `--expect`) exits 1 otherwise. Over the research's
 records it reproduces its aggregate (`~/work/evidence/1728/`):
 
