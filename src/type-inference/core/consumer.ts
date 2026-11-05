@@ -1665,9 +1665,16 @@ class Contracts {
     // answer is the value side's, which the stop left unproven (A6: the stores admission rejects are unsettled), so
     // the program leaves the slice rather than read what the natural plan may not, #1526 condition 1, #1767)
     const fallback = call.kind === "loadExpression" ? call.defaultValue : defaultOf(call);
-    if (fallback !== null && readsPlace(fallback) && stoppedAnalysis(this.answers))
-      throw new OutsideContract(call, OPEN_BY_STOP);
     const landing = this.#landing(call);
+    // (a written scalar destination is the reader type itself, whatever its default reads: Codex r5's P2)
+    const written = landing === null ? null : this.answers.place(landing.id, landing.path).admitted;
+    const scalar =
+      written !== null &&
+      written.by === "written" &&
+      written.kinds.length > 0 &&
+      written.kinds.every((kind) => !STRUCTURED.has(kind));
+    if (fallback !== null && !scalar && readsPlace(fallback) && stoppedAnalysis(this.answers))
+      throw new OutsideContract(call, OPEN_BY_STOP);
     const expected = runCompileTask(
       this.#answerTask(
         { node: nodeOf(this.answers, this.index, call), call, landing, keeps: false },
@@ -2070,12 +2077,16 @@ function defaultOf(call: CallExpression): Expression | null {
   );
 }
 
+/** The kinds whose levels below a typed call's answer its default answers (#1767). */
+const STRUCTURED: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object", "unknown"]);
+
 /** The exclusion of a typed call's answer a stop left open (#1767). */
 const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
 
 /**
- * Whether a default reads anything but literal data: a variable, a property or an element of one, or any operation but
- * a typed parse or load, whose own default is checked as its own call's (#1755's test, read after a stop alone, #1767).
+ * Whether a default reads anything but literal data at any level: a variable, a property or an element of one, any
+ * operation but a typed parse or load, or one whose own default does, or a load of a computed key (#1755's test, read
+ * after a stop alone and through nested typed calls, #1767).
  */
 function readsPlace(fallback: Expression): boolean {
   const pending = [fallback];
@@ -2098,17 +2109,19 @@ function readsPlace(fallback: Expression): boolean {
       case "objectLiteral":
         for (const property of at.properties) pending.push(property.value);
         break;
-      // a typed parse or load inside the default is checked as its own call
+      // a typed parse or load inside the default answers by its own default, which the outer call reads through: a
+      // computed key's load answers by nothing it proves (F19), so it reads a place (Codex r5's B1)
       case "loadExpression":
+        if (unwrap(at.key).kind !== "stringLiteral" || at.defaultValue === null) return true;
+        pending.push(at.defaultValue);
         break;
-      case "callExpression":
-        if (
-          at.callee.kind !== "identifier" ||
-          at.callee.name !== "fromJson" ||
-          defaultOf(at) === null
-        )
+      case "callExpression": {
+        const inner = defaultOf(at);
+        if (at.callee.kind !== "identifier" || at.callee.name !== "fromJson" || inner === null)
           return true;
+        pending.push(inner);
         break;
+      }
       default:
         return true;
     }
