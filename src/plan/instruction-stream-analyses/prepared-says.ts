@@ -1,6 +1,7 @@
 import { type PlanValidationError, isRecord, planError } from "../validation-support.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
 import type { InstructionExecutionRegion, PlanValidationIndex } from "./execution-regions.js";
+import { type RangeTree, buildRangeTree, rangeQuery, rangeTree } from "./range-tree.js";
 import {
   collectExpressionTemporaryReferences,
   producedTemporaryIds,
@@ -391,8 +392,8 @@ interface PreparedSayRanges {
   /** At `i`: how many instructions up to `i` have another owner than the one before. */
   readonly ownerChanges: Int32Array;
   /** The lowest and highest jump source of each instruction from its own region, by range. */
-  readonly lowestSource: RangeTable;
-  readonly highestSource: RangeTable;
+  readonly lowestSource: RangeTree;
+  readonly highestSource: RangeTree;
 }
 
 function preparedSayRanges(
@@ -410,8 +411,10 @@ function preparedSayRanges(
   const count = instructions.length;
   const gotoTargets = new Int32Array(count + 1);
   const ownerChanges = new Int32Array(count);
-  const lowest = new Float64Array(count).fill(Infinity);
-  const highest = new Float64Array(count).fill(-Infinity);
+  const lowestSource = rangeTree(count, Math.min, Infinity);
+  const highestSource = rangeTree(count, Math.max, -Infinity);
+  const lowest = lowestSource.nodes;
+  const highest = highestSource.nodes;
   recordValidationTestWork("preparedSayRangeSteps", count);
   for (let instructionIndex = 0; instructionIndex < count; instructionIndex += 1) {
     const instruction = instructions[instructionIndex];
@@ -427,8 +430,9 @@ function preparedSayRanges(
     for (const sourceIndex of explicitIncomingSources[instructionIndex] ?? []) {
       if (index.gotoSources.has(sourceIndex)) gotoTarget = true;
       else if (index.owners[sourceIndex] === index.owners[instructionIndex]) {
-        lowest[instructionIndex] = Math.min(lowest[instructionIndex]!, sourceIndex);
-        highest[instructionIndex] = Math.max(highest[instructionIndex]!, sourceIndex);
+        const leaf = count + instructionIndex;
+        lowest[leaf] = Math.min(lowest[leaf]!, sourceIndex);
+        highest[leaf] = Math.max(highest[leaf]!, sourceIndex);
       }
     }
     gotoTargets[instructionIndex + 1] = gotoTargets[instructionIndex]! + (gotoTarget ? 1 : 0);
@@ -438,43 +442,17 @@ function preparedSayRanges(
         : ownerChanges[instructionIndex - 1]! +
           (index.owners[instructionIndex] === index.owners[instructionIndex - 1] ? 0 : 1);
   }
+  buildRangeTree(lowestSource);
+  buildRangeTree(highestSource);
   return {
     index,
     explicitIncomingSources,
     clears,
     gotoTargets,
     ownerChanges,
-    lowestSource: rangeTable(lowest, Math.min),
-    highestSource: rangeTable(highest, Math.max),
+    lowestSource,
+    highestSource,
   };
-}
-
-/** A sparse table: the combination of any range of values in constant time. */
-interface RangeTable {
-  readonly levels: readonly Float64Array[];
-  readonly combine: (left: number, right: number) => number;
-}
-
-function rangeTable(
-  values: Float64Array,
-  combine: (left: number, right: number) => number,
-): RangeTable {
-  const levels = [values];
-  for (let width = 2; width <= values.length; width *= 2) {
-    const previous = levels.at(-1)!;
-    const level = new Float64Array(values.length - width + 1);
-    for (let start = 0; start < level.length; start += 1)
-      level[start] = combine(previous[start]!, previous[start + width / 2]!);
-    levels.push(level);
-  }
-  return { levels, combine };
-}
-
-/** The combination of the values from `first` to `last`, both included. */
-function rangeQuery(table: RangeTable, first: number, last: number): number {
-  const level = Math.floor(Math.log2(last - first + 1));
-  const values = table.levels[level]!;
-  return table.combine(values[first]!, values[last - (1 << level) + 1]!);
 }
 
 function preparedSayTemporaryIsCleared(
