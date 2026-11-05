@@ -23,6 +23,7 @@ import {
   ingressLeaves,
   type Item,
   itemsSignature,
+  spellingIdentity,
   writerKey,
 } from "../../src/type-inference/core/items.js";
 import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
@@ -687,13 +688,18 @@ export function publication(
 }
 
 /**
- * #1655: every demand a pass's solver settled, by its key, its answer's items by `itemText`: what each raw read answers,
+ * #1655: every demand a pass's solver settled, by its key, its answer's items by `itemText` and their spelling: what each raw read answers,
  * where a publication shows only what the checks and the occurrences take of it.
  */
 export function settledAnswers(pass: CorePass): Map<string, string> {
   const answers = new Map<string, string>();
   for (const { key } of pass.solver.demandWork())
-    answers.set(key, (pass.solver.answer(key) ?? []).map(itemText).join(" "));
+    answers.set(
+      key,
+      (pass.solver.answer(key) ?? [])
+        .map((item) => `${itemText(item)}|${spellingIdentity(item.spelling)}`)
+        .join(" "),
+    );
   return answers;
 }
 

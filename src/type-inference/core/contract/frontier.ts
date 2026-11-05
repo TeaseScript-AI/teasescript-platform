@@ -111,7 +111,9 @@ class Frontier {
   readonly places = new Set<PlaceId>();
   /** Per place, whether a copy cycle through a projection holds it. */
   readonly cyclic = new Map<PlaceId, boolean>();
-  /** Per decline reason, the pushed reads it declined (`pushedDeclines`). */
+  /** Per goal (`node|step`) whose rules declined, the reason: a later build reaching it declines at once. */
+  readonly poisoned = new Map<string, string>();
+  /** Per decline reason, the pushed reads it declined (`pushedFacts`). */
   readonly declines = new Map<string, number>();
   /** The goals of the build running, final when it ends, dropped when it declines. */
   pending: Goal[] = [];
@@ -349,6 +351,8 @@ function goalOf(frontier: Frontier, node: number, stepName: string): Goal {
   if (bySteps === undefined) frontier.goals.set(node, (bySteps = new Map()));
   let goal = bySteps.get(stepName);
   if (goal === undefined) {
+    const poisoned = frontier.poisoned.get(`${node}|${stepName}`);
+    if (poisoned !== undefined) throw new Decline(poisoned);
     frontier.contract.keep(2);
     goal = { node, step: stepName, value: new Set(), readers: [] };
     bySteps.set(stepName, goal);
@@ -488,7 +492,13 @@ function drain(frontier: Frontier): void {
     for (;;) {
       const goal = frontier.fresh.pop();
       if (goal !== undefined) {
-        rules(frontier, goal);
+        try {
+          rules(frontier, goal);
+        } catch (error) {
+          if (error instanceof Decline)
+            frontier.poisoned.set(`${goal.node}|${goal.step}`, error.reason);
+          throw error;
+        }
         continue;
       }
       const task = frontier.tasks.pop();
