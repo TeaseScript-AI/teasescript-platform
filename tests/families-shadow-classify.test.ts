@@ -85,7 +85,10 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
   // (the research's campaign and shadow.mjs's run of #1704's configurations, classified apart: the research's records
   // of those keys are aborted ones, so together the two campaigns conflict)
   const research = witnesses.filter((r) => r.set === undefined);
-  const rerun = witnesses.filter((r) => r.set !== undefined);
+  const rerun = witnesses.filter((r) => r.set === "copies");
+  // (#1744's presence sources, recorded by shadow.mjs at main 575c699b9; and Sol's traversal control past a function
+  // declaration, `return-controlled.json` of the classifier-group preparation, the return statement's witness)
+  const holes = witnesses.filter((r) => r.set === "holes" || r.set === "return-control");
   const result = C.classifyRecords(
     entries(research),
     new Set([...research.map((r) => r.key), ...UNAVAILABLE]),
@@ -119,6 +122,17 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
         `${c.id}: ${c.witness}`,
       );
     }
+  // (each presence source in its exclusion class, the classifier's own reading of the run)
+  const fromHoles = C.classifyRecords(entries(holes));
+  assert.deepEqual(fromHoles.problems, []);
+  for (const r of holes)
+    assert.ok(
+      fromHoles.perPair.some(
+        (p: { key: string; class: string }) =>
+          p.key === r.key && `pairs:${p.class}` === r.witnessOf[0],
+      ),
+      `${nameOf(r)} witnesses ${r.witnessOf[0]}`,
+    );
   for (const r of research)
     for (const tag of r.witnessOf) {
       if (tag === "#1703 inventory") continue;
@@ -136,7 +150,18 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
     C.PAIR_CLASSES.map((c: { id: string }) => c.id).filter(
       (id: string) => !reached(result.pairs).includes(id),
     ),
-    ["differs/plan", "failed/legacy-heap", "failed/other", "exception"],
+    [
+      "differs/plan",
+      // (v2's: the presence sources' and the traversal control's own records reach them, checked below)
+      "excluded/this return statement",
+      "excluded/this show camera statement",
+      "excluded/this show camera expression",
+      "excluded/this hide camera statement",
+      "excluded/this tag query expression",
+      "failed/legacy-heap",
+      "failed/other",
+      "exception",
+    ],
   );
   assert.deepEqual(
     C.SHARING_CLASSES.map((c: { id: string }) => c.id).filter(
@@ -452,9 +477,11 @@ test("every pair of a generated grid over the pair rule's axes takes exactly one
     "this assignment",
     "the name 'x'",
     "the variable 'v', whose lists nest deeper than the slice follows",
+    "this return statement",
   ])
     facts.push([{ kind: "outside", outside: text }, "excluded/"]);
   facts.push([{ kind: "outside", outside: "the name x" }, null]);
+  facts.push([{ kind: "outside", outside: "this return statements" }, null]);
   for (const [f, id] of [
     [{ kind: "failed", legacyHeap: true }, "failed/legacy-heap"],
     [{ kind: "failed", legacyHeap: false }, "failed/other"],
@@ -478,7 +505,7 @@ test("every pair of a generated grid over the pair rule's axes takes exactly one
     else assert.equal(got.id, expected);
     checked += 1;
   }
-  assert.equal(checked, 8 + 128 * 8 + 4 + 6);
+  assert.equal(checked, 8 + 128 * 8 + 6 + 6);
 });
 
 test("the command: the verdict line, the gate's exit, the files it writes", (t) => {
@@ -497,7 +524,7 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   assert.match(green.stdout, /^gate: green$/m);
   assert.match(
     readFileSync(join(folder, "out", "gate.md"), "utf8"),
-    /^# Shadow gate \(taxonomy v1\): green/,
+    /^# Shadow gate \(taxonomy v2\): green/,
   );
   // (a source the manifest owes without a record: open; the gate's run exits 1, the plain run 0)
   const owed = write("owed.jsonl", [{ key: "fine" }, { key: "missing" }]);
@@ -585,5 +612,29 @@ test("coverage: the natural runs' ordinary decisions and a receiving completion 
       (p: { why: string }) => p.why,
     ),
     ["a demand run not in four modes"],
+  );
+});
+
+test("taxonomy v2's return-statement rule takes its text and no other (#1744)", async () => {
+  const C = await load();
+  const exclusion = (key: string, text: string) =>
+    record(key, (i) =>
+      i === 0 ? { core: { outcome: "outside", outside: text }, delta: undefined } : {},
+    );
+  const result = C.classifyRecords(
+    entries([
+      exclusion("return", "this return statement"),
+      exclusion("near", "this return statements"),
+    ]),
+  );
+  assert.deepEqual(
+    result.perPair
+      .filter((p: { mode: string }) => p.mode === "source order, sharing on")
+      .map((p: { class: string }) => p.class),
+    ["excluded/this return statement"],
+  );
+  assert.deepEqual(
+    result.problems.map((p: { problem: string; key: string }) => [p.problem, p.key]),
+    [["unclassified", "near"]],
   );
 });

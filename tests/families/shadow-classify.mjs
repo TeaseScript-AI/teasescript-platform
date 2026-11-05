@@ -19,11 +19,14 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
 /** The taxonomy's version: a class added, removed or changed in its rule makes the next. */
-export const VERSION = 1;
+export const VERSION = 2;
 
 const S9B = "S9b #1072 (candidate coverage; retired or deferred syntax is no release requirement)";
 const S10 = "S10 #1073";
-/** Sol's 53 exclusion texts as 48 rules: each text exact, the two that name a variable as one template each. */
+/**
+ * Sol's 53 exclusion texts as 48 rules (each text exact, the two that name a variable as one template each), and from
+ * version 2 the next blocker of a function's body and the four texts #1744's presence sources reach.
+ */
 const EXCLUSIONS = [
   ["this member or element read", S9B, "9a8e2a853d99 all:ar5-own::own/inferred-widens"],
   ["this function declaration", S9B, "6e50d4087fe3 all:astra::defaults/null/8"],
@@ -102,6 +105,19 @@ const EXCLUSIONS = [
     "a check of a loop variable",
     S9B,
     "3359b3e4928b all:fixture-1::cp9-cells/s6/rule-function/loop/decided",
+  ],
+  // (v2, #1744: 20,052 function pairs meet it next once function declarations are admitted, Sol's S9b scoping r2; its
+  // witness is Sol's in-memory traversal control past the declaration, the classifier-group preparation's
+  // `return-controlled.json`, since main stops at the declaration first)
+  ["this return statement", S9B, "f5dfaa2d51f3 3a-spike14-gates.mjs/cell/F22/1"],
+  // (v2, #1744's presence sources: forms no gate source had reached)
+  ["this show camera statement", S9B, "42fd964f21aa 1744-sol-v30-call-holes.mjs/camera-statement"],
+  ["this show camera expression", S9B, "c8292fdb2997 1744-sol-v30-call-holes.mjs/camera-handle"],
+  ["this hide camera statement", S9B, "34cbe4ed6cec 1744-sol-v30-call-holes.mjs/hide-camera"],
+  [
+    "this tag query expression",
+    S9B,
+    "af90ea51aed2 1744-sol-v30-call-holes.mjs/plain-tag-predicate",
   ],
   [
     /^the name '[^']+'$/,
