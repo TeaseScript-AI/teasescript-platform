@@ -58,6 +58,88 @@ function refersToBinding(node: ts.Identifier): boolean {
   return parent.name !== node && parent.propertyName !== node && parent.label !== node;
 }
 
+/** Whether binding pattern `pattern` binds `name`, also inside a destructuring. */
+function binds(pattern: ts.BindingName, name: string): boolean {
+  if (ts.isIdentifier(pattern)) return pattern.text === name;
+  return pattern.elements.some(
+    (element) => !ts.isOmittedExpression(element) && binds(element.name, name),
+  );
+}
+
+/** Whether `statement`, directly in a block or a module, declares `name` there. */
+function declaresInBlock(statement: ts.Statement, name: string): boolean {
+  if (ts.isImportDeclaration(statement)) {
+    const clause = statement.importClause;
+    const bindings = clause?.namedBindings;
+    return (
+      clause?.name?.text === name ||
+      (bindings !== undefined && ts.isNamespaceImport(bindings) && bindings.name.text === name) ||
+      (bindings !== undefined &&
+        ts.isNamedImports(bindings) &&
+        bindings.elements.some((element) => element.name.text === name))
+    );
+  }
+  if (ts.isVariableStatement(statement))
+    return statement.declarationList.declarations.some((declaration) =>
+      binds(declaration.name, name),
+    );
+  return (
+    (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) &&
+    statement.name?.text === name
+  );
+}
+
+/** Whether a `var` anywhere in `root`, outside its nested functions, declares `name`: it is hoisted to `root`. */
+function hoists(root: ts.Node, name: string): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found || ts.isFunctionLike(node)) return;
+    if (
+      ts.isVariableDeclarationList(node) &&
+      (node.flags & ts.NodeFlags.BlockScoped) === 0 &&
+      node.declarations.some((declaration) => binds(declaration.name, name))
+    )
+      found = true;
+    else ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(root, visit);
+  return found;
+}
+
+/**
+ * Whether `name` at `node` resolves to a declaration of a scope around it, up to its module: an import, a parameter, a
+ * block's `let`, `const`, `class` or function (a module is strict, so a block's function is the block's), a `var`
+ * hoisted to its function or module, a catch clause, a loop head, or a function or class expression's own name.
+ */
+function declaredAround(node: ts.Node, name: string): boolean {
+  for (let scope = node.parent; scope !== undefined; scope = scope.parent) {
+    const statements =
+      ts.isSourceFile(scope) || ts.isBlock(scope) || ts.isModuleBlock(scope)
+        ? scope.statements
+        : ts.isCaseBlock(scope)
+          ? scope.clauses.flatMap((clause) => [...clause.statements])
+          : [];
+    if (statements.some((statement) => declaresInBlock(statement, name))) return true;
+    if (ts.isSourceFile(scope) && hoists(scope, name)) return true;
+    if (ts.isFunctionLike(scope)) {
+      if (scope.parameters.some((parameter) => binds(parameter.name, name))) return true;
+      if (ts.isFunctionExpression(scope) && scope.name?.text === name) return true;
+      if ("body" in scope && scope.body !== undefined && hoists(scope.body, name)) return true;
+    }
+    if (ts.isClassExpression(scope) && scope.name?.text === name) return true;
+    if (ts.isCatchClause(scope) && scope.variableDeclaration !== undefined)
+      if (binds(scope.variableDeclaration.name, name)) return true;
+    if (
+      (ts.isForStatement(scope) || ts.isForInStatement(scope) || ts.isForOfStatement(scope)) &&
+      scope.initializer !== undefined &&
+      ts.isVariableDeclarationList(scope.initializer) &&
+      scope.initializer.declarations.some((declaration) => binds(declaration.name, name))
+    )
+      return true;
+  }
+  return false;
+}
+
 /** Whether `node` is `import.meta.<name>`. */
 function isImportMeta(node: ts.Node, name: string): boolean {
   return (
@@ -133,8 +215,13 @@ function valueImports(
           : clause.elements.map((element) => (element.propertyName ?? element.name).text);
       // `export { type A } from "m"` emits `export {} from "m"`, which still loads `m`.
       found.push({ specifier: node.moduleSpecifier.text, names: names.length > 0 ? names : ["*"] });
-    } else if (ts.isIdentifier(node) && node.text === "require" && refersToBinding(node)) {
-      // Any reference to `require`, not only a direct call: `(require)(…)`, `require!(…)` and an alias call it too.
+    } else if (
+      ts.isIdentifier(node) &&
+      node.text === "require" &&
+      refersToBinding(node) &&
+      !declaredAround(node, "require")
+    ) {
+      // Any reference to the global `require`, not only a direct call: `(require)(…)`, `require!(…)` and an alias too.
       refuse(label, "CommonJS require()");
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const [argument] = node.arguments;

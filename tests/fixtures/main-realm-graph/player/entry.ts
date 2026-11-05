@@ -3,6 +3,7 @@ import type { RootType } from "../src/root.js";
 import { allowed } from "../src/allowed.js";
 import "./side.js";
 import "./names.js";
+import "./bindings.js";
 
 export { fromRoot } from "../src/root.js";
 // Each loads its module though it names no value.

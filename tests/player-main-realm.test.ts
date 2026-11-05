@@ -85,6 +85,7 @@ test("the walk reads every import form once and stops at Worker-side code", () =
   const fixture = fixtureGraph("player/entry.ts");
   assert.deepEqual(fixture.modules, [
     "player/alias/aliased.ts",
+    "player/bindings.ts",
     "player/entry.ts",
     "player/names.ts",
     "player/panel.vue",
