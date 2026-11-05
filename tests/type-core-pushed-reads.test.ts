@@ -132,7 +132,10 @@ test("where the native reader ends, a pushed read answers what it does, raw and 
     // and that operation's member read below the projection (a value the graph does not model, stepped: declined)
     ring({ q: spine(2, "hostValue"), extra: ['say "${p1.q.q.q}"'] }),
     ring({ q: spine(2, "{f:hostValue+1}"), extra: ['say "${p1.q.q.f}"'] }),
-    ring({ q: spine(2, "{f:hostValue otherwise {x:1}}"), extra: ['say "${p1.q.q.f.x}"'] }),
+    ring({
+      q: spine(2, "{f:hostValue otherwise {x:1}}"),
+      extra: ['say "${p1.q.q.f.x}"', 'let w=p1.q.q.f\nsay "${w.x}"'],
+    }),
     // the ring without its closing copy, with a store below the projection read there
     ring({ cycle: false }),
     ring({ cycle: false, extra: ["p1.q.q.g=5", 'say "${p1.q.q.g}"'] }),
