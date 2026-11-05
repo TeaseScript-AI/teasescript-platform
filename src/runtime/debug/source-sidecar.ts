@@ -98,13 +98,15 @@ export function loadSourceDebugSidecar(
   for (let index = 0; index < parsed.files.length; index += 1) {
     const file = sidecarFile(parsed.files[index]);
     if (typeof file === "string") return invalid(`Source debug sidecar file ${index}: ${file}`);
-    files.push(file);
+    files[index] = file;
   }
-  if (
-    files.length !== validPlan.files.length ||
-    files.some((file, index) => file.path !== validPlan.files[index]!.path)
-  ) {
+  if (files.length !== validPlan.files.length) {
     return stale("The source debug sidecar lists other files than the plan.");
+  }
+  for (let index = 0; index < files.length; index += 1) {
+    if (files[index]!.path !== validPlan.files[index]!.path) {
+      return stale("The source debug sidecar lists other files than the plan.");
+    }
   }
   if (parsed.planSha256 !== validatedPlanSha256(validPlan)) {
     return stale("The source debug sidecar was made for another plan.");
@@ -142,7 +144,9 @@ function sidecarTokens(value: unknown, sourceLength: number): readonly SourceDeb
   const tokens: SourceDebugToken[] = [];
   let previousEnd = 0;
   for (let index = 0; index < value.length; index += 3) {
-    const [kind, start, end] = [value[index], value[index + 1], value[index + 2]];
+    const kind: unknown = value[index];
+    const start: unknown = value[index + 1];
+    const end: unknown = value[index + 2];
     if (
       !isIndex(kind) ||
       kind >= LANGUAGE_TOKEN_CLASSES.length ||
@@ -154,25 +158,25 @@ function sidecarTokens(value: unknown, sourceLength: number): readonly SourceDeb
     ) {
       return null;
     }
-    tokens.push(Object.freeze({ kind: LANGUAGE_TOKEN_CLASSES[kind]!, start, end }));
+    tokens[tokens.length] = Object.freeze({ kind: LANGUAGE_TOKEN_CLASSES[kind]!, start, end });
     previousEnd = end;
   }
   return Object.freeze(tokens);
 }
 
 function sidecarSpans(value: unknown, lines: readonly number[]): readonly SourceDebugSpan[] | null {
-  if (!Array.isArray(value) || value.length % 4 !== 0 || !value.every(isIndex)) return null;
-  // EVIDENCE: validation: every element passed isIndex above.
-  const numbers = value as readonly number[];
+  if (!Array.isArray(value) || value.length % 4 !== 0) return null;
   const spans: SourceDebugSpan[] = [];
-  for (let index = 0; index < numbers.length; index += 4) {
-    const [startLine, startColumn, endLine, endColumn] = [
-      numbers[index]!,
-      numbers[index + 1]!,
-      numbers[index + 2]!,
-      numbers[index + 3]!,
-    ];
+  for (let index = 0; index < value.length; index += 4) {
+    const startLine: unknown = value[index];
+    const startColumn: unknown = value[index + 1];
+    const endLine: unknown = value[index + 2];
+    const endColumn: unknown = value[index + 3];
     if (
+      !isIndex(startLine) ||
+      !isIndex(startColumn) ||
+      !isIndex(endLine) ||
+      !isIndex(endColumn) ||
       startLine >= lines.length ||
       endLine >= lines.length ||
       startColumn > lines[startLine]! ||
@@ -182,7 +186,7 @@ function sidecarSpans(value: unknown, lines: readonly number[]): readonly Source
     ) {
       return null;
     }
-    spans.push(Object.freeze({ startLine, startColumn, endLine, endColumn }));
+    spans[spans.length] = Object.freeze({ startLine, startColumn, endLine, endColumn });
   }
   return Object.freeze(spans);
 }
@@ -192,10 +196,10 @@ function lineLengths(source: string): number[] {
   const lengths: number[] = [];
   let start = 0;
   for (let index = source.indexOf("\n"); index >= 0; index = source.indexOf("\n", index + 1)) {
-    lengths.push(index - start);
+    lengths[lengths.length] = index - start;
     start = index + 1;
   }
-  lengths.push(source.length - start);
+  lengths[lengths.length] = source.length - start;
   return lengths;
 }
 
@@ -209,8 +213,11 @@ function isObject<const K extends string>(
   keys: readonly K[],
 ): value is { readonly [key in K]: unknown } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const own = Object.keys(value);
-  return own.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+  if (Object.keys(value).length !== keys.length) return false;
+  for (let index = 0; index < keys.length; index += 1) {
+    if (!Object.hasOwn(value, keys[index]!)) return false;
+  }
+  return true;
 }
 
 function invalid(message: string): SourceDebugSidecarLoad {

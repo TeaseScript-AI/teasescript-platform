@@ -172,3 +172,31 @@ test("a malformed sidecar is rejected as a whole", () => {
   for (const [name, text] of cases)
     assert.equal(loadSourceDebugSidecar(text, PLAN).kind, "invalid", name);
 });
+
+test("a rejected sidecar stays rejected when Array.prototype methods are replaced", () => {
+  // EVIDENCE: fixture: SIDECAR is createSourceDebugSidecar's JSON.
+  const parsed = JSON.parse(SIDECAR) as {
+    files: Array<{ path: string; enclosing: { blocks: number[] } }>;
+  };
+  const negativeSpan = structuredClone(parsed);
+  negativeSpan.files[0]!.enclosing.blocks = [-1, 0, -1, 0];
+  const otherPath = structuredClone(parsed);
+  otherPath.files[0]!.path = "other.tease";
+  const cases = [
+    ["every", () => true, negativeSpan, "invalid", () => [0].every(() => false)],
+    ["some", () => false, otherPath, "stale", () => ![0].some(() => true)],
+  ] as const;
+  for (const [method, replacement, sidecar, kind, replaced] of cases) {
+    const text = JSON.stringify(sidecar);
+    // Control: the sidecar is rejected with the native method.
+    assert.equal(loadSourceDebugSidecar(text, PLAN).kind, kind, method);
+    const native = Object.getOwnPropertyDescriptor(Array.prototype, method)!;
+    Object.defineProperty(Array.prototype, method, { ...native, value: replacement });
+    try {
+      assert.ok(replaced(), `${method} is replaced`);
+      assert.equal(loadSourceDebugSidecar(text, PLAN).kind, kind, method);
+    } finally {
+      Object.defineProperty(Array.prototype, method, native);
+    }
+  }
+});
