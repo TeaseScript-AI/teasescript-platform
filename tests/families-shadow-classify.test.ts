@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -761,7 +761,20 @@ test("the group table: its bindings decide a grouped pair's state, by key, mode 
   }
 });
 
-test("bind.mjs joins an adjudication with its run, refusing a pair adjudicated twice or recorded twice with other readings, in either order", () => {
+test("importing shadow-bind.mjs does nothing, and shadow-groups/ holds no module, as the runner's areas are folders with one", async () => {
+  // (#1771's writer in shadow-groups/ made it an area, whose import read its absent arguments: the baseline seed failed)
+  const groups = resolve("tests/families/shadow-groups");
+  const before = readdirSync(groups).sort();
+  const bind: object = await import(pathToFileURL(resolve("tests/families/shadow-bind.mjs")).href);
+  assert.deepEqual(Object.keys(bind), []);
+  assert.deepEqual(readdirSync(groups).sort(), before);
+  assert.deepEqual(
+    before.filter((name) => name.endsWith(".mjs")),
+    [],
+  );
+});
+
+test("shadow-bind.mjs joins an adjudication with its run, refusing a pair adjudicated twice or recorded twice with other readings, in either order", () => {
   const folder = mkdtempSync(join(tmpdir(), "shadow-bind-"));
   try {
     const differing = (message: string) =>
@@ -847,7 +860,7 @@ test("bind.mjs joins an adjudication with its run, refusing a pair adjudicated t
       return spawnSync(
         process.execPath,
         [
-          resolve("tests/families/shadow-groups/bind.mjs"),
+          resolve("tests/families/shadow-bind.mjs"),
           tableJson,
           tableMd,
           write("pairs.jsonl", bindings),
