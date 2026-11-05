@@ -357,8 +357,6 @@ export function literalElements(
       shared = paths;
       atCopy = atCopies.get(key)!;
     }
-    // (#1765: each element's walk down its errors' paths, kept across them)
-    const walks = new Map<Definition, LayerWalk>();
     const first = new Map<
       string,
       {
@@ -391,14 +389,11 @@ export function literalElements(
           : null;
       // (#1765: the layers between the element and the leaf that may hold null, each element's by its form
       // (`mayHoldNull`); the sentence's type alone, as the leaf's own null is, #1753)
-      // (each element's layers by one walk down its errors' paths, kept across them; each value at a path from the
-      // pass's memo of `mayHoldNull`, Codex r6's B3, Astra r1's B2)
+      // (each element's layers by one walk down the error's path, each value at a path from the pass's memo of
+      // `mayHoldNull`, Codex r6's B3, Astra r1's B2)
       const depths = intermediateDepths(path);
-      const layers = (of: Definition): boolean[] => {
-        let walk = walks.get(of);
-        if (walk === undefined) walks.set(of, (walk = layerWalk(of.value!, of.node)));
-        return layersAt(admission, walk, path, depths);
-      };
+      const layers = (of: Definition): boolean[] =>
+        layersAt(admission, of.value!, of.node, path, depths);
       const optional = mixedOptional(layers(first.get(at)!.d), layers(d));
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,
@@ -1165,8 +1160,6 @@ export function joinElements(
     };
     // each join after the joins it holds, its operands' values taken once
     const held = new Map<PlaceId, Held | null>();
-    // (#1765: each operand's walk down its errors' paths, kept across the tree's errors)
-    const operandWalks = new Map<PlaceId, LayerWalk>();
     const take = (value: PlaceId): Held | null => {
       if (!joins.has(value)) {
         const found = reached(value);
@@ -1213,17 +1206,14 @@ export function joinElements(
           )
             continue;
           // (#1765: the layers between the element and the leaf that may hold null, each side's by its form, as a
-          // literal's elements are: each operand walked down below its elements once, across the tree's errors, Codex
-          // r5's B2)
+          // literal's elements are: each operand walked down below its elements, Codex r5's B2)
           const joinNode = program.exprAt(c.site) ?? program.flow.statementAt(c.site) ?? null;
           const below = joinSteps(["element"], path);
           const depths = intermediateDepths(path).map((depth) => depth + 1);
-          const layers = (side: PlaceId): boolean[] => {
-            if (joinNode === null) return depths.map(() => false);
-            let walk = operandWalks.get(side);
-            if (walk === undefined) operandWalks.set(side, (walk = layerWalk(side, joinNode)));
-            return layersAt(admission, walk, below, depths);
-          };
+          const layers = (side: PlaceId): boolean[] =>
+            joinNode === null
+              ? depths.map(() => false)
+              : layersAt(admission, side, joinNode, below, depths);
           const optional = mixedOptional(layers(left), layers(right));
           const found: Parameters<typeof error>[0] = {
             ...(optional === undefined ? {} : { optional }),
@@ -1480,71 +1470,42 @@ function intermediateDepths(path: readonly string[]): number[] {
 }
 
 /**
- * #1765: one side of mixed errors walked down their paths once (`layersAt`): what it holds at each depth, a literal's
- * children followed and any other value kept with the depth it was met at, and whether each depth may hold null. A later
- * error's path reads only its steps past the part it shares with the last one, so errors at ever longer paths walk each
- * step once (the deep nest of #1762's alternating dicts and lists, cubic otherwise).
+ * #1765: whether each of `depths` along `path` may hold null for a side (`mayHoldNull` at each), by one walk down the
+ * path: what the side holds at each depth, a literal's children followed and any other value kept with the depth it
+ * was met at, each depth an OR over what it holds there. One walk per error, not a descent per depth (#1762's deep nest
+ * of alternating dicts and lists, cubic otherwise); each value at a path from the pass's memo.
  */
-interface LayerWalk {
-  readonly value: PlaceId;
-  readonly node: FlowNode;
-  path: readonly string[];
-  readonly held: {
-    readonly value: PlaceId;
-    readonly node: FlowNode;
-    readonly from: number | null;
-  }[][];
-  readonly holds: (boolean | undefined)[];
-}
-
-function layerWalk(value: PlaceId, node: FlowNode): LayerWalk {
-  return { value, node, path: [], held: [[{ value, node, from: null }]], holds: [] };
-}
-
-/** Whether each of `depths` along `path` may hold null for `walk`'s side (`mayHoldNull` at each), walked once. */
 function layersAt(
   admission: Admission,
-  walk: LayerWalk,
+  value: PlaceId,
+  node: FlowNode,
   path: readonly string[],
   depths: readonly number[],
 ): boolean[] {
   const { program } = admission.pass;
-  let common = 0;
-  for (; common < path.length && common < walk.path.length; common += 1) {
-    admission.work.charge("checks");
-    if (walk.path[common] !== path[common]) break;
-  }
-  // (what the walk knew past the shared steps no longer holds: kept up to them, never lengthened)
-  walk.held.length = Math.min(walk.held.length, common + 1);
-  walk.holds.length = Math.min(walk.holds.length, common + 1);
-  walk.path = path;
-  const reach = (depth: number): void => {
-    for (let at = walk.held.length - 1; at < depth; at += 1) {
-      const next: LayerWalk["held"][number] = [];
-      for (const each of walk.held[at]!) {
+  type Held = { readonly value: PlaceId; readonly node: FlowNode; readonly from: number | null };
+  let held: Held[] = [{ value, node, from: null }];
+  let depth = 0;
+  return depths.map((wanted) => {
+    for (; depth < wanted; depth += 1) {
+      const next: Held[] = [];
+      for (const each of held) {
         admission.work.charge("checks");
         if (each.from === null && program.hasOf.has(each.value))
-          for (const child of literalChildren(admission, each.value, path[at]!))
+          for (const child of literalChildren(admission, each.value, path[depth]!))
             next.push({ value: child.value!, node: child.node ?? each.node, from: null });
-        else next.push(each.from === null ? { ...each, from: at } : each);
+        else next.push(each.from === null ? { ...each, from: depth } : each);
       }
-      walk.held.push(next);
+      held = next;
     }
-  };
-  return depths.map((depth) => {
-    const known = walk.holds[depth];
-    if (known !== undefined) return known;
-    reach(depth);
-    const holds = walk.held[depth]!.some((each) =>
+    return held.some((each) =>
       mayHoldNull(
         admission,
         each.value,
         each.node,
-        each.from === null ? [] : keptSlice(admission.work, path, each.from, depth),
+        each.from === null ? [] : keptSlice(admission.work, path, each.from, wanted),
       ),
     );
-    walk.holds[depth] = holds;
-    return holds;
   });
 }
 

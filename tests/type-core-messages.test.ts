@@ -3151,11 +3151,11 @@ test("a mixed join's layers read each value at a path once per pass (#1765)", ()
 });
 
 /**
- * #1765: each side's layers are walked down its errors' paths once and kept across them, so a literal whose two
+ * #1765: each side's layers are read by one walk down the error's path, not a descent per layer, so a literal whose two
  * elements disagree at every layer of a deep nest of dicts and lists (an error at each ever longer path, each with a
  * layer more between) grows as the errors' paths do (×4 per doubling, as on main), not by a cube, in four modes.
  */
-test("a mixed error's layers are walked once across its literal's deeper errors (#1765)", () => {
+test("a mixed error's layers are read by one walk down its path (#1765)", () => {
   for (const mode of MODES) {
     const work = [24, 48, 96].map((n) => {
       let first = "[1]";
