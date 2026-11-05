@@ -15,7 +15,7 @@ import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import { BRIDGE_VERSION, type BuildIdentity } from "../player/engine-bridge/protocol.js";
 import { compilePlayerProject } from "../player/runtime-adapter.js";
-import { validateInstructionPlan } from "../src/index.js";
+import { listRandomSites, validateInstructionPlan } from "../src/index.js";
 
 /*
  * The engine bridge over a real worker thread (a separate realm; messages are structured clones): the Worker's
@@ -88,7 +88,11 @@ test("prepare compiles a source in the Worker and returns its token, header and 
     assert.deepEqual(result.identity, { title: "Bridge", author: "Lane 3" });
     assert.deepEqual(result.metadata.files, ["main.tease"]);
     assert.deepEqual(result.metadata.stageImages, ["a.png"]);
-    assert.equal(result.metadata.randomSites.length, 1);
+    // The main realm's own reading of the same plan, which the Worker reports instead of sending the plan.
+    assert.deepEqual(
+      result.metadata.randomSites,
+      listRandomSites(compilePlayerProject(SOURCE).plan!),
+    );
     assert.deepEqual([result.metadata.locks, result.metadata.encrypts], [false, false]);
     for (const key of ["instructions", "functions", "storageTypes"])
       assert.ok(!keys(reply).has(key), key);
