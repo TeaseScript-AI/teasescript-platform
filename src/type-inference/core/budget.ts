@@ -289,8 +289,8 @@ export class WorkLedger {
   /** Units charged while building an index the program shares (`shared`), outermost builds only. */
   #shared = 0;
   #sharing = false;
-  /** A `sharedSteps` build's start, while it runs: `own` stands there. */
-  #windowStart: number | null = null;
+  /** A `sharedSteps` build's start, while it runs: `own` stands there, repeats included. */
+  #window: { readonly total: number; readonly repeated: number } | null = null;
   /** Units a demand counts for work the program did once for every reader (`repeat`). */
   #repeated = 0;
   readonly #spent: number[] = [0];
@@ -380,17 +380,26 @@ export class WorkLedger {
    */
   public *sharedSteps<Y, R, N>(steps: Generator<Y, R, N>): Generator<Y, R, N> {
     if (this.#sharing) return yield* steps;
-    const [before, repeated] = [this.#total, this.#repeated];
     this.#sharing = true;
-    this.#windowStart = before;
+    this.#window = { total: this.#total, repeated: this.#repeated };
     try {
       return yield* steps;
     } finally {
-      this.#sharing = false;
-      this.#windowStart = null;
-      this.#shared += this.#total - before;
-      this.#repeated = repeated;
+      this.closeShared();
     }
+  }
+
+  /**
+   * Ends an open `sharedSteps` build: its units counted as shared, what its readers repeated dropped. Its own end
+   * calls it, and so does a solver run that abandons it unfinished (a stop leaves its generator suspended).
+   */
+  public closeShared(): void {
+    const window = this.#window;
+    if (window === null) return;
+    this.#window = null;
+    this.#sharing = false;
+    this.#shared += this.#total - window.total;
+    this.#repeated = window.repeated;
   }
 
   /** Whether a `shared` build is running: its units count as shared once it ends (`own`). */
@@ -403,7 +412,10 @@ export class WorkLedger {
    * measures (S3 §5).
    */
   public get own(): number {
-    return (this.#windowStart ?? this.#total) - this.#shared + this.#repeated;
+    const window = this.#window;
+    return window === null
+      ? this.#total - this.#shared + this.#repeated
+      : window.total - this.#shared + window.repeated;
   }
 
   /**

@@ -6475,3 +6475,35 @@ test("a stopped operand check stands for a lost null check only at its site, exc
     false,
   );
 });
+
+/**
+ * #1323 (r4.371, Codex r6): a folded group's provenance reads are shared work, and a demand stop that leaves one
+ * suspended closes it (`closeShared`): with the sharing on, the stops at these demands lose no check main keeps.
+ */
+test("a stop that abandons a group's provenance read loses no check, with the sharing on (#1323)", () => {
+  const cases = [
+    [
+      "function read(x:object) { let alias0=x.p[0]\nalias0.extra=1\nreturn 0 }\nlet result=read({p:[{extra:1,noise:read({p:[{extra:1,noise:0},{f0:1.5}]})},{f0:1.5}]})\nexit\n",
+      64,
+    ],
+    [
+      "function read(x:object) { let alias=x.p\nalias.extra=1\nx.p.extra=hostValue\nreturn 0 }\nlet result=read({noise:read({noise:0,p:{q:{}}}),p:{q:{}}})\nexit\n",
+      32,
+    ],
+  ] as const;
+  for (const [source, demand] of cases)
+    for (const mode of HELD_MODES.slice(0, 2)) {
+      const held: HeldCase = { name: "abandoned-provenance", source, slice: false, values: [] };
+      const problems = stopProblems({
+        unstopped: heldRun(held, mode),
+        stopped: heldRun(held, mode, undefined, demand),
+        fitting: [],
+        violating: [],
+      });
+      assert.deepEqual(
+        problems.filter((problem) => problem.startsWith("lost")),
+        [],
+        `${mode.name} at ${demand}`,
+      );
+    }
+});

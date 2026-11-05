@@ -231,6 +231,44 @@ test("repeated work counts to the demand and its spender, never to the total, a 
 });
 
 /**
+ * #1323 (r4.371): a generator's shared build (`sharedSteps`) counts its units, the demands it yields included, to the
+ * total and not to the asker: its `own` stands where the build began, repeats included, until the build ends; one a
+ * stop abandons suspended ends when the solver closes it (`closeShared`), as its end would have.
+ */
+test("a generator's shared build counts to the total, never to the asker, and ends where a stop abandons it (#1323)", () => {
+  const work = new WorkLedger(1_000);
+  work.charge("checks", 7);
+  const steps = work.sharedSteps(
+    (function* () {
+      work.charge("checks", 5);
+      work.repeat(20);
+      yield 1;
+      work.charge("checks", 3);
+      return "done";
+    })(),
+  );
+  steps.next();
+  work.charge("checks", 2);
+  assert.deepEqual({ total: work.total, own: work.own }, { total: 14, own: 7 });
+  assert.deepEqual(steps.next(), { value: "done", done: true });
+  assert.deepEqual({ total: work.total, own: work.own }, { total: 17, own: 7 });
+  // (abandoned at its yield: the solver's stop closes it)
+  const abandoned = work.sharedSteps(
+    (function* () {
+      work.charge("checks", 4);
+      yield 1;
+    })(),
+  );
+  abandoned.next();
+  work.closeShared();
+  work.charge("checks", 1);
+  assert.deepEqual(
+    { total: work.total, own: work.own, sharing: work.sharing },
+    { total: 22, own: 8, sharing: false },
+  );
+});
+
+/**
  * TABLE r4.55, S3 §5: the pipeline handles depth 10,000; the consumers of statements nested past the core's 256 are
  * checked when the script runs, every other statement proved as ever (admission still decides every place from every
  * store), an `else if` one level more: a check inside them is moved, an error outside stands, and one warning names the

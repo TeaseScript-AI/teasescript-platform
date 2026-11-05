@@ -362,7 +362,7 @@ const rows = [
       {
         path: "main.tease",
         source:
-          "function read(x:object) { let alias0=x.p.q\nalias0.extra=1\nreturn 0 }\nlet result=read({noise:read({noise:0,p:^hostValue}),p:^hostValue})\nexit\n",
+          "function read(x:object) { let alias0=x.p.q\nalias0.extra=1\nreturn 0 }\nlet result=read({noise:read({noise:0,p:/x/}),p:/x/})\nexit\n",
       },
     ],
   ],
@@ -1182,7 +1182,7 @@ const rows = [
       {
         path: "main.tease",
         source:
-          "function read(x:object) { let alias=x.p\nalias.extra=1\nlet number:integer=alias.extra\nreturn 0 }\nlet result=read({noise:read({noise:0,p:{q:{}}}),p:{q:{}}})\nexit\n",
+          "function read(x:object) { let alias=x.p\nalias.extra=1\nlet checked:integer=alias.extra\nreturn 0 }\nlet result=read({noise:read({noise:0,p:{q:{}}}),p:{q:{}}})\nexit\n",
       },
     ],
   ],
@@ -1242,7 +1242,7 @@ const rows = [
       {
         path: "main.tease",
         source:
-          "function read(x:object) { let alias=x.p.q\nalias.extra=1\nlet number:integer=alias.extra\nreturn 0 }\nlet result=read({noise:read({noise:0,p:{q:{}}}),p:{q:{}}})\nexit\n",
+          "function read(x:object) { let alias=x.p.q\nalias.extra=1\nlet checked:integer=alias.extra\nreturn 0 }\nlet result=read({noise:read({noise:0,p:{q:{}}}),p:{q:{}}})\nexit\n",
       },
     ],
   ],
@@ -2000,5 +2000,5 @@ export const recorded = {
     ],
   ],
   sources: 198,
-  sha256: "1d5fea84a1a326f1f3e66aba03da72b5125001489f3c3c69aa56b452d765836f",
+  sha256: "2b4205e83ba592fbae7fb82acf9a3872942bcbd05c7823bf9c2f06f05e727b21",
 };
