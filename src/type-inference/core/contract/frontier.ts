@@ -48,14 +48,13 @@ type FNode =
   | { readonly kind: "leaf"; readonly item: Item }
   | { readonly kind: "native"; readonly value: PlaceId };
 
+/** A node one step below another: `Sum(node, step)`, its nodes as found, each passed once to every reader. */
 interface Goal {
   readonly node: number;
   readonly step: string;
-  value: Set<number>;
-  readonly readers: Set<Goal>;
-  final: boolean;
-  /** Whether it waits among the goals to evaluate again (`Frontier.dirty`). */
-  dirty: boolean;
+  readonly value: Set<number>;
+  /** Its readers while it is not final; a final goal's nodes are read as they stand. */
+  readers: ((node: number) => void)[] | null;
 }
 
 /** The answer a pushed read takes from the graph: its leaves' items and the values read natively at its end. */
@@ -115,12 +114,13 @@ class Frontier {
   readonly cyclic = new Map<PlaceId, boolean>();
   /** Per decline reason, the pushed reads it declined (`pushedDeclines`). */
   readonly declines = new Map<string, number>();
-  /** The goals of the build running, finalised when it ends, dropped when it declines. */
+  /** The goals of the build running, final when it ends, dropped when it declines. */
   pending: Goal[] = [];
-  /** The goals not evaluated yet, newest first; those a read grew below, to evaluate again once none is new. */
-  queue: Goal[] = [];
-  dirty: Goal[] = [];
-  dirtyAt = 0;
+  /** The goals whose rules are not read yet, and each node a goal gained with a reader to pass it to. */
+  fresh: Goal[] = [];
+  tasks: (readonly [(node: number) => void, number])[] = [];
+  /** Whether a build runs (`drain`): none starts inside another. */
+  draining = false;
 
   public constructor(readonly contract: Contract) {}
 }
@@ -285,53 +285,42 @@ function literalRoot(frontier: Frontier, literal: PlaceId): number {
 }
 
 /**
- * The nodes a value stands for, as a step reads it: a binding's read its root, a host's read its leaf, a property read
- * its owner's nodes one step below, a literal its root; declines for any other (and for a guarded or ingress read).
+ * The nodes a value stands for, each passed to `then`: a binding's read its root, a host's read its leaf, a property
+ * read its owner's nodes one step below, a literal its root; declines for any other (and for a guarded or ingress read).
  */
-function valueNodes(frontier: Frontier, value: PlaceId, reader: Goal | null): readonly number[] {
+function eachValue(frontier: Frontier, value: PlaceId, then: (node: number) => void): void {
   const { contract } = frontier;
   const { program, guards } = contract.pass;
-  step(frontier);
-  const binding = program.occurrenceOf.get(value);
-  if (binding !== undefined) {
-    if (program.isHost(binding)) return [hostLeaf(frontier, value)];
-    if (!guards.untested(binding) || guards.guardedRead(value)) throw new Decline("guarded");
-    if (ingressLeafOf(contract, value) !== undefined) throw new Decline("ingress");
-    return [keyNode(frontier, binding, [])];
-  }
-  const projection = program.projOf.get(value);
-  if (projection !== undefined) {
+  // (a chain of property reads walked down to its root once, its steps read below the root: no native recursion)
+  const steps: string[] = [];
+  let at = value;
+  for (
+    let projection = program.projOf.get(at);
+    projection !== undefined;
+    projection = program.projOf.get(at)
+  ) {
+    step(frontier);
     if (!propertyOnly(projection.step) || selectsElement(projection.step))
       throw new Decline("step");
-    if (ingressLeafOf(contract, value) !== undefined) throw new Decline("ingress");
-    if (positions() && passesWrapper(contract, value)) throw new Decline("wrapper");
-    return advance(
-      frontier,
-      valueNodes(frontier, projection.owner, reader),
-      projection.step,
-      reader,
-    );
+    if (ingressLeafOf(contract, at) !== undefined) throw new Decline("ingress");
+    if (positions() && passesWrapper(contract, at)) throw new Decline("wrapper");
+    steps.push(projection.step);
+    at = projection.owner;
   }
-  if (program.hasOf.has(value) && !program.cellOwner.has(value))
-    return [literalRoot(frontier, value)];
-  throw new Decline("value");
-}
-
-/**
- * The nodes one step below `nodes`: settled (`star`) outside a goal's evaluation; inside one (`reader`), as its
- * dependencies stand now, each read registering the goal, so no build settles inside another.
- */
-function advance(
-  frontier: Frontier,
-  nodes: readonly number[],
-  stepName: string,
-  reader: Goal | null,
-): readonly number[] {
-  if (reader === null)
-    return setMembers(frontier, star(frontier, intern(frontier, nodes), stepName));
-  const out = new Set<number>();
-  stepAll(frontier, nodes, stepName, reader, out);
-  return [...out];
+  steps.reverse();
+  step(frontier);
+  let root: number;
+  const binding = program.occurrenceOf.get(at);
+  if (binding !== undefined) {
+    if (program.isHost(binding)) root = hostLeaf(frontier, at);
+    else {
+      if (!guards.untested(binding) || guards.guardedRead(at)) throw new Decline("guarded");
+      if (ingressLeafOf(contract, at) !== undefined) throw new Decline("ingress");
+      root = rootNode(frontier, binding);
+    }
+  } else if (program.hasOf.has(at) && !program.cellOwner.has(at)) root = literalRoot(frontier, at);
+  else throw new Decline("value");
+  below(frontier, root, steps, 0, then);
 }
 
 /** Whether a property read's chain passes a wrapper at its first step (G3's position, `positionOf`). */
@@ -351,57 +340,63 @@ function hostLeaf(frontier: Frontier, value: PlaceId): number {
 
 // --- the summaries -------------------------------------------------------------------------------------------------
 
-function goalOf(frontier: Frontier, node: number, stepName: string, reader: Goal | null): Goal {
+/**
+ * The summaries' least solution, one fact at a time: a goal's rules are read once, each reading the goals they need
+ * one step below (`below`), and each node a goal gains is passed once to each reader. So the work is one unit per
+ * rule, per node each goal gains and per reader it passes it to, never a goal's whole rules again as it grows.
+ */
+function goalOf(frontier: Frontier, node: number, stepName: string): Goal {
   let bySteps = frontier.goals.get(node);
   if (bySteps === undefined) frontier.goals.set(node, (bySteps = new Map()));
   let goal = bySteps.get(stepName);
   if (goal === undefined) {
     frontier.contract.keep(2);
-    goal = {
-      node,
-      step: stepName,
-      value: new Set(),
-      readers: new Set(),
-      final: false,
-      dirty: false,
-    };
+    goal = { node, step: stepName, value: new Set(), readers: [] };
     bySteps.set(stepName, goal);
     frontier.pending.push(goal);
-    frontier.queue.push(goal);
+    frontier.fresh.push(goal);
   }
-  if (reader !== null && !goal.final) goal.readers.add(reader);
   return goal;
 }
 
-/** The nodes one step below each of `nodes`, as they stand now (a reader of each goal). */
-function stepAll(
+/** The nodes `steps` from `from` on below `node`, each passed to `then`, as their goals find them. */
+function below(
   frontier: Frontier,
-  nodes: Iterable<number>,
-  stepName: string,
-  reader: Goal,
-  out: Set<number>,
+  node: number,
+  steps: readonly string[],
+  from: number,
+  then: (node: number) => void,
 ): void {
-  for (const node of nodes)
-    for (const below of goalOf(frontier, node, stepName, reader).value) {
-      step(frontier);
-      out.add(below);
-    }
+  if (from === steps.length) return then(node);
+  const goal = goalOf(frontier, node, steps[from]!);
+  const next = (found: number): void => below(frontier, found, steps, from + 1, then);
+  step(frontier);
+  goal.readers?.push(next);
+  for (const found of goal.value) frontier.tasks.push([next, found]);
 }
 
-/** A goal's nodes from the rules, with what its dependencies hold now. */
-function evaluate(frontier: Frontier, goal: Goal): Set<number> {
+function gain(frontier: Frontier, goal: Goal, node: number): void {
+  step(frontier);
+  if (goal.value.has(node)) return;
+  goal.value.add(node);
+  keep(frontier.contract.work, 1);
+  for (const reader of goal.readers ?? []) frontier.tasks.push([reader, node]);
+}
+
+/** A goal's rules, read once: what one step below its node holds, each part as it is found. */
+function rules(frontier: Frontier, goal: Goal): void {
   const { contract } = frontier;
   const node = frontier.nodes[goal.node]!;
   const s = goal.step;
-  const out = new Set<number>();
+  const into = (found: number): void => gain(frontier, goal, found);
   step(frontier);
-  if (node.kind === "leaf") return new Set([goal.node]);
+  if (node.kind === "leaf") return into(goal.node);
   if (node.kind === "native") throw new Decline("native");
   if (node.kind === "key") {
     const below = [...node.path, s];
     const inside = new Set(node.members);
     for (const member of node.members) {
-      if (holds(contract, member, below)) out.add(keyNode(frontier, member, below));
+      if (holds(contract, member, below)) into(keyNode(frontier, member, below));
       if (node.path.length === 0 && positions() && contract.wrapperHop(member, s) !== null)
         throw new Decline("wrapper");
       const stores = contract.prefixStores(keyOf(member, node.path));
@@ -419,29 +414,28 @@ function evaluate(frontier: Frontier, goal: Goal): Set<number> {
           plainRead(contract, entry)
         )
           continue;
-        stepEntry(frontier, entry, s, goal, out);
+        stepEntry(frontier, entry, s, into);
       }
     }
-    return out;
+    return;
   }
   // a literal's index node: its child at the step, F11's `missing` where an object lacks it, its reads one step below
   const { literal, index, at, id } = node;
   if (at.reference) throw new Decline("reference");
   if (at.others.length > 0) throw new Decline("native");
   const child = at.children.get(s);
-  if (child !== undefined) out.add(litNode(frontier, literal, pathAt(contract, id, s), child));
+  if (child !== undefined) into(litNode(frontier, literal, pathAt(contract, id, s), child));
   const lacking = lackingAt(contract, index, id, s);
   if (lacking !== null)
-    out.add(
+    into(
       leafNode(frontier, joinParts("m", literal, id, s), () =>
         unknownItem(REASON.missing, lacking),
       ),
     );
   for (const read of at.reads) {
     if (!plainRead(contract, read)) throw new Decline("marks");
-    stepAll(frontier, valueNodes(frontier, read.value, goal), s, goal, out);
+    eachValue(frontier, read.value, (found) => below(frontier, found, [s], 0, into));
   }
-  return out;
 }
 
 /** Whether an entry or a literal's read carries no mark and no ingress of its own (`annotated` leaves it as it is). */
@@ -466,8 +460,7 @@ function stepEntry(
   frontier: Frontier,
   entry: PrefixEntry,
   s: string,
-  goal: Goal,
-  out: Set<number>,
+  into: (node: number) => void,
 ): void {
   const { contract } = frontier;
   if (entry.unk !== undefined || entry.empty === true || entry.elem !== undefined)
@@ -477,57 +470,36 @@ function stepEntry(
   if (entry.key !== undefined) {
     if (isKeyId(entry.key)) throw new Decline("cursor");
     const path = keyPath(entry.key);
-    let nodes: Iterable<number> = [keyNode(frontier, keyPlace(entry.key), [])];
-    for (const each of path) {
-      if (!propertyOnly(each)) throw new Decline("step");
-      const next = new Set<number>();
-      stepAll(frontier, nodes, each, goal, next);
-      nodes = next;
-    }
-    stepAll(frontier, nodes, s, goal, out);
-    return;
+    if (!path.every(propertyOnly)) throw new Decline("step");
+    return below(frontier, rootNode(frontier, keyPlace(entry.key)), [...path, s], 0, into);
   }
-  let nodes: Iterable<number> = valueNodes(frontier, entry.value!, goal);
-  for (const each of entry.at ?? []) {
-    if (!propertyOnly(each)) throw new Decline("step");
-    const next = new Set<number>();
-    stepAll(frontier, nodes, each, goal, next);
-    nodes = next;
-  }
-  stepAll(frontier, nodes, s, goal, out);
+  const at = entry.at ?? [];
+  if (!at.every(propertyOnly)) throw new Decline("step");
+  eachValue(frontier, entry.value!, (found) => below(frontier, found, [...at, s], 0, into));
 }
 
 /**
- * Runs the queued goals to their least solution: each new goal evaluated first, then each one a goal it read grew
- * below, once for all the growth before it (so a reader of k goals is evaluated again once, not k times).
+ * Runs a build to its least solution: each new goal's rules read, each node gained passed on, until neither is left;
+ * then every goal of the build is final. A build never starts inside another (a rule reads goals, never `drain`).
  */
-function settle(frontier: Frontier): void {
-  for (;;) {
-    let goal = frontier.queue.pop();
-    if (goal === undefined) {
-      goal = frontier.dirty[frontier.dirtyAt++];
-      if (goal === undefined) {
-        frontier.dirty = [];
-        frontier.dirtyAt = 0;
-        break;
+function drain(frontier: Frontier): void {
+  if (frontier.draining) throw new Error("A producer graph's build ran inside another.");
+  frontier.draining = true;
+  try {
+    for (;;) {
+      const goal = frontier.fresh.pop();
+      if (goal !== undefined) {
+        rules(frontier, goal);
+        continue;
       }
-      goal.dirty = false;
+      const task = frontier.tasks.pop();
+      if (task === undefined) break;
+      task[0](task[1]);
     }
-    if (goal.final) continue;
-    const next = evaluate(frontier, goal);
-    if (next.size === goal.value.size) continue;
-    keep(frontier.contract.work, next.size - goal.value.size);
-    goal.value = next;
-    for (const reader of goal.readers)
-      if (!reader.dirty) {
-        reader.dirty = true;
-        frontier.dirty.push(reader);
-      }
+  } finally {
+    frontier.draining = false;
   }
-  for (const goal of frontier.pending) {
-    goal.final = true;
-    goal.readers.clear();
-  }
+  for (const goal of frontier.pending) goal.readers = null;
   frontier.pending = [];
 }
 
@@ -535,9 +507,17 @@ function settle(frontier: Frontier): void {
 function rollback(frontier: Frontier): void {
   for (const goal of frontier.pending) frontier.goals.get(goal.node)?.delete(goal.step);
   frontier.pending = [];
-  frontier.queue = [];
-  frontier.dirty = [];
-  frontier.dirtyAt = 0;
+  frontier.fresh = [];
+  frontier.tasks = [];
+  frontier.draining = false;
+}
+
+/** The nodes a build passes to its collector, once it is settled. */
+function collect(frontier: Frontier, start: (then: (node: number) => void) => void): number[] {
+  const out = new Set<number>();
+  start((node) => out.add(node));
+  drain(frontier);
+  return [...out];
 }
 
 function intern(frontier: Frontier, nodes: Iterable<number>): number {
@@ -558,20 +538,15 @@ function setMembers(frontier: Frontier, set: number): readonly number[] {
   return frontier.members[set]!;
 }
 
-/** The interned set one step below a set: each member's goal settled first, once per set and step. */
+/** The interned set one step below a set, settled, once per set and step. */
 function star(frontier: Frontier, set: number, stepName: string): number {
   let bySteps = frontier.below.get(set);
   const known = bySteps?.get(stepName);
   if (known !== undefined) return known;
-  const goals = frontier.members[set]!.map((node) => goalOf(frontier, node, stepName, null));
-  settle(frontier);
-  const out = new Set<number>();
-  for (const goal of goals)
-    for (const node of goal.value) {
-      step(frontier);
-      out.add(node);
-    }
-  const id = intern(frontier, out);
+  const nodes = collect(frontier, (then) => {
+    for (const node of frontier.members[set]!) below(frontier, node, [stepName], 0, then);
+  });
+  const id = intern(frontier, nodes);
   if (bySteps === undefined) frontier.below.set(set, (bySteps = new Map()));
   bySteps.set(stepName, id);
   return id;
@@ -599,10 +574,11 @@ function termOf(frontier: Frontier, id: number): { leaves: number[]; next: numbe
       // (a value the graph models stands for its nodes; one it declines is read natively)
       const before = frontier.pending.length;
       try {
-        next.push(...valueNodes(frontier, v, null));
+        next.push(...collect(frontier, (then) => eachValue(frontier, v, then)));
       } catch (error) {
         // (a decline inside a summary's build declines the read; one at the value itself reads it natively)
         if (!(error instanceof Decline) || frontier.pending.length !== before) throw error;
+        frontier.draining = false;
         leaves.push(nativeNode(frontier, v));
       }
     } else leaves.push(nativeNode(frontier, v));
@@ -644,8 +620,6 @@ function leavesOf(frontier: Frontier, start: readonly number[]): Set<number> {
   const frames: { readonly node: number; readonly next: readonly number[]; at: number }[] = [];
   const enter = (node: number): void => {
     const term = termOf(frontier, node);
-    // (projections' nodes found by their summaries, settled before the walk reads them)
-    settle(frontier);
     index.set(node, index.size);
     low.set(node, index.size - 1);
     open.push(node);
@@ -853,7 +827,7 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
     try {
       if (!cyclic(frontier, keyPlace(entry.key!))) return null;
       if (!steps.every(propertyOnly) || !path.every(propertyOnly)) return null;
-      let set = intern(frontier, [keyNode(frontier, keyPlace(entry.key!), [])]);
+      let set = intern(frontier, [rootNode(frontier, keyPlace(entry.key!))]);
       for (const each of [...path, ...steps]) set = star(frontier, set, each);
       const items: Item[] = [];
       const natives: PlaceId[] = [];
@@ -862,7 +836,6 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
         if (node.kind === "leaf") items.push(node.item);
         else if (node.kind === "native") natives.push(node.value);
       }
-      settle(frontier);
       return { items, natives };
     } catch (error) {
       rollback(frontier);
