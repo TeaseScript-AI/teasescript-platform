@@ -364,7 +364,7 @@ function propertiesOrElements(steps: readonly string[]): void {
 
 /** Whether a property read's chain passes a wrapper at its first step (G3's position, `positionOf`). */
 function passesWrapper(contract: Contract, value: PlaceId): boolean {
-  const chain = contract.work.shared(() => contract.chainOf(value));
+  const chain = contract.chainOf(value);
   return chain !== null && contract.wrapperHop(chain.root, chain.first) !== null;
 }
 
@@ -910,8 +910,8 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
 export function pushedValueSlot(contract: Contract, value: PlaceId): string | null {
   const { program } = contract.pass;
   if (!pushing || !program.projOf.has(value)) return null;
-  // (the chain's root read, memoised once per value and pass, `chainOf`: the pass's index, shared work, r4.349)
-  const chain = contract.work.shared(() => contract.chainOf(value));
+  // (the chain's root read, from the pass's index: `Contract.chainOf`)
+  const chain = contract.chainOf(value);
   const binding = chain === null ? undefined : program.occurrenceOf.get(chain.root);
   if (binding === undefined) return null;
   return reachSlot(contract, keptParts(contract.work, "pv", value), binding, () =>

@@ -6,7 +6,7 @@ import { analyseCore } from "../src/type-inference/core/answers.js";
 import { Consumers } from "../src/type-inference/core/consumers.js";
 import { pushedFacts, withoutPushedReads } from "../src/type-inference/core/contract/frontier.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { WorkLedger } from "../src/type-inference/core/budget.js";
+import { withTestDemandAllowance, WorkLedger } from "../src/type-inference/core/budget.js";
 import { inMode, MODES, publication, settledAnswers } from "./helpers/type-core-oracles.js";
 
 /*
@@ -238,6 +238,75 @@ test("a pushed read's graph is built as shared work: counted to the total, never
   }
   assert.ok(inside > 0);
   assert.equal(outside, 0);
+});
+
+test("a chain's root is read from the pass's index, its making shared work and a hit nothing (#1793)", () => {
+  // (the accessor itself, whatever reads it: the chain index made again from empty after the analysis, then read again)
+  const source = 'let a={b:{c:{d:1}}}\nlet x=a.b.c.d\nsay "${x}"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+  assert.ok(request !== null);
+  const passes: CorePass[] = [];
+  const check = Consumers.prototype.check;
+  Consumers.prototype.check = function (this: Consumers) {
+    passes.push(this.pass);
+    check.call(this);
+  };
+  try {
+    analyseCore(request);
+  } finally {
+    Consumers.prototype.check = check;
+  }
+  const { contract, program } = passes.at(-1)!;
+  const deepest = [...program.projOf.keys()].find(
+    (value) => ![...program.projOf.values()].some((projection) => projection.owner === value),
+  );
+  assert.ok(deepest !== undefined);
+  contract.chains.clear();
+  const work = program.work;
+  const read = () => {
+    const [total, own] = [work.total, work.own];
+    const chain = contract.chainOf(deepest);
+    return { chain, total: work.total - total, own: work.own - own };
+  };
+  const first = read();
+  assert.ok(first.chain !== null && first.total > 0, JSON.stringify(first));
+  assert.equal(first.own, 0);
+  assert.deepEqual(read(), { chain: first.chain, total: 0, own: 0 });
+});
+
+test("a chain's root index is shared work through each caller that first builds it inside a demand (#1793)", () => {
+  // (each source's first build of the index comes through one caller: a direct chain's read through `positionOf`; a
+  // wrapper's chain read through `Values.#rooted`, at its demand allowance in source order unshared, Astra r1 S1)
+  const rows = [
+    { source: "let a={b:{c:{d:1}}}\nlet x=a.b.c.d\nsay x\nexit\n", mode: MODES[0]!, demand: null },
+    {
+      source:
+        'let leaf={n:1}\nlet a={b:leaf}\nlet w={c:a}\nw.c.b.n=hostValue\nrepeat w.c.b.n { say "AFTER" }\nexit\n',
+      mode: MODES[1]!,
+      demand: 59,
+    },
+  ];
+  const charge = WorkLedger.prototype.charge;
+  let [shared, owned] = [0, 0];
+  WorkLedger.prototype.charge = function (this: WorkLedger, ...args) {
+    // (the index's own making: a charge inside `positions.ts`'s helper, not the accessor's frame)
+    if (/at chainOf \(.*positions\.js/.test(new Error().stack!))
+      if (this.sharing) shared += 1;
+      else owned += 1;
+    charge.apply(this, args);
+  };
+  try {
+    for (const { source, mode, demand } of rows) {
+      [shared, owned] = [0, 0];
+      const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+      const run = () => analyseCore(request);
+      inMode(mode, () => (demand === null ? run() : withTestDemandAllowance(demand, run)));
+      assert.ok(shared > 0, source);
+      assert.equal(owned, 0, source);
+    }
+  } finally {
+    WorkLedger.prototype.charge = charge;
+  }
 });
 
 test("the producer graph grows with the ring and the projection's depth, each by a constant", () => {

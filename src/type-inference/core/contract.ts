@@ -796,8 +796,12 @@ export class Contract {
     return contractOfValue(this, value, flow);
   }
 
+  /**
+   * A chain of property reads' root (`positions.ts`'s `chainOf`), from the pass's memoised index: its making is shared
+   * work (r4.349), counted to the total and to no demand's allowance, whichever reader asks first.
+   */
   public chainOf(value: PlaceId): ChainRoot | null {
-    return chainOf(this, value);
+    return this.work.shared(() => chainOf(this, value));
   }
 
   /** `keyBelowIn`: the key `rest` below `key` in its identity (a wrapper's family's a cursor's children). */
