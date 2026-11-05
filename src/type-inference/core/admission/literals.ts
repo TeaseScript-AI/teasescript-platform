@@ -11,6 +11,7 @@ import {
   keptText,
   pathText,
   stepText,
+  type WorkLedger,
 } from "../budget.js";
 import { keyStepsIn, stepsArray, type Steps } from "../contract/key-ids.js";
 import { defaultOf, typeTags, type IndexNode } from "../contract.js";
@@ -380,16 +381,18 @@ export function literalElements(
             )
           : null;
       // (#1765: the layers between the element and the leaf that may hold null, each element's: a written copy's term
-      // there, else a null among its items; the sentence's type alone, as the leaf's own null is, #1753)
+      // there, or a null among its items; the sentence's type alone, as the leaf's own null is, #1753)
       const layers = (of: Definition): boolean[] =>
-        intermediateLayers(path).map((prefix) => {
+        intermediateLayers(admission.work, path).map((prefix) => {
           const copied = named(of)
             ? (drive(admission, earliestDecider(admission, of.value!, of.node, prefix, null))
                 ?.term ?? null)
             : null;
-          return copied !== null
-            ? typeTags(copied).includes("null")
-            : admission.valueAt(of, prefix).some((item) => item.tag === "null");
+          // (either: a join's other operand may bring the null a written copy's term lacks, Codex r1's B1)
+          return (
+            (copied !== null && typeTags(copied).includes("null")) ||
+            admission.valueAt(of, prefix).some((item) => item.tag === "null")
+          );
         });
       const optional = mixedOptional(layers(first.get(at)!.d), layers(d));
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
@@ -1215,7 +1218,7 @@ export function joinElements(
               at !== null && at.decided !== "open" && (at.nulls || at.decided.nullable === true)
             );
           };
-          const prefixes = intermediateLayers(path);
+          const prefixes = intermediateLayers(admission.work, path);
           const optional = mixedOptional(
             prefixes.map((prefix) => layer(ours, prefix)),
             prefixes.map((prefix) => layer(theirs, prefix)),
@@ -1336,10 +1339,11 @@ export interface MixedOptional {
 }
 
 /** The paths of the layers strictly between a mixed path's last property (or the element) and its leaf. */
-function intermediateLayers(path: readonly string[]): (readonly string[])[] {
+function intermediateLayers(work: WorkLedger, path: readonly string[]): (readonly string[])[] {
   const property = path.findLastIndex((step) => step !== "element" && step !== "entry");
   const layers: (readonly string[])[] = [];
-  for (let end = property + 2; end < path.length; end += 1) layers.push(path.slice(0, end));
+  for (let end = property + 2; end < path.length; end += 1)
+    layers.push(keptSlice(work, path, 0, end));
   return layers;
 }
 

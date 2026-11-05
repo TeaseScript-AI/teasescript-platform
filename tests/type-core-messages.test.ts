@@ -2721,6 +2721,11 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let a:integer[]?[]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
       `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
     ],
+    // (an inline join's other operand brings the null a written copy's type lacks: Codex r1's B1)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[a+[[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
     // (no layer that may hold null: plain)
     [
       'let a:integer[][]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
