@@ -69,6 +69,7 @@ function formattedOffsets(formatter: Intl.DateTimeFormat, timeZone: string): Off
  * a host whose list ends early falls back.
  */
 function nativeOffsets(name: string, formatted: OffsetAt): OffsetAt | null {
+  // EVIDENCE: invariant: the method is checked below, every other use is within the `try`, and any throw falls back.
   const temporal = (globalThis as { Temporal?: NativeTemporal }).Temporal;
   if (typeof temporal?.ZonedDateTime?.prototype?.getTimeZoneTransition !== "function") return null;
   try {

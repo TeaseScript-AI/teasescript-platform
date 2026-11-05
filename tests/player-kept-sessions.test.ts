@@ -293,7 +293,8 @@ test("the sweep keeps every photo a stored kept session shows, and defers when t
       snapshotJson: playerRuntimeSnapshotJson(live),
       eventsFrom: 0,
       events: storedEvents,
-      eventsJson: storedEvents.map((event) => JSON.stringify(event)),
+      // A memory store keeps the events themselves, which here JSON cannot write.
+      eventsJson: [],
       marks,
     });
     return kept;

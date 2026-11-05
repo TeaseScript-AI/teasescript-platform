@@ -23,6 +23,11 @@ interface HostTemporal {
   };
   readonly ZonedDateTime: { readonly prototype: Zoned };
 }
+/** A host's Temporal as a test gives it, whose method may be missing. */
+interface GivenTemporal {
+  readonly Instant: HostTemporal["Instant"];
+  readonly ZonedDateTime: { readonly prototype: { readonly getTimeZoneTransition?: () => void } };
+}
 
 // EVIDENCE: invariant: the repository's Node (.nvmrc) ships Temporal, so the native route is the one CI runs.
 const realTemporal = (globalThis as { Temporal?: HostTemporal }).Temporal!;
@@ -37,13 +42,19 @@ let fresh = 0;
  * `run` with the host's `Temporal` replaced by `temporal` (deleted for `undefined`), the calls of both APIs counted, on
  * a fresh instance of the capture module, so that no zone it cached under another host is reused.
  */
-async function withHost<T>(temporal: unknown, run: (capture: Capture) => T): Promise<T> {
+async function withHost<T>(
+  temporal: GivenTemporal | undefined,
+  run: (capture: Capture) => T,
+): Promise<T> {
   const url = new URL("../src/temporal-capture.js", import.meta.url);
   url.search = `?host=${(fresh += 1)}`;
   // EVIDENCE: invariant: the URL names the module this file imports statically for its type, with a query of its own.
   const capture = (await import(url.href)) as Capture;
-  const replace = (target: object, name: string, value: unknown) =>
-    Object.defineProperty(target, name, { configurable: true, writable: true, value });
+  const replace = (
+    target: typeof globalThis | Intl.DateTimeFormat | Zoned,
+    name: string,
+    value: unknown,
+  ) => Object.defineProperty(target, name, { configurable: true, writable: true, value });
   if (temporal === undefined) Reflect.deleteProperty(globalThis, "Temporal");
   else replace(globalThis, "Temporal", temporal);
   replace(
@@ -125,7 +136,7 @@ test("a zone the formatter knows and this host's Temporal does not, or an unusab
     readonly nanoseconds?: (value: bigint) => bigint;
     readonly offset?: (value: number, at: Zoned) => number;
   }
-  const listed = (change: Change): unknown => {
+  const listed = (change: Change): GivenTemporal => {
     const wrap = (inner: Zoned): Zoned => ({
       epochMilliseconds: inner.epochMilliseconds,
       epochNanoseconds: (change.nanoseconds ?? ((value) => value))(inner.epochNanoseconds),
@@ -147,7 +158,7 @@ test("a zone the formatter knows and this host's Temporal does not, or an unusab
       ZonedDateTime: { prototype: { getTimeZoneTransition() {} } },
     };
   };
-  const hosts: Record<string, unknown> = {
+  const hosts = {
     "without the method": { Instant: realTemporal.Instant, ZonedDateTime: { prototype: {} } },
     "that throws": {
       Instant: {
@@ -168,7 +179,7 @@ test("a zone the formatter knows and this host's Temporal does not, or an unusab
       offset: (value, at) =>
         at.epochMilliseconds >= Date.UTC(2099, 0, 1) ? value + 1_800e9 : value,
     }),
-  };
+  } satisfies Record<string, GivenTemporal>;
   for (const [name, temporal] of Object.entries(hosts)) {
     const read = await withHost(temporal, (capture) => counted(capture, "Europe/Amsterdam"));
     assert.ok(read.formatToParts > SCANNED, `a host ${name} is scanned`);
@@ -221,12 +232,23 @@ test("both ways read the window's edges and a change undone within a day as the 
   };
   // The formatter for the synthetic zone, from the same offsets; every other zone is the host's.
   const RealFormat = Intl.DateTimeFormat;
-  const Format = function (locales?: string | string[], options?: Intl.DateTimeFormatOptions) {
-    if (options?.timeZone !== zone) return new RealFormat(locales, options);
-    return Object.assign(Object.create(RealFormat.prototype) as Intl.DateTimeFormat, {
-      resolvedOptions: () => ({ ...new RealFormat("en-US").resolvedOptions(), timeZone: zone }),
-    });
-  } as unknown as typeof Intl.DateTimeFormat;
+  class EdgesFormat extends RealFormat {
+    readonly #edges: boolean;
+    constructor(locales?: string, options?: Intl.DateTimeFormatOptions) {
+      const edges = options?.timeZone === zone;
+      super(locales, edges ? { ...options, timeZone: "UTC" } : options);
+      this.#edges = edges;
+    }
+    override resolvedOptions() {
+      const resolved = super.resolvedOptions();
+      return this.#edges ? { ...resolved, timeZone: zone } : resolved;
+    }
+    override formatToParts(moment?: number | Date): Intl.DateTimeFormatPart[] {
+      if (!this.#edges) return super.formatToParts(moment);
+      calls.formatToParts += 1;
+      return [{ type: "timeZoneName", value: longOffset(offsetAt(Number(moment))) }];
+    }
+  }
   const expected = JSON.stringify({
     name: zone,
     initialOffsetSeconds: 3_600,
@@ -241,20 +263,17 @@ test("both ways read the window's edges and a change undone within a day as the 
     [temporal, true],
   ] as const) {
     const read = await withHost(host, (capture) => {
-      Intl.DateTimeFormat = Format;
-      const formatToParts = Intl.DateTimeFormat.prototype.formatToParts;
-      Intl.DateTimeFormat.prototype.formatToParts = function (
-        this: Intl.DateTimeFormat,
-        moment?: number | Date,
-      ) {
-        if (this.resolvedOptions().timeZone !== zone) return formatToParts.call(this, moment);
-        calls.formatToParts += 1;
-        return [{ type: "timeZoneName", value: longOffset(offsetAt(Number(moment))) }];
-      };
+      const format = (value: typeof RealFormat) =>
+        Object.defineProperty(Intl, "DateTimeFormat", {
+          configurable: true,
+          writable: true,
+          value,
+        });
+      format(EdgesFormat);
       try {
         return counted(capture, zone);
       } finally {
-        Intl.DateTimeFormat = RealFormat;
+        format(RealFormat);
       }
     });
     assert.equal(read.rules, expected, native ? "native" : "scanned");
