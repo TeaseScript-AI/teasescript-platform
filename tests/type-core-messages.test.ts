@@ -2879,6 +2879,21 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let a=[null]\nlet xs=[a+[[1]],[["x"]]]\nexit\n',
       `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
     ],
+    // (a join's operand admission rejected brings nothing to the join's result, ADR 0021 1.1: inline, through a method
+    // and to a later join; Astra r1's B1)
+    [
+      'let xs=[([[1]]+[["x"],null]),[["y"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[([[1]]+[["x"],null]).take(1),[["y"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[[1]]]+[[["x"],null]]+[[["y"]]]\nexit\n',
+      "'+' would mix a list (integer[][]) and a list (string[][]). A list holds one type. To allow both, declare " +
+        "the list with the type '((integer | string)[]?)[][]'.",
+    ],
     // (a value with no place, a method's result: its own items)
     [
       'let xs=[[[1],null].take(2),[["x"]]]\nexit\n',
@@ -3112,4 +3127,25 @@ test("a message's walk and owner index charge their work, to the analysis and no
   });
   for (let at = 1; at < work.length; at += 1)
     assert.ok(work[at]! <= 2.5 * work[at - 1]!, work.join(", "));
+});
+
+/**
+ * #1765, Astra r1's B2 on #1789: each value's optionality at a path is asked once per pass, whichever literal's or
+ * join's error asks it, so a wide `.take(k)` operand joined with k lists one after another is walked once, not once per
+ * join: the analysis's work grows with k (at most ×2.5 per doubling), in four modes.
+ */
+test("a mixed join's layers read each value at a path once per pass (#1765)", () => {
+  for (const mode of MODES) {
+    const work = [16, 32, 64].map((k) => {
+      const wide = `[${Array.from({ length: k }, (_, at) => `[${at}]`).join(",")}].take(${k})`;
+      const joined = Array.from({ length: k }, (_, at) => `+[[["s${at}"]]]`).join("");
+      const request = coreRequest(main(`let xs=[${wide}]${joined}\nexit\n`));
+      assert.ok(request !== null);
+      const answers = inMode(mode, () => analyseCore(request));
+      assert.equal(answers.budget.exhausted, null);
+      return answers.budget.total;
+    });
+    for (let at = 1; at < work.length; at += 1)
+      assert.ok(work[at]! <= 2.5 * work[at - 1]!, `${JSON.stringify(mode)}: ${work.join(", ")}`);
+  }
 });
