@@ -2874,6 +2874,20 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let xs=[(askChoice null) otherwise [[1],null],[["x"]]]\nexit\n',
       `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
     ],
+    // (an `otherwise` at a layer: its fallback's null only where its operand may be null, on either side; Codex r3 on
+    // #1819)
+    [
+      'let xs=[[["x"]],[([1] otherwise null)]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[([1] otherwise null)],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let n:integer[]?=[1]\nif hostValue == 1 { n=null }\nlet xs=[[["x"]],[(n otherwise null)]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[]?[]). ${ONE}`,
+    ],
     // (a join's operand bound to a literal holding null: its place's undecided type, read by its own items; Codex r7)
     [
       'let a=[null]\nlet xs=[a+[[1]],[["x"]]]\nexit\n',

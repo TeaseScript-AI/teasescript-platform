@@ -1339,7 +1339,8 @@ export interface MixedOptional {
 /**
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
  * items hold (the lead's ruling (A) on #1789, after Codex r1–r8 and Astra r1):
- * - at its own level (no step left), any value by its own items;
+ * - at its own level (no step left), any value by its own items, but an `otherwise` by its fallback, where its operand's
+ *   items hold null (`1 otherwise null` holds none: its fallback never runs);
  * - a literal, by its children at the layer's next step, each by this same rule below;
  * - a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and
  *   default, a method's receiver, a dict's values, a `+` join's admitted operands), by each value it carries, at the
@@ -1370,7 +1371,14 @@ function mayHoldNull(
   // (a value's answer at a path where its form decides it, else the parts whose answers decide it)
   const expand = (at: PlaceId, from: FlowNode, steps: readonly string[]): boolean | Part[] => {
     admission.work.charge("checks");
-    if (steps.length === 0) return itemsHold(at, []);
+    if (steps.length === 0) {
+      // (an `otherwise`'s own null is its fallback's, where its operand's items hold one: the operand's null is what the
+      // fallback replaces, Codex r3 on #1819)
+      const op = program.opOf.get(at);
+      if (op?.kind === "fallback")
+        return itemsHold(op.left, []) ? [[op.right, from, []] as const] : false;
+      return itemsHold(at, []);
+    }
     if (program.hasOf.has(at)) {
       const rest = keptSlice(admission.work, steps, 1);
       return literalChildren(admission, at, steps[0]!).map(
