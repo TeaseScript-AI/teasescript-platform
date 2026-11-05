@@ -33,11 +33,12 @@ export function rangeQuery(tree: RangeTree, first: number, last: number): number
   let result = tree.identity;
   let low = first + tree.size;
   let high = last + 1 + tree.size;
+  // Arithmetic, not bitwise operators: those work on 32 bits and would wrap above 2^31 nodes.
   while (low < high) {
-    if (low & 1) result = combine(result, nodes[low++]!);
-    if (high & 1) result = combine(result, nodes[--high]!);
-    low >>= 1;
-    high >>= 1;
+    if (low % 2 === 1) result = combine(result, nodes[low++]!);
+    if (high % 2 === 1) result = combine(result, nodes[--high]!);
+    low = Math.floor(low / 2);
+    high = Math.floor(high / 2);
   }
   return result;
 }
