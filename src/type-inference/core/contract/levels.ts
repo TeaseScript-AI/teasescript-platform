@@ -17,6 +17,7 @@ import { stepName } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
 import type { FlowSink } from "./contributions.js";
+import { pushedRead, pushedSlot } from "./frontier.js";
 import { plainStep, propertyOnly, unknownItem } from "./kinds.js";
 import {
   indexPaths,
@@ -79,11 +80,19 @@ export function* entryAt(
   if (entry.key !== undefined) {
     // (#1668: the copied key below, the edge a copy makes, as its marks and writer annotate it)
     const below = flow?.child() ?? null;
+    // #1655: a key below its place's root in a copy cycle through a projection, read one step at a time below the
+    // writing edge (`frontier.ts`)
+    const pushed = pushedSlot(contract, entry, ref);
     const items = annotated(
       contract,
       entry,
       ref,
-      withWriter(yield* contract.contractOf(keyBelowRef(contract, entry.key, ref), below), entry.w),
+      withWriter(
+        pushed !== null
+          ? yield* pushedRead(contract, pushed, entry, below)
+          : yield* contract.contractOf(keyBelowRef(contract, entry.key, ref), below),
+        entry.w,
+      ),
     );
     if (below !== null) flow!.attach(below, "annotated", "writer");
     return items;
