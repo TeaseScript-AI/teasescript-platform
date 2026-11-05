@@ -767,6 +767,12 @@ test("importing shadow-bind.mjs does nothing, and shadow-groups/ holds no module
   const before = readdirSync(groups).sort();
   const bind: object = await import(pathToFileURL(resolve("tests/families/shadow-bind.mjs")).href);
   assert.deepEqual(Object.keys(bind), []);
+  // (imported by a script that is no file: Node's stdin entry, `-`)
+  const piped = spawnSync(process.execPath, ["--input-type=module", "-"], {
+    input: `await import(${JSON.stringify(pathToFileURL(resolve("tests/families/shadow-bind.mjs")).href)});`,
+    encoding: "utf8",
+  });
+  assert.deepEqual([piped.status, piped.stdout, piped.stderr], [0, "", ""]);
   assert.deepEqual(readdirSync(groups).sort(), before);
   assert.deepEqual(
     before.filter((name) => name.endsWith(".mjs")),

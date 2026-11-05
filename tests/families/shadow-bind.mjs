@@ -8,7 +8,7 @@
 // It lives beside `shadow-groups/`, which holds data only: a folder of `tests/families/` with a module is a runner area
 // (`baselines.mjs`), and importing this module does nothing; it writes only when it is the script run.
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
@@ -16,6 +16,7 @@ import { pairGuard, readRecord, classifyRecords } from "./shadow-classify.mjs";
 
 if (
   process.argv[1] !== undefined &&
+  existsSync(process.argv[1]) &&
   realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
 )
   bind(...process.argv.slice(2));
