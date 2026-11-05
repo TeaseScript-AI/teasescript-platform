@@ -2452,8 +2452,10 @@ test("TSV041's advice names the property an object literal types and its narrowe
 
 /**
  * #1753 (ADR 0021 rule 4.2): a store whose place is an element below the stored value, through collections alone, is
- * checked by the value's whole receiving type, `null` kept, which tests every element; pasted where `codeAt` proves it,
- * else in words, and with no fallback, which would replace the whole value. An element store keeps its element's test.
+ * checked by the value's whole receiving type, which tests every element, where the root's written type proves every
+ * layer of it with its `null` (a `let`, a `global`, a parameter: Codex r1's B1, `integer[]?[]`); pasted where `codeAt`
+ * proves it, else in words, and with no fallback, which would replace the whole value. Where no written type proves
+ * the layers (a copy of one), the words name the elements the check tests. An element store keeps its element's test.
  * Each pasted check compiles under both checkers, where the element's scalar test it replaces is an error. Below a
  * literal's element, the mixed error names the earliest element's type with its `null`; the element itself keeps its
  * kinds' words. In four modes.
@@ -2527,6 +2529,68 @@ test("a store below its value checks the whole receiving type, null kept, and th
       "'a' holds whole numbers (integer[]), but 'b' may be null here. " +
         `${STOPS} Check 'b' first, as in 'if b is integer[] { a=b }'.`,
     ],
+    // (every layer's `null`, from the written type: Codex r1's B1)
+    ...[
+      "An element of 'a' is declared as a list or null",
+      "An element of an element of 'a' is declared as a whole number (integer)",
+    ].map(
+      (into) =>
+        [
+          "let a:integer[]?[]=[[1]]\na=hostValue\nexit\n",
+          "hostValue",
+          warned(
+            into,
+            "hostValue",
+            "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { a=hostValue }'.",
+          ),
+        ] as const,
+    ),
+    [
+      "let a:integer[]?=[1]\na=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "'a' holds whole numbers (integer[])",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer[]? { a=hostValue }'.",
+      ),
+    ],
+    [
+      "global g: integer[]? dict = dict {}\ng=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "An element of an element of 'g' is declared as a whole number (integer)",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer[]? dict { g=hostValue }'.",
+      ),
+    ],
+    [
+      'function f(p: integer[]?[]) {\n    p=hostValue\n    say "${p.length}"\n}\nf([[1]])\nexit\n',
+      "hostValue",
+      warned(
+        "An element of an element of 'p' is declared as a whole number (integer)",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { p=hostValue }'.",
+      ),
+    ],
+    // (a copy of a written type: no written type proves its layers, so the words name the elements)
+    [
+      "let x:integer[]?[]=[[1]]\nlet b=x\nb=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "An element of an element of 'b' is declared as a whole number (integer)",
+        "hostValue",
+        "Check that every element of every element of 'hostValue' is a whole number (integer) first.",
+      ),
+    ],
+    [
+      "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "An element of 'b' is declared as a list or null",
+        "hostValue",
+        "Check that every value of 'hostValue' is a list or null first.",
+      ),
+    ],
     // (words where no form holds: a declaration's start value)
     [
       "let a:integer?[]=hostValue\nexit\n",
@@ -2574,6 +2638,9 @@ test("a store below its value checks the whole receiving type, null kept, and th
     "let d:integer? dict=dict {}\nif hostValue is integer? dict { d=hostValue }\nexit\n",
     "let a:integer?[][]=[[1]]\nif hostValue is integer?[][] { a=hostValue }\nexit\n",
     "let a:integer[]=[1]\nlet b=[1, hostValue]\nif b is integer[] { a=b }\nexit\n",
+    "let a:integer[]?[]=[[1]]\nif hostValue is integer[]?[] { a=hostValue }\nexit\n",
+    "let a:integer[]?=[1]\nif hostValue is integer[]? { a=hostValue }\nexit\n",
+    "global g: integer[]? dict = dict {}\nif hostValue is integer[]? dict { g=hostValue }\nexit\n",
   ])
     assert.deepEqual(errors(followed), [], followed);
   assert.deepEqual(

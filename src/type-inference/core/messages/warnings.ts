@@ -1,3 +1,5 @@
+import type { TypeAnnotation } from "../../../ast.js";
+import { parse } from "../../../parser.js";
 import type { SourceSite } from "../../graph.js";
 import { WRITABLE_JSON_FIX } from "../../../conversions.js";
 import { dictMethod } from "../../../dict-operations.js";
@@ -23,7 +25,6 @@ import {
   argumentFixOf,
   capitalized,
   choiceSubject,
-  collectionText,
   described,
   isLiteral,
   known,
@@ -344,32 +345,110 @@ function stepsBelow(rule: StoreRule, landing: Landing | null): readonly StoreSte
 }
 
 /**
- * #1753: the test of a stored value whose place is an element below it through collections alone (`stepsBelow`): the
- * whole receiving type at the value, `null` kept (`integer?[]`), which checks every element (ADR 0021 rule 4.2), as
- * code (`hostValue is integer?[]`) and in words (`is a list (integer?[])`); `null` where no written type names it.
- * `undefined` where the place is the value itself, a property below it, or off its landing: the place's own test.
+ * #1753: the check of a stored value whose place is an element below it through collections alone (`stepsBelow`): the
+ * test of the whole receiving type at the value (ADR 0021 rule 4.2: a collection test checks every element), as code
+ * (`hostValue is integer[]?[]`) and in words (`is a list (integer[]?[])`), where the place's root is declared with a
+ * written type that proves every layer of it, `null` at each (Codex r1's B1 on #1764: `integer[]?[]`): the declaration's
+ * type followed down the value's landing to the place (`receivingType`). Anywhere else the rule's leaf alone does not
+ * prove the layers between (a copy of a written type), so the words name the elements the check tests. `undefined`
+ * where the place is the value itself, a property below it, or off its landing: the place's own test.
  */
-function wholeTest(
+function wholeCheck(
   rule: StoreRule,
   site: SourceSite,
   source: MessageSource,
-): Test | null | undefined {
+): { readonly test: Test } | { readonly words: string; readonly leaf: string } | undefined {
   // (its landing asked, and charged, only for a place below a collection)
   if (!rule.steps.some((step) => "collection" in step)) return undefined;
-  const below = stepsBelow(rule, source.landing(site));
+  const landing = source.landing(site);
+  const below = stepsBelow(rule, landing);
   if (below === null || below.length === 0 || !below.every((step) => "collection" in step))
     return undefined;
-  let written = typeText(rule.type);
-  for (const step of below.toReversed())
-    written = written === null ? null : collectionText(step.collection, written);
+  const type = receivingType(rule, landing!.steps, below, source);
+  if (type === null)
+    return {
+      words: `every ${below
+        .toReversed()
+        .map((step) => (step.collection === "dict" ? "value" : "element"))
+        .join(" of every ")} of`,
+      leaf: described(rule.type),
+    };
+  const optional = type.kind === "optionalType";
   const outer = below[0]!.collection;
-  return written === null
-    ? null
-    : {
-        code: (value) => `${value} is ${written}`,
-        words: `is ${VALUE_KINDS[outer].description} (${written})`,
-        rulesOut: (kind) => kind !== outer,
-      };
+  const written = annotationText(type);
+  return {
+    test: {
+      code: (value) => `${value} is ${written}`,
+      words: `is ${VALUE_KINDS[outer].description}${optional ? " or null" : ""} (${written})`,
+      rulesOut: (kind) => kind !== outer && !(optional && kind === "null"),
+    },
+  };
+}
+
+/**
+ * The written type a store's value receives (`wholeCheck`): its root's declared type (a `let`'s, a `global`'s or a
+ * parameter's, parsed from the declaration as written), followed through the collections `above` the value, which must
+ * reach the place through the collections `below`; else `null`.
+ */
+function receivingType(
+  rule: StoreRule,
+  above: readonly StoreStep[],
+  below: readonly { readonly collection: "list" | "set" | "dict" }[],
+  source: MessageSource,
+): TypeAnnotation | null {
+  const { root } = rule;
+  if (root === null || root.site === null || root.kind === "result") return null;
+  // (the annotation alone, between the name's `:` and any `=`, parsed as written: a declaration's start value is never
+  // read, so the work is the written type's)
+  const text = source.text(root.site);
+  const colon = text.indexOf(":");
+  const equals = text.indexOf("=");
+  if (colon === -1 || (equals !== -1 && equals < colon)) return null;
+  if (text.slice(0, colon).trim().split(/\s+/).at(-1) !== root.name) return null;
+  const parsed = parse(
+    `let fix: ${text.slice(colon + 1, equals === -1 ? undefined : equals)} = null\nexit\n`,
+  );
+  const [statement] = parsed.program.statements;
+  const declared =
+    parsed.diagnostics.length > 0 || statement?.kind !== "letStatement"
+      ? null
+      : statement.typeAnnotation;
+  // (each collection step's element type, through the layer's `?`; a union there, or another collection, is none)
+  const element = (type: TypeAnnotation | null, step: StoreStep): TypeAnnotation | null => {
+    const at = type?.kind === "optionalType" ? type.value : type;
+    return at !== null &&
+      at !== undefined &&
+      "collection" in step &&
+      (at.kind === "listType" || at.kind === "setType" || at.kind === "dictType") &&
+      at.kind === `${step.collection}Type`
+      ? at.element
+      : null;
+  };
+  let value = declared;
+  for (const step of above) value = element(value, step);
+  let leaf = value;
+  for (const step of below) leaf = element(leaf, step);
+  return leaf === null ? null : value;
+}
+
+/** A written type as code (V30 §13): `integer[]?[]`, `(integer | string) dict`. */
+function annotationText(type: TypeAnnotation): string {
+  const operand = (inner: TypeAnnotation): string =>
+    inner.kind === "unionType" ? `(${annotationText(inner)})` : annotationText(inner);
+  switch (type.kind) {
+    case "namedType":
+      return type.name;
+    case "optionalType":
+      return `${operand(type.value)}?`;
+    case "listType":
+      return `${operand(type.element)}[]`;
+    case "setType":
+      return `${operand(type.element)} set`;
+    case "dictType":
+      return `${operand(type.element)} dict`;
+    case "unionType":
+      return type.members.map(annotationText).join(" | ");
+  }
 }
 
 /**
@@ -466,11 +545,17 @@ export function warningFix(
       : null;
   // (a store whose place is an element below the value: the test of the whole receiving type, no fallback, which would
   // replace the whole value, #1753)
-  const whole = rule.rule === "store" ? wholeTest(rule, site, source) : undefined;
-  if (whole !== undefined)
-    return whole === null || isLiteral(text) || context === "missing"
-      ? ""
-      : (inPlace(whole) ?? checkFix(subject, whole, null, { source, site, diagnosed }));
+  const whole = rule.rule === "store" ? wholeCheck(rule, site, source) : undefined;
+  if (whole !== undefined) {
+    if (isLiteral(text) || context === "missing") return "";
+    if ("test" in whole)
+      return (
+        inPlace(whole.test) ?? checkFix(subject, whole.test, null, { source, site, diagnosed })
+      );
+    return variable(subject) !== null || source.target(site)
+      ? `Check that ${whole.words} '${subject}' is ${whole.leaf} first.`
+      : `Keep '${subject}' in a new variable and check that ${whole.words} it is ${whole.leaf} first.`;
+  }
   if (kinds.includes("null")) {
     // (no fallback for a value a store or a method changes in place, a compound assignment's target among them: the
     // change would be lost)
