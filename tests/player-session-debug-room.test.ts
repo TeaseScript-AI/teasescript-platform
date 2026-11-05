@@ -375,6 +375,7 @@ test("the debug room's start page also says why its session cannot continue afte
     ...kept,
     planJson: JSON.stringify({ ...plan, version: plan.version - 1 }),
     eventsFrom: 0,
+    eventsJson: kept.events.map((event) => JSON.stringify(event)),
   });
   const reopened = await open();
   assert.equal(reopened.activation.value, "start");

@@ -78,6 +78,8 @@ export interface KeptSessionUpdate {
   readonly snapshotJson: string;
   readonly eventsFrom: number;
   readonly events: readonly InterpreterEvent[];
+  /** The engine's JSON of each of `events` (`serializeValidatedRuntimeJson`), which a store keeping text writes. */
+  readonly eventsJson: readonly string[];
   readonly marks: DebugHistoryMarks;
 }
 
@@ -443,7 +445,7 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
               transaction.objectStore(PLANS).get(scope),
               (plan: Record<string, unknown> | undefined) =>
                 got(transaction.objectStore(EVENTS).getAll(eventsFrom(scope, 0)), (records) => {
-                  // Each event is JSON text (`storedData`), or data in a session kept before; text that is not JSON
+                  // Each event is JSON text (`eventsJson`), or data in a session kept before; text that is not JSON
                   // is no event.
                   const events: unknown[] = [];
                   for (const record of records)
@@ -467,7 +469,7 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
     // step does, and goes with the session: a later step reads and writes only the snapshot, marks, event count, and new
     // events, and its plan is there whenever its session is.
     publish: async (scope, update) => {
-      const written = update.events.map(storedData);
+      const written = update.eventsJson;
       return transact<void>(
         database,
         [SESSIONS, PLANS, EVENTS],

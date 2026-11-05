@@ -1177,7 +1177,8 @@ holds:
 
 `captureTemporalContext(timeZone, locale)` builds the context from the host's `Intl` data. Zone offsets are sampled
 daily and each change located by bisection, so two changes less than a day apart that cancel each other out are not
-seen. Fresh-session creation rejects a malformed context with `RangeError`; restore validates it like other snapshot
+seen. Where the host's `Temporal` lists the zone's transitions, the samples read that list instead of formatting each
+day, which gives the same rules; a host without a usable list is scanned with `Intl.DateTimeFormat`. Fresh-session creation rejects a malformed context with `RangeError`; restore validates it like other snapshot
 state. Without a context a session uses UTC and locale-neutral text such as `2026-10-04 18:30`.
 
 Each capture records a context, the UTC wall clock (or `null` when the host supplied none), its boundary scene time,

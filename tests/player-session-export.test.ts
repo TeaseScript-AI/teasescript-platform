@@ -450,6 +450,7 @@ test("Start says why a kept session cannot continue only when a Player update ch
       planJson: JSON.stringify(planJson),
       snapshotJson: JSON.stringify(snapshotJson),
       eventsFrom: 0,
+      eventsJson: from.events.map((event) => JSON.stringify(event)),
     });
     const host = await page(context, { ...into, kept: store }, shown);
     return [host.activation.value, host.outdatedSession.value];
