@@ -593,6 +593,7 @@ export function coreCheckResult(
     request.files.map((file) => file.source),
     result.diagnostics,
     (base) => answers.keptName(base),
+    (units) => answers.messageWork(units),
   );
   const shown = new Set(reportedDiagnostics(answers, result.diagnostics));
   for (const diagnostic of result.diagnostics)

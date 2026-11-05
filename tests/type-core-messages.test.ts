@@ -13,6 +13,14 @@ import {
 } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
+import {
+  type Given,
+  givenBy,
+  landingOf,
+  ownerOf,
+} from "../src/type-inference/core/messages/site.js";
+import { parse } from "../src/parser.js";
+import type { SourceSite } from "../src/type-inference/graph.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
@@ -2285,6 +2293,11 @@ test("a kept value's name is surveyed once, charged to the analysis and no deman
     const request = coreRequest([{ path: "main.tease", source }])!;
     const answers = analyseCore(request);
     const before = answers.budget;
+    // (the records as the analysis left them, copied: the budget's lists are the answers' own, Codex r4 T1 on #1730)
+    const [demands, decisions] = [
+      structuredClone(before.demands),
+      structuredClone(before.decisions),
+    ];
     const checked = coreCheckResult(
       answers,
       new SliceIndex(request.files.map((file) => file.program)),
@@ -2298,8 +2311,8 @@ test("a kept value's name is surveyed once, charged to the analysis and no deman
     const surveyed =
       (answers.budget.counts.get("indexSteps") ?? 0) - (before.counts.get("indexSteps") ?? 0);
     assert.ok(surveyed >= nodes, `k = ${k}: ${surveyed} survey units for ${nodes} nodes`);
-    assert.deepEqual(answers.budget.demands, before.demands, `k = ${k}`);
-    assert.deepEqual(answers.budget.decisions, before.decisions, `k = ${k}`);
+    assert.deepEqual(answers.budget.demands, demands, `k = ${k}`);
+    assert.deepEqual(answers.budget.decisions, decisions, `k = ${k}`);
     return { total: answers.budget.total, nodes };
   });
   for (let at = 1; at < measured.length; at += 1) {
@@ -2347,4 +2360,291 @@ test("a kept value's name survey charges the host's names and every file (#1274)
     [...apart.values()].reduce((sum, units) => sum + units, 0),
     finishing,
   );
+});
+
+/**
+ * #1495 (#1468's rule for a place an object literal types): where a store's place is a property below the warned value,
+ * TSV041's advice names that property in words and where its type must come from, the narrowest expression that owns it
+ * (`MessageSource.owner`), never the whole literal; also where a part of the value already fits, and for a value an
+ * element selection of a list literal gives (`[a, b].random`) or either operand of `otherwise` (a value the set's
+ * collision family gives, where the check named a whole number for an element that holds an object). A value whose
+ * place is its own keeps its own check, also where its landing is unknown (`boxes[0].x`, Codex r1 N1 on #1730), and a
+ * declared place with no test of what fits keeps its own advice, a separate property, beside the same place's type
+ * inferred from a value (the lead's ruling on #1730).
+ */
+test("TSV041's advice names the property an object literal types and its narrowest owner (#1495)", () => {
+  const other = 'let other = fromJson("{\\"volume\\": \\"loud\\"}", default: null)';
+  const cases: readonly (readonly [string, string, string, string])[] = [
+    [
+      `${other}\nlet wrap = {inner: [{volume: 5}, other].random}\nsay "\${wrap.inner.volume}"\nexit\n`,
+      "{inner: [{volume: 5}, other].random}",
+      "Give 'wrap.inner.volume' a whole number (integer) where '[{volume: 5}, other].random' gets its value.",
+      "Check that 'other' is an object first.",
+    ],
+    [
+      'let wrap = {inner: [{volume: 5}, hostValue].random}\nsay "${wrap.inner.volume}"\nexit\n',
+      "hostValue",
+      "Give 'wrap.inner.volume' a whole number (integer) where 'hostValue' gets its value.",
+      "",
+    ],
+    [
+      `${other}\nlet wrap = ({inner: {deep: ([{volume: 5}, other][0])}})\nsay "\${wrap.inner.deep.volume}"\nexit\n`,
+      "({inner: {deep: ([{volume: 5}, other][0])}})",
+      "Give 'wrap.inner.deep.volume' a whole number (integer) where '[{volume: 5}, other][0]' gets its value.",
+      "Check that 'other' is an object first.",
+    ],
+    [
+      "let t: integer = 7\nlet peer = {x: t}\nlet first = [hostValue otherwise {x: 1}, peer]\nexit\n",
+      "hostValue",
+      "Give 'x' of an element of 'first' a whole number (integer) where 'hostValue' gets its value.",
+      "Check that 'hostValue' is an object first.",
+    ],
+    [
+      "let t: integer = 7\nlet peer = {x: t}\nlet first = [{y: hostValue otherwise peer}, {y: peer}]\nexit\n",
+      "hostValue",
+      "Give 'y.x' of an element of 'first' a whole number (integer) where 'hostValue' gets its value.",
+      "Check that 'hostValue' is an object first.",
+    ],
+    [
+      "let t: integer = 7\nlet peer = {x: t}\nlet first = [peer, {x: hostValue otherwise 1}]\nexit\n",
+      "hostValue",
+      "Check that 'hostValue' is a whole number (integer) first.",
+      "",
+    ],
+    [
+      "let t: integer = 1\nlet box = {x: t}\nlet boxes = [box]\nboxes[0].x = hostValue otherwise 1\nexit\n",
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer { boxes[0].x = hostValue otherwise 1 }'.",
+      "",
+    ],
+    [
+      "let typed: list = [1]\nlet root = {f: typed}\nlet holder = [root, hostValue]\nexit\n",
+      "hostValue",
+      "Use a separate property for a value of another type.",
+      "Check that 'hostValue' is an object first.",
+    ],
+    [
+      `${other}\nlet holder = [{f: [1]}, other]\nsay "\${holder[0].f}"\nexit\n`,
+      "[{f: [1]}, other]",
+      "Give 'f' of an element of 'holder' a list where '[{f: [1]}, other]' gets its value.",
+      "",
+    ],
+  ];
+  for (const [source, at, advice, own] of cases) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    const message = (site: string): string =>
+      diagnostics
+        .filter((d) => d.code === "TSV041" && text.text(d.site) === site)
+        .map((d) => coreMessage(d, text))
+        .join(" | ");
+    assert.ok(message(at).includes(advice), `${at}: ${message(at)}`);
+    // (the value whose place is its own keeps its own check)
+    const all = diagnostics
+      .filter((d) => d.code === "TSV041")
+      .map((d) => coreMessage(d, text))
+      .join(" | ");
+    if (own !== "") assert.ok(all.includes(own), all);
+  }
+});
+
+/**
+ * #1730 Codex r1 B1: a warning's landing and owner (`landingOf`, `ownerOf`) find the value a statement gives and a
+ * literal's part by their start, so k warnings, each in its own statement or each an element of one list, read the
+ * statements' values and the list's elements O(k log k) times, not once per earlier one (k = 64 to 256, at most ×2.5
+ * per doubling; a scan per warning grows by ×4).
+ */
+test("a warning's landing and owner read the program's values by their start (#1495)", () => {
+  // (an array whose every element is read through a counting getter, as the lookups' indexed reads and searches do)
+  const counted = <T extends object>(items: readonly T[], count: { reads: number }): T[] => {
+    const array: T[] = [...items];
+    items.forEach((item, at) =>
+      Object.defineProperty(array, at, {
+        get: () => {
+          count.reads += 1;
+          return item;
+        },
+      }),
+    );
+    return array;
+  };
+  const reads = (k: number, list: boolean): number => {
+    const source = list
+      ? `let holder = [${Array.from({ length: k }, () => "{inner: hostValue}").join(", ")}]\nexit\n`
+      : `${Array.from({ length: k }, (_, at) => `let w${at} = {inner: {volume: 5}}\nw${at}.inner = hostValue\n`).join("")}exit\n`;
+    const count = { reads: 0 };
+    const statements = parse(source).program.statements;
+    let given: Given[] = statements.flatMap((statement) => givenBy(statement) ?? []);
+    const sites = source
+      .split("hostValue")
+      .slice(0, -1)
+      .map((_, at, parts) => {
+        const start = parts.slice(0, at + 1).join("hostValue").length;
+        return { file: 0, start, end: start + "hostValue".length };
+      });
+    assert.equal(sites.length, k);
+    if (list) {
+      const [holder] = given;
+      assert.ok(holder !== undefined && holder.value.kind === "listLiteral");
+      given = [
+        { ...holder, value: { ...holder.value, elements: counted(holder.value.elements, count) } },
+      ];
+    } else given = counted(given, count);
+    for (const site of sites) {
+      assert.notEqual(landingOf(given, site), null);
+      ownerOf(given, site, [{ property: "volume" }]);
+    }
+    return count.reads;
+  };
+  for (const list of [false, true]) {
+    const measured = [64, 128, 256].map((k) => reads(k, list));
+    for (let at = 1; at < measured.length; at += 1)
+      assert.ok(
+        measured[at]! <= 2.5 * measured[at - 1]!,
+        `${list ? "elements" : "values"}: ${measured.join(", ")}`,
+      );
+  }
+});
+
+/**
+ * #1730, Astra r1 B1: a message's walk to a warned value and an owner's index charge their work, one unit per item a
+ * search compares, per expression walked, per property an owner's index holds (made once per literal) and per step it
+ * takes; through `coreCheckResult` the units count to the analysis's total as a shared build (`Answers.messageWork`),
+ * to no demand, and grow linearly with the warnings (k = 64 to 256, at most ×2.5 per doubling).
+ */
+test("a message's walk and owner index charge their work, to the analysis and no demand (#1495)", () => {
+  const n = 64;
+  const properties = Array.from({ length: n }, (_, at) => `p${at}: 1`).join(", ");
+  const source = `let wrap = {${properties}, inner: {volume: 5}}\nexit\n`;
+  const [given] = parse(source).program.statements.flatMap((statement) => givenBy(statement) ?? []);
+  assert.ok(given !== undefined && given.value.kind === "objectLiteral");
+  const literal = given.value;
+  const whole = { file: 0, start: literal.span.start.offset, end: literal.span.end.offset };
+  let units = 0;
+  const charge = (more: number): void => {
+    units += more;
+  };
+  const steps = [{ property: "inner" }, { property: "volume" }];
+  ownerOf([given], whole, steps, charge);
+  // (one value compared, one expression walked, the outer index's n + 1 entries and the inner's one, two steps taken)
+  assert.equal(units, 1 + 1 + (n + 1) + 1 + 2);
+  units = 0;
+  ownerOf([given], whole, steps, charge);
+  // (each index made once)
+  assert.equal(units, 1 + 1 + 2);
+  // (the landing at `5`: one value compared, three expressions walked, the properties each literal's search compares)
+  const count = { reads: 0 };
+  const read = <T extends object>(items: readonly T[]): T[] => {
+    const array: T[] = [...items];
+    items.forEach((item, at) =>
+      Object.defineProperty(array, at, {
+        get: () => {
+          count.reads += 1;
+          return item;
+        },
+      }),
+    );
+    return array;
+  };
+  const inner = literal.properties.at(-1)!.value;
+  assert.ok(inner.kind === "objectLiteral");
+  const counted: Given = {
+    ...given,
+    value: {
+      ...literal,
+      properties: read([
+        ...literal.properties.slice(0, -1),
+        { ...literal.properties.at(-1)!, value: { ...inner, properties: read(inner.properties) } },
+      ]),
+    },
+  };
+  const five = source.indexOf("volume: 5") + "volume: ".length;
+  units = 0;
+  assert.notEqual(landingOf([counted], { file: 0, start: five, end: five + 1 }, charge), null);
+  assert.equal(units, 1 + 3 + count.reads);
+  // (each parenthesis unwrapped is a unit more: d around an owner's two literals, 2d; d around a selection's list, d)
+  const charged = (code: string, at: (code: string) => SourceSite, owned: boolean): number => {
+    const [entry] = parse(code).program.statements.flatMap((statement) => givenBy(statement) ?? []);
+    assert.ok(entry !== undefined, code);
+    let spent = 0;
+    const add = (more: number): void => {
+      spent += more;
+    };
+    if (owned) ownerOf([entry], at(code), steps, add);
+    else assert.notEqual(landingOf([entry], at(code), add), null, code);
+    return spent;
+  };
+  const wrapped = (d: number, text: string): string => `${"(".repeat(d)}${text}${")".repeat(d)}`;
+  const value = (code: string): SourceSite => ({
+    file: 0,
+    start: code.indexOf("= ") + 2,
+    end: code.indexOf("\nexit"),
+  });
+  const element = (code: string): SourceSite => {
+    const start = code.indexOf("{volume: 5}");
+    return { file: 0, start, end: start + "{volume: 5}".length };
+  };
+  for (const d of [1, 4, 16]) {
+    const owner = (depth: number): string =>
+      `let wrap = ${wrapped(depth, `{a: 1, inner: ${wrapped(depth, "{volume: 5}")}}`)}\nexit\n`;
+    assert.equal(
+      charged(owner(d), value, true) - charged(owner(0), value, true),
+      2 * d,
+      `owner, ${d}`,
+    );
+    const selection = (depth: number): string =>
+      `let wrap = {inner: ${wrapped(depth, "[{volume: 5}, hostValue]")}[0]}\nexit\n`;
+    assert.equal(
+      charged(selection(d), element, false) - charged(selection(0), element, false),
+      d,
+      `selection, ${d}`,
+    );
+  }
+  // (through the compile's consumer: what the messages charge is the analysis's, beside the same compile whose messages
+  // charge nothing; a demand's records as they were)
+  const compiled = (k: number, charging: boolean) => {
+    const program = `${Array.from({ length: k }, (_, at) => `let w${at} = {inner: [{volume: 5}, hostValue].random}\n`).join("")}exit\n`;
+    const request = coreRequest([{ path: "main.tease", source: program }])!;
+    const answers = analyseCore(request);
+    const before = answers.budget;
+    // (the records as the analysis left them, copied: the budget's lists are the answers' own, Codex r4 T1 on #1730)
+    const [demands, decisions] = [
+      structuredClone(before.demands),
+      structuredClone(before.decisions),
+    ];
+    let charged = 0;
+    const counts = answers.messageWork.bind(answers);
+    answers.messageWork = (more) => {
+      charged += more;
+      counts(charging ? more : 0);
+    };
+    const checked = coreCheckResult(
+      answers,
+      new SliceIndex(request.files.map((file) => file.program)),
+      request,
+    );
+    const owned = checked.diagnostics
+      .flat()
+      .filter((diagnostic) => diagnostic.message.includes("where 'hostValue' gets its value"));
+    assert.equal(owned.length, k, `k = ${k}`);
+    assert.deepEqual(answers.budget.demands, demands, `k = ${k}`);
+    assert.deepEqual(answers.budget.decisions, decisions, `k = ${k}`);
+    return {
+      charged,
+      total: answers.budget.total,
+      indexSteps: answers.budget.counts.get("indexSteps") ?? 0,
+    };
+  };
+  const work = [64, 128, 256].map((k) => {
+    const [charging, free] = [compiled(k, true), compiled(k, false)];
+    assert.ok(charging.charged >= 2 * k, `k = ${k}: ${charging.charged}`);
+    assert.equal(charging.charged, free.charged, `k = ${k}`);
+    assert.equal(charging.total - free.total, charging.charged, `k = ${k}`);
+    assert.equal(charging.indexSteps - free.indexSteps, charging.charged, `k = ${k}`);
+    return charging.charged;
+  });
+  for (let at = 1; at < work.length; at += 1)
+    assert.ok(work[at]! <= 2.5 * work[at - 1]!, work.join(", "));
 });

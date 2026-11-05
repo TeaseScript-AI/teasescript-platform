@@ -8,8 +8,15 @@ import { repeatCountFix, repeatCountMessage } from "../../loop-rules.js";
 import { cannotConvert, describeShownValue } from "../../runtime/values/value-types.js";
 import type { WorkLedger } from "./budget.js";
 import type { ItemTag } from "./items.js";
-import type { CheckedDiagnostic, CoreCode, DiagnosticRule, StaticRule } from "./result.js";
+import type {
+  CheckedDiagnostic,
+  CoreCode,
+  DiagnosticRule,
+  StaticRule,
+  StoreStep,
+} from "./result.js";
 import {
+  type Charge,
   type Given,
   givenBy,
   guards,
@@ -17,6 +24,7 @@ import {
   inTarget,
   type Landing,
   landingOf,
+  ownerOf,
   type LineStatements,
   type MessageSource,
   UNGUARDED,
@@ -41,12 +49,14 @@ export { described, pathPhrase } from "./messages/words.js";
 /**
  * The message source of a project's files and of their analysis's diagnostics: each file's text, its lines counted
  * once, its statements on one line by their line, each parsed once, and its diagnostics' sites in start order, each
- * on first need; `keptName`, the analysis's name for a kept value (`Answers.keptName`), else one surveyed here.
+ * on first need; `keptName`, the analysis's name for a kept value (`Answers.keptName`), else one surveyed here; `charge`,
+ * where a landing's and an owner's walk count their work (`Answers.messageWork`), else nowhere.
  */
 export function messageSource(
   sources: readonly string[],
   diagnostics: readonly CheckedDiagnostic[],
   keptName?: (base: string) => string,
+  charge?: Charge,
 ): MessageSource {
   const starts = new Map<number, number[]>();
   const programs = new Map<number, Program>();
@@ -210,9 +220,17 @@ export function messageSource(
     }
     return found;
   };
-  const landing = (site: SourceSite): Landing | null => landingOf(givensOf(site.file), site);
-  // (every name a project's code spells: its identifiers but the property names of objects, speakers, reads and
-  // arguments, which no variable can clash with; with the host globals and built-ins, `freeName`'s taken names)
+  // (each walk's units, counted once it ends: one charge per landing or owner asked)
+  const metered = <T>(walk: (count: Charge) => T): T => {
+    let units = 0;
+    const value = walk((more) => {
+      units += more;
+    });
+    if (units > 0) charge?.(units);
+    return value;
+  };
+  const landing = (site: SourceSite): Landing | null =>
+    metered((count) => landingOf(givensOf(site.file), site, count));
   // (the kept variable's name: the analysis's, chosen once and charged as its question, else surveyed here once, uncharged)
   const surveyed = new Map<string, string>();
   const freeName =
@@ -230,10 +248,13 @@ export function messageSource(
       }
       return name;
     });
+  const owner = (site: SourceSite, steps: readonly StoreStep[]): SourceSite =>
+    metered((count) => ownerOf(givensOf(site.file), site, steps, count));
   return {
     freeName,
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
     landing,
+    owner,
     target: (site) =>
       statementsOf(site.file)
         .get(line(site) - 1)

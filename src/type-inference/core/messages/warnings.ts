@@ -329,20 +329,24 @@ function checkFix(
  * property by its way from the load, of the place's type, which its reader then takes where the stored property misfits
  * or is missing; anything else
  * gives no check that discharges the warning (a property's check does not reach a copy of the whole object, Astra r1's
- * A1, #1496), so the words say where the type must come from. `null` where the place is the value itself or its
- * element, whose own check is the fix.
+ * A1, #1496), so the words say where the type must come from: the narrowest expression that owns the property below
+ * the value (`MessageSource.owner`, #1495), never the whole literal where a part of it owns it. `null` where the place
+ * is the value itself or its element, whose own check is the fix; `strict`, also where the value's landing is unknown
+ * or off the place's path, whose own check may be the fix (#1730 Codex r1 N1: `boxes[0].x = hostValue otherwise 1`).
  */
 function propertyFix(
   rule: StoreRule,
-  text: string,
   site: SourceSite,
   source: MessageSource,
+  strict = false,
 ): string | null {
   if (!rule.steps.some((step) => "property" in step)) return null;
   const type = described(rule.type);
-  const otherwise = `Give ${rule.into} ${type} where '${text}' gets its value.`;
   const landing = source.landing(site);
   const above = landing?.steps ?? [];
+  // (where the place's type must come from: the expression that owns the property, the value where no part of it does)
+  const where = (steps: readonly StoreStep[]): string =>
+    `Give ${rule.into} ${type} where '${source.text(source.owner(site, steps))}' gets its value.`;
   const same = (a: StoreStep, b: StoreStep): boolean =>
     "property" in a
       ? "property" in b && a.property === b.property
@@ -355,13 +359,13 @@ function propertyFix(
     above.length > rule.steps.length ||
     !above.every((step, index) => same(step, rule.steps[index]!))
   )
-    return otherwise;
+    return strict ? null : where([]);
   const below = rule.steps.slice(above.length);
   if (!below.some((step) => "property" in step)) return null;
   const found = originOf(rule);
   // (a type with null takes no default that discharges yet: a value of its other type narrows what the place takes,
   // and a default's `null` does not yet prove the property, #1470)
-  if (found === undefined || rule.type.includes("null")) return otherwise;
+  if (found === undefined || rule.type.includes("null")) return where(below);
   // (the property by its way below the load where only properties lead there, else by its way from the variable that
   // holds the load)
   const named = pathPhrase(
@@ -529,7 +533,7 @@ export function warningFix(
     // (a store's place below the value, a property of what it holds: that property's fix, #1468)
     const property =
       rule.rule === "store" && !isLiteral(text) && context !== "missing"
-        ? propertyFix(rule, text, site, source)
+        ? propertyFix(rule, site, source)
         : null;
     if (property !== null) return property;
     return test === null || isLiteral(text) || context === "missing"
@@ -539,6 +543,13 @@ export function warningFix(
   // (no test where the read itself stops, a property an object may lack, nor of a literal, whose type is its own)
   if (isLiteral(text) || context === "missing") return "";
   const test = typeTest(fits);
+  // (a store's place below a value part of which fits, a property of what it holds: that property's fix, #1495; but a
+  // declared place with no test of what fits keeps the store's own advice, a separate property: the type is the
+  // author's declaration, the lead's ruling on #1730)
+  if (rule.rule === "store" && kinds.includes("unknown") && !(rule.written && test === null)) {
+    const property = propertyFix(rule, site, source, true);
+    if (property !== null) return property;
+  }
   if (test !== null)
     return inPlace(test) ?? checkFix(subject, test, null, { source, site, diagnosed });
   return errorFix(rule, text, kinds, site, source, diagnosed).trimStart();
