@@ -2,6 +2,7 @@ import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
 import { createBrowserCaptureHost, browserMediaUrls } from "../../browser-capture.js";
 import { CaptureDevice } from "../../capture-device.js";
+import { planLockNeeds } from "../../plan-metadata.js";
 import {
   CapturedMediaNotStoredError,
   CapturedMediaStore,
@@ -84,7 +85,7 @@ import {
 } from "../../../src/index.js";
 import type { Problem } from "./ProblemCard.vue";
 import type { SavedDataHost } from "../../saved-data.js";
-import { playerBuildIdentity } from "./buildIdentity";
+import { playerBuildIdentity } from "../../build-identity.js";
 import type { ScriptStorageProvider } from "../../script-storage.js";
 import {
   checkStorageTransferImages,
@@ -606,17 +607,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   watch(
     () => servicedSession.value?.plan,
     (plan) => {
-      if (plan?.instructions.some((instruction) => instruction.kind === "lock") !== true) return;
+      const needs = plan === undefined ? null : planLockNeeds(plan);
+      if (needs?.locks !== true) return;
       void import("../../encryption/lock.js").catch(() => {});
       void (options.lockServices?.tlock ?? (() => import("../../encryption/tlock.js")))().catch(
         () => {},
       );
-      const encrypts = plan.instructions.some(
-        (instruction) =>
-          instruction.kind === "lock" &&
-          (instruction.call === "encryptText" || instruction.call === "encryptFile"),
-      );
-      if (encrypts)
+      if (needs.encrypts)
         void (options.lockServices?.age ?? (() => import("../../encryption/age.js")))().catch(
           () => {},
         );

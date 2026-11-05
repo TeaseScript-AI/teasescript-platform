@@ -8,8 +8,9 @@ import type { RuntimePlayerProfileInput } from "../../../src/runtime/host-data/p
 import type { ScriptFailure } from "./ScriptProblems.vue";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { MAIN_FILE_PATH } from "../../../src/index.js";
-import { lex } from "../../../src/lexer.js";
-import { readScriptHeader } from "../../../src/script-header.js";
+import { scriptIdentity, type ScriptIdentity } from "../../script-identity.js";
+
+export type { ScriptIdentity };
 
 /** The code of a package file the host could not load (`docs/DIAGNOSTICS.md`). */
 const UNREADABLE_FILE_CODE = "TSC011";
@@ -24,12 +25,6 @@ export interface ScriptHost {
   resolveAsset(path: string): string | null;
   /** The script, or the package as a project with the files the host could not load. */
   load(): Promise<{ readonly project: string | PlayerProject }>;
-}
-
-/** The `title` and `author` of a script's header, each `null` when the header does not give it. */
-export interface ScriptIdentity {
-  readonly title: string | null;
-  readonly author: string | null;
 }
 
 /**
@@ -93,18 +88,4 @@ export function prepareHostedScript(
     },
   );
   return { failure, identity };
-}
-
-/** The `title` and `author` of `main.tease`'s header; a blank field counts as absent. */
-function scriptIdentity(project: string | PlayerProject): ScriptIdentity {
-  const source =
-    typeof project === "string"
-      ? project
-      : project.files.find((file) => file.path === MAIN_FILE_PATH)?.source;
-  const header = source === undefined ? null : readScriptHeader(lex(source)).header;
-  const field = (value: string | null | undefined) => {
-    const trimmed = value?.trim() ?? "";
-    return trimmed === "" ? null : trimmed;
-  };
-  return { title: field(header?.title), author: field(header?.author) };
 }

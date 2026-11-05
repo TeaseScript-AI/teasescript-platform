@@ -1,4 +1,4 @@
-/** This build's identity for debug exports; every field is `null` where it is unknown, such as in tests. */
+/** This build's identity for debug exports and the engine bridge; every field is `null` where it is unknown, such as in tests. */
 export const playerBuildIdentity = {
   commit: typeof __PLAYER_BUILD__ === "undefined" ? null : __PLAYER_BUILD__.commit,
   dirty: typeof __PLAYER_BUILD__ === "undefined" ? null : __PLAYER_BUILD__.dirty,
