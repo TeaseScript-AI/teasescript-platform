@@ -720,6 +720,24 @@ export class Consumers {
   /** The receiving seed's store sites (`#capture`); `null` in a pass whose admission did not settle. */
   #storeSites: readonly { readonly site: SourceSite; readonly stopped: boolean }[] | null = null;
 
+  /**
+   * The receiving obligations of a pass whose admission settled, found once, without a completion (#1526 decision 2,
+   * condition 1): what a published plan's gate reads after a stop where no receiving completion ran (`Answers.gated`);
+   * `null` where admission did not settle. Every store and slot visited charged, as `receive` charges them.
+   */
+  public stopObligations(): readonly ReceivingObligation[] | null {
+    if (this.#storeSites === null) return null;
+    this.#stopObligations ??= receivingObligations(this.admission, {
+      epoch: epochOf(this.pass),
+      storeSites: this.#storeSites,
+      ingressSites: this.#ingressSites,
+      siteKey,
+    });
+    return this.#stopObligations;
+  }
+
+  #stopObligations: readonly ReceivingObligation[] | undefined;
+
   /** Whether the receiving completion was asked for (`receive`), once. */
   #received = false;
 

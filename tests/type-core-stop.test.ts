@@ -4960,13 +4960,13 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
   ];
   // (#1526 decision 2, condition 1, TABLE r4.390: a settled stop whose plan lost the element's check, which the unstopped
   // plan makes against a host value, is declined; where the reference run at demand 257 is such a stop, a decision's,
-  // each of its stops is left uncompared, for want of a reference)
+  // each of its stops is declined too, but an unsettled one, which has no registry: option (a), #1767, #1252)
   const declines = (error: unknown): boolean =>
     error instanceof CandidateOutsideSlice &&
     error.what === "a store whose check was lost at the budget";
   let compared = 0;
   let declined = 0;
-  let uncompared = 0;
+  let unsettled = 0;
   for (const source of sources)
     for (const demand of [null, 257])
       for (const mode of MODES) {
@@ -4984,7 +4984,17 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
           unstopped = stopRunIn(inDemand, source);
         } catch (error) {
           assert.ok(declines(error), `${source} demand: ${demand}, ${JSON.stringify(mode)}`);
-          uncompared += stopsOf().length;
+          for (const [phase, allowance] of stopsOf()) {
+            const where = `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`;
+            try {
+              const stopped = stopRunIn(inDemand, source, allowance);
+              assert.equal(stopped.answers.budget.settled, false, where);
+              unsettled += 1;
+            } catch (stop) {
+              assert.ok(declines(stop), where);
+              declined += 1;
+            }
+          }
           continue;
         }
         if (unstopped.answers.budget.exhausted !== null) continue;
@@ -5019,12 +5029,9 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
         }
       }
   // (54 stops: in source order at demand 257, with and without sharing, the first source's reference run stops `root`'s
-  // decisions and loses `value.a`'s element check, so its five stops each, two walk ends, two publication ends and the
-  // last unsettled one, are uncompared)
-  assert.deepEqual(
-    { compared, declined, uncompared },
-    { compared: 44, declined: 0, uncompared: 10 },
-  );
+  // decisions and loses the `value.a` element's check; of its five stops each, its two walk ends and two publication ends
+  // are declined, and the last unsettled one is option (a)'s)
+  assert.deepEqual({ compared, declined, unsettled }, { compared: 44, declined: 8, unsettled: 2 });
 });
 
 /**

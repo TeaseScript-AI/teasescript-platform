@@ -1251,18 +1251,16 @@ function runtimeChecks(
 
 /**
  * #1526 decision 2, condition 1 (TABLE r4.390): while a required check is missing, the candidate publishes no plan that
- * lets the invalid value through unchecked. After a settled decision stop, each obligation of the pass's receiving
- * registry (`Answers.receiving`, #1526 phase C) that a store owes when the script runs, its C1 check (a warning the
- * walk made) or its C9 boundary (external data entering), is Lost where the plan's check at its store
- * does not carry its required contract: the store's published contract is lost, its part only, and the receiving
- * completion completed none there; or the obligation is a complete contract the completion completed and no published
- * check of its store reaches it (#1645's whole object); or a shape it requires is lost. A complete published contract,
- * settled or received, keeps it, and so does one proved open, which the unstopped analysis checks against nothing
- * either. The first Lost obligation, in the registry's source order, declines the program at its store (`OutsideContract`):
- * the stopped plan would otherwise run past a check the natural plan makes (ADR 0021 §1.10, r4.295 column (2)). A program
- * the analysis rejects has no plan and is not asked. Without a settled decision stop there is no registry and nothing is
- * declined here; an unsettled stop is #1767's and #1252's.
- * One visit per obligation of the registry, whose making charged each one (r4.261).
+ * lets the invalid value through unchecked. Every plan published after a stop is gated here, at the one seam `asked`
+ * publishes through, against the capture its path has (`Answers.gated`): the receiving registry where a receiving
+ * completion ran (#1526 phase C), its results; after a stop where none ran or it kept none, the registry's obligations
+ * without results. Each obligation a store owes when the script runs, its C1 check (a warning the walk made) or its C9
+ * boundary (external data entering), is Lost where the plan's check at its store does not carry its required contract
+ * (`keeps`). The first Lost obligation, in the registry's source order, declines the program at its store
+ * (`OutsideContract`): the stopped plan would otherwise run past a check the natural plan makes (ADR 0021 §1.10, r4.295
+ * column (2)). A program the analysis rejects has no plan and is not asked. Where admission did not settle there is no
+ * registry and nothing is declined here: an unsettled stop is #1767's and #1252's. One visit per obligation of the
+ * registry, whose making charged each one (r4.261).
  */
 function lostCheck(
   answers: Answers,
@@ -1271,7 +1269,7 @@ function lostCheck(
   checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   core: CoreRuntimeChecks,
 ): void {
-  for (const { obligation, result } of answers.receiving) {
+  for (const { obligation, result } of answers.gated()) {
     // (a stopped decision's own marks stand at every store of it, external data or not: the store's own C1 check and
     // its C9 boundary are the checks it owes when the script runs)
     if (obligation.epoch !== answers.epoch || obligation.slot.role === "stopped") continue;
@@ -1293,8 +1291,8 @@ function lostCheck(
  * store check carries; a contract proved open; a complete store check (settled or received, its whole type); or a
  * contract the completion completed that a published check carries at the obligation's path, with the contract's own
  * type there: a typed parse's or load's reader of the value stored (F18), or, where the natural plan does not check the
- * store whole, its part checks there (#1682). Where the completion kept no result, past its allowance, only the store's
- * check keeps it, against a contract the settled pass proved complete or open. A check against bare `unknown` where the contract owes a domain carries nothing.
+ * store whole, its part checks there (#1682). Where the completion kept no result, past its allowance, only the
+ * complete store check keeps it. A check against bare `unknown` where the contract owes a domain carries nothing.
  */
 function keeps(
   answers: Answers,
@@ -1308,10 +1306,18 @@ function keeps(
 ): boolean {
   const own = published.get(store);
   const whole = own?.state === "complete" && checks.has(store);
-  // (a completion past its allowance keeps no result, and the plan is the settled pass's: only its store check keeps the
-  // obligation, against a contract the settled pass proved complete or open)
-  if (result === null)
-    return checks.has(store) && (own?.state === "complete" || own?.state === "open");
+  // (no result, a completion past its allowance or a stop of the analysis: the plan is the settled pass's, and only its
+  // complete store check or a typed parse's or load's reader of the value stored, the core's own answer at the call (F18),
+  // carries what the obligation requires; a partial store check may be weaker than the natural plan's, which nothing tells)
+  if (result === null) {
+    const read = unwrap(store.kind === "letStatement" ? store.initializer : store.value);
+    return (
+      whole ||
+      (read.kind === "loadExpression"
+        ? checks.has(read)
+        : read.kind === "callExpression" && core.expected.has(read))
+    );
+  }
   // (a shape is the suitability the value's own structure proves where it is not lost; a complete result there is the
   // requirement's, which a shape owes no more of)
   if (obligation.extent === "shape" || "shape" in result) return result.state !== "lost" || whole;

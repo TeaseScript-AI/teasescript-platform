@@ -520,6 +520,16 @@ export interface Answers {
    */
   completed<T>(again: () => T): T | null;
   /**
+   * The obligations a published plan's gate reads (#1526 decision 2, condition 1, `lostCheck`): the receiving registry
+   * where a receiving completion ran (`receiving`, its results); after a stop of the analysis, where none runs, once
+   * admission settled, the registry's obligations without results, found as finishing work counted apart
+   * (`Consumers.stopObligations`); none elsewhere.
+   */
+  gated(): readonly {
+    readonly obligation: ReceivingObligation;
+    readonly result: ReceivingResult | null;
+  }[];
+  /**
    * `callback` as finishing work counted apart (`WorkLedger.apart`), in the budget's `apart` and never its total: the
    * settled pass's publication asked once more where the receiving completion kept no result, so its gate reads the
    * registry (#1526 decision 2, condition 1, `asked`).
@@ -1708,6 +1718,15 @@ class CoreAnswers implements Answers {
     for (const item of bySite(ranked))
       if (!order.has(item.obligation)) order.set(item.obligation, order.size);
     return order;
+  }
+
+  public gated(): Answers["receiving"] {
+    // (the registry once a receiving completion made it, in its questions asked again too; where the analysis stopped none
+    // runs; elsewhere it runs after the first questions, `asked`)
+    if (this.receiving.length > 0) return this.receiving;
+    const found =
+      this.budget.exhausted === null ? null : this.apart(() => this.#consumers.stopObligations());
+    return found === null ? [] : found.map((obligation) => ({ obligation, result: null }));
   }
 
   public apart<T>(callback: () => T): T {
