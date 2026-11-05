@@ -152,6 +152,14 @@ function touchElements(
   return out;
 }
 
+/** The carriers a value is read through to what it selects: a projection's owner, an `otherwise`'s sides. */
+const RESOLVED: ReadonlySet<string> = new Set([
+  "projection/owner",
+  "projection/record field",
+  "otherwise/operand",
+  "otherwise/fallback",
+]);
+
 /**
  * A literal value's stores at one step, in evaluation order: a property's one store, a collection's every element, a
  * dict's values among them (its `element`, as its type has them). Every walk of a literal's children asks here with its
@@ -350,12 +358,19 @@ export function literalElements(
       shared = paths;
       atCopy = atCopies.get(key)!;
     }
-    // (#1765: whether a value may hold null at a layer, by its own form, never by what a copy's items hold: a join, if
-    // any operand may, each by this same rule; anything a written copy decides, its term alone, whatever a rejected
-    // store put there; anything else, a null among its items; Codex r1–r3 on #1789, the lead's ruling (ii))
+    // (#1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a copy's
+    // items hold (the lead's ruling (A) on #1789, after Codex r1–r4):
+    // - a join, if any operand may;
+    // - a literal, by its children at the layer's next step, each by this same rule below; at its own level, its kind;
+    // - a selection (a projection's owner, an `otherwise`'s sides), by what it selects there; an `otherwise`'s operand
+    //   never at its own level, its fallback only where the operand may itself be null;
+    // - a written copy, by its term alone, whatever a rejected store put there;
+    // - another read or a call's result, by its place's admitted type;
+    // - a value with no place (an operation's own result), by its own items)
     const mayHoldNull = (value: PlaceId, node: FlowNode, prefix: readonly string[]): boolean => {
-      const pending = [value];
-      for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
+      const pending: (readonly [PlaceId, FlowNode, readonly string[]])[] = [[value, node, prefix]];
+      for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+        const [at, from, steps] = next;
         program.work.charge("checks");
         const c = program.opOf.get(at);
         if (
@@ -365,18 +380,52 @@ export function literalElements(
           c.contract.name === "+" &&
           c.arguments.length === 2
         ) {
-          pending.push(...c.arguments);
+          for (const operand of c.arguments) pending.push([operand, from, steps]);
+          continue;
+        }
+        if (program.hasOf.has(at)) {
+          if (steps.length === 0) {
+            if (
+              withoutEmpty(admission.run(contract.contractOfValueAt(at, []))).some(
+                (item) => item.tag === "null",
+              )
+            )
+              return true;
+            continue;
+          }
+          const rest = keptSlice(admission.work, steps, 1);
+          for (const child of literalChildren(admission, at, steps[0]!))
+            pending.push([child.value!, child.node ?? from, rest]);
+          continue;
+        }
+        const carried = admission.carriersOf(at, steps);
+        if (carried.length > 0 && carried.every(([, , role]) => RESOLVED.has(role))) {
+          // (an `otherwise`'s fallback only where its operand may itself be null, by this same rule)
+          const operand = carried.find(([, , role]) => role === "otherwise/operand")?.[0];
+          const falls = operand === undefined || mayHoldNull(operand, from, []);
+          for (const [part, strip, role] of carried)
+            if (
+              (role !== "otherwise/operand" || strip.length > 0) &&
+              (role !== "otherwise/fallback" || falls)
+            )
+              pending.push([part, from, strip]);
           continue;
         }
         const copied = holdsSource(admission, at)
-          ? (drive(admission, earliestDecider(admission, at, node, prefix, null))?.term ?? null)
+          ? (drive(admission, earliestDecider(admission, at, from, steps, null))?.term ?? null)
           : null;
         if (copied !== null) {
           if (typeTags(copied).includes("null")) return true;
           continue;
         }
+        const key = contract.copiedKey(at) ?? contract.resultKey(at);
+        if (key !== null) {
+          const path = joinSteps(stepsArray(keyStepsIn(contract, key)), steps);
+          if (admission.admitted(keyPlace(key), path).includes("null")) return true;
+          continue;
+        }
         if (
-          withoutEmpty(admission.run(contract.contractOfValueAt(at, prefix))).some(
+          withoutEmpty(admission.run(contract.contractOfValueAt(at, steps))).some(
             (item) => item.tag === "null",
           )
         )
@@ -414,8 +463,8 @@ export function literalElements(
               offends(at, [...new Set(deciding(items).map((item) => item.tag))]),
             )
           : null;
-      // (#1765: the layers between the element and the leaf that may hold null, each element's: a written copy's term
-      // there, or a null among its items; the sentence's type alone, as the leaf's own null is, #1753)
+      // (#1765: the layers between the element and the leaf that may hold null, each element's by its form
+      // (`mayHoldNull`); the sentence's type alone, as the leaf's own null is, #1753)
       const layers = (of: Definition): boolean[] =>
         intermediateLayers(admission.work, path).map((prefix) =>
           mayHoldNull(of.value!, of.node, prefix),
@@ -752,12 +801,6 @@ export function joinElements(
   // that is no literal and carries nothing. The join check never derives again a type the join rule already composed:
   // a join answers the same inline as kept (the lead's rule on #1310))
   type Part = { readonly join: PlaceId } | { readonly leaf: PlaceId };
-  const RESOLVED: ReadonlySet<string> = new Set([
-    "projection/owner",
-    "projection/record field",
-    "otherwise/operand",
-    "otherwise/fallback",
-  ]);
   const reaches = new Map<PlaceId, readonly Part[] | null>();
   const reachOf = (operand: PlaceId): readonly Part[] | null => {
     const known = reaches.get(operand);

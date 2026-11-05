@@ -2753,6 +2753,61 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let a:integer[][]=[[1],null]\nlet xs=[a+[[2]],[["x"]]]\nexit\n',
       `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
     ],
+    // (a join below a literal, a property, an index, an `otherwise` or a projection: its operand's null, each form by its own
+    // rule; Codex r4's B1)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]],[[["x"]]]]\nexit\n',
+      `This list mixes a list (integer[]?[][]) and a list (string[][][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[{f:a+[[2],null]},{f:[["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer[]?[]) in one and a list (string[][]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]][0],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[(a+[[2],null]) otherwise [[3]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[({f:a+[[2],null]}).f,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (an inferred result, and a read of an unwritten binding: their place's admitted type; Codex r4's B2)
+    [
+      'let a:integer[]?[]=[[1]]\nlet b:string[][]=[["x"]]\nfunction give { return a }\nlet xs=[give(),b]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let b=[[1],null]\nlet xs=[b,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a written copy below a literal: its declared type, whatever a rejected store put there)
+    [
+      'let a:integer[][]=[[1],null]\nlet xs=[[a],[[["x"]]]]\nexit\n',
+      `This list mixes a list (integer[][][]) and a list (string[][][]). ${ONE}`,
+    ],
+    // (an `otherwise`: its fallback only where its operand may be null, its operand's null never at its own level)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]?=null\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[]?=null\nlet xs=[[a otherwise [1]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a property read of a literal-bound binding holding no null: plain)
+    [
+      'let o={p:[[1]]}\nlet xs=[o.p,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
     // (no layer that may hold null: plain)
     [
       'let a:integer[][]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
