@@ -1081,21 +1081,30 @@ function withBesides(diagnostics: readonly CoreDiagnostic[]): CoreDiagnostic[] {
 /**
  * A published list in source order of its items' sites (file, start, end): at one site in the order the consumers run
  * (`rule`), and one consumer's by their own text, so the order is the same whichever order a consumer visits in and with
- * the sharing on or off (TABLE r4.86 (1)).
+ * the sharing on or off (TABLE r4.86 (1)). An item's text (its JSON) is made only where its site and rule tie with
+ * another's, once per item: serializing flattens the operand text its records share, which a stopped analysis's many
+ * records would then each keep (#1734).
  */
-function bySite<T extends { readonly site: SourceSite }>(
+export function bySite<T extends { readonly site: SourceSite }>(
   list: readonly { readonly item: T; readonly rule: number }[],
 ): T[] {
-  return list
-    .map(({ item, rule }) => ({ item, rule, text: JSON.stringify(item) }))
-    .sort(
-      (a, b) =>
+  const texts = new Map<T, string>();
+  const text = (item: T): string => {
+    let found = texts.get(item);
+    if (found === undefined) texts.set(item, (found = JSON.stringify(item)));
+    return found;
+  };
+  return [...list]
+    .sort((a, b) => {
+      const order =
         a.item.site.file - b.item.site.file ||
         a.item.site.start - b.item.site.start ||
         a.item.site.end - b.item.site.end ||
-        a.rule - b.rule ||
-        (a.text < b.text ? -1 : a.text > b.text ? 1 : 0),
-    )
+        a.rule - b.rule;
+      if (order !== 0) return order;
+      const [left, right] = [text(a.item), text(b.item)];
+      return left < right ? -1 : left > right ? 1 : 0;
+    })
     .map(({ item }) => item);
 }
 
