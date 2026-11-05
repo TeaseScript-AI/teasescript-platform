@@ -146,8 +146,9 @@ function keyOfSteps(place: PlaceId, rest: Steps): Key {
 export class Values {
   /** The route each read took, by key, node and `before`, recorded as the read is answered. */
   readonly #routes = new Map<string, ReadRoute>();
-  /** Per read, the narrowing it takes (`#narrowingOf`). */
+  /** Per read, the narrowing it takes (`#narrowingOf`), and per place, its stable chain's binding (`#stableBinding`). */
   readonly #narrowings = new Map<PlaceId, NarrowedRead | null>();
+  readonly #bindings = new Map<PlaceId, PlaceId | null>();
   /** Per type test's form, its spelling (`#testSpelling`). */
   readonly #testSpellings = new Map<NarrowingForm, Spelling>();
 
@@ -259,32 +260,29 @@ export class Values {
     let found: NarrowedRead | null = null;
     const outer = program.projOf.get(value);
     const read = outer === undefined ? (program.occNode.get(value) ?? null) : outer.node;
-    // (the chain down to its binding, its steps as the exact path keys them, the node `#valueAt` passes down)
-    const steps: string[] = [];
-    let at = value;
-    let node: FlowNode | null = null;
-    let stable = read !== null && read.span !== null;
-    for (let projection = outer; projection !== undefined && stable;) {
-      program.work.charge("eventSteps");
-      const step = projection.step;
-      stable = step !== "iteration" && !measuresLength(step) && memberStep([step], 0) < 0;
-      steps.push(stepName(step));
-      node = projection.node ?? node;
-      at = projection.owner;
-      projection = program.projOf.get(at);
-    }
-    const binding = stable ? program.occurrenceOf.get(at) : undefined;
+    const binding = read !== null && read.span !== null ? this.#stableBinding(value) : null;
     // (a root no test names is never narrowed: a program without a condition, a switch or an `and`/`or` makes no
     // narrowing definition and builds no narrowing index (#1251); else the index's lookup, the stored values and the
     // tested paths)
     if (
-      binding !== undefined &&
+      binding !== null &&
       !guards.testless &&
       guards.narrowing.tests(binding) &&
       this.#inStoredValue(read!)
     ) {
       const g = guards.narrowing.nearestAt(read!);
-      if (g !== null)
+      if (g !== null) {
+        // (the chain down to its binding, its steps as the exact path keys them, the node `#valueAt` passes down)
+        const steps: string[] = [];
+        let at = value;
+        let node: FlowNode | null = null;
+        for (let projection = outer; projection !== undefined;) {
+          program.work.charge("eventSteps");
+          steps.push(stepName(projection.step));
+          node = projection.node ?? node;
+          at = projection.owner;
+          projection = program.projOf.get(at);
+        }
         found = {
           g,
           read: read!,
@@ -292,9 +290,41 @@ export class Values {
           key: keptKey(program.work, binding, steps.reverse()),
           node: program.occNode.get(at) ?? node,
         };
+      }
     }
     this.#narrowings.set(value, found);
     return found;
+  }
+
+  /**
+   * The binding of a place's chain of projections where every step is stable (no iteration, length or member step),
+   * `null` for none: one memo per place, each new place charged one step, so the prefixes of one chain, each a read of
+   * its own (`#narrowedChain`'s owners), walk it once together, never once each (Codex r2 on #1742).
+   */
+  #stableBinding(value: PlaceId): PlaceId | null {
+    const { program } = this.pass;
+    const pending: PlaceId[] = [];
+    let at = value;
+    let known = this.#bindings.get(at);
+    while (known === undefined) {
+      program.work.charge("eventSteps");
+      const projection = program.projOf.get(at);
+      if (projection === undefined) {
+        known = program.occurrenceOf.get(at) ?? null;
+        break;
+      }
+      const step = projection.step;
+      if (step === "iteration" || measuresLength(step) || memberStep([step], 0) >= 0) {
+        known = null;
+        break;
+      }
+      pending.push(at);
+      at = projection.owner;
+      known = this.#bindings.get(at);
+    }
+    this.#bindings.set(at, known);
+    for (const place of pending) this.#bindings.set(place, known);
+    return known;
   }
 
   /**
