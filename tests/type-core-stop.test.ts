@@ -6529,6 +6529,12 @@ test("a stopped receiver's words may follow the declaration to its leaf, the pai
     slice: true,
     values: [],
   };
+  const natural = (mode: (typeof HELD_MODES)[number]): Answers =>
+    mode.run(() =>
+      analyseCore(
+        coreRequest([{ path: "main.tease", source: witness.source }], ["hostValue", "hostOther"])!,
+      ),
+    );
   let paired = 0;
   for (const mode of HELD_MODES)
     for (const demand of [1, 3]) {
@@ -6541,6 +6547,11 @@ test("a stopped receiver's words may follow the declaration to its leaf, the pai
         );
         const stopped = heldRun(witness, mode, allowance, demand).answers;
         paired += combinedStopRule(witness, mode, reference, stopped).reworded.pairs.size;
+        assert.deepEqual(
+          combinedMarkProblems(reference.answers, natural(mode), stopped),
+          [],
+          `${mode.name} ${demand} @${allowance}: the inventory`,
+        );
       }
     }
   assert.ok(paired > 0, "no stop paired the receiver's words");
@@ -6590,10 +6601,12 @@ test("a stopped receiver's words are refused where a condition of r4.363 breaks 
       ),
     },
   });
+  // (the changed check keeps the recorded label of the one it replaces, so only the condition under test can refuse it)
   const refused = (record: Partial<typeof mark>, why: string, changed: Obligation = x): void => {
     const answers = tampered(record, changed);
+    const labels = to === null ? null : withLabels(to, [[changed, to.of(x)!]]);
     assert.equal(
-      provenRewording(u, owed(answers), reference, answers, from, labelIdentities(stopped)),
+      provenRewording(u, owed(answers), reference, answers, from, labels),
       undefined,
       why,
     );
