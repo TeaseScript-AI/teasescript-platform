@@ -51,6 +51,7 @@ export const costlyTestSeconds = {
   "type-core-operator-table.test.js": 3,
   "type-core-f18.test.js": 2,
   "type-core-lost-check.test.js": 2,
+  "type-core-lost-check-matrix.test.js": 60,
   "type-core-members.test.js": 2,
   "type-core-kept.test.js": 2,
   "type-core-labels.test.js": 2,

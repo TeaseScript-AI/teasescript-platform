@@ -768,9 +768,11 @@ export function asked<T>(answers: Answers, ask: (answers: Answers) => T): T {
   if (leftOutCompletion()) return first;
   const again = answers.completed(() => ask(answers));
   if (again !== null) return again;
-  // (#1526 decision 2, condition 1: a completion that kept no result leaves the settled pass's publication, which was
-  // asked before the registry was made; asked once more apart, its gate reads the obligations left without results)
-  return answers.receiving.some(({ result }) => result === null)
+  // (#1526 decision 2, condition 1: a completion that kept no result, past its allowance even before it found its
+  // obligations, leaves the settled pass's publication, which was asked before the registry was made; asked once more
+  // apart, its gate reads the obligations left without results)
+  return (answers.budget.closure?.counts.capped ?? 0) > 0 ||
+    answers.receiving.some(({ result }) => result === null)
     ? answers.apart(() => ask(answers))
     : first;
 }
@@ -1291,8 +1293,11 @@ function lostCheck(
  * store check carries; a contract proved open; a complete store check (settled or received, its whole type); or a
  * contract the completion completed that a published check carries at the obligation's path, with the contract's own
  * type there: a typed parse's or load's reader of the value stored (F18), or, where the natural plan does not check the
- * store whole, its part checks there (#1682). Where the completion kept no result, past its allowance, only the
- * complete store check keeps it. A check against bare `unknown` where the contract owes a domain carries nothing.
+ * store whole, its part checks there (#1682). Where no result exists, a completion past its allowance or a stop of the
+ * analysis, only the complete store check keeps it, or a typed parse's or load's reader where the destination's type is
+ * the call's own (a `let` whose whole initializer is the call): there the reader is the natural check. A stricter reader
+ * is never a lost check: it rejects at most what the natural reader rejects, both from the written type. A check against
+ * bare `unknown` where the contract owes a domain carries nothing.
  */
 function keeps(
   answers: Answers,
@@ -1307,15 +1312,18 @@ function keeps(
   const own = published.get(store);
   const whole = own?.state === "complete" && checks.has(store);
   // (no result, a completion past its allowance or a stop of the analysis: the plan is the settled pass's, and only its
-  // complete store check or a typed parse's or load's reader of the value stored, the core's own answer at the call (F18),
-  // carries what the obligation requires; a partial store check may be weaker than the natural plan's, which nothing tells)
+  // complete store check carries what the obligation requires, or a typed parse's or load's reader where the
+  // destination's type is the call's own, a `let` whose whole initializer is the call (#1460): there the reader is the
+  // natural check; into a place typed elsewhere a reader may be weaker than its store's check, and a partial store check
+  // than the natural plan's, which nothing tells (#1832))
   if (result === null) {
     const read = unwrap(store.kind === "letStatement" ? store.initializer : store.value);
     return (
       whole ||
-      (read.kind === "loadExpression"
-        ? checks.has(read)
-        : read.kind === "callExpression" && core.expected.has(read))
+      (store.kind === "letStatement" &&
+        (read.kind === "loadExpression"
+          ? checks.has(read)
+          : read.kind === "callExpression" && core.expected.has(read)))
     );
   }
   // (a shape is the suitability the value's own structure proves where it is not lost; a complete result there is the
@@ -1379,14 +1387,14 @@ function keeps(
 export function narrower(narrow: TypePlan, wide: TypePlan): boolean {
   if (narrow.kind === "union") return narrow.members.every((member) => narrower(member, wide));
   if (wide.kind === "union") return wide.members.some((member) => narrower(narrow, member));
-  if (wide.kind === "object")
-    return (
-      narrow.kind === "object" &&
-      wide.properties.every((property) => {
-        const own = narrow.properties.find((each) => each.name === property.name);
-        return own !== undefined && narrower(own.type, property.type);
-      })
-    );
+  if (wide.kind === "object") {
+    if (narrow.kind !== "object") return false;
+    const own = new Map(narrow.properties.map((each) => [each.name, each.type]));
+    return wide.properties.every((property) => {
+      const type = own.get(property.name);
+      return type !== undefined && narrower(type, property.type);
+    });
+  }
   if (wide.kind === "list" || wide.kind === "set" || wide.kind === "dict") {
     if (narrow.kind !== "list" && narrow.kind !== "set" && narrow.kind !== "dict") return false;
     return (
@@ -1394,7 +1402,8 @@ export function narrower(narrow: TypePlan, wide: TypePlan): boolean {
       (wide.element === null || (narrow.element !== null && narrower(narrow.element, wide.element)))
     );
   }
-  return narrow.kind === wide.kind;
+  // (a whole number is a number)
+  return narrow.kind === wide.kind || (narrow.kind === "integer" && wide.kind === "number");
 }
 
 /** A type plan's part at a path of property names and `[]` (an element, entry or value), `null` where it has none. */

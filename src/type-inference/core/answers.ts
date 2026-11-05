@@ -521,9 +521,9 @@ export interface Answers {
   completed<T>(again: () => T): T | null;
   /**
    * The obligations a published plan's gate reads (#1526 decision 2, condition 1, `lostCheck`): the receiving registry
-   * where a receiving completion ran (`receiving`, its results); after a stop of the analysis, where none runs, once
-   * admission settled, the registry's obligations without results, found as finishing work counted apart
-   * (`Consumers.stopObligations`); none elsewhere.
+   * where a receiving completion ran (`receiving`, its results); after a stop of the analysis, where none runs, or a
+   * completion past its allowance before it found them, once admission settled, the registry's obligations without
+   * results, found as finishing work counted apart (`Consumers.stopObligations`); none elsewhere.
    */
   gated(): readonly {
     readonly obligation: ReceivingObligation;
@@ -1721,11 +1721,15 @@ class CoreAnswers implements Answers {
   }
 
   public gated(): Answers["receiving"] {
-    // (the registry once a receiving completion made it, in its questions asked again too; where the analysis stopped none
-    // runs; elsewhere it runs after the first questions, `asked`)
+    // (the registry once a receiving completion made it, in its questions asked again too; where it is empty after a
+    // stop of the analysis, where none runs, or after a completion past its allowance before it found its obligations,
+    // the obligations are found again apart; elsewhere the completion runs after the first questions, `asked`)
     if (this.receiving.length > 0) return this.receiving;
+    const capped = (this.#consumers.completion?.counts.capped ?? 0) > 0;
     const found =
-      this.budget.exhausted === null ? null : this.apart(() => this.#consumers.stopObligations());
+      this.budget.exhausted === null && !capped
+        ? null
+        : this.apart(() => this.#consumers.stopObligations());
     return found === null ? [] : found.map((obligation) => ({ obligation, result: null }));
   }
 
