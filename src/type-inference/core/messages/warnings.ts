@@ -350,7 +350,8 @@ function stepsBelow(rule: StoreRule, landing: Landing | null): readonly StoreSte
  * (`hostValue is integer[]?[]`) and in words (`is a list (integer[]?[])`), where the place's root is declared with a
  * written type that proves every layer of it, `null` at each (Codex r1's B1 on #1764: `integer[]?[]`): the declaration's
  * type followed down the value's landing to the place (`receivingType`). Anywhere else the rule's leaf alone does not
- * prove the layers between (a copy of a written type), so the words name the elements the check tests. `undefined`
+ * prove the layers between (a copy of a written type), so a leaf's words name the elements the check tests, and a layer
+ * between keeps its own check. `undefined`
  * where the place is the value itself, a property below it, or off its landing: the place's own test.
  */
 function wholeCheck(
@@ -365,6 +366,12 @@ function wholeCheck(
   if (below === null || below.length === 0 || !below.every((step) => "collection" in step))
     return undefined;
   const type = receivingType(rule, landing!.steps, below, source);
+  // (unproved, a layer between keeps its own check, no test of the elements: the leaf's words name them)
+  if (
+    type === null &&
+    rule.type.some((kind) => kind === "list" || kind === "set" || kind === "dict")
+  )
+    return undefined;
   if (type === null)
     return {
       words: `every ${below

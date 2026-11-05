@@ -2586,10 +2586,16 @@ test("a store below its value checks the whole receiving type, null kept, and th
       "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
       "hostValue",
       warned(
-        "An element of 'b' is declared as a list or null",
+        "An element of an element of 'b' is declared as a whole number (integer)",
         "hostValue",
-        "Check that every value of 'hostValue' is a list or null first.",
+        "Check that every element of every value of 'hostValue' is a whole number (integer) first.",
       ),
+    ],
+    // (unproved, the layer between keeps its own check)
+    [
+      "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
+      "hostValue",
+      `An element of 'b' is declared as a list or null, but 'hostValue' may be a value of another type here. ${STOPS} ${OUTSIDE("hostValue")}`,
     ],
     [
       "let x:integer[]?[]=[[1]]\nlet a={f: x}\na.f=[hostValue]\nexit\n",
