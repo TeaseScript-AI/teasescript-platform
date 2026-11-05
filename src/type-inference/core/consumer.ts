@@ -1954,9 +1954,10 @@ class Contracts {
             ? at
             : { ...at, node: nodeOf(this.answers, this.index, literal), keeps: true };
         const own = opens && inner !== at ? this.answers.valueAt(inner.node, path) : null;
-        // (the default's own answer below a written `object`, whose names the plan keeps: one a stop left open names
-        // none it holds, #1767)
-        if (own !== null && own.items.some(stoppedItem))
+        // (the names the plan keeps, the call's or below a written `object` the default's own: where a stop may have
+        // left some out, or left the default's answer open, they are no names the natural plan has, #1767)
+        const named = opens ? own : answer;
+        if (named?.namesOpen === true || (own !== null && own.items.some(stoppedItem)))
           throw new OutsideContract(at.call, OPEN_BY_STOP);
         const names = !opens ? answer.properties : own === null ? [] : own.properties;
         const properties: TypePropertyPlan[] = [];
