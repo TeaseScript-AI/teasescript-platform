@@ -4621,9 +4621,7 @@ test("an admission decision past its allowance stops: its key undecided, its rea
       // half of `b`'s decision in the unbounded analysis in this order, still far above `count`'s (the solver's steps
       // decide where it stops: since A2, #1293, three quarters is crossed only after the last of them)
       const { decisions } = inOrder(() => analyseCore(request)).budget;
-      const own = decisions.filter((d) => d.place === b && d.path.length === 0);
-      assert.equal(own.length, 1);
-      const allowance = Math.floor(0.5 * own[0]!.units);
+      const allowance = Math.floor(0.5 * decisionOf(decisions, { place: b, path: [] }).units);
       const where = `reversed: ${reversed}, count: ${count}`;
       const answers: Answers = withTestDemandAllowance(allowance, () =>
         inOrder(() => completedCore(request)),
@@ -4699,7 +4697,7 @@ test("a stopped decision stays undecided at every reader, also after a settled p
           )
         : make();
     const { decisions } = inOrder(() => analyseCore(request)).budget;
-    const own = decisions.find((d) => d.place === tally && d.path.length === 0)!;
+    const own = decisionOf(decisions, { place: tally, path: [] });
     const capped = <T>(make: () => T): T =>
       withTestDemandAllowance(Math.floor(own.units / 2), () => inOrder(make));
     const unstopped = capped(() => stopRun(source));

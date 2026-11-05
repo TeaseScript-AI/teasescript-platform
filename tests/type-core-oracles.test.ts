@@ -12,6 +12,7 @@ import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
+  decisionKey,
   decisionOf,
   decisionsByKey,
   everyAnswer,
@@ -282,6 +283,7 @@ test("a decision record is read by its place and its exact path, never by the fi
     () => decisionOf([...list, record(2, [])], { place: 2, path: [] }),
     /2 decision records at \[2,\[\]\]/,
   );
+  assert.equal(decisionKey(record(1, ["a", "b"])), '[1,["a","b"]]');
   assert.equal(decisionsByKey(list).size, 4);
   assert.throws(
     () => decisionsByKey([...list, record(1, ["a", "b"])]),
