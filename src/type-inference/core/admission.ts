@@ -7,7 +7,6 @@ import {
   ingressStores,
   publish,
   takeBackReadChecks,
-  typedStoreBoundary,
 } from "./admission/boundaries.js";
 import {
   compareLanded,
@@ -986,9 +985,5 @@ export class Admission {
 
   public publish(written?: boolean): void {
     publish(this, written);
-  }
-
-  public typedStoreBoundary(d: Definition): SourceSite | null {
-    return typedStoreBoundary(this, d);
   }
 }

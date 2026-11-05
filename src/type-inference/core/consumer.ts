@@ -1186,26 +1186,7 @@ function runtimeChecks(
     if (held === undefined) atStore.set(store, [obligation]);
     else held.push(obligation);
     if (checks.has(store)) continue;
-    // (after a stop before admission settled, a typed call's own store keeps its boundary, #1767: its check is the
-    // reader type, which the natural run's destination admits, where the stop left the destination's contract undecided)
-    const value = store.kind === "letStatement" ? unwrap(store.initializer) : null;
-    const reader =
-      obligation.boundary &&
-      !answers.budget.settled &&
-      store.kind === "letStatement" &&
-      store.typeAnnotation === null &&
-      value !== null &&
-      typed.has(value)
-        ? ((value.kind === "loadExpression"
-            ? checks.get(value)?.type
-            : value.kind === "callExpression"
-              ? core.expected.get(value)
-              : undefined) ?? null)
-        : null;
-    const type =
-      reader !== null && store.kind === "letStatement"
-        ? { type: reader, place: `'${store.name.name}'` }
-        : (contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null));
+    const type = contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null);
     if (type !== null) checks.set(store, type);
   }
   // after a demand stop, the obligations the receiving completion's own store checks owe (#1682): the natural walk's of
