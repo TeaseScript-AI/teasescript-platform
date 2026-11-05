@@ -519,6 +519,12 @@ export interface Answers {
    * stops the analysis.
    */
   completed<T>(again: () => T): T | null;
+  /**
+   * `callback` as finishing work counted apart (`WorkLedger.apart`), in the budget's `apart` and never its total: the
+   * settled pass's publication asked once more where the receiving completion kept no result, so its gate reads the
+   * registry (#1526 decision 2, condition 1, `asked`).
+   */
+  apart<T>(callback: () => T): T;
   at(node: FlowNode): OccurrenceAnswer | null;
   /**
    * The place and path a statement that stores stores into, as `at` reads them there (its node's first live store, else
@@ -1702,6 +1708,14 @@ class CoreAnswers implements Answers {
     for (const item of bySite(ranked))
       if (!order.has(item.obligation)) order.set(item.obligation, order.size);
     return order;
+  }
+
+  public apart<T>(callback: () => T): T {
+    try {
+      return this.#pass.program.work.apart(callback);
+    } finally {
+      this.#counted();
+    }
   }
 
   public completed<T>(again: () => T): T | null {

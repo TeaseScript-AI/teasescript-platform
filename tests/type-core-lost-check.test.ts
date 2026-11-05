@@ -108,6 +108,19 @@ const DECLINED: readonly Witness[] = [
   witness("r1-load", 'let a={n:[[1]]}\nlet b=a\nb=load("k",default:a)\nsay toJson(b)', {}, "load", [
     { key: "k", value: object({ n: nested("x") }) },
   ]),
+  // (Codex r2: a literal holding external data its natural store check types, no part check carrying it)
+  witness(
+    "r2-literal-get",
+    "let a={n:null}\nlet b=a\nb={n:[hostValue].get(0,default:[[1]])}\nsay toJson(b)",
+    { hostValue: nested("x") },
+    "{n:[hostValue]",
+  ),
+  witness(
+    "r2-literal-parse",
+    "let a={f:[[1]]}\na={f:fromJson(hostValue,default:a.f,files:false)}\nsay toJson(a)",
+    { hostValue: '[["x"]]' },
+    "{f:fromJson",
+  ),
   // (declined at the first Lost store in source order: the retarget's, before the independent store's)
   witness(
     "1648-independent-beside-retarget",
@@ -189,6 +202,19 @@ test("a stopped program whose checks its complete store check or a typed reader 
   for (const [source, demand, modes] of kept)
     for (const mode of modes)
       assert.ok(inMode(mode, () => compiled(source, demand)).plan !== null, JSON.stringify(mode));
+});
+
+test("a program whose receiving completion reached its allowance keeps a check only by its complete store check (Codex r2)", () => {
+  // (in source order with sharing, demand 16: the completion caps and keeps no result; the plan is the settled pass's,
+  // which checks the host store against nothing where the natural plan checks every field)
+  const source = `let pad={f0:1}\n${lines(16, (at) => `pad={f${at}:${at}}`)}\npad=hostOther${END}`;
+  const forbidden = { hostOther: object({ f0: "x" }) };
+  const natural = compiled(source, null);
+  assert.equal(said(runGlobals(natural.plan!, forbidden)), false);
+  assert.throws(
+    () => inMode(MODES[0]!, () => compiled(source, 16)),
+    (error) => error instanceof CandidateOutsideSlice && error.what === LOST,
+  );
 });
 
 test("a check published against nothing where the natural plan checks a domain is lost: the open control at demand 32 (#1526)", () => {

@@ -4952,19 +4952,32 @@ test("a stopped decision stays undecided at every reader, also after a settled p
  * is no unstopped analysis to compare. A host value fits where the unstopped plan runs it: without sharing, 257 decides
  * the element `regex`, which C9 checks the host value against.
  */
-test("a stop adds no boundary below a stopped decision and keeps toJson's checks (#1437)", () => {
+test("a stop adds no boundary below a stopped decision and keeps toJson's checks, or the program is declined (#1437, #1526)", () => {
   const sources = [
     "let root={value:{a:[hostValue otherwise /r/],b:1}}\nlet first=root\nlet second=first\n" +
       "say toJson(first)\nsay toJson(second)\nsay toJson(root)\nexit\n",
     "let n = 1\nsay toJson({a: [hostValue otherwise /r/], b: n})\nexit\n",
   ];
+  // (#1526 decision 2, condition 1, TABLE r4.390: a settled stop whose plan lost the element's check, which the unstopped
+  // plan makes against a host value, is declined, a decision's demand stop at 257 among them)
+  const declines = (error: unknown): boolean =>
+    error instanceof CandidateOutsideSlice &&
+    error.what === "a store whose check was lost at the budget";
   let compared = 0;
+  let declined = 0;
   for (const source of sources)
     for (const demand of [null, 257])
       for (const mode of MODES) {
         const inDemand = <T>(make: () => T): T =>
           inMode(mode, () => (demand === null ? make() : withTestDemandAllowance(demand, make)));
-        const unstopped = stopRunIn(inDemand, source);
+        let unstopped: StopRun;
+        try {
+          unstopped = stopRunIn(inDemand, source);
+        } catch (error) {
+          assert.ok(declines(error), `${source} demand: ${demand}, ${JSON.stringify(mode)}`);
+          declined += 1;
+          continue;
+        }
         if (unstopped.answers.budget.exhausted !== null) continue;
         const inputs = [host(1), host(null)];
         const fits = (globals: Globals): boolean =>
@@ -4976,19 +4989,33 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
         stops.push(["unsettled", inDemand(() => lastUnsettled(source))]);
         for (const [phase, allowance] of stops) {
           compared += 1;
+          const where = `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`;
+          let stopped: StopRun;
+          try {
+            stopped = stopRunIn(inDemand, source, allowance);
+          } catch (error) {
+            assert.ok(declines(error), where);
+            assert.ok(
+              inputs.some((globals) => !fits(globals)),
+              where,
+            );
+            declined += 1;
+            continue;
+          }
           assert.deepEqual(
             stopProblems({
               unstopped,
-              stopped: stopRunIn(inDemand, source, allowance),
+              stopped,
               fitting: inputs.filter(fits),
               violating: inputs.filter((globals) => !fits(globals)),
             }),
             [],
-            `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`,
+            where,
           );
         }
       }
-  assert.equal(compared, 54);
+  // (two runs at demand 257 stop a decision and lose the element's check: declined, their five stops each not compared)
+  assert.deepEqual({ compared, declined }, { compared: 44, declined: 2 });
 });
 
 /**

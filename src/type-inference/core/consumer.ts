@@ -765,7 +765,13 @@ export function asked<T>(answers: Answers, ask: (answers: Answers) => T): T {
   }
   // (a test that leaves the completion's checks out leaves the completion out: phase B's answers)
   if (leftOutCompletion()) return first;
-  return answers.completed(() => ask(answers)) ?? first;
+  const again = answers.completed(() => ask(answers));
+  if (again !== null) return again;
+  // (#1526 decision 2, condition 1: a completion that kept no result leaves the settled pass's publication, which was
+  // asked before the registry was made; asked once more apart, its gate reads the obligations left without results)
+  return answers.receiving.some(({ result }) => result === null)
+    ? answers.apart(() => ask(answers))
+    : first;
 }
 
 /**
@@ -1267,8 +1273,7 @@ function lostCheck(
   for (const { obligation, result } of answers.receiving) {
     // (a stopped decision's own marks stand at every store of it, external data or not: the store's own C1 check and
     // its C9 boundary are the checks it owes when the script runs)
-    if (result === null || obligation.epoch !== answers.epoch || obligation.slot.role === "stopped")
-      continue;
+    if (obligation.epoch !== answers.epoch || obligation.slot.role === "stopped") continue;
     const store = index.storeAt(obligation.slot.site);
     if (
       store === undefined ||
@@ -1287,21 +1292,24 @@ function lostCheck(
  * store check carries; a contract proved open; a complete store check (settled or received, its whole type); or a
  * contract the completion completed that a published check carries at the obligation's path, with the contract's own
  * type there: a typed parse's or load's reader of the value stored (F18), or, where the natural plan does not check the
- * store whole, its part checks there (#1682), or with none a stored literal (#1437). A check against bare `unknown`
- * where the contract owes a domain carries nothing.
+ * store whole, its part checks there (#1682). Where the completion kept no result, past its allowance, only the
+ * complete store check keeps it. A check against bare `unknown` where the contract owes a domain carries nothing.
  */
 function keeps(
   answers: Answers,
   index: SliceIndex,
   store: Store,
   obligation: ReceivingObligation,
-  result: ReceivingResult,
+  result: ReceivingResult | null,
   published: ReadonlyMap<Store, ContractResult>,
   checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   core: CoreRuntimeChecks,
 ): boolean {
   const own = published.get(store);
   const whole = own?.state === "complete" && checks.has(store);
+  // (a completion past its allowance keeps no result, and the plan is the settled pass's: only its complete store check
+  // carries what the obligation requires)
+  if (result === null) return whole;
   // (a shape is the suitability the value's own structure proves where it is not lost; a complete result there is the
   // requirement's, which a shape owes no more of)
   if (obligation.extent === "shape" || "shape" in result) return result.state !== "lost" || whole;
@@ -1337,23 +1345,20 @@ function keeps(
         : undefined;
   if (carries(reader)) return true;
   if (answers.completedCheck(index.site(value))) return false;
-  // (the part checks at or below the obligation's path, each the contract's type there where it has one: a weaker one
-  // stands for nothing, #1645's whole object; with none, only a stored literal is kept, whose external data the natural
-  // plan checks by the literal's own kind at its boundary and by the completion's warnings, none here, #1437: a value
-  // that is itself external data, a call's or a read's, owes its contract at the store)
+  // (the part checks at or below the obligation's path, at least one, each the contract's type there where it has one:
+  // a weaker one stands for nothing, #1645's whole object)
   const parts = (core.partChecks.get(store) ?? []).filter((part) => {
     const steps = part.path.map((step) => ("element" in step ? "[]" : step.property));
     return steps.length >= below.length && below.every((step, at) => steps[at] === step);
   });
-  if (parts.length === 0)
-    return (
-      value.kind === "objectLiteral" || value.kind === "listLiteral" || value.kind === "setLiteral"
-    );
-  return parts.every((part) => {
-    const steps = part.path.map((step) => ("element" in step ? "[]" : step.property));
-    const at = typeAt(contract.ref, steps.slice(below.length));
-    return at === null || JSON.stringify(part.type) === JSON.stringify(at);
-  });
+  return (
+    parts.length > 0 &&
+    parts.every((part) => {
+      const steps = part.path.map((step) => ("element" in step ? "[]" : step.property));
+      const at = typeAt(contract.ref, steps.slice(below.length));
+      return at === null || JSON.stringify(part.type) === JSON.stringify(at);
+    })
+  );
 }
 
 /** A type plan's part at a path of property names and `[]` (an element, entry or value), `null` where it has none. */
