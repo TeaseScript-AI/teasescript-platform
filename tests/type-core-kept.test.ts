@@ -141,6 +141,10 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     "a collection's code in a sentence, its property names joined",
   ],
   "messages/errors.ts errorSentence step": [8, "a sentence's period before its fix, no path"],
+  "consumers/otherwise.ts codeText step": [
+    1,
+    "a receiver and its property as the code a fallback's warning names, made for its sentence",
+  ],
   "messages/site.ts valueAt spread": [
     1,
     "the way from a variable to a warned value, made once for a fix after the analysis and dropped",

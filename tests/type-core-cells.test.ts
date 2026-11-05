@@ -1481,6 +1481,9 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `empty-check (o otherwise null).keys [list] @${at("(o otherwise")}`,
         `null-check (o otherwise null).keys [non-null] @${at("(o otherwise")}`,
         `integer-check (o otherwise null).keys.first [integer] @${at("(o otherwise")}`,
+        // (#1072: the stored values are a dict and the speaker, never null, so the fallback never runs, V30 §18; the
+        // current checker reads the unrestricted dict's value as unknown and gives no warning)
+        `static warning @${at("otherwise null)")}`,
       ],
     ],
     // a path through eight objects' own `values` is read once per step, as any property's (review r2: it exhausted the
@@ -1904,7 +1907,8 @@ test("the set's follow-up records give their records in both orders", () => {
     [
       "temporal/year-fallback-written-union",
       'let x: integer | string = (askDate "When?").year otherwise "ok"\nexit\n',
-      ["valid"],
+      // (#1072, V30 §18: a date's year is never null, so its fallback is never used)
+      ["static warning @49", "warning"],
     ],
     [
       "temporal/year-partial-presence-store",
@@ -2778,6 +2782,8 @@ test("admission decides from the start value, keeps written copies, rejects ever
       (at) => [
         "compile-error",
         `copy-type xs.element [string] @${at("[(")}`,
+        // (#1072, V30 §18: the selection is never null, so its fallback never runs; the fallback stays checked)
+        `static warning @${at("otherwise 2")}`,
         `written-target compile-error @${at("2)")}`,
         `written-target compile-error @${at("1]")}`,
         `written-target warning-runtime-check @${at("[(")}`,
@@ -4754,7 +4760,8 @@ test("a written copy carried through a projection or an operation keeps its writ
     [
       "a selected union through otherwise",
       'let typed: (integer | string)[] = [1]\nlet xs = typed otherwise []\nxs.add("good")\nexit',
-      "valid",
+      // (#1072, V30 §18: `typed` is never null, so its fallback is never used)
+      "warning",
     ],
     [
       "a selected union through a projection",
@@ -5371,6 +5378,15 @@ test("a guarded read inside a computed child keeps its mark where literals share
     const expected: CompactRecord = {
       outcome: "warning-runtime-check",
       diagnostics: [
+        // (#1072, V30 §18: `root` is never null, so each `otherwise null` is never used)
+        ...(own
+          ? [...source.matchAll(/otherwise null\)/g)].map((found): CompactDiagnostic => ({
+              kind: "static",
+              class: "warning",
+              site: { file: "main.tease", offset: found.index, end: found.index + 14 },
+              context: null,
+            }))
+          : []),
         ...(own ? [branch("member-read", at(read + 10))] : []),
         branch("integer-use", at(read + 10)),
       ],
