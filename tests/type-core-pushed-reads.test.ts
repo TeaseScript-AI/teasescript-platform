@@ -141,6 +141,12 @@ test("where the native reader ends, a pushed read answers what it does, raw and 
     ring({ cycle: false, extra: ["p1.q.q.g=5", 'say "${p1.q.q.g}"'] }),
     // a chain of three whose literals all lack the step: a read that is `missing` alone, its earliest literal's
     ring({ n: 3, q: spine(1, "{g:1}"), cycle: false, extra: ['say "${p2.q.q.q}"'] }),
+    // a list below the projection read at its element (a collection's: declined), and a host's data read at an
+    // element (its frame decides whether it may hold none: declined)
+    ring({
+      q: spine(2, "{l:[1,2],h:hostValue}"),
+      extra: ['say "${p1.q.q.l}"', 'say "${p1.q.q.h}"'],
+    }),
     // a written binding below the projection, where the read ends there (its type answers: read natively)
     ring({ q: spine(3), cycle: false, extra: ['say "${p1.q.q.q.f}"'] }),
   ];
