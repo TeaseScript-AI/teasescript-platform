@@ -245,18 +245,19 @@ For `corpus`, add `--data ~/work/o4-m4-g3/cases.json` and `CASES_JSON=$HOME/work
 `shadow.mjs` (S9b's interim and S11's final shadow comparison, landed by #1704 from the S11 readiness research's copy)
 compiles each source of a set (`corpus`, `fixture` or an area) through both public routes of one built tree, the legacy
 backend and the core (`decisionRecords`), in the four modes, and writes one JSON line per source to `--out` and the
-core's decision records to `--decisions`. Each route runs in its own worker with `--memory` MB of old generation (2,048,
-the families runner's, so both compare a source under the same cap; it refuses Node options and `NODE_OPTIONS`, whose
-heap flags would override that: the queue sets one, so the command clears it), under the unit limit below (the legacy
-route charges no ledger) and the safety net. A run that fails (heap, units, safety net, worker exit) leaves the source's
-other runs and is recorded as `{ outcome: "failed", failure, phase, runsBeforeFailure, heapMiB }` (`heapMiB`: the
-worker's heap limit as V8 measured it) in its row and in the record's `failed` list, with `incomplete: true` and the
-first failure as `reason`; the next run starts in a fresh worker. A reused worker's heap failure or safety net is
-retried once in a fresh one, whose result is the run's (`retried` names the first). `--demands 16` also runs the core
-route alone at that demand allowance in the four modes and keeps each run's outcome and decision counts under `demands`:
-the gate's completion control, since nothing stops at the natural allowance on current main, so no natural run reaches a
-receiving completion. It classifies nothing; `--manifest` prints the sources the same options owe, one `{ key, name }`
-line each, and runs nothing. An incomplete record is never agreement.
+core's decision records to `--decisions`. Each route runs in its own process with `--memory` MB of old generation
+(2,048, the families runner's, so both compare a source under the same cap; it refuses Node options and `NODE_OPTIONS`,
+whose heap flags would override that: the queue sets one, so the command clears it), under the unit limit below (the
+legacy route charges no ledger) and the safety net. A run that fails (heap, units, safety net, the process's end, a V8
+abort at its heap limit included: #1738) leaves the source's other runs and is recorded as `{ outcome: "failed",
+failure, phase, runsBeforeFailure, heapMiB }` (`heapMiB`: the worker's heap limit as V8 measured it) in its row and in
+the record's `failed` list, with `incomplete: true` and the first failure as `reason`; the next run starts in a fresh
+worker. A reused worker's heap failure or safety net is retried once in a fresh one, whose result is the run's
+(`retried` names the first). `--demands 16` also runs the core route alone at that demand allowance in the four modes
+and keeps each run's outcome and decision counts under `demands`: the gate's completion control, since nothing stops at
+the natural allowance on current main, so no natural run reaches a receiving completion. It classifies nothing;
+`--manifest` prints the sources the same options owe, one `{ key, name }` line each, and runs nothing. An incomplete
+record is never agreement.
 
 ```sh
 sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> -- bash -c 'env -u NODE_OPTIONS \

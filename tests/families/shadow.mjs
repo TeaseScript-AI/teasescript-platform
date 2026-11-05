@@ -7,8 +7,8 @@
 // where both have one, what differs. It classifies nothing: `shadow-classify.mjs` does (README "Shadow").
 //   <set>: corpus (CASES_JSON=<cases.json>), fixture (the tree's tools/corpus/fixture), or an area of tests/families by
 //   its name or folder (its generators' sources at their own sizes, `sources.mjs`).
-// Each route runs in a worker of its own with `--memory` MB of old generation, which takes its runs (one route in one
-// mode) in turn until one fails; the runner refuses Node options and NODE_OPTIONS, whose heap flags would override it. A run fails where its heap is exhausted, where its charged units pass
+// Each route runs in a process of its own (#1738) with `--memory` MB of old generation, which takes its runs (one route
+// in one mode) in turn until one fails, so a heap abort or any other end of that process ends that run only; the runner refuses Node options and NODE_OPTIONS, whose heap flags would override it. A run fails where its heap is exhausted, where its charged units pass
 // `--units` times the largest allowance of a ledger it charged (#1647's rule; the legacy route charges none), where it
 // passes the safety net of `--timeout` seconds, or where its worker ends. A failed run is recorded with its route, mode,
 // the phase it was in (`phase`: `parse and names`, `analysis`, `analysis pass k`, `completion`, `lowering`, the core's
@@ -29,10 +29,60 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import v8 from "node:v8";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
+import { fork } from "node:child_process";
+import { Worker } from "node:worker_threads";
+import { EventEmitter } from "node:events";
+import { writeSync } from "node:fs";
 
 /** The exit of a worker whose run passed the unit limit, after it posted the run's units (`over`). */
 const OVER_EXIT = 86;
+/** The start of a line a route's process writes on its stderr to say where it is, read whatever way it ends. */
+const MARK = "\u0001shadow ";
+/** A route's process: its settings in this variable (JSON), set only for it. */
+const CHILD = "SHADOW_ROUTE";
+const isMainThread = process.env[CHILD] === undefined;
+
+/**
+ * A route's worker: a process of its own (#1738: a worker thread's heap abort could end the whole runner), with the
+ * worker thread's events. Its stderr marks (`MARK`, written synchronously, so they outlive an abort) give its heap
+ * limit, each run's phases and the units of a run past the limit; an end whose stderr has V8's heap message is an
+ * `error` with ERR_WORKER_OUT_OF_MEMORY, any other end an `exit` with its code or signal. Outcomes come over IPC.
+ */
+class RouteProcess extends EventEmitter {
+  constructor(file, settings, memory) {
+    super();
+    this.tail = "";
+    this.line = "";
+    this.child = fork(file, [], {
+      execArgv: [`--max-old-space-size=${memory}`],
+      env: { ...process.env, [CHILD]: JSON.stringify(settings) },
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+      serialization: "advanced",
+    });
+    this.closed = new Promise((resolve) => this.child.once("close", resolve));
+    this.child.stderr.setEncoding("utf8").on("data", (chunk) => {
+      const lines = (this.line + chunk).split("\n");
+      this.line = lines.pop();
+      for (const line of lines)
+        if (line.startsWith(MARK)) this.emit("message", JSON.parse(line.slice(MARK.length)));
+        else this.tail = `${this.tail}${line}\n`.slice(-4096);
+    });
+    this.child.on("message", (message) => this.emit("message", message));
+    this.child.on("error", (error) => this.emit("error", error));
+    this.child.on("close", (code, signal) => {
+      if (/JavaScript heap out of memory/.test(this.tail + this.line))
+        this.emit("error", { code: "ERR_WORKER_OUT_OF_MEMORY" });
+      else this.emit("exit", code ?? signal);
+    });
+  }
+  postMessage(message) {
+    this.child.send(message);
+  }
+  async terminate() {
+    this.child.kill("SIGKILL");
+    await this.closed;
+  }
+}
 const ROUTES = ["legacy", "core"];
 
 const distOf = (root) => (existsSync(path.join(root, "dist")) ? path.join(root, "dist") : root);
@@ -203,10 +253,11 @@ if (
   );
   const fresh = (route) => {
     const slot = workers.get(route);
-    const worker = new Worker(fileURLToPath(import.meta.url), {
-      workerData: { root, set, units, route },
-      resourceLimits: { maxOldGenerationSizeMb: memory },
-    });
+    const worker = new RouteProcess(
+      fileURLToPath(import.meta.url),
+      { root, set, units, route },
+      memory,
+    );
     Object.assign(slot, { worker, runs: 0, limitMiB: null, ended: false });
     worker
       .on("message", (message) => {
@@ -229,7 +280,9 @@ if (
   };
 
   /** One run in the route's worker: its outcome (`done`), or its failure with the phase it was in. */
+  let sequence = 0;
   async function attempt(route, index, mode, demand = null) {
+    const seq = (sequence += 1);
     // (a worker that ended or threw after its last run's outcome is replaced; that outcome stands)
     if (workers.get(route).ended) {
       summary.replaced += 1;
@@ -257,6 +310,8 @@ if (
       const timer = setTimeout(() => failed("safety net"), seconds * 1000);
       const onMessage = (message) => {
         if (message.limitMiB !== undefined) return;
+        // (a mark of an earlier run, read late, is that run's)
+        if (message.seq !== seq) return;
         if (message.phase !== undefined) phase = message.phase;
         else if (message.over !== undefined) over = message.over;
         else finish(message);
@@ -274,7 +329,7 @@ if (
         resolve(value);
       }
       worker.on("message", onMessage).on("error", onError).on("exit", onExit);
-      worker.postMessage({ index, mode, demand });
+      worker.postMessage({ seq, index, mode, demand });
     });
   }
 
@@ -404,12 +459,34 @@ if (
   console.log(JSON.stringify(summary));
   process.exitCode = summary.failed === 0 ? 0 : 1;
 } else {
-  // (each route has workers of its own: the parent asks each for its route's runs)
-  const { root, set, units, route } = workerData;
-  // (the heap limit this worker has, the one a failure is recorded with)
-  parentPort.postMessage({
-    limitMiB: Math.round(v8.getHeapStatistics().heap_size_limit / 1048576),
+  // (each route has processes of its own: the parent asks each for its route's runs; a mark goes to stderr at once, so
+  // the parent reads it however this process ends)
+  const { root, set, units, route } = JSON.parse(process.env[CHILD]);
+  let seq = null;
+  // (a mark starts a line of its own, whatever the compile wrote on stderr before it without a newline)
+  const mark = (message) => writeSync(2, `\n${MARK}${JSON.stringify({ seq, ...message })}\n`);
+  process.on("disconnect", () => process.exit(0));
+  // (this process ends when its parent does, also while a compile blocks its event loop: a thread of its own watches)
+  new Worker(
+    `const { workerData } = require("node:worker_threads");
+     setInterval(() => { if (process.ppid !== workerData) process.kill(process.pid, "SIGKILL"); }, 250).unref();
+     setInterval(() => {}, 1 << 30);`,
+    { eval: true, workerData: process.ppid },
+  ).unref();
+  // (an outcome being sent is delivered before an error thrown after it ends this process: the parent keeps it)
+  let sending = 0;
+  let failure = null;
+  process.on("uncaughtException", (error) => {
+    writeSync(2, `\n${error?.stack ?? error}\n`);
+    failure = error;
+    if (sending === 0) process.exit(1);
   });
+  // (requests that arrive while this process still loads the tree wait for it)
+  let take = null;
+  const waiting = [];
+  process.on("message", (request) => (take === null ? waiting.push(request) : take(request)));
+  // (the heap limit this worker has, the one a failure is recorded with)
+  mark({ limitMiB: Math.round(v8.getHeapStatistics().heap_size_limit / 1048576) });
   const dist = distOf(root);
   const imp = (file) => import(pathToFileURL(path.join(dist, file)).href);
   const { compileProjectWithBackend } = await imp("src/compiler.js");
@@ -419,7 +496,7 @@ if (
   const { Consumers } = await imp("src/type-inference/core/consumers.js");
   const O = await imp("tests/helpers/type-core-oracles.js");
   const text = (value) => O.jsonText(value);
-  const phase = (name) => parentPort.postMessage({ phase: name });
+  const phase = (name) => mark({ phase: name });
 
   // (a run's charged units, and the largest allowance of a ledger it charged: past `units` times that, it stops here)
   const meter = { spent: 0, allowance: 0 };
@@ -429,7 +506,7 @@ if (
     if (Number.isInteger(this.allowance) && this.allowance > meter.allowance)
       meter.allowance = this.allowance;
     if (units !== null && meter.allowance > 0 && meter.spent > units * meter.allowance) {
-      parentPort.postMessage({ over: { units: meter.spent, allowance: meter.allowance } });
+      mark({ over: { units: meter.spent, allowance: meter.allowance } });
       process.exit(OVER_EXIT);
     }
     return charge.call(this, counter, n);
@@ -507,14 +584,20 @@ if (
   }
 
   const sources = await sourcesOfSet(set, root);
-  parentPort.on("message", ({ index, mode: modeIndex, demand }) => {
+  take = ({ seq: run, index, mode: modeIndex, demand }) => {
+    seq = run;
     const source = sources[index];
     const mode = O.MODES[modeIndex];
     Object.assign(meter, { spent: 0, allowance: 0 });
     pass = 0;
     seen = { checks: null, excluded: null };
-    parentPort.postMessage({ ...runRoute(source, mode, demand), mode });
-  });
+    sending += 1;
+    process.send({ ...runRoute(source, mode, demand), mode, seq: run }, () => {
+      sending -= 1;
+      if (failure !== null && sending === 0) process.exit(1);
+    });
+  };
+  for (const request of waiting.splice(0)) take(request);
 
   /** One route's outcome in `mode`: compare.mjs's summary, and the texts the parent compares with the other route's. */
   function runRoute(source, mode, demand) {
