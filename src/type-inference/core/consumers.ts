@@ -372,11 +372,12 @@ export class Consumers {
   ): readonly Item[] {
     if (this.finishing) return finishingRead(this, value, node, rest, requirement);
     const items = this.valueRun(value, node, rest);
-    // (a stopped read of an ingress's data keeps its C9 check, structurally: the stop leaves its kinds unknown and its
-    // reason `budget`, never its provenance, so its unknown is that ingress's data for C9, entering by the ingress as an
-    // unnarrowed read's, Codex r4 on #1770)
+    // (a stopped read of an ingress keeps its C9 check, structurally: the stop leaves its kinds unknown and its reason
+    // `budget`, never its provenance, so its unknown is the ingress's data for C9, entering by it as an unnarrowed
+    // read's, Codex r4 on #1770; a projection's own read stays as it stopped, as its owner's read asks the occurrence's
+    // check, which validates the whole value, Codex r5)
     const stopped = (item: Item) => (item.reasons & REASON.budget) !== 0;
-    if (!items.some(stopped) || this.pass.contract.ingressOf(value) === null) return items;
+    if (!items.some(stopped) || this.pass.contract.ingressOf(value) !== value) return items;
     return this.pass.contract.entered(
       value,
       items.map((item) => (stopped(item) ? { ...item, fromExternal: true } : item)),

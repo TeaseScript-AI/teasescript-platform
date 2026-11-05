@@ -1565,6 +1565,9 @@ test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 P
   for (const [source, expected] of [
     ["if hostValue is integer {repeat hostValue {}}", "hostValue [unknown] 32-41"],
     ['if hostValue is string[] {say "${hostValue}"}', "hostValue [unknown] 33-42"],
+    // (a projection's own read, data or computed, is the occurrence's check alone, Codex r5)
+    ["if hostValue is integer[] {repeat hostValue[0] {}}", "hostValue [unknown] 34-43"],
+    ["if hostValue is integer[] {repeat hostValue.length {}}", "hostValue [unknown] 34-43"],
     ["if hostValue is integer {let out:integer=hostValue\nrepeat out {}}", "out [integer] 41-50"],
     [
       "if hostValue is integer[] {let out:integer=hostValue[0]\nrepeat out {}}",
