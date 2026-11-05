@@ -628,6 +628,11 @@ test("after a stop a typed call's reader type a stop left open declines the plan
       "2",
     ],
     [
+      "literal index's scalar of a projected holder",
+      'let result = fromJson(hostValue, default: ({p: ({q: [0]}).q}).p[0], files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
       "literal index's scalar at a computed index",
       'let result = fromJson(hostValue, default: [0][load("i", default: 0)], files: false)\nsay result\nsay "after"\nexit\n',
       "2",

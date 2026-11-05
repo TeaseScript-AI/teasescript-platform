@@ -2147,10 +2147,10 @@ function readsPlace(fallback: Expression): boolean {
 
 /**
  * What an expression may select through parentheses and projections of literals: an object literal's literal property,
- * a list literal's element at a non-negative integer index (an index itself such an expression, Codex r9), or any of
- * its elements at any other index, whatever the index reads (Codex r9: `[0][load("i", default: 0)]` is an element of
- * `[0]`); a selected part that is itself a projection is followed (Codex r8: `({p: ({n: 0}).n}).p`). `undefined` where a
- * step leaves the literal's syntax: another receiver, a missing property or element. Recursive over the syntax alone.
+ * or any element of a list literal, whatever the index reads (Codex r9: `[0][load("i", default: 0)]` and
+ * `[0][({i: 0}).i]` are elements of `[0]`); a selected part that is itself a projection is followed (Codex r8:
+ * `({p: ({n: 0}).n}).p`); an empty list's none. `undefined` where a step leaves the literal's syntax: another receiver,
+ * a missing property. Recursive over the syntax alone.
  */
 function projectedLiteral(expression: Expression): readonly Expression[] | undefined {
   const at = unwrap(expression);
@@ -2165,15 +2165,8 @@ function projectedLiteral(expression: Expression): readonly Expression[] | undef
         holder.kind === "objectLiteral"
           ? [holder.properties.find((property) => property.name.name === at.property.name)?.value]
           : [undefined];
-    else if (holder.kind !== "listLiteral") values = [undefined];
-    else {
-      const index = projectedLiteral(at.index);
-      const literal = index?.length === 1 ? index[0]! : null;
-      values =
-        literal?.kind === "numberLiteral" && Number.isInteger(literal.value) && literal.value >= 0
-          ? [holder.elements[literal.value]]
-          : holder.elements;
-    }
+    // (an element of a list literal at any index, a literal or computed one alike: its elements are of one type)
+    else values = holder.kind === "listLiteral" ? holder.elements : [undefined];
     for (const value of values) {
       const parts = value === undefined ? undefined : projectedLiteral(value);
       if (parts === undefined) return undefined;
