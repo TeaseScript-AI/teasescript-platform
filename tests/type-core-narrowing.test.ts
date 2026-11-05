@@ -1313,6 +1313,152 @@ test("a stored selection takes its element's narrowing as an index does, never i
   );
 });
 
+test("a read below a selection takes its narrowing, each selected owner's own selection beside it (#1073, F11)", () => {
+  const answer = (...lines: readonly string[]): string => {
+    const { outcome, diagnostics, checks } = record(...lines);
+    return [
+      outcome,
+      ...diagnostics.map((d) => `${d.kind} ${d.context ?? "-"}`),
+      ...checks.map((c) => c.kind),
+    ].join(", ");
+  };
+  const choice = 'let choice = askBoolean "change?"';
+  const rows = [choice, "let rows: integer?[][] = [[1]]", "if choice { rows = [[null]] }"];
+  const cube = [choice, "let cube: integer?[][][] = [[[1]]]", "if choice { cube = [[[null]]] }"];
+  // each program read at `@` two element steps down, by indexes and by selections at either step (`.random` in the
+  // middle included): a selection answers as the index does where G holds, where it fails and where a nearer
+  // definition answers
+  const scenarios: readonly (readonly [string, readonly string[]])[] = [
+    ["a collection test", [...rows, "if rows is integer[][] { let sink: integer = rows@ }"]],
+    [
+      "a root test, which proves no element's kind",
+      [
+        choice,
+        "let rows: integer?[][]? = [[1]]",
+        "if choice { rows = [[null]] }",
+        "if choice { rows = null }",
+        "if rows != null { let sink: integer = rows@ }",
+      ],
+    ],
+    [
+      "an inner mutation after the test",
+      [...rows, "if rows is integer[][] { rows[0].add(null)\nlet sink: integer = rows@ }"],
+    ],
+    [
+      "a call storing the list after the test",
+      [
+        ...rows,
+        "function spoil { rows = [[null]] }",
+        "if rows is integer[][] { spoil()\nlet sink: integer = rows@ }",
+      ],
+    ],
+    [
+      "a nearer store of the prefix",
+      [...rows, "if rows is integer[][] { rows[0] = [null]\nlet sink: integer = rows@ }"],
+    ],
+    [
+      "one literal's reads before and after a call (one class per environment)",
+      [
+        ...rows,
+        "function spoil { rows = [[null]]\nreturn 1 }",
+        "if rows is integer[][] { let both: integer[] = [rows@, spoil(), rows@] }",
+      ],
+    ],
+    [
+      "a store to the row's index between two reads (one class per environment)",
+      [
+        choice,
+        "let cube: integer?[][][] = [[[1]], [[null]]]",
+        "if choice { cube = [[[null]]] }",
+        "let row = 0",
+        "function bump { row = 1\nreturn 1 }",
+        "if cube[row] is integer[][] { let both: integer[] = [cube[row]@, bump(), cube[row]@] }",
+      ],
+    ],
+    ["a test of one row", [...cube, "if cube[0] is integer[][] { let sink: integer = cube[0]@ }"]],
+    ["another row's test", [...cube, "if cube[0] is integer[][] { let sink: integer = cube[1]@ }"]],
+    [
+      "a parameter given lists and an object with its own selections",
+      [
+        "function pick(v) {",
+        'if v is integer[][] { let sink: integer = v@\nsay "${sink}" }',
+        "}",
+        "pick([[1]])",
+        'pick({first: {last: "a"}})',
+      ],
+    ],
+  ];
+  const indexes = scenarios.map(([name, lines]) => {
+    const index = answer(...lines.map((line) => line.replaceAll("@", "[0][0]")));
+    for (const selection of [".first.last", ".random.first", ".first[0]", ".last.random"])
+      assert.equal(
+        answer(...lines.map((line) => line.replaceAll("@", selection))),
+        index,
+        `${name}: ${selection}`,
+      );
+    return index;
+  });
+  assert.deepEqual([indexes[0], indexes[7], indexes[9]], ["valid", "valid", "valid"]);
+  // a descendant path's own test narrows it as an index path's does; `.random` selects anew, so a path through it is no
+  // path, and a test of one path says nothing of another
+  const rs = [choice, "let rs = [{f: 1}]", "if choice { rs = [{f: null}] }"];
+  const tested = (base: readonly string[], test: string, read: string): string =>
+    answer(...base, `if ${test} != null { let sink: integer = ${read} }`);
+  const untested = (base: readonly string[], read: string): string =>
+    answer(...base, `let sink: integer = ${read}`);
+  assert.equal(tested(rs, "rs.first.f", "rs.first.f"), "valid");
+  assert.equal(tested(rs, "rs.last.f", "rs.last.f"), tested(rs, "rs[0].f", "rs[0].f"));
+  assert.equal(tested(rows, "rows.first.last", "rows.first.last"), "valid");
+  assert.equal(tested(rs, "rs.first.f", "rs.last.f"), untested(rs, "rs.last.f"));
+  assert.equal(tested(rs, "rs.random.f", "rs.random.f"), untested(rs, "rs.random.f"));
+  assert.equal(
+    tested(rows, "rows.random.first", "rows.random.first"),
+    untested(rows, "rows.random.first"),
+  );
+  assert.equal(
+    tested(rows, "rows.first.random", "rows.first.random"),
+    untested(rows, "rows.first.random"),
+  );
+  // an empty list passes every element test: C6 still asks each selection's element of its owner; a property an
+  // element lacks stays a member read
+  const checks = (...lines: readonly string[]): string[] =>
+    record(...lines).checks.map((c) => c.kind);
+  assert.deepEqual(
+    checks(
+      choice,
+      "let rows: integer?[][] = []",
+      "if choice { rows = [[null]] }",
+      "if rows is integer[][] { let sink: integer = rows.first.last }",
+    ),
+    ["empty-check", "empty-check"],
+  );
+  assert.ok(
+    record(
+      choice,
+      "let rs = [{g: 1}]",
+      "if choice { rs = [{f: null}] }",
+      "if rs.first.f != null { let sink: integer = rs.first.f }",
+    ).diagnostics.some((d) => d.kind === "member-read" && d.context === "missing"),
+  );
+  // each owner that may be an object keeps its own selection opaque beside the narrowed element (F11), at the inner
+  // link and at the outer one, where G holds and where it fails; lists alone are narrowed
+  const pick = (body: string, ...calls: readonly string[]): readonly string[] =>
+    record(
+      "function pick(v) {",
+      `if v.first.last != null { ${body}let sink: integer = v.first.last\nsay "\${sink}" }`,
+      "}",
+      "pick([[1], [null]])",
+      ...calls.map((call) => `pick(${call})`),
+    )
+      .diagnostics.filter((d) => d.kind === "written-target")
+      .map((d) => d.context ?? "-");
+  assert.deepEqual(pick(""), []);
+  for (const object of ["{first: [null]}", "[{last: null}]"]) {
+    assert.deepEqual(pick("", object), ["unmodelled"], object);
+    assert.ok(pick("v.first.add(null)\n", object).includes("unmodelled"), object);
+  }
+});
+
 /** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */
 function queryDoubling(source: (k: number) => string, marker: string, delta: number): number {
   const [small, large] = [64, 128].map((k) => {

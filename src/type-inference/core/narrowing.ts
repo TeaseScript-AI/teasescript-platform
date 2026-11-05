@@ -1062,6 +1062,34 @@ export class NarrowingIndex {
   }
 }
 
+/** A selection of a narrowed read's chain (`selectionLinks`): the owner it selects from and the node that read takes. */
+export interface SelectionLink {
+  readonly owner: PlaceId;
+  readonly node: FlowNode | null;
+}
+
+/**
+ * The selections of a read's chain of projections down to its binding (#1073, `Values.#narrowedChain`), outermost
+ * first: each one's owner and the node the ordinary route reads it at (the link's own node, else the one the link above
+ * passes down, from `node` at the read). One walk of the chain, a step charged per link.
+ */
+export function selectionLinks(
+  program: CoreProgram,
+  value: PlaceId,
+  node: FlowNode | null,
+): readonly SelectionLink[] {
+  program.work.charge("eventSteps");
+  const links: SelectionLink[] = [];
+  let at = node;
+  let projection = program.projOf.get(value);
+  for (const _ of steps(program.work, "eventSteps", () => projection !== undefined)) {
+    at = projection!.node ?? at;
+    if (selectsElement(projection!.step)) links.push({ owner: projection!.owner, node: at });
+    projection = program.projOf.get(projection!.owner);
+  }
+  return links;
+}
+
 /** Whether `a` lies inside `b`'s region: an operand region inside a branch's, or the deeper of two of a kind. */
 function nearer(program: CoreProgram, a: Narrowing, b: Narrowing): boolean {
   program.work.charge("eventSteps");
