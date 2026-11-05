@@ -1336,14 +1336,14 @@ export interface MixedOptional {
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
  * items hold (the lead's ruling (A) on #1789, after Codex r1–r8 and Astra r1):
  * - at its own level (no step left), any value by its own items;
- * - a join, if any operand admission admitted may: an operand it rejected brings nothing (ADR 0021 1.1, Astra r1's B1);
  * - a literal, by its children at the layer's next step, each by this same rule below;
  * - a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and
  *   default, a method's receiver, a dict's values), by each value it carries, at the path into it; an `otherwise`'s
  *   fallback only where its operand's own items hold null;
  * - a written copy, by its term alone, whatever a rejected store put there;
  * - another read or a call's result, by its place's admitted type where admission decides it;
- * - any other value (an undecided place's read, an operation's own result), by its own items.
+ * - any other value (an undecided place's read, an operation's own result), by its own items: a `+` join's are its
+ *   admitted operands' elements, so an operand admission rejected brings nothing (ADR 0021 1.1, Astra r1's B1).
  * Each value at each path is asked once per pass (`OPTIONAL`), whichever literal's or join's error asks it, so a wide
  * part shared by many joins is walked once (Astra r1's B2); a value asked again while its own answer is pending, never.
  */
@@ -1367,22 +1367,6 @@ function mayHoldNull(
   const expand = (at: PlaceId, from: FlowNode, steps: readonly string[]): boolean | Part[] => {
     work.charge("checks");
     if (steps.length === 0) return itemsHold(at, []);
-    const c = program.opOf.get(at);
-    if (
-      c !== undefined &&
-      c.kind === "operation" &&
-      c.contract.family === "operator" &&
-      c.contract.name === "+" &&
-      c.arguments.length === 2
-    ) {
-      const [left, right] = c.arguments as readonly [PlaceId, PlaceId];
-      return admission.pass.lists.joined(right)
-        ? [
-            [left, from, steps],
-            [right, from, steps],
-          ]
-        : [[left, from, steps]];
-    }
     if (program.hasOf.has(at)) {
       const rest = keptSlice(work, steps, 1);
       return literalChildren(admission, at, steps[0]!).map(
