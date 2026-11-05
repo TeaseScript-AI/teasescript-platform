@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore, type CorePass } from "../src/type-inference/core/answers.js";
+import { WorkLedger } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { annotationTags } from "../src/type-inference/core/contract/terms.js";
 import {
@@ -2192,5 +2193,82 @@ test("a program without a test does not pay for the narrowing index; the same wi
       withTest - without >= index,
       `k = ${k}: ${without} without the test, ${withTest} with it, index ${index}`,
     );
+  }
+});
+
+test("a deep path's events are its prefixes' and collections' that hold one, wherever they stand (#1640)", () => {
+  const rows = ["let rows = [[[1, null]]]", "let other = [1]"];
+  const test = (body: string): string[] => [
+    ...rows,
+    `if rows[0][0][1] != null { ${body}\n repeat rows[0][0][1] {} }`,
+  ];
+  const lists = "let m: integer?[][] = [[1]]";
+  check(
+    [
+      ["held", test("say 1"), "repeat rows[0][0][1]", 7, "non-null: holds"],
+      ["another collection", test("other.reverse()"), "repeat rows[0][0][1]", 7, "non-null: holds"],
+      [
+        "the innermost collection",
+        test("rows[0][0].reverse()"),
+        "repeat rows[0][0][1]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a middle collection",
+        test("rows[0].reverse()"),
+        "repeat rows[0][0][1]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a middle prefix's store",
+        test("rows[0] = [[null]]"),
+        "repeat rows[0][0][1]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a positive collection test's element step",
+        [lists, "if m is integer[][] { m[0].reverse()\n repeat m[0][0] {} }"],
+        "repeat m[0][0]",
+        7,
+        "is integer element: branch",
+      ],
+    ],
+    at,
+  );
+});
+
+test("a deep path's narrowing makes no text per prefix: its events' kept text grows with the path, not its square (#1640)", () => {
+  // (#1770's family: a k-deep chain of selections under its own null test, read once below it)
+  const chain = (k: number): string =>
+    Array.from({ length: k }, (_, i) => (i % 2 === 0 ? ".first" : ".last")).join("");
+  const nested = (k: number, leaf: string): string => `${"[".repeat(k)}${leaf}${"]".repeat(k)}`;
+  const source = (k: number): string =>
+    [
+      'let choice = askBoolean "change?"',
+      `let rows = ${nested(k, "1")}`,
+      `if choice { rows = ${nested(k, "null")} }`,
+      `if rows${chain(k)} != null { let sink: integer = rows${chain(k)} }`,
+      "exit",
+    ].join("\n");
+  const charge = WorkLedger.prototype.charge;
+  let units = 0;
+  WorkLedger.prototype.charge = function (this: WorkLedger, ...args) {
+    if (args[0] === "literalUnits" && /narrowing(-events)?\.js/.test(new Error().stack!))
+      units += args[1] ?? 1;
+    charge.apply(this, args);
+  };
+  const kept = (k: number): number => {
+    units = 0;
+    analyseCore(coreRequest([{ path: "main.tease", source: source(k) }])!);
+    return units;
+  };
+  try {
+    const [small, large] = [kept(64), kept(128)];
+    assert.ok(large <= 2.25 * small, `${small} at 64, ${large} at 128`);
+  } finally {
+    WorkLedger.prototype.charge = charge;
   }
 });
