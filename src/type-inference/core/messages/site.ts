@@ -306,16 +306,31 @@ function lastStartingBy<T>(
   items: readonly T[],
   start: number,
   spanOf: (item: T) => SourceSpan,
+  charge: Charge,
 ): T | undefined {
   let low = 0;
   let high = items.length;
+  let found: T | undefined;
   while (low < high) {
+    // (one unit per item compared)
+    charge(1);
     const middle = (low + high) >> 1;
-    if (spanOf(items[middle]!).start.offset <= start) low = middle + 1;
-    else high = middle;
+    const item = items[middle]!;
+    if (spanOf(item).start.offset <= start) {
+      found = item;
+      low = middle + 1;
+    } else high = middle;
   }
-  return items[low - 1];
+  return found;
 }
+
+/**
+ * Where a message's walk of the source counts its work (#1730, Astra r1 B1): one unit per item a search compares, per
+ * expression the walk descends through, per property an owner's index holds and per step it takes.
+ */
+export type Charge = (units: number) => void;
+
+const NO_CHARGE: Charge = () => {};
 
 /**
  * The value at `site` among the values statements give (in their start order), with the statement's variable and the
@@ -327,20 +342,22 @@ function lastStartingBy<T>(
 function valueAt(
   given: readonly Given[],
   site: SourceSite,
+  charge: Charge,
 ): { readonly found: Given; readonly at: Expression; readonly steps: StoreStep[] } | null {
-  const found = lastStartingBy(given, site.start, (entry) => entry.value.span);
+  const found = lastStartingBy(given, site.start, (entry) => entry.value.span, charge);
   if (found === undefined) return null;
   const holds = (expression: Expression | undefined): expression is Expression =>
     expression !== undefined &&
     expression.span.start.offset <= site.start &&
     site.end <= expression.span.end.offset;
   const within = (expressions: readonly Expression[]): Expression | undefined => {
-    const part = lastStartingBy(expressions, site.start, (expression) => expression.span);
+    const part = lastStartingBy(expressions, site.start, (expression) => expression.span, charge);
     return holds(part) ? part : undefined;
   };
   const steps = [...found.steps];
   let at: Expression | undefined = found.value;
   while (holds(at)) {
+    charge(1);
     if (at.span.start.offset === site.start && at.span.end.offset === site.end)
       return { found, at, steps };
     if (at.kind === "parenthesizedExpression") at = at.expression;
@@ -352,6 +369,7 @@ function valueAt(
         at.properties,
         site.start,
         (entry) => entry.value.span,
+        charge,
       );
       if (property === undefined || !holds(property.value)) return null;
       steps.push({ property: property.name.name });
@@ -370,8 +388,12 @@ function valueAt(
 }
 
 /** Where the expression at `site` lands among the values statements give (`MessageSource.landing`, `valueAt`). */
-export function landingOf(given: readonly Given[], site: SourceSite): Landing | null {
-  const value = valueAt(given, site);
+export function landingOf(
+  given: readonly Given[],
+  site: SourceSite,
+  charge: Charge = NO_CHARGE,
+): Landing | null {
+  const value = valueAt(given, site, charge);
   return value === null ? null : { root: value.found.root, steps: value.steps };
 }
 
@@ -389,7 +411,7 @@ function selectedList(expression: Expression): ListLiteral | null {
   return inner.kind === "listLiteral" ? inner : null;
 }
 
-/** Each object literal's properties by name, made on its first lookup (`ownerOf`), one pass over its properties. */
+/** Each object literal's properties by name, made on its first lookup (`ownerOf`), one unit per property it holds. */
 const PROPERTIES = new WeakMap<ObjectLiteral, ReadonlyMap<string, ObjectProperty>>();
 
 /**
@@ -401,17 +423,21 @@ export function ownerOf(
   given: readonly Given[],
   site: SourceSite,
   steps: readonly StoreStep[],
+  charge: Charge = NO_CHARGE,
 ): SourceSite {
-  let at = valueAt(given, site)?.at;
+  let at = valueAt(given, site, charge)?.at;
   if (at === undefined) return site;
   for (const step of steps) {
     while (at.kind === "parenthesizedExpression") at = at.expression;
     if (!("property" in step) || at.kind !== "objectLiteral") break;
     let named = PROPERTIES.get(at);
-    if (named === undefined)
+    if (named === undefined) {
+      charge(at.properties.length);
       PROPERTIES.set(at, (named = new Map(at.properties.map((entry) => [entry.name.name, entry]))));
+    }
     const property = named.get(step.property);
     if (property === undefined) break;
+    charge(1);
     at = property.value;
   }
   return { file: site.file, start: at.span.start.offset, end: at.span.end.offset };

@@ -16,6 +16,7 @@ import type {
   StoreStep,
 } from "./result.js";
 import {
+  type Charge,
   type Given,
   givenBy,
   guards,
@@ -48,12 +49,14 @@ export { described, pathPhrase } from "./messages/words.js";
 /**
  * The message source of a project's files and of their analysis's diagnostics: each file's text, its lines counted
  * once, its statements on one line by their line, each parsed once, and its diagnostics' sites in start order, each
- * on first need; `keptName`, the analysis's name for a kept value (`Answers.keptName`), else one surveyed here.
+ * on first need; `keptName`, the analysis's name for a kept value (`Answers.keptName`), else one surveyed here; `charge`,
+ * where a landing's and an owner's walk count their work (`Answers.messageWork`), else nowhere.
  */
 export function messageSource(
   sources: readonly string[],
   diagnostics: readonly CheckedDiagnostic[],
   keptName?: (base: string) => string,
+  charge?: Charge,
 ): MessageSource {
   const starts = new Map<number, number[]>();
   const programs = new Map<number, Program>();
@@ -217,7 +220,17 @@ export function messageSource(
     }
     return found;
   };
-  const landing = (site: SourceSite): Landing | null => landingOf(givensOf(site.file), site);
+  // (each walk's units, counted once it ends: one charge per landing or owner asked)
+  const metered = <T>(walk: (count: Charge) => T): T => {
+    let units = 0;
+    const value = walk((more) => {
+      units += more;
+    });
+    if (units > 0) charge?.(units);
+    return value;
+  };
+  const landing = (site: SourceSite): Landing | null =>
+    metered((count) => landingOf(givensOf(site.file), site, count));
   // (the kept variable's name: the analysis's, chosen once and charged as its question, else surveyed here once, uncharged)
   const surveyed = new Map<string, string>();
   const freeName =
@@ -236,7 +249,7 @@ export function messageSource(
       return name;
     });
   const owner = (site: SourceSite, steps: readonly StoreStep[]): SourceSite =>
-    ownerOf(givensOf(site.file), site, steps);
+    metered((count) => ownerOf(givensOf(site.file), site, steps, count));
   return {
     freeName,
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),

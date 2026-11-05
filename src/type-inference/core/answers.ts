@@ -542,6 +542,11 @@ export interface Answers {
    * counted again.
    */
   keptName(base: string): string;
+  /**
+   * Counts `units` of a message's work over the source (#1730, `MessageSource.landing` and `owner`) as a shared build,
+   * to the analysis's total and to no demand (Astra r1 on #1730), its budget then counted again.
+   */
+  messageWork(units: number): void;
   /** The occurrence answer at a path step below a value: a collection's `element`, a dict's `entry`, a property. */
   project(
     node: FlowNode,
@@ -1535,15 +1540,33 @@ class CoreAnswers implements Answers {
         work.spender = spender;
       }
       names.set(base, name);
-      this.budget = {
-        ...this.budget,
-        total: work.total,
-        counts: work.counts(),
-        finishing: work.finishing,
-        apart: work.apartCounts(),
-      };
+      this.#counted();
     }
     return name;
+  }
+
+  public messageWork(units: number): void {
+    const { work } = this.#pass.program;
+    const spender = work.spender;
+    work.spender = 0;
+    try {
+      work.shared(() => work.charge("indexSteps", units));
+    } finally {
+      work.spender = spender;
+    }
+    this.#counted();
+  }
+
+  /** The budget again after a shared build the answers' questions made (`keptName`, `messageWork`). */
+  #counted(): void {
+    const { work } = this.#pass.program;
+    this.budget = {
+      ...this.budget,
+      total: work.total,
+      counts: work.counts(),
+      finishing: work.finishing,
+      apart: work.apartCounts(),
+    };
   }
 
   public stoppedAt(limit: BudgetLimit): Answers {

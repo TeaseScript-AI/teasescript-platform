@@ -2501,3 +2501,93 @@ test("a warning's landing and owner read the program's values by their start (#1
       );
   }
 });
+
+/**
+ * #1730, Astra r1 B1: a message's walk to a warned value and an owner's index charge their work, one unit per item a
+ * search compares, per expression walked, per property an owner's index holds (made once per literal) and per step it
+ * takes; through `coreCheckResult` the units count to the analysis's total as a shared build (`Answers.messageWork`),
+ * to no demand, and grow linearly with the warnings (k = 64 to 256, at most ×2.5 per doubling).
+ */
+test("a message's walk and owner index charge their work, to the analysis and no demand (#1495)", () => {
+  const n = 64;
+  const properties = Array.from({ length: n }, (_, at) => `p${at}: 1`).join(", ");
+  const source = `let wrap = {${properties}, inner: {volume: 5}}\nexit\n`;
+  const [given] = parse(source).program.statements.flatMap((statement) => givenBy(statement) ?? []);
+  assert.ok(given !== undefined && given.value.kind === "objectLiteral");
+  const literal = given.value;
+  const whole = { file: 0, start: literal.span.start.offset, end: literal.span.end.offset };
+  let units = 0;
+  const charge = (more: number): void => {
+    units += more;
+  };
+  const steps = [{ property: "inner" }, { property: "volume" }];
+  ownerOf([given], whole, steps, charge);
+  // (one value compared, one expression walked, the outer index's n + 1 entries and the inner's one, two steps taken)
+  assert.equal(units, 1 + 1 + (n + 1) + 1 + 2);
+  units = 0;
+  ownerOf([given], whole, steps, charge);
+  // (each index made once)
+  assert.equal(units, 1 + 1 + 2);
+  // (the landing at `5`: one value compared, three expressions walked, the properties each literal's search compares)
+  const count = { reads: 0 };
+  const read = <T extends object>(items: readonly T[]): T[] => {
+    const array: T[] = [...items];
+    items.forEach((item, at) =>
+      Object.defineProperty(array, at, {
+        get: () => {
+          count.reads += 1;
+          return item;
+        },
+      }),
+    );
+    return array;
+  };
+  const inner = literal.properties.at(-1)!.value;
+  assert.ok(inner.kind === "objectLiteral");
+  const counted: Given = {
+    ...given,
+    value: {
+      ...literal,
+      properties: read([
+        ...literal.properties.slice(0, -1),
+        { ...literal.properties.at(-1)!, value: { ...inner, properties: read(inner.properties) } },
+      ]),
+    },
+  };
+  const five = source.indexOf("5");
+  units = 0;
+  assert.notEqual(landingOf([counted], { file: 0, start: five, end: five + 1 }, charge), null);
+  assert.equal(units, 1 + 3 + count.reads);
+  // (through the compile's consumer: what the messages charge is the analysis's, a demand's records as they were)
+  const work = [64, 128, 256].map((k) => {
+    const program = `${Array.from({ length: k }, (_, at) => `let w${at} = {inner: {volume: 5}}\nw${at}.inner = hostValue\n`).join("")}exit\n`;
+    const request = coreRequest([{ path: "main.tease", source: program }])!;
+    const answers = analyseCore(request);
+    const before = answers.budget;
+    let charged = 0;
+    const counts = answers.messageWork.bind(answers);
+    answers.messageWork = (more) => {
+      charged += more;
+      counts(more);
+    };
+    const checked = coreCheckResult(
+      answers,
+      new SliceIndex(request.files.map((file) => file.program)),
+      request,
+    );
+    const owned = checked.diagnostics
+      .flat()
+      .filter((diagnostic) => diagnostic.message.includes("where 'hostValue' gets its value"));
+    assert.equal(owned.length, k, `k = ${k}`);
+    assert.ok(charged >= 2 * k, `k = ${k}: ${charged}`);
+    const added =
+      (answers.budget.counts.get("indexSteps") ?? 0) - (before.counts.get("indexSteps") ?? 0);
+    assert.equal(added, charged, `k = ${k}`);
+    assert.equal(answers.budget.total - before.total, charged, `k = ${k}`);
+    assert.deepEqual(answers.budget.demands, before.demands, `k = ${k}`);
+    assert.deepEqual(answers.budget.decisions, before.decisions, `k = ${k}`);
+    return charged;
+  });
+  for (let at = 1; at < work.length; at += 1)
+    assert.ok(work[at]! <= 2.5 * work[at - 1]!, work.join(", "));
+});
