@@ -325,8 +325,9 @@ function lastStartingBy<T>(
 }
 
 /**
- * Where a message's walk of the source counts its work (#1730, Astra r1 B1): one unit per item a search compares, per
- * expression the walk descends through, per property an owner's index holds and per step it takes.
+ * Where a message's walk of the source counts its work (#1730, Astra r1 B1, Codex r4 B1): one unit per item a search
+ * compares, per expression the walk descends through, per parenthesis a selection's list or an owner's step unwraps,
+ * per property an owner's index holds and per step it takes.
  */
 export type Charge = (units: number) => void;
 
@@ -379,7 +380,7 @@ function valueAt(
       at = within([at.left, at.right]);
     else {
       // (a list literal's selected element, `[a, b].random` or `[a, b][0]`: that element is the place, no step more)
-      const list = selectedList(at);
+      const list = selectedList(at, charge);
       if (list === null) return null;
       at = within(list.elements);
     }
@@ -398,7 +399,7 @@ export function landingOf(
 }
 
 /** The list literal a selection of one element reads (`.random`, `.first`, `.last`, an index), through parentheses. */
-function selectedList(expression: Expression): ListLiteral | null {
+function selectedList(expression: Expression, charge: Charge): ListLiteral | null {
   const object =
     expression.kind === "propertyAccessExpression" && selectsElement(expression.property.name)
       ? expression.object
@@ -407,7 +408,11 @@ function selectedList(expression: Expression): ListLiteral | null {
         : null;
   if (object === null) return null;
   let inner = object;
-  while (inner.kind === "parenthesizedExpression") inner = inner.expression;
+  while (inner.kind === "parenthesizedExpression") {
+    // (one unit per parenthesis unwrapped)
+    charge(1);
+    inner = inner.expression;
+  }
   return inner.kind === "listLiteral" ? inner : null;
 }
 
@@ -428,7 +433,11 @@ export function ownerOf(
   let at = valueAt(given, site, charge)?.at;
   if (at === undefined) return site;
   for (const step of steps) {
-    while (at.kind === "parenthesizedExpression") at = at.expression;
+    while (at.kind === "parenthesizedExpression") {
+      // (one unit per parenthesis unwrapped)
+      charge(1);
+      at = at.expression;
+    }
     if (!("property" in step) || at.kind !== "objectLiteral") break;
     let named = PROPERTIES.get(at);
     if (named === undefined) {

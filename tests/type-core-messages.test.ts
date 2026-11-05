@@ -20,6 +20,7 @@ import {
   ownerOf,
 } from "../src/type-inference/core/messages/site.js";
 import { parse } from "../src/parser.js";
+import type { SourceSite } from "../src/type-inference/graph.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
@@ -2292,6 +2293,11 @@ test("a kept value's name is surveyed once, charged to the analysis and no deman
     const request = coreRequest([{ path: "main.tease", source }])!;
     const answers = analyseCore(request);
     const before = answers.budget;
+    // (the records as the analysis left them, copied: the budget's lists are the answers' own, Codex r4 T1 on #1730)
+    const [demands, decisions] = [
+      structuredClone(before.demands),
+      structuredClone(before.decisions),
+    ];
     const checked = coreCheckResult(
       answers,
       new SliceIndex(request.files.map((file) => file.program)),
@@ -2305,8 +2311,8 @@ test("a kept value's name is surveyed once, charged to the analysis and no deman
     const surveyed =
       (answers.budget.counts.get("indexSteps") ?? 0) - (before.counts.get("indexSteps") ?? 0);
     assert.ok(surveyed >= nodes, `k = ${k}: ${surveyed} survey units for ${nodes} nodes`);
-    assert.deepEqual(answers.budget.demands, before.demands, `k = ${k}`);
-    assert.deepEqual(answers.budget.decisions, before.decisions, `k = ${k}`);
+    assert.deepEqual(answers.budget.demands, demands, `k = ${k}`);
+    assert.deepEqual(answers.budget.decisions, decisions, `k = ${k}`);
     return { total: answers.budget.total, nodes };
   });
   for (let at = 1; at < measured.length; at += 1) {
@@ -2558,6 +2564,44 @@ test("a message's walk and owner index charge their work, to the analysis and no
   units = 0;
   assert.notEqual(landingOf([counted], { file: 0, start: five, end: five + 1 }, charge), null);
   assert.equal(units, 1 + 3 + count.reads);
+  // (each parenthesis unwrapped is a unit more: d around an owner's two literals, 2d; d around a selection's list, d)
+  const charged = (code: string, at: (code: string) => SourceSite, owned: boolean): number => {
+    const [entry] = parse(code).program.statements.flatMap((statement) => givenBy(statement) ?? []);
+    assert.ok(entry !== undefined, code);
+    let spent = 0;
+    const add = (more: number): void => {
+      spent += more;
+    };
+    if (owned) ownerOf([entry], at(code), steps, add);
+    else assert.notEqual(landingOf([entry], at(code), add), null, code);
+    return spent;
+  };
+  const wrapped = (d: number, text: string): string => `${"(".repeat(d)}${text}${")".repeat(d)}`;
+  const value = (code: string): SourceSite => ({
+    file: 0,
+    start: code.indexOf("= ") + 2,
+    end: code.indexOf("\nexit"),
+  });
+  const element = (code: string): SourceSite => {
+    const start = code.indexOf("{volume: 5}");
+    return { file: 0, start, end: start + "{volume: 5}".length };
+  };
+  for (const d of [1, 4, 16]) {
+    const owner = (depth: number): string =>
+      `let wrap = ${wrapped(depth, `{a: 1, inner: ${wrapped(depth, "{volume: 5}")}}`)}\nexit\n`;
+    assert.equal(
+      charged(owner(d), value, true) - charged(owner(0), value, true),
+      2 * d,
+      `owner, ${d}`,
+    );
+    const selection = (depth: number): string =>
+      `let wrap = {inner: ${wrapped(depth, "[{volume: 5}, hostValue]")}[0]}\nexit\n`;
+    assert.equal(
+      charged(selection(d), element, false) - charged(selection(0), element, false),
+      d,
+      `selection, ${d}`,
+    );
+  }
   // (through the compile's consumer: what the messages charge is the analysis's, beside the same compile whose messages
   // charge nothing; a demand's records as they were)
   const compiled = (k: number, charging: boolean) => {
@@ -2565,6 +2609,11 @@ test("a message's walk and owner index charge their work, to the analysis and no
     const request = coreRequest([{ path: "main.tease", source: program }])!;
     const answers = analyseCore(request);
     const before = answers.budget;
+    // (the records as the analysis left them, copied: the budget's lists are the answers' own, Codex r4 T1 on #1730)
+    const [demands, decisions] = [
+      structuredClone(before.demands),
+      structuredClone(before.decisions),
+    ];
     let charged = 0;
     const counts = answers.messageWork.bind(answers);
     answers.messageWork = (more) => {
@@ -2580,8 +2629,8 @@ test("a message's walk and owner index charge their work, to the analysis and no
       .flat()
       .filter((diagnostic) => diagnostic.message.includes("where 'hostValue' gets its value"));
     assert.equal(owned.length, k, `k = ${k}`);
-    assert.deepEqual(answers.budget.demands, before.demands, `k = ${k}`);
-    assert.deepEqual(answers.budget.decisions, before.decisions, `k = ${k}`);
+    assert.deepEqual(answers.budget.demands, demands, `k = ${k}`);
+    assert.deepEqual(answers.budget.decisions, decisions, `k = ${k}`);
     return {
       charged,
       total: answers.budget.total,
