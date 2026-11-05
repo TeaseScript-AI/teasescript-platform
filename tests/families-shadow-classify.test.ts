@@ -643,20 +643,25 @@ test("taxonomy v2's return-statement rule: its synthetic witness classifies, and
     (c: { id: string }) => c.id === "excluded/this return statement",
   );
   if (!rule.witness.startsWith("synthetic")) return;
-  const real = C.classifyRecords(entries(witnesses)).perPair.filter(
-    (p: { class: string }) => p.class === "excluded/this return statement",
-  );
+  // (the text in any route's run of a record, whatever class the pair takes: a failed legacy run beside it makes the
+  // pair failed/legacy-heap, and the text is still real; Codex r1 on #1761)
+  const TEXT = "this return statement";
+  const hasText = (record: { rows?: unknown; demands?: unknown }): boolean =>
+    JSON.stringify([record.rows ?? [], record.demands ?? []]).includes(`"outside":"${TEXT}"`);
+  const real = witnesses.filter(hasText).map((r) => r.key);
+  // (a run's pairs.jsonl, by its class, or its records (shadow.jsonl), by their runs)
   const pairs = process.env.SHADOW_CLASSIFY_PAIRS;
   const recorded =
     pairs === undefined
       ? []
       : readFileSync(pairs, "utf8")
-          .trim()
           .split("\n")
-          .map((line): { class: string; key: string } => JSON.parse(line))
-          .filter((p) => p.class === "excluded/this return statement");
+          .filter((line) => line.trim() !== "")
+          .map((line): { key: string; class?: string; rows?: unknown } => JSON.parse(line))
+          .filter((p) => (p.rows === undefined ? p.class === `excluded/${TEXT}` : hasText(p)))
+          .map((p) => p.key);
   assert.deepEqual(
-    [...real, ...recorded].map((p: { key: string }) => p.key),
+    [...real, ...recorded],
     [],
     "a real record has the text: replace the synthetic witness with it",
   );
