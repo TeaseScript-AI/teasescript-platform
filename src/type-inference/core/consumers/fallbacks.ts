@@ -37,7 +37,7 @@ export function fallbackFits(
   directAt: (rest: readonly string[]) => readonly Item[],
   value: PlaceId,
   written = false,
-  domainAt: ((rest: readonly string[]) => Domain | null) | null = null,
+  domainAt: ((rest: readonly string[], unknown: boolean) => Domain | null) | null = null,
 ): void {
   // nested list, set and dict literals by their elements, one depth after another; the target: the fallback's own
   // key path at the depth, a dict's value its `entry` (§10.5)
@@ -89,13 +89,17 @@ export function domainFamily(
   walk: Consumers,
   value: PlaceId,
   rest: readonly string[],
+  unknown: boolean,
 ): Domain | null {
+  // (asked only where it can stand for the value: a read of unknown kinds, or a value with a written type there; a
+  // known unwritten value, an operator's or a join's, asks nothing, so a chain of them stays linear, #1310)
+  const term = writtenTermOf(walk, value);
+  const written = term !== null && termAt(term, rest) !== null;
+  if (!written && !unknown) return null;
   walk.pass.program.work.charge("checks");
   const kinds = quietKinds(walk, value, rest);
-  if (kinds === null || !oneFamily(kinds)) return null;
-  const term = writtenTermOf(walk, value);
   // (its `null` contributes no family: C10 reads a direct value's concrete kinds)
-  return { kinds, written: term !== null && termAt(term, rest) !== null };
+  return kinds === null || !oneFamily(kinds) ? null : { kinds, written };
 }
 
 /** C10 at one path of the fallback, its label there made by `label`: whether its elements are checked too. */
@@ -104,7 +108,7 @@ function fallbackFitsAt(
   c: ValueConstraint,
   node: FlowNode,
   directAt: (rest: readonly string[]) => readonly Item[],
-  domainAt: ((rest: readonly string[]) => Domain | null) | null,
+  domainAt: ((rest: readonly string[], unknown: boolean) => Domain | null) | null,
   value: PlaceId,
   rest: readonly string[],
   written: boolean,
@@ -123,11 +127,11 @@ function fallbackFitsAt(
     read.some(unsettledItem) ||
     read.every((item) => item.tag === "null")
       ? null
-      : domainAt(rest);
-  const direct =
-    domain !== null && (domain.written || read.some((item) => item.tag === "unknown"))
-      ? domain.kinds.map((tag) => makeItem(tag))
-      : read;
+      : domainAt(
+          rest,
+          read.some((item) => item.tag === "unknown"),
+        );
+  const direct = domain === null ? read : domain.kinds.map((tag) => makeItem(tag));
   const into = contract.landsIn(c.result, rest);
   // (the declaration the value lands in directly, where a written type is)
   const root =

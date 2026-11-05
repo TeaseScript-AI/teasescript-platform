@@ -68,7 +68,7 @@ export function operations(walk: Consumers): void {
           withoutEmpty(walk.valueItems(c.receiver, node, joinSteps(["element"], rest), true)),
         c.fallback,
         false,
-        (rest) => domainFamily(walk, c.receiver, joinSteps(["element"], rest)),
+        (rest, unknown) => domainFamily(walk, c.receiver, joinSteps(["element"], rest), unknown),
       );
       continue;
     }
@@ -80,7 +80,7 @@ export function operations(walk: Consumers): void {
         (rest) => withoutEmpty(walk.valueItems(c.left, node, rest, true)),
         c.right,
         false,
-        (rest) => domainFamily(walk, c.left, rest),
+        (rest, unknown) => domainFamily(walk, c.left, rest, unknown),
       );
       continue;
     }
