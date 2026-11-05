@@ -358,8 +358,6 @@ export function literalElements(
       shared = paths;
       atCopy = atCopies.get(key)!;
     }
-    // (#1765: each definition's intermediate layers by path, asked once beside every later element, Codex r6's B3)
-    const layered = new Map<Definition, Map<string, boolean[]>>();
     const first = new Map<
       string,
       {
@@ -392,23 +390,11 @@ export function literalElements(
           : null;
       // (#1765: the layers between the element and the leaf that may hold null, each element's by its form
       // (`mayHoldNull`); the sentence's type alone, as the leaf's own null is, #1753)
-      // (each definition's layers at a path asked once: the earliest element's beside every later one, Codex r6's B3)
-      const layers = (of: Definition): boolean[] => {
-        let mine = layered.get(of);
-        if (mine === undefined) layered.set(of, (mine = new Map()));
-        let found = mine.get(at);
-        if (found === undefined) {
-          // (the path's text kept as the key, charged)
-          keepText(admission.work, at.length);
-          mine.set(
-            at,
-            (found = intermediateLayers(admission.work, path).map((prefix) =>
-              mayHoldNull(admission, of.value!, of.node, prefix),
-            )),
-          );
-        }
-        return found;
-      };
+      // (each value's layers read from the pass's memo of `mayHoldNull`, Codex r6's B3, Astra r1's B2)
+      const layers = (of: Definition): boolean[] =>
+        intermediateLayers(admission.work, path).map((prefix) =>
+          mayHoldNull(admission, of.value!, of.node, prefix),
+        );
       const optional = mixedOptional(layers(first.get(at)!.d), layers(d));
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,
@@ -1348,40 +1334,39 @@ export interface MixedOptional {
 
 /**
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
- * items hold (the lead's ruling (A) on #1789, after Codex r1–r6):
+ * items hold (the lead's ruling (A) on #1789, after Codex r1–r8 and Astra r1):
  * - at its own level (no step left), any value by its own items;
- * - a join, if any operand may;
+ * - a join, if any operand admission admitted may: an operand it rejected brings nothing (ADR 0021 1.1, Astra r1's B1);
  * - a literal, by its children at the layer's next step, each by this same rule below;
  * - a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and
  *   default, a method's receiver, a dict's values), by each value it carries, at the path into it; an `otherwise`'s
- *   fallback only where its operand may itself be null;
+ *   fallback only where its operand's own items hold null;
  * - a written copy, by its term alone, whatever a rejected store put there;
  * - another read or a call's result, by its place's admitted type where admission decides it;
  * - any other value (an undecided place's read, an operation's own result), by its own items.
- * Each own-level question of an `otherwise`'s operand once per call, so nested `otherwise`s ask each value once.
+ * Each value at each path is asked once per pass (`OPTIONAL`), whichever literal's or join's error asks it, so a wide
+ * part shared by many joins is walked once (Astra r1's B2); a value asked again while its own answer is pending, never.
  */
 function mayHoldNull(
   admission: Admission,
   value: PlaceId,
   node: FlowNode,
   prefix: readonly string[],
-  own = new Map<PlaceId, boolean>(),
 ): boolean {
   const { program, contract } = admission.pass;
+  const { work } = admission;
+  let memo = OPTIONAL.get(admission.pass);
+  if (memo === undefined) OPTIONAL.set(admission.pass, (memo = new Map()));
+  const answers = memo;
   const itemsHold = (at: PlaceId, steps: readonly string[]): boolean =>
     withoutEmpty(admission.run(contract.contractOfValueAt(at, steps))).some(
       (item) => item.tag === "null",
     );
-  const pending: (readonly [PlaceId, FlowNode, readonly string[]])[] = [[value, node, prefix]];
-  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-    const [at, from, steps] = next;
-    program.work.charge("checks");
-    // (at its own level, any value by its own items: a method's or a join's result is a new collection, whatever its
-    // receiver or operands hold, and a choice's own null is its own, Codex r6's B1 and B2)
-    if (steps.length === 0) {
-      if (itemsHold(at, [])) return true;
-      continue;
-    }
+  type Part = readonly [PlaceId, FlowNode, readonly string[]];
+  // (a value's answer at a path where its form decides it, else the parts whose answers decide it)
+  const expand = (at: PlaceId, from: FlowNode, steps: readonly string[]): boolean | Part[] => {
+    work.charge("checks");
+    if (steps.length === 0) return itemsHold(at, []);
     const c = program.opOf.get(at);
     if (
       c !== undefined &&
@@ -1390,50 +1375,107 @@ function mayHoldNull(
       c.contract.name === "+" &&
       c.arguments.length === 2
     ) {
-      for (const operand of c.arguments) pending.push([operand, from, steps]);
-      continue;
+      const [left, right] = c.arguments as readonly [PlaceId, PlaceId];
+      return admission.pass.lists.joined(right)
+        ? [
+            [left, from, steps],
+            [right, from, steps],
+          ]
+        : [[left, from, steps]];
     }
     if (program.hasOf.has(at)) {
-      const rest = keptSlice(admission.work, steps, 1);
-      for (const child of literalChildren(admission, at, steps[0]!))
-        pending.push([child.value!, child.node ?? from, rest]);
-      continue;
+      const rest = keptSlice(work, steps, 1);
+      return literalChildren(admission, at, steps[0]!).map(
+        (child) => [child.value!, child.node ?? from, rest] as const,
+      );
     }
     const carried = admission.carriersOf(at, steps);
     if (carried.length > 0) {
-      // (an `otherwise`'s fallback only where its operand may itself be null, by this same rule, asked once)
       const operand = carried.find(([, , role]) => role === "otherwise/operand")?.[0];
-      let falls = true;
-      if (operand !== undefined) {
-        const known = own.get(operand);
-        falls = known ?? mayHoldNull(admission, operand, from, [], own);
-        own.set(operand, falls);
-      }
-      for (const [part, strip, role] of carried)
-        if (role !== "otherwise/fallback" || falls) pending.push([part, from, strip]);
-      continue;
+      const falls = operand === undefined || itemsHold(operand, []);
+      return carried
+        .filter(([, , role]) => role !== "otherwise/fallback" || falls)
+        .map(([part, strip]) => [part, from, strip] as const);
     }
     const copied = holdsSource(admission, at)
       ? (drive(admission, earliestDecider(admission, at, from, steps, null))?.term ?? null)
       : null;
-    if (copied !== null) {
-      if (typeTags(copied).includes("null")) return true;
-      continue;
-    }
+    if (copied !== null) return typeTags(copied).includes("null");
     const key = contract.copiedKey(at) ?? contract.resultKey(at);
     if (key !== null) {
       const path = joinSteps(stepsArray(keyStepsIn(contract, key)), steps);
       const admitted = admission.admitted(keyPlace(key), path);
       // (no kind, or an unknown, decides nothing: `null` alone settles no type, Codex r5's B3)
-      if (admitted.length > 0 && !admitted.includes("unknown")) {
-        if (admitted.includes("null")) return true;
+      if (admitted.length > 0 && !admitted.includes("unknown")) return admitted.includes("null");
+    }
+    return itemsHold(at, steps);
+  };
+  const known = (at: PlaceId, text: string): boolean | undefined => answers.get(at)?.get(text);
+  const keep = (at: PlaceId, text: string, holds: boolean): void => {
+    let mine = answers.get(at);
+    if (mine === undefined) answers.set(at, (mine = new Map()));
+    mine.set(text, holds);
+  };
+  interface Frame {
+    readonly at: PlaceId;
+    readonly from: FlowNode;
+    readonly steps: readonly string[];
+    readonly text: string;
+    parts: Part[] | null;
+    next: number;
+  }
+  const pending = new Map<PlaceId, Set<string>>();
+  const open = (at: PlaceId, from: FlowNode, steps: readonly string[], text: string): Frame => {
+    let mine = pending.get(at);
+    if (mine === undefined) pending.set(at, (mine = new Set()));
+    mine.add(text);
+    return { at, from, steps, text, parts: null, next: 0 };
+  };
+  const rootText = keptText(work, prefix);
+  const already = known(value, rootText);
+  if (already !== undefined) return already;
+  const stack: Frame[] = [open(value, node, prefix, rootText)];
+  let last = false;
+  while (stack.length > 0) {
+    const frame = stack.at(-1)!;
+    if (frame.parts === null) {
+      const found = expand(frame.at, frame.from, frame.steps);
+      if (typeof found === "boolean") {
+        keep(frame.at, frame.text, (last = found));
+        pending.get(frame.at)!.delete(frame.text);
+        stack.pop();
         continue;
       }
+      frame.parts = found;
     }
-    if (itemsHold(at, steps)) return true;
+    let holds = false;
+    let opened = false;
+    while (frame.next < frame.parts.length) {
+      const [at, from, steps] = frame.parts[frame.next]!;
+      const text = keptText(work, steps);
+      const answer = known(at, text);
+      if (answer === true) {
+        holds = true;
+        break;
+      }
+      frame.next += 1;
+      if (answer === false || pending.get(at)?.has(text) === true) continue;
+      // (asked first here: answered before this frame goes on, then read from the memo)
+      frame.next -= 1;
+      stack.push(open(at, from, steps, text));
+      opened = true;
+      break;
+    }
+    if (opened) continue;
+    keep(frame.at, frame.text, (last = holds));
+    pending.get(frame.at)!.delete(frame.text);
+    stack.pop();
   }
-  return false;
+  return last;
 }
+
+/** Per pass, each value's answer at each path (`mayHoldNull`), shared by every literal's and join's error. */
+const OPTIONAL = new WeakMap<object, Map<PlaceId, Map<string, boolean>>>();
 
 /** The paths of the layers strictly between a mixed path's last property (or the element) and its leaf. */
 function intermediateLayers(work: WorkLedger, path: readonly string[]): (readonly string[])[] {
