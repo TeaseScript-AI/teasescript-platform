@@ -122,6 +122,7 @@ test("the walk refuses each loading form it does not model", () => {
       unmodelled('"./sibling.js", which could name refused/sibling.js or refused/sibling.ts'),
     ],
     ["require.ts", unmodelled("CommonJS require()")],
+    ["require-alias.ts", unmodelled("CommonJS require()")],
     ["url.ts", unmodelled("new URL(…, import.meta.url) outside new Worker(…)")],
     ["computed-import.ts", unmodelled("an import() of a computed specifier")],
   ])

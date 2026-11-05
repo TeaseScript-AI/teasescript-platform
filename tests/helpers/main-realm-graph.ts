@@ -42,6 +42,20 @@ function refuse(label: string, form: string): never {
   throw new Error(`${label}: the main-realm walk does not model ${form}`);
 }
 
+/** Whether `node` names a member (`a.require`, `{ require: … }`) rather than referring to a binding. */
+function isMemberName(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  return (
+    (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+    ((ts.isPropertyAssignment(parent) ||
+      ts.isMethodDeclaration(parent) ||
+      ts.isPropertyDeclaration(parent) ||
+      ts.isPropertySignature(parent) ||
+      ts.isMethodSignature(parent)) &&
+      parent.name === node)
+  );
+}
+
 /** Whether `node` is `import.meta.<name>`. */
 function isImportMeta(node: ts.Node, name: string): boolean {
   return (
@@ -101,11 +115,10 @@ function valueImports(
       // `export { type A } from "m"` and `export {} from "m"` still load `m` under `verbatimModuleSyntax`.
       found.push({ specifier: node.moduleSpecifier.text, names: names.length > 0 ? names : ["*"] });
     } else if (
-      (ts.isCallExpression(node) &&
-        ts.isIdentifier(node.expression) &&
-        node.expression.text === "require") ||
+      (ts.isIdentifier(node) && node.text === "require" && !isMemberName(node)) ||
       (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference))
     ) {
+      // Any reference to `require`, not only a direct call: `(require)(…)`, `require!(…)` and an alias call it too.
       refuse(label, "CommonJS require()");
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const [argument] = node.arguments;
