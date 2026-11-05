@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -41,7 +49,8 @@ export const CORE_BACKEND = {
   },
 };
 `,
-  "src/type-inference/legacy-rounds.js": `let compiled = 0;
+  "src/type-inference/legacy-rounds.js": `import { writeSync } from "node:fs";
+let compiled = 0;
 const exhaust = () => {
   const held = [];
   for (;;) held.push(new Array(100000).fill(held.length));
@@ -53,6 +62,15 @@ export const LEGACY_BACKEND = {
     const mode = globalThis.shadowMode;
     if (source === "crash" && mode.reversed && !mode.unshared) exhaust();
     if (source === "abort" && !mode.reversed && !mode.unshared) process.abort();
+    if (source === "noisy" && !mode.reversed && !mode.unshared) {
+      writeSync(2, "a diagnostic without a newline");
+      exhaust();
+    }
+    if (source === "large" && !mode.reversed && !mode.unshared)
+      queueMicrotask(() => {
+        throw new Error("large worker error");
+      });
+    if (source === "block") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
     if (source === "leak" && !mode.reversed && !mode.unshared && compiled > 0) exhaust();
     if (source === "idle" && !mode.reversed && !mode.unshared)
       setTimeout(() => {
@@ -72,7 +90,7 @@ export const LEGACY_BACKEND = {
 export function compileProjectWithBackend(files, options, backend) {
   const program = { kind: "program", span: { start: { offset: 0 }, end: { offset: 1 } } };
   (backend ?? LEGACY_BACKEND).analyze({ files: [{ path: "main.tease", program, source: files[0].source }] });
-  return { plan: { instructions: [files[0].source] }, diagnostics: [] };
+  return { plan: { instructions: [files[0].source === "large" ? "x".repeat(1 << 20) : files[0].source] }, diagnostics: [] };
 }
 `,
   "tests/helpers/type-core-oracles.js": `import { compileProjectWithBackend } from "../../src/compiler.js";
@@ -106,7 +124,7 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
   cpSync(resolve("tests/families/sources.mjs"), join(folder, "tests/families/sources.mjs"));
   writeFileSync(
     join(folder, "tests/families/area/cases.mjs"),
-    `export const cases = ${JSON.stringify(["fine", "leak", "crash", "after", "outside", "idle", "late", "abort", "costly"].map((s) => [s, s]))};\n`,
+    `export const cases = ${JSON.stringify(["fine", "leak", "crash", "after", "outside", "idle", "late", "abort", "costly", "noisy", "large"].map((s) => [s, s]))};\n`,
   );
   const out = join(folder, "shadow.jsonl");
   const decisions = join(folder, "decisions.jsonl");
@@ -132,11 +150,29 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
     .map((line) => JSON.parse(line));
   assert.deepEqual(
     records.map((r) => r.name),
-    ["fine", "leak", "crash", "after", "outside", "idle", "late", "abort", "costly"].map(
-      (name) => `cases.mjs/${name}`,
-    ),
+    [
+      "fine",
+      "leak",
+      "crash",
+      "after",
+      "outside",
+      "idle",
+      "late",
+      "abort",
+      "costly",
+      "noisy",
+      "large",
+    ].map((name) => `cases.mjs/${name}`),
   );
-  const [fine, leak, crash, after, outside, idle, late, abort, costly] = records;
+  const [fine, leak, crash, after, outside, idle, late, abort, costly, noisy, large] = records;
+  // (stderr text without a newline before a mark leaves the mark readable: the heap failure is still in analysis)
+  assert.deepEqual(
+    noisy.failed.map((f: Record<string, unknown>) => [f.route, f.mode, f.failure, f.phase]),
+    [["legacy", 0, "heap", "analysis"]],
+  );
+  // (a large outcome sent just before an error ends the process is kept: the parent replaces the process after it)
+  assert.equal(large.incomplete, undefined);
+  assert.equal(large.rows[0].legacy.outcome, "plan");
   // (a run past the unit limit: its process ends at once, the units it had charged and the allowance recorded)
   assert.deepEqual(
     costly.failed.map((f: Record<string, unknown>) => [
@@ -243,13 +279,13 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
     return { resumed, runs, failed, retried, replaced, incomplete };
   };
   // (each worker that threw after its outcome, between runs or as the next run waited, was replaced, its outcome kept)
-  const recorded = { runs: 72, failed: 3, retried: 2, incomplete: 3 };
-  assert.deepEqual(counted(ran.stdout), { ...recorded, resumed: 0, replaced: 2 });
+  const recorded = { runs: 88, failed: 4, retried: 3, incomplete: 4 };
+  assert.deepEqual(counted(ran.stdout), { ...recorded, resumed: 0, replaced: 3 });
   // (again with the same --out: nothing runs again, and the recorded failure still counts)
   const again = shadow();
   assert.equal(again.status, 1, again.stderr);
-  assert.deepEqual(counted(again.stdout), { ...recorded, resumed: 9, replaced: 0 });
-  assert.equal(readFileSync(out, "utf8").trim().split("\n").length, 9);
+  assert.deepEqual(counted(again.stdout), { ...recorded, resumed: 11, replaced: 0 });
+  assert.equal(readFileSync(out, "utf8").trim().split("\n").length, 11);
 
   // (--manifest: the sources these options owe, the keys shadow-classify.mjs's --expect reads)
   const env = { ...process.env };
@@ -281,6 +317,7 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
       ["cases.mjs/crash", "failed/legacy-heap"],
       ["cases.mjs/abort", "failed/other"],
       ["cases.mjs/costly", "failed/other"],
+      ["cases.mjs/noisy", "failed/legacy-heap"],
     ],
   );
   assert.deepEqual(
@@ -331,4 +368,49 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
   // decisions, which this fake source has none of)
   const { coverage } = C.classifyRecords([{ record: fineControlled, bytes: 0, where: "control" }]);
   assert.deepEqual([coverage.controlRuns, coverage.controlCompletionRuns], [4, 4]);
+
+  // (the runner killed while a route's process blocks in its compile: that process ends too, its own thread watching
+  // the parent, since a blocked event loop never hears the parent go)
+  mkdirSync(join(folder, "tests", "families", "blocked"), { recursive: true });
+  writeFileSync(
+    join(folder, "tests/families/blocked/cases.mjs"),
+    'export const cases = [["block", "block"]];\n',
+  );
+  const runner = spawn(process.execPath, [tool, folder, "blocked", "--memory", "16"], {
+    env,
+    stdio: "ignore",
+  });
+  const childrenOf = (pid: number) =>
+    readdirSync("/proc")
+      .filter((name) => /^\d+$/.test(name))
+      .filter((name) => {
+        try {
+          return (
+            readFileSync(`/proc/${name}/stat`, "utf8").split(") ")[1]?.split(" ")[1] === String(pid)
+          );
+        } catch {
+          return false;
+        }
+      })
+      .map(Number);
+  let routes: number[] = [];
+  for (let tries = 0; tries < 100 && routes.length === 0; tries += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    routes = childrenOf(runner.pid!);
+  }
+  assert.ok(routes.length > 0, "the runner started a route's process");
+  // (past the route's load of the tree, into the blocking compile)
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  runner.kill("SIGKILL");
+  // (a process that ended, reaped or not yet)
+  const alive = (pid: number) => {
+    try {
+      return readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.[0] !== "Z";
+    } catch {
+      return false;
+    }
+  };
+  for (let tries = 0; tries < 40 && routes.some(alive); tries += 1)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(routes.filter(alive), []);
 });

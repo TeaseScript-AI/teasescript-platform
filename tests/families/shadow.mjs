@@ -30,6 +30,7 @@ import path from "node:path";
 import v8 from "node:v8";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { fork } from "node:child_process";
+import { Worker } from "node:worker_threads";
 import { EventEmitter } from "node:events";
 import { writeSync } from "node:fs";
 
@@ -462,8 +463,24 @@ if (
   // the parent reads it however this process ends)
   const { root, set, units, route } = JSON.parse(process.env[CHILD]);
   let seq = null;
-  const mark = (message) => writeSync(2, `${MARK}${JSON.stringify({ seq, ...message })}\n`);
+  // (a mark starts a line of its own, whatever the compile wrote on stderr before it without a newline)
+  const mark = (message) => writeSync(2, `\n${MARK}${JSON.stringify({ seq, ...message })}\n`);
   process.on("disconnect", () => process.exit(0));
+  // (this process ends when its parent does, also while a compile blocks its event loop: a thread of its own watches)
+  new Worker(
+    `const { workerData } = require("node:worker_threads");
+     setInterval(() => { if (process.ppid !== workerData) process.kill(process.pid, "SIGKILL"); }, 250).unref();
+     setInterval(() => {}, 1 << 30);`,
+    { eval: true, workerData: process.ppid },
+  ).unref();
+  // (an outcome being sent is delivered before an error thrown after it ends this process: the parent keeps it)
+  let sending = 0;
+  let failure = null;
+  process.on("uncaughtException", (error) => {
+    writeSync(2, `\n${error?.stack ?? error}\n`);
+    failure = error;
+    if (sending === 0) process.exit(1);
+  });
   // (requests that arrive while this process still loads the tree wait for it)
   let take = null;
   const waiting = [];
@@ -574,7 +591,11 @@ if (
     Object.assign(meter, { spent: 0, allowance: 0 });
     pass = 0;
     seen = { checks: null, excluded: null };
-    process.send({ ...runRoute(source, mode, demand), mode, seq: run });
+    sending += 1;
+    process.send({ ...runRoute(source, mode, demand), mode, seq: run }, () => {
+      sending -= 1;
+      if (failure !== null && sending === 0) process.exit(1);
+    });
   };
   for (const request of waiting.splice(0)) take(request);
 
