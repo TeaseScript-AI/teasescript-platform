@@ -107,6 +107,8 @@ class Frontier {
   readonly reads = new Map<string, Reach | null>();
   /** The host reads' leaves (`hostLeaf`). */
   readonly hosts = new Set<number>();
+  /** The stops and held places `heldStopped` last answered for, and its answer. */
+  stopsSeen = { stops: -1, places: -1, held: false };
   /** Per binding, its root's node (`rootNode`). */
   readonly roots = new Map<PlaceId, number>();
   /** The bindings the graph holds a position of, which a stop at any of them makes decline (`stoppedAt`). */
@@ -252,8 +254,28 @@ function rootNode(frontier: Frontier, place: PlaceId): number {
 }
 
 function stoppedAt(contract: Contract, place: PlaceId): boolean {
+  return contract.stoppedPlaces.has(place);
+}
+
+/**
+ * Whether a decision stopped at a place the graph holds: the stopped places visited (shared work) only after a new stop
+ * or a new held place, else the answer kept.
+ */
+function heldStopped(frontier: Frontier): boolean {
+  const { contract } = frontier;
   if (!contract.anyStopped) return false;
-  return contract.stoppedKeys().some((stopped) => stopped.place === place);
+  const seen = frontier.stopsSeen;
+  if (seen.stops === contract.stoppedCount && seen.places === frontier.places.size)
+    return seen.held;
+  const held = contract.pass.program.work.shared(() => {
+    for (const place of contract.stoppedPlaces.keys()) {
+      step(frontier);
+      if (frontier.places.has(place)) return true;
+    }
+    return false;
+  });
+  frontier.stopsSeen = { stops: contract.stoppedCount, places: frontier.places.size, held };
+  return held;
 }
 
 /** Whether a binding's position has stores at or below it. */
@@ -910,11 +932,7 @@ function reachSlot(
 ): string | null {
   const frontier = frontierOf(contract);
   // (after a stop at a place the graph holds, the native reader answers: its keys ask their stops one by one)
-  if (
-    contract.anyStopped &&
-    contract.stoppedKeys().some((stopped) => frontier.places.has(stopped.place))
-  )
-    return null;
+  if (heldStopped(frontier)) return null;
   if (frontier.reads.has(slot)) return frontier.reads.get(slot) === null ? null : slot;
   const work = contract.pass.program.work;
   const reach = work.shared((): Reach | null => {
