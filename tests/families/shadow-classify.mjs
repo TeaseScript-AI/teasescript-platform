@@ -106,12 +106,10 @@ const EXCLUSIONS = [
     S9B,
     "3359b3e4928b all:fixture-1::cp9-cells/s6/rule-function/loop/decided",
   ],
-  // (v2, #1744: 20,052 function pairs meet it next once function declarations are admitted, Sol's S9b scoping r2)
-  [
-    "this return statement",
-    S9B,
-    "synthetic (no gate record yet; first reachable once #1072 admits function declarations)",
-  ],
+  // (v2, #1744: 20,052 function pairs meet it next once function declarations are admitted, Sol's S9b scoping r2; its
+  // witness is Sol's in-memory traversal control past the declaration, the classifier-group preparation's
+  // `return-controlled.json`, since main stops at the declaration first)
+  ["this return statement", S9B, "f5dfaa2d51f3 3a-spike14-gates.mjs/cell/F22/1"],
   // (v2, #1744's presence sources: forms no gate source had reached)
   ["this show camera statement", S9B, "42fd964f21aa 1744-sol-v30-call-holes.mjs/camera-statement"],
   ["this show camera expression", S9B, "c8292fdb2997 1744-sol-v30-call-holes.mjs/camera-handle"],

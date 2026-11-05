@@ -86,8 +86,9 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
   // of those keys are aborted ones, so together the two campaigns conflict)
   const research = witnesses.filter((r) => r.set === undefined);
   const rerun = witnesses.filter((r) => r.set === "copies");
-  // (#1744's presence sources, recorded by shadow.mjs at main 575c699b9)
-  const holes = witnesses.filter((r) => r.set === "holes");
+  // (#1744's presence sources, recorded by shadow.mjs at main 575c699b9; and Sol's traversal control past a function
+  // declaration, `return-controlled.json` of the classifier-group preparation, the return statement's witness)
+  const holes = witnesses.filter((r) => r.set === "holes" || r.set === "return-control");
   const result = C.classifyRecords(
     entries(research),
     new Set([...research.map((r) => r.key), ...UNAVAILABLE]),
@@ -151,8 +152,7 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
     ),
     [
       "differs/plan",
-      // (v2's: the presence sources' own records reach the four camera and tag-query texts, the synthetic test the
-      // return statement)
+      // (v2's: the presence sources' and the traversal control's own records reach them, checked below)
       "excluded/this return statement",
       "excluded/this show camera statement",
       "excluded/this show camera expression",
@@ -615,7 +615,7 @@ test("coverage: the natural runs' ordinary decisions and a receiving completion 
   );
 });
 
-test("taxonomy v2's return-statement rule: its synthetic witness classifies, and stands only while no real record has the text (#1744)", async () => {
+test("taxonomy v2's return-statement rule takes its text and no other (#1744)", async () => {
   const C = await load();
   const exclusion = (key: string, text: string) =>
     record(key, (i) =>
@@ -636,33 +636,5 @@ test("taxonomy v2's return-statement rule: its synthetic witness classifies, and
   assert.deepEqual(
     result.problems.map((p: { problem: string; key: string }) => [p.problem, p.key]),
     [["unclassified", "near"]],
-  );
-  // (the witness is synthetic: once a real gate record has the text, the fixture or a run's pairs.jsonl named by
-  // SHADOW_CLASSIFY_PAIRS, the witness must name it instead, and this fails until it does)
-  const rule = C.PAIR_CLASSES.find(
-    (c: { id: string }) => c.id === "excluded/this return statement",
-  );
-  if (!rule.witness.startsWith("synthetic")) return;
-  // (the text in any route's run of a record, whatever class the pair takes: a failed legacy run beside it makes the
-  // pair failed/legacy-heap, and the text is still real; Codex r1 on #1761)
-  const TEXT = "this return statement";
-  const hasText = (record: { rows?: unknown; demands?: unknown }): boolean =>
-    JSON.stringify([record.rows ?? [], record.demands ?? []]).includes(`"outside":"${TEXT}"`);
-  const real = witnesses.filter(hasText).map((r) => r.key);
-  // (a run's pairs.jsonl, by its class, or its records (shadow.jsonl), by their runs)
-  const pairs = process.env.SHADOW_CLASSIFY_PAIRS;
-  const recorded =
-    pairs === undefined
-      ? []
-      : readFileSync(pairs, "utf8")
-          .split("\n")
-          .filter((line) => line.trim() !== "")
-          .map((line): { key: string; class?: string; rows?: unknown } => JSON.parse(line))
-          .filter((p) => (p.rows === undefined ? p.class === `excluded/${TEXT}` : hasText(p)))
-          .map((p) => p.key);
-  assert.deepEqual(
-    [...real, ...recorded],
-    [],
-    "a real record has the text: replace the synthetic witness with it",
   );
 });
