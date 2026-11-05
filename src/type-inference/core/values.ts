@@ -298,7 +298,7 @@ export class Values {
 
   /**
    * The binding of a place's chain of projections where every step is stable (no iteration, length or member step),
-   * `null` for none: one memo per place, each new place charged one step, so the prefixes of one chain, each a read of
+   * `null` for none: one memo per place, each projection step walked charged once, so the prefixes of one chain, each a read of
    * its own (`#narrowedChain`'s owners), walk it once together, never once each (Codex r2 on #1742).
    */
   #stableBinding(value: PlaceId): PlaceId | null {
@@ -307,12 +307,12 @@ export class Values {
     let at = value;
     let known = this.#bindings.get(at);
     while (known === undefined) {
-      program.work.charge("eventSteps");
       const projection = program.projOf.get(at);
       if (projection === undefined) {
         known = program.occurrenceOf.get(at) ?? null;
         break;
       }
+      program.work.charge("eventSteps");
       const step = projection.step;
       if (step === "iteration" || measuresLength(step) || memberStep([step], 0) >= 0) {
         known = null;
