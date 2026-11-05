@@ -3149,3 +3149,28 @@ test("a mixed join's layers read each value at a path once per pass (#1765)", ()
       assert.ok(work[at]! <= 2.5 * work[at - 1]!, `${JSON.stringify(mode)}: ${work.join(", ")}`);
   }
 });
+
+/**
+ * #1765: each side's layers are walked down its errors' paths once and kept across them, so a literal whose two
+ * elements disagree at every layer of a deep nest of dicts and lists (an error at each ever longer path, each with a
+ * layer more between) grows as the errors' paths do (×4 per doubling, as on main), not by a cube, in four modes.
+ */
+test("a mixed error's layers are walked once across its literal's deeper errors (#1765)", () => {
+  for (const mode of MODES) {
+    const work = [24, 48, 96].map((n) => {
+      let first = "[1]";
+      let second = '["x"]';
+      for (let at = 0; at < n; at += 1) {
+        first = `dict {k:[${first}]}`;
+        second = `[dict {k:${second}}]`;
+      }
+      const request = coreRequest(main(`let xs=[${first},${second}]\nexit\n`));
+      assert.ok(request !== null);
+      const answers = inMode(mode, () => analyseCore(request));
+      assert.equal(answers.budget.exhausted, null);
+      return answers.budget.total;
+    });
+    for (let at = 1; at < work.length; at += 1)
+      assert.ok(work[at]! <= 4.5 * work[at - 1]!, `${JSON.stringify(mode)}: ${work.join(", ")}`);
+  }
+});
