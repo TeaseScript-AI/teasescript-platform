@@ -2558,8 +2558,9 @@ test("a message's walk and owner index charge their work, to the analysis and no
   units = 0;
   assert.notEqual(landingOf([counted], { file: 0, start: five, end: five + 1 }, charge), null);
   assert.equal(units, 1 + 3 + count.reads);
-  // (through the compile's consumer: what the messages charge is the analysis's, a demand's records as they were)
-  const work = [64, 128, 256].map((k) => {
+  // (through the compile's consumer: what the messages charge is the analysis's, beside the same compile whose messages
+  // charge nothing; a demand's records as they were)
+  const compiled = (k: number, charging: boolean) => {
     const program = `${Array.from({ length: k }, (_, at) => `let w${at} = {inner: [{volume: 5}, hostValue].random}\n`).join("")}exit\n`;
     const request = coreRequest([{ path: "main.tease", source: program }])!;
     const answers = analyseCore(request);
@@ -2568,7 +2569,7 @@ test("a message's walk and owner index charge their work, to the analysis and no
     const counts = answers.messageWork.bind(answers);
     answers.messageWork = (more) => {
       charged += more;
-      counts(more);
+      counts(charging ? more : 0);
     };
     const checked = coreCheckResult(
       answers,
@@ -2579,14 +2580,21 @@ test("a message's walk and owner index charge their work, to the analysis and no
       .flat()
       .filter((diagnostic) => diagnostic.message.includes("where 'hostValue' gets its value"));
     assert.equal(owned.length, k, `k = ${k}`);
-    assert.ok(charged >= 2 * k, `k = ${k}: ${charged}`);
-    const added =
-      (answers.budget.counts.get("indexSteps") ?? 0) - (before.counts.get("indexSteps") ?? 0);
-    assert.equal(added, charged, `k = ${k}`);
-    assert.equal(answers.budget.total - before.total, charged, `k = ${k}`);
     assert.deepEqual(answers.budget.demands, before.demands, `k = ${k}`);
     assert.deepEqual(answers.budget.decisions, before.decisions, `k = ${k}`);
-    return charged;
+    return {
+      charged,
+      total: answers.budget.total,
+      indexSteps: answers.budget.counts.get("indexSteps") ?? 0,
+    };
+  };
+  const work = [64, 128, 256].map((k) => {
+    const [charging, free] = [compiled(k, true), compiled(k, false)];
+    assert.ok(charging.charged >= 2 * k, `k = ${k}: ${charging.charged}`);
+    assert.equal(charging.charged, free.charged, `k = ${k}`);
+    assert.equal(charging.total - free.total, charging.charged, `k = ${k}`);
+    assert.equal(charging.indexSteps - free.indexSteps, charging.charged, `k = ${k}`);
+    return charging.charged;
   });
   for (let at = 1; at < work.length; at += 1)
     assert.ok(work[at]! <= 2.5 * work[at - 1]!, work.join(", "));
