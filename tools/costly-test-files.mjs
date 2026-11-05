@@ -42,6 +42,7 @@ export const costlyTestSeconds = {
   "type-core-contract-descriptors.test.js": 6,
   "type-core-written-decider.test.js": 6,
   "type-core-inline.test.js": 6,
+  "type-core-pushed-reads.test.js": 6,
   "type-core-roles.test.js": 5,
   "type-core-part-checks.test.js": 5,
   "type-core-narrowing.test.js": 5,
