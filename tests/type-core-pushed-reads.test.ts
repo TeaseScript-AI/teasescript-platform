@@ -6,7 +6,8 @@ import { analyseCore } from "../src/type-inference/core/answers.js";
 import { Consumers } from "../src/type-inference/core/consumers.js";
 import { pushedFacts, withoutPushedReads } from "../src/type-inference/core/contract/frontier.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { inMode, MODES, publication } from "./helpers/type-core-oracles.js";
+import { WorkLedger } from "../src/type-inference/core/budget.js";
+import { inMode, MODES, publication, settledAnswers } from "./helpers/type-core-oracles.js";
 
 /*
  * #1655 (TABLE r4.385): a key entry below its place's root in a copy cycle through a projection (`p1 = p1.q` beside the
@@ -46,7 +47,12 @@ function spine(k: number, leaf = '{f:typed,g:"end"}'): string {
   return `${"{q:".repeat(k - 1)}${leaf}${"}".repeat(k - 1)}`;
 }
 
-function analysed(source: string, mode = MODES[0]!) {
+/**
+ * One analysis, its pushed reads on (`oracle` none), or answered natively (`native`), or natively below a horizon of
+ * that many steps (bottom past it: the least fixed point's approximations from below, where the native reader does not
+ * end): its answers, each pass's graph and each pass's settled answers.
+ */
+function analysed(source: string, mode = MODES[0]!, oracle: "native" | number | null = null) {
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
   assert.ok(request !== null, source);
   const passes: CorePass[] = [];
@@ -56,13 +62,43 @@ function analysed(source: string, mode = MODES[0]!) {
     check.call(this);
   };
   try {
-    const answers = inMode(mode, () => analyseCore(request));
-    // (the publishing pass's graph, and every pass's)
+    const run = () => inMode(mode, () => analyseCore(request));
+    const answers =
+      oracle === null ? run() : withoutPushedReads(run, oracle === "native" ? null : oracle);
     const all = passes.map((pass) => pushedFacts(pass.contract));
-    return { answers, facts: all.at(-1)!, all };
+    return { answers, facts: all.at(-1)!, all, settled: passes.map(settledAnswers) };
   } finally {
     Consumers.prototype.check = check;
   }
+}
+
+/** Every slot both analyses settled, pass by pass, answers the same (the pushed slots, the read's own, apart). */
+function sameSettled(
+  pushed: ReturnType<typeof analysed>,
+  oracle: ReturnType<typeof analysed>,
+  source: string,
+): void {
+  assert.equal(pushed.settled.length, oracle.settled.length, source);
+  pushed.settled.forEach((answers, pass) => {
+    let common = 0;
+    for (const [key, items] of answers) {
+      const other = oracle.settled[pass]!.get(key);
+      if (key.startsWith("pr|") || other === undefined) continue;
+      common += 1;
+      assert.equal(items, other, `${key} in pass ${pass}\n${source}`);
+    }
+    assert.ok(common > 0, source);
+  });
+}
+
+/** A plain ring of `n` members, every copy live: one component of whole copies. */
+function plainRing(n: number, read = "q.q.g"): string {
+  const last = `p${n - 1}`;
+  const rows = Array.from({ length: n }, (_, i) => `let p${i}={g:${i}}`);
+  rows.push(`${last}.q=p0`);
+  for (let i = n - 1; i > 0; i--) rows.push(`p${i}=p${i - 1}`);
+  rows.push(`p0=${last}`, `${last}=${last}.q`, `say "\${${last}.${read}}"`, "exit");
+  return rows.join("\n") + "\n";
 }
 
 test("a ring of whole copies read through a projection reaches its check in four modes", () => {
@@ -85,21 +121,24 @@ test("a ring of whole copies read through a projection reaches its check in four
     }
 });
 
-test("where the native reader ends, a pushed read publishes what it does, in four modes", () => {
+test("where the native reader ends, a pushed read answers what it does, raw and published, in four modes", () => {
   const controls = [
     // terminating spines: with the ring, without its closing copy, with a ring of four, read back to the spine's end
     ring({ q: spine(3) }),
     ring({ q: spine(3), cycle: false }),
     ring({ n: 4, q: spine(2) }),
     ring({ q: spine(3), extra: ['say "${p1.q.q.q.g}"'] }),
-    // a host's unknown beside the literals' `missing` (reasons that are not `missing` alone), an operation's (`fan`)
+    // a host's unknown beside the literals' `missing` (reasons that are not `missing` alone), an operation's (`fan`),
+    // and that operation's member read below the projection (a value the graph does not model, stepped: declined)
     ring({ q: spine(2, "hostValue"), extra: ['say "${p1.q.q.q}"'] }),
-    ring({ q: spine(2, "{f:hostValue+1}"), extra: ['say "${p1.q.q.f}"'] }),
+    ring({ q: spine(2, "{f:hostValue+1}"), extra: ['say "${p1.q.q.f}"', 'say "${p1.q.q.f.x}"'] }),
     // the ring without its closing copy, with a store below the projection read there
     ring({ cycle: false }),
     ring({ cycle: false, extra: ["p1.q.q.g=5", 'say "${p1.q.q.g}"'] }),
     // a chain of three whose literals all lack the step: a read that is `missing` alone, its earliest literal's
     ring({ n: 3, q: spine(1, "{g:1}"), cycle: false, extra: ['say "${p2.q.q.q}"'] }),
+    // a written binding below the projection (its type answers: declined)
+    ring({ q: "typed", cycle: false, extra: ['say "${p1.q.q}"', 'say "${p1.q.x}"'] }),
   ];
   for (const source of controls)
     for (const mode of MODES) {
@@ -108,13 +147,41 @@ test("where the native reader ends, a pushed read publishes what it does, in fou
       const native = withoutPushedReads(() => publication(files, mode, GLOBALS));
       assert.ok(pushed !== null, source);
       assert.equal(pushed, native, source);
+      sameSettled(analysed(source, mode), analysed(source, mode, "native"), source);
     }
+});
+
+test("where the native reader does not end, its approximations from below reach the pushed read's answers", () => {
+  // (each slot both settle: the native one with every read past eight steps bottom)
+  for (const source of [ring({}), plainRing(3), ring({ q: spine(2, "{q:p0,g:hostValue}") })])
+    for (const mode of [MODES[0]!, MODES[3]!])
+      sameSettled(analysed(source, mode), analysed(source, mode, 8), source);
+});
+
+test("a pushed read's graph is built as shared work: counted to the total, never to the demand that asked (r4.349)", () => {
+  const charge = WorkLedger.prototype.charge;
+  let outside = 0;
+  let inside = 0;
+  WorkLedger.prototype.charge = function (this: WorkLedger, ...args) {
+    if (args[0] === "structureSteps" && new Error().stack!.includes("frontier.js"))
+      if (this.sharing) inside += 1;
+      else outside += 1;
+    charge.apply(this, args);
+  };
+  try {
+    analysed(ring({ q: spine(2) }));
+  } finally {
+    WorkLedger.prototype.charge = charge;
+  }
+  assert.ok(inside > 0);
+  assert.equal(outside, 0);
 });
 
 test("the producer graph grows with the ring and the projection's depth, each by a constant", () => {
   const rings = [4, 8, 16].map((n) => analysed(ring({ n })).facts);
+  const plain = [4, 8, 16].map((n) => analysed(plainRing(n)).facts);
   const depths = [4, 8, 16].map((d) => analysed(ring({ d })).facts);
-  for (const sizes of [rings, depths])
+  for (const sizes of [rings, plain, depths])
     for (const field of ["nodes", "goals", "edges", "sets"] as const)
       assert.equal(
         sizes[2]![field] - sizes[1]![field],
