@@ -87,7 +87,7 @@ import { leftOutCheck, leftOutCompletion, leftOutWarning } from "./consumers.js"
 import { withoutEmpty } from "./exact-path.js";
 import { otherwiseChains, provesNonNull, unusedFallbackRule } from "./consumers/otherwise.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
-import { REASON, type ItemTag } from "./items.js";
+import { REASON, type Item, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
 import {
   coreMessage,
@@ -1914,8 +1914,7 @@ class Contracts {
       throw new OutsideContract(at.call, "a value whose structure the slice does not follow");
     // (a level a stop left open is no open level: the plan would read every value there, the natural one its type, so
     // the program leaves the slice rather than publish a check less, #1526 condition 1, #1767)
-    if (answer.items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0))
-      throw new OutsideContract(at.call, "a typed parse's or load's default that a stop left open");
+    if (answer.items.some(stoppedItem)) throw new OutsideContract(at.call, OPEN_BY_STOP);
     if (held.has("number")) held.delete("integer");
     // an unknown, or an empty collection's elements, is open; a known `null` is the `null` type
     if (held.has("unknown") || held.size === 0) {
@@ -1954,11 +1953,12 @@ class Contracts {
           literal === null
             ? at
             : { ...at, node: nodeOf(this.answers, this.index, literal), keeps: true };
-        const names = !opens
-          ? answer.properties
-          : inner === at
-            ? []
-            : this.answers.valueAt(inner.node, path).properties;
+        const own = opens && inner !== at ? this.answers.valueAt(inner.node, path) : null;
+        // (the default's own answer below a written `object`, whose names the plan keeps: one a stop left open names
+        // none it holds, #1767)
+        if (own !== null && own.items.some(stoppedItem))
+          throw new OutsideContract(at.call, OPEN_BY_STOP);
+        const names = !opens ? answer.properties : own === null ? [] : own.properties;
         const properties: TypePropertyPlan[] = [];
         for (const name of fieldOrder(names, below ?? NO_RECORDS, this.index))
           properties.push({
@@ -2062,6 +2062,14 @@ function defaultOf(call: CallExpression): Expression | null {
       (argument) => argument.kind === "namedArgument" && argument.name.name === "default",
     )?.value ?? null
   );
+}
+
+/** The exclusion of a typed call's answer a stop left open (#1767). */
+const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
+
+/** Whether an item is a stop's unknown, what the analysis left unread (#1767). */
+function stoppedItem(item: Item): boolean {
+  return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0;
 }
 
 /**

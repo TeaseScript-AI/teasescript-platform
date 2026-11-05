@@ -551,10 +551,21 @@ test("after a stop a typed call's reader type a stop left open declines the plan
       'let d = {m: 1}\nlet result = fromJson(hostValue, default: {n: d}, files: false)\nsay result.n.m\nsay "after"\nexit\n',
       '{"n":{"m":2}}',
     ],
+    // (below a written `object`, whose plan keeps the default's names: Codex r2's B1)
+    [
+      "below a written object",
+      'let d = {n: 0}\nlet result: object = fromJson(hostValue, default: d, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
     [
       "literal",
       'let result = fromJson(hostValue, default: {n: 0}, files: false)\nsay result.n\nsay "after"\nexit\n',
       '{"n":2}',
+    ],
+    [
+      "literal below a written object",
+      'let result: object = fromJson(hostValue, default: {n: 0}, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
     ],
     [
       "null field",
@@ -570,7 +581,8 @@ test("after a stop a typed call's reader type a stop left open declines the plan
   let declined = 0;
   for (const [kind, source, json] of cases) {
     const c: HeldCase = { name: kind, slice: true, values: [], source };
-    const opens = kind === "variable" || kind === "below a literal";
+    const opens =
+      kind === "variable" || kind === "below a literal" || kind === "below a written object";
     for (const mode of HELD_MODES) {
       const natural = heldRun(c, mode);
       assert.ok(natural.result.plan !== null, kind);
