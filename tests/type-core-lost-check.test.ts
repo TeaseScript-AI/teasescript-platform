@@ -204,7 +204,7 @@ test("a stopped program whose checks its complete store check or a typed reader 
       assert.ok(inMode(mode, () => compiled(source, demand)).plan !== null, JSON.stringify(mode));
 });
 
-test("a program whose receiving completion reached its allowance keeps a check only by its complete store check (Codex r2)", () => {
+test("a program whose receiving completion reached its allowance keeps a check only by its store check, complete or open (Codex r2, r3)", () => {
   // (in source order with sharing, demand 16: the completion caps and keeps no result; the plan is the settled pass's,
   // which checks the host store against nothing where the natural plan checks every field)
   const source = `let pad={f0:1}\n${lines(16, (at) => `pad={f${at}:${at}}`)}\npad=hostOther${END}`;
@@ -215,6 +215,13 @@ test("a program whose receiving completion reached its allowance keeps a check o
     () => inMode(MODES[0]!, () => compiled(source, 16)),
     (error) => error instanceof CandidateOutsideSlice && error.what === LOST,
   );
+  // (its control, Codex r3: at demand 64 the completion caps too, and the store's check against its open contract is the
+  // natural plan's own, `list` of anything: published, and `5` fails it)
+  const open = `let pad={f0:1}\n${lines(10, (at) => `pad={f${at}:${at}}`)}\nlet x=[]\nx=hostValue${END}`;
+  const kept = inMode(MODES[0]!, () => compiled(open, 64));
+  assert.ok(kept.plan !== null);
+  assert.notEqual(runGlobals(kept.plan, { hostValue: 5 }).failure, null);
+  assert.equal(said(runGlobals(kept.plan, { hostValue: list([2]) })), true);
 });
 
 test("a check published against nothing where the natural plan checks a domain is lost: the open control at demand 32 (#1526)", () => {

@@ -752,8 +752,9 @@ function siteOrder(a: SourceSite, b: SourceSite): number {
  * it stops there, the finished analysis's findings and decisions standing, and what is asked from then on answers
  * `STOPPED` (D4 a′). Where nothing stopped, the receiving completion runs then, after everything that can stop, and
  * asks again with its completed contracts within its own allowance (`Answers.completed`, #1526 phase C); where it keeps
- * no result, what was asked first stands. The backend's outcome and the test-only checked result (`checkedResult`) both
- * ask so.
+ * no result, what was asked first stands, asked once more as finishing work where obligations were left without results,
+ * so that the publication's gate reads them and may decline the program (#1526 decision 2). The backend's outcome and
+ * the test-only checked result (`checkedResult`) both ask so.
  */
 export function asked<T>(answers: Answers, ask: (answers: Answers) => T): T {
   let first: T;
@@ -1292,8 +1293,8 @@ function lostCheck(
  * store check carries; a contract proved open; a complete store check (settled or received, its whole type); or a
  * contract the completion completed that a published check carries at the obligation's path, with the contract's own
  * type there: a typed parse's or load's reader of the value stored (F18), or, where the natural plan does not check the
- * store whole, its part checks there (#1682). Where the completion kept no result, past its allowance, only the
- * complete store check keeps it. A check against bare `unknown` where the contract owes a domain carries nothing.
+ * store whole, its part checks there (#1682). Where the completion kept no result, past its allowance, only the store's
+ * check keeps it, against a contract the settled pass proved complete or open. A check against bare `unknown` where the contract owes a domain carries nothing.
  */
 function keeps(
   answers: Answers,
@@ -1307,9 +1308,10 @@ function keeps(
 ): boolean {
   const own = published.get(store);
   const whole = own?.state === "complete" && checks.has(store);
-  // (a completion past its allowance keeps no result, and the plan is the settled pass's: only its complete store check
-  // carries what the obligation requires)
-  if (result === null) return whole;
+  // (a completion past its allowance keeps no result, and the plan is the settled pass's: only its store check keeps the
+  // obligation, against a contract the settled pass proved complete or open)
+  if (result === null)
+    return checks.has(store) && (own?.state === "complete" || own?.state === "open");
   // (a shape is the suitability the value's own structure proves where it is not lost; a complete result there is the
   // requirement's, which a shape owes no more of)
   if (obligation.extent === "shape" || "shape" in result) return result.state !== "lost" || whole;

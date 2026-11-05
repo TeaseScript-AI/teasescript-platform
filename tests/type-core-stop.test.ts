@@ -4959,35 +4959,39 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
     "let n = 1\nsay toJson({a: [hostValue otherwise /r/], b: n})\nexit\n",
   ];
   // (#1526 decision 2, condition 1, TABLE r4.390: a settled stop whose plan lost the element's check, which the unstopped
-  // plan makes against a host value, is declined, a decision's demand stop at 257 among them)
+  // plan makes against a host value, is declined; where the reference run at demand 257 is such a stop, a decision's,
+  // each of its stops is left uncompared, for want of a reference)
   const declines = (error: unknown): boolean =>
     error instanceof CandidateOutsideSlice &&
     error.what === "a store whose check was lost at the budget";
   let compared = 0;
   let declined = 0;
+  let uncompared = 0;
   for (const source of sources)
     for (const demand of [null, 257])
       for (const mode of MODES) {
         const inDemand = <T>(make: () => T): T =>
           inMode(mode, () => (demand === null ? make() : withTestDemandAllowance(demand, make)));
+        // (each settled phase's ends, and the last stop before admission settled, whose fresh pass asks nothing)
+        const stopsOf = (): (readonly [string, number])[] => [
+          ...[...inDemand(() => settledEnds(source))].flatMap(([phase, ends]) =>
+            ends.map((allowance) => [phase, allowance] as const),
+          ),
+          ["unsettled", inDemand(() => lastUnsettled(source))],
+        ];
         let unstopped: StopRun;
         try {
           unstopped = stopRunIn(inDemand, source);
         } catch (error) {
           assert.ok(declines(error), `${source} demand: ${demand}, ${JSON.stringify(mode)}`);
-          declined += 1;
+          uncompared += stopsOf().length;
           continue;
         }
         if (unstopped.answers.budget.exhausted !== null) continue;
         const inputs = [host(1), host(null)];
         const fits = (globals: Globals): boolean =>
           runGlobals(unstopped.result.plan!, globals).failure === null;
-        // (each settled phase's ends, and the last stop before admission settled, whose fresh pass asks nothing)
-        const stops: (readonly [string, number])[] = [
-          ...inDemand(() => settledEnds(source)),
-        ].flatMap(([phase, ends]) => ends.map((allowance) => [phase, allowance] as const));
-        stops.push(["unsettled", inDemand(() => lastUnsettled(source))]);
-        for (const [phase, allowance] of stops) {
+        for (const [phase, allowance] of stopsOf()) {
           compared += 1;
           const where = `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`;
           let stopped: StopRun;
@@ -5014,8 +5018,13 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
           );
         }
       }
-  // (two runs at demand 257 stop a decision and lose the element's check: declined, their five stops each not compared)
-  assert.deepEqual({ compared, declined }, { compared: 44, declined: 2 });
+  // (54 stops: in source order at demand 257, with and without sharing, the first source's reference run stops `root`'s
+  // decisions and loses `value.a`'s element check, so its five stops each, two walk ends, two publication ends and the
+  // last unsettled one, are uncompared)
+  assert.deepEqual(
+    { compared, declined, uncompared },
+    { compared: 44, declined: 0, uncompared: 10 },
+  );
 });
 
 /**
