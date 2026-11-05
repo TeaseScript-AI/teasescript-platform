@@ -522,6 +522,49 @@ const WITNESSES: readonly {
     derived: "integer",
     finding: X2,
   },
+  { name: "a null element", source: "let d = [null]\n@", read: "d", derived: "list<any>" },
+  {
+    name: "a null element in a copied part",
+    source: "let e = [null]\nlet d = {n: e}\n@",
+    read: "d",
+    derived: "{n: list<any>}",
+  },
+  {
+    name: "a store after an exit",
+    source: `let d = 0\nif ${FLAG} {\n  exit\n  d = 1.5\n}\n@`,
+    read: "d",
+    derived: "integer",
+  },
+  {
+    name: "an arm whose condition is false",
+    source: "let d = 0\nif false { d = 1.5 }\n@",
+    read: "d",
+    derived: "integer",
+  },
+  {
+    name: "an else after a true condition",
+    source: "let d = 0\nif true { d = 1.5 } else { d = null }\n@",
+    read: "d",
+    derived: "number",
+  },
+  {
+    name: "a sibling binding's written type",
+    source: `if ${FLAG} {\n  let d: number = 0\n} else {\n  let d = 0\n  if load("g", default: false) { d = 1 }\n  @\n}`,
+    read: "d",
+    derived: "integer",
+  },
+  {
+    name: "X2 written, a self-copy in the arm",
+    source: `let d: number = 0\nif ${FLAG} { d = d }\n@`,
+    read: "d",
+    derived: "number",
+  },
+  {
+    name: "X2 written, a copy back in the arm",
+    source: `let d: number = 0\nlet e = d\nif ${FLAG} { d = e }\n@`,
+    read: "d",
+    derived: "number",
+  },
   {
     name: "a self-copy after a join",
     source: `let d = 0\nif ${FLAG} { d = 1 }\nd = d\n@`,
@@ -579,7 +622,7 @@ const WITNESSES: readonly {
   },
   {
     name: "a method call",
-    source: "let d = [0]\nd.push(1.5)\n@",
+    source: "let d = [0]\nlet x = d.get(0, default: 1)\n@",
     read: "d",
     derived: { refused: "a method call on the variable" },
   },
@@ -592,12 +635,6 @@ const WITNESSES: readonly {
   {
     name: "a loop's store before the call",
     source: "let d = 0\nrepeat 2 { d = 1.5 }\n@",
-    read: "d",
-    derived: LOOP,
-  },
-  {
-    name: "a while loop's store",
-    source: `let d = 0\nwhile ${FLAG} { d = 1.5 }\n@`,
     read: "d",
     derived: LOOP,
   },
@@ -639,6 +676,9 @@ test("the S7 oracle reads a typed default's variable at its call's snapshot, fro
               throw error;
             }
           })();
+          // (every witness has a plan: a refusal is of a source the slice admits)
+          const compiled = compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND);
+          assert.ok(compiled.plan !== null, `${where}: ${compiled.diagnostics.map((d) => d.code)}`);
           if (typeof witness.derived === "object" && witness.derived !== null) {
             assert.ok(derivation instanceof Underivable, where);
             assert.equal(derivation.message, witness.derived.refused, where);
@@ -656,8 +696,6 @@ test("the S7 oracle reads a typed default's variable at its call's snapshot, fro
             return text === undefined || text === "any" ? null : text;
           };
           assert.equal(type(derived), witness.derived, where);
-          const compiled = compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND);
-          assert.ok(compiled.plan !== null, `${where}: ${compiled.diagnostics.map((d) => d.code)}`);
           const planned = atCall(plannedContent(compiled.plan, source));
           if (witness.finding === undefined) assert.deepEqual(planned, derived, where);
           else if (mode === MODES[0])
@@ -715,10 +753,16 @@ test("the S7 oracle keys each default's reads by its outermost typed call, as th
           program.exprAt(nodeAt(expression)),
           `${source}: a read at its own node`,
         );
-      // (the call's own snapshot node: a parse's call node, a load's default probe, both at the call's span)
+      // (the call's own snapshot node: a parse's call node, a load's default probe, at the call's span; not another
+      // node there, as the call's entry or its result)
       assert.deepEqual(
-        key?.span ? [key.span.start.offset, key.span.end.offset] : null,
-        [call.span.start.offset, call.span.end.offset],
+        key?.span ? [key.file, key.kind, key.span.start.offset, key.span.end.offset] : null,
+        [
+          0,
+          call.kind === "loadExpression" ? "default-probe" : "expression",
+          call.span.start.offset,
+          call.span.end.offset,
+        ],
         `${source}: a default's reads keyed at another node`,
       );
       keys.add(key);
@@ -747,7 +791,13 @@ test("the S7 oracle's snapshot reader walks a program once, each statement visit
     const syntax = syntaxOf(source);
     const before = snapshotVisits();
     const { content } = derive(syntax, compactAnalysis(request));
-    assert.equal(snapshotVisits() - before, 2 * size + 2, `${size}`);
+    const after = snapshotVisits();
+    // (each statement visited once; each call captures the one value its default reads)
+    assert.deepEqual(
+      [after.statements - before.statements, after.captured - before.captured],
+      [2 * size + 2, size],
+      `${size}`,
+    );
     assert.equal(
       derivedContent(content, source).filter((entry) => entry.endsWith(" integer")).length,
       size,
