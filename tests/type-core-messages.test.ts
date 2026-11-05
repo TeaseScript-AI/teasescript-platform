@@ -2451,13 +2451,19 @@ test("TSV041's advice names the property an object literal types and its narrowe
  * per doubling; a scan per warning grows by ×4).
  */
 test("a warning's landing and owner read the program's values by their start (#1495)", () => {
-  const counted = <T extends object>(items: readonly T[], count: { reads: number }): T[] =>
-    new Proxy([...items], {
-      get(target, key, receiver) {
-        if (typeof key === "string" && /^\d+$/.test(key)) count.reads += 1;
-        return Reflect.get(target, key, receiver);
-      },
-    });
+  // (an array whose every element is read through a counting getter, as the lookups' indexed reads and searches do)
+  const counted = <T extends object>(items: readonly T[], count: { reads: number }): T[] => {
+    const array: T[] = [...items];
+    items.forEach((item, at) =>
+      Object.defineProperty(array, at, {
+        get: () => {
+          count.reads += 1;
+          return item;
+        },
+      }),
+    );
+    return array;
+  };
   const reads = (k: number, list: boolean): number => {
     const source = list
       ? `let holder = [${Array.from({ length: k }, () => "{inner: hostValue}").join(", ")}]\nexit\n`
