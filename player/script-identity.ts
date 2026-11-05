@@ -9,7 +9,7 @@ export interface ScriptIdentity {
   readonly author: string | null;
 }
 
-/** The title and author of `main.tease`'s header, for the title bar. */
+/** The `title` and `author` of `main.tease`'s header, for the title bar; a blank field counts as absent. */
 export function scriptIdentity(project: string | PlayerProject): ScriptIdentity {
   const source =
     typeof project === "string"

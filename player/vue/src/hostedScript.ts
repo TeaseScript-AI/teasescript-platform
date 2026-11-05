@@ -89,5 +89,3 @@ export function prepareHostedScript(
   );
   return { failure, identity };
 }
-
-/** The `title` and `author` of `main.tease`'s header; a blank field counts as absent. */
