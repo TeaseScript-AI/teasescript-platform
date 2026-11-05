@@ -593,6 +593,60 @@ test("checkpoint text is decided as the external route decides its parsed data",
   assert.ok(numeric.has("version") && numeric.has("currentSessionTimeMs"));
 });
 
+test("a non-finite number in checkpoint text comes before the plan's and the snapshot's other errors", () => {
+  const OVERFLOW = "OVERFLOW_PLACEHOLDER";
+  // EVIDENCE: fixture: a checkpoint the engine wrote, with its plan and snapshot.
+  const checkpoint = JSON.parse(mixedCheckpointText()) as {
+    plan: Record<string, unknown>;
+    snapshot: Record<string, unknown>;
+  };
+  const text = (change: (copy: typeof checkpoint) => void) => {
+    const copy = structuredClone(checkpoint);
+    change(copy);
+    return JSON.stringify(copy).replace(`"${OVERFLOW}"`, "1e400");
+  };
+  const nonFinite = (path: string) => ({
+    code: "TSK002",
+    message: "Checkpoint contains a non-finite number.",
+    path,
+  });
+  const cases = [
+    ["plan format", text((c) => (c.plan.format = OVERFLOW)), nonFinite("$.plan.format")],
+    ["plan revision", text((c) => (c.plan.version = OVERFLOW)), nonFinite("$.plan.version")],
+    ["snapshot format", text((c) => (c.snapshot.format = OVERFLOW)), nonFinite("$.snapshot")],
+    ["snapshot revision", text((c) => (c.snapshot.version = OVERFLOW)), nonFinite("$.snapshot")],
+    [
+      "plan of another format with an overflow",
+      text((c) => {
+        c.plan.format = "other";
+        c.plan.temporaryCount = OVERFLOW;
+      }),
+      nonFinite("$.plan.temporaryCount"),
+    ],
+    [
+      "snapshot of another revision with an overflow",
+      text((c) => {
+        c.snapshot.version = 99;
+        c.snapshot.nextInstruction = OVERFLOW;
+      }),
+      nonFinite("$.snapshot"),
+    ],
+    [
+      "plan of another format, snapshot with an overflow",
+      text((c) => {
+        c.plan.format = "other";
+        c.snapshot.nextInstruction = OVERFLOW;
+      }),
+      { code: "TSK001", message: "Unsupported instruction-plan format.", path: "$.plan.format" },
+    ],
+  ] as const;
+  for (const [name, mutated, expected] of cases) {
+    assert.ok(mutated.includes("1e400"), name);
+    assert.deepEqual(ownedCheckpoint(mutated), expected, name);
+    assert.deepEqual(externalCheckpoint(mutated), expected, name);
+  }
+});
+
 test("checkpoint text keeps the external route's decision when Array.prototype methods are replaced", () => {
   const text = mixedCheckpointText().replace(
     '"warnedSpeakerIds":[]',
