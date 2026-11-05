@@ -1560,6 +1560,7 @@ test("a property store missing from literals the levels fold names the object wr
     `${read("p.q")}let result=read({noise:read({noise:0,p:{q:{f0:1.5}}}),p:{q:{f0:1.5}}})\nexit\n`,
     `${read("p")}let result=read({noise:read({noise:read({noise:0,p:{f0:1.5}}),p:{f0:1.5}}),p:{f0:1.5}})\nexit\n`,
     `${read("p")}let result=read({p:{f0:1.5},noise:read({noise:0,p:{f0:1.5}})})\nexit\n`,
+    `${read("p.q")}let result=read({p:{q:{f0:1.5}},noise:read({noise:0,p:{q:{f0:1.5}}})})\nexit\n`,
     `${read("p[0]")}let result=read({noise:read({noise:0,p:[{}]}),p:[{}]})\nexit\n`,
     `${read("p[0]")}let result=read({p:[{extra:1,noise:read({p:[{extra:1,noise:0},{f0:1.5}]})},{f0:1.5}]})\nexit\n`,
     `${read("p[0].q")}let result=read({p:[{f0:1.5,noise:read({p:[{f0:1.5,noise:0},{q:{f0:1.5}}]})},{q:{f0:1.5}}]})\nexit\n`,
