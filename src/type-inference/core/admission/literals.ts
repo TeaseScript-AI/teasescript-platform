@@ -366,6 +366,8 @@ export function literalElements(
         readonly d: Definition;
       }
     >();
+    // (#1765: the earliest element's layers at each path, `layersAt`'s, once asked)
+    const earliestLayers = new Map<string, boolean[]>();
     // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
     // number fits a written integer, a fraction does not), an earliest element's by their family
     const offends = (at: string, tags: readonly ItemTag[]): boolean => {
@@ -391,10 +393,14 @@ export function literalElements(
       // (`mayHoldNull`); the sentence's type alone, as the leaf's own null is, #1753)
       // (each element's layers by one walk down the error's path, each value at a path from the pass's memo of
       // `mayHoldNull`, Codex r6's B3, Astra r1's B2)
+      // (the earliest element's walked once per path, whichever later element offends there: a wide earliest literal
+      // is otherwise walked once per conflict, Codex r9's B1)
       const depths = intermediateDepths(path);
       const layers = (of: Definition): boolean[] =>
         layersAt(admission, of.value!, of.node, path, depths);
-      const optional = mixedOptional(layers(first.get(at)!.d), layers(d));
+      let earliest = earliestLayers.get(at);
+      if (earliest === undefined) earliestLayers.set(at, (earliest = layers(first.get(at)!.d)));
+      const optional = mixedOptional(earliest, layers(d));
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,
         cell,

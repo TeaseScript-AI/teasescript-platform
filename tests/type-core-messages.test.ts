@@ -3132,22 +3132,30 @@ test("a message's walk and owner index charge their work, to the analysis and no
 /**
  * #1765, Astra r1's B2 on #1789: each value's optionality at a path is asked once per pass, whichever literal's or
  * join's error asks it, so a wide `.take(k)` operand joined with k lists one after another is walked once, not once per
- * join: the analysis's work grows with k (at most ×2.5 per doubling), in four modes.
+ * join; and a wide earliest literal element before k disagreeing ones is walked once, not once per error (Codex r9's
+ * B1): the analysis's work grows with k (at most ×2.5 per doubling), in four modes.
  */
 test("a mixed join's layers read each value at a path once per pass (#1765)", () => {
-  for (const mode of MODES) {
-    const work = [16, 32, 64].map((k) => {
-      const wide = `[${Array.from({ length: k }, (_, at) => `[${at}]`).join(",")}].take(${k})`;
-      const joined = Array.from({ length: k }, (_, at) => `+[[["s${at}"]]]`).join("");
-      const request = coreRequest(main(`let xs=[${wide}]${joined}\nexit\n`));
-      assert.ok(request !== null);
-      const answers = inMode(mode, () => analyseCore(request));
-      assert.equal(answers.budget.exhausted, null);
-      return answers.budget.total;
-    });
-    for (let at = 1; at < work.length; at += 1)
-      assert.ok(work[at]! <= 2.5 * work[at - 1]!, `${JSON.stringify(mode)}: ${work.join(", ")}`);
-  }
+  const wide = (k: number): string =>
+    `[${Array.from({ length: k }, (_, at) => `[${at}]`).join(",")}]`;
+  const sources = [
+    (k: number): string =>
+      `let xs=[${wide(k)}.take(${k})]${Array.from({ length: k }, (_, at) => `+[[["s${at}"]]]`).join("")}\nexit\n`,
+    (k: number): string =>
+      `let xs=[${wide(k)},${Array.from({ length: k }, (_, at) => `[["s${at}"]]`).join(",")}]\nexit\n`,
+  ];
+  for (const source of sources)
+    for (const mode of MODES) {
+      const work = [16, 32, 64].map((k) => {
+        const request = coreRequest(main(source(k)));
+        assert.ok(request !== null);
+        const answers = inMode(mode, () => analyseCore(request));
+        assert.equal(answers.budget.exhausted, null);
+        return answers.budget.total;
+      });
+      for (let at = 1; at < work.length; at += 1)
+        assert.ok(work[at]! <= 2.5 * work[at - 1]!, `${JSON.stringify(mode)}: ${work.join(", ")}`);
+    }
 });
 
 /**
