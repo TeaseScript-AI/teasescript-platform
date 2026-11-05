@@ -10,6 +10,7 @@ import {
   createFreshRuntimeSession,
   deserializeCheckpoint,
   deserializeRuntimeSession,
+  restoreRuntimeSession,
   loadInstructionPlan,
   restoreCheckpoint,
   serializeCheckpoint,
@@ -21,6 +22,7 @@ import {
 import { isValidatedImmutableInstructionPlan } from "../src/plan/validated-immutable.js";
 import { validateCapturedInstructionPlan } from "../src/plan/validation.js";
 import { classifyCapturedRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 /*
@@ -162,7 +164,25 @@ function fixturePlans(): ReadonlyMap<string, InstructionPlan> {
   return plans;
 }
 
-const PLANS = fixturePlans();
+const PLANS = new Map(fixturePlans());
+for (const [name, source] of [
+  ["references", "let xs = [1, 2]\nxs[0] += 1\nxs[1] += 2\nexit"],
+  [
+    "rounds",
+    [
+      "function pick(value: integer = 2): integer {",
+      "    return value + [1, 2, 3, 4, 5, 6].random",
+      "}",
+      "repeat 3 {",
+      '    let answer = askChoice "left", "right"',
+      '    say "${answer}: ${pick()}"',
+      "    wait 1 s",
+      "}",
+      "exit",
+    ].join("\n"),
+  ],
+] as const)
+  PLANS.set(name, compileValidPlan(source));
 
 type Decision =
   | { readonly kind: "valid"; readonly json: string }
@@ -218,27 +238,37 @@ const ODD_VALUES: ReadonlyArray<readonly [string, unknown]> = [
   ["object", { kind: "bad" }],
 ];
 
-/** Mutations of a parsed plan, by class: the root, each first instruction of a kind, and nested records. */
-function planMutations(plan: InstructionPlan): Mutation[] {
+/**
+ * Mutations of a parsed plan, by class: the root, unless `root` is false, and the first instruction of each kind not in
+ * `covered`, which then holds it.
+ */
+function planMutations(
+  plan: InstructionPlan,
+  covered = new Set<string>(),
+  root = true,
+): Mutation[] {
   const mutations: Mutation[] = [];
   // EVIDENCE: fixture: a compiled plan's JSON is an object.
-  const root = JSON.parse(JSON.stringify(plan)) as Record<string, unknown>;
-  for (const field of Object.keys(root)) {
+  const fields = root
+    ? Object.keys(JSON.parse(JSON.stringify(plan)) as Record<string, unknown>)
+    : [];
+  for (const field of fields) {
     mutations.push([`root ${field} missing`, (p) => delete p[field]]);
     for (const [label, value] of ODD_VALUES)
       mutations.push([`root ${field} ${label}`, (p) => (p[field] = value)]);
   }
-  mutations.push(["root unknown field", (p) => (p.trusted = true)]);
-  mutations.push(["older revision", (p) => (p.version = Number(p.version) - 1)]);
+  if (root) {
+    mutations.push(["root unknown field", (p) => (p.trusted = true)]);
+    mutations.push(["older revision", (p) => (p.version = Number(p.version) - 1)]);
+  }
   const instructionsOf = (p: Record<string, unknown>) =>
     // EVIDENCE: fixture: mutations apply to a copy of a compiled plan, whose instructions are an array of objects.
     p.instructions as Record<string, unknown>[];
   mutations.push(["instructions truncated", (p) => instructionsOf(p).pop()]);
-  mutations.push(["instructions emptied", (p) => (p.instructions = [])]);
-  const seen = new Set<string>();
+  if (root) mutations.push(["instructions emptied", (p) => (p.instructions = [])]);
   plan.instructions.forEach((instruction, index) => {
-    if (seen.has(instruction.kind)) return;
-    seen.add(instruction.kind);
+    if (covered.has(instruction.kind)) return;
+    covered.add(instruction.kind);
     const at = (p: Record<string, unknown>) => instructionsOf(p)[index]!;
     const kind = instruction.kind;
     mutations.push([`${kind} unknown kind`, (p) => (at(p).kind = "bad")]);
@@ -286,11 +316,13 @@ test("the owned loader decides every mutated plan as the external route does, wi
   const kinds = new Set<string>();
   const decisions = new Map<string, number>();
   const count = (kind: Decision["kind"]) => decisions.set(kind, (decisions.get(kind) ?? 0) + 1);
+  // The root's cases once, and each kind's at its first fixture: their decisions do not depend on the rest of the plan.
+  const covered = new Set<string>();
   for (const [name, plan] of PLANS) {
     for (const instruction of plan.instructions) kinds.add(instruction.kind);
     const text = JSON.stringify(plan);
     count(assertSameDecision(text, `${name} unchanged`));
-    for (const [mutation, mutate] of planMutations(plan)) {
+    for (const [mutation, mutate] of planMutations(plan, covered, name === "mixed")) {
       // EVIDENCE: fixture: `text` is a compiled plan's JSON, an object.
       const mutated = JSON.parse(text) as Record<string, unknown>;
       mutate(mutated);
@@ -330,6 +362,102 @@ test("the owned loader keeps the external route's decision when Array.prototype 
   } finally {
     Object.defineProperty(Array.prototype, "forEach", native);
   }
+});
+
+test("the owned loader reports reference-order errors as the external route does", () => {
+  const plan = PLANS.get("references")!;
+  const producers = plan.instructions.flatMap((instruction, pc) =>
+    instruction.kind === "prepareReference" ? [pc] : [],
+  );
+  assert.ok(producers.length >= 2);
+  const first = plan.instructions[producers[0]!]!;
+  assert.equal(first.kind, "prepareReference");
+  const id = first.kind === "prepareReference" ? first.destinationTemporary : -1;
+  const consumer = plan.instructions.findIndex(
+    (instruction, pc) =>
+      pc > producers[0]! &&
+      JSON.stringify(instruction).includes(`"kind":"preparedReference","temporaryId":${id}`),
+  );
+  assert.ok(consumer > producers[0]!);
+  const cases: Mutation[] = [
+    [
+      "duplicate producer",
+      (p) => {
+        // EVIDENCE: fixture: a copy of a compiled plan, whose instructions are an array of objects.
+        const instructions = p.instructions as Record<string, unknown>[];
+        instructions[producers[1]!]!.destinationTemporary = id;
+      },
+    ],
+    [
+      "use before its producer",
+      (p) => {
+        // EVIDENCE: fixture: a copy of a compiled plan, whose instructions are an array of objects.
+        const instructions = p.instructions as Record<string, unknown>[];
+        [instructions[producers[0]!], instructions[consumer]] = [
+          instructions[consumer]!,
+          instructions[producers[0]!]!,
+        ];
+      },
+    ],
+  ];
+  for (const [name, mutate] of cases) {
+    // EVIDENCE: fixture: a compiled plan's JSON is an object.
+    const mutated = JSON.parse(JSON.stringify(plan)) as Record<string, unknown>;
+    mutate(mutated);
+    assert.equal(assertSameDecision(JSON.stringify(mutated), name), "invalid");
+  }
+});
+
+test("a loaded plan plays through input, time, random draws and restores as the compiled plan and the external route do", () => {
+  const plan = PLANS.get("rounds")!;
+  const text = JSON.stringify(plan);
+  const load = loadInstructionPlan(text);
+  assert.equal(load.kind, "valid");
+  if (load.kind !== "valid") return;
+  const fresh = { seed: 112, baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 };
+  // EVIDENCE: fixture: `text` is a compiled plan's JSON; the session captures and validates it.
+  const external = JSON.parse(text) as InstructionPlan;
+  let sessions = [plan, load.plan, external].map((p) => createFreshRuntimeSession(p, fresh));
+  const same = (values: readonly unknown[], label: string) => {
+    for (const value of values.slice(1))
+      assert.equal(JSON.stringify(value), JSON.stringify(values[0]), label);
+  };
+  let [choices, observations] = [0, 0];
+  for (let step = 0; sessions[0]!.view().status !== "halted"; step += 1) {
+    assert.ok(step < 400, "the script ends");
+    same(
+      sessions.map((session) => [session.view(), session.exportSnapshot()]),
+      `state ${step}`,
+    );
+    const view = sessions[0]!.view();
+    const action = view.foregroundAction;
+    let results: unknown[];
+    if (view.status !== "waiting")
+      results = sessions.map((session) => session.executeInstruction());
+    else if (action?.kind === "interaction") {
+      const request = {
+        actionId: action.actionId,
+        actionKind: "interaction",
+        interactionKind: "choice",
+        payload: { kind: "selectedOption", optionIndex: choices % 2 },
+      } as const;
+      results = sessions.map((session) => session.completeAction(request));
+      choices += 1;
+    } else {
+      results = sessions.map((session) => session.observeTime(view.currentSessionTimeMs + 1_000));
+      observations += 1;
+    }
+    same(results, `result ${step}`);
+    // Every boundary continues from a restored checkpoint, by text for the first two and as data for the third.
+    const saved = sessions.map((session) => serializeCheckpoint(session.exportCheckpoint()));
+    same(saved, `checkpoint ${step}`);
+    sessions = [
+      deserializeRuntimeSession(saved[0]!),
+      deserializeRuntimeSession(saved[1]!),
+      restoreRuntimeSession(JSON.parse(saved[2]!)),
+    ];
+  }
+  assert.deepEqual([choices, observations], [3, 3]);
 });
 
 test("a loaded plan runs exactly as the compiled plan and the external route's plan do", () => {
