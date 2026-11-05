@@ -2068,6 +2068,16 @@ test("a deep path's events are its prefixes' and collections' that hold one, whe
         "non-null: branch",
       ],
       [
+        "a mutated prefix that is no collection of the path (a property step below it)",
+        [
+          "let rows = [{xs: [1, null]}, [3]]",
+          "if rows[0].xs[0] != null { rows[1].reverse()\n repeat rows[0].xs[0] {} }",
+        ],
+        "repeat rows[0].xs[0]",
+        7,
+        "non-null: holds",
+      ],
+      [
         "a positive collection test's element step",
         [lists, "if m is integer[][] { m[0].reverse()\n repeat m[0][0] {} }"],
         "repeat m[0][0]",
