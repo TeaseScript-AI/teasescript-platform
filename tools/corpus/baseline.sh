@@ -292,8 +292,9 @@ while IFS=$'\t' read -r folder n shards; do
       unqueued=$((unqueued + 1))
     fi
   done
+# (a tree's state module before #1826 names no count for an area it has not planned: 16, as it plans one)
 done < <(jq -r 'select(.area and .store and .store != [])
-  | [.folder, .shards, (if .store == "all" then "all" else (.store | map(tostring) | join(",")) end)] | @tsv' \
+  | [.folder, (.shards // 16), (if .store == "all" then "all" else (.store | map(tostring) | join(",")) end)] | @tsv' \
   <<< "$lines")
 jq -r 'select(.state == "another plan") | "baseline: \(.area) is planned otherwise, not filled"' <<< "$lines"
 [ "$unqueued" -eq 0 ] || fail "$unqueued jobs not queued ($queued queued now); call again to queue them"

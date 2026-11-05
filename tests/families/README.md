@@ -115,7 +115,8 @@ stalls are rerun by a runner since; the rerun's unit limit is added to its confi
 A replay since #1647 is judged by units. A record made before #1647 is judged by the rule then (a candidate, load or unknown, its time
 clause a heuristic). An
 area's records must share one configuration (another is refused, exit 2), so the area is complete only with its shards
-0/N to N-1/N of one N, together every source of one plan, and a source a plan lists more than once (a repeat, which the
+0/N to N-1/N of one N, together every source of one plan, or with an item pool's batches alone (#1826), each naming the
+area's count of sources and together holding that many (batches beside numbered shards are incomplete), and a source a plan lists more than once (a repeat, which the
 runner runs and counts each time) is one source where its repeats record the same counts, stall and runs, milliseconds
 apart, refused (exit 2, naming the place) where they differ; a source counts as `agreed` only where it was compared in
 every run and agrees, and as `unansweredAlike` where its runs agree but for some unanswered alike, each such source

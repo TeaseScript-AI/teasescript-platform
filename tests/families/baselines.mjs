@@ -960,7 +960,7 @@ async function stateOf(tree, root, readOnly) {
     let line;
     if (made.refused !== undefined) return refusal(made.refused);
     if (record === undefined)
-      line = { area, folder, state: "absent", shards: shardsOf(area), store: "all" };
+      line = { area, folder, state: "absent", shards: shardsOf(area), verified: 0, store: "all" };
     else if (made.area === undefined)
       // (recorded, its PLAN not made yet: the next writer's to finish, in the recorded count)
       line = { area, folder, state: "absent", shards: record.shards, verified: 0, store: "all" };
