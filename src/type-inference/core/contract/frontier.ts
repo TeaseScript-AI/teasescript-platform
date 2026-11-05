@@ -301,8 +301,8 @@ function eachValue(frontier: Frontier, value: PlaceId, then: (node: number) => v
     projection = program.projOf.get(at)
   ) {
     step(frontier);
-    if (!propertyOnly(projection.step) || selectsElement(projection.step))
-      throw new Decline("step");
+    if (selectsElement(projection.step)) throw new Decline(`step ${projection.step}`);
+    properties([projection.step]);
     if (ingressLeafOf(contract, at) !== undefined) throw new Decline("ingress");
     if (positions() && passesWrapper(contract, at)) throw new Decline("wrapper");
     steps.push(projection.step);
@@ -322,6 +322,11 @@ function eachValue(frontier: Frontier, value: PlaceId, then: (node: number) => v
   } else if (program.hasOf.has(at) && !program.cellOwner.has(at)) root = literalRoot(frontier, at);
   else throw new Decline("value");
   below(frontier, root, steps, 0, then);
+}
+
+/** Declines a path with a step no property read takes (an element, a selection, a member a built-in answers). */
+function properties(steps: readonly string[]): void {
+  for (const each of steps) if (!propertyOnly(each)) throw new Decline(`step ${each}`);
 }
 
 /** Whether a property read's chain passes a wrapper at its first step (G3's position, `positionOf`). */
@@ -473,11 +478,11 @@ function stepEntry(
   if (entry.key !== undefined) {
     if (isKeyId(entry.key)) throw new Decline("cursor");
     const path = keyPath(entry.key);
-    if (!path.every(propertyOnly)) throw new Decline("step");
+    properties(path);
     return below(frontier, rootNode(frontier, keyPlace(entry.key)), [...path, s], 0, into);
   }
   const at = entry.at ?? [];
-  if (!at.every(propertyOnly)) throw new Decline("step");
+  properties(at);
   eachValue(frontier, entry.value!, (found) => below(frontier, found, [...at, s], 0, into));
 }
 
@@ -825,7 +830,8 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
   if (path.length === 0) return null;
   const steps = stepsArray(ref.steps());
   return reachSlot(contract, keptParts(contract.work, "pr", key, steps), keyPlace(key), () => {
-    if (!steps.every(propertyOnly) || !path.every(propertyOnly)) throw new Decline("step");
+    properties(path);
+    properties(steps);
     const frontier = frontierOf(contract);
     let set = intern(frontier, [rootNode(frontier, keyPlace(key))]);
     for (const each of [...path, ...steps]) set = star(frontier, set, each);
