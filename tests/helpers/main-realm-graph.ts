@@ -3,6 +3,19 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { ts } from "ts-morph";
 import { compileTemplate, parse as parseSfc } from "vue/compiler-sfc";
 
+/*
+ * The main-realm walk behind `tests/player-main-realm.test.ts`. It is a progress ratchet for the L5 series and a guard
+ * against honest mistakes, not the proof that the main bundle holds no engine code: the bundle provenance check at
+ * activation is that proof. It handles exactly:
+ * - ESM imports, re-exports and literal `import()` in `.ts`;
+ * - a `.vue` file's inline blocks, its template compiled by `compileTemplate`;
+ * - Vite's `?raw` import, `?url` glob and `new Worker(new URL(…, import.meta.url))`;
+ * - local specifiers that name one file.
+ *
+ * It refuses other SFC forms, other Vite queries and globs, other `new URL(…, import.meta.url)`, CommonJS, and ambiguous
+ * or non-code local targets.
+ */
+
 /** An import of a value from a module the main realm may not load: who imports it, from where, and which name. */
 export interface MainRealmOffender {
   readonly importer: string;
@@ -87,6 +100,13 @@ function valueImports(
               .map((element) => (element.propertyName ?? element.name).text);
       // `export { type A } from "m"` and `export {} from "m"` still load `m` under `verbatimModuleSyntax`.
       found.push({ specifier: node.moduleSpecifier.text, names: names.length > 0 ? names : ["*"] });
+    } else if (
+      (ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "require") ||
+      (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference))
+    ) {
+      refuse(label, "CommonJS require()");
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const [argument] = node.arguments;
       if (argument === undefined || !ts.isStringLiteralLike(argument))
@@ -176,34 +196,67 @@ function scripts(file: string, label: string): string[] {
   return code;
 }
 
-/** The local files the Player imports that hold no code (styles). */
-const NON_CODE = /\.css$/u;
+/** The file extensions a local specifier may leave out or name. */
+const EXTENSIONS = [
+  ".ts",
+  ".vue",
+  ".css",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".mts",
+  ".cts",
+  ".jsx",
+  ".tsx",
+  ".json",
+];
 
-/** The repository file a local specifier names, or `null` for a package or a non-script file. */
-function resolveSpecifier(from: string, specifier: string, aliasRoot: string): string | null {
+/**
+ * The one repository file a local specifier names (a `.ts` or `.vue` module, or a stylesheet), or `null` for a package.
+ * A specifier with an extension names that file, or the `.ts` file for a `.js` one that is missing; one without names a
+ * file with one of `EXTENSIONS`, else a directory's `index` file. Where two candidates exist, which one loads depends on
+ * the bundler's order, so the walk refuses it, as it refuses a file of any other kind.
+ */
+function resolveSpecifier(
+  from: string,
+  specifier: string,
+  aliasRoot: string,
+  label: string,
+  name: (file: string) => string,
+): string | null {
   const base = specifier.startsWith("@/")
     ? join(aliasRoot, specifier.slice(2))
     : specifier.startsWith(".")
       ? resolve(dirname(from), specifier)
       : null;
-  if (base === null) return null;
-  for (const candidate of [
-    base.replace(/\.js$/u, ".ts"),
-    base,
-    `${base}.ts`,
-    `${base}.vue`,
-    join(base, "index.ts"),
-  ])
-    if (/\.(ts|vue)$/u.test(candidate) && existsSync(candidate) && statSync(candidate).isFile())
-      return candidate;
-  return null;
+  if (base === null) {
+    if (specifier.startsWith("/")) refuse(label, `the root-relative specifier "${specifier}"`);
+    return null;
+  }
+  const extension = EXTENSIONS.find((candidate) => base.endsWith(candidate));
+  const groups =
+    extension === undefined
+      ? [
+          EXTENSIONS.map((ext) => `${base}${ext}`),
+          EXTENSIONS.map((ext) => join(base, `index${ext}`)),
+        ]
+      : [extension === ".js" ? [base, `${base.slice(0, -3)}.ts`] : [base]];
+  const found =
+    groups
+      .map((group) => group.filter((file) => existsSync(file) && statSync(file).isFile()))
+      .find((group) => group.length > 0) ?? [];
+  if (found.length > 1)
+    refuse(label, `"${specifier}", which could name ${found.map(name).join(" or ")}`);
+  const [file] = found;
+  if (file === undefined || !/\.(?:ts|vue|css)$/u.test(file))
+    refuse(label, `"${specifier}", a local specifier that names no .ts, .vue or .css file`);
+  return file;
 }
 
 /**
  * Walks the main realm's modules from `entry`: every Player module it reaches that is not a Worker module, and every
  * allowed `src/` module. An import of a value from any other module is an offender, and the walk does not go through it.
- * A local specifier must name a `.ts` or `.vue` module or a stylesheet; the walk refuses any other. Each module is
- * visited once, so a cycle is no special case.
+ * Each module is visited once, so a cycle is no special case.
  */
 export function mainRealmGraph(options: MainRealmGraphOptions): {
   readonly modules: readonly string[];
@@ -222,13 +275,9 @@ export function mainRealmGraph(options: MainRealmGraphOptions): {
     if (options.exempt.has(importer)) continue;
     for (const code of scripts(file, importer))
       for (const { specifier, names } of valueImports(code, file, importer)) {
-        const resolved = resolveSpecifier(file, specifier, aliasRoot);
-        if (resolved === null) {
-          // A package, or a local file that holds no code; any other local file is a load the walk does not model.
-          if (/^(\.|\/|@\/)/u.test(specifier) && !NON_CODE.test(specifier))
-            refuse(importer, `"${specifier}", a local specifier that names no .ts or .vue module`);
-          continue;
-        }
+        const resolved = resolveSpecifier(file, specifier, aliasRoot, importer, name);
+        // A package, or a stylesheet, which holds no code.
+        if (resolved === null || resolved.endsWith(".css")) continue;
         const target = name(resolved);
         const mainRealm = target.startsWith("src/")
           ? options.allowedSource.has(target)

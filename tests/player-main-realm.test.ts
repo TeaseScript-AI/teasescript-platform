@@ -115,8 +115,13 @@ test("the walk refuses each loading form it does not model", () => {
     ["glob-spread.ts", unmodelled('import.meta.glob without one literal query "?url"')],
     [
       "local-module.ts",
-      unmodelled('"./plain.mjs", a local specifier that names no .ts or .vue module'),
+      unmodelled('"./plain.mjs", a local specifier that names no .ts, .vue or .css file'),
     ],
+    [
+      "ambiguous.ts",
+      unmodelled('"./sibling.js", which could name refused/sibling.js or refused/sibling.ts'),
+    ],
+    ["require.ts", unmodelled("CommonJS require()")],
     ["url.ts", unmodelled("new URL(…, import.meta.url) outside new Worker(…)")],
     ["computed-import.ts", unmodelled("an import() of a computed specifier")],
   ])
