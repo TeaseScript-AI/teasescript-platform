@@ -191,6 +191,22 @@ export function marksOf(from: readonly Item[]): {
   };
 }
 
+/**
+ * The marks a computed item takes from its operands (`marksOf` without `fromExternal`): an operator's row, a
+ * conversion, a length, a declared result or a key is computed, so it is never external data a test refined (#1073
+ * PR 2: only a transfer that keeps the value, a copy, a merge of one kind, a literal's element or a selection, carries
+ * that mark).
+ */
+export function computedMarks(from: readonly Item[]): {
+  readonly guarded?: true;
+  readonly called?: true;
+} {
+  return {
+    ...(from.some((each) => each.guarded === true) ? { guarded: true as const } : {}),
+    ...(from.some((each) => each.called === true) ? { called: true as const } : {}),
+  };
+}
+
 /** The mark of an element read that may find no element (TABLE §1 M): not a value, so no consumer checks it. */
 export const EMPTY: Item = Object.freeze(makeItem("empty"));
 

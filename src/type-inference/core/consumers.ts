@@ -450,11 +450,34 @@ export class Consumers {
       this.pass.contract.contractOfValueAt(value, rest),
     );
     // C9 (#1073): an item a type test narrowed from external data brings its ingress stores' boundary checks, whatever
-    // its consumer then finds fitting; the test proves its kind, never its ingress (a look at each of the read's items,
-    // at most one per kind, inside the read's own charged step, r4.261)
+    // its consumer then finds fitting, and host data no ingress store brought its check at the read's root (r4.10, at
+    // the site and with the target the consumers' own requests use, so one check); the test proves its kind, never its
+    // ingress (a look at each of the read's items, at most one per kind, inside the read's own charged step, r4.261)
     for (const item of items)
-      if (item.fromExternal === true) this.admission.boundaryFor(item, null);
+      if (item.fromExternal === true)
+        this.admission.boundaryFor(item, () => this.#hostCheck(value));
     return items;
+  }
+
+  /** C9's check of host data at a read's root occurrence (`valueRun`): its site, its text as the target. */
+  #hostCheck(value: PlaceId): Obligation {
+    const program = this.pass.program;
+    let root = value;
+    for (let projection = program.projOf.get(root); projection !== undefined;) {
+      program.work.charge("checks");
+      root = projection.owner;
+      projection = program.projOf.get(root);
+    }
+    const site = program.places[root]?.site ?? program.places[value]!.site!;
+    const label = program.textAt(site);
+    return {
+      kind: "copy-type",
+      target: label,
+      against: [],
+      on: `validate external data ${label}`,
+      site: { file: site.file, start: site.start, end: site.end },
+      boundary: false,
+    };
   }
 
   /**
