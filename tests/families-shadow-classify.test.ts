@@ -571,6 +571,92 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   assert.match(badName.stderr, /a name that is no text/);
 });
 
+test("the control's runs that left the slice are counted by exclusion rule, from the table itself, zeros included (r4.382)", async () => {
+  const C = await load();
+  // (one run at an exact text, one at a template's, one at a text no rule names; the fourth mode plans)
+  const texts = ["this function declaration", "the name 'f'", "a text no rule names", null];
+  const outside = {
+    demand: 16,
+    rows: control(16).rows.map((row, i) =>
+      texts[i] === null
+        ? row
+        : {
+            mode: row.mode,
+            core: {
+              outcome: "outside",
+              outside: texts[i],
+              decisionCounts: { ordinary: [], completion: [] },
+            },
+          },
+    ),
+  };
+  const result = C.classifyRecords(
+    entries([{ ...record("left", () => ({})), demands: [outside, control(64)] }]),
+  );
+  const table: { rule: string; text?: string; runs: number; witnesses: { key: string }[] }[] =
+    result.coverage.controlOutside;
+  // (every rule of the pair classes' exclusions has its row, in their order, zeros included)
+  const classes: { id: string }[] = C.PAIR_CLASSES;
+  const rules = classes.map((c) => c.id).filter((id) => id.startsWith("excluded/"));
+  assert.deepEqual(
+    table.filter((r) => r.rule !== "unlisted").map((r) => r.rule),
+    rules,
+  );
+  const runs = (rule: string) => table.find((r) => r.rule === rule)?.runs;
+  assert.equal(runs("excluded/this function declaration"), 1);
+  // (a template's text: its one row, `excluded/<words>`)
+  assert.deepEqual(
+    table.filter((r) => r.rule !== "unlisted" && r.runs > 0).map((r) => [r.rule, r.runs]),
+    [
+      ["excluded/this function declaration", 1],
+      ["excluded/the name '<a name the slice does not declare>'", 1],
+    ],
+  );
+  assert.equal(rules.filter((rule) => runs(rule) === 0).length, rules.length - 2);
+  // (a text no rule names: its own row, counted and witnessed; information only, the gate's state does not move)
+  assert.deepEqual(
+    table.filter((r) => r.rule === "unlisted").map((r) => [r.text, r.runs, r.witnesses[0]?.key]),
+    [["a text no rule names", 1, "left"]],
+  );
+  const plain = C.classifyRecords(
+    entries([{ ...record("left", () => ({})), demands: [control(16), control(64)] }]),
+  );
+  assert.deepEqual(
+    [result.coverage.state, result.verdict, result.open],
+    [plain.coverage.state, plain.verdict, plain.open],
+  );
+  const quiet: { runs: number }[] = plain.coverage.controlOutside;
+  assert.ok(quiet.every((r) => r.runs === 0));
+  // (published: gate.json's coverage holds the table, gate.md the unlisted line under the coverage line and a row a rule)
+  const folder = mkdtempSync(join(tmpdir(), "shadow-control-"));
+  try {
+    const left = { ...record("left", () => ({})), demands: [outside, control(64)] };
+    writeFileSync(join(folder, "left.jsonl"), `${JSON.stringify(left)}\n`);
+    const ran = spawnSync(
+      process.execPath,
+      [tool, join(folder, "left.jsonl"), "--groups", "none", "--out", join(folder, "out")],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 0, ran.stderr);
+    const json = JSON.parse(readFileSync(join(folder, "out", "gate.json"), "utf8"));
+    assert.equal(json.coverage.controlOutside.length, rules.length + 1);
+    const md = readFileSync(join(folder, "out", "gate.md"), "utf8").split("\n");
+    const at = md.findIndex((l) => l.startsWith("Coverage ("));
+    assert.equal(md[at + 1], "Unlisted control texts: 1.");
+    for (const row of [
+      "| excluded/this function declaration | 1 | left left (source order, sharing on) |",
+      "| unlisted: a text no rule names | 1 | left left (reversed, sharing on) |",
+    ])
+      assert.ok(md.includes(row), `${row}\n${md.filter((l) => l.includes("| 1 |")).join("\n")}`);
+    assert.equal(
+      md.filter((l) => l.startsWith("| excluded/") && l.endsWith(" | 0 |  |")).length,
+      rules.length - 2,
+    );
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test("coverage: the natural runs' ordinary decisions and a receiving completion at the demand control (16)", async () => {
   const C = await load();
   const coverage = (demands: unknown[]) =>

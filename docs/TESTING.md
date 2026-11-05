@@ -129,7 +129,9 @@ with one `--expect` per set's manifest (the flag takes one file).
 For `corpus`, both commands also need `CASES_JSON=<cases.json>` before `node`, and the job `--data <cases.json>`.
 `env -u NODE_OPTIONS` keeps the queue's heap flag from overriding each route's `--memory`. `--demands 16` is the
 completion control: nothing stops at the natural allowance on current `main`, so only a demand-allowance run reaches
-a receiving completion. `--expect` makes a source without a result count as `unavailable`.
+a receiving completion. The gate table also counts, as information only, the control's runs that left the slice by
+exclusion rule, every rule a row and a text no rule names apart. `--expect` makes a source without a result count as
+`unavailable`.
 
 Each class has one of three states:
 
