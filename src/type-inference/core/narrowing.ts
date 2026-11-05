@@ -995,12 +995,12 @@ export class NarrowingIndex {
   /**
    * The collections G's tested path reads an element of that hold an invalidation (N2's lists), the shortest first: its
    * key's prefixes at each element step, the tested path's own and those below it for a positive collection test, by
-   * one walk of the key's steps down the invalidations' keys, once per G (#1640). A collection with none holds no list,
-   * so G's events, owners and handlers read it as nothing.
+   * one walk of the key's steps down the invalidations' keys, once per G (#1640), each step charged; asked again, it is
+   * G's field, as its list was. A collection with none holds no list, so G's events, owners and handlers read it as
+   * nothing.
    */
   public collectionsOf(g: Narrowing): readonly Key[] {
     const work = this.program.work;
-    work.charge("eventSteps");
     const known = this.#collections.get(g);
     if (known !== undefined) return known;
     this.#invalidated ??= new KeyTrie(work, "eventSteps", () => this.#invalidations.keys());
