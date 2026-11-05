@@ -1552,8 +1552,10 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
 test("a store's property below the warned value is the property its fix names, and following it removes the warning (#1468)", () => {
   const load = 'load("prefs", default: {volume: 5})';
   const given = 'load("prefs", default: {volume: 5, caption: 7})';
+  // (a test of another property, which says nothing of the stored one: a test of `original.entry` itself proves it a
+  // whole number through the copy, so no warning is owed, #1073 PR 2)
   const guarded = (body: string) =>
-    `if original.entry is integer {\n${body.replace(/^/gm, "    ").trimEnd()}\n}\nexit\n`;
+    `if original.marker is integer {\n${body.replace(/^/gm, "    ").trimEnd()}\n}\nexit\n`;
   const cases: readonly (readonly [
     source: string,
     value: string,

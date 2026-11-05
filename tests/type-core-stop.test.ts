@@ -3375,13 +3375,14 @@ test("a combined stop owes the reference's check in other words, or a boundary's
       each: true,
     },
     // ((a) at a member's presence check by every read its consumer makes: the receiver at the unlisted step `#`, which
-    // the stop left `unknown` and the finishing walk answers from the ring's literals, reversed under demand 41: two
-    // units below its decision's 43 since #1221 charges the event searches by comparison, the stop at 42 past that read)
+    // the stop left `unknown` and the finishing walk answers from the ring's literals, reversed under demand 45: two
+    // units below its decision's 47 (43 since #1221 charges the event searches by comparison, 4 more since #1073 PR 2's
+    // consumers look up a descendant demand's narrowing), the stop at 46 past that read)
     {
       clause: "a",
       modes: [HELD_MODES[1]!],
       c: heldFamily(false).find((c) => c.name === "ring-1-written-plain")!,
-      demand: 41,
+      demand: 45,
     },
     ...[
       "function build {return dict {a: hostValue, b: 4}}",

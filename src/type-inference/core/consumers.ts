@@ -191,6 +191,15 @@ const EXTRACTION = -1;
 export const STOP_RULE = 5 + STAGES;
 
 /**
+ * C9 at a consumer for an item a type test narrowed from external data (`fromExternal`, #1073): the test proves its
+ * kind, never its ingress, so it brings its ingress store's boundary check as the external item it came from does
+ * (`narrowedItems` keeps its reasons and ingress). Every other item as it is.
+ */
+function externalOrigin(item: Item): Item {
+  return item.fromExternal === true && item.tag !== "unknown" ? { ...item, tag: "unknown" } : item;
+}
+
+/**
  * A method whose body lives in `consumers/` is a function of its name there; the members those functions read are
  * public for them, and internal to the consumers.
  */
@@ -404,13 +413,14 @@ export class Consumers {
   ): void {
     // (only a finishing read brings a domain item: an ordinary walk's requests are C9's alone)
     if (!this.finishing) {
-      for (const item of items) this.admission.boundaryFor(item, here);
+      for (const item of items) this.admission.boundaryFor(externalOrigin(item), here);
       return;
     }
     // (each item looked up, charged: the finishing walk's charges never move a stop)
     this.pass.program.work.charge("checks", items.length);
     for (const item of items)
-      if (!this.domainOwned.has(item) || !leftOut(item)) this.admission.boundaryFor(item, here);
+      if (!this.domainOwned.has(item) || !leftOut(item))
+        this.admission.boundaryFor(externalOrigin(item), here);
   }
 
   /**
@@ -422,18 +432,19 @@ export class Consumers {
     here: Obligation | (() => Obligation) | null,
   ): (leftOut?: (item: Item) => boolean) => void {
     if (!this.finishing) {
-      for (const item of items) this.admission.boundaryFor(item, here);
+      for (const item of items) this.admission.boundaryFor(externalOrigin(item), here);
       return () => {};
     }
     this.pass.program.work.charge("checks", items.length);
     const domain: Item[] = [];
     for (const item of items)
       if (this.domainOwned.has(item)) domain.push(item);
-      else this.admission.boundaryFor(item, here);
+      else this.admission.boundaryFor(externalOrigin(item), here);
     return (leftOut = () => false) => {
       // (each gone over again, charged)
       this.pass.program.work.charge("checks", domain.length);
-      for (const item of domain) if (!leftOut(item)) this.admission.boundaryFor(item, here);
+      for (const item of domain)
+        if (!leftOut(item)) this.admission.boundaryFor(externalOrigin(item), here);
     };
   }
 
@@ -446,9 +457,17 @@ export class Consumers {
 
   /** A value's items at a node and a path, as a consumer's demand: past its allowance, its own key's contract. */
   public valueRun(value: PlaceId, node: FlowNode | null, rest: Rest): readonly Item[] {
-    return this.run(this.pass.values.valueItems(value, node, rest), () =>
+    const items = this.run(this.pass.values.consumerItems(value, node, rest), () =>
       this.pass.contract.contractOfValueAt(value, rest),
     );
+    // C9 (#1073): an item a type test narrowed from external data brings its ingress stores' boundary checks, whatever
+    // its consumer then finds fitting; the test proves its kind, never its ingress (a look at each of the read's items,
+    // at most one per kind, inside the read's own charged step, r4.261)
+    for (const item of items) {
+      const origin = externalOrigin(item);
+      if (origin !== item) this.admission.boundaryFor(origin, null);
+    }
+    return items;
   }
 
   /**

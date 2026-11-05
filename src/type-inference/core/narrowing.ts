@@ -290,13 +290,18 @@ export function narrowedItems(
       item.tag === "unknown" && (item.reasons & REASON.budget) !== 0
         ? { reasons: item.reasons & ~REASON.budget, context: null }
         : {};
+    // (external data the test proves of a kind still owes its ingress's boundary, C9, #1073)
+    const external =
+      item.tag === "unknown" && (item.reasons & REASON.external) !== 0
+        ? { fromExternal: true as const }
+        : {};
     switch (form.kind) {
       case "non-null":
         if (item.tag !== "null") kept.push(item);
         break;
       case "null":
         if (item.tag === "null" || item.tag === "unknown")
-          kept.push({ ...item, ...proof, tag: "null" });
+          kept.push({ ...item, ...proof, ...external, tag: "null" });
         break;
       case "is":
         for (const kind of each(work, "mergeItems", form.kinds)) {
@@ -305,7 +310,13 @@ export function narrowedItems(
             kept.push(
               tag === item.tag
                 ? item
-                : { ...item, ...proof, tag, ...(spelling === undefined ? {} : { spelling }) },
+                : {
+                    ...item,
+                    ...proof,
+                    ...external,
+                    tag,
+                    ...(spelling === undefined ? {} : { spelling }),
+                  },
             );
         }
         break;
@@ -1027,9 +1038,13 @@ export class NarrowingIndex {
    * The nearest narrowing definition of a read at `node` (N2): of its own path's text, and of each element scope of its
    * trailing element steps (`rows[i][j]` asks `rows[i][*]` and `rows[*][*]`; `rows[i + 1][0]` only `rows[*][*]`, as no
    * tested path holds a computed step), the deepest region wins. One walk of the read's steps down the trie of tested
-   * paths, asking only the scopes a test defines: linear in the read's path.
+   * paths, asking only the scopes a test defines: linear in the read's path. `below`: a consumer's descendant demand
+   * of the read (#1073: `${xs}` asks its element, `['element']`), its steps after the read's own, each charged.
    */
-  public nearestAt(node: FlowNode): Narrowing | null {
+  public nearestAt(
+    node: FlowNode,
+    below: { readonly length: number; at(index: number): string | undefined } = NO_STEPS,
+  ): Narrowing | null {
     this.program.work.charge("eventSteps");
     const program = this.program;
     const expression = node.expression;
@@ -1037,7 +1052,20 @@ export class NarrowingIndex {
     const path = stablePath(program, node.file, expression, true);
     if (path === null) return null;
     const work = program.work;
-    const walk = path.steps;
+    let walk: readonly PathStep[] = path.steps;
+    if (below.length > 0) {
+      const longer: PathStep[] = [];
+      for (const step of each(work, "eventSteps", path.steps)) longer.push(step);
+      // (a consumer's descendant demand asks elements, `${xs}`'s; any other step below the read names no tested path
+      // here, the conservative answer)
+      let index = 0;
+      for (const _ of steps(work, "eventSteps", () => index < below.length)) {
+        if (below.at(index) !== "element") return null;
+        longer.push({ kind: "element" });
+        index += 1;
+      }
+      walk = longer;
+    }
     // the trailing element steps start at `first`
     let first = walk.length;
     for (const _ of steps(
@@ -1089,6 +1117,9 @@ export function selectionLinks(
   }
   return links;
 }
+
+/** No steps below a read (`nearestAt`'s default). */
+const NO_STEPS: readonly string[] = [];
 
 /** Whether `a` lies inside `b`'s region: an operand region inside a branch's, or the deeper of two of a kind. */
 function nearer(program: CoreProgram, a: Narrowing, b: Narrowing): boolean {
