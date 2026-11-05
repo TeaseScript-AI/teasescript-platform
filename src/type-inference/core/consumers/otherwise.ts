@@ -36,9 +36,9 @@ export function otherwiseChains(expressions: readonly Expression[]): BinaryExpre
   for (const expression of expressions) {
     if (!isOtherwise(expression) || inner.has(expression)) continue;
     const chain: BinaryExpression[] = [];
-    for (let link: Expression = expression; isOtherwise(link); link = link.left)
-      chain.unshift(link);
-    chains.push(chain);
+    // (from the root inward, then reversed once: linear in the chain's links)
+    for (let link: Expression = expression; isOtherwise(link); link = link.left) chain.push(link);
+    chains.push(chain.reverse());
   }
   return chains;
 }
