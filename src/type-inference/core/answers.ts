@@ -459,8 +459,6 @@ export interface DecisionWork {
 export interface ValueAnswer {
   readonly items: readonly Item[];
   readonly properties: ReadonlySet<string>;
-  /** Whether a stop may have left `properties` without names the unstopped answer has (#1767). */
-  readonly namesOpen?: true;
 }
 
 export interface Answers {
@@ -1765,7 +1763,7 @@ class CoreAnswers implements Answers {
     const value = this.#valueOf(node);
     const out = new Map<string, readonly Item[]>();
     if (value === null) return out;
-    for (const name of [...this.#propertyNames({ value, path: [] }).names].sort())
+    for (const name of [...this.#propertyNames({ value, path: [] })].sort())
       out.set(name, this.#items(value, node, [propertyStep(name)]));
     return out;
   }
@@ -1774,7 +1772,7 @@ class CoreAnswers implements Answers {
     // (the key in its identity, as the property search names its tasks: G3 stage 1; the capture's search, where it made
     // one in this pass, is the answer, #1526)
     const key = this.#pass.contract.keyAt(id, path);
-    return this.#consumers.propertySets.get(key) ?? this.#propertyNames({ key }).names;
+    return this.#consumers.propertySets.get(key) ?? this.#propertyNames({ key });
   }
 
   public targetName(node: FlowNode): string | null {
@@ -1789,16 +1787,15 @@ class CoreAnswers implements Answers {
     if (value === null) return { items: [], properties: new Set() };
     const items = this.#items(value, node, path);
     // only an object has properties to find
-    if (!items.some((item) => item.tag === "object")) return { items, properties: new Set() };
-    const { names, open } = this.#propertyNames({ value, path });
-    return open ? { items, properties: names, namesOpen: true } : { items, properties: names };
+    return {
+      items,
+      properties: items.some((item) => item.tag === "object")
+        ? this.#propertyNames({ value, path })
+        : new Set(),
+    };
   }
 
-  /** A start's property names, and whether a stop may have left out some the unstopped analysis names (`open`). */
-  #propertyNames(start: PropertyNamesTask): {
-    readonly names: ReadonlySet<string>;
-    readonly open: boolean;
-  } {
+  #propertyNames(start: PropertyNamesTask): ReadonlySet<string> {
     // (a key whose decision stopped names nothing, as every read of it holds nothing but `unknown`, S3 §5)
     const { contract } = this.#pass;
     if (contract.anyStopped) {
@@ -1808,21 +1805,17 @@ class CoreAnswers implements Answers {
           ? read !== null && contract.stopped(read.root, joinSteps(read.path, start.path))
           : "key" in start && contract.keyStopped(start.key)
       )
-        return { names: new Set(), open: true };
+        return new Set();
     }
     // (after a stop before admission settled only what a value's own syntax names: a literal's or a written
-    // destination's properties; a value whose syntax proves nothing may name more unstopped)
+    // destination's properties)
     if (this.#stopped && !this.#consumers.settled) {
       const names = new Set<string>();
-      if (!("value" in start)) return { names, open: true };
-      const shape = this.#stoppedShape(start.value, start.path);
-      for (const name of shape.names) names.add(name);
-      return { names, open: shape.items === STOPPED };
+      if ("value" in start)
+        for (const name of this.#stoppedShape(start.value, start.path).names) names.add(name);
+      return names;
     }
-    return {
-      names: propertyNames(this.#pass, (work) => this.#pass.solver.run(work), start),
-      open: false,
-    };
+    return propertyNames(this.#pass, (work) => this.#pass.solver.run(work), start);
   }
 
   public view(node: FlowNode): CoreView {

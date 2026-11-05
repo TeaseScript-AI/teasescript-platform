@@ -1661,6 +1661,12 @@ class Contracts {
    */
   public expected(call: CallExpression | LoadExpression): TypePlan | null {
     if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
+    // (after a stop only literal data proves a default, by its own syntax at every level (#1460): below a read the
+    // answer is the value side's, which the stop left unproven (A6: the stores admission rejects are unsettled), so
+    // the program leaves the slice rather than read what the natural plan may not, #1526 condition 1, #1767)
+    const fallback = call.kind === "loadExpression" ? call.defaultValue : defaultOf(call);
+    if (fallback !== null && readsPlace(fallback) && stoppedAnalysis(this.answers))
+      throw new OutsideContract(call, OPEN_BY_STOP);
     const landing = this.#landing(call);
     const expected = runCompileTask(
       this.#answerTask(
@@ -1954,10 +1960,9 @@ class Contracts {
             ? at
             : { ...at, node: nodeOf(this.answers, this.index, literal), keeps: true };
         const own = opens && inner !== at ? this.answers.valueAt(inner.node, path) : null;
-        // (the names the plan keeps, the call's or below a written `object` the default's own: where a stop may have
-        // left some out, or left the default's answer open, they are no names the natural plan has, #1767)
-        const named = opens ? own : answer;
-        if (named?.namesOpen === true || (own !== null && own.items.some(stoppedItem)))
+        // (below a written `object` the default's own answer, whose names the plan keeps: a level of it a stop left
+        // open is no open level either, #1767)
+        if (own !== null && own.items.some(stoppedItem))
           throw new OutsideContract(at.call, OPEN_BY_STOP);
         const names = !opens ? answer.properties : own === null ? [] : own.properties;
         const properties: TypePropertyPlan[] = [];
@@ -2067,6 +2072,58 @@ function defaultOf(call: CallExpression): Expression | null {
 
 /** The exclusion of a typed call's answer a stop left open (#1767). */
 const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
+
+/**
+ * Whether a default reads anything but literal data: a variable, a property or an element of one, or any operation but
+ * a typed parse or load, whose own default is checked as its own call's (#1755's test, read after a stop alone, #1767).
+ */
+function readsPlace(fallback: Expression): boolean {
+  const pending = [fallback];
+  for (let at = pending.pop(); at !== undefined; at = pending.pop())
+    switch (at.kind) {
+      case "numberLiteral":
+      case "booleanLiteral":
+      case "nullLiteral":
+        break;
+      case "stringLiteral":
+        if (at.parts.some((part) => part.kind !== "stringText")) return true;
+        break;
+      case "parenthesizedExpression":
+        pending.push(at.expression);
+        break;
+      case "listLiteral":
+      case "setLiteral":
+        for (const element of at.elements) pending.push(element);
+        break;
+      case "objectLiteral":
+        for (const property of at.properties) pending.push(property.value);
+        break;
+      // a typed parse or load inside the default is checked as its own call
+      case "loadExpression":
+        break;
+      case "callExpression":
+        if (
+          at.callee.kind !== "identifier" ||
+          at.callee.name !== "fromJson" ||
+          defaultOf(at) === null
+        )
+          return true;
+        break;
+      default:
+        return true;
+    }
+  return false;
+}
+
+/**
+ * Whether a stop before admission settled left the value side unproven: a work or depth allowance (A6: the stores
+ * admission rejects are unsettled, #1767). A stop after admission settled leaves every finished answer standing, and a
+ * decision stopped at its demand allowance leaves its own answers `unknown`, which `stoppedItem` finds.
+ */
+function stoppedAnalysis(answers: Answers): boolean {
+  const { budget } = answers;
+  return budget.exhausted !== null && budget.exhausted !== "nesting" && !budget.settled;
+}
 
 /** Whether an item is a stop's unknown, what the analysis left unread (#1767). */
 function stoppedItem(item: Item): boolean {

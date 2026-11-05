@@ -532,12 +532,12 @@ test("after a stop a load still takes its default for a stored value its default
 });
 
 /**
- * #1767 (ADR 0021 1.10, #1526 condition 1, the lead's ruling (A′)): a typed parse's or load's reader type that a stop
- * left open at any level is no open level. The program leaves the slice there rather than publish a plan that reads
- * every value where the natural plan reads its type: at every stop a plan reads the natural plan's reader types and
- * runs as the natural one, or the candidate route declines. A default that reads a variable, at the call or below its
- * literal, declines before admission settles; a literal default (#1460) and a level its own `null` leaves open never
- * decline. Four modes, each source's sampled program stops and Astra's demand grid on #1755.
+ * #1767 (ADR 0021 1.10, #1526 condition 1, the lead's rulings (A′) and (R)): after a stop only literal data proves a
+ * typed parse's or load's default, by its own syntax at every level (#1460), so a default that reads anything else
+ * leaves the slice rather than publish a plan that reads what the natural plan may not: at every stop a plan reads the
+ * natural plan's reader types and runs as the natural one, or the candidate route declines. A default that reads a
+ * variable (directly, below a literal's property or element, below a written `object`, through a load) declines before
+ * admission settles; a literal default and a level its own `null` leaves open never decline. Four modes, each source's sampled program stops and Astra's demand grid on #1755.
  */
 test("after a stop a typed call's reader type a stop left open declines the plan, never read as every value (#1767)", () => {
   const cases = [
@@ -564,6 +564,23 @@ test("after a stop a typed call's reader type a stop left open declines the plan
       'let d: object = {n: 0}\nlet result: object = fromJson(hostValue, default: d, files: false)\nsay result.n\nsay "after"\nexit\n',
       '{"n":"bad"}',
     ],
+    // (a written default below a literal's property and element, and below a load's literal: Codex r4's B1 and its
+    // siblings)
+    [
+      "a written default below a literal",
+      'let d: object = {m: 0}\nlet result: object = fromJson(hostValue, default: {n: d}, files: false)\nsay result.n.m\nsay "after"\nexit\n',
+      '{"n":{"m":"bad"}}',
+    ],
+    [
+      "a written default in a literal list",
+      'let d: object = {n: 0}\nlet result: object[] = fromJson(hostValue, default: [d], files: false)\nsay result[0].n\nsay "after"\nexit\n',
+      '[{"n":"bad"}]',
+    ],
+    [
+      "a written default below a load's literal",
+      'let d: object = {m: 0}\nlet result: object = load("k", default: {n: d})\nsay result.n.m\nsay "after"\nexit\n',
+      "{}",
+    ],
     [
       "literal",
       'let result = fromJson(hostValue, default: {n: 0}, files: false)\nsay result.n\nsay "after"\nexit\n',
@@ -588,11 +605,8 @@ test("after a stop a typed call's reader type a stop left open declines the plan
   let declined = 0;
   for (const [kind, source, json] of cases) {
     const c: HeldCase = { name: kind, slice: true, values: [], source };
-    const opens =
-      kind === "variable" ||
-      kind === "below a literal" ||
-      kind === "below a written object" ||
-      kind === "a written default below a written object";
+    // (a default that reads anything but literal data, at any level)
+    const opens = !kind.startsWith("literal") && kind !== "null field";
     for (const mode of HELD_MODES) {
       const natural = heldRun(c, mode);
       assert.ok(natural.result.plan !== null, kind);
