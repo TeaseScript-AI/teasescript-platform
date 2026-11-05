@@ -397,17 +397,14 @@ function receivingType(
   source: MessageSource,
 ): TypeAnnotation | null {
   const { root } = rule;
-  if (root === null || root.site === null || root.kind === "result") return null;
+  if (root === null || root.site === null) return null;
   // (the annotation alone, between the name's `:` and any `=`, parsed as written: a declaration's start value is never
   // read, so the work is the written type's)
   const text = source.text(root.site);
-  const colon = text.indexOf(":");
   const equals = text.indexOf("=");
-  if (colon === -1 || (equals !== -1 && equals < colon)) return null;
-  if (text.slice(0, colon).trim().split(/\s+/).at(-1) !== root.name) return null;
-  const parsed = parse(
-    `let fix: ${text.slice(colon + 1, equals === -1 ? undefined : equals)} = null\nexit\n`,
-  );
+  const head = equals === -1 ? text : text.slice(0, equals);
+  // (no `:` there: no annotation, and the text left does not parse as one)
+  const parsed = parse(`let fix: ${head.slice(head.indexOf(":") + 1)} = null\nexit\n`);
   const [statement] = parsed.program.statements;
   const declared =
     parsed.diagnostics.length > 0 || statement?.kind !== "letStatement"

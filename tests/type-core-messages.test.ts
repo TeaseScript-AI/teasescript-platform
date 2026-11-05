@@ -2591,6 +2591,15 @@ test("a store below its value checks the whole receiving type, null kept, and th
         "Check that every value of 'hostValue' is a list or null first.",
       ),
     ],
+    [
+      "let x:integer[]?[]=[[1]]\nlet a={f: x}\na.f=[hostValue]\nexit\n",
+      "hostValue",
+      warned(
+        "An element of an element of 'a.f' is declared as a whole number (integer)",
+        "hostValue",
+        "Check that every element of 'hostValue' is a whole number (integer) first.",
+      ),
+    ],
     // (words where no form holds: a declaration's start value)
     [
       "let a:integer?[]=hostValue\nexit\n",
