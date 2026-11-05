@@ -1342,13 +1342,13 @@ export interface MixedOptional {
  * - at its own level (no step left), any value by its own items;
  * - a literal, by its children at the layer's next step, each by this same rule below;
  * - a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and
- *   default, a method's receiver, a dict's values), by each value it carries, at the path into it; an `otherwise`'s
- *   fallback only where its operand's own items hold null;
+ *   default, a method's receiver, a dict's values, a `+` join's admitted operands), by each value it carries, at the
+ *   path into it; an `otherwise`'s fallback only where its operand's own items hold null;
  * - a written copy, by its term alone, whatever a rejected store put there;
  * - another read or a call's result, by its place's admitted type where admission decides it;
- * - any other value (an undecided place's read, an operation's own result, a `+` join), by its own items.
- * A join has no case of its own: admission's join items hold exactly its admitted operands' elements, so walking its
- * operands added only what a rejected operand brought (ADR 0021 1.1, Astra r1's B1).
+ * - any other value (an undecided place's read, an operation's own result), by its own items.
+ * A join has no case of its own: the carrier table gives only its admitted operands (`joined`), so a rejected operand
+ * brings nothing (ADR 0021 1.1, Astra r1's B1; Codex r9).
  * Each value at each path is asked once per pass (`OPTIONAL`), whichever literal's or join's error asks it, so a wide
  * part shared by many joins is walked once (Astra r1's B2); a value asked again while its own answer is pending, never.
  */
