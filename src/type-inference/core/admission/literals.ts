@@ -419,10 +419,17 @@ export function literalElements(
               : (drive(admission, earliestDecider(admission, d.value, d.node, path, null))?.term ??
                 null);
           const kinds = [...new Set(own.map(family))];
+          // (the kinds its error names: below the element, with any null the earliest may hold there, as its written
+          // type is described; the null decides nothing, #1753)
+          const below = path.length > 0;
           if (copied !== null) {
-            const tags = typeTags(copied).filter((tag) => tag !== "null");
-            first.set(at, { tags, written: true, own: tags });
-          } else if (kinds.length === 1) first.set(at, { tags: kinds, written: false, own });
+            const written = typeTags(copied);
+            const tags = written.filter((tag) => tag !== "null");
+            first.set(at, { tags, written: true, own: below ? written : tags });
+          } else if (kinds.length === 1) {
+            const nulls = below && items.some((item) => item.tag === "null");
+            first.set(at, { tags: kinds, written: false, own: nulls ? [...own, "null"] : own });
+          }
           continue;
         }
         if (!offends(at, own)) continue;

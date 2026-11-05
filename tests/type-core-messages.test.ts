@@ -2451,6 +2451,138 @@ test("TSV041's advice names the property an object literal types and its narrowe
 });
 
 /**
+ * #1753 (ADR 0021 rule 4.2): a store whose place is an element below the stored value, through collections alone, is
+ * checked by the value's whole receiving type, `null` kept, which tests every element; pasted where `codeAt` proves it,
+ * else in words, and with no fallback, which would replace the whole value. An element store keeps its element's test.
+ * Each pasted check compiles under both checkers, where the element's scalar test it replaces is an error. Below a
+ * literal's element, the mixed error names the earliest element's type with its `null`; the element itself keeps its
+ * kinds' words. In four modes.
+ */
+test("a store below its value checks the whole receiving type, null kept, and the mixed error names it (#1753)", () => {
+  const warned = (into: string, value: string, fix: string) =>
+    `${into}, but '${value}' may be a value of another type here. ${STOPS} ${fix} ${OUTSIDE(value)}`;
+  const nullable = "'a' holds whole numbers or null (integer?[])";
+  const cases: readonly (readonly [source: string, site: string, message: string])[] = [
+    [
+      'let a:integer?[]=[1]\na=hostValue\nlet b=a\nlet c=b\nlet xs=[c,["x"]]\nexit\n',
+      "hostValue",
+      warned(
+        nullable,
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer?[] { a=hostValue }'.",
+      ),
+    ],
+    [
+      'let a:integer?[]=[1]\na=hostValue\nlet b=a\nlet c=b\nlet xs=[c,["x"]]\nexit\n',
+      '"x"',
+      "This list mixes a list (integer?[]) and a list (string[]). A list holds one type. Use values of one type in it.",
+    ],
+    [
+      'let a:integer?[]=[1]\na=hostValue\nlet xs=[{f:a},{f:["x"]}]\nexit\n',
+      '"x"',
+      "This list mixes objects whose property 'f' holds a list (integer?[]) in one and a list (string[]) in another. " +
+        "A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let xs=[[1,null],["x"]]\nexit\n',
+      '"x"',
+      "This list mixes a list (integer?[]) and a list (string[]). A list holds one type. Use values of one type in it.",
+    ],
+    [
+      'let n:integer?=1\nlet xs=[n,"x"]\nexit\n',
+      '"x"',
+      "This list mixes a whole number (integer) and text (string). A list holds one type. To allow both, declare it " +
+        "as 'let xs: (integer | string)[] =[n,\"x\"]'.",
+    ],
+    [
+      "let d:integer? dict=dict {}\nd=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "'d' holds whole numbers or null (integer? dict)",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer? dict { d=hostValue }'.",
+      ),
+    ],
+    [
+      "let a:integer?[][]=[[1]]\na=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "An element of an element of 'a' is declared as a whole number (integer) or null",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer?[][] { a=hostValue }'.",
+      ),
+    ],
+    [
+      "let a:integer[]=[1]\nlet b=[1, hostValue]\na=b\nexit\n",
+      "b",
+      warned(
+        "'a' holds whole numbers (integer[])",
+        "b",
+        "Check 'b' first, as in 'if b is integer[] { a=b }'.",
+      ),
+    ],
+    [
+      "let a:integer[]=[1]\nlet b=[hostValue otherwise null]\na=b\nexit\n",
+      "b",
+      "'a' holds whole numbers (integer[]), but 'b' may be null here. " +
+        `${STOPS} Check 'b' first, as in 'if b is integer[] { a=b }'.`,
+    ],
+    // (words where no form holds: a declaration's start value)
+    [
+      "let a:integer?[]=hostValue\nexit\n",
+      "hostValue",
+      warned(nullable, "hostValue", "Check that 'hostValue' is a list (integer?[]) first."),
+    ],
+    // (an element store, and a literal's element: the element's own test)
+    [
+      "let a:integer?[]=[1]\na[0]=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        nullable,
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer { a[0]=hostValue }'.",
+      ),
+    ],
+    [
+      "let a:integer?[]=[1]\na=[1, hostValue]\nexit\n",
+      "hostValue",
+      warned(
+        nullable,
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer { a=[1, hostValue] }'.",
+      ),
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, site, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.site === site && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+  // (each pasted check compiles under both checkers; the scalar test it replaces does not)
+  const errors = (source: string) => [
+    ...compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] })
+      .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
+      .map((diagnostic) => `current ${diagnostic.code}`),
+    ...reported(main(source))
+      .filter((each) => each.error)
+      .map((each) => `core ${each.code}`),
+  ];
+  for (const followed of [
+    "let a:integer?[]=[1]\nif hostValue is integer?[] { a=hostValue }\nexit\n",
+    "let d:integer? dict=dict {}\nif hostValue is integer? dict { d=hostValue }\nexit\n",
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[][] { a=hostValue }\nexit\n",
+    "let a:integer[]=[1]\nlet b=[1, hostValue]\nif b is integer[] { a=b }\nexit\n",
+  ])
+    assert.deepEqual(errors(followed), [], followed);
+  assert.deepEqual(
+    errors("let a:integer?[]=[1]\nif hostValue is integer { a=hostValue }\nexit\n"),
+    ["current TSV041", "core TSV041"],
+  );
+});
+
+/**
  * #1730 Codex r1 B1: a warning's landing and owner (`landingOf`, `ownerOf`) find the value a statement gives and a
  * literal's part by their start, so k warnings, each in its own statement or each an element of one list, read the
  * statements' values and the list's elements O(k log k) times, not once per earlier one (k = 64 to 256, at most ×2.5
