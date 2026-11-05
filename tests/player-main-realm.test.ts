@@ -111,7 +111,12 @@ test("the walk refuses each loading form it does not model", () => {
     ["css-vars.vue", unmodelled("CSS v-bind()")],
     ["custom-block.vue", unmodelled("the custom block <docs>")],
     ["query.ts", unmodelled('the query of "./plain.js?worker"')],
-    ["glob.ts", unmodelled('import.meta.glob without query "?url"')],
+    ["glob.ts", unmodelled('import.meta.glob without one literal query "?url"')],
+    ["glob-spread.ts", unmodelled('import.meta.glob without one literal query "?url"')],
+    [
+      "local-module.ts",
+      unmodelled('"./plain.mjs", a local specifier that names no .ts or .vue module'),
+    ],
     ["url.ts", unmodelled("new URL(…, import.meta.url) outside new Worker(…)")],
     ["computed-import.ts", unmodelled("an import() of a computed specifier")],
   ])

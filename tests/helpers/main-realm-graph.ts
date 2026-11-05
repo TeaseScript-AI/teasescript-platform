@@ -95,19 +95,29 @@ function valueImports(
     } else if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
       const glob = node.expression;
       if (ts.isMetaProperty(glob.expression) && glob.name.text.startsWith("glob")) {
+        // Only a literal options object of plain properties whose one `query` is "?url": a spread, a computed key or a
+        // second `query` could override it.
         const settings = node.arguments[1];
+        const properties =
+          settings !== undefined && ts.isObjectLiteralExpression(settings)
+            ? settings.properties
+            : [];
+        const plain = properties.flatMap((property) =>
+          ts.isPropertyAssignment(property) &&
+          (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
+            ? [{ key: property.name.text, value: property.initializer }]
+            : [],
+        );
+        const [query, ...more] = plain.filter(({ key }) => key === "query");
         const urls =
           isImportMeta(glob, "glob") &&
-          settings !== undefined &&
-          ts.isObjectLiteralExpression(settings) &&
-          settings.properties.some(
-            (property) =>
-              ts.isPropertyAssignment(property) &&
-              property.name.getText(source) === "query" &&
-              ts.isStringLiteralLike(property.initializer) &&
-              property.initializer.text === "?url",
-          );
-        if (!urls) refuse(label, `${node.expression.getText(source)} without query "?url"`);
+          plain.length === properties.length &&
+          query !== undefined &&
+          more.length === 0 &&
+          ts.isStringLiteralLike(query.value) &&
+          query.value.text === "?url";
+        if (!urls)
+          refuse(label, `${node.expression.getText(source)} without one literal query "?url"`);
       }
     } else if (
       ts.isNewExpression(node) &&
@@ -166,6 +176,9 @@ function scripts(file: string, label: string): string[] {
   return code;
 }
 
+/** The local files the Player imports that hold no code (styles). */
+const NON_CODE = /\.css$/u;
+
 /** The repository file a local specifier names, or `null` for a package or a non-script file. */
 function resolveSpecifier(from: string, specifier: string, aliasRoot: string): string | null {
   const base = specifier.startsWith("@/")
@@ -189,7 +202,8 @@ function resolveSpecifier(from: string, specifier: string, aliasRoot: string): s
 /**
  * Walks the main realm's modules from `entry`: every Player module it reaches that is not a Worker module, and every
  * allowed `src/` module. An import of a value from any other module is an offender, and the walk does not go through it.
- * Each module is visited once, so a cycle is no special case.
+ * A local specifier must name a `.ts` or `.vue` module or a stylesheet; the walk refuses any other. Each module is
+ * visited once, so a cycle is no special case.
  */
 export function mainRealmGraph(options: MainRealmGraphOptions): {
   readonly modules: readonly string[];
@@ -209,7 +223,12 @@ export function mainRealmGraph(options: MainRealmGraphOptions): {
     for (const code of scripts(file, importer))
       for (const { specifier, names } of valueImports(code, file, importer)) {
         const resolved = resolveSpecifier(file, specifier, aliasRoot);
-        if (resolved === null) continue;
+        if (resolved === null) {
+          // A package, or a local file that holds no code; any other local file is a load the walk does not model.
+          if (/^(\.|\/|@\/)/u.test(specifier) && !NON_CODE.test(specifier))
+            refuse(importer, `"${specifier}", a local specifier that names no .ts or .vue module`);
+          continue;
+        }
         const target = name(resolved);
         const mainRealm = target.startsWith("src/")
           ? options.allowedSource.has(target)
