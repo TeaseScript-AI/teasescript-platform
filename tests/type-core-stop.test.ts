@@ -631,6 +631,9 @@ test("after a stop a typed call's reader type a stop left open declines the plan
         const { stoppedIn, settled } = stopped.answers.budget;
         if (opens && stoppedIn === "admission" && !settled)
           assert.equal(stopped.result.plan, null, `${at}: open, so declined`);
+        // (after admission settled every finished answer stands: the natural reader, never a decline)
+        if (settled && stoppedIn !== null)
+          assert.ok(stopped.result.plan !== null, `${at}: settled, so published`);
       }
       for (const demand of GRID)
         judged(heldRun(c, mode, undefined, demand), `${kind} (${mode.name}) demand ${demand}`);
