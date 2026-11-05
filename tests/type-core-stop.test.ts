@@ -531,6 +531,193 @@ test("after a stop a load still takes its default for a stored value its default
   }
 });
 
+/**
+ * #1767 (ADR 0021 1.10, #1526 condition 1, the lead's rulings (A′) and (R)): after a stop only literal data proves a
+ * typed parse's or load's default, by its own syntax at every level (#1460), so a default that reads anything else
+ * leaves the slice rather than publish a plan that reads what the natural plan may not: at every stop a plan reads the
+ * natural plan's reader types and runs as the natural one, or the candidate route declines. A default that reads a
+ * variable (directly, below a literal's property or element, below a written `object`, through a load) declines before
+ * admission settles; a literal default and a level its own `null` leaves open never decline. Four modes, each source's sampled program stops and Astra's demand grid on #1755.
+ */
+test("after a stop a typed call's reader type a stop left open declines the plan, never read as every value (#1767)", () => {
+  const cases = [
+    [
+      "variable",
+      'let textHost = hostValue\nlet d = {n: 1.5}\nd.n = 0\nlet result = fromJson(textHost, default: d, files: false)\nsay result.n\nrepeat result.n {}\nsay "after"\nexit\n',
+      '{"n":2}',
+    ],
+    [
+      "below a literal",
+      'let d = {m: 1}\nlet result = fromJson(hostValue, default: {n: d}, files: false)\nsay result.n.m\nsay "after"\nexit\n',
+      '{"n":{"m":2}}',
+    ],
+    // (below a written `object`, whose plan keeps the default's names: Codex r2's B1)
+    [
+      "below a written object",
+      'let d = {n: 0}\nlet result: object = fromJson(hostValue, default: d, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
+    // (a written default below a written `object`: its stopped answer an `object` whose names the stop left out,
+    // Codex r3's B1)
+    [
+      "a written default below a written object",
+      'let d: object = {n: 0}\nlet result: object = fromJson(hostValue, default: d, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
+    // (a written default below a literal's property and element, and below a load's literal: Codex r4's B1 and its
+    // siblings)
+    [
+      "a written default below a literal",
+      'let d: object = {m: 0}\nlet result: object = fromJson(hostValue, default: {n: d}, files: false)\nsay result.n.m\nsay "after"\nexit\n',
+      '{"n":{"m":"bad"}}',
+    ],
+    [
+      "a written default in a literal list",
+      'let d: object = {n: 0}\nlet result: object[] = fromJson(hostValue, default: [d], files: false)\nsay result[0].n\nsay "after"\nexit\n',
+      '[{"n":"bad"}]',
+    ],
+    [
+      "a written default below a load's literal",
+      'let d: object = {m: 0}\nlet result: object = load("k", default: {n: d})\nsay result.n.m\nsay "after"\nexit\n',
+      "{}",
+    ],
+    // (a default read through a nested load of a computed key: Codex r5's B1)
+    [
+      "a default through a computed-key load",
+      'let k = "k"\nlet d: object = {n: 0}\nlet result: object = fromJson(hostValue, default: load(k, default: d), files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
+    // (a computed key's load answers by its literal default: Codex r6's P2)
+    [
+      "literal default through a computed-key load",
+      'let k = "k"\nlet result: object = fromJson(hostValue, default: load(k, default: {n: 0}), files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
+    // (a written scalar destination is the reader type, whatever its default reads: Codex r5's P2)
+    [
+      "literal reader: a written scalar",
+      'let d = 0\nlet result: integer = fromJson(hostValue, default: d, files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    // (a projection the syntax proves: literal data at a literal's property or element, Astra r1's B1, through a
+    // projected part, Codex r8, and at a projected or computed index or through a nested load, Codex r9; an object below
+    // a projection is not, its properties unproven after a stop)
+    [
+      "literal property's scalar",
+      'let result = fromJson(hostValue, default: ({n: 0}).n, files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's scalar",
+      'let result = fromJson(hostValue, default: [0][0], files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's list of scalars",
+      'let result = fromJson(hostValue, default: [[1]][0], files: false)\nsay result[0]\nsay "after"\nexit\n',
+      "[2]",
+    ],
+    [
+      "literal property's projected scalar",
+      'let result = fromJson(hostValue, default: ({p: ({n: 0}).n}).p, files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's scalar at a projected index",
+      'let result = fromJson(hostValue, default: ({p: [0][({i: 0}).i]}).p, files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's scalar of a projected holder",
+      'let result = fromJson(hostValue, default: ({p: ({q: [0]}).q}).p[0], files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's scalar at a computed index",
+      'let result = fromJson(hostValue, default: [0][load("i", default: 0)], files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal property's list of a load",
+      'let result = fromJson(hostValue, default: ({p: [load("k", default: 0)]}).p, files: false)\nsay result[0]\nsay "after"\nexit\n',
+      "[2]",
+    ],
+    [
+      "a literal's projected load of an object",
+      'let result = fromJson(hostValue, default: ({p: [load("k", default: {n: 0})]}).p, files: false)\nsay result[0].n\nsay "after"\nexit\n',
+      '[{"n":2}]',
+    ],
+    [
+      "a literal's object element",
+      'let result = fromJson(hostValue, default: [{n: 0}][0], files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":2}',
+    ],
+    [
+      "a literal's structured property",
+      'let result = fromJson(hostValue, default: ({p: {n: 0}}).p, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":2}',
+    ],
+    [
+      "literal",
+      'let result = fromJson(hostValue, default: {n: 0}, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":2}',
+    ],
+    [
+      "literal below a written object",
+      'let result: object = fromJson(hostValue, default: {n: 0}, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
+    [
+      "null field",
+      'let result = fromJson(hostValue, default: {n: null}, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"text"}',
+    ],
+  ] as const;
+  const GRID = [16, 32, 64, 96, 120, 127, 128, 136, 192, 224, 240, 256];
+  const readers = (run: StopRun, source: string) =>
+    run.result.plan === null
+      ? null
+      : plannedContent(run.result.plan, source).filter((line) => /^(load|expected) /u.test(line));
+  let declined = 0;
+  for (const [kind, source, json] of cases) {
+    const c: HeldCase = { name: kind, slice: true, values: [], source };
+    // (a default that reads anything but literal data, at any level)
+    const opens = !kind.startsWith("literal") && kind !== "null field";
+    for (const mode of HELD_MODES) {
+      const natural = heldRun(c, mode);
+      assert.ok(natural.result.plan !== null, kind);
+      const naturalRun = ran(natural.result.plan, json);
+      assert.equal(naturalRun.failure, null, kind);
+      const judged = (stopped: StopRun, at: string) => {
+        if (stopped.result.plan === null) {
+          assert.ok(opens, `${at}: declined`);
+          declined += 1;
+          return;
+        }
+        assert.deepEqual(readers(stopped, source), readers(natural, source), at);
+        assert.deepEqual(ran(stopped.result.plan, json), naturalRun, at);
+      };
+      for (const allowance of [
+        ...sampled(Array.from({ length: natural.answers.budget.total - 1 }, (_, i) => i + 1)),
+        ...testedStops(heldStops(c, mode)).map((stop) => stop.allowance),
+      ]) {
+        const stopped = heldRun(c, mode, allowance);
+        const at = `${kind} (${mode.name}) @${allowance}`;
+        judged(stopped, at);
+        const { stoppedIn, settled } = stopped.answers.budget;
+        if (opens && stoppedIn === "admission" && !settled)
+          assert.equal(stopped.result.plan, null, `${at}: open, so declined`);
+        // (after admission settled every finished answer stands: the natural reader, never a decline)
+        if (settled && stoppedIn !== null)
+          assert.ok(stopped.result.plan !== null, `${at}: settled, so published`);
+      }
+      for (const demand of GRID)
+        judged(heldRun(c, mode, undefined, demand), `${kind} (${mode.name}) demand ${demand}`);
+    }
+  }
+  assert.ok(declined > 0, `${declined} declined`);
+});
+
 test("after a stop a typed default's own literal and the call's expected type answer the same in any read order", () => {
   for (const [source, literal, path, call] of [
     [

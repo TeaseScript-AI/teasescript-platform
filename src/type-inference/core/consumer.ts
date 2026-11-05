@@ -87,7 +87,7 @@ import { leftOutCheck, leftOutCompletion, leftOutWarning } from "./consumers.js"
 import { withoutEmpty } from "./exact-path.js";
 import { otherwiseChains, provesNonNull, unusedFallbackRule } from "./consumers/otherwise.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
-import { REASON, type ItemTag } from "./items.js";
+import { REASON, type Item, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
 import {
   coreMessage,
@@ -1505,8 +1505,9 @@ function unwrap(expression: Expression): Expression {
 
 /**
  * A contract the plan cannot carry exactly as the core decided it: one deeper than the slice follows (`SLICE_DEPTH`), a
- * record field that some records of a list lack, a typed parse or load into a copy of a written type. The candidate
- * route rejects its program, at `expression`, rather than check less than the core decided.
+ * record field that some records of a list lack, a typed parse or load into a copy of a written type, a typed parse's or
+ * load's default a stop left open (#1767). The candidate route rejects its program, at `expression`, rather than check
+ * less than the core decided.
  */
 export class OutsideContract extends Error {
   public constructor(
@@ -1656,11 +1657,29 @@ class Contracts {
   /**
    * The type a typed load or `fromJson` reads its value as (F18, S3 §3): the core's own answer at the call, level by
    * level (`#answerTask`); `null` where the call's kinds hold an unknown or only `null` (F19), or a load's key is
-   * computed.
+   * computed; the program leaves the slice where a stop left a level of the answer open (#1767).
    */
   public expected(call: CallExpression | LoadExpression): TypePlan | null {
     if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
+    // (after a stop only literal data proves a default, by its own syntax at every level (#1460): below a read the
+    // answer is the value side's, which the stop left unproven (A6: the stores admission rejects are unsettled), so
+    // the program leaves the slice rather than read what the natural plan may not, #1526 condition 1, #1767)
+    const fallback = call.kind === "loadExpression" ? call.defaultValue : defaultOf(call);
     const landing = this.#landing(call);
+    // (a written scalar destination is the reader type itself, whatever its default reads: Codex r5's P2; asked only
+    // after such a stop, so an unstopped compile asks nothing more)
+    const scalar = (): boolean => {
+      const written =
+        landing === null ? null : this.answers.place(landing.id, landing.path).admitted;
+      return (
+        written !== null &&
+        written.by === "written" &&
+        written.kinds.length > 0 &&
+        written.kinds.every((kind) => !STRUCTURED.has(kind))
+      );
+    };
+    if (fallback !== null && stoppedAnalysis(this.answers) && readsPlace(fallback) && !scalar())
+      throw new OutsideContract(call, OPEN_BY_STOP);
     const expected = runCompileTask(
       this.#answerTask(
         { node: nodeOf(this.answers, this.index, call), call, landing, keeps: false },
@@ -1911,6 +1930,9 @@ class Contracts {
     // field its elements may lack is the plan's as it is; JSON's requires every listed field: #1458)
     if (lacking && path.includes("element") && at.call.kind !== "loadExpression")
       throw new OutsideContract(at.call, "a value whose structure the slice does not follow");
+    // (a level a stop left open is no open level: the plan would read every value there, the natural one its type, so
+    // the program leaves the slice rather than publish a check less, #1526 condition 1, #1767)
+    if (answer.items.some(stoppedItem)) throw new OutsideContract(at.call, OPEN_BY_STOP);
     if (held.has("number")) held.delete("integer");
     // an unknown, or an empty collection's elements, is open; a known `null` is the `null` type
     if (held.has("unknown") || held.size === 0) {
@@ -1949,11 +1971,12 @@ class Contracts {
           literal === null
             ? at
             : { ...at, node: nodeOf(this.answers, this.index, literal), keeps: true };
-        const names = !opens
-          ? answer.properties
-          : inner === at
-            ? []
-            : this.answers.valueAt(inner.node, path).properties;
+        const own = opens && inner !== at ? this.answers.valueAt(inner.node, path) : null;
+        // (below a written `object` the default's own answer, whose names the plan keeps: a level of it a stop left
+        // open is no open level either, #1767)
+        if (own !== null && own.items.some(stoppedItem))
+          throw new OutsideContract(at.call, OPEN_BY_STOP);
+        const names = !opens ? answer.properties : own === null ? [] : own.properties;
         const properties: TypePropertyPlan[] = [];
         for (const name of fieldOrder(names, below ?? NO_RECORDS, this.index))
           properties.push({
@@ -2057,6 +2080,115 @@ function defaultOf(call: CallExpression): Expression | null {
       (argument) => argument.kind === "namedArgument" && argument.name.name === "default",
     )?.value ?? null
   );
+}
+
+/** The kinds whose levels below a typed call's answer its default answers (#1767). */
+const STRUCTURED: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object", "unknown"]);
+
+/** The exclusion of a typed call's answer a stop left open (#1767). */
+const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
+
+/**
+ * Whether a default reads anything but literal data at any level: a variable, a property or an element of one, any
+ * operation but a typed parse or load, or one whose own default does (#1755's test, read after a stop alone and through
+ * nested typed calls, #1767). A projection of a literal is the literal data it selects (`projectedLiteral`), where no
+ * object literal stands at any level below it: #1460's syntax route proves its items, not an object's names below a
+ * projection (Astra r1's B1 and Codex r8–r9 on #1775: `({n: 0}).n`, `[0][i]` and `({p: [load("k", default: 0)]}).p`
+ * are literal data, `({p: {n: 0}}).p` and `[{n: 0}][0]` are not).
+ */
+function readsPlace(fallback: Expression): boolean {
+  const pending: { at: Expression; projected: boolean }[] = [{ at: fallback, projected: false }];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { at, projected } = next;
+    switch (at.kind) {
+      case "numberLiteral":
+      case "booleanLiteral":
+      case "nullLiteral":
+        break;
+      case "stringLiteral":
+        if (at.parts.some((part) => part.kind !== "stringText")) return true;
+        break;
+      case "parenthesizedExpression":
+        pending.push({ at: at.expression, projected });
+        break;
+      case "listLiteral":
+      case "setLiteral":
+        for (const element of at.elements) pending.push({ at: element, projected });
+        break;
+      case "objectLiteral":
+        if (projected) return true;
+        for (const property of at.properties) pending.push({ at: property.value, projected });
+        break;
+      case "propertyAccessExpression":
+      case "indexExpression": {
+        const selected = projectedLiteral(at);
+        if (selected === undefined) return true;
+        for (const value of selected) pending.push({ at: value, projected: true });
+        break;
+      }
+      // a typed parse or load inside the default answers by its own default, which the outer call reads through,
+      // whatever its key (Codex r5's B1, r6's P2)
+      case "loadExpression":
+        if (at.defaultValue !== null) pending.push({ at: at.defaultValue, projected });
+        break;
+      case "callExpression": {
+        const inner = defaultOf(at);
+        if (at.callee.kind !== "identifier" || at.callee.name !== "fromJson" || inner === null)
+          return true;
+        pending.push({ at: inner, projected });
+        break;
+      }
+      default:
+        return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * What an expression may select through parentheses and projections of literals: an object literal's literal property,
+ * or any element of a list literal, whatever the index reads (Codex r9: `[0][load("i", default: 0)]` and
+ * `[0][({i: 0}).i]` are elements of `[0]`); a selected part that is itself a projection is followed (Codex r8:
+ * `({p: ({n: 0}).n}).p`); an empty list's none. `undefined` where a step leaves the literal's syntax: another receiver,
+ * a missing property. Recursive over the syntax alone.
+ */
+function projectedLiteral(expression: Expression): readonly Expression[] | undefined {
+  const at = unwrap(expression);
+  if (at.kind !== "propertyAccessExpression" && at.kind !== "indexExpression") return [at];
+  const holders = projectedLiteral(at.object);
+  if (holders === undefined) return undefined;
+  const selected: Expression[] = [];
+  for (const holder of holders) {
+    let values: readonly (Expression | undefined)[];
+    if (at.kind === "propertyAccessExpression")
+      values =
+        holder.kind === "objectLiteral"
+          ? [holder.properties.find((property) => property.name.name === at.property.name)?.value]
+          : [undefined];
+    // (an element of a list literal at any index, a literal or computed one alike: its elements are of one type)
+    else values = holder.kind === "listLiteral" ? holder.elements : [undefined];
+    for (const value of values) {
+      const parts = value === undefined ? undefined : projectedLiteral(value);
+      if (parts === undefined) return undefined;
+      selected.push(...parts);
+    }
+  }
+  return selected;
+}
+
+/**
+ * Whether a stop before admission settled left the value side unproven: a work or depth allowance (A6: the stores
+ * admission rejects are unsettled, #1767). A stop after admission settled leaves every finished answer standing, and a
+ * decision stopped at its demand allowance leaves its own answers `unknown`, which `stoppedItem` finds.
+ */
+function stoppedAnalysis(answers: Answers): boolean {
+  const { budget } = answers;
+  return budget.exhausted !== null && budget.exhausted !== "nesting" && !budget.settled;
+}
+
+/** Whether an item is a stop's unknown, what the analysis left unread (#1767). */
+function stoppedItem(item: Item): boolean {
+  return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0;
 }
 
 /**
