@@ -531,6 +531,115 @@ test("after a stop a load still takes its default for a stored value its default
   }
 });
 
+/**
+ * #1767 (ADR 0021 1.10, #1526 condition 1, the lead's ruling (A)): after a stop before admission settles, a typed parse's
+ * or load's own store keeps the natural run's boundary, its store checked as the reader type, where its default is
+ * literal data and the store is the only one into its destination: the stop oracle finds nothing at any stop. A default
+ * that reads a variable reads stores admission may yet reject (A6), so its store keeps the mark and the program leaves
+ * the slice there rather than read every value; an earlier store that decides the destination keeps the mark too. At
+ * every stop no boundary is published that the natural run lacks, and a stopped plan runs as the natural one. Four
+ * modes, each source's sampled program stops and Astra's demand grid on #1755.
+ */
+test("after a stop a typed call's own store keeps its boundary where its literal default proves it, else the mark, and its plan reads its type or declines (#1767)", () => {
+  const read = 'say result.n\nrepeat result.n {}\nsay "after"\nexit\n';
+  const cases = [
+    [
+      "literal",
+      `let textHost = hostValue\nlet result = fromJson(textHost, default: {n: 0}, files: false)\n${read}`,
+    ],
+    ["load", `let result = load("k", default: {n: 0})\n${read}`],
+    [
+      "variable",
+      `let textHost = hostValue\nlet d = {n: 1.5}\nd.n = 0\nlet result = fromJson(textHost, default: d, files: false)\n${read}`,
+    ],
+    [
+      "two stores",
+      `let result = null\nresult = fromJson(hostValue, default: {n: 0}, files: false)\n${read}`,
+    ],
+    // (a written destination: its own boundary and check, whatever the reader type)
+    [
+      "written",
+      'let result: number[] = fromJson(hostValue, default: [1], files: false)\nsay result[0]\nsay "after"\nexit\n',
+    ],
+  ] as const;
+  const GRID = [16, 32, 64, 96, 120, 127, 128, 136, 192, 224, 240, 256];
+  const key = (check: Obligation) => JSON.stringify(check);
+  const boundaries = (answers: Answers) =>
+    answers.checks.filter((check) => check.boundary).map(key);
+  const counts = { kept: 0, marked: 0, declined: 0 };
+  for (const [kind, source] of cases) {
+    const c: HeldCase = { name: kind, slice: true, values: [], source };
+    for (const mode of HELD_MODES) {
+      const natural = heldRun(c, mode);
+      const { plan: naturalPlan } = natural.result;
+      assert.ok(naturalPlan !== null, kind);
+      const json = kind === "written" ? "[2]" : '{"n":2}';
+      const naturalRun = ran(naturalPlan, json);
+      // (the store's check in the plan: where a stopped run keeps the boundary it checks what the natural plan does)
+      const storeCheck = (plan: NonNullable<typeof naturalPlan>) =>
+        JSON.stringify(
+          plan.instructions.flatMap((instruction) =>
+            "typeCheck" in instruction && instruction.typeCheck?.place === "'result'"
+              ? [instruction.typeCheck]
+              : [],
+          ),
+        );
+      assert.equal(naturalRun.failure, null, kind);
+      const own = new Set(boundaries(natural.answers));
+      assert.equal(own.size, 1, kind);
+      const judged = (stopped: StopRun, at: string) => {
+        assert.deepEqual(
+          boundaries(stopped.answers).filter((check) => !own.has(check)),
+          [],
+          at,
+        );
+        const { plan } = stopped.result;
+        if (plan === null) counts.declined += 1;
+        else {
+          assert.deepEqual(ran(plan, json), naturalRun, at);
+          if (boundaries(stopped.answers).length > 0)
+            assert.equal(storeCheck(plan), storeCheck(naturalPlan), at);
+        }
+      };
+      const allowances = [
+        ...sampled(Array.from({ length: natural.answers.budget.total - 1 }, (_, i) => i + 1)),
+        ...testedStops(heldStops(c, mode)).map((stop) => stop.allowance),
+      ];
+      for (const allowance of allowances) {
+        const stopped = heldRun(c, mode, allowance);
+        const at = `${kind} (${mode.name}) @${allowance}`;
+        judged(stopped, at);
+        const { budget, checks } = stopped.answers;
+        if (budget.stoppedIn !== "admission" || budget.settled) continue;
+        // (before admission settled: kept and clean for a literal default's sole store, else the store's mark)
+        if (kind === "written") continue;
+        if (kind === "literal" || kind === "load") {
+          assert.deepEqual(heldProblems(c, mode, allowance, natural), [], at);
+          assert.ok(own.has(boundaries(stopped.answers)[0] ?? ""), at);
+          counts.kept += 1;
+        } else {
+          assert.deepEqual(boundaries(stopped.answers), [], at);
+          assert.ok(
+            checks.some(
+              (check) =>
+                check.kind === "copy-type" &&
+                check.target === "result" &&
+                check.against.length === 1 &&
+                check.against[0] === "unknown",
+            ),
+            at,
+          );
+          counts.marked += 1;
+          if (kind === "variable") assert.equal(stopped.result.plan, null, `${at}: declined`);
+        }
+      }
+      for (const demand of GRID)
+        judged(heldRun(c, mode, undefined, demand), `${kind} (${mode.name}) demand ${demand}`);
+    }
+  }
+  assert.ok(counts.kept > 0 && counts.marked > 0 && counts.declined > 0, JSON.stringify(counts));
+});
+
 test("after a stop a typed default's own literal and the call's expected type answer the same in any read order", () => {
   for (const [source, literal, path, call] of [
     [
