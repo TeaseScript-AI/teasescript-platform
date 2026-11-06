@@ -40,4 +40,14 @@ for (const kind of ["take", "index", "property"]) {
     return `let xs=[${first},${second}]\nexit\n`;
   };
 }
-export const recorded = { commands: [], sources: 0, sha256: "" };
+export const recorded = {
+  commands: [
+    [
+      'env -u NODE_OPTIONS node tests/families/shadow.mjs "$SX_TREE" messages --only only.json --out shadow.jsonl',
+      "sx-job campaign i1765-growth-shadow-f3e23c25b (job 11060358184325, tree f3e23c25b); " +
+        "desktop:~/work/evidence/1765-family/f3e23c25bf0398dd794c5e76913b7e34bda93d53/shadow-growth/out/shadow.jsonl",
+    ],
+  ],
+  sources: 51,
+  sha256: "33c6396ffeee3953ad0f237528e76d389eb25b013bbdac1cd2411026da59f33f",
+};
