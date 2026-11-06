@@ -45,6 +45,9 @@ export function keyOf(place: PlaceId, path: readonly string[]): Key {
   return `${place}|${path.join(".")}`;
 }
 
+/** The code unit of `.`, which joins a key's steps. */
+const DOT = 46;
+
 /** Where a key's text puts its `|`; a cursor has none, and is refused: its path is the arena's (`key-ids.ts`). */
 function barOf(key: Key): number {
   const bar = key.indexOf("|");
@@ -1128,8 +1131,20 @@ export class DefinitionLists {
       ? [this.#eventList(source), this.index.sitePositions]
       : [this.#eventList(source)];
     const cuts = lists.map(cut);
-    for (const prefix of this.index.stored.above(source, false))
-      cuts.push(`${keyDepth(prefix)}:${cut(this.definitionsOf(prefix).eventPositions)}`);
+    // (each prefix's depth counted along the source's text, the shallowest first, so the scan goes no further than the
+    // deepest prefix the trie's walk reached, each character once; the cuts in the walk's order, the nearest first)
+    const prefixes = this.index.stored.above(source, false);
+    const bar = barOf(source);
+    const tagged: string[] = [];
+    let [dots, scanned] = [0, bar + 1];
+    for (let index = prefixes.length - 1; index >= 0; index -= 1) {
+      const prefix = prefixes[index]!;
+      for (; scanned < prefix.length; scanned += 1)
+        if (source.charCodeAt(scanned) === DOT) dots += 1;
+      const depth = prefix.length === bar + 1 ? 0 : dots + 1;
+      tagged.push(`${depth}:${cut(this.definitionsOf(prefix).eventPositions)}`);
+    }
+    for (let index = tagged.length - 1; index >= 0; index -= 1) cuts.push(tagged[index]!);
     return [
       reaching === null
         ? "-"
