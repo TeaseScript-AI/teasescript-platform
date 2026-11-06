@@ -32,11 +32,9 @@ import { LockService, type LockDialog, type LockDialogInput } from "../../lock-s
 import type { LockServices } from "../../encryption/lock.js";
 import {
   createPlayerRuntimeRestorePoint,
-  playerRuntimeMediaOrigin,
   playerRuntimeSnapshot,
   playerRuntimeSnapshotJson,
   playerRuntimeSnapshotOrNull,
-  reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSessionAt,
   resumePlayerRuntimeRandomDraw,
   setPlayerRuntimeDebugMode,
@@ -52,6 +50,7 @@ import {
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeCameraView,
   playerRuntimeMedia,
+  playerRuntimeMediaOrigin,
   playerRuntimePermanentButtons,
   type PlayerSession,
 } from "../../runtime-view.js";
@@ -133,6 +132,7 @@ import {
 import type {
   InstructionPlan,
   InterpreterEvent,
+  MediaReportOutcome,
   RandomControlOptions,
   RandomDrawResolutionOutcome,
   RandomOutcome,
@@ -543,9 +543,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     notices.publish(notice);
   }
   function reportFailedMedia(mediaId: number) {
-    const origin =
-      session.value &&
-      hatch(session.value, (current) => playerRuntimeMediaOrigin(current, mediaId));
+    const shown = session.value;
+    if (shown === null) return;
+    // As a call through the facade did: the session's replies still in transit apply first, so a medium an observation
+    // already ended has no origin. With the Worker nothing arrives early, and the latest applied publication answers.
+    const host = bridgeOf(shown);
+    host.deliverInTransit?.(shown.id);
+    const origin = playerRuntimeMediaOrigin(host.latest(shown) ?? shown, mediaId);
     if (!origin) return;
     const missing = resolvePackageAsset(origin.source) === null;
     // The Player cannot play video yet, so a video file that exists is not the script's problem.
@@ -562,19 +566,41 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
 
   const pendingLoadCount = ref(0);
+  /**
+   * Delivers queued load reports to the shown session, in one of its sections, after an observation when new reports
+   * arrived. A report waits while the session is inspected or a draw waits, and while the runtime cannot take it yet
+   * (`executionPending`). Only an accepted report shows: a refusal changed nothing, and showing it would retry at once.
+   */
   const loads = new MediaLoadQueue(
-    () => clock.observe(),
-    (mediaId, report) => {
+    async (reports, observe, acknowledge) => {
       const current = session.value;
-      if (!current) return "delivered";
-      if (held.value) return "pending";
-      const result = hatch(current, (current) =>
-        reportPlayerRuntimeMediaLoad(current, mediaId, report),
-      );
-      if (result.outcome.kind === "executionPending") return "pending";
-      if (result.outcome.kind === "accepted") session.value = result.session;
-      return "delivered";
+      // Without a session, nothing takes them.
+      if (current === null) return reports.forEach(([mediaId]) => acknowledge(mediaId));
+      try {
+        await ownedSection(current, "observeTime", async (section, owned, observed) => {
+          if (observe && (await observed()) === null) return;
+          for (const [mediaId, report] of reports) {
+            if (held.value || !owned()) return;
+            const outcome = await section.send<MediaReportOutcome>("reportMediaLoad", {
+              mediaId,
+              report,
+            });
+            if (outcome.kind === "executionPending") continue;
+            if (outcome.kind === "accepted") publishOwned(section.session);
+            acknowledge(mediaId);
+          }
+        });
+      } catch (error) {
+        // Refusals changed nothing. A basis another op since replaced (the observation's) leaves the rest for the retry
+        // its publication makes; a stopped session takes nothing more, and the stop clears the queue. Any other error is
+        // the Player's error stop, as a report's throw through the facade was, unless the session no longer owns the UI.
+        if (isHalted(error) || (error instanceof BridgeRequestError && error.code === "basis"))
+          return;
+        if (!disposed && !stopped.value && session.value?.lineage === current.lineage)
+          reportHostError(error);
+      }
     },
+    () => (pendingLoadCount.value = loads.size),
   );
   // Audio elements reused across media. Browsers such as Safari allow playback per element only from a user
   // activation; an element that played during the activating click keeps that permission when its source changes.

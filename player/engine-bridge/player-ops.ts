@@ -187,6 +187,18 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
           : compile(source.script).then((result) => ({ result }));
       },
     },
+    // What the Player reads of a plan the host holds, by its token, as `prepare` gave it; `null` for a token it does not
+    // hold. For sessions that reach the Player in any way: started, continued, restored or transferred.
+    planMetadata: {
+      session: "none",
+      checkArguments: (args) =>
+        isRecord(args) && exactly(args, ["plan"]) && typeof args.plan === "string",
+      run: (args) => {
+        // EVIDENCE: validation: checkArguments accepted these arguments before run.
+        const plan = plans.get((args as { readonly plan: string }).plan);
+        return { result: plan === undefined ? null : planMetadata(plan) };
+      },
+    },
     teardown: {
       session: "none",
       checkArguments: (args) => args === null,

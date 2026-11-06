@@ -82,7 +82,7 @@ before(async () => {
 });
 
 // Audio elements the Player host created, so a test can make one fail to load.
-const audioElements: EventTarget[] = [];
+const audioElements: (EventTarget & { src: string })[] = [];
 
 // The browser surface the Player host touches without a camera; no Web Locks, so durable writes are not coordinated.
 function stubBrowser(context: TestContext) {
@@ -405,7 +405,10 @@ test("media the script refers to but the Player cannot use is a warning, once pe
   await host.activate();
   // An async play waits for its load: the missing sound is reported while the run waits for the next one.
   await until(() => messages().length === 2, "the missing image and sound were not reported");
-  audioElements.at(-1)!.dispatchEvent(new Event("error"));
+  // The missing sound's load report goes over the bridge (L5d) before the script plays the next one.
+  const broken = () => audioElements.find((element) => element.src.endsWith("sounds/broken.wav"));
+  await until(() => broken() !== undefined, "the broken sound did not play");
+  broken()!.dispatchEvent(new Event("error"));
   // The video that exists is not reported: the Player cannot play video yet.
   await until(
     () => messages().length === 4,

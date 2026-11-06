@@ -1,3 +1,6 @@
+import { onScopeDispose, onWatcherCleanup, watch } from "vue";
+import type { BridgeClient } from "../../engine-bridge/client.js";
+import type { PlanMetadata } from "../../engine-bridge/player-ops.js";
 import { photoSwatches, type PhotoSwatches } from "../../theme/node-vibrant/swatches.js";
 import type { StagePhotoRequest, StagePhotoResponse } from "./stagePhotoWorker";
 
@@ -368,4 +371,46 @@ async function measureInWorker(blob: Blob): Promise<StagePhotoResponse["swatches
   );
   worker.postMessage({ id, type: blob.type, data } satisfies StagePhotoRequest, [data]);
   return answer;
+}
+
+/**
+ * Preloads every Stage image the shown session's script names, once its session runs, so such a photo and its colour
+ * are ready when it shows; they stay between sessions of the same script. The images come from the plan's host by the
+ * plan's token, which is unique only within its bridge connection. Another plan or connection, or the end of the scope,
+ * makes a reply still awaited obsolete: it preloads nothing. Call it in a component's or effect scope's setup.
+ */
+/** What the preload reads of the shown session: the plan's token, and the connection whose host holds that plan. */
+export interface PlanPhotoSource {
+  readonly connection: { readonly client: Pick<BridgeClient, "request"> };
+  readonly planToken: string;
+}
+
+export function usePlanPhotoPreload(
+  shown: () => PlanPhotoSource | null,
+  resolveAsset: (path: string) => string | null,
+  preload: (sources: readonly string[]) => () => void = preloadStagePhotos,
+): void {
+  let release = () => {};
+  watch(
+    [() => shown()?.connection ?? null, () => shown()?.planToken ?? null],
+    ([connection, plan]) => {
+      if (connection === null || plan === null) return;
+      let current = true;
+      onWatcherCleanup(() => (current = false));
+      connection.client.request("planMetadata", { plan }).then(
+        (reply) => {
+          // EVIDENCE: validation: `planMetadata` replies from the same build with the plan's metadata, or null.
+          const metadata = reply.result as PlanMetadata | null;
+          if (!current || metadata === null) return;
+          const previous = release;
+          release = preload(metadata.stageImages.flatMap((path) => resolveAsset(path) ?? []));
+          previous();
+        },
+        // A Worker that is lost or ended preloads nothing.
+        () => {},
+      );
+    },
+    { immediate: true },
+  );
+  onScopeDispose(() => release());
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { hatch, heldPlan } from "../../engine-bridge/in-process.js";
-import { computed, nextTick, onBeforeUnmount, onErrorCaptured, provide, ref, watch } from "vue";
+import { hatch } from "../../engine-bridge/in-process.js";
+import { computed, nextTick, onErrorCaptured, provide, ref, watch } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import { Bug, SquareSplitHorizontal } from "@lucide/vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
@@ -36,7 +36,6 @@ import { explainValues } from "./explainValues";
 import { usePlayerDebug } from "./usePlayerDebug";
 import { debugStageImage } from "./debugStageImage";
 import { playerRuntimeCalls, playerRuntimeDebugNow } from "../../runtime-adapter.js";
-import { playerRuntimeStageImages } from "../../plan-metadata.js";
 import DebugExportDialog from "./DebugExportDialog.vue";
 import RuntimeFailure from "./RuntimeFailure.vue";
 import SessionEndDialog from "./SessionEndDialog.vue";
@@ -60,7 +59,7 @@ import {
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 import { usePhotoColour } from "./usePhotoColour";
-import { preloadStagePhotos, prepareStagePhoto } from "./stagePhotos";
+import { prepareStagePhoto, usePlanPhotoPreload } from "./stagePhotos";
 import { useStagePhoto } from "./useStagePhoto";
 
 // Product Player composition. The development preview supplies tools, a Stage media override, the right rail and an
@@ -220,8 +219,9 @@ const debugExport = useDebugExport(
       ),
       media: (session.value === null
         ? []
-        : hatch(session.value, (held) => playerRuntimeDebugNow(held, props.player.sceneTimeMs.value))
-            .media
+        : hatch(session.value, (held) =>
+            playerRuntimeDebugNow(held, props.player.sceneTimeMs.value),
+          ).media
       ).map(({ mediaId, media, loaded, state, source }) => ({
         mediaId,
         media,
@@ -461,25 +461,8 @@ useResizeObserver(stageElement, ([entry]) => {
 // and its colour stay. Without a photo, also after an image failed, the theme's colours apply. Which
 // swatch family colours it, and whether the accent follows the photo, are A/B tests.
 const stagePhoto = useStagePhoto(stageMedia, prepareStagePhoto);
-// Every Stage image the script names is downloaded and measured in the background once its session runs, so such a
-// photo and its colour are ready when it shows. They stay between sessions of the same script.
-let releasePreloaded = () => {};
-watch(
-  () => {
-    const shown = props.player.session.value;
-    return shown === null ? undefined : heldPlan(shown.connection, shown.planToken);
-  },
-  (plan) => {
-    if (plan === undefined) return;
-    const release = releasePreloaded;
-    releasePreloaded = preloadStagePhotos(
-      playerRuntimeStageImages(plan).flatMap((path) => props.player.resolveAsset(path) ?? []),
-    );
-    release();
-  },
-  { immediate: true },
-);
-onBeforeUnmount(() => releasePreloaded());
+// Every Stage image the script names is downloaded and measured in the background once its session runs.
+usePlanPhotoPreload(() => props.player.session.value, props.player.resolveAsset);
 const shownMedia = computed(() => {
   const photo = stagePhoto.shown.value;
   return photo === null ? undefined : { ...photo.media, src: photo.url, source: photo.media.src };

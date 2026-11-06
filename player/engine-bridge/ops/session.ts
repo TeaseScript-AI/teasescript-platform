@@ -21,6 +21,7 @@ import {
 import { playerRuntimePacingGate } from "../../runtime-view.js";
 import { isValidEpochMilliseconds } from "../../../src/temporal.js";
 import { everyItem, exactly, isRecord, isStringArray, isTime } from "../argument-checks.js";
+import { instructionFacts } from "../instruction-facts.js";
 import { planMetadata, type PlanMetadata, type PlayerOpsContext } from "../player-ops.js";
 import type { Introduction, Publication } from "../session-protocol.js";
 import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host.js";
@@ -80,6 +81,7 @@ export class HeldSession implements HostSession {
       from,
       eventsThrough: through,
       events: next.events.slice(from),
+      instructions: instructionFacts(next),
     });
   }
 

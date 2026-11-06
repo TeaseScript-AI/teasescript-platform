@@ -38,6 +38,7 @@ import type {
   PlayerTimerPresentation,
   PlayerTranscriptEntryPresentation,
 } from "./model.js";
+import type { InstructionFacts } from "./engine-bridge/instruction-facts.js";
 import type { PlayerBridge } from "./player-bridge.js";
 import type { PlayerRuntimeState } from "./runtime-adapter.js";
 
@@ -84,6 +85,8 @@ export interface PlayerSession extends PlayerSessionView {
   readonly connection: PlayerBridge;
   /** The plan instance the session runs, as the host's token for it. */
   readonly planToken: string;
+  /** Where in the script each instruction this publication's view names is, by instruction index. */
+  readonly instructions: InstructionFacts;
   /**
    * What all publications of the session share (its store): while any of them is reachable, the host keeps the
    * session; once none is, the bridge releases it there.
@@ -780,4 +783,25 @@ export function playerRuntimeForm(session: PlayerSessionView): PlayerFormPresent
   });
   formPresentations.set(session.events, { key, presentation: result });
   return result;
+}
+
+/**
+ * The authored source of an active media instance and the script file and line of the `playMedia` that started it, or
+ * `null` when no such media is active.
+ */
+export function playerRuntimeMediaOrigin(
+  session: Pick<PlayerSession, "state" | "instructions">,
+  mediaId: number,
+): {
+  readonly media: "audio" | "video";
+  readonly source: string;
+  readonly location: { readonly path: string; readonly line: number };
+} | null {
+  for (const action of session.state.backgroundActions) {
+    if (action.kind !== "media" || action.media.mediaId !== mediaId) continue;
+    const location = session.instructions[action.owningInstruction];
+    if (location === undefined) return null;
+    return Object.freeze({ media: action.media.media, source: action.media.source, location });
+  }
+  return null;
 }

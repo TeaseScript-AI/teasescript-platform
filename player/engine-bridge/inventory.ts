@@ -14,7 +14,7 @@ export type BridgeFamily =
   "L5b" | "L5c" | "L5d" | "L5e" | "L5f" | "L5g" | "L5h" | "L5i" | "activation";
 
 /** Families whose PRs have landed: none of their entries may remain in `RATCHET`. */
-export const COMPLETED_FAMILIES: readonly BridgeFamily[] = ["L5b", "L5c", "L5e"];
+export const COMPLETED_FAMILIES: readonly BridgeFamily[] = ["L5b", "L5c", "L5d", "L5e"];
 
 /** The `src/` modules the main realm may load, grouped by why. */
 export const ALLOWED_SOURCE: readonly {
@@ -149,25 +149,6 @@ export interface RatchetEntry {
 }
 
 export const RATCHET: readonly RatchetEntry[] = [
-  // L5d
-  {
-    importer: "player/vue/src/PlayerApp.vue",
-    target: "player/engine-bridge/in-process.ts",
-    name: "heldPlan",
-    family: "L5d",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeMediaOrigin",
-    family: "L5d",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "reportPlayerRuntimeMediaLoad",
-    family: "L5d",
-  },
   // L5f
   {
     importer: "player/vue/src/DebugNow.vue",
@@ -576,7 +557,6 @@ export const ADAPTER_EXPORTS: Readonly<
   pressPlayerRuntimePermanentButton: { kind: "op", family: "L5c" },
   setPlayerRuntimeRandomControl: { kind: "op", family: "L5i" },
   resumePlayerRuntimeRandomDraw: { kind: "op", family: "L5i" },
-  playerRuntimeMediaOrigin: { kind: "planReader", family: "L5d" },
   completePlayerRuntimeStorageWrite: { kind: "op", family: "L5c" },
 };
 
@@ -601,6 +581,7 @@ export const VIEW_READERS: readonly string[] = [
   "playerRuntimePermanentButtons",
   "playerRuntimeCameraView",
   "playerRuntimeMedia",
+  "playerRuntimeMediaOrigin",
   "pendingPlayerRuntimeStorageWrite",
   "playerRuntimeTranscriptEventSequence",
   "playerRuntimeTranscript",
