@@ -38,6 +38,7 @@ interface StopHost {
   ): void;
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
+  temporalCapture(): PlayerRuntimeSessionOptions;
   debugExportCandidate(shown: {
     readonly player: object;
     readonly host: object;
@@ -601,3 +602,60 @@ test("a Continue serialized behind one still beginning records its own click's z
   );
   assert.equal(capture.epochMs, 1_793_966_400_000, "the clock of its own click");
 });
+
+for (const form of [
+  "a factory that asks for the capture",
+  "a factory with its options",
+  "a held plan",
+] as const)
+  test(`a Start serialized behind a Continue still beginning records its click's zone and clock (${form})`, async (context) => {
+    let epoch = 1_793_966_400_000;
+    let temporal = DEFAULT_TEMPORAL_CONTEXT;
+    context.mock.method(Date, "now", () => epoch);
+    const { bridge, player } = await mount(context, 0, undefined, () => temporal);
+    // The Continue's `beginRecording` reply is held, so the Start waits for it (`begunInFlight`).
+    const request = bridge.client.request.bind(bridge.client);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let first = true;
+    context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+      const reply = request(...args);
+      if (args[0] !== "beginRecording" || !first) return reply;
+      first = false;
+      return reply.then(async (result) => (await held, result));
+    });
+    player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
+    const obsolete = player.activate();
+    const script = 'showButton "Go"\nexit';
+    if (form === "a held plan")
+      player.prepare({
+        plan: facade.holdPlan(bridge, compiler.compilePlayerProject(script).plan!),
+        // As `hostedScript.ts` asks for it.
+        options: () => player.temporalCapture(),
+      });
+    else
+      player.prepare((recording) =>
+        compiler.createPlayerRuntimeSession(
+          script,
+          form === "a factory with its options"
+            ? recording
+            : { ...recording, ...player.temporalCapture() },
+        ),
+      );
+    const starting = player.activate();
+    // After the click: the clock moves on, and the zone changes.
+    epoch += 20_000;
+    temporal = {
+      ...DEFAULT_TEMPORAL_CONTEXT,
+      zone: { ...DEFAULT_TEMPORAL_CONTEXT.zone, name: "Etc/UTC" },
+    };
+    release();
+    await Promise.all([obsolete, starting]);
+    for (let index = 0; index < 5; index += 1) await turn();
+    assert.equal(player.hostError.value, null);
+    const capture = facade.hatch(player.session.value!, (session) =>
+      adapter.playerRuntimeSnapshot(session).temporalCaptures.at(-1)!,
+    );
+    assert.equal(capture.epochMs, 1_793_966_400_000, "the clock of the Start's click");
+    assert.deepEqual(capture.context, DEFAULT_TEMPORAL_CONTEXT, "the zone of the Start's click");
+  });

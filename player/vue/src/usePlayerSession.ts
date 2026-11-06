@@ -213,15 +213,13 @@ export interface PlayerSessionOptions {
   debugHistoryMemoryBudget?: number;
 }
 
+/** What Start and Continue record of the player's click: the zone and presentation, and the wall clock. */
+type TemporalCapture = { temporalContext: TemporalContext; wallClockMs: number };
+
 type Activation = {
   readonly kind: "start" | "continue";
   /** Begins the session; a Start or Continue over the bridge resolves once its first publication is applied. */
   readonly begin: () => PlayerSession | Promise<PlayerSession>;
-  /**
-   * Samples what the activation records of its click (#1886), before anything it waits for: a Continue's zone,
-   * presentation and clock. `begin` goes on with the latest sample, or samples itself without one.
-   */
-  readonly sample?: () => void;
   /** The marks a continued session had, which it keeps. */
   readonly marks?: DebugHistoryMarks;
   /** The restored session Continue goes on with. */
@@ -243,12 +241,14 @@ export type PlayerSessionStart =
       /** The Start's data options, read at activation. */
       readonly options: () => StartOptions;
     }
-  | ((recording: {
-      readonly recorder: DebugRecorder;
-      readonly debugTrace?: RuntimeDebugContext;
-      readonly debugMode: boolean;
-      readonly randomControl?: RandomControlOptions;
-    }) => PlayerRuntimeSession);
+  | ((
+      recording: {
+        readonly recorder: DebugRecorder;
+        readonly debugTrace?: RuntimeDebugContext;
+        readonly debugMode: boolean;
+        readonly randomControl?: RandomControlOptions;
+      } & TemporalCapture,
+    ) => PlayerRuntimeSession);
 
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
 // Player state; this host records which session is shown, when presentation must reset, maps
@@ -2341,10 +2341,31 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * What Start and Continue record about the player now: the zone and presentation, then the wall clock, sampled last so
    * that resolving the zone does not age it.
    */
-  function temporalCapture(): { temporalContext: TemporalContext; wallClockMs: number } {
+  function temporalCapture(): TemporalCapture {
+    if (clicked !== null) {
+      if ("error" in clicked) throw clicked.error;
+      return clicked.capture;
+    }
+    return sampleTemporalCapture();
+  }
+  function sampleTemporalCapture(): TemporalCapture {
     const temporalContext = resolveTemporalContext();
     return { temporalContext, wallClockMs: Date.now() };
   }
+  /** `temporalCapture()`'s result, sampled once, or what sampling threw. */
+  type ClickSample = { readonly capture: TemporalCapture } | { readonly error: unknown };
+  function sampleClick(): ClickSample {
+    try {
+      return { capture: sampleTemporalCapture() };
+    } catch (error) {
+      return { error };
+    }
+  }
+  /**
+   * The capture of the activation's click while its `begin` runs (#1886): Start's factories and options and Continue's
+   * `begin` record it through `temporalCapture()`, whatever the activation waited for since the click.
+   */
+  let clicked: ClickSample | null = null;
   /**
    * Shows the explicit Continue control for a restored session; its execution, time and media resume only then.
    * Continue records the wall clock and the player's zone and presentation as they are now.
@@ -2355,21 +2376,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     supersede();
     beginning.value = false;
     camera.release();
-    // The capture of this Continue's latest click, or what capturing threw; `begin` takes it.
-    let sampled:
-      | { readonly capture: ReturnType<typeof temporalCapture> }
-      | { readonly error: unknown }
-      | null = null;
-    const sample = () => {
-      try {
-        sampled = { capture: temporalCapture() };
-      } catch (error) {
-        sampled = { error };
-      }
-    };
     activation.value = {
       kind: "continue",
-      sample,
       begin: async () => {
         const host = bridgeOf(restored);
         continuing = restored;
@@ -2382,9 +2390,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // Continue records the zone, presentation and clock of the click (#1886), before any reply or wait. A capture
         // that throws fails the Continue where it failed before: after its recording began, so the failure's recording
         // is the restored session's, not the previous one's.
-        if (sampled === null) sample();
-        const taken = sampled!;
-        sampled = null;
+        let taken: ClickSample;
+        try {
+          taken = { capture: temporalCapture() };
+        } catch (error) {
+          taken = { error };
+        }
         // The recording of a restored session starts from the state it continues, and so does a new trace epoch.
         await host.request(restored, "beginRecording", null);
         owned();
@@ -2444,13 +2455,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       void camera.open(false);
       captures.reset();
       // What it records of the click is sampled now, before it waits for an activation still beginning.
-      pending.sample?.();
+      const sample = sampleClick();
       try {
         if (begunInFlight !== null) {
           await begunInFlight;
           if (disposed || token !== activationToken) return;
         }
-        await startFrom(pending);
+        await startFrom(pending, sample);
       } finally {
         if (token === activationToken) beginning.value = false;
       }
@@ -2470,14 +2481,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Replaced, re-prepared, or unmounted while it waited: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
-    // As before, a camera's Continue samples once the camera answered, and before it waits for another activation.
-    pending.sample?.();
+    // As at the fork, a camera's activation samples once the camera answered, and before it waits for another one.
+    const sample = sampleClick();
     try {
       if (begunInFlight !== null) {
         await begunInFlight;
         if (disposed || token !== activationToken) return;
       }
-      await startFrom(pending);
+      await startFrom(pending, sample);
     } finally {
       if (token === activationToken) beginning.value = false;
     }
@@ -2500,8 +2511,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     },
   ): PlayerSession | Promise<PlayerSession> {
     const host = requireBridge();
-    if (typeof create === "function")
-      return introduceNow(host, (made) => create({ ...recording, recorder: made.recorder }));
+    // A factory records the click's capture as the Start's options do (`temporalCapture`).
+    if (typeof create === "function") {
+      const capture = temporalCapture();
+      return introduceNow(host, (made) =>
+        create({ ...recording, ...capture, recorder: made.recorder }),
+      );
+    }
     const startOptions = { ...create.options(), debugMode: recording.debugMode };
     const { debugTrace: trace, randomControl: control } = recording;
     if (trace === undefined && control === undefined)
@@ -2521,21 +2537,25 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * session the host starts at once shows within the activating click; one that begins over the bridge shows once its
    * first publication arrives, unless it was replaced, re-prepared, or unmounted meanwhile.
    */
-  function startFrom(pending: Activation): Promise<void> | void {
+  function startFrom(pending: Activation, sample: ClickSample): Promise<void> | void {
     const token = activationToken;
     // The engine's host is ready at once in-process; an injected one may answer `ready` later, which this waits for.
     if (bridge === null)
       return bridgeReady.then(() => {
-        if (!disposed && token === activationToken) return startFrom(pending);
+        if (!disposed && token === activationToken) return startFrom(pending, sample);
       });
     hostError.value = null;
     failureRecording = null;
     let begun: PlayerSession | Promise<PlayerSession>;
+    // `begin` records the click's capture: it reads it before its first await, a Start in its factory or options.
+    clicked = sample;
     try {
       begun = pending.begin();
     } catch (error) {
       reportHostError(error);
       return;
+    } finally {
+      clicked = null;
     }
     if (!(begun instanceof Promise)) return started(pending, begun);
     sessionBeginning = begun;

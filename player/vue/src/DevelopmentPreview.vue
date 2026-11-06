@@ -8,7 +8,6 @@ import type { KeptRoomStore, KeptSessionStore } from "../../kept-sessions.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
 import { createPlayerRuntimeSession } from "../../compile-project.js";
-import { playerTemporalContext } from "../../runtime-view.js";
 import { browserSavedData } from "../../saved-data.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
@@ -133,10 +132,9 @@ function clearSampleNotices() {
 }
 // A scenario's factory, which the engine's host runs until L5i starts it through a source `prepare`.
 type ScenarioStart = Extract<PlayerSessionStart, (recording: never) => unknown>;
+// The zone, presentation and clock are the Start's click's (`recording`).
 const startOptions = (recording: Parameters<ScenarioStart>[0]) => ({
   ...recording,
-  temporalContext: playerTemporalContext(),
-  wallClockMs: Date.now(),
   playerProfile: DEMO_PLAYER_PROFILE,
 });
 // A package is compiled and prepared like in the default build; a scenario is a fixed development script.
