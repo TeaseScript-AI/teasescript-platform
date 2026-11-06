@@ -142,10 +142,14 @@ function guardSendKey(event: KeyboardEvent): void {
     event.preventDefault();
 }
 
+// The password and picker fields take what an input method composes once the composition ends (`endComposed`), as the
+// text field's `v-model` does, so an answer given meanwhile holds only committed text.
 function updateFromPicker(event: Event): void {
+  if (event instanceof InputEvent && event.isComposing) return;
   if (event.target instanceof HTMLInputElement) value.value = event.target.value;
 }
 function updateRepeated(event: Event): void {
+  if (event instanceof InputEvent && event.isComposing) return;
   if (event.target instanceof HTMLInputElement) emit("update:repeated", event.target.value);
 }
 
@@ -183,7 +187,8 @@ watch(
 
 function releaseOnBlur(): void {
   capsLock.value = false;
-  if (!replacingField) allowSoftwareKeyboard();
+  // The blur that ends a composition (`endComposition`) gives the focus back at once, the keyboard as it was.
+  if (!replacingField && !endingComposition) allowSoftwareKeyboard();
 }
 
 // The password fields' eye buttons, one each, and their Caps Lock warning. Only a key event says whether Caps Lock is
@@ -272,10 +277,17 @@ function selectInput(): void {
 
 /** Whether the player composes text in a field of the composer with an input method (IME). */
 const composing = ref(false);
+let endingComposition = false;
+/** A composition ended: a password or picker field takes its text now; the text field's `v-model` does so itself. */
+function endComposed(event: CompositionEvent): void {
+  composing.value = false;
+  if (event.target === repeatInput.value) updateRepeated(event);
+  else if (event.target === picker.value) updateFromPicker(event);
+}
 /**
- * Ends the player's composition, as an answer does before the field turns read-only: the browser ends it, with its
- * `compositionend`, when the field loses focus, which it then gets back in the same task. What the composition held is
- * not part of the answer, which is the text of the click.
+ * Ends the player's composition: the browser ends it, with its `compositionend`, when the field loses focus, which it
+ * gets back in the same task, the software keyboard as it was. What the composition held is not part of an answer given
+ * meanwhile, which is the committed text of the click.
  */
 function endComposition(): void {
   if (!composing.value) return;
@@ -285,18 +297,32 @@ function endComposition(): void {
     (element !== input.value && element !== repeatInput.value)
   )
     return;
-  element.blur();
-  element.focus({ preventScroll: true });
+  endingComposition = true;
+  try {
+    element.blur();
+    element.focus({ preventScroll: true });
+  } finally {
+    endingComposition = false;
+  }
 }
+// Whatever makes the fields read-only (an answer in flight, an image being read, a lock at work) ends a composition
+// first, so none stays open in a read-only field.
+watch(
+  () => props.submitting,
+  (busy) => {
+    if (busy) endComposition();
+  },
+  { flush: "pre" },
+);
 
-defineExpose({ focusInput, selectInput, openPicker, endComposition });
+defineExpose({ focusInput, selectInput, openPicker });
 </script>
 
 <template>
   <div
     class="composer-container"
     @compositionstart.capture="composing = true"
-    @compositionend.capture="composing = false"
+    @compositionend.capture="endComposed"
   >
     <p v-if="feedback" :id="feedbackId" class="composer-notice" role="status" aria-live="polite">
       {{ feedback }}

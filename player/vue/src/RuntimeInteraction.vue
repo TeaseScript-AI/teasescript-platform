@@ -283,12 +283,7 @@ const root = ref<HTMLElement | null>(null);
 // The session's area, which a popup that is not modal centres on, beside the Debug panel.
 const composition = computed(() => root.value?.closest<HTMLElement>(".player-composition") ?? null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
-const composer = ref<{
-  focusInput(): void;
-  selectInput(): void;
-  openPicker(): void;
-  endComposition(): void;
-} | null>(null);
+const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
 const draft = ref("");
 /** The "Repeat password" of a lock's password field, which, like its password, is never kept. */
 const repeated = ref("");
@@ -531,9 +526,8 @@ async function complete(
     document.documentElement.dataset.playerKeyboardFocus === "true" &&
     !!document.activeElement?.closest("[data-foreground-controls]");
   // From the click until the answer settles, the composer and the form's controls are read-only (`submitting`): the
-  // answer is the text of the click, and nothing typed meanwhile is lost to the next interaction's text. A composition
-  // under way ends first, so the field turns read-only with no composition left open in it.
-  composer.value?.endComposition();
+  // answer is the text of the click, and nothing typed meanwhile is lost to the next interaction's text. The composer ends
+  // a composition under way as it turns read-only.
   submitting.value = true;
   try {
     const targetId = (current: PlayerSession) =>
