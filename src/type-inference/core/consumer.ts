@@ -89,6 +89,7 @@ import { otherwiseChains, provesNonNull, unusedFallbackRule } from "./consumers/
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
+import type { ReceivingObligation, ReceivingResult } from "./admission/receiving.js";
 import {
   coreMessage,
   coreMessageInWords,
@@ -404,6 +405,16 @@ export class SliceIndex {
     return this.#store.get(expression);
   }
 
+  /** The `let` or assignment a site names: the statement itself, or the one whose stored value holds the expression. */
+  public storeAt(site: SourceSite): Store | undefined {
+    const key = `${site.file}:${site.start}:${site.end}`;
+    const statement = this.#statementsBySite.get(key);
+    if (statement?.kind === "letStatement" || statement?.kind === "assignmentStatement")
+      return statement;
+    const expression = this.#bySite.get(key);
+    return expression === undefined ? undefined : this.#store.get(expression);
+  }
+
   /** The span of the expression or statement at a site of the analysis. */
   public spanAt(site: SourceSite): SourceSpan {
     const key = `${site.file}:${site.start}:${site.end}`;
@@ -589,10 +600,13 @@ export function coreCheckResult(
   request: CoreAnalysisRequest,
 ): TypeCheckResult {
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
-  const { checks, core } = runtimeChecks(answers, index, request);
+  const { checks, core, contracts } = runtimeChecks(answers, index, request);
   const known = knownValues(answers, index, (call) => core.expected.get(call));
   const fallbacks = fallbackUses(answers, index);
   const result = checkedOf(answers, index, known, fallbacks);
+  // (a program the analysis rejects has no plan to let a value through: nothing to decline)
+  if (!result.diagnostics.some((diagnostic) => diagnostic.class === "compile-error"))
+    lostCheck(answers, index, contracts, checks, core);
   const source = messageSource(
     request.files.map((file) => file.source),
     result.diagnostics,
@@ -738,8 +752,9 @@ function siteOrder(a: SourceSite, b: SourceSite): number {
  * it stops there, the finished analysis's findings and decisions standing, and what is asked from then on answers
  * `STOPPED` (D4 a′). Where nothing stopped, the receiving completion runs then, after everything that can stop, and
  * asks again with its completed contracts within its own allowance (`Answers.completed`, #1526 phase C); where it keeps
- * no result, what was asked first stands. The backend's outcome and the test-only checked result (`checkedResult`) both
- * ask so.
+ * no result, what was asked first stands, asked once more as finishing work where obligations were left without results,
+ * so that the publication's gate reads them and may decline the program (#1526 decision 2). The backend's outcome and
+ * the test-only checked result (`checkedResult`) both ask so.
  */
 export function asked<T>(answers: Answers, ask: (answers: Answers) => T): T {
   let first: T;
@@ -751,7 +766,15 @@ export function asked<T>(answers: Answers, ask: (answers: Answers) => T): T {
   }
   // (a test that leaves the completion's checks out leaves the completion out: phase B's answers)
   if (leftOutCompletion()) return first;
-  return answers.completed(() => ask(answers)) ?? first;
+  const again = answers.completed(() => ask(answers));
+  if (again !== null) return again;
+  // (#1526 decision 2, condition 1: a completion that kept no result, past its allowance even before it found its
+  // obligations, leaves the settled pass's publication, which was asked before the registry was made; asked once more
+  // apart, its gate reads the obligations left without results)
+  return (answers.budget.closure?.counts.capped ?? 0) > 0 ||
+    answers.receiving.some(({ result }) => result === null)
+    ? answers.apart(() => ask(answers))
+    : first;
 }
 
 /**
@@ -1226,6 +1249,268 @@ function runtimeChecks(
     if (parts.length > 0) core.partChecks.set(store, parts);
   }
   return { checks, core, contracts: contracts.results };
+}
+
+/**
+ * #1526 decision 2, condition 1 (TABLE r4.390): while a required check is missing, the candidate publishes no plan that
+ * lets the invalid value through unchecked. Every plan published after a stop is gated here, at the one seam `asked`
+ * publishes through, against the capture its path has (`Answers.gated`): the receiving registry where a receiving
+ * completion ran (#1526 phase C), its results; after a stop where none ran or it kept none, the registry's obligations
+ * without results. Each obligation a store owes when the script runs, its C1 check (a warning the walk made) or its C9
+ * boundary (external data entering), is Lost where the plan's check at its store does not carry its required contract
+ * (`keeps`). The first Lost obligation, in the registry's source order, declines the program at its store
+ * (`OutsideContract`): the stopped plan would otherwise run past a check the natural plan makes (ADR 0021 §1.10, r4.295
+ * column (2)). A program the analysis rejects has no plan and is not asked. Where admission did not settle there is no
+ * registry and nothing is declined here: an unsettled stop is #1767's and #1252's. One visit per obligation of the
+ * registry, whose making charged each one (r4.261).
+ */
+function lostCheck(
+  answers: Answers,
+  index: SliceIndex,
+  published: ReadonlyMap<Store, ContractResult>,
+  checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  core: CoreRuntimeChecks,
+): void {
+  const gated = answers.gated();
+  // (obligations a settled stop cannot establish: the program is declined at its first store, never read as owing none)
+  if (gated === null) {
+    const first = index.statements.find(
+      (statement): statement is Store =>
+        statement.kind === "letStatement" || statement.kind === "assignmentStatement",
+    );
+    if (first === undefined) return;
+    throw new OutsideContract(
+      first.kind === "letStatement" ? first.initializer : first.value,
+      "a store whose required checks could not be established at the budget",
+    );
+  }
+  for (const { obligation, result } of gated) {
+    // (a stopped decision's own marks stand at every store of it, external data or not: the store's own C1 check and
+    // its C9 boundary are the checks it owes when the script runs)
+    if (obligation.epoch !== answers.epoch || obligation.slot.role === "stopped") continue;
+    const store = index.storeAt(obligation.slot.site);
+    if (
+      store === undefined ||
+      keeps(answers, index, store, obligation, result, published, checks, core)
+    )
+      continue;
+    throw new OutsideContract(
+      store.kind === "letStatement" ? store.initializer : store.value,
+      "a store whose check was lost at the budget",
+    );
+  }
+}
+
+/**
+ * Whether the plan keeps an obligation's check at its store (`lostCheck`): a shape the analysis proved, or one a complete
+ * store check carries; a contract proved open; a complete store check (settled or received, its whole type); or a
+ * contract the completion completed that a published check carries at the obligation's path: a typed parse's or load's
+ * reader of the value stored at least as strict as the contract there (F18), the stored literal's own structure, its typed
+ * calls' readers and its scalar leaves, at least as strict (`elementsCarry`), or, where the natural plan does not check the
+ * store whole, its part checks there equal to it (#1682). With no result, a completion past its allowance or a stop of the
+ * analysis, only a complete store check keeps it, else it declines (#1832). A stricter reader is never a lost check: it
+ * accepts no more values than the natural reader. A check against bare `unknown` where the contract owes a domain carries
+ * nothing.
+ */
+function keeps(
+  answers: Answers,
+  index: SliceIndex,
+  store: Store,
+  obligation: ReceivingObligation,
+  result: ReceivingResult | null,
+  published: ReadonlyMap<Store, ContractResult>,
+  checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  core: CoreRuntimeChecks,
+): boolean {
+  const own = published.get(store);
+  const whole = own?.state === "complete" && checks.has(store);
+  // (no result, a completion past its allowance or a stop of the analysis: the plan is the settled pass's, and only its
+  // complete store check carries what the obligation requires; a reader, even of a `let` of its own, may be weaker than a
+  // later store makes the natural check, and a partial store check than the natural plan's, which nothing tells (#1832))
+  if (result === null) return whole;
+  // (a shape is the suitability the value's own structure proves where it is not lost; a complete result there is the
+  // requirement's, which a shape owes no more of)
+  if (obligation.extent === "shape" || "shape" in result) return result.state !== "lost" || whole;
+  if (result.state === "open" || whole) return true;
+  const value = unwrap(store.kind === "letStatement" ? store.initializer : store.value);
+  // (a contract the completion completed is kept only by a published check that carries it at the obligation's path: a
+  // typed parse's or load's reader of the value stored, or the store's part checks there; where the natural plan checks
+  // the store whole, `completedCheck`, and publication did not, its parts stand for nothing, #1645's whole object)
+  const contract = answers.received(obligation.place, obligation.path);
+  const destination = answers.storedPlace(nodeOf(answers, index, store));
+  if (
+    result.state !== "complete" ||
+    contract?.state !== "complete" ||
+    destination === null ||
+    destination.id !== obligation.place ||
+    destination.path.some((step, at) => obligation.path[at] !== step)
+  )
+    return false;
+  const below = obligation.path
+    .slice(destination.path.length)
+    .map((step) =>
+      step === "element" || step === "entry" || step === "index" ? "[]" : propertyName(step),
+    );
+  // (a reader at least as strict as the contract there: one that checks more, as a typed parse's of an object whose
+  // field the contract leaves open, still checks all the contract does)
+  const carries = (type: TypePlan | null | undefined): boolean => {
+    const at = type === null || type === undefined ? null : typeAt(type, below);
+    return at !== null && narrower(at, contract.ref);
+  };
+  if (
+    carries(readerOf(value, checks, core)) ||
+    elementsCarry(value, below, contract.ref, checks, core)
+  )
+    return true;
+  if (answers.completedCheck(index.site(value))) return false;
+  // (the part checks at or below the obligation's path, at least one, each the contract's type there where it has one:
+  // a weaker one stands for nothing, #1645's whole object)
+  const parts = (core.partChecks.get(store) ?? []).filter((part) => {
+    const steps = part.path.map((step) => ("element" in step ? "[]" : step.property));
+    return steps.length >= below.length && below.every((step, at) => steps[at] === step);
+  });
+  return (
+    parts.length > 0 &&
+    parts.every((part) => {
+      const steps = part.path.map((step) => ("element" in step ? "[]" : step.property));
+      const at = typeAt(contract.ref, steps.slice(below.length));
+      return at === null || JSON.stringify(part.type) === JSON.stringify(at);
+    })
+  );
+}
+
+/** The type a typed parse or load reads its value as (F18), `undefined` for any other value. */
+function readerOf(
+  value: Expression,
+  checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  core: CoreRuntimeChecks,
+): TypePlan | undefined {
+  return value.kind === "loadExpression"
+    ? checks.get(value)?.type
+    : value.kind === "callExpression"
+      ? core.expected.get(value)
+      : undefined;
+}
+
+/**
+ * Whether a stored literal carries a contract at `below` (property names and `[]` for an element) by its own structure:
+ * followed through its properties and elements to the contract's level, a list or set whose every element carries the
+ * contract's element, an object whose property carries each property the contract lists, a typed parse's or load's whole
+ * value whose reader is at least as strict as the contract there, or a scalar literal of a kind at least as strict. The
+ * value itself is a literal holding them, never the call alone (`readerOf`'s).
+ */
+function elementsCarry(
+  value: Expression,
+  below: readonly string[],
+  contract: TypePlan,
+  checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  core: CoreRuntimeChecks,
+): boolean {
+  const carried = (at: Expression, steps: readonly string[], type: TypePlan): boolean => {
+    const node = unwrap(at);
+    if (node.kind === "listLiteral" || node.kind === "setLiteral") {
+      if (steps.length > 0)
+        return (
+          steps[0] === "[]" &&
+          node.elements.length > 0 &&
+          node.elements.every((one) => carried(one, steps.slice(1), type))
+        );
+      const element =
+        node.kind === "listLiteral"
+          ? type.kind === "list"
+            ? type.element
+            : undefined
+          : type.kind === "set"
+            ? type.element
+            : undefined;
+      if (element === undefined) return false;
+      return element === null || node.elements.every((one) => carried(one, [], element));
+    }
+    if (node.kind === "objectLiteral") {
+      if (steps.length > 0) {
+        const property = node.properties.find((one) => one.name.name === steps[0]);
+        return property !== undefined && carried(property.value, steps.slice(1), type);
+      }
+      if (type.kind !== "object") return false;
+      // (the literal's properties indexed once: the walk visits each property at most once, as the store's own check of
+      // the value does, so its work is that check's, charged where publication made it)
+      const own = new Map(node.properties.map((one) => [one.name.name, one.value]));
+      return type.properties.every((wanted) => {
+        const value = own.get(wanted.name);
+        return value !== undefined && carried(value, [], wanted.type);
+      });
+    }
+    const leaf = leafKind(node);
+    if (leaf !== null) return steps.length === 0 && narrower(leaf, type);
+    const reader = readerOf(node, checks, core);
+    const there = reader === undefined ? null : typeAt(reader, steps);
+    return there !== null && narrower(there, type);
+  };
+  const root = unwrap(value);
+  return (
+    (root.kind === "listLiteral" || root.kind === "setLiteral" || root.kind === "objectLiteral") &&
+    carried(root, below, contract)
+  );
+}
+
+/** The type a scalar literal proves by its own syntax, `null` for any other expression. */
+function leafKind(node: Expression): TypePlan | null {
+  switch (node.kind) {
+    case "numberLiteral":
+      return { kind: node.numericType };
+    case "stringLiteral":
+      return { kind: "string" };
+    case "booleanLiteral":
+      return { kind: "boolean" };
+    case "nullLiteral":
+      return { kind: "null" };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Whether every value a check against `narrow` passes also passes one against `wide` (a check checks only the listed
+ * properties an object has, and every element of a collection whose element type is not `null`): a reader that carries
+ * a contract (`keeps`).
+ */
+export function narrower(narrow: TypePlan, wide: TypePlan): boolean {
+  if (narrow.kind === "union") return narrow.members.every((member) => narrower(member, wide));
+  if (wide.kind === "union") return wide.members.some((member) => narrower(narrow, member));
+  if (wide.kind === "object") {
+    if (narrow.kind !== "object") return false;
+    const own = new Map(narrow.properties.map((each) => [each.name, each.type]));
+    return wide.properties.every((property) => {
+      const type = own.get(property.name);
+      return type !== undefined && narrower(type, property.type);
+    });
+  }
+  if (wide.kind === "list" || wide.kind === "set" || wide.kind === "dict") {
+    if (narrow.kind !== "list" && narrow.kind !== "set" && narrow.kind !== "dict") return false;
+    return (
+      narrow.kind === wide.kind &&
+      (wide.element === null || (narrow.element !== null && narrower(narrow.element, wide.element)))
+    );
+  }
+  // (a whole number is a number)
+  return narrow.kind === wide.kind || (narrow.kind === "integer" && wide.kind === "number");
+}
+
+/** A type plan's part at a path of property names and `[]` (an element, entry or value), `null` where it has none. */
+function typeAt(type: TypePlan, steps: readonly string[]): TypePlan | null {
+  let at: TypePlan | null = type;
+  for (const step of steps)
+    at =
+      at === null
+        ? null
+        : step === "[]"
+          ? at.kind === "list" || at.kind === "set" || at.kind === "dict"
+            ? at.element
+            : null
+          : at.kind === "object"
+            ? (at.properties.find((property) => property.name === step)?.type ?? null)
+            : null;
+  return at;
 }
 
 /**

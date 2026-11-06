@@ -3,6 +3,7 @@ import type { InstructionPlan } from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { Answers } from "../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice } from "../../src/type-inference/core/backend.js";
 import { withMessagesInWords } from "../../src/type-inference/core/consumer.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
@@ -78,6 +79,19 @@ function spanOf(value: unknown): Span | null {
   if (parts.has("so")) return { start: Number(parts.get("so")), end: Number(parts.get("eo")) };
   const offset = (end: string): number => Number(partsOf(parts.get(end))?.get("offset"));
   return { start: offset("start"), end: offset("end") };
+}
+
+/** The decline of a compile that would lose a check its store owes (#1526 decision 2, condition 1). */
+const LOST_CHECK = "a store whose check was lost at the budget";
+
+/**
+ * What a record stands for in a plan, between the compile with it and the one without it (`rerun`): where they differ;
+ * where one of them has no plan, the candidate declining it (`LOST_CHECK`), the whole plan.
+ */
+function contentOf(one: Compiled["plan"], other: Compiled["plan"]): PlanDifference[] {
+  return (one === null) !== (other === null)
+    ? [{ path: "", node: null }]
+    : planDifferences(one, other);
 }
 
 /** Every place two plans differ: each value's path where one has what the other lacks or another value. */
@@ -193,7 +207,15 @@ function rerun(
   omit: Omission,
   key: string,
 ): { readonly result: Compiled; readonly answers: Answers } {
-  const again = each.without(omit, key);
+  let again: { readonly result: Compiled; readonly answers: Answers };
+  try {
+    again = each.without(omit, key);
+  } catch (error) {
+    // (#1526 decision 2, condition 1: the compile with these records left out loses a check its store owes, and the
+    // candidate declines it; no plan, so what the records stand for is the whole plan, `contentOf`)
+    if (!(error instanceof CandidateOutsideSlice) || error.what !== LOST_CHECK) throw error;
+    return { result: { diagnostics: [], plan: null }, answers: each.answers };
+  }
   const other = otherScope(each.answers.budget, again.answers.budget);
   if (other !== null)
     throw new Error(
@@ -538,7 +560,7 @@ export function stopProblems(c: StopCase): string[] {
   // mark as the settled pass made it; only an analysis with a decision stopped completes)
   if (differences.length > 0 && unstopped.answers.budget.decisions.some((d) => d.stopped))
     content.push(
-      ...planDifferences(
+      ...contentOf(
         rerun(
           unstopped,
           { diagnostic: () => false, check: () => false, completion: true },
@@ -549,7 +571,7 @@ export function stopProblems(c: StopCase): string[] {
     );
   if (differences.length > 0 && changing.size > 0) {
     const own = (each: StopRun): PlanDifference[] =>
-      planDifferences(
+      contentOf(
         rerun(each, ...omission(new Set())).result.plan,
         rerun(each, ...omission(new Set([...changing, ...storeRecords]), stores)).result.plan,
       );
@@ -565,7 +587,7 @@ export function stopProblems(c: StopCase): string[] {
   );
   if (differences.length > 0 && boundaries.size > 0)
     content.push(
-      ...planDifferences(
+      ...contentOf(
         rerun(stopped, ...omission(new Set())).result.plan,
         rerun(
           stopped,

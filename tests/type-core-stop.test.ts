@@ -316,6 +316,9 @@ test("after a stop a typed default's null leaves its level open, as without one 
  * A source's typed loads and parses as its plan reads them (`load` and `expected` lines, `plannedContent`), or how the
  * candidate route ends without one: no plan (its errors), or declined.
  */
+/** The lost-check gate's decline (#1526 decision 2, condition 1). */
+const LOST_CHECK = "a store whose check was lost at the budget";
+
 function readers(source: string): string[] {
   try {
     const { plan, diagnostics } = compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND);
@@ -324,7 +327,7 @@ function readers(source: string): string[] {
       .filter((line) => /^(load|expected) /u.test(line))
       .map((line) => line.replace(/ repair=\w+$/u, ""));
   } catch (error) {
-    if (error instanceof CandidateOutsideSlice) return ["declined"];
+    if (error instanceof CandidateOutsideSlice) return [`declined: ${error.what}`];
     throw error;
   }
 }
@@ -387,12 +390,13 @@ test("a stop does not change what a typed load or parse reads: a record without 
   for (const source of sources)
     for (const mode of HELD_MODES) {
       const unstopped = mode.run(() => readers(source));
-      for (const stop of readerStops(source, mode))
-        assert.deepEqual(
-          mode.run(() => stop(() => readers(source))),
-          unstopped,
-          `${source} (${mode.name})`,
-        );
+      for (const stop of readerStops(source, mode)) {
+        // (or declined where the stop left the load's store without a result: #1526 decision 2, an accepted
+        // over-decline, #1832, no result's reader standing for the natural check)
+        const stopped = mode.run(() => stop(() => readers(source)));
+        if (JSON.stringify(stopped) !== JSON.stringify([`declined: ${LOST_CHECK}`]))
+          assert.deepEqual(stopped, unstopped, `${source} (${mode.name})`);
+      }
     }
   // the unstopped readers the family holds every stop to, by the defaults' own types (V30 §13)
   assert.deepEqual(readers('let seed = load("seed", default: [{n: 1}, {m: 2}])\nexit\n'), [
@@ -496,9 +500,20 @@ test("after a stop a load still takes its default for a stored value its default
     const end = source.indexOf(")\n") + 1;
     for (const mode of HELD_MODES)
       for (const stop of [<T>(make: () => T): T => make(), ...sampled(readerStops(source, mode))]) {
-        const { plan } = mode.run(() =>
-          stop(() => compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND)),
-        );
+        // (a stop that leaves the load's store without a result declines, #1526 decision 2, an accepted over-decline,
+        // #1832; every published plan reads as unstopped)
+        let plan;
+        try {
+          ({ plan } = mode.run(() =>
+            stop(() => compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND)),
+          ));
+        } catch (error) {
+          assert.ok(
+            error instanceof CandidateOutsideSlice && error.what === LOST_CHECK,
+            `${source} (${mode.name})`,
+          );
+          continue;
+        }
         assert.ok(plan !== null, `${source} (${mode.name})`);
         const loaded = (value: SerializableRuntimeValue) => {
           const snapshot = createImmediatePacingRuntimeSnapshot(plan, {
@@ -707,9 +722,27 @@ test("after a stop a typed call's reader type a stop left open declines the plan
         const { stoppedIn, settled } = stopped.answers.budget;
         if (opens && stoppedIn === "admission" && !settled)
           assert.equal(stopped.result.plan, null, `${at}: open, so declined`);
-        // (after admission settled every finished answer stands: the natural reader, never a decline)
-        if (settled && stoppedIn !== null)
-          assert.ok(stopped.result.plan !== null, `${at}: settled, so published`);
+        // (after admission settled every finished answer stands: a published plan reads the natural reader and keeps every
+        // natural check, `judged`; or the candidate declines it with the lost-check text, #1526 decision 2, condition 1:
+        // `variable`'s store of host text a work stop left partial, an accepted over-decline, #1832; #1775's rule (R) is
+        // untouched, it never covered settled stops)
+        if (settled && stoppedIn !== null && stopped.result.plan === null)
+          assert.throws(
+            () =>
+              mode.run(() =>
+                withTestAllowance(allowance, () =>
+                  compileSourceWithBackend(
+                    source,
+                    { globals: ["hostValue", "hostOther"] },
+                    CORE_BACKEND,
+                  ),
+                ),
+              ),
+            (error) =>
+              error instanceof CandidateOutsideSlice &&
+              error.what === "a store whose check was lost at the budget",
+            `${at}: settled: publishes, or declines with the lost-check text`,
+          );
       }
       for (const demand of GRID)
         judged(heldRun(c, mode, undefined, demand), `${kind} (${mode.name}) demand ${demand}`);
@@ -988,9 +1021,21 @@ test("the stop oracle sees every change no mark of the stop names", () => {
   const vessel = stopRun('let vessel = hostValue\nvessel.amount = 4\nsay "AFTER"\nexit\n');
   assert.deepEqual(problems(vessel, vessel), []);
   assert.notDeepEqual(problems(vessel, edited(vessel, withoutGuard)), []);
-  // a walk stop marks the default (r4.100), which excuses its own check and not the guard
-  const source =
+  // a walk stop marks the default (r4.100), which excuses its own check and not the guard; where `vessel` holds a host
+  // value, its lowest walk stop loses the vessel's check, which `{amount: "x"}` passes, and the candidate declines it
+  // (#1526 decision 2), so the oracle is judged on its variant, `vessel` a typed load's, which its reader carries
+  const original =
     'let nums: number?[] = [null,1.25]\nlet pack={nums:nums}\nlet twin=pack\nsay twin.nums.get(4, default:hostValue)\nlet vessel=hostOther\nvessel.amount=4\nsay "AFTER"\nexit\n';
+  assert.throws(
+    () => stopRun(original, walkEnds(original)[0]),
+    (error: unknown) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === "a store whose check was lost at the budget",
+  );
+  const source = original.replace(
+    "let vessel=hostOther",
+    'let vessel=load("v", default: {other: 1})',
+  );
   const unstopped = stopRun(source);
   const stopped = stopRun(source, walkEnds(source)[0]);
   const fallback = source.indexOf("hostValue");
@@ -2037,7 +2082,9 @@ test("the stop oracle refuses a stopped run whose without leaves the run's allow
 /**
  * #1631: a rerun without the run's demand allowance can stop in the same phase, settled, at the same program allowance,
  * yet under another demand allowance none of its decisions stops, so its compile differs. The issue's witness at program
- * allowance 1,886 (2,039 before #1251 made no narrowing index for it) and demand allowance 27: the run's own `without` gives no problem, the uncapped run's is refused.
+ * allowance 1,886 (2,039 before #1251 made no narrowing index for it) and demand allowance 27, whose stopped compile the
+ * candidate now declines (#1832): on its analysis with the reference's plan one text changed, the run's own `without` is
+ * judged, the uncapped run's refused.
  */
 test("the stop oracle refuses a stopped run whose without leaves the run's demand allowance (#1631)", () => {
   const c: HeldCase = {
@@ -2055,9 +2102,53 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
     assert.deepEqual([budget.allowance, budget.stoppedIn, budget.settled], [1886, "walk", true]);
   assert.ok(stopped.answers.budget.decisions.some((d) => d.stopped));
   assert.ok(!uncapped.answers.budget.decisions.some((d) => d.stopped));
+  // (there the candidate may decline the stopped compile, #1526 decision 2, an accepted over-decline, #1832: no completion
+  // tells `root`'s partial check from the natural one; a published plan runs as the natural one)
+  try {
+    const plan = mode.run(() =>
+      withTestDemandAllowance(27, () =>
+        withTestAllowance(1886, () =>
+          compileSourceWithBackend(c.source, { globals: ["hostValue", "hostOther"] }, CORE_BACKEND),
+        ),
+      ),
+    ).plan;
+    const natural = heldRun(c, mode).result.plan!;
+    assert.ok(plan !== null);
+    for (const value of [2, "x", null])
+      assert.deepEqual(
+        runGlobals(plan, { hostValue: value, hostOther: value }),
+        runGlobals(natural, { hostValue: value, hostOther: value }),
+      );
+  } catch (error) {
+    if (error instanceof assert.AssertionError) throw error;
+    assert.ok(error instanceof CandidateOutsideSlice && error.what === LOST_CHECK, String(error));
+  }
+  // (the oracle's scope check, on the stopped analysis with the reference's plan and its `say "BEFORE"` text changed, so
+  // the oracle reruns the stopped run: its own rerun is judged, the uncapped run's refused)
+  // (the reference under demand allowance 27 is declined too, at its decision stop; the natural plan stands for it)
+  const base: StopRun = {
+    ...unstopped,
+    result: { ...unstopped.result, plan: unstopped.result.plan ?? heldRun(c, mode).result.plan },
+  };
+  assert.ok(base.result.plan !== null);
+  const plan = structuredClone(base.result.plan);
+  const pending: unknown[] = [plan];
+  let changed = 0;
+  while (pending.length > 0 && changed === 0) {
+    const node = pending.pop();
+    if (node === null || typeof node !== "object") continue;
+    for (const [key, value] of Object.entries(node))
+      if (value === "BEFORE" && changed === 0) {
+        Reflect.set(node, key, "OTHER");
+        changed += 1;
+      }
+    pending.push(...Object.values(node));
+  }
+  assert.equal(changed, 1);
+  const edited: StopRun = { ...stopped, result: { ...stopped.result, plan } };
   // (a combined stop, judged under its rule: its finishing read answers `first` from its stores' syntax through the copy
   // of `root`, as the natural analysis does, where the demand-only run's read stopped, #1604)
-  const rule = combinedStopRule(c, mode, unstopped, stopped.answers);
+  const rule = combinedStopRule(c, mode, base, stopped.answers);
   const excused = {
     records: new Set([...rule.records.keys(), ...rule.relabelled.records, ...rule.coarse.records]),
     checks: new Set([
@@ -2068,10 +2159,10 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
     ]),
   };
   const judge = (run: StopRun): string[] =>
-    stopProblems({ unstopped, stopped: run, fitting: [], violating: [], excused });
-  assert.deepEqual(judge(stopped), []);
+    stopProblems({ unstopped: base, stopped: run, fitting: [], violating: [], excused });
+  assert.notDeepEqual(judge(edited), []);
   assert.throws(
-    () => judge({ ...stopped, without: uncapped.without }),
+    () => judge({ ...edited, without: uncapped.without }),
     /the demand allowance \d+ at its decision \[\d+,\[[^\]]*\]\], not the run's 27/,
   );
   // (and the reference's rerun without its completion, Codex r1's F1 on #1662: a decision of the reference stopped)
@@ -4774,17 +4865,25 @@ test("a settled stop decides a typed parse's nested default by its syntax, its c
   ]) {
     const unstopped = stopRun(source);
     const [low, high] = walkEnds(source);
-    for (const allowance of [low, Math.floor((low + high) / 2)])
+    for (const allowance of [low, Math.floor((low + high) / 2)]) {
+      // (or declined: the parse's store has no result at a program stop, and only a complete store check keeps it,
+      // #1526 decision 2, an accepted over-decline, #1832)
+      let stopped: StopRun;
+      try {
+        stopped = stopRun(source, allowance);
+      } catch (error) {
+        assert.ok(
+          error instanceof CandidateOutsideSlice && error.what === LOST_CHECK,
+          `@${allowance}`,
+        );
+        continue;
+      }
       assert.deepEqual(
-        stopProblems({
-          unstopped,
-          stopped: stopRun(source, allowance),
-          fitting: [],
-          violating: [],
-        }),
+        stopProblems({ unstopped, stopped, fitting: [], violating: [] }),
         [],
         `@${allowance}`,
       );
+    }
   }
 });
 
@@ -4904,8 +5003,28 @@ test("a stopped decision stays undecided at every reader, also after a settled p
     );
     for (const allowance of [undefined, first, total - 1]) {
       const where = `reversed: ${reversed}, allowance: ${allowance}`;
-      const run = allowance === undefined ? unstopped : capped(() => stopRun(source, allowance));
-      const { answers } = run;
+      // (at a settled program stop the candidate may decline the compile, #1526 decision 2: an accepted over-decline,
+      // #1832, the store check of `tally`'s host value partial and no completion to tell it from the natural plan's; a
+      // published plan runs as the unstopped one; its analysis is judged either way)
+      if (allowance !== undefined)
+        try {
+          const run = capped(() => stopRun(source, allowance));
+          // (a published plan runs as the unstopped one)
+          assert.ok(run.result.plan !== null, where);
+          for (const value of [2, 2.5, "x"])
+            assert.deepEqual(
+              runGlobals(run.result.plan, host(value)),
+              runGlobals(unstopped.result.plan!, host(value)),
+              where,
+            );
+        } catch (error) {
+          if (error instanceof assert.AssertionError) throw error;
+          assert.ok(error instanceof CandidateOutsideSlice && error.what === LOST_CHECK, where);
+        }
+      const answers: Answers =
+        allowance === undefined
+          ? unstopped.answers
+          : capped(() => withTestAllowance(allowance, () => analyseCore(request)));
       assert.equal(answers.budget.settled, true, where);
       assert.ok(
         answers.budget.decisions.some((d) => d.place === tally && d.stopped),
@@ -4929,14 +5048,6 @@ test("a stopped decision stays undecided at every reader, also after a settled p
         ["unknown/16"],
         where,
       );
-      if (allowance !== undefined)
-        assert.deepEqual(
-          capped(() =>
-            stopProblems({ unstopped, stopped: run, fitting: [host(2)], violating: [host(2.5)] }),
-          ),
-          [],
-          where,
-        );
     }
   }
 });
@@ -4952,43 +5063,86 @@ test("a stopped decision stays undecided at every reader, also after a settled p
  * is no unstopped analysis to compare. A host value fits where the unstopped plan runs it: without sharing, 257 decides
  * the element `regex`, which C9 checks the host value against.
  */
-test("a stop adds no boundary below a stopped decision and keeps toJson's checks (#1437)", () => {
+test("a stop adds no boundary below a stopped decision and keeps toJson's checks, or the program is declined (#1437, #1526)", () => {
   const sources = [
     "let root={value:{a:[hostValue otherwise /r/],b:1}}\nlet first=root\nlet second=first\n" +
       "say toJson(first)\nsay toJson(second)\nsay toJson(root)\nexit\n",
     "let n = 1\nsay toJson({a: [hostValue otherwise /r/], b: n})\nexit\n",
   ];
+  // (#1526 decision 2, condition 1, TABLE r4.390: a settled stop whose plan lost the element's check, which the unstopped
+  // plan makes against a host value, is declined; where the reference run at demand 257 is such a stop, a decision's,
+  // each of its stops is declined too, but an unsettled one, which has no registry: option (a), #1767, #1252)
+  const declines = (error: unknown): boolean =>
+    error instanceof CandidateOutsideSlice &&
+    error.what === "a store whose check was lost at the budget";
   let compared = 0;
+  let declined = 0;
+  let unsettled = 0;
   for (const source of sources)
     for (const demand of [null, 257])
       for (const mode of MODES) {
         const inDemand = <T>(make: () => T): T =>
           inMode(mode, () => (demand === null ? make() : withTestDemandAllowance(demand, make)));
-        const unstopped = stopRunIn(inDemand, source);
+        // (each settled phase's ends, and the last stop before admission settled, whose fresh pass asks nothing)
+        const stopsOf = (): (readonly [string, number])[] => [
+          ...[...inDemand(() => settledEnds(source))].flatMap(([phase, ends]) =>
+            ends.map((allowance) => [phase, allowance] as const),
+          ),
+          ["unsettled", inDemand(() => lastUnsettled(source))],
+        ];
+        let unstopped: StopRun;
+        try {
+          unstopped = stopRunIn(inDemand, source);
+        } catch (error) {
+          assert.ok(declines(error), `${source} demand: ${demand}, ${JSON.stringify(mode)}`);
+          for (const [phase, allowance] of stopsOf()) {
+            const where = `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`;
+            try {
+              const stopped = stopRunIn(inDemand, source, allowance);
+              assert.equal(stopped.answers.budget.settled, false, where);
+              unsettled += 1;
+            } catch (stop) {
+              assert.ok(declines(stop), where);
+              declined += 1;
+            }
+          }
+          continue;
+        }
         if (unstopped.answers.budget.exhausted !== null) continue;
         const inputs = [host(1), host(null)];
         const fits = (globals: Globals): boolean =>
           runGlobals(unstopped.result.plan!, globals).failure === null;
-        // (each settled phase's ends, and the last stop before admission settled, whose fresh pass asks nothing)
-        const stops: (readonly [string, number])[] = [
-          ...inDemand(() => settledEnds(source)),
-        ].flatMap(([phase, ends]) => ends.map((allowance) => [phase, allowance] as const));
-        stops.push(["unsettled", inDemand(() => lastUnsettled(source))]);
-        for (const [phase, allowance] of stops) {
+        for (const [phase, allowance] of stopsOf()) {
           compared += 1;
+          const where = `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`;
+          let stopped: StopRun;
+          try {
+            stopped = stopRunIn(inDemand, source, allowance);
+          } catch (error) {
+            assert.ok(declines(error), where);
+            assert.ok(
+              inputs.some((globals) => !fits(globals)),
+              where,
+            );
+            declined += 1;
+            continue;
+          }
           assert.deepEqual(
             stopProblems({
               unstopped,
-              stopped: stopRunIn(inDemand, source, allowance),
+              stopped,
               fitting: inputs.filter(fits),
               violating: inputs.filter((globals) => !fits(globals)),
             }),
             [],
-            `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`,
+            where,
           );
         }
       }
-  assert.equal(compared, 54);
+  // (54 stops: in source order at demand 257, with and without sharing, the first source's reference run stops `root`'s
+  // decisions and loses the `value.a` element's check; of its five stops each, its two walk ends and two publication ends
+  // are declined, and the last unsettled one is option (a)'s)
+  assert.deepEqual({ compared, declined, unsettled }, { compared: 44, declined: 8, unsettled: 2 });
 });
 
 /**

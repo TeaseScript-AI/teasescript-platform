@@ -249,9 +249,10 @@ test("host data inside a stored object literal is captured with its whole store 
  * the store's type unknown, and the receiving completion completes its contract; the plan checks that contract at the
  * store. Judged by what the script does under the demand allowance alone, and at sampled settled stops past it (each
  * phase's first, last and two between): a stop always comes before the completion, which runs after everything that can
- * stop, so there no completion runs and the plan is the settled pass's, as without the completion.
+ * stop, so there no completion runs, and the settled pass's plan, which lets the forbidden value through, is declined
+ * (#1526 decision 2, condition 1), as without the completion.
  */
-test("a stopped decision's store is checked against its completed contract; at a stop the plan is the settled pass's (#1526 phase C)", () => {
+test("a stopped decision's store is checked against its completed contract; at a stop the settled pass's plan is declined (#1526 phase C, decision 2)", () => {
   for (const witness of WITNESSES) {
     const { source } = witness;
     const store = spanOf(source, witness.store);
@@ -285,11 +286,23 @@ test("a stopped decision's store is checked against its completed contract; at a
           assert.notEqual(stopped.budget.exhausted, null, at);
           assert.equal(stopped.budget.closure, null, at);
           assert.deepEqual(stopped.receiving, [], at);
-          const without = withoutRecords(
-            { diagnostic: () => false, check: () => false, completion: true },
+          // (#1526 decision 2, condition 1: there the plan is the settled pass's, whose store check lacks the completed
+          // contract, so the forbidden value would pass; the candidate declines it, as without the completion)
+          for (const run of [
             () => compiled(allowance),
-          );
-          assert.deepEqual(compiled(allowance).plan, without.plan, at);
+            () =>
+              withoutRecords(
+                { diagnostic: () => false, check: () => false, completion: true },
+                () => compiled(allowance),
+              ),
+          ])
+            assert.throws(
+              run,
+              (error) =>
+                error instanceof CandidateOutsideSlice &&
+                error.what === "a store whose check was lost at the budget",
+              at,
+            );
         }
       }
   }
@@ -375,7 +388,7 @@ test("a copy of an inferred place gives the capture its natural contract after a
   }
 });
 
-test("a property whose proof a stop cut leaves its later complete sibling checked (Codex r1 on #1606)", () => {
+test("a property whose proof a stop cut leaves its later complete sibling checked, or the store declined (Codex r1 on #1606, #1526 decision 2)", () => {
   // (`g` decided before the capture by its own store, `f` cut: the later sibling's check stands at the store; `a.f`
   // stored from a loop's element, as above, #1604)
   const source =
@@ -393,7 +406,6 @@ test("a property whose proof a stop cut leaves its later complete sibling checke
     const [result] = storeContracts(answers, request).values();
     if (result?.state !== "lost" || !result.required.every((level) => level.path[0] === f))
       continue;
-    witnessed += 1;
     const at = `stop at ${allowance}`;
     const partial = result.partial;
     assert.ok(partial?.kind === "object", at);
@@ -402,9 +414,24 @@ test("a property whose proof a stop cut leaves its later complete sibling checke
       { kind: "integer" },
       at,
     );
-    const { plan } = withTestAllowance(allowance, () =>
-      compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
-    );
+    // (the stop cut `f`'s proof, so the store's check is the partial one and the obligation has no result: the candidate
+    // declines, #1526 decision 2, Astra r1's B1, where the partial plan would let `{f: [["x"]], g: 3}` through; a
+    // published plan keeps the later sibling's check)
+    let plan;
+    try {
+      ({ plan } = withTestAllowance(allowance, () =>
+        compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+      ));
+    } catch (error) {
+      assert.ok(
+        error instanceof CandidateOutsideSlice &&
+          error.what === "a store whose check was lost at the budget",
+        at,
+      );
+      witnessed += 1;
+      if (witnessed === 2) break;
+      continue;
+    }
     assert.deepEqual(
       storeRunProblems(
         plan!,
@@ -415,6 +442,7 @@ test("a property whose proof a stop cut leaves its later complete sibling checke
       [],
       at,
     );
+    witnessed += 1;
     // (two such stops are enough here; every allowance is the PR's queue evidence)
     if (witnessed === 2) break;
   }
