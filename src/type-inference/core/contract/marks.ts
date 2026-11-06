@@ -1,5 +1,5 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, joinSteps, keptText, pathText } from "../budget.js";
+import { joinParts, joinSteps, keptSteps, keptText, pathText } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keptKey, keyBelow, recordPath, sortCost, type Key } from "../definitions.js";
 import type { Callable } from "../flow-graph.js";
@@ -596,7 +596,7 @@ function marksBelow(contract: Contract, holder: Holder, path: number): boolean {
     for (let at = 0; at < rest.length; at += 1) {
       work.charge("eventSteps");
       if (rest[at] !== ABSENT && !tested.has(rest[at]!))
-        stack.push([asked, joinSteps(rest.slice(0, at), [ABSENT])]);
+        stack.push([asked, keptSteps(contract.work, rest.slice(0, at), [ABSENT])]);
     }
     let where = 0;
     for (let length = 0; ; length += 1) {
@@ -604,7 +604,7 @@ function marksBelow(contract: Contract, holder: Holder, path: number): boolean {
       if (asked.guarded.has(where)) return true;
       for (const reference of asked.refsAt.get(where) ?? []) {
         work.charge("eventSteps");
-        stack.push([reference.to, joinSteps(reference.shift, rest.slice(length))]);
+        stack.push([reference.to, keptSteps(contract.work, reference.shift, rest.slice(length))]);
       }
       if (length === rest.length) break;
       where = pathBelow(contract, where, rest[length]!);
@@ -632,24 +632,21 @@ function marksBelow(contract: Contract, holder: Holder, path: number): boolean {
     if (marksNothing(contract, asked)) continue;
     // (an ask as deep as the holder's depth is one at its first `depthOf` steps, which this walk covers)
     const depth = depthOf(contract, asked);
-    if (depth === Infinity) hit = true;
-    if (hit) break;
+    if (depth === Infinity) {
+      hit = true;
+      break;
+    }
     const rest = asks.length > depth ? asks.slice(0, depth) : asks;
     const name = pathText(rest);
-    const known = asked.below?.get(name);
-    if (known === false) continue;
-    if (known === true) hit = true;
-    else {
-      let names = seen.get(asked);
-      if (names === undefined) seen.set(asked, (names = new Set()));
-      if (names.has(name)) continue;
-      names.add(name);
-      contract.keepText(name.length);
-      visited.push([asked, name]);
-      hit =
-        (asked.reads.length > 0 && (rest.length === 0 || tested.has(rest[0]!))) ||
-        below(asked, rest);
-    }
+    if (asked.below?.get(name) === false) continue;
+    let names = seen.get(asked);
+    if (names === undefined) seen.set(asked, (names = new Set()));
+    if (names.has(name)) continue;
+    contract.keepText(name.length);
+    names.add(name);
+    visited.push([asked, name]);
+    hit =
+      (asked.reads.length > 0 && (rest.length === 0 || tested.has(rest[0]!))) || below(asked, rest);
   }
   if (hit) return true;
   for (const [asked, name] of visited) (asked.below ??= new Map()).set(name, false);
