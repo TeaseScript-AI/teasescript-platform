@@ -36,3 +36,8 @@ export function withValidationTestStatistics<T>(
 export function recordValidationTestWork(name: string, amount = 1): void {
   if (active !== null) active[name] = (active[name] ?? 0) + amount;
 }
+
+/** Records `value` under `name` where it is higher than any recorded there in this session. */
+export function recordValidationTestPeak(name: string, value: number): void {
+  if (active !== null && value > (active[name] ?? 0)) active[name] = value;
+}
