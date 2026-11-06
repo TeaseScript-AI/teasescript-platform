@@ -148,7 +148,7 @@ test("the catalog follows edits that keep a file's size and time, and skips what
   }
 
   const missing = await listening(createPlaygroundServer({ packageRoot: join(root, "absent") }));
-  context.after(() => new Promise((resolve) => missing.close(resolve)));
+  closeAfter(context, missing);
   const response = await get(missing, "/dev-package/catalog.json");
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(response.body.toString("utf8")), {
