@@ -9,6 +9,8 @@
     "player/vue/index.html",
     "player/vue/src/lib/utils.ts",
     "tests/**/*.test.ts",
+    "tests/runtime-pipeline-oracle.oracle.ts",
+    "tests/runtime-oracle-admission.oracle.ts",
     "tests/property/replay.ts",
     "tools/oxlint/{run,test}.mjs",
     "tools/oxlint/check-evidence.test.mjs",
@@ -29,15 +31,6 @@
     "tools/local-agent/**/*.{cjs,mjs}"
   ],
   "ignore": ["tests/fixtures/main-realm-graph/**"],
-  "ignoreDependencies": [
-    "@vue/tsconfig",
-    "shadcn-vue"
-  ],
-  "include": [
-    "files",
-    "exports",
-    "dependencies",
-    "unlisted",
-    "unresolved"
-  ]
+  "ignoreDependencies": ["@vue/tsconfig", "shadcn-vue"],
+  "include": ["files", "exports", "dependencies", "unlisted", "unresolved"]
 }
