@@ -1647,13 +1647,17 @@ test("a read's signature cuts only its source's prefixes with definitions, tagge
   const read = (name: string) => `let ${name}=out[0][0][0][0]`;
   const programs = [
     [head, read("a"), read("b")],
-    // a prefix stored between the reads (they must part), and below or beside the path (they must not)
+    // a prefix stored in a branch between the reads, the parent or one below it: only that prefix's cut parts them
+    [head, read("a"), "if hostValue is integer { out[0]=[[[2]]] }", read("b")],
+    [head, read("a"), "if hostValue is integer { out[0][0]=[[2]] }", read("b")],
+    // the reads in two branches, a prefix stored after both; a store below the path, which the source's own list cuts
+    [head, "if hostValue is integer {", read("a"), "} else {", read("b"), "}", "out[0]=[[[2]]]"],
+    [head, read("a"), "if hostValue is integer { out[0][0][0][0]=2 }", read("b")],
+    // a prefix stored on the straight path, in a loop, by a call another callable makes (`ownedAway`); a store beside
     [head, read("a"), "out[0]=[[[2]]]", read("b")],
-    [head, read("a"), "out[0][0][0][0]=3", read("b")],
-    [head, "let side=[1]", read("a"), "side[0]=2", read("b")],
-    // a prefix stored in a loop and by a call another callable makes (its call site an event, `ownedAway`)
     [head, read("a"), "repeat 2 { out[0][0]=[[4]] }", read("b")],
     [head, "function f { out[0]=[[[5]]] }", read("a"), "f()", read("b")],
+    [head, "let side=[1]", read("a"), "side[0]=2", read("b")],
   ];
   const sig = DefinitionLists.prototype.aliasSignature;
   type Call = {
@@ -1695,7 +1699,9 @@ test("a read's signature cuts only its source's prefixes with definitions, tagge
       for (const reversed of [false, true]) {
         calls = [];
         const source = `${lines.join("\n")}\nexit\n`;
-        inOrder(reversed, () => analyseCore(coreRequest([{ path: "main.tease", source }])!));
+        inOrder(reversed, () =>
+          analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!),
+        );
         // today's signature, every prefix cut untagged: the new one's last field but its prefixes' cuts, then each
         // prefix's of `prefixesOf`, the parent first
         const today = ({ lists, source, node, calls: flag, made }: Call): string => {
@@ -1719,7 +1725,16 @@ test("a read's signature cuts only its source's prefixes with definitions, tagge
               today(one) === today(other),
               `${one.source}\n${source}`,
             );
-            if (one.made !== other.made && one.source.split(".").length > 3) parted += 1;
+            // (a pair that only a prefix's cut parts: without the prefixes' cuts they would share one signature)
+            const rest = (call: Call) => {
+              const fields = call.made.split("|");
+              const own = fields
+                .at(-1)!
+                .split(";")
+                .slice(0, call.calls ? 2 : 1);
+              return [...fields.slice(0, -1), own.join(";")].join("|");
+            };
+            if (one.made !== other.made && rest(one) === rest(other)) parted += 1;
           }
         deep += calls.filter(({ source }) => prefixesOf(source).length >= 4).length;
       }
@@ -1728,5 +1743,5 @@ test("a read's signature cuts only its source's prefixes with definitions, tagge
     Consumers.prototype.check = check;
   }
   assert.ok(deep > 0, "a deep source's signature was asked");
-  assert.ok(parted > 0, "two reads of a deep source were parted");
+  assert.ok(parted > 0, "two reads that a prefix's cut alone parts");
 });
