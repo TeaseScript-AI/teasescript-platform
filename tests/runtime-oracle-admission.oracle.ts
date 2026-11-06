@@ -215,6 +215,9 @@ function fixture(work: string, item: Case, index = ""): Fixture {
   writeTree(deps, {
     "locked/package.json": '{"name":"locked","version":"1.0.0","type":"module","main":"index.js"}',
     "locked/index.js": target("locked"),
+    // An internal scope of the locked package, which stays that package's.
+    "locked/modules/package.json": '{"type":"module"}',
+    "locked/modules/inner.js": target("internal-scope"),
     "locked/nested.js": 'import "./node_modules/unlocked/index.js";\n',
     "locked/node_modules/unlocked/index.js": target("unlocked-nested"),
     "locked/deeper.js": 'import "./lib/node_modules/unlocked/index.js";\n',
@@ -382,14 +385,36 @@ test("the admission family covers every axis value and every pair outside the ex
 
 // Companion families, each generated from its own axis.
 
-const SPELLINGS = {
+/**
+ * A declaration is the root's when (a) its spelling is a root path, not absolute, without `..` and without a
+ * `node_modules` segment, and (b) its real path is the root's own. Each row's `link` (root-relative link to target) is
+ * made first; the last two rows are refused by one condition each.
+ */
+const SPELLINGS: Readonly<
+  Record<
+    string,
+    { readonly file: string; readonly admitted: boolean; readonly link?: readonly [string, string] }
+  >
+> = {
   relative: { file: "dist/src/target.js", admitted: true },
   absolute: { file: "ABSOLUTE", admitted: false },
   "dot-dot": { file: "dist/../dist/src/target.js", admitted: false },
   "node-modules": { file: "dist/src/lib/node_modules/unlocked/index.js", admitted: false },
-} as const;
+  // Only (a) refuses it: the declared path has a `node_modules` segment, its real path is an owned file.
+  "alias-named-node_modules": {
+    file: "dist/src/node_modules/target.js",
+    admitted: false,
+    link: ["dist/src/node_modules", "dist/src/owned"],
+  },
+  // Only (b) refuses it: the declared path is a plain root path, its real path is under a `node_modules` directory.
+  "link-into-node_modules": {
+    file: "dist/src/vendored/index.js",
+    admitted: false,
+    link: ["dist/src/vendored", "dist/src/lib/node_modules/unlocked"],
+  },
+};
 
-for (const [spelling, { file, admitted }] of Object.entries(SPELLINGS))
+for (const [spelling, { file, admitted, link }] of Object.entries(SPELLINGS))
   test(`admission/declaration=${spelling}`, () => {
     const work = scratch();
     try {
@@ -402,6 +427,9 @@ for (const [spelling, { file, admitted }] of Object.entries(SPELLINGS))
         deps: "direct",
       };
       const at = fixture(work.directory, item);
+      writeTree(at.real, { "dist/src/owned/target.js": target("owned") });
+      if (link !== undefined)
+        fs.symlinkSync(path.join(at.real, link[1]), path.join(at.real, link[0]));
       const declared = file === "ABSOLUTE" ? path.join(at.real, "dist/src/target.js") : file;
       const manifest = baselineManifest(item, at);
       const output = { ...manifest.output, [declared]: "0" };
@@ -492,8 +520,39 @@ for (const [installation, { lock, entry, refusal }] of Object.entries(INSTALLATI
     }
   });
 
-/** Each loading mechanism, with how `dist/src/index.js` uses it on the target, and whether it executes the target. */
-const MECHANISMS = {
+/** A `data:` module that would say the sentinel; the sentinel's text never appears in the URL itself. */
+const DATA_MODULE = `data:text/javascript,${encodeURIComponent(
+  `process.stderr.write(${JSON.stringify(SENTINEL.slice(0, 5))} + ${JSON.stringify(`${SENTINEL.slice(5)} data\n`)});`,
+)}`;
+
+/**
+ * Each loading mechanism: how `dist/src/index.js` uses it on its target, whether it executes the target, and what the
+ * target is (`owned`, a file of the root's own, by default; `package`, a locked package's internal scope; `data`, a
+ * `data:` module). Only an owned target can be declared.
+ */
+const MECHANISMS: Readonly<
+  Record<
+    string,
+    {
+      readonly entry: string;
+      readonly executes: boolean;
+      readonly file: string;
+      readonly target?: "owned" | "package" | "data";
+    }
+  >
+> = {
+  "internal-scope": {
+    entry: 'import "locked/modules/inner.js";\n',
+    executes: true,
+    file: "node_modules/locked/modules/inner.js",
+    target: "package",
+  },
+  "data-url": {
+    entry: `import ${JSON.stringify(DATA_MODULE)};\n`,
+    executes: true,
+    file: DATA_MODULE,
+    target: "data",
+  },
   "static-import": { entry: 'import "./target.js";\n', executes: true, file: "dist/src/target.js" },
   "dynamic-import": {
     entry: 'await import("./target.js");\n',
@@ -531,10 +590,18 @@ const MECHANISMS = {
     executes: true,
     file: "dist/src/target.json",
   },
-} as const;
+};
 
-for (const [mechanism, { entry, executes, file }] of Object.entries(MECHANISMS))
-  for (const member of ["listed", "unlisted"] as const)
+/** Whether a mechanism's load is admitted, from what its target is and whether it is declared alone. */
+const mechanismAdmitted = (target: "owned" | "package" | "data", member: "listed" | "unlisted") =>
+  target === "package" || (target === "owned" && member === "listed");
+
+for (const [mechanism, { entry, executes, file, target: kind = "owned" }] of Object.entries(
+  MECHANISMS,
+))
+  for (const member of kind === "owned"
+    ? (["listed", "unlisted"] as const)
+    : (["unlisted"] as const))
     test(`admission/mechanism=${mechanism}/member=${member}`, () => {
       const work = scratch();
       try {
@@ -563,8 +630,9 @@ for (const [mechanism, { entry, executes, file }] of Object.entries(MECHANISMS))
           JSON.stringify([...ENTRIES.map(built), ...(member === "listed" ? [file] : [])]),
         );
         const { status, stderr } = oracle("run.mjs", ["--root", at.root, "--files", files], "[]");
-        // An undeclared target is refused however it is reached; a declared one runs only where the mechanism runs it.
-        if (member === "listed") {
+        // An undeclared owned target, or a `data:` module, is refused however it is reached; an admitted one runs only
+        // where the mechanism runs it.
+        if (mechanismAdmitted(kind, member)) {
           assert.equal(status, 0, stderr);
           assert.equal(stderr.includes(SENTINEL), executes, stderr);
         } else {

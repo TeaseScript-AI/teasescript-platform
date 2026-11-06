@@ -79,9 +79,10 @@ function own(rootInventory, file) {
 
 /**
  * The inventory of `root`: its canonical directory, its locked packages, and the files it declares certified
- * (`declared`, paths relative to `root`). Every declaration is validated before it counts: it is relative and has no
- * `..`, and its real path is a file of the root's own (`own`), so a link out of the root never counts. Each is bound to
- * its real path. Throws naming the first that is not, so a declaration can never widen what the root admits.
+ * (`declared`, paths relative to `root`). Every declaration is validated before it counts: (a) it is relative, with no
+ * `..` and no `node_modules` segment, and (b) its real path is a file of the root's own (`own`), so a link out of the
+ * root never counts. Each is bound to its real path. Throws naming the first that is not, so a declaration can never
+ * widen what the root admits.
  */
 export function inventory(root, declared) {
   const canonical = fs.realpathSync(root);
@@ -89,7 +90,9 @@ export function inventory(root, declared) {
   const files = new Set();
   for (const file of declared) {
     const parts = segments(file);
-    if (path.isAbsolute(file) || parts.includes(".."))
+    // (a) The declared spelling is a root path; (b), below, its real path is the root's own. Each refuses what the
+    // other admits: a link named `node_modules` to an owned directory, and a plain path linked into a package's.
+    if (path.isAbsolute(file) || parts.includes("..") || parts.includes("node_modules"))
       throw new Error(`${canonical}: the declared file '${file}' is not a root path`);
     const at = path.join(canonical, file);
     let real;
