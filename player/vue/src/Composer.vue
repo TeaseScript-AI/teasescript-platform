@@ -270,11 +270,34 @@ function selectInput(): void {
   });
 }
 
-defineExpose({ focusInput, selectInput, openPicker });
+/** Whether the player composes text in a field of the composer with an input method (IME). */
+const composing = ref(false);
+/**
+ * Ends the player's composition, as an answer does before the field turns read-only: the browser ends it, with its
+ * `compositionend`, when the field loses focus, which it then gets back in the same task. What the composition held is
+ * not part of the answer, which is the text of the click.
+ */
+function endComposition(): void {
+  if (!composing.value) return;
+  const element = document.activeElement;
+  if (
+    !(element instanceof HTMLElement) ||
+    (element !== input.value && element !== repeatInput.value)
+  )
+    return;
+  element.blur();
+  element.focus({ preventScroll: true });
+}
+
+defineExpose({ focusInput, selectInput, openPicker, endComposition });
 </script>
 
 <template>
-  <div class="composer-container">
+  <div
+    class="composer-container"
+    @compositionstart.capture="composing = true"
+    @compositionend.capture="composing = false"
+  >
     <p v-if="feedback" :id="feedbackId" class="composer-notice" role="status" aria-live="polite">
       {{ feedback }}
     </p>
