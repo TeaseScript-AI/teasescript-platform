@@ -360,6 +360,24 @@ function guardedRing({
   );
 }
 
+test("a closed ring of copies each marked two steps deep grows its graph and its pending marks with the ring, each by a constant (#1784, Codex r2 B2)", () => {
+  // (k copies, each stored under a two-step test of its source: the same few pending sets at every member, kept once)
+  const ring = (k: number): string => {
+    const last = `p${k - 1}`;
+    const rows = Array.from({ length: k }, (_, i) => `let p${i}={g:{h:${i}}}`);
+    rows.push(`${last}.q=p0`);
+    for (let i = k - 1; i > 0; i--) rows.push(`if p${i - 1}.g.h is integer { p${i}=p${i - 1} }`);
+    rows.push(`p0=${last}`, `${last}=${last}.q`, `say "\${${last}.q.q.g.h}"`, "exit");
+    return rows.join("\n") + "\n";
+  };
+  const sizes = [8, 16, 32].map((k) => analysed(ring(k)));
+  for (const { answers } of sizes) assert.equal(answers.budget.exhausted, null);
+  for (const field of ["nodes", "goals", "edges", "pending"] as const) {
+    const [a, b, c] = sizes.map(({ facts }) => facts[field]);
+    assert.equal(c! - b!, 2 * (b! - a!), `${field}: ${a}, ${b}, ${c}`);
+  }
+});
+
 test("a ring read through a marked copy reaches its check, and its leaves are read marked, in four modes (#1784)", () => {
   // (the issue's source, a second test path, a deeper read, the holder's mark at a rest it does not test)
   for (const source of [
