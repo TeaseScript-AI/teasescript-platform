@@ -177,8 +177,10 @@ function loadFormEditor(current: PlayerFormPresentation | null): boolean {
     return false;
   }
   composerOwner = { actionId: current.actionId, fieldId: current.editor.fieldId };
-  draft.value =
-    typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text;
+  writeField(
+    "input",
+    typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text,
+  );
   return true;
 }
 /** Whether the composer holds the text of the presented form's edited field. */
@@ -283,10 +285,25 @@ const root = ref<HTMLElement | null>(null);
 // The session's area, which a popup that is not modal centres on, beside the Debug panel.
 const composition = computed(() => root.value?.closest<HTMLElement>(".player-composition") ?? null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
-const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
+const composer = ref<{
+  focusInput(): void;
+  selectInput(): void;
+  openPicker(): void;
+  writeField(field: "input" | "repeat", text: string): void;
+} | null>(null);
 const draft = ref("");
 /** The "Repeat password" of a lock's password field, which, like its password, is never kept. */
 const repeated = ref("");
+/**
+ * The one way this component writes the composer's text (`draft`) or its repeat (`repeated`): through the composer's
+ * `writeField`, which ends a composition in that field and then writes the text, also an unchanged one. Only the
+ * composer's own `v-model` writes them otherwise; a test checks that no other code here does.
+ */
+function writeField(field: "input" | "repeat", text: string): void {
+  if (composer.value) composer.value.writeField(field, text);
+  else if (field === "repeat") repeated.value = text;
+  else draft.value = text;
+}
 const feedback = ref("");
 const submitting = ref(false);
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -468,11 +485,13 @@ watch(
         ? typedTexts()?.get(typedKey(actionId.value, ""))
         : undefined;
     if (!loadFormEditor(form.value))
-      draft.value =
+      writeField(
+        "input",
         typedHere ??
-        (presentedInput !== null && "prefill" in presentedInput
-          ? (presentedInput.prefill ?? "")
-          : "");
+          (presentedInput !== null && "prefill" in presentedInput
+            ? (presentedInput.prefill ?? "")
+            : ""),
+      );
     clearFeedback();
     await nextTick();
     // Completion releases the disabled guard after publishing the session.
@@ -568,13 +587,13 @@ async function complete(
     // the field it edits, if any.
     // The composer gives up its field before its text changes, so the change is never typed text of another one.
     if (result.outcome.kind === "updated" || result.outcome.kind === "unchanged") {
-      if (!loadFormEditor(playerRuntimeForm(result.session))) draft.value = "";
+      if (!loadFormEditor(playerRuntimeForm(result.session))) writeField("input", "");
       clearFeedback();
     } else if (result.outcome.kind === "completed") {
       // The answered text goes, unless the next interaction already shows: its prefill or typed text stays.
       if (actionId.value === before) {
         composerOwner = null;
-        draft.value = "";
+        writeField("input", "");
       }
       clearFeedback();
     } else {
@@ -769,10 +788,10 @@ async function imageControl(control: ImageControl) {
 watch(
   () => lockField.value?.key,
   async (key) => {
-    repeated.value = "";
+    writeField("repeat", "");
     // A question or form that came back meanwhile already holds the composer; its text stays.
     if (key !== undefined || actionId.value === undefined) {
-      draft.value = "";
+      writeField("input", "");
       clearFeedback();
     }
     if (key === undefined) return;
@@ -794,7 +813,7 @@ function submit(source: "input" | "button") {
     if (field.busy || draft.value === "") return focusInput();
     // After a mismatch both are typed again: the repeat is emptied, and the password selected, so typing replaces it.
     if (field.repeat && repeated.value !== draft.value) {
-      repeated.value = "";
+      writeField("repeat", "");
       showFeedback(invalidAnswerMessage("passwordMismatch"));
       composer.value?.selectInput();
       return;
