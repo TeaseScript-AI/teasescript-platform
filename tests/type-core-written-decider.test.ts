@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { Admission } from "../src/type-inference/core/admission.js";
@@ -16,7 +18,10 @@ import { inMode, MODES, type Mode } from "./helpers/type-core-oracles.js";
 // decision's own scan staying the stops'. The obligations: the summary answers as the scan does on the same admission;
 // no decision reads it; and after a stop it answers from what is current, as a scan with no memo of its own does.
 
-/** An answer by what a reader takes of it: the term's spelling, the site, the kinds, the join's facts. */
+/**
+ * An answer by what a reader takes of it: the term's spelling, the site, the kinds, the join's facts, and whether the
+ * copy reads its type at its own level (#1901).
+ */
 type Answer = ReturnType<typeof earliestDecider> extends Generator<unknown, infer R> ? R : never;
 const shown = (answer: Answer): string =>
   answer === null
@@ -27,6 +32,7 @@ const shown = (answer: Answer): string =>
         answer.tags ?? null,
         answer.joined ?? null,
         answer.joinedNull ?? null,
+        answer.own ?? null,
       ]);
 
 /** `value`'s decider at `path` asked as `literalElements` asks it: the summary, outside every decision. */
@@ -230,6 +236,62 @@ test("outside a decision the written decider's summary answers each question as 
         });
   assert.ok(asked > 1_000);
   assert.deepEqual(differ.slice(0, 5), []);
+});
+
+/**
+ * #1901's regressions, each a copy whose own level the summary once guessed by the asked path's geometry: an inferred
+ * binding of a join (its element below the joined copy's own level), and a property holding a scalar copy (its own
+ * level); each in both orders and as a join, beside a copy of a copy and a written copy read below its own level.
+ */
+const OWN: readonly string[] = [
+  'let d: integer?[] = [1]\nlet held = d + [2]\nlet xs = held + ["tail"]\nexit\n',
+  'let d: integer?[] = [1]\nlet held = d + [2]\nlet xs = ["tail"] + held\nexit\n',
+  'let d: integer[]?[] = [[1]]\nlet held = d + [[2]]\nlet xs = [held, [["x"]]]\nexit\n',
+  'let atom: string? = "x"\nlet h = {v: atom}\nlet xs = [{v: 1}, h]\nexit\n',
+  'let atom: string? = "x"\nlet h = {v: atom}\nlet xs = [h, {v: 1}]\nexit\n',
+  'let atom: string? = "x"\nlet h = {v: atom}\nlet xs = [[1]] + [h]\nexit\n',
+  'let atom: string? = "x"\nlet h = {v: atom}\nlet g = h\nlet xs = [{v: 1}, g]\nexit\n',
+  'let b: string?[] = ["x"]\nlet xs = [[1], b]\nexit\n',
+];
+
+test("the summary and the scan agree on a copy's own level at every layer the mixed family reaches (#1901)", async () => {
+  // EVIDENCE: the family modules export `cases` (name and source), the families' module contract.
+  const { cases } = (await import(
+    pathToFileURL(resolve(process.cwd(), "tests/families/messages/1765-mixed-family.mjs")).href
+  )) as { cases: readonly (readonly [string, string])[] };
+  // (each path of the source's layers: its list elements and its objects' properties, at most one past its depth)
+  const paths = (source: string, depth: number): string[][] => {
+    const steps = ["element", ...new Set([...source.matchAll(/[{,]\s*(\w+):/g)].map((m) => m[1]!))];
+    const out: string[][] = [[]];
+    for (const path of out)
+      if (path.length <= depth) for (const step of steps) out.push([...path, step]);
+    return out;
+  };
+  const differ: string[] = [];
+  let copies = 0;
+  const ask = (source: string, depth: number, mode: Mode): void => {
+    const seen = new WeakSet<Admission>();
+    atElements(source, mode, (admission) => {
+      if (seen.has(admission)) return;
+      seen.add(admission);
+      for (const d of valued(admission))
+        for (const path of paths(source, depth)) {
+          const [summary, scan] = [routed(admission, d, path), scanned(admission, d, path)];
+          if (summary?.own !== undefined) copies += 1;
+          if (summary?.own !== scan?.own)
+            differ.push(
+              `${d.uid} ${path.join(".")}: ${shown(summary)} ≠ ${shown(scan)}\n${source}`,
+            );
+        }
+    });
+  };
+  for (const source of OWN) for (const mode of MODES) ask(source, 2, mode);
+  const regressions = copies;
+  // (the family's copies: a written binding `c` its side reads, each kind of copy at each layer)
+  for (const [name, source] of cases.filter(([, source]) => source.includes("let c:")))
+    ask(source, Number(name.split("/")[0]!.slice("depth:".length)), MODES[0]!);
+  assert.deepEqual(differ.slice(0, 5), []);
+  assert.ok(regressions > 0 && copies > regressions, `${regressions} ${copies}`);
 });
 
 test("a decision never reads the written decider's summary, so it charges what its scan charges (#1444)", () => {
