@@ -1041,6 +1041,8 @@ interface WrittenCandidate {
   /** A call a list join carries, read by its written result (`Entry.call`). */
   readonly call: boolean;
   readonly depth: number;
+  /** Whether it decides at its own level: no step of the asked path is left below it (#1901). */
+  readonly own: boolean;
 }
 
 /**
@@ -1313,6 +1315,9 @@ export function* writtenDecider(
     if (!member.joined && entry.rank > f.copyRank) continue;
     if (!asksType(admission, f.group, entry, rest === at.length)) continue;
     let term: TypeTerm | null;
+    // (whether the copy decides at its own level, no step of the asked path left below it; a call's result never is a
+    // copy read as an occurrence, #1901)
+    let own = false;
     if (entry.call === true) {
       const key = contract.resultKey(entry.task.value);
       const result = key === null ? null : writtenOf(program.place(keyPlace(key)).kind);
@@ -1323,14 +1328,15 @@ export function* writtenDecider(
               result,
               stepsAfter(keyPath(key!), restSteps(restAfter(entry.task.stop!.strip, at, rest))),
             );
-    } else if (entry.task.inherits !== null)
-      term = yield* inheritedInto(
-        admission,
-        entry.task.inherits.from,
-        restAfter(entry.task.inherits.strip, at, rest),
-        null,
-      );
-    else term = permittedAt(entry.task.stop!.term!, restAfter(entry.task.stop!.strip, at, rest));
+    } else if (entry.task.inherits !== null) {
+      const below = restAfter(entry.task.inherits.strip, at, rest);
+      own = below.length === 0;
+      term = yield* inheritedInto(admission, entry.task.inherits.from, below, null);
+    } else {
+      const below = restAfter(entry.task.stop!.strip, at, rest);
+      own = below.length === 0;
+      term = permittedAt(entry.task.stop!.term!, below);
+    }
     // (a copy reached through operations decides only where they select it, A4)
     if (
       term !== null &&
@@ -1346,6 +1352,7 @@ export function* writtenDecider(
       joined: member.joined,
       call: entry.call === true,
       depth: 0,
+      own,
     };
     const domain = member.joined ? joinedDomain(typeTags(term)) : "kinds";
     merge(
@@ -1370,8 +1377,7 @@ export function* writtenDecider(
       site: siteOf(s.copy.value),
       joined: s.copy.joined,
       joinedNull: s.joinedNull,
-      // (the copy stands at the asked path's end: the path is its own level, as the scan's `own`, #1901)
-      own: s.copy.depth === at.length,
+      own: s.copy.own,
     };
   return s.first === null ? null : { term: null, site: siteOf(s.first.value), tags: s.first.tags };
 }

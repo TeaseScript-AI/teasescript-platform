@@ -269,12 +269,14 @@ export function* earliestDecider(
     readonly key: EvaluationKey;
     readonly term: TypeTerm;
     readonly stop: Stop;
-    readonly length: number;
+    readonly own: boolean;
   } | null = null;
   // (a list join's written operands by `joinedDomain`, each whatever came before or after it: an open one leaves the
   // value open there, one holding `null` makes it optional, Codex r9's B1 on #1310)
   let joinedNull = false;
   const self = admission;
+  // (whether the last copy `termOf` answered decides at its own level, no step of the asked path left below it, #1901)
+  let ownLevel = false;
   function* termOf(stop: Stop, length: number): Inheriting<TypeTerm | null> {
     // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
     // read out of has it alone, and each operation surely gives it)
@@ -284,6 +286,7 @@ export function* earliestDecider(
       at.kind === "span"
         ? at.from(length).after(stop.strip)
         : stepsAfter(stop.strip, stepsFrom(restSteps(asked), length));
+    ownLevel = rest.length === 0;
     const term =
       stop.from === null
         ? permittedAt(stop.term!, rest)
@@ -308,6 +311,7 @@ export function* earliestDecider(
       let term: TypeTerm | null;
       if (stop.term !== null || stop.from !== null) term = yield* termOf(stop, length);
       else {
+        ownLevel = false;
         const key = contract.resultKey(stop.value);
         const result = key === null ? null : writtenOf(program.place(keyPlace(key)).kind);
         term =
@@ -326,14 +330,14 @@ export function* earliestDecider(
       if (domain === "open") return { term, site: siteOf(stop) };
       joinedNull ||= typeTags(term).includes("null");
       if (domain === "kinds" && (copy === null || compareKeys(stop.key, copy.key) < 0))
-        copy = { key: stop.key, term, stop, length };
+        copy = { key: stop.key, term, stop, own: ownLevel };
     }
     for (const stop of written ?? []) {
       program.work.charge("checks");
       if (copy !== null && compareKeys(stop.key, copy.key) > 0) break;
       if (stop.via?.joined === true) continue;
       const term = yield* termOf(stop, length);
-      if (term !== null) copy = { key: stop.key, term, stop, length };
+      if (term !== null) copy = { key: stop.key, term, stop, own: ownLevel };
     }
   }
   const copied = () => ({
@@ -341,7 +345,7 @@ export function* earliestDecider(
     site: siteOf(copy!.stop),
     joined: copy!.stop.via?.joined === true,
     joinedNull,
-    own: copy!.length === at.length,
+    own: copy!.own,
   });
   // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
   const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];
