@@ -46,7 +46,8 @@ subdirectories, Vue typechecking emits nothing, and the clean-build regression u
 
 `npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or
-specific investigation. Do not run a normal and full-output variant by default
+specific investigation. `npm run check:full-output` runs `npm run check`'s stages with `TEST_FULL_OUTPUT=1`, which
+gives every test run in them full output. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
 distinct task-relevant evidence. To see what the checkout's compiler and
 runtime do with one source or a project, run
