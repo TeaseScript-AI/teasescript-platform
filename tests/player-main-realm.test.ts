@@ -85,7 +85,6 @@ test("the walk reads every import form once and stops at Worker-side code", () =
   const fixture = fixtureGraph("player/entry.ts");
   assert.deepEqual(fixture.modules, [
     "player/alias/aliased.ts",
-    "player/bindings.ts",
     "player/entry.ts",
     "player/names.ts",
     "player/panel.vue",
@@ -105,6 +104,8 @@ test("the walk reads every import form once and stops at Worker-side code", () =
 
 test("the walk refuses each loading form it does not model", () => {
   const unmodelled = (form: string) => `the main-realm walk does not model ${form}`;
+  const named =
+    "a binding or reference named `require`: the main-realm walk refuses CommonJS loading; rename it";
   for (const [file, failure] of [
     ["script-src.vue", unmodelled("<script src>")],
     ["setup-src.vue", 'SyntaxError: <script setup> cannot use the "src" attribute'],
@@ -123,10 +124,11 @@ test("the walk refuses each loading form it does not model", () => {
       "ambiguous.ts",
       unmodelled('"./sibling.js", which could name refused/sibling.js or refused/sibling.ts'),
     ],
-    ["require.ts", unmodelled("CommonJS require()")],
-    ["require-alias.ts", unmodelled("CommonJS require()")],
-    ["require-scope.ts", unmodelled("CommonJS require()")],
-    ["require-default.vue", unmodelled("CommonJS require()")],
+    ["require.ts", named],
+    ["require-alias.ts", named],
+    ["require-import.ts", named],
+    ["require-parameter.ts", named],
+    ["require-import-equals.vue", unmodelled("CommonJS require()")],
     ["url.ts", unmodelled("new URL(…, import.meta.url) outside new Worker(…)")],
     ["computed-import.ts", unmodelled("an import() of a computed specifier")],
   ])

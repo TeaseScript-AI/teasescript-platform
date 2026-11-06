@@ -14,7 +14,8 @@ import { compileTemplate, parse as parseSfc } from "vue/compiler-sfc";
  * - local specifiers that name one file.
  *
  * It refuses other SFC forms, other Vite queries and globs, other `new URL(…, import.meta.url)`, CommonJS, and ambiguous
- * or non-code local targets.
+ * or non-code local targets. Main-realm Player code may not use `require` as an identifier: Vite bundles `require()`
+ * calls, and the walk resolves no scopes.
  */
 
 /** An import of a value from a module the main realm may not load: who imports it, from where, and which name. */
@@ -44,76 +45,26 @@ function refuse(label: string, form: string): never {
 }
 
 /**
- * Whether an identifier refers to a binding, rather than being a name that something declares or accesses, a key, or a
- * label. A shorthand property `{ require }` refers to one.
+ * Whether identifier `node` is a property name or key, which neither binds nor refers to anything: `a.require`,
+ * `{ require: … }`, a member named `require`, `{ require: x } = …`, or a module's export of that name. A shorthand
+ * `{ require }` refers to a binding, so it is none.
  */
-function refersToBinding(node: ts.Identifier): boolean {
-  // EVIDENCE: validation: each of these optional fields, where a node kind has it, holds a child node.
-  const parent = node.parent as ts.Node & {
-    name?: ts.Node;
-    propertyName?: ts.Node;
-    label?: ts.Node;
-  };
-  if (ts.isShorthandPropertyAssignment(parent)) return true;
-  return parent.name !== node && parent.propertyName !== node && parent.label !== node;
-}
-
-/**
- * TypeScript's checker over one emitted module alone, with no library or other file: a name it resolves has a declaration
- * in the module, by the language's own scope rules; a global, such as CommonJS's `require`, resolves to nothing.
- */
-function moduleChecker(source: ts.SourceFile): ts.TypeChecker {
-  const host: ts.CompilerHost = {
-    getSourceFile: (name) => (name === source.fileName ? source : undefined),
-    getDefaultLibFileName: () => "lib.d.ts",
-    writeFile: () => {},
-    getCurrentDirectory: () => "/",
-    getCanonicalFileName: (name) => name,
-    useCaseSensitiveFileNames: () => true,
-    getNewLine: () => "\n",
-    fileExists: (name) => name === source.fileName,
-    readFile: () => undefined,
-  };
-  const options: ts.CompilerOptions = {
-    noLib: true,
-    noResolve: true,
-    types: [],
-    target: ts.ScriptTarget.ESNext,
-  };
-  return ts.createProgram({ rootNames: [source.fileName], options, host }).getTypeChecker();
-}
-
-/** Whether `inner` lies within `outer`, both of one source file. */
-const within = (inner: ts.Node, outer: ts.Node): boolean =>
-  inner.pos >= outer.pos && inner.end <= outer.end;
-
-/**
- * Whether identifier `node` refers to a binding the module declares (`checker` from `moduleChecker`). The checker also
- * resolves a parameter's initializer to a declaration in its function's body, which it only reports (TS2373): at run
- * time the parameters cannot see the body, so the name resolves from outside that function instead.
- */
-function declaredInModule(node: ts.Identifier, checker: ts.TypeChecker): boolean {
-  let symbol = ts.isShorthandPropertyAssignment(node.parent)
-    ? checker.getShorthandAssignmentValueSymbol(node.parent)
-    : checker.getSymbolAtLocation(node);
-  for (;;) {
-    const declarations = symbol?.declarations ?? [];
-    if (declarations.length === 0) return false;
-    let hiding: ts.Node | undefined;
-    for (let scope = node.parent; scope !== undefined && hiding === undefined; scope = scope.parent)
-      if (
-        ts.isFunctionLike(scope) &&
-        "body" in scope &&
-        scope.body !== undefined &&
-        scope.parameters.some((parameter) => within(node, parameter)) &&
-        declarations.every((declaration) => within(declaration, scope.body!))
-      )
-        hiding = scope;
-    if (hiding === undefined) return true;
-    symbol = checker
-      .getSymbolsInScope(hiding.parent, ts.SymbolFlags.Value)
-      .find((candidate) => candidate.name === node.text);
-  }
+function isKey(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  return (
+    ((ts.isPropertyAccessExpression(parent) ||
+      ts.isPropertyAssignment(parent) ||
+      ts.isMethodDeclaration(parent) ||
+      ts.isGetAccessorDeclaration(parent) ||
+      ts.isSetAccessorDeclaration(parent) ||
+      ts.isPropertyDeclaration(parent) ||
+      ts.isExportSpecifier(parent)) &&
+      parent.name === node) ||
+    ((ts.isBindingElement(parent) ||
+      ts.isImportSpecifier(parent) ||
+      ts.isExportSpecifier(parent)) &&
+      parent.propertyName === node)
+  );
 }
 
 /** Whether `node` is `import.meta.<name>`. */
@@ -165,7 +116,6 @@ function valueImports(
     true,
     ts.ScriptKind.TS,
   );
-  let checker: ts.TypeChecker | null = null;
   const found: { specifier: string; names: string[] }[] = [];
   const pending: ts.Node[] = [source];
   for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
@@ -198,14 +148,12 @@ function valueImports(
           : clause.elements.map((element) => (element.propertyName ?? element.name).text);
       // `export { type A } from "m"` emits `export {} from "m"`, which still loads `m`.
       found.push({ specifier: node.moduleSpecifier.text, names: names.length > 0 ? names : ["*"] });
-    } else if (
-      ts.isIdentifier(node) &&
-      node.text === "require" &&
-      refersToBinding(node) &&
-      !declaredInModule(node, (checker ??= moduleChecker(source)))
-    ) {
-      // Any reference to the global `require`, not only a direct call: `(require)(…)`, `require!(…)` and an alias too.
-      refuse(label, "CommonJS require()");
+    } else if (ts.isIdentifier(node) && node.text === "require" && !isKey(node)) {
+      // Vite bundles a `require()` call as CommonJS, and the walk resolves no scopes: any binding or reference of the
+      // name is refused, also a local one, so no call of it can pass.
+      throw new Error(
+        `${label}: a binding or reference named \`require\`: the main-realm walk refuses CommonJS loading; rename it`,
+      );
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const [argument] = node.arguments;
       if (argument === undefined || !ts.isStringLiteralLike(argument))
