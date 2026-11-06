@@ -7,6 +7,8 @@ import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { MODES, inMode, stopSet } from "./helpers/type-core-oracles.js";
+import type { WorkFamily } from "./helpers/type-core-families.js";
+import { steepCounters } from "./helpers/type-core-work.js";
 
 /** The parts of `stopSet`'s record the C10 stop rows read. */
 interface StopRecord {
@@ -408,4 +410,48 @@ test("C10 takes a fallback's family from its value's domain where the read canno
         `${name} at ${allowance} ${JSON.stringify(mode)}`,
       );
     }
+});
+
+/** k typed host declarations and one `otherwise` chain of them, with its last fallback (`#1824`'s C10 chains). */
+function chainFamily(
+  name: string,
+  type: string,
+  initial: (i: number) => string,
+  last: string,
+): WorkFamily {
+  return {
+    name,
+    measures: "C10's domain of each link of an `otherwise` chain, at its root and below it",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          ...Array.from({ length: k }, (_, i) => `let v${i}: ${type} = ${initial(i)}`),
+          `say ${Array.from({ length: k }, (_, i) => `v${i}`).join(" otherwise ")} otherwise ${last}`,
+          "exit",
+          "",
+        ].join("\n"),
+      },
+    ],
+  };
+}
+
+test("C10's domain of an otherwise chain is each link's, once per value and path: its work linear (Astra r1 on #1824)", () => {
+  // (a chain of nullable lists or dicts descends into the element, where each link's domain at that path was its whole
+  // earlier chain's: 4k² + 73k + 2 more units than main; beside it the scalar chain and the known-list control)
+  const families = [
+    chainFamily("c10-chain-scalar", "integer?", () => "hostValue", "0"),
+    chainFamily("c10-chain-list", "integer[]?", () => "hostValue", "[0]"),
+    chainFamily("c10-chain-dict", "integer dict?", () => "hostValue", 'dict{"a": 0}'),
+    chainFamily("c10-chain-list-known", "integer[]?", (i) => `[${i}]`, "[0]"),
+  ];
+  const steep: string[] = [];
+  for (const sizes of [
+    [16, 32],
+    [32, 64],
+    [64, 128],
+  ] as const)
+    for (const unshared of [false, true])
+      steep.push(...steepCounters(families, unshared, undefined, sizes));
+  assert.deepEqual(steep, []);
 });

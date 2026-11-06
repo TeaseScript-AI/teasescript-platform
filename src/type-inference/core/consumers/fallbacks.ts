@@ -1,7 +1,7 @@
 import type { PlaceId, SourceSite } from "../../graph.js";
 import { concrete, fits, isExternal, isOpaque, requiredKind } from "../admission.js";
 import { family as oneFamily } from "../admission/kinds.js";
-import { joinParts, joinSteps, keepText } from "../budget.js";
+import { joinParts, joinSteps, keepText, keptParts } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { termAt, typeTags } from "../contract.js";
 import { labelBelow } from "../contract/labels.js";
@@ -80,10 +80,9 @@ export interface Domain {
  * C10's requirement from a domain (r4.150): the kinds the domain of a direct value at `rest` gives its fallback, the
  * join of its non-null members' families, `null` contributing none: what the value retains, its contract's kinds
  * (`quietKinds`: a written variable's, parameter's or call result's type, a copy's of one); `written` where the value
- * has a written type there (`writtenTermOf`). An `otherwise` chain's left value has its operands' contracts joined, so a
- * chain of such reads has their domain. `null` where it gives none: no written or retained type (an unknown
- * read keeps its runtime check), two families or more (the receiving union decides), or only `null`. One charged step;
- * the contract answers it from what it keeps.
+ * has a written type there (`writtenTermOf`). An `otherwise` chain's domain is its operands' joined (`domainKinds`).
+ * `null` where it gives none: no written or retained type (an unknown read keeps its runtime check), two families or
+ * more (the receiving union decides), or only `null`. One charged step per value and path.
  */
 export function domainFamily(
   walk: Consumers,
@@ -96,10 +95,40 @@ export function domainFamily(
   const term = writtenTermOf(walk, value);
   const written = term !== null && termAt(term, rest) !== null;
   if (!written && !unknown) return null;
-  walk.pass.program.work.charge("checks");
-  const kinds = quietKinds(walk, value, rest);
+  const kinds = domainKinds(walk, value, rest);
   // (its `null` contributes no family: C10 reads a direct value's concrete kinds)
   return kinds === null || !oneFamily(kinds) ? null : { kinds, written };
+}
+
+/** Per walk, `domainKinds`'s answer of a value at a path. */
+const DOMAINS = new WeakMap<Consumers, Map<string, readonly ItemTag[] | null>>();
+
+/**
+ * A value's domain's kinds at `rest`, any number of families (`domainFamily`'s), `null` where one is unknown: its
+ * contract's kinds, and an `otherwise` result's its operands' joined, each once per value and path. The chain's contract
+ * at a descendant path walks its operands again at each link (Astra r1 on #1824), so a chain's domain is its links'.
+ */
+function domainKinds(
+  walk: Consumers,
+  value: PlaceId,
+  rest: readonly string[],
+): readonly ItemTag[] | null {
+  const { program } = walk.pass;
+  program.work.charge("checks");
+  let memo = DOMAINS.get(walk);
+  if (memo === undefined) DOMAINS.set(walk, (memo = new Map()));
+  const key = keptParts(program.work, value, rest);
+  const known = memo.get(key);
+  if (known !== undefined) return known;
+  const link = program.opOf.get(value);
+  let found: readonly ItemTag[] | null;
+  if (link?.kind === "fallback") {
+    const left = domainKinds(walk, link.left, rest);
+    const right = left === null ? null : domainKinds(walk, link.right, rest);
+    found = left === null || right === null ? null : [...new Set([...left, ...right])];
+  } else found = quietKinds(walk, value, rest);
+  memo.set(key, found);
+  return found;
 }
 
 /** C10 at one path of the fallback, its label there made by `label`: whether its elements are checked too. */
