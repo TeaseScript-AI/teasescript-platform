@@ -9,6 +9,7 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
 import { withTestDemandAllowance, WorkLedger } from "../src/type-inference/core/budget.js";
 import { inMode, MODES, publication, settledAnswers } from "./helpers/type-core-oracles.js";
 import { marked } from "../src/type-inference/core/guards.js";
+import { itemScope } from "./helpers/type-core-items.js";
 import {
   CONTEXT_WORDS,
   makeItem,
@@ -407,7 +408,7 @@ test("where the native reader ends, a read through a marked copy answers what it
 });
 
 test("marking a route's leaves before their join is marking their join, except where a late context meets none (#1784 HEAD 1)", () => {
-  const scope = { work: new WorkLedger(), ingress: { union: (a: unknown, b: unknown) => a ?? b } };
+  const scope = itemScope();
   const late = new Set(CONTEXT_WORDS.slice(CONTEXT_WORDS.indexOf("branch") + 1));
   const variants = (tag: Item["tag"]): Item[] =>
     [null, ...CONTEXT_WORDS].flatMap((context) =>
@@ -430,8 +431,8 @@ test("marking a route's leaves before their join is marking their join, except w
     for (const one of variants(tag))
       for (const other of variants(tag)) {
         pairs += 1;
-        const joinedThenMarked = marked(mergeItems([one, other], scope as never));
-        const markedThenJoined = mergeItems(marked([one, other]), scope as never);
+        const joinedThenMarked = marked(mergeItems([one, other], scope));
+        const markedThenJoined = mergeItems(marked([one, other]), scope);
         const condition =
           tag === "unknown" ||
           ![one, other].some((item) => item.context !== null && late.has(item.context));
