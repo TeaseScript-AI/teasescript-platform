@@ -266,10 +266,14 @@ test("each family's objects queries at its members' path cost what the family's 
 test("after the analysis stops, an objects query covers no read: its unfinished queries decline (#1747)", () => {
   for (const shape of SHAPES) {
     const mode = MODES[0]!;
-    // (an allowance the family exceeds: the pass stops, and every demand after it finishes as it stood)
-    const passes = passesOf(family(shape, 8, true), mode, 2_000);
-    const pass = passes.at(-1)!;
-    assert.ok(pass.program.work.stopped !== null, shape);
+    // (an allowance the family exceeds once its checks have begun: the pass stops, and every demand after it finishes
+    // as it stood)
+    const source = family(shape, 8, true);
+    const total = passesOf(source, mode).at(-1)!.program.work.total;
+    const pass = [0.9, 0.8, 0.7, 0.6, 0.5]
+      .map((part) => passesOf(source, mode, Math.floor(total * part)).at(-1))
+      .find((each) => each !== undefined && each.program.work.stopped !== null);
+    assert.ok(pass !== undefined, shape);
     inMode(mode, () => {
       for (const literal of members(pass))
         assert.equal(
