@@ -57,10 +57,10 @@ type FNode =
   /** #1784: `inner` reached through a marking route: its leaves `marked`. */
   | { readonly kind: "mark"; readonly inner: number }
   /**
-   * #1784: `inner` (neither marked nor held) reached below entries whose holders' marks the rest decides: each holder
-   * with the steps taken since its entry, one per holder and steps, in their names' order.
+   * #1784: `inner` (neither marked nor held) reached below entries whose holders' marks the rest decides: its pending
+   * set (`internPending`), each holder with the steps taken since its entry, once.
    */
-  | { readonly kind: "hold"; readonly inner: number; readonly pending: readonly Pending[] };
+  | { readonly kind: "hold"; readonly inner: number; readonly set: number };
 
 /** A holder's mark not decided yet, and the steps taken since its entry (`decide`). */
 interface Pending {
@@ -149,6 +149,16 @@ class Frontier {
   draining = false;
   /** #1784: each mark holder a hold names, by its number in this graph. */
   readonly holders = new Map<Holder, number>();
+  /**
+   * #1784: the pending sets holds carry, interned apart from their nodes (`internPending`): their members, ids by their
+   * names; per set and step, its advance (`advance`); per pair, their union; per set, whether it marks where a path
+   * ends (`stateOf`).
+   */
+  readonly pendingSets: (readonly Pending[])[] = [];
+  readonly pendingIds = new Map<string, number>();
+  readonly advances = new Map<number, Map<string, Decision>>();
+  readonly unions = new Map<string, number>();
+  readonly endMarks = new Map<number, boolean>();
 
   public constructor(readonly contract: Contract) {}
 }
@@ -343,16 +353,38 @@ function markNode(frontier: Frontier, inner: number): number {
 interface Decision {
   /** One of them marks at the steps taken: every node is reached marked. */
   readonly marked: boolean;
-  /** Those not decided yet, each once by holder and steps, with their names (`pendingBelow`'s identity). */
-  readonly rest: ReadonlyMap<string, Pending>;
+  /** The set of those not decided yet (`internPending`), or -1 for none. */
+  readonly rest: number;
+}
+
+/** A pending mark's name: its holder's number and its steps. */
+function pendingName(frontier: Frontier, each: Pending): string {
+  let holder = frontier.holders.get(each.holder);
+  if (holder === undefined) frontier.holders.set(each.holder, (holder = frontier.holders.size));
+  return JSON.stringify([holder, each.steps]);
+}
+
+/** #1784: a set of pending marks by their names, interned once: its id; -1 for none. */
+function internPending(frontier: Frontier, byName: ReadonlyMap<string, Pending>): number {
+  if (byName.size === 0) return -1;
+  const names = [...byName.keys()].sort();
+  const name = JSON.stringify(names);
+  const known = frontier.pendingIds.get(name);
+  if (known !== undefined) return known;
+  step(frontier, names.length);
+  frontier.contract.keepText(name.length);
+  const id = frontier.pendingSets.length;
+  frontier.pendingSets.push(names.map((each) => byName.get(each)!));
+  frontier.pendingIds.set(name, id);
+  return id;
 }
 
 /**
  * #1784: what holders' marks newly pending at a step make of the nodes they reach, decided once (it depends on the
  * holders and the steps, never the node): a holder whose steps reach its depth is decided (`marksAt` asks no more of
- * them), marked marking every node, unmarked dropped; the rest stay pending, each once by holder and steps (a mark is
- * idempotent, so a holder pending twice at one steps is pending once). A holder whose depth no bound holds declines
- * (`marks-depth`).
+ * them), marked marking every node, unmarked dropped; the rest stay pending, one set of them, each once by holder and
+ * steps (a mark is idempotent, so a holder pending twice at one steps is pending once). A holder whose depth no bound
+ * holds declines (`marks-depth`).
  */
 function decide(frontier: Frontier, adds: readonly Pending[]): Decision {
   const { contract } = frontier;
@@ -362,39 +394,61 @@ function decide(frontier: Frontier, adds: readonly Pending[]): Decision {
     const depth = depthOf(contract, each.holder);
     if (depth === Infinity) throw new Decline("marks-depth");
     if (each.steps.length >= depth) {
-      if (marksAt(contract, each.holder, each.steps)) return { marked: true, rest };
+      if (marksAt(contract, each.holder, each.steps)) return { marked: true, rest: -1 };
       continue;
     }
-    let holder = frontier.holders.get(each.holder);
-    if (holder === undefined) frontier.holders.set(each.holder, (holder = frontier.holders.size));
-    rest.set(JSON.stringify([holder, each.steps]), each);
+    rest.set(pendingName(frontier, each), each);
   }
-  return { marked: false, rest };
+  return { marked: false, rest: internPending(frontier, rest) };
+}
+
+/** #1784: a pending set one step further (`decide` of its marks with the step taken), once per set and step. */
+function advance(frontier: Frontier, set: number, s: string): Decision {
+  let bySteps = frontier.advances.get(set);
+  const known = bySteps?.get(s);
+  if (known !== undefined) return known;
+  const work = frontier.contract.work;
+  const decision = decide(
+    frontier,
+    frontier.pendingSets[set]!.map(({ holder, steps }) => ({
+      holder,
+      steps: keptSteps(work, steps, [s]),
+    })),
+  );
+  if (bySteps === undefined) frontier.advances.set(set, (bySteps = new Map()));
+  bySteps.set(s, decision);
+  return decision;
+}
+
+/** #1784: the union of two pending sets, once per pair. */
+function unionPending(frontier: Frontier, a: number, b: number): number {
+  if (a < 0 || a === b) return b;
+  if (b < 0) return a;
+  const name = a < b ? `${a},${b}` : `${b},${a}`;
+  const known = frontier.unions.get(name);
+  if (known !== undefined) return known;
+  const byName = new Map<string, Pending>();
+  for (const each of [...frontier.pendingSets[a]!, ...frontier.pendingSets[b]!]) {
+    step(frontier);
+    byName.set(pendingName(frontier, each), each);
+  }
+  const id = internPending(frontier, byName);
+  frontier.unions.set(name, id);
+  return id;
 }
 
 /**
- * #1784: `node` reached with a decision's marks: marked where it marks; else its pending marks with the decision's
- * still pending, their union (a whole-copy cycle adding the same ones again adds nothing new); a node with none pending
- * is its own.
+ * #1784: `node` reached with a decision's marks: marked where it marks; else its pending set with the decision's, their
+ * union (a whole-copy cycle adding the same ones again adds nothing new); a node with none pending is its own.
  */
 function pendingBelow(frontier: Frontier, node: number, decision: Decision): number {
   const at = frontier.nodes[node]!;
   if (at.kind === "mark") return node;
   const inner = at.kind === "hold" ? at.inner : node;
   if (decision.marked) return markNode(frontier, inner);
-  if (decision.rest.size === 0) return node;
-  const byName = new Map(decision.rest);
-  if (at.kind === "hold")
-    for (const each of at.pending) {
-      step(frontier);
-      byName.set(JSON.stringify([frontier.holders.get(each.holder)!, each.steps]), each);
-    }
-  const names = [...byName.keys()].sort();
-  return nodeId(frontier, JSON.stringify(["H", inner, names]), () => ({
-    kind: "hold",
-    inner,
-    pending: names.map((name) => byName.get(name)!),
-  }));
+  if (decision.rest < 0) return node;
+  const set = at.kind === "hold" ? unionPending(frontier, at.set, decision.rest) : decision.rest;
+  return nodeId(frontier, joinParts("H", inner, set), () => ({ kind: "hold", inner, set }));
 }
 
 /** An entry, or a literal's read: its guard bit, its mark holder and its ingress (`annotated`'s). */
@@ -454,10 +508,8 @@ function selfMarks(
     else if (!marksNothing(contract, entry.holder))
       pending.push({ holder: entry.holder!, steps: [s] });
   }
-  const decision: Decision = guarded
-    ? { marked: true, rest: new Map() }
-    : decide(frontier, pending);
-  if (!decision.marked && decision.rest.size === 0) return;
+  const decision: Decision = guarded ? { marked: true, rest: -1 } : decide(frontier, pending);
+  if (!decision.marked && decision.rest < 0) return;
   below(frontier, root, [s], 0, (found) => into(pendingBelow(frontier, found, decision)));
 }
 
@@ -616,13 +668,7 @@ function rules(frontier: Frontier, goal: Goal): void {
   if (node.kind === "mark")
     return below(frontier, node.inner, [s], 0, (found) => into(markNode(frontier, found)));
   if (node.kind === "hold") {
-    const decision = decide(
-      frontier,
-      node.pending.map(({ holder, steps }) => ({
-        holder,
-        steps: keptSteps(contract.work, steps, [s]),
-      })),
-    );
+    const decision = advance(frontier, node.set, s);
     return below(frontier, node.inner, [s], 0, (found) =>
       into(pendingBelow(frontier, found, decision)),
     );
@@ -861,6 +907,18 @@ function termOf(frontier: Frontier, id: number): { leaves: number[]; next: numbe
   return { leaves, next };
 }
 
+/** #1784: whether a pending set marks where a path ends (one of its holders' marks at its steps), once per set. */
+function endMarks(frontier: Frontier, set: number): boolean {
+  const known = frontier.endMarks.get(set);
+  if (known !== undefined) return known;
+  const marks = frontier.pendingSets[set]!.some(({ holder, steps }) => {
+    step(frontier);
+    return marksAt(frontier.contract, holder, steps);
+  });
+  frontier.endMarks.set(set, marks);
+  return marks;
+}
+
 /**
  * #1784: a node as `leavesOf` reads it, a state: a marked node is its inner node's marked, a held one its inner node's
  * as its holder's mark at the steps taken (the path ends there) decides; twice the node, plus one where marked.
@@ -873,11 +931,7 @@ function stateOf(frontier: Frontier, start: number, mark: boolean): number {
     if (at.kind === "mark" || at.kind === "hold") step(frontier);
     if (at.kind === "mark") [node, marked] = [at.inner, true];
     else if (at.kind === "hold") {
-      if (
-        !marked &&
-        at.pending.some(({ holder, steps }) => marksAt(frontier.contract, holder, steps))
-      )
-        marked = true;
+      if (!marked && endMarks(frontier, at.set)) marked = true;
       node = at.inner;
     } else return node * 2 + (marked ? 1 : 0);
   }
