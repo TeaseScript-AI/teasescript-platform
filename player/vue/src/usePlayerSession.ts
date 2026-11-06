@@ -2361,6 +2361,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           if (disposed || owner !== activationToken)
             throw new Error("A replaced Continue goes no further.");
         };
+        // Continue records the zone, presentation and clock of the click (#1886), before any reply. A capture that
+        // throws fails the Continue where it failed before: after its recording began, so the failure's recording is
+        // the restored session's, not the previous one's.
+        let capture: ReturnType<typeof temporalCapture> | null = null;
+        let captureError: unknown;
+        try {
+          capture = temporalCapture();
+        } catch (error) {
+          captureError = error;
+        }
         // The recording of a restored session starts from the state it continues, and so does a new trace epoch.
         await host.request(restored, "beginRecording", null);
         owned();
@@ -2381,7 +2391,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             setPlayerRuntimeDebugMode(held, debugMode),
           ).session;
         applyRandomControl(continued);
-        await host.request(continued, "continue", { capture: temporalCapture() });
+        if (capture === null) throw captureError;
+        await host.request(continued, "continue", { capture });
         owned();
         return host.latest(continued) ?? continued;
       },

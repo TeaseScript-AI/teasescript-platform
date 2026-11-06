@@ -15,6 +15,7 @@ import type {
 import type * as RuntimeView from "../player/runtime-view.js";
 import type { PlayerSession } from "../player/runtime-view.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
+import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 /*
@@ -52,6 +53,7 @@ let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
   readonly debugHistorySpill: () => Promise<null>;
   readonly resolveAsset?: (path: string) => string | null;
+  readonly temporalContext?: () => TemporalContext;
 }) => StopHost;
 let facade: typeof InProcess;
 let compiler: typeof CompileProject;
@@ -78,6 +80,7 @@ async function mount(
   context: TestContext,
   delayMs = 50,
   resolveAsset?: (path: string) => string | null,
+  temporalContext?: () => TemporalContext,
 ) {
   const surface = {
     document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
@@ -105,6 +108,7 @@ async function mount(
       bridge: Promise.resolve(bridge),
       debugHistorySpill: async () => null,
       ...(resolveAsset === undefined ? {} : { resolveAsset }),
+      ...(temporalContext === undefined ? {} : { temporalContext }),
     }),
   )!;
   context.after(() => {
@@ -529,4 +533,30 @@ test("a jump another publication overtook seeks media to what shows, not to the 
     audio.currentTime * 1_000,
     view.playerRuntimeMedia(shown.state).media[0]!.playheadMs,
   );
+});
+
+test("a Continue whose capture throws fails after its recording began, so the failure's recording is its own", async (context) => {
+  // The zone and presentation are read at the click; this one throws only for the Continue.
+  let failing = false;
+  const { bridge, player } = await mount(context, 50, undefined, () => {
+    if (failing) throw new TypeError("no time zone");
+    return DEFAULT_TEMPORAL_CONTEXT;
+  });
+  // A session that played before, whose recording the host's recorder held.
+  player.prepare(factory('say "earlier", instant\nshowButton "Next"\nexit'));
+  await player.activate();
+  const earlier = player.session.value!;
+  assert.equal(facade.heldRecording(bridge)?.plan, facade.heldPlan(bridge, earlier.planToken));
+  const restored = compiler.createPlayerRuntimeSession(
+    'say "restored", instant\nshowButton "Next"\nexit',
+  );
+  player.prepareRestore(restored);
+  failing = true;
+  await player.activate();
+  for (let index = 0; index < 10; index += 1) await turn();
+  assert.equal(player.hostError.value, "TypeError");
+  // The recording is the restored session's, which the failed Continue began; not the earlier session's.
+  const recording = facade.heldRecording(bridge)!;
+  assert.notEqual(recording.plan, facade.heldPlan(bridge, earlier.planToken));
+  assert.equal(JSON.stringify(recording.plan).includes("restored"), true);
 });
