@@ -564,6 +564,13 @@ test("where the native reader ends, a read through a marked route answers what i
   const plain = ["let p0={g:0}", "let p1={g:1}", "let p2={g:2}"];
   const nested = ["let p0={g:{h:0}}", "let p1={g:{h:1}}", "let p2={g:{h:2}}"];
   const deep = ["let x={a:{b:{c:1}}}", 'if x.a.b.c is integer { say "x" }', ...plain];
+  const referred = [
+    "let x={h:0}",
+    "let p0={g:{h:9}}",
+    "if x.h is integer { p0={g:x} }",
+    "let p1={g:{h:1}}",
+    "let p2={g:{h:2}}",
+  ];
   const controls = [
     // a holder's mark (a test of the copy's source below it), read at the tested path, beside it, and whole
     guardedRing({ closing: false }),
@@ -577,6 +584,9 @@ test("where the native reader ends, a read through a marked route answers what i
     ring(...nested, "if p0.g.h is integer { p1=p0 }", 'let w=p2.q.q.g\nsay "${w.h}"'),
     ring(...deep, "if p0.g is integer { p1=p0 }", 'say "${p2.q.q.g}"'),
     ring(...deep, "if p0.g is integer { p1=p0 }", 'let w=p2.q.q\nsay "${w.g}"'),
+    // a mark through a reference: a literal's cell read inside a test of its value, below the path's first step
+    ring(...referred, "p1=p0", 'say "${p2.q.q.g.h}"'),
+    ring(...referred, "p1=p0", 'let w=p2.q.q.g\nsay "${w.h}"'),
     // a marked copy of a literal whose leaf is an operation's (a native value): declined, read natively
     guardedRing({ closing: false, leaf: "{g:hostValue+1}" }),
   ];
