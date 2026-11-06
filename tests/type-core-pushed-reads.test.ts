@@ -4,7 +4,12 @@ import test from "node:test";
 import type { CorePass } from "../src/type-inference/core/answers.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { Consumers } from "../src/type-inference/core/consumers.js";
-import { pushedFacts, withoutPushedReads } from "../src/type-inference/core/contract/frontier.js";
+import {
+  pushedFacts,
+  pushedInvariant,
+  withoutMarkPruning,
+  withoutPushedReads,
+} from "../src/type-inference/core/contract/frontier.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { withTestDemandAllowance, WorkLedger } from "../src/type-inference/core/budget.js";
 import { inMode, MODES, publication, settledAnswers } from "./helpers/type-core-oracles.js";
@@ -74,7 +79,8 @@ function analysed(source: string, mode = MODES[0]!, oracle: "native" | number | 
     const answers =
       oracle === null ? run() : withoutPushedReads(run, oracle === "native" ? null : oracle);
     const all = passes.map((pass) => pushedFacts(pass.contract));
-    return { answers, facts: all.at(-1)!, all, settled: passes.map(settledAnswers) };
+    const invariants = passes.map((pass) => pushedInvariant(pass.contract));
+    return { answers, facts: all.at(-1)!, all, invariants, settled: passes.map(settledAnswers) };
   } finally {
     Consumers.prototype.check = check;
   }
@@ -402,6 +408,75 @@ test("a closed ring of copies each marked nine steps deep reaches its check, its
       withoutPushedReads(() => publication(files, mode, GLOBALS), steps.length + 8),
     );
   }
+});
+
+/**
+ * #1784's family of held marks: a ring of `n` members, each a literal `d` steps deep, the last holding the first at `q`;
+ * `m` of the copies stored under a test `d` steps below their source; `closed` with the first copying the last back;
+ * read at `q.q` and the `d` steps.
+ */
+function heldRing(n: number, d: number, m: number, closed: boolean): string {
+  const steps = Array.from({ length: d }, (_, i) => `s${i}`);
+  const literal = (value: number): string =>
+    steps.reduceRight((inner, step) => `{${step}:${inner}}`, String(value));
+  const last = `p${n - 1}`;
+  const path = steps.join(".");
+  const rows = Array.from({ length: n }, (_, i) => `let p${i}=${literal(i)}`);
+  rows.push(`${last}.q=p0`);
+  for (let i = n - 1; i > 0; i--)
+    rows.push(i <= m ? `if p${i - 1}.${path} is integer { p${i}=p${i - 1} }` : `p${i}=p${i - 1}`);
+  if (closed) rows.push(`p0=${last}`);
+  rows.push(`${last}=${last}.q`, `say "\${${last}.q.q.${path}}"`, "exit");
+  return rows.join("\n") + "\n";
+}
+
+test("a ring's held marks are one pending set per goal and base node, a mark that cannot mark dropped, in four modes (#1784)", () => {
+  // (a sample of the family the queue runs whole: one doubling of the ring, the depth and the marked copies)
+  const pending = (analysis: ReturnType<typeof analysed>): string =>
+    JSON.stringify(
+      analysis.settled.map((answers) => [...answers].filter(([key]) => key.startsWith("pr|"))),
+    );
+  for (const n of [3, 6])
+    for (const d of [2, 4])
+      for (const m of [1, n - 1])
+        for (const closed of [false, true]) {
+          const source = heldRing(n, d, m, closed);
+          const files = [{ path: "main.tease", source }];
+          // (native exact where it ends; where it does not, below the read's whole path and eight more)
+          const horizon = closed ? d + 8 : null;
+          for (const mode of MODES) {
+            const pushed = analysed(source, mode);
+            const label = `n ${n}, d ${d}, m ${m}, closed ${closed}, ${JSON.stringify(mode)}`;
+            assert.equal(pushed.answers.budget.exhausted, null, label);
+            for (const { violations, largest } of pushed.invariants) {
+              assert.deepEqual(violations, [], label);
+              // (the marks still pending at a node: one per marked copy, whatever the depth)
+              assert.ok(largest <= m, `${label}: ${largest}`);
+            }
+            // (a dropped mark is one no path below it marks: the marks and the publication as with every one kept)
+            assert.equal(
+              pending(pushed),
+              pending(withoutMarkPruning(() => analysed(source, mode))),
+              label,
+            );
+            const native = analysed(source, mode, horizon ?? "native");
+            assert.ok(
+              pushed.answers.budget.total <= native.answers.budget.total,
+              `${label}: ${pushed.answers.budget.total} > ${native.answers.budget.total}`,
+            );
+            const published = publication(files, mode, GLOBALS);
+            assert.equal(
+              published,
+              withoutPushedReads(() => publication(files, mode, GLOBALS), horizon),
+              label,
+            );
+            assert.equal(
+              published,
+              withoutMarkPruning(() => publication(files, mode, GLOBALS)),
+              label,
+            );
+          }
+        }
 });
 
 test("a ring read through a marked copy reaches its check, and its leaves are read marked, in four modes (#1784)", () => {
