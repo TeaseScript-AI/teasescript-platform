@@ -257,7 +257,7 @@ test("a flat form is decoded only when it is whole; anything else passes as it c
   const good = { v: BRIDGE_VERSION, kind: "nested", nodes: [{ a: 0 }, [1]], links: [0, "a", 1] };
   assert.deepEqual(decodeMessage(structuredClone(good)), { a: [1] });
   for (const bad of [
-    { ...good, links: [1, "length", 0] },
+    { ...good, links: [0, "a", 1, 1, "length", 0] },
     { ...good, links: [0, "a", 2] },
     { ...good, links: [0, "b", 1] },
     { ...good, links: [0, "a"] },
