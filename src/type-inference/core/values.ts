@@ -27,7 +27,8 @@ import {
   type CanonicalKey,
   isPathSteps,
   isSteps,
-  type PathRef,
+  keyIdAt,
+  type PathSteps,
   keyStepsIn,
   type Rest,
   someStep,
@@ -36,7 +37,9 @@ import {
   stepsArray,
   stepsFrom,
   stepsJoin,
+  stepsOfId,
   stepsRest,
+  stepsText,
   stepsTo,
   type Steps,
 } from "./contract/key-ids.js";
@@ -156,8 +159,6 @@ function copyMethod(c: ValueConstraint): c is CopyOperation {
 export class Values {
   /** The route each read took, by key, node and `before`, recorded as the read is answered. */
   readonly #routes = new Map<string, ReadRoute>();
-  /** Each path a read asks at as an array, as its arena span (`valueItems`): made once in this pass, charged (#1857). */
-  readonly #asked = new WeakMap<readonly string[], PathRef>();
   /** Per read, the narrowing it takes (`#narrowingOf`), and per place, its stable chain's binding (`#stableBinding`). */
   readonly #narrowings = new Map<PlaceId, NarrowedRead | null>();
   readonly #narrowingsBelow = new Map<PlaceId, Map<string, NarrowedRead | null>>();
@@ -569,18 +570,6 @@ export class Values {
 
   /** The value of a place at a node, read at the path `rest` below it. */
   public valueItems(value: PlaceId, node: FlowNode | null, asked: Rest): Work<readonly Item[]> {
-    // (a path asked as an array read as its arena span, made once per array in this pass: the demands below it are
-    // named by its path's id, never by its text, and its steps are views of the arena's, never copies, #1857)
-    if (isSteps(asked) && asked.length > 0) {
-      let span = this.#asked.get(asked);
-      if (span === undefined) {
-        const { contract } = this.pass;
-        span = spanRef(contract, contract.pathIdOf(asked));
-        contract.keep(1);
-        this.#asked.set(asked, span);
-      }
-      asked = span;
-    }
     // (G3 stage 1: a cursor's span read by its path's id)
     if (!isSteps(asked) && asked.kind === "span") return this.valueItemsAt(value, node, asked.id());
     const rest = isSteps(asked) ? asked : asked.steps();
@@ -1111,8 +1100,7 @@ export class Values {
   *#literalItems(literal: PlaceId, rest: Steps, node: FlowNode | null): Work<readonly Item[]> {
     const site = this.pass.program.places[literal]?.site ?? null;
     return yield {
-      // (the path by its id, a span's name: a key's length no longer grows with its path's, #1857)
-      key: joinParts("lit", literal, `.${this.#pathId(rest)}`, node?.id ?? "-"),
+      key: joinParts("lit", literal, this.#pathPart(rest), node?.id ?? "-"),
       kind: "value",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -1133,13 +1121,17 @@ export class Values {
    * An operation's value at a path: a demand per result and path, and one for every path below a computed-key load's
    * root, where F19 gives host data whatever the path (`operationValue`; #1203: `loadsBelow`).
    */
-  *#operationItems(c: ValueConstraint, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
+  *#operationItems(c: ValueConstraint, node: FlowNode | null, asked: Steps): Work<readonly Item[]> {
     const site = this.pass.program.places[c.result]?.site ?? c.site;
+    // (a copy of a collection's elements carries its path down as the arena's steps, made once here, so the carriers
+    // below it name and extend one record, never a longer array and its text at each, #1857)
+    const rest =
+      copyMethod(c) && !isPathSteps(asked) && asked.length > 0 ? this.#stepsOf(asked) : asked;
     const below = rest.length > 0 && c.kind === "load" && c.key === null;
     const items = yield {
       key: below
         ? joinParts("op-below", c.result)
-        : joinParts("op", c.result, `.${this.#pathId(rest)}`),
+        : joinParts("op", c.result, this.#pathPart(rest)),
       kind: "value",
       file: site.file,
       offset: site.start,
@@ -1154,9 +1146,18 @@ export class Values {
     return below ? [...items, ...emptyAt(rest)] : items;
   }
 
-  /** The arena id of a path a demand is named by: a record's own, an array's found (`Contract.pathIdOf`, #1857). */
-  #pathId(rest: Steps): number {
-    return isPathSteps(rest) ? rest.path : this.pass.contract.pathIdOf(rest);
+  /**
+   * A path as a value demand's name has it: a record's by its id, a span's name (`.id`), whose length does not grow with
+   * the path's; an array's by its text, as before (#1857).
+   */
+  #pathPart(rest: Steps): string {
+    return isPathSteps(rest) ? `.${rest.path}` : stepsText(rest);
+  }
+
+  /** The arena's steps of an array's path (`stepsOfId`), each step made or found once (`Contract.pathIdOf`). */
+  #stepsOf(steps: readonly string[]): PathSteps {
+    const { contract } = this.pass;
+    return stepsOfId(contract, keyIdAt(0, contract.pathIdOf(steps)));
   }
 
   /**
