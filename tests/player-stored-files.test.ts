@@ -13,6 +13,7 @@ import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
 import type { PlayerSession } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
 import { answerFileStore } from "../player/stored-files.js";
 import type {
   RuntimeFileStoreActionSnapshot,
@@ -162,9 +163,11 @@ interface FileHost {
 }
 // The transition facade of the composable's own bundle: its host holds the sessions the host shows.
 let hatch: typeof InProcess.hatch;
+let createInProcessBackend: typeof InProcess.createInProcessBackend;
 let usePlayerSession: (options: {
   scriptStorage?: ScriptStorageProvider;
   capturedMedia?: { repository: FakeMediaRepository };
+  bridge?: Promise<PlayerBridge>;
 }) => FileHost;
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
@@ -180,6 +183,8 @@ before(async () => {
   );
   // EVIDENCE: validation: the facade of the bundle the composable runs in, whose sessions only it reaches.
   hatch = inProcess.hatch as typeof hatch;
+  // EVIDENCE: validation: the same bundle's backend, whose sessions that facade reaches.
+  createInProcessBackend = inProcess.createInProcessBackend as typeof createInProcessBackend;
 });
 
 // The browser surface the Player host touches without a camera; no Web Locks, so durable writes are not coordinated.
@@ -228,10 +233,24 @@ async function playInPlayer(
   source: string,
   storage: ScriptStorageProvider,
   repository: FakeMediaRepository,
+  delayMs?: number,
 ) {
   const scope = effectScope();
   const host = scope.run(() =>
-    usePlayerSession({ scriptStorage: storage, capturedMedia: { repository } }),
+    usePlayerSession({
+      scriptStorage: storage,
+      capturedMedia: { repository },
+      ...(delayMs === undefined
+        ? {}
+        : {
+            bridge: Promise.resolve(
+              createInProcessBackend(
+                { commit: null, dirty: null, mode: null, appVersion: null },
+                { delayMs },
+              ),
+            ),
+          }),
+    }),
   );
   assert.ok(host);
   context.after(() => scope.stop());
@@ -411,4 +430,28 @@ test("saved text that only has the shape of a reference stays text in a later se
     }),
   );
   assert.deepEqual(hatch(later.host.session.value!, playerRuntimeSnapshot).storedFiles, [picture]);
+});
+
+test("a Player stores, reads and hashes files once each when the engine's replies come 50 ms late", async (context) => {
+  stubBrowser(context);
+  // A completed answer shows at once; were it to wait for a later observation, the next service would make it again.
+  const digest = context.mock.method(crypto.subtle, "digest");
+  const { provider } = memoryStorage("late files");
+  const played = await playInPlayer(
+    context,
+    [
+      `let picture = fileFromBase64("${PNG}", default: "")`,
+      "let data = fileToBase64(picture)",
+      "let hash = hashFile(picture)",
+      "exit",
+    ].join("\n"),
+    provider,
+    new FakeMediaRepository(),
+    50,
+  );
+  const { picture, data, hash } = played.variables;
+  assert.ok(typeof picture === "string" && played.host.resolveAsset(picture) !== null);
+  assert.equal(data, PNG);
+  assert.equal(hash, createHash("sha256").update(Buffer.from(PNG, "base64")).digest("hex"));
+  assert.equal(digest.mock.callCount(), 1);
 });
