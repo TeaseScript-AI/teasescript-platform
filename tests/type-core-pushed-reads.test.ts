@@ -376,6 +376,18 @@ test("a ring read through a marked copy reaches its check, and its leaves are re
       const pushed = analysed(source, mode);
       assert.equal(pushed.answers.budget.exhausted, null, source);
       assert.ok(pushed.facts.reads > 0 && pushed.facts.declines.size === 0, source);
+      // (the reads through the ring's marked copy carry its mark, as native's read of it does: a guarded item, whose
+      // flags hold `g`, in some pushed slot)
+      assert.ok(
+        pushed.settled.some((answers) =>
+          [...answers].some(
+            ([key, items]) =>
+              key.startsWith("pr|") &&
+              items.split(" ").some((item) => item.split("|")[6]?.includes("g")),
+          ),
+        ),
+        source,
+      );
       // (where the native reader does not end, its approximations from below reach the pushed read's answers)
       sameSettled(pushed, analysed(source, mode, 8), source);
       const files = [{ path: "main.tease", source }];
