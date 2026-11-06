@@ -15,8 +15,8 @@ import { loadPlayerModule } from "./helpers/player-modules.js";
 /*
  * What the browser allows only within the player's click runs within it, also when the session shows only once the
  * engine's host replied (a Start of a held plan, a Continue) or the camera answered: the audio unlock's `play()`, the
- * camera's `getUserMedia`, and the screen wake lock's request. The host here replies only after 250 ms, so each check
- * fails if that work waits for a reply.
+ * camera's `getUserMedia`, and the screen wake lock's request. Each runs synchronously in the click, before the
+ * activation's first bridge request; the host here also replies only after 250 ms.
  */
 
 interface GestureHost {
@@ -56,7 +56,8 @@ const SCRIPT = 'say "Stare at the screen.", instant\nwait 10 s\nexit';
 
 /** The browser surface of a Start: audio elements, a screen wake lock and a camera, each counting its calls. */
 function stubBrowser(context: TestContext) {
-  const calls = { play: 0, wakeLock: 0, getUserMedia: 0 };
+  const order: string[] = [];
+  const calls = { play: 0, wakeLock: 0, getUserMedia: 0, order };
   const values = {
     document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
     window: new EventTarget(),
@@ -64,12 +65,14 @@ function stubBrowser(context: TestContext) {
       wakeLock: {
         request: () => {
           calls.wakeLock += 1;
+          calls.order.push("wakeLock");
           return new Promise(() => {});
         },
       },
       mediaDevices: Object.assign(new EventTarget(), {
         getUserMedia: () => {
           calls.getUserMedia += 1;
+          calls.order.push("getUserMedia");
           return new Promise(() => {});
         },
       }),
@@ -78,6 +81,7 @@ function stubBrowser(context: TestContext) {
       src = "";
       play = () => {
         calls.play += 1;
+        calls.order.push("play");
         return Promise.resolve();
       };
       pause() {}
@@ -96,9 +100,14 @@ function stubBrowser(context: TestContext) {
   return calls;
 }
 
-/** A Player whose engine host replies only after 250 ms. */
-async function mountSlow(context: TestContext, camera = false) {
+/** A Player whose engine host replies only after 250 ms; each bridge request it posts goes into `order`. */
+async function mountSlow(context: TestContext, order: string[], camera = false) {
   const bridge = createInProcessBackend(BUILD, { delayMs: 250 });
+  const request = bridge.client.request;
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    order.push(args[0]);
+    return request(...args);
+  });
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({ bridge: Promise.resolve(bridge), capabilities: { camera } }),
@@ -119,7 +128,7 @@ async function clickMicrotasks() {
 
 test("a Start of a held plan unlocks audio and keeps the screen on within the click, before the host replies", async (context) => {
   const calls = stubBrowser(context);
-  const { host, bridge } = await mountSlow(context);
+  const { host, bridge } = await mountSlow(context, calls.order);
   const plan = compilePlayerProject(SCRIPT).plan!;
   const reply = await bridge.client.request("prepare", {
     source: { kind: "plan", text: serializeValidatedRuntimeJson(plan) },
@@ -128,31 +137,38 @@ test("a Start of a held plan unlocks audio and keeps the screen on within the cl
   const prepared = reply.result as PrepareResult;
   assert.equal(prepared.kind, "prepared");
   host.prepare({ plan: prepared.kind === "prepared" ? prepared.plan : "", options: () => ({}) });
+  calls.order.length = 0;
   const activating = host.activate();
-  assert.ok(calls.play > 0, "the audio unlock played within the click");
+  assert.deepEqual(
+    calls.order.filter((call, index, all) => call !== all[index - 1]),
+    ["play", "wakeLock", "start"],
+    "the audio unlock, then the wake lock, then the Start's request, all within the click",
+  );
   await clickMicrotasks();
   assert.equal(host.session.value, null, "the host has not replied yet");
-  assert.equal(calls.wakeLock, 1, "the wake lock was asked for within the click");
   await activating;
   assert.equal(shown(host)?.state.status, "waiting");
 });
 
 test("a Continue unlocks audio and keeps the screen on within the click, before the host replies", async (context) => {
   const calls = stubBrowser(context);
-  const { host } = await mountSlow(context);
+  const { host } = await mountSlow(context, calls.order);
   host.prepareRestore(createPlayerRuntimeSession(SCRIPT));
   const activating = host.activate();
-  assert.ok(calls.play > 0, "the audio unlock played within the click");
+  assert.deepEqual(
+    calls.order.filter((call, index, all) => call !== all[index - 1]),
+    ["play", "wakeLock", "beginRecording"],
+    "the audio unlock, then the wake lock, then the Continue's first request, all within the click",
+  );
   await clickMicrotasks();
   assert.equal(host.session.value, null, "the host has not replied yet");
-  assert.equal(calls.wakeLock, 1, "the wake lock was asked for within the click");
   await activating;
   assert.notEqual(shown(host), null);
 });
 
 test("a Start with the camera asks for it within the click, before any reply", async (context) => {
   const calls = stubBrowser(context);
-  const { host } = await mountSlow(context, true);
+  const { host } = await mountSlow(context, calls.order, true);
   host.prepare({ plan: "unused", options: () => ({}) });
   void host.activate();
   assert.equal(calls.getUserMedia, 1, "the camera was asked for within the click");

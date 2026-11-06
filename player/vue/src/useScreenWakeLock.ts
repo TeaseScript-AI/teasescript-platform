@@ -47,6 +47,7 @@ export function useScreenWakeLock(playing: () => boolean): void {
     if (held !== null && !held.released) void held.release();
   }
 
+  // Synchronous, so the request runs within the activating click as `playing` begins, before the Start's request.
   watch(
     playing,
     (now) => {
@@ -54,7 +55,7 @@ export function useScreenWakeLock(playing: () => boolean): void {
       if (now) acquire();
       else release();
     },
-    { immediate: true },
+    { immediate: true, flush: "sync" },
   );
   useEventListener(
     () => (typeof document === "undefined" ? undefined : document),
