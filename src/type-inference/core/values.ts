@@ -961,7 +961,7 @@ export class Values {
           return yield* this.valueItems(
             projection.owner,
             at,
-            stepsAfter([stepName(projection.step)], this.#carried(rest)),
+            stepsAfter([stepName(projection.step)], rest),
           );
         // S6c: a selection reads its owner twice, at its step and whole, so its whole value once per value and node,
         // whatever asks: a chain of k `.first` reads each link once whole, never each link 2^k times
@@ -1003,11 +1003,7 @@ export class Values {
     node: FlowNode | null,
     rest: Steps,
   ): Work<readonly Item[]> {
-    const elements = yield* this.valueItems(
-      owner,
-      node,
-      stepsAfter([stepName(step)], this.#carried(rest)),
-    );
+    const elements = yield* this.valueItems(owner, node, stepsAfter([stepName(step)], rest));
     const owners = withoutEmpty(yield* this.valueItems(owner, node, []));
     return withOwnSelection(elements, owners, this.pass);
   }
@@ -1156,15 +1152,6 @@ export class Values {
    */
   #pathPart(rest: Steps): string {
     return isPathSteps(rest) ? `.${rest.path}` : stepsText(rest);
-  }
-
-  /**
-   * A path a projection carries one step further down (a property or an element selection): an array's as the arena's
-   * steps (`#stepsOf`), so the projections below it extend one record, never a longer array at each, #1857; a record's
-   * and an empty path as they are.
-   */
-  #carried(rest: Steps): Steps {
-    return !isPathSteps(rest) && rest.length > 0 ? this.#stepsOf(rest) : rest;
   }
 
   /** The arena's steps of an array's path (`stepsOfId`), each step made or found once (`Contract.pathIdOf`). */
