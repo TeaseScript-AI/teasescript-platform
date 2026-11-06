@@ -369,7 +369,7 @@ const UNKNOWN_NOTES = {
   unavailable: "Before tracing or no longer retained",
 } as const;
 
-export function playerDebugRecordText(
+function playerDebugRecordText(
   trace: RuntimeDebugContext,
   record: RuntimeDebugRecord,
   live: PlayerDebugLiveValue | null = null,
