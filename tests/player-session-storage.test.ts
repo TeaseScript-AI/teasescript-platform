@@ -467,8 +467,8 @@ for (const [name, source, expected] of [
     await nextTick();
     now = 2_000;
     context.mock.timers.tick(2_000);
-    // The deadline's observation goes over the bridge, which replies a few microtasks later.
-    for (let turn = 0; turn < 10; turn += 1) await nextTick();
+    // The deadline's catch-up goes over the bridge (begin, step, adopt), each reply a few microtasks later.
+    for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setImmediate(resolve));
     if (source.startsWith("say")) {
       const waiting: PlayerRuntimeSession | null = host.session.value;
       assert.equal(playerRuntimePacingGate(waiting!), null);
