@@ -77,7 +77,7 @@ function inheritsToJson(): boolean {
 }
 
 /** A native stack overflow: a `RangeError` in V8 and JavaScriptCore, an `InternalError` in SpiderMonkey. */
-export function isStackExhaustion(error: unknown): boolean {
+function isStackExhaustion(error: unknown): boolean {
   return (
     error instanceof Error &&
     ((error.name === "RangeError" && /call stack/i.test(error.message)) ||

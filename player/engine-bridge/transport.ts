@@ -1,5 +1,4 @@
 import { createWorklist, type Worklist } from "../../src/external-data-capture.js";
-import { isStackExhaustion } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { BRIDGE_VERSION } from "./protocol.js";
 
 /*
@@ -17,6 +16,15 @@ import { BRIDGE_VERSION } from "./protocol.js";
  * only after the sender's native clone overflowed crosses as its data; a page cannot detect one. What another kind of
  * object holds (a `Map`'s entries, an `Error`'s cause) is cloned natively and not measured.
  */
+
+/** A native stack overflow, as `checkpoint-json.ts` tells it: a `RangeError` in V8 and JavaScriptCore, an `InternalError` in SpiderMonkey. */
+function isStackExhaustion(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    ((error.name === "RangeError" && /call stack/i.test(error.message)) ||
+      (error.name === "InternalError" && /recursion/i.test(error.message)))
+  );
+}
 
 /** How deep a message may nest and still cross as it is: about a sixth of the smallest native limit measured. */
 export const NATIVE_NESTING = 256;
