@@ -273,3 +273,55 @@ test("a Stage preload whose reply comes after an unmount or another plan preload
   await flush();
   assert.deepEqual(log, ["preload /b.jpg", "preload /c.jpg", "release /b.jpg", "release /c.jpg"]);
 });
+
+/*
+ * The preload's reply identity, over a declared family: a reply settles before or after the watcher's next run, and
+ * meanwhile the shown session moves to another connection, to another plan on the same connection, or the scope ends.
+ * In every case the obsolete reply preloads nothing.
+ */
+const SETTLES = ["before the watcher runs", "after the watcher runs"] as const;
+const CHANGES = ["another connection", "another plan", "an unmount"] as const;
+const REPLY_CASES = SETTLES.flatMap((settles) =>
+  CHANGES.map((change) => ({ settles, change, name: `${settles}, ${change}` })),
+);
+
+test("the reply-identity family covers every pair of its axes", () => {
+  for (const settles of SETTLES)
+    for (const change of CHANGES)
+      assert.ok(REPLY_CASES.some((each) => each.name === `${settles}, ${change}`));
+  assert.equal(new Set(REPLY_CASES.map((each) => each.name)).size, SETTLES.length * CHANGES.length);
+});
+
+for (const { settles, change, name } of REPLY_CASES)
+  test(`an obsolete preload reply preloads nothing: ${name}`, async () => {
+    const { replies, connection, log, preload } = preloadHost();
+    const a = connection("A");
+    const shown = shallowRef<PlanPhotoSource | null>({ connection: a, planToken: "p1" });
+    const scope = effectScope();
+    scope.run(() =>
+      usePlanPhotoPreload(
+        () => shown.value,
+        (path) => `/${path}`,
+        preload,
+      ),
+    );
+    assert.equal(replies.length, 1);
+    const move = () => {
+      if (change === "another connection")
+        shown.value = { connection: connection("B"), planToken: "p1" };
+      else if (change === "another plan") shown.value = { connection: a, planToken: "p2" };
+      else scope.stop();
+    };
+    if (settles === "before the watcher runs") {
+      // The reply settles, then the session moves in the same tick, before Vue runs the watcher again.
+      replies[0]!.reply(["old.jpg"]);
+      move();
+    } else {
+      move();
+      await flush();
+      replies[0]!.reply(["old.jpg"]);
+    }
+    await flush();
+    assert.deepEqual(log, [], "the old plan's images are not preloaded");
+    scope.stop();
+  });

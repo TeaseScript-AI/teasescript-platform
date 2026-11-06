@@ -1,4 +1,4 @@
-import { onScopeDispose, onWatcherCleanup, watch } from "vue";
+import { onScopeDispose, watch } from "vue";
 import type { BridgeClient } from "../../engine-bridge/client.js";
 import type { PlanMetadata } from "../../engine-bridge/player-ops.js";
 import { photoSwatches, type PhotoSwatches } from "../../theme/node-vibrant/swatches.js";
@@ -376,8 +376,8 @@ async function measureInWorker(blob: Blob): Promise<StagePhotoResponse["swatches
 /**
  * Preloads every Stage image the shown session's script names, once its session runs, so such a photo and its colour
  * are ready when it shows; they stay between sessions of the same script. The images come from the plan's host by the
- * plan's token, which is unique only within its bridge connection. Another plan or connection, or the end of the scope,
- * makes a reply still awaited obsolete: it preloads nothing. Call it in a component's or effect scope's setup.
+ * plan's token, which is unique only within its bridge connection. A reply preloads only while its connection and token
+ * are still the shown ones and the scope lives. Call it in a component's or effect scope's setup.
  */
 /** What the preload reads of the shown session: the plan's token, and the connection whose host holds that plan. */
 export interface PlanPhotoSource {
@@ -391,17 +391,21 @@ export function usePlanPhotoPreload(
   preload: (sources: readonly string[]) => () => void,
 ): void {
   let release = () => {};
+  /** Set when the scope ends; it then preloads nothing more. */
+  let disposed = false;
   watch(
     [() => shown()?.connection ?? null, () => shown()?.planToken ?? null],
     ([connection, plan]) => {
       if (connection === null || plan === null) return;
-      let current = true;
-      onWatcherCleanup(() => (current = false));
       connection.client.request("planMetadata", { plan }).then(
         (reply) => {
           // EVIDENCE: validation: `planMetadata` replies from the same build with the plan's metadata, or null.
           const metadata = reply.result as PlanMetadata | null;
-          if (!current || metadata === null) return;
+          // The one acceptance: the reply is still for what shows now, read here from the live source, whatever the
+          // order of this reply and the watcher's next run. Nothing is awaited between it and the preload.
+          const now = shown();
+          if (disposed || now?.connection !== connection || now.planToken !== plan) return;
+          if (metadata === null) return;
           const previous = release;
           release = preload(metadata.stageImages.flatMap((path) => resolveAsset(path) ?? []));
           previous();
@@ -412,5 +416,8 @@ export function usePlanPhotoPreload(
     },
     { immediate: true },
   );
-  onScopeDispose(() => release());
+  onScopeDispose(() => {
+    disposed = true;
+    release();
+  });
 }
