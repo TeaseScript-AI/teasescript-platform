@@ -1,6 +1,7 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
-import type { Strip } from "../carriers.js";
+import { operandsOf, type Strip } from "../carriers.js";
 import type { Admission } from "../admission.js";
+import type { MixedSteps } from "../result.js";
 import {
   joinParts,
   joinSteps,
@@ -161,6 +162,38 @@ const RESOLVED: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * #1762: a mixed error's path as one side's sentence reads it: each `element` step below a dict its `entry`, where that
+ * side's value there is a dict (`dicts`, one walk down the path); admission's own path, which rejects and checks,
+ * unchanged.
+ */
+function shownSteps(
+  path: readonly string[],
+  dicts: (path: readonly string[], depths: readonly number[]) => boolean[],
+): readonly string[] {
+  const asked: number[] = [];
+  for (let at = 0; at < path.length; at += 1) if (path[at] === "element") asked.push(at);
+  const flags = dicts(path, asked);
+  let next = 0;
+  return path.map((step) => (step === "element" && flags[next++] === true ? "entry" : step));
+}
+
+/**
+ * #1762: each side's steps as its sentence writes them (`MixedSteps`), the earliest element's and the other's, each by
+ * its own values: a list and a dict may meet at one path (Codex r1 on #1814); none where both are the path.
+ */
+function shownOf(
+  path: readonly string[],
+  earliest: (path: readonly string[], depths: readonly number[]) => boolean[],
+  other: (path: readonly string[], depths: readonly number[]) => boolean[],
+): { readonly shown?: MixedSteps } {
+  const type = shownSteps(path, earliest);
+  const kinds = shownSteps(path, other);
+  return type.every((step, at) => step === path[at]) && kinds.every((step, at) => step === path[at])
+    ? {}
+    : { shown: { type, kinds } };
+}
+
+/**
  * A literal value's stores at one step, in evaluation order: a property's one store, a collection's every element, a
  * dict's values among them (its `element`, as its type has them). Every walk of a literal's children asks here with its
  * path's own step, so the step that reaches a child is read in this one place (TABLE r4.122).
@@ -257,6 +290,7 @@ export function literalElements(
       readonly kinds: readonly ItemTag[];
       readonly atCopy: boolean;
       readonly optional?: MixedOptional;
+      readonly shown?: MixedSteps;
     },
   ) => void,
   undecided?: (cell: PlaceId) => void,
@@ -365,8 +399,9 @@ export function literalElements(
         readonly written: boolean;
         readonly own: readonly ItemTag[];
         readonly d: Definition;
-        // (#1765: its layers at this path, `layersAt`'s, once asked)
+        // (#1765: its layers at this path, `layersAt`'s, once asked; #1762: its dict layers too)
         layers?: boolean[];
+        dicts?: boolean[];
       }
     >();
     // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
@@ -418,6 +453,19 @@ export function literalElements(
         kinds,
         atCopy: atCopy.has(at),
         ...(optional === undefined ? {} : { optional }),
+        ...shownOf(
+          path,
+          (steps, asked) =>
+            (earliest.dicts ??= layersAt(
+              admission,
+              earliest.d.value!,
+              earliest.d.node,
+              steps,
+              asked,
+              "dict",
+            )),
+          (steps, asked) => layersAt(admission, d.value!, d.node, steps, asked, "dict"),
+        ),
       });
       admission.reject(d, cell, path);
     };
@@ -654,6 +702,7 @@ export function joinElements(
     readonly value: PlaceId;
     readonly levels: readonly (readonly ItemTag[])[] | null;
     readonly optional?: MixedOptional;
+    readonly shown?: MixedSteps;
   }) => void,
   undecided?: (value: PlaceId) => void,
 ): void {
@@ -1229,10 +1278,26 @@ export function joinElements(
               ? depths.map(() => false)
               : layersAt(admission, side, joinNode, below, depths);
           const optional = mixedOptional(layers(left), layers(right));
+          // (#1762: each operand's layers are a dict's by the same walk below its elements, its contract's items, Astra
+          // r1 on #1814)
+          const dicts =
+            (side: PlaceId) =>
+            (walked: readonly string[], asked: readonly number[]): boolean[] =>
+              joinNode === null
+                ? asked.map(() => false)
+                : layersAt(
+                    admission,
+                    side,
+                    joinNode,
+                    keptSteps(admission.work, ["element"], walked),
+                    asked.map((depth) => depth + 1),
+                    "dict",
+                  );
           const found: Parameters<typeof error>[0] = {
             ...(optional === undefined ? {} : { optional }),
             c,
             path,
+            ...shownOf(path, dicts(left), dicts(right)),
             earliest:
               ruled.nulls || ruled.decided.nullable === true
                 ? [...ruled.decided.own, "null"]
@@ -1460,6 +1525,74 @@ function operandNull(admission: Admission, operand: PlaceId, from: FlowNode): bo
 const NARROWED = new WeakMap<object, Map<FlowNode, Map<PlaceId, boolean>>>();
 
 /**
+ * #1762: whether a value is a dict there, by its contract's items, which compose its written and carried terms: `a
+ * otherwise dict {}`, `a` a written dict holding a host value, is a dict, where its stored values (`valueAt`) lose it
+ * (Astra r1 on #1814).
+ */
+function dictHeld(admission: Admission, at: PlaceId, steps: readonly string[]): boolean {
+  return withoutEmpty(admission.run(admission.pass.contract.contractOfValueAt(at, steps))).some(
+    (item) => item.tag === "dict",
+  );
+}
+
+/**
+ * #1762: whether a value is a dict at its own level: an `otherwise` its operand where the operand, narrowed at its node,
+ * may hold a value, and its fallback where the operand may be null (a fallback never run names no dict, nor an operand
+ * proved null, Codex r5–r6 on #1814); any other value by its items (`dictHeld`) or its own reads (a default). Each
+ * node's answer once per pass and node (`DICT_OWN`), a value after the sides it takes, so a chain is walked once.
+ */
+function dictOwn(admission: Admission, value: PlaceId, from: FlowNode): boolean {
+  const { program } = admission.pass;
+  let byNode = DICT_OWN.get(admission.pass);
+  if (byNode === undefined) DICT_OWN.set(admission.pass, (byNode = new Map()));
+  let known = byNode.get(from);
+  if (known === undefined) byNode.set(from, (known = new Map()));
+  const open = [value];
+  while (open.length > 0) {
+    const at = open.at(-1)!;
+    if (known.has(at)) {
+      open.pop();
+      continue;
+    }
+    admission.work.charge("checks");
+    const op = program.opOf.get(at);
+    // (any other value a dict by its items, or where an operand that is its own read is: a `get`'s, a `load`'s or a
+    // parse's default, which hands the value on whole; its items lose a host-assigned written dict, Codex r8 on #1814)
+    const sides =
+      op?.kind === "fallback"
+        ? [
+            ...(admission.items(op.left, from, []).some((item) => item.tag !== "null")
+              ? [op.left]
+              : []),
+            ...(operandNull(admission, op.left, from) ? [op.right] : []),
+          ]
+        : dictHeld(admission, at, [])
+          ? null
+          : operandsOf(program, at)
+              .filter((operand) => operand.own)
+              .map((operand) => operand.operand);
+    if (sides === null) {
+      known.set(at, true);
+      open.pop();
+      continue;
+    }
+    const missing = sides.find((side) => !known.has(side));
+    if (missing !== undefined) open.push(missing);
+    else {
+      known.set(
+        at,
+        sides.some((side) => known.get(side) === true),
+      );
+      open.pop();
+    }
+  }
+  return known.get(value)!;
+}
+
+/** Per pass and node, whether a value is a dict at its own level (`dictOwn`). */
+const DICT_OWN = new WeakMap<object, Map<FlowNode, Map<PlaceId, boolean>>>();
+
+/**
  * #1765: the depths of the collection layers strictly between a mixed error's elements (or its path's last property)
  * and its leaf, outermost first: the prefixes `optional` describes, by their lengths.
  */
@@ -1471,10 +1604,11 @@ function intermediateDepths(path: readonly string[]): number[] {
 }
 
 /**
- * #1765: whether each of `depths` along `path` may hold null for a side, every depth by `mayHoldNull`'s rule, read by one
- * descent down the path (`layersOf`): through a literal's children and through a carried value's parts alike (Astra r2's
- * B1 on #1789: a carrier's literal was descended once per longer prefix), each value at its own level and each leaf from
- * `mayHoldNull`'s memo.
+ * #1765: whether each of `depths` along `path` holds `fact` for a side, read by one descent down the path (`layersOf`):
+ * through a literal's children and through a carried value's parts alike (Astra r2's B1 on #1789: a carrier's literal
+ * was descended once per longer prefix). The two facts' own levels and leaves, side by side:
+ * - `null` (#1765): `mayHoldNull`'s rule;
+ * - `dict` (#1762): `dictOwn` at a value's own level, its items below it (`dictHeld`).
  */
 function layersAt(
   admission: Admission,
@@ -1482,8 +1616,9 @@ function layersAt(
   node: FlowNode,
   path: readonly string[],
   depths: readonly number[],
+  fact: "null" | "dict" = "null",
 ): boolean[] {
-  return depths.length === 0 ? [] : layersOf(admission, value, node, path, depths);
+  return depths.length === 0 ? [] : layersOf(admission, value, node, path, depths, fact);
 }
 
 /**
@@ -1566,11 +1701,14 @@ function layersOf(
   node: FlowNode,
   path: readonly string[],
   depths: readonly number[],
+  fact: "null" | "dict",
 ): boolean[] {
   const { program } = admission.pass;
-  let memo = LAYERS.get(admission.pass);
+  // (each fact its own answers per pass, #1762)
+  const memos = fact === "null" ? LAYERS : DICT_LAYERS;
+  let memo = memos.get(admission.pass);
   if (memo === undefined)
-    LAYERS.set(
+    memos.set(
       admission.pass,
       (memo = { keys: new Map(), answers: new Map(), seen: new Map(), count: { value: 0 } }),
     );
@@ -1659,7 +1797,8 @@ function layersOf(
     let { next } = here;
     // (the depth at its own level, if one is)
     if (next < depths.length && depths[next]! + here.shift === 0) {
-      if (mayHoldNull(admission, at, from, [])) holds.add(next);
+      if (fact === "null" ? mayHoldNull(admission, at, from, []) : dictOwn(admission, at, from))
+        holds.add(next);
       next += 1;
     }
     let parts: Part[] = [];
@@ -1686,19 +1825,19 @@ function layersOf(
               (role !== "otherwise/fallback" || falls) && (role !== "otherwise/operand" || taken),
           )
           .map(([part, path]) => [part, from, path] as const);
-        // (a value no carrier composes: each depth by `mayHoldNull`, its path one read of the longest)
+        // (a value no carrier composes: each depth by `mayHoldNull`, or its items for a dict, its path one read of the
+        // longest)
         if (carried.length === 0) {
           const longest = viewSteps(admission, here.view, depths.at(-1)! + here.shift);
-          for (let slot = next; slot < depths.length; slot += 1)
+          for (let slot = next; slot < depths.length; slot += 1) {
+            const steps = keptSlice(admission.work, longest, 0, depths[slot]! + here.shift);
             if (
-              mayHoldNull(
-                admission,
-                at,
-                from,
-                keptSlice(admission.work, longest, 0, depths[slot]! + here.shift),
-              )
+              fact === "null"
+                ? mayHoldNull(admission, at, from, steps)
+                : dictHeld(admission, at, steps)
             )
               holds.add(slot);
+          }
         }
       }
     }
@@ -1762,6 +1901,16 @@ function layersOf(
 const EMPTY: ReadonlySet<number> = new Set();
 
 const LAYERS = new WeakMap<
+  object,
+  {
+    readonly keys: Map<number, Map<string, number>>;
+    readonly answers: Map<PlaceId, Map<number, ReadonlySet<number>>>;
+    readonly seen: Map<PlaceId, Set<number>>;
+    readonly count: { value: number };
+  }
+>();
+/** Per pass, `layersOf`'s keys and answers for the dict fact (#1762), as `LAYERS` holds the null fact's. */
+const DICT_LAYERS = new WeakMap<
   object,
   {
     readonly keys: Map<number, Map<string, number>>;
