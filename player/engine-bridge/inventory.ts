@@ -14,7 +14,7 @@ export type BridgeFamily =
   "L5b" | "L5c" | "L5d" | "L5e" | "L5f" | "L5g" | "L5h" | "L5i" | "activation";
 
 /** Families whose PRs have landed: none of their entries may remain in `RATCHET`. */
-export const COMPLETED_FAMILIES: readonly BridgeFamily[] = ["L5b", "L5e"];
+export const COMPLETED_FAMILIES: readonly BridgeFamily[] = ["L5b", "L5c", "L5e"];
 
 /** The `src/` modules the main realm may load, grouped by why. */
 export const ALLOWED_SOURCE: readonly {
@@ -149,121 +149,6 @@ export interface RatchetEntry {
 }
 
 export const RATCHET: readonly RatchetEntry[] = [
-  // L5c
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/engine-bridge/in-process.ts",
-    name: "hatch",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "activatePlayerRuntimeButton",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "answeredByPlayerInput",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "cancelPlayerRuntimeForm",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "clearPlayerRuntimeFormField",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "closePlayerRuntimeExport",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "closePlayerRuntimePopup",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "dismissPlayerRuntimeFormField",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "draftPlayerRuntimeForm",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "openPlayerRuntimeUrl",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "selectPlayerRuntimeChoice",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "skipPlayerRuntimeImage",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "stepPlayerRuntimeFormField",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "submitPlayerRuntimeComposer",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "submitPlayerRuntimeForm",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/useImageCapture.ts",
-    target: "player/runtime-adapter.ts",
-    name: "answerPlayerRuntimeImage",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "applyPlayerRuntimeStorageEdit",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "completePlayerRuntimeStorageWrite",
-    family: "L5c",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "pressPlayerRuntimePermanentButton",
-    family: "L5c",
-  },
   // L5d
   {
     importer: "player/vue/src/PlayerApp.vue",

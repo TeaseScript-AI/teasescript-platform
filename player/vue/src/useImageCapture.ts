@@ -1,16 +1,14 @@
 import { computed, onScopeDispose, shallowRef, watch, type Ref } from "vue";
 import type { CapturedMediaStore } from "../../captured-media.js";
-import {
-  answerPlayerRuntimeImage,
-  type PlayerRuntimeControlResult,
-  type PlayerRuntimeSession,
-} from "../../runtime-adapter.js";
+import type { DebugAnswerInput } from "../../debug-export.js";
+import { heldMedia } from "../../engine-bridge/held-media.js";
 import {
   activePlayerRuntimeInteraction,
   type PlayerSession,
   type PlayerSessionView,
 } from "../../runtime-view.js";
 import type { SessionCamera } from "../../session-camera.js";
+import type { InputIntent, InputOutcome } from "./runtime-input";
 
 /**
  * Where an `askImage` request's Player controls stand: the first step, which offers the routes to an image and "Use
@@ -45,7 +43,7 @@ interface Capture {
   /** Whether the request offers the camera here. */
   readonly camera: boolean;
   readonly phase: ImageCapturePhase;
-  /** The stored photo or file of the preview; it becomes the answer only through `use`. */
+  /** The stored photo or file of the preview; it becomes the answer only through `answer`. */
   readonly reference: string | null;
   /** Whether the camera step uses the camera it opened itself rather than the session camera. */
   readonly own: boolean;
@@ -92,10 +90,16 @@ export function useImageCapture(host: ImageCaptureHost) {
     host.generation.value === target.generation &&
     presentedRequest(current)?.actionId === target.actionId;
 
+  // The preview an answer took along, until that answer settled: it is not the capture's to discard meanwhile, as the
+  // host may already have admitted it.
+  let submitted: string | null = null;
+  const discard = (reference: string) => {
+    if (reference !== submitted) host.media.discard(reference);
+  };
+
   function set(next: Capture | null) {
     const previous = capture.value;
-    if (previous?.reference && previous.reference !== next?.reference)
-      host.media.discard(previous.reference);
+    if (previous?.reference && previous.reference !== next?.reference) discard(previous.reference);
     capture.value = next;
     // A camera the camera step opened itself is released as soon as it no longer uses it.
     if (previous?.own && !next?.own) host.captureCamera.release();
@@ -108,7 +112,7 @@ export function useImageCapture(host: ImageCaptureHost) {
   ) {
     if (capture.value !== target) {
       // Only a photo taken for a capture that is gone needs dropping.
-      if (change.reference) host.media.discard(change.reference);
+      if (change.reference) discard(change.reference);
       return null;
     }
     const next = { ...target, ...change };
@@ -228,17 +232,36 @@ export function useImageCapture(host: ImageCaptureHost) {
   }
 
   /**
-   * Answers `current`'s request with the preview, from "Use image"; `null` without a preview to answer. An adapter op,
-   * which the input runs on the host's session (`hatch`).
+   * "Use image": answers the observed session's request with the preview (the `answerImage` op), with what the store
+   * holds it as; `null` without a preview to answer. Until the answer settled, the preview stays held, also when the
+   * request ends meanwhile.
    */
-  function use(current: PlayerRuntimeSession): PlayerRuntimeControlResult | null {
-    const target = sync();
-    if (target?.phase !== "choose" || target.reference === null || !answers(current, target))
-      return null;
-    const result = answerPlayerRuntimeImage(current, target.reference, host.media);
+  function answer(input: DebugAnswerInput): InputIntent {
+    return (observed) => {
+      const target = sync();
+      if (target?.phase !== "choose" || target.reference === null || !answers(observed, target))
+        return null;
+      const reference = target.reference;
+      submitted = reference;
+      return {
+        op: "answerImage",
+        args: { reference, held: heldMedia(host.media, [reference]), input },
+        settle: (outcome) => settle(reference, outcome),
+      };
+    };
+  }
+  /** Settles the answer with `reference`: the answer keeps it once it completed; otherwise it is the preview again. */
+  function settle(reference: string, outcome: InputOutcome | null) {
+    submitted = null;
+    const target = capture.value;
+    const still = target?.reference === reference;
     // The image is the answer now, so it stays.
-    if (result?.outcome.kind === "completed") capture.value = { ...target, reference: null };
-    return result;
+    if (outcome?.kind === "completed") {
+      if (still) capture.value = { ...target!, reference: null };
+      return;
+    }
+    // Not taken: a preview the capture moved on from in the meantime goes.
+    if (!still) host.media.discard(reference);
   }
 
   // A capture belongs to one request: when the request ends, however it was answered, is interrupted, or its session is
@@ -276,7 +299,7 @@ export function useImageCapture(host: ImageCaptureHost) {
     };
   });
 
-  return { view, openCamera, retry, back, takePhoto, selfTimer, choose, use };
+  return { view, openCamera, retry, back, takePhoto, selfTimer, choose, answer };
 }
 
 /** The controls of the presented `askImage` request, as the Player gives them to its interaction. */

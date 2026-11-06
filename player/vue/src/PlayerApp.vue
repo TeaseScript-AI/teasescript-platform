@@ -756,7 +756,7 @@ async function toggleFullscreen() {
           :revision="transcript.revision"
           :jumped-revision="transcript.jumpedRevision"
           :removed-rows="transcript.removedRows"
-          :observe-time="player.observe"
+          :input-section="player.inputSection"
           :prepare-input="player.prepareInput"
           :hold-form-drafts="player.rewind.inspecting.value"
           :images="player.images"
