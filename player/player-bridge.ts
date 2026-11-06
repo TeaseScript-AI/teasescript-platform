@@ -24,13 +24,24 @@ export function haltedError(): BridgeRequestError {
 }
 
 /**
+ * The code of a refusal by the host, which changed nothing (`basis`, `session`, `halted`, ...), or `null` for any other
+ * error, such as what an op threw.
+ */
+export function refusalCode(error: unknown): string | null {
+  return error instanceof BridgeRequestError && error.kind === "bridge" ? error.code : null;
+}
+
+/**
  * What a service's chain gets in its section of the published session (`section` of the service hosts): an
  * observation inside the section, as `observeForInput` makes one, and the section's requests.
  */
 export interface ServiceSection {
   /** The clock's now and media samples, observed (`observeTime`), with the stop checked before and after. */
   observe(): Promise<PlayerSession | null>;
-  /** One op of the section's session from `basis`; resolves with its result once its publication applied. */
+  /**
+   * One op of the section's session from `basis`; resolves with its result once its publication applied and shows
+   * (`publishOwned`).
+   */
   send<R>(op: string, args: unknown, basis: number): Promise<R>;
 }
 

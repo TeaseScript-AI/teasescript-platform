@@ -15,11 +15,13 @@ import {
 } from "../player/runtime-adapter.js";
 import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
+import type { PlayerDiagnostic } from "../player/session-camera.js";
 import { activePlayerRuntimeLock, type PlayerSession } from "../player/runtime-view.js";
 import { bytesFromBase64 } from "../player/stored-files.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { fromBase64, openAge, sshIdentity, x25519Identity } from "./helpers/age-keyholder.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
+import { serviceSection } from "./helpers/service-section.js";
 
 // The engine's host the Player's sessions live in, as in production until the L5 series activates the Worker.
 let bridge: PlayerBridge;
@@ -67,7 +69,7 @@ class Harness {
   session: PlayerSession;
   readonly media: CapturedMediaStore;
   readonly dialogs: ({ readonly dialog: LockDialog; readonly busy: boolean } | null)[] = [];
-  readonly diagnostics: unknown[] = [];
+  readonly diagnostics: PlayerDiagnostic[] = [];
   relaysDown = false;
   /** The device clock, which a test may move on. */
   nowMs = NOW_MS;
@@ -84,11 +86,16 @@ class Harness {
       readonly recorder?: DebugRecorder;
       /** Whether the service starts at once; a test may first answer a step itself. */
       readonly start?: boolean;
+      /** The engine's host, the shared in-process one by default. */
+      readonly bridge?: PlayerBridge;
+      /** Sees each request the service's sections post, right before it is posted. */
+      readonly onSend?: (op: string, args: unknown) => void;
     } = {},
   ) {
+    const host = options.bridge ?? bridge;
     this.media = options.media ?? new CapturedMediaStore(null, urls, "locks");
     this.session = introduced(
-      bridge,
+      host,
       createPlayerRuntimeSession(source, {
         wallClockMs: NOW_MS,
         storedFiles: options.files ?? [],
@@ -104,12 +111,15 @@ class Harness {
     this.service = new LockService({
       session: () => this.session,
       generation: () => 1,
-      observe: () => this.session,
-      publish: (next) => {
-        this.session = next;
-        this.service.request();
-      },
-      section: () => Promise.resolve(null),
+      section: serviceSection(
+        host,
+        () => this.session,
+        (next) => {
+          this.session = next;
+          this.service.request();
+        },
+        options.onSend,
+      ),
       media: this.media,
       diagnostic: (diagnostic) => this.diagnostics.push(diagnostic),
       dialog: (dialog, busy) => this.dialogs.push(dialog === null ? null : { dialog, busy }),
@@ -718,3 +728,92 @@ test("a time lock's open dialog offers Try again when its moment comes but the r
   assert.equal((await player.ended()).opened, "closed");
   player.stop();
 });
+
+test("what the player types in a dialog, and the Player's own objects, never reach the engine's host", async (context) => {
+  // Every message of the in-process backend, as it is posted, before cloning could change what it is.
+  const messages: unknown[] = [];
+  const clone = globalThis.structuredClone;
+  context.after(() => void (globalThis.structuredClone = clone));
+  globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
+    if (typeof value === "object" && value !== null && "v" in value) messages.push(value);
+    return clone(value, options);
+  };
+  const typed = "typed words 7f3a";
+  const player = new Harness(
+    [
+      'let locked = encryptText("fielded", password: askPassword("Choose a code"), publicKey: false, timeLock: false)',
+      'let opened = decryptText(locked, password: askPassword("Your code?"), default: "closed")',
+      "exit",
+    ].join("\n"),
+    { bridge: await inProcessBridge() },
+  );
+  await player.dialog();
+  player.answer({ password: typed, timeLockMs: null });
+  await player.dialog();
+  player.answer({ password: typed, timeLockMs: null });
+  assert.equal((await player.ended()).opened, "fielded");
+  player.stop();
+  assert.ok(messages.some((message) => JSON.stringify(message).includes("answerLock")));
+  assert.equal(messages.filter((message) => JSON.stringify(message).includes(typed)).length, 0);
+  // Only plain data crosses: no Blob, stream track, key, function or other class instance.
+  const plain = (value: unknown): boolean => {
+    if (value === null || typeof value !== "object") return typeof value !== "function";
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null)
+      return false;
+    return Object.values(value).every(plain);
+  };
+  assert.ok(messages.every(plain));
+});
+
+for (const stops of [false, true])
+  test(`a locked file the store does not vouch for fails the step${stops ? ", unless the Player stopped while its reply came" : ""}`, async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+    const media = new CapturedMediaStore(null, urls, "locks");
+    const photo = media.add("image", new Blob([png], { type: "image/png" })).reference;
+    // The store keeps the locked file but does not vouch for it.
+    media.holds = () => false;
+    const host = await inProcessBridge(stops ? 50 : undefined);
+    const sent: string[] = [];
+    const player: Harness = new Harness(
+      [
+        `let photo = "${photo}"`,
+        'let locked = encryptFile(photo, password: "p", publicKey: false, timeLock: false)',
+        "exit",
+      ].join("\n"),
+      {
+        media,
+        files: [photo],
+        bridge: host,
+        onSend: (op, args) => {
+          if (op !== "answerLock") return;
+          const answer =
+            typeof args === "object" && args !== null && "answer" in args ? args.answer : null;
+          sent.push(
+            typeof answer === "object" && answer !== null && "kind" in answer
+              ? String(answer.kind)
+              : "",
+          );
+          // The Player error stop while the refusal's reply is in transit: the store froze at once in-process, and the
+          // stop then resets the service in the same tick.
+          if (stops)
+            queueMicrotask(() => {
+              void host.halt(player.session);
+              player.service.reset();
+            });
+        },
+      },
+    );
+    await player.until(
+      () => sent.length > 0 && (stops || player.session.state.status !== "waiting"),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    player.stop();
+    const answers = sent;
+    assert.deepEqual(answers, stops ? ["locked"] : ["locked", "failed"]);
+    assert.deepEqual(
+      player.diagnostics.map((diagnostic) => diagnostic.code),
+      stops ? [] : ["lock-rejected"],
+    );
+    if (!stops) assert.equal(player.session.state.status, "failed");
+  });

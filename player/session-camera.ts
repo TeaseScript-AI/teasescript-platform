@@ -1,4 +1,8 @@
-import type { CapturedMediaAdmission, CaptureUnavailableReason } from "../src/index.js";
+import type {
+  ActionCompletionOutcome,
+  CapturedMediaAdmission,
+  CaptureUnavailableReason,
+} from "../src/index.js";
 import type {
   AcquireOutcome,
   CaptureDevice,
@@ -8,9 +12,9 @@ import type {
   CaptureRequest,
   CaptureTrack,
 } from "./capture-device.js";
-import { answerPlayerRuntimeCapture, type PlayerCaptureAnswer } from "./runtime-adapter.js";
-import { hatch } from "./engine-bridge/in-process.js";
-import type { ServiceSection } from "./player-bridge.js";
+import { heldMedia } from "./engine-bridge/held-media.js";
+import { refusalCode, type ServiceSection } from "./player-bridge.js";
+import type { PlayerCaptureAnswer } from "./runtime-adapter.js";
 import { activePlayerRuntimeCapture, type PlayerSession } from "./runtime-view.js";
 
 /** A bounded Player diagnostic for developers; never shown as an ordinary Player notice. */
@@ -339,12 +343,6 @@ export interface CaptureServiceHost {
   /** Identifies the published session; it changes when another session starts. */
   generation(): number;
   /**
-   * Observes the current time, publishes the result, and returns the published session; `null` when the session takes
-   * no input, as once a Player error stopped it.
-   */
-  observe(): PlayerSession | null;
-  publish(session: PlayerSession): void;
-  /**
    * Runs `body` as one exclusive section of the published session, with an observation inside it; `null` without a
    * session, or once a Player error stopped it.
    */
@@ -414,38 +412,71 @@ export class CaptureService {
         this.#pending = this.#answer();
       }
       const answer = await this.#pending;
-      if (this.#stopped || this.#key !== key || this.#host.generation() !== generation) return;
-      // Input happens at the observed time.
-      const observed = this.#host.observe();
-      if (!observed || activePlayerRuntimeCapture(observed.state)?.actionId !== action.actionId) {
-        this.#settled(key);
-        return;
-      }
-      const result = hatch(observed, (current) =>
-        answerPlayerRuntimeCapture(current, action.actionId, answer, this.#host.capturedMedia),
+      if (!this.#current(key, generation)) return;
+      await this.#host.section((section) =>
+        this.#deliver(section, key, generation, action.actionId, answer),
       );
-      // `executionPending`: the same answer is offered again in the next service.
-      if (result.outcome.kind === "executionPending") return;
-      this.#settled(key);
-      if (result.outcome.kind === "invalidPayload") {
-        this.#host.diagnostic({ code: "capture-rejected", message: result.outcome.message });
-        // Never leave the script waiting: answer this capture as unavailable instead.
-        this.#host.publish(
-          hatch(observed, (current) =>
-            answerPlayerRuntimeCapture(current, action.actionId, {
-              kind: "unavailable",
-              reason: "failed",
-            }),
-          ).session,
-        );
-        return;
-      }
-      if (result.outcome.kind === "completed") this.#host.publish(result.session);
+    } catch (error) {
+      // A refusal changed nothing: a basis another op replaced keeps this answer for the next service, a released
+      // session needs none, and a Player error stop already dropped it.
+      const refused = refusalCode(error);
+      if (refused === "session") this.#settled(key);
+      else if (refused !== "basis" && refused !== "halted") throw error;
     } finally {
       this.#servicing = false;
       // A retry, or the next capture of the same or a replacing session.
       this.request();
     }
+  }
+
+  /**
+   * Delivers `answer` in a section: input happens at the observed time. Whether to send is decided right before each
+   * send, with no wait in between, since nothing can take a request back once it is sent.
+   */
+  async #deliver(
+    section: ServiceSection,
+    key: string,
+    generation: number,
+    actionId: number,
+    answer: PlayerCaptureAnswer,
+  ): Promise<void> {
+    const observed = await section.observe();
+    if (!this.#current(key, generation)) return;
+    if (!observed || activePlayerRuntimeCapture(observed.state)?.actionId !== actionId)
+      return this.#settled(key);
+    const outcome = await section.send<ActionCompletionOutcome>(
+      "answerCapture",
+      {
+        actionId,
+        answer,
+        held: heldMedia(
+          this.#host.capturedMedia,
+          answer.kind === "captured" ? [answer.reference] : [],
+        ),
+      },
+      observed.revision,
+    );
+    // A reply after a stop or a replacement settles and reports nothing here.
+    if (!this.#current(key, generation)) return;
+    // `executionPending`: the same answer is offered again in the next service.
+    if (outcome.kind === "executionPending") return;
+    if (outcome.kind !== "invalidPayload") return this.#settled(key);
+    this.#host.diagnostic({ code: "capture-rejected", message: outcome.message });
+    // Never leave the script waiting: answer this capture as unavailable instead. That is now this capture's answer, so
+    // a retry offers it, not the photo again.
+    const fallback: PlayerCaptureAnswer = { kind: "unavailable", reason: "failed" };
+    this.#pending = Promise.resolve(fallback);
+    await section.send(
+      "answerCapture",
+      { actionId, answer: fallback, held: null },
+      observed.revision,
+    );
+    if (this.#current(key, generation)) this.#settled(key);
+  }
+
+  /** Whether the answer of `key` is still the one to deliver: not stopped, not reset, the same session. */
+  #current(key: string, generation: number): boolean {
+    return !this.#stopped && this.#key === key && this.#host.generation() === generation;
   }
 
   #settled(key: string): void {

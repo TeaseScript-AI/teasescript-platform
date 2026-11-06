@@ -1,4 +1,5 @@
 import type {
+  ActionCompletionOutcome,
   RuntimeLockActionSnapshot,
   RuntimeLockChoice,
   RuntimeLockNotice,
@@ -6,9 +7,9 @@ import type {
 import { fileType, OCTET_STREAM, storedFileKind } from "../src/runtime/host-data/stored-files.js";
 import type { LockServices, ReadLock } from "./encryption/lock.js";
 import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey, type PublicKey } from "../src/public-keys.js";
-import { answerPlayerRuntimeLock, type PlayerLockAnswer } from "./runtime-adapter.js";
-import { hatch } from "./engine-bridge/in-process.js";
-import type { ServiceSection } from "./player-bridge.js";
+import { heldMedia } from "./engine-bridge/held-media.js";
+import { refusalCode, type ServiceSection } from "./player-bridge.js";
+import type { PlayerLockAnswer } from "./runtime-adapter.js";
 import { activePlayerRuntimeLock, type PlayerSession } from "./runtime-view.js";
 import type { PlayerDiagnostic } from "./session-camera.js";
 import { base64FromBytes, bytesFromBase64, type FileStoreMedia } from "./stored-files.js";
@@ -76,9 +77,6 @@ export interface LockServiceHost {
   session(): PlayerSession | null;
   /** Identifies the published session; it changes when another session starts. */
   generation(): number;
-  /** Observes the current time, publishes the result, and returns the published session, or `null` without input. */
-  observe(): PlayerSession | null;
-  publish(session: PlayerSession): void;
   /**
    * Runs `body` as one exclusive section of the published session, with an observation inside it; `null` without a
    * session, or once a Player error stopped it.
@@ -233,41 +231,73 @@ export class LockService {
         this.#answer = { key, promise: this.#work(action, typed) };
       }
       const answer = await this.#answer.promise;
-      if (this.#stopped || this.#answer?.key !== key || this.#host.generation() !== generation)
-        return;
-      // Input happens at the observed time.
-      const observed = this.#host.observe();
-      if (!observed || activePlayerRuntimeLock(observed.state)?.actionId !== action.actionId) {
-        this.#settled(key);
-        return;
-      }
-      const result = hatch(observed, (current) =>
-        answerPlayerRuntimeLock(current, action.actionId, answer, this.#host.media),
+      if (!this.#current(key, generation)) return;
+      await this.#host.section((section) =>
+        this.#deliver(section, key, generation, action, answer),
       );
-      // `executionPending`: the same answer is offered again in the next service.
-      if (result.outcome.kind === "executionPending") return;
-      this.#settled(key);
-      if (result.outcome.kind === "invalidPayload") {
-        this.#host.diagnostic({ code: "lock-rejected", message: result.outcome.message });
-        // Never leave the script waiting: a step fails, and a dialog's answer is dropped, so the dialog asks again.
-        if (action.phase === "work")
-          this.#host.publish(
-            hatch(observed, (current) =>
-              answerPlayerRuntimeLock(current, action.actionId, {
-                kind: "failed",
-                reason: "unavailable",
-              }),
-            ).session,
-          );
-        else this.#showDialog(null);
-        return;
-      }
-      if (result.outcome.kind === "completed") this.#host.publish(result.session);
+    } catch (error) {
+      // A refusal changed nothing: a basis another op replaced keeps this answer for the next service, a released
+      // session needs none, and a Player error stop already dropped it.
+      const refused = refusalCode(error);
+      if (refused === "session") this.#settled(key);
+      else if (refused !== "basis" && refused !== "halted") throw error;
     } finally {
       this.#servicing = false;
       // A retry, or the next step of the same or a replacing session.
       this.request();
     }
+  }
+
+  /**
+   * Delivers `answer` in a section, as `CaptureService` does: input happens at the observed time, and whether to send is
+   * decided right before each send.
+   */
+  async #deliver(
+    section: ServiceSection,
+    key: string,
+    generation: number,
+    action: RuntimeLockActionSnapshot,
+    answer: PlayerLockAnswer,
+  ): Promise<void> {
+    const observed = await section.observe();
+    if (!this.#current(key, generation)) return;
+    if (!observed || activePlayerRuntimeLock(observed.state)?.actionId !== action.actionId)
+      return this.#settled(key);
+    const outcome = await section.send<ActionCompletionOutcome>(
+      "answerLock",
+      {
+        actionId: action.actionId,
+        answer,
+        held: heldMedia(this.#host.media, "file" in answer ? [answer.file] : []),
+      },
+      observed.revision,
+    );
+    // A reply after a stop or a replacement settles and reports nothing here.
+    if (!this.#current(key, generation)) return;
+    // `executionPending`: the same answer is offered again in the next service.
+    if (outcome.kind === "executionPending") return;
+    if (outcome.kind !== "invalidPayload") return this.#settled(key);
+    this.#host.diagnostic({ code: "lock-rejected", message: outcome.message });
+    // Never leave the script waiting: a step fails, and a dialog's answer is dropped, so the dialog asks again.
+    if (action.phase !== "work") {
+      this.#settled(key);
+      this.#showDialog(null);
+      return;
+    }
+    // The failure is now this step's answer, so a retry offers it, not the lock again.
+    const fallback: PlayerLockAnswer = { kind: "failed", reason: "unavailable" };
+    this.#answer = { key, promise: Promise.resolve(fallback) };
+    await section.send(
+      "answerLock",
+      { actionId: action.actionId, answer: fallback, held: null },
+      observed.revision,
+    );
+    if (this.#current(key, generation)) this.#settled(key);
+  }
+
+  /** Whether the answer of `key` is still the one to deliver: not stopped, not reset, the same session. */
+  #current(key: string, generation: number): boolean {
+    return !this.#stopped && this.#answer?.key === key && this.#host.generation() === generation;
   }
 
   #settled(key: string): void {
