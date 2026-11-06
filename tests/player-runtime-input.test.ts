@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import test, { before, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { effectScope, watch, type Ref } from "vue";
-import { ts } from "ts-morph";
 
 import type * as CompileProject from "../player/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
@@ -714,43 +714,22 @@ test("a permanent button is pressed at the observed time, and a replaced session
   assert.equal(posted.ops().filter((op) => op === "pressPermanentButton").length, 1);
 });
 
-// The composer keeps an input-method composition as `v-model` does, so a text written into its field from outside wins
-// only through `writeField`, which ends the composition and publishes the text at once. `RuntimeInteraction.vue` gets
-// the composer's text and repeat from `useComposerFields` only, as read-only refs, so a write in any form fails its type
-// check; it must not declare or receive them otherwise. The template, which unwraps them, passes them to the composer
-// only, as a write there would not fail the type check.
-test("the interaction gets the composer's text and its repeat only as useComposerFields' read-only refs", () => {
-  const source = readFileSync(
-    fileURLToPath(new URL("../../player/vue/src/RuntimeInteraction.vue", import.meta.url)),
-    "utf8",
+// The composer's text and repeat have one owner, `useComposerFields`: the component that renders the composer reads
+// them with `text` and writes them only with `writeField`, which ends a composition under way first. Only the composer
+// takes the writable model (`useComposerModel`); a component cannot inject what it provides itself.
+test("only the composer takes the composer's writable model", () => {
+  const sources = fileURLToPath(new URL("../../player/vue/src/", import.meta.url));
+  const files = readdirSync(sources, { recursive: true, encoding: "utf8" }).filter((file) =>
+    /\.(?:ts|vue)$/.test(file),
   );
-  const script = /<script setup lang="ts">([\s\S]*?)<\/script>/.exec(source)?.[1];
-  const template = /<\/script>\s*<template>([\s\S]*)<\/template>/.exec(source)?.[1];
-  assert.ok(script !== undefined && template !== undefined);
-  const file = ts.createSourceFile("RuntimeInteraction.ts", script, ts.ScriptTarget.Latest, true);
-  const bindings: string[] = [];
-  const visit = (node: ts.Node): void => {
-    if (
-      (ts.isBindingElement(node) || ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
-      ts.isIdentifier(node.name) &&
-      (node.name.text === "draft" || node.name.text === "repeated")
-    ) {
-      const declaration = ts.isBindingElement(node) ? node.parent.parent : node;
-      const from =
-        ts.isVariableDeclaration(declaration) &&
-        declaration.initializer !== undefined &&
-        ts.isCallExpression(declaration.initializer)
-          ? declaration.initializer.expression.getText(file)
-          : "(another source)";
-      bindings.push(`${node.name.text} from ${from}`);
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
-  assert.deepEqual(bindings, ["draft from useComposerFields", "repeated from useComposerFields"]);
-  // Every expression of the template, in an attribute or an interpolation, that names either one.
-  const uses = [...template.matchAll(/([^\s=<>]+)="([^"]*)"|\{\{([\s\S]*?)\}\}/g)]
-    .map((match) => (match[1] === undefined ? `{{${match[3]}}}` : `${match[1]}=${match[2]}`))
-    .filter((use) => /\b(?:draft|repeated)\b/.test(use.slice(use.indexOf("=") + 1)));
-  assert.deepEqual(uses, [":model-value=draft", ":repeated=repeated"]);
+  const takers = files.filter((file) => {
+    const source = readFileSync(join(sources, file), "utf8");
+    return (
+      file !== "useComposerFields.ts" &&
+      (/\buseComposerModel\b/.test(source) ||
+        /import\s*\*\s*as\s+\w+\s+from\s*["'][^"']*useComposerFields["']/.test(source))
+    );
+  });
+  assert.ok(files.includes("Composer.vue") && files.includes("RuntimeInteraction.vue"));
+  assert.deepEqual(takers, ["Composer.vue"]);
 });

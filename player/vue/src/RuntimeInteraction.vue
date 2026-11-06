@@ -38,7 +38,7 @@ import {
   type InputIntent,
   type InputSectionHost,
 } from "./runtime-input";
-import { useComposerFields, type ComposerFieldWriter } from "./useComposerFields";
+import { useComposerFields } from "./useComposerFields";
 import type { ImageCapture } from "./useImageCapture";
 
 /** How the host stores an image file the player chose for `askImage`. */
@@ -286,11 +286,9 @@ const root = ref<HTMLElement | null>(null);
 // The session's area, which a popup that is not modal centres on, beside the Debug panel.
 const composition = computed(() => root.value?.closest<HTMLElement>(".player-composition") ?? null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
-const composer = ref<
-  ({ focusInput(): void; selectInput(): void; openPicker(): void } & ComposerFieldWriter) | null
->(null);
-// The composer's text and repeat are read-only here: a text from outside goes through `writeField`.
-const { draft, repeated, writeField, typed: composerTyped } = useComposerFields(composer);
+const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
+// The composer's text and repeat, which this component reads with `text` and writes only with `writeField`.
+const { text, writeField } = useComposerFields();
 const feedback = ref("");
 const submitting = ref(false);
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -315,9 +313,12 @@ function showFeedback(message: string) {
   feedbackTimeout = setTimeout(clearFeedback, 6000);
 }
 
-watch(draft, clearFeedback);
+watch(() => text("input"), clearFeedback);
 // Typing the repeat again clears the notice that the passwords do not match, which empties it.
-watch(repeated, (text) => text !== "" && clearFeedback());
+watch(
+  () => text("repeat"),
+  (typed) => typed !== "" && clearFeedback(),
+);
 
 // The composer edits one form field at a time: it opens with the field's text selected, so typing replaces it and
 // Enter keeps it; after the field closes, focus returns to the field's button.
@@ -355,35 +356,38 @@ watch(
 // The form holds the text being typed, shortly after typing pauses, so a checkpoint or debug export keeps it. Only the
 // composer's own field takes it, while it is presented.
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
-watch(draft, (text) => {
-  clearTimeout(draftTimer);
-  // A password typed but not sent is never kept: a question that resumes after a block asks for it again.
-  if (
-    actionId.value !== undefined &&
-    form.value === null &&
-    foreground.value?.kind !== "ask-password"
-  )
-    typedTexts()?.set(typedKey(actionId.value, ""), text);
-  if (!ownsPresentedEditor() || !props.session) return;
-  const target = composerOwner!;
-  const { planToken: plan } = props.session;
-  const reset = props.reset;
-  typedTexts()?.set(typedKey(target.actionId, target.fieldId), text);
-  if (text === formEditor.value?.text) return;
-  draftTimer = setTimeout(() => {
-    // A replaced session, such as one Debug's rewind restored, takes no text typed for another.
-    if (props.session?.planToken !== plan || props.reset !== reset || submitting.value) return;
-    if (props.holdFormDrafts || !props.inputSection) return;
-    // The text reaches only its own action's field; while another is presented it stays typed for the return.
-    void draftInput(props.inputSection, target, text).then((drafted) => {
-      if (drafted !== null) emit("update:session", drafted);
-    });
-  }, 400);
-});
+watch(
+  () => text("input"),
+  (typed) => {
+    clearTimeout(draftTimer);
+    // A password typed but not sent is never kept: a question that resumes after a block asks for it again.
+    if (
+      actionId.value !== undefined &&
+      form.value === null &&
+      foreground.value?.kind !== "ask-password"
+    )
+      typedTexts()?.set(typedKey(actionId.value, ""), typed);
+    if (!ownsPresentedEditor() || !props.session) return;
+    const target = composerOwner!;
+    const { planToken: plan } = props.session;
+    const reset = props.reset;
+    typedTexts()?.set(typedKey(target.actionId, target.fieldId), typed);
+    if (typed === formEditor.value?.text) return;
+    draftTimer = setTimeout(() => {
+      // A replaced session, such as one Debug's rewind restored, takes no text typed for another.
+      if (props.session?.planToken !== plan || props.reset !== reset || submitting.value) return;
+      if (props.holdFormDrafts || !props.inputSection) return;
+      // The text reaches only its own action's field; while another is presented it stays typed for the return.
+      void draftInput(props.inputSection, target, typed).then((drafted) => {
+        if (drafted !== null) emit("update:session", drafted);
+      });
+    }, 400);
+  },
+);
 onUnmounted(() => clearTimeout(draftTimer));
 /** The composer's text, which the edited form field takes before any other edit of its form. */
 function formDraft(): string | undefined {
-  return ownsPresentedEditor() ? draft.value : undefined;
+  return ownsPresentedEditor() ? text("input") : undefined;
 }
 onUnmounted(clearFeedback);
 useEventListener(
@@ -797,20 +801,20 @@ function submit(source: "input" | "button") {
   const field = lockField.value;
   if (field) {
     // As for askPassword, an empty field answers nothing.
-    if (field.busy || draft.value === "") return focusInput();
+    if (field.busy || text("input") === "") return focusInput();
     // After a mismatch both are typed again: the repeat is emptied, and the password selected, so typing replaces it.
-    if (field.repeat && repeated.value !== draft.value) {
+    if (field.repeat && text("repeat") !== text("input")) {
       writeField("repeat", "");
       showFeedback(invalidAnswerMessage("passwordMismatch"));
       composer.value?.selectInput();
       return;
     }
     // The fields keep what was typed, read-only, while the Player locks or opens with it; they empty once it is done.
-    props.lock?.submit({ password: draft.value, timeLockMs: null });
+    props.lock?.submit({ password: text("input"), timeLockMs: null });
     return;
   }
   void complete(
-    intents.composer(draft.value, source === "input" ? "enter" : "send"),
+    intents.composer(text("input"), source === "input" ? "enter" : "send"),
     source === "input",
   );
 }
@@ -901,7 +905,6 @@ function submit(source: "input" | "button") {
         />
         <Composer
           ref="composer"
-          :model-value="draft"
           :disabled="
             (!foreground && !pacing && !lockField) ||
             foreground?.kind === 'popup' ||
@@ -934,7 +937,6 @@ function submit(source: "input" | "button") {
           :attach="attach"
           :password="foreground?.kind === 'ask-password' || lockField !== null"
           :repeat="lockField?.repeat ?? false"
-          :repeated="repeated"
           :accessible-name="
             lockField ? 'Password' : (formEditor?.label ?? foreground?.accessibleName ?? 'Response')
           "
@@ -961,8 +963,6 @@ function submit(source: "input" | "button") {
                       : 'text'
           "
           :feedback="feedback"
-          @update:model-value="composerTyped('input', $event)"
-          @update:repeated="composerTyped('repeat', $event)"
           @submit="submit"
           @skip="skipPacing(true)"
           @activate="activatePreselected"
