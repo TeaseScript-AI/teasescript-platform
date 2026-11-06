@@ -7,7 +7,7 @@ import { Consumers } from "../src/type-inference/core/consumers.js";
 import { indexPaths, stepsOf } from "../src/type-inference/core/contract/literal-index.js";
 import { exportNames } from "../src/type-inference/core/contract/key-ids.js";
 import { absentWriterAt, objectsAt } from "../src/type-inference/core/contract/objects.js";
-import { DemandExhausted } from "../src/type-inference/core/budget.js";
+import { DemandExhausted, withTestAllowance } from "../src/type-inference/core/budget.js";
 import { firstWriter, REASON, type Writer } from "../src/type-inference/core/items.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
@@ -55,7 +55,11 @@ function family(shape: string, k: number, absent: boolean): string {
 const SHAPES = ["plain", "get-inline", "get-shared", "call", "different-steps"];
 
 /** The passes of one analysis of `source` in `mode`. */
-function passesOf(source: string, mode: (typeof MODES)[number]): CorePass[] {
+function passesOf(
+  source: string,
+  mode: (typeof MODES)[number],
+  allowance: number | null = null,
+): CorePass[] {
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
   assert.ok(request !== null, source);
   const passes: CorePass[] = [];
@@ -65,7 +69,9 @@ function passesOf(source: string, mode: (typeof MODES)[number]): CorePass[] {
     check.call(this);
   };
   try {
-    inMode(mode, () => analyseCore(request));
+    const run = () => inMode(mode, () => analyseCore(request));
+    if (allowance === null) run();
+    else withTestAllowance(allowance, run);
   } finally {
     Consumers.prototype.check = check;
   }
@@ -172,7 +178,8 @@ test("the objects query names a read's missing writer as the read does on each c
   for (const source of CONTROLS)
     for (const mode of MODES) {
       const label = `${JSON.stringify(mode)}\n${source}`;
-      for (const pass of passesOf(source, mode))
+      // (with room for the oracle's reads after the analysis, each control's at every literal path and property)
+      for (const pass of passesOf(source, mode, 30_000_000))
         assert.deepEqual(inMode(mode, () => compared(pass)).differences, [], label);
     }
 });
