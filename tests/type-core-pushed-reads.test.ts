@@ -383,16 +383,67 @@ test("a ring read through a marked copy reaches its check, and its leaves are re
     }
 });
 
-test("where the native reader ends, a read through a marked copy answers what it does, and a marked native value declines (#1784)", () => {
+/**
+ * #1784: each pushed slot (`pr|place|path|rest`) against the native reader's answer of the same read (`c|place|path.rest`,
+ * `rc|` where it recurs), its items' writers apart (the entry's writing edge sets the writer after the read,
+ * `withWriter`); the slots compared.
+ */
+function samePushedSlots(
+  pushed: ReturnType<typeof analysed>,
+  native: ReturnType<typeof analysed>,
+  source: string,
+): number {
+  const unwritten = (items: string): string =>
+    items
+      .split(" ")
+      .map((item) =>
+        item
+          .split("|")
+          .map((field, index) => (index === 3 ? "*" : field))
+          .join("|"),
+      )
+      .join(" ");
+  let compared = 0;
+  pushed.settled.forEach((answers, pass) => {
+    for (const [key, items] of answers) {
+      const slot = /^pr\|(\d+)\|([^|]*)\|(.*)$/.exec(key);
+      if (slot === null) continue;
+      const read = `c|${slot[1]}|${[slot[2], slot[3]].filter((part) => part !== "").join(".")}`;
+      const other = native.settled[pass]?.get(read) ?? native.settled[pass]?.get(`r${read}`);
+      if (other === undefined) continue;
+      compared += 1;
+      assert.equal(unwritten(items), unwritten(other), `${key} in pass ${pass}\n${source}`);
+    }
+  });
+  return compared;
+}
+
+test("where the native reader ends, a read through a marked route answers what it does, raw and published, in four modes (#1784)", () => {
+  const ring = (...rows: string[]): string =>
+    [...rows.slice(0, -2), "p2.q=p0", "p2=p1", rows.at(-2)!, "p2=p2.q", rows.at(-1)!, "exit"].join(
+      "\n",
+    ) + "\n";
+  const plain = ["let p0={g:0}", "let p1={g:1}", "let p2={g:2}"];
+  const nested = ["let p0={g:{h:0}}", "let p1={g:{h:1}}", "let p2={g:{h:2}}"];
+  const deep = ["let x={a:{b:{c:1}}}", 'if x.a.b.c is integer { say "x" }', ...plain];
   const controls = [
-    // the ring without its closing copy: the marked copy's leaves, read at the tested path and beside it
+    // a holder's mark (a test of the copy's source below it), read at the tested path, beside it, and whole
     guardedRing({ closing: false }),
     guardedRing({ closing: false, read: "q.q.f" }),
-    guardedRing({ closing: false, tested: "h" }),
+    ring(...plain, "if p0.g is integer { p1=p0 }", 'let w=p2.q.q\nsay "${w.g}"'),
+    // the guard bit (a test of the source itself), and steps below a mark
+    ring(...plain, "if p0 is object { p1=p0 }", 'say "${p2.q.q.g}"'),
+    ring(...nested, "if p0.g is object { p1=p0 }", 'say "${p2.q.q.g.h}"'),
+    ring(...nested, "if p0 is object { p1=p0 }", 'say "${p2.q.q.g.h}"'),
+    // a holder two steps deep, and one whose depth another test sets, its hold decided where the path ends
+    ring(...nested, "if p0.g.h is integer { p1=p0 }", 'let w=p2.q.q.g\nsay "${w.h}"'),
+    ring(...deep, "if p0.g is integer { p1=p0 }", 'say "${p2.q.q.g}"'),
+    ring(...deep, "if p0.g is integer { p1=p0 }", 'let w=p2.q.q\nsay "${w.g}"'),
     // a marked copy of a literal whose leaf is an operation's (a native value): declined, read natively
     guardedRing({ closing: false, leaf: "{g:hostValue+1}" }),
   ];
-  for (const source of controls)
+  for (const source of controls) {
+    let compared = 0;
     for (const mode of MODES) {
       const files = [{ path: "main.tease", source }];
       assert.equal(
@@ -400,8 +451,12 @@ test("where the native reader ends, a read through a marked copy answers what it
         withoutPushedReads(() => publication(files, mode, GLOBALS)),
         source,
       );
-      sameSettled(analysed(source, mode), analysed(source, mode, "native"), source);
+      const [pushed, native] = [analysed(source, mode), analysed(source, mode, "native")];
+      sameSettled(pushed, native, source);
+      compared += samePushedSlots(pushed, native, source);
     }
+    if (!source.includes("hostValue")) assert.ok(compared > 0, source);
+  }
   // (the operation's leaf reached through the marked copy declines; the native reader answers it, as above)
   const declined = analysed(guardedRing({ closing: false, leaf: "{g:hostValue+1}" }));
   assert.ok(declined.all.some((facts) => (facts.declines.get("marks-native") ?? 0) > 0));
