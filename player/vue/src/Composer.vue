@@ -1,16 +1,15 @@
 <script setup lang="ts" generic="Request">
-import { computed, nextTick, ref, useId, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
 import { Eye, EyeOff, Paperclip } from "@lucide/vue";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
 import { playerKeys } from "./playerKeys";
-import type { ComposerField } from "./useComposerFields";
+import { useComposerModel, type ComposerField } from "./useComposerFields";
 
 const props = withDefaults(
   defineProps<{
-    modelValue: string;
     disabled?: boolean;
     submitting?: boolean;
     placeholder?: string;
@@ -24,11 +23,10 @@ const props = withDefaults(
      */
     password?: boolean;
     /**
-     * With `password`, a "Repeat password" field under it, which `repeated` holds: Enter in the password field moves to
-     * it, and Enter there submits.
+     * With `password`, a "Repeat password" field under it, whose text the model's `repeated` holds: Enter in the
+     * password field moves to it, and Enter there submits.
      */
     repeat?: boolean;
-    repeated?: string;
     feedback?: string;
     /** A skippable pacing gate is waiting; Space in the empty input settles it. */
     pacing?: boolean;
@@ -57,7 +55,6 @@ const props = withDefaults(
     inputType: "text",
     password: false,
     repeat: false,
-    repeated: "",
     feedback: "",
     pacing: false,
     preselected: false,
@@ -68,8 +65,6 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  "update:modelValue": [value: string];
-  "update:repeated": [value: string];
   submit: [source: "input" | "button"];
   skip: [];
   /** Space in the empty input while a preselected button waits. */
@@ -88,13 +83,16 @@ const textareaElement = computed(() => {
   return element instanceof HTMLTextAreaElement ? element : undefined;
 });
 const input = computed(() => picker.value ?? textareaElement.value);
+// The text and repeat belong to the component that renders the composer (`useComposerFields`); the player's typing
+// writes them here.
+const model = useComposerModel();
 const value = computed({
-  get: () => props.modelValue,
-  set: (text: string) => emit("update:modelValue", text),
+  get: () => model.draft.value,
+  set: (text: string) => (model.draft.value = text),
 });
 const repeatedValue = computed({
-  get: () => props.repeated,
-  set: (text: string) => emit("update:repeated", text),
+  get: () => model.repeated.value,
+  set: (text: string) => (model.repeated.value = text),
 });
 const feedbackId = useId();
 const capsLockId = useId();
@@ -127,7 +125,7 @@ function handleKeydown(event: KeyboardEvent): void {
     return;
   }
   const element = input.value;
-  const empty = props.modelValue === "" && element?.selectionStart === element?.selectionEnd;
+  const empty = value.value === "" && element?.selectionStart === element?.selectionEnd;
   if (event.key === playerKeys.skipPacing.key && props.pacing && empty) {
     event.preventDefault();
     emit("skip");
@@ -301,10 +299,10 @@ function endComposition(field?: HTMLElement): void {
   }
 }
 /**
- * The one path for a text that a field gets from outside, such as a reset or a prefill. The model is its authority: the
- * text is published at once, also an unchanged one, and never left to a later update. A composition under way in that
- * field ends first, and a text field that shows another text takes it as typed input does, so the field and the
- * Textarea's own copy of the model hold it too. A date or time control never composes, and shows the model.
+ * Brings a field in line with a text written from outside, such as a reset or a prefill, before its owner publishes the
+ * text (`useComposerFields`' `writeField`): a composition under way in that field ends first, and a text field that
+ * shows another text takes it as typed input does, so the field and the Textarea's own copy of the model hold it too. A
+ * date or time control never composes, and shows the model.
  */
 function writeField(field: ComposerField, text: string): void {
   const element = field === "repeat" ? repeatInput.value : input.value;
@@ -319,9 +317,8 @@ function writeField(field: ComposerField, text: string): void {
       element.dispatchEvent(new Event("input"));
     }
   }
-  if (field === "repeat") emit("update:repeated", text);
-  else emit("update:modelValue", text);
 }
+onBeforeUnmount(model.attach(writeField));
 // Whatever makes the fields read-only (an answer in flight, an image being read, a lock at work) ends a composition
 // first, so none stays open in a read-only field.
 watch(
@@ -332,7 +329,7 @@ watch(
   { flush: "pre" },
 );
 
-defineExpose({ focusInput, selectInput, openPicker, writeField });
+defineExpose({ focusInput, selectInput, openPicker });
 </script>
 
 <template>
@@ -488,7 +485,7 @@ defineExpose({ focusInput, selectInput, openPicker, writeField });
             data-composer-input
             :type="inputType"
             :step="inputType === 'date' ? undefined : 1"
-            :value="modelValue"
+            :value="value"
             :aria-label="placeholder ? `${accessibleName}: ${placeholder}` : accessibleName"
             :aria-invalid="feedback ? true : undefined"
             :aria-describedby="feedback ? feedbackId : undefined"
@@ -507,7 +504,7 @@ defineExpose({ focusInput, selectInput, openPicker, writeField });
           ref="textarea"
           data-composer-input
           rows="1"
-          :model-value="modelValue"
+          :model-value="value"
           :aria-label="accessibleName"
           :aria-invalid="feedback ? true : undefined"
           :aria-describedby="feedback ? feedbackId : undefined"

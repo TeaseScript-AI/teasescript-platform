@@ -122,7 +122,9 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   `TranscriptLine.vue`, `transcriptPresentation.ts` and `messageContrast.ts`.
 - `RuntimeInteraction.vue` composes `Composer.vue` and `ForegroundControls.vue` and submits their runtime actions,
   including [pacing skips](../../../docs/ui/PLAYER-UI.md#composer-and-foreground-interactions), with shared
-  submission guards and focus handling. The composer uses shadcn Textarea/Button and VueUse autosizing;
+  submission guards and focus handling. `useComposerFields.ts` owns the composer's text: `RuntimeInteraction.vue`
+  reads it and writes it only through `writeField`, which ends an input-method composition first, and only
+  `Composer.vue` takes the writable model. The composer uses shadcn Textarea/Button and VueUse autosizing;
   foreground controls use `components/PlayerActionButton.vue` in the transcript's trailing slot.
   `playerRuntimeForeground` maps authored backgrounds from live/restored actions; `player/theme/story-choice.ts`
   supplies theme/authored button material. See [ADR 0018](../../../docs/decisions/0018-first-standard-library-poc-contract.md)
