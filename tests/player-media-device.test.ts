@@ -376,6 +376,24 @@ test("the load queue runs one delivery at a time and coalesces requests made mea
   assert.equal(deliveries[1]!.observe, true, "new reports arrived, so it observes");
 });
 
+test("a report added as a delivery ends is offered only after an observation, also by the delivery that follows", async () => {
+  const { queue, deliveries } = gatedQueue();
+  queue.add(1, LOADED);
+  queue.add(3, LOADED);
+  await settle();
+  deliveries[0]!.acknowledge(1);
+  // A retry while 3 waits; then, as the delivery ends, a new report, whose own request comes only after a microtask.
+  queue.retry();
+  deliveries[0]!.finish();
+  queue.add(2, LOADED);
+  await settle();
+  assert.deepEqual(
+    deliveries[1]!.reports.map(([mediaId]) => mediaId),
+    [3, 2],
+  );
+  assert.equal(deliveries[1]!.observe, true, "2 is new, so the delivery observes first");
+});
+
 test("a cleared load queue keeps nothing a delivery under way acknowledges after the clear", async () => {
   const { queue, deliveries } = gatedQueue();
   queue.add(1, LOADED);

@@ -453,11 +453,12 @@ export class MediaLoadQueue {
     this.#delivering = true;
     const generation = this.#generation;
     const offered = [...this.#pending];
+    const reports = new Map(offered);
     try {
-      await this.#deliver(offered, observe, (mediaId) => {
+      // A report added whose own request has not come yet is new as well: it is offered only after an observation.
+      await this.#deliver(offered, observe || this.#scheduled, (mediaId) => {
         // Only the report that was offered: a newer one for the same medium stays, as does everything after a clear.
-        const report = offered.find(([id]) => id === mediaId)?.[1];
-        if (generation === this.#generation && this.#pending.get(mediaId) === report)
+        if (generation === this.#generation && this.#pending.get(mediaId) === reports.get(mediaId))
           this.#pending.delete(mediaId);
       });
     } finally {

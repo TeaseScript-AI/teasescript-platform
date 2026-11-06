@@ -59,7 +59,7 @@ import {
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 import { usePhotoColour } from "./usePhotoColour";
-import { prepareStagePhoto, usePlanPhotoPreload } from "./stagePhotos";
+import { preloadStagePhotos, prepareStagePhoto, usePlanPhotoPreload } from "./stagePhotos";
 import { useStagePhoto } from "./useStagePhoto";
 
 // Product Player composition. The development preview supplies tools, a Stage media override, the right rail and an
@@ -462,7 +462,11 @@ useResizeObserver(stageElement, ([entry]) => {
 // swatch family colours it, and whether the accent follows the photo, are A/B tests.
 const stagePhoto = useStagePhoto(stageMedia, prepareStagePhoto);
 // Every Stage image the script names is downloaded and measured in the background once its session runs.
-usePlanPhotoPreload(() => props.player.session.value, props.player.resolveAsset);
+usePlanPhotoPreload(
+  () => props.player.session.value,
+  props.player.resolveAsset,
+  preloadStagePhotos,
+);
 const shownMedia = computed(() => {
   const photo = stagePhoto.shown.value;
   return photo === null ? undefined : { ...photo.media, src: photo.url, source: photo.media.src };

@@ -388,7 +388,7 @@ export interface PlanPhotoSource {
 export function usePlanPhotoPreload(
   shown: () => PlanPhotoSource | null,
   resolveAsset: (path: string) => string | null,
-  preload: (sources: readonly string[]) => () => void = preloadStagePhotos,
+  preload: (sources: readonly string[]) => () => void,
 ): void {
   let release = () => {};
   watch(
