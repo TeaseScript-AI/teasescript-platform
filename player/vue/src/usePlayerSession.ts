@@ -2269,26 +2269,28 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (!pending || clearing.value || importing.value) return;
     activation.value = null;
     const token = ++activationToken;
-    // The engine's host is ready within a task of the Player's start; an activation before that waits for it.
-    if (bridge === null) {
-      await bridgeReady;
-      if (disposed || token !== activationToken) return;
-    }
     const withCamera = options.capabilities?.camera === true;
     const reading = pending.kind === "start" && scriptStorage !== undefined;
-    if (!withCamera && !reading) {
-      // Nothing waits: `takePhoto()` is unconfigured (settled before `open` returns), and the session starts within the
-      // activating click.
-      void camera.open(false);
-      captures.reset();
-      return startFrom(pending);
-    }
+    // Everything the browser allows only within the player's click runs here, before any await or request: the
+    // session may show only after the host replied (a Start of a held plan, a Continue), or after the camera answered.
     // Retire the previous session first: its elements return to the pool before priming, so the new session never
-    // receives an element the browser still blocks, and it cannot project media while it waits.
+    // receives an element the browser still blocks, and it cannot project media while it waits. `beginning` keeps the
+    // screen on from the click (`useScreenWakeLock`).
     session.value = null;
     device.reset();
     primeAudio();
     beginning.value = true;
+    if (!withCamera && !reading) {
+      // `takePhoto()` is unconfigured (settled before `open` returns): nothing waits but the host's replies.
+      void camera.open(false);
+      captures.reset();
+      try {
+        await startFrom(pending);
+      } finally {
+        if (token === activationToken) beginning.value = false;
+      }
+      return;
+    }
     let opened: boolean;
     try {
       opened = await camera.open(withCamera);
@@ -2300,7 +2302,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Replaced, re-prepared, or unmounted while it waited: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
-    await startFrom(pending);
+    beginning.value = true;
+    try {
+      await startFrom(pending);
+    } finally {
+      if (token === activationToken) beginning.value = false;
+    }
   }
   /** The engine's host, which the in-process backend gives at once; an injected one is ready before any Start. */
   function requireBridge(): PlayerBridge {
@@ -2342,9 +2349,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * first publication arrives, unless it was replaced, re-prepared, or unmounted meanwhile.
    */
   function startFrom(pending: Activation): Promise<void> | void {
+    const token = activationToken;
+    // The engine's host is ready at once in-process; an injected one may answer `ready` later, which this waits for.
+    if (bridge === null)
+      return bridgeReady.then(() => {
+        if (!disposed && token === activationToken) return startFrom(pending);
+      });
     hostError.value = null;
     failureRecording = null;
-    const token = activationToken;
     let begun: PlayerSession | Promise<PlayerSession>;
     try {
       begun = pending.begin();
