@@ -60,7 +60,7 @@ export interface BridgeReady {
 
 /** Why the bridge refused a request, before any effect. */
 export type BridgeRefusal =
-  "version" | "envelope" | "unknownOp" | "arguments" | "order" | "session" | "basis";
+  "version" | "envelope" | "unknownOp" | "arguments" | "order" | "session" | "basis" | "halted";
 
 /**
  * A failed request. `bridge` errors are refusals (`code` names which); `engine` errors are what the op threw, with the

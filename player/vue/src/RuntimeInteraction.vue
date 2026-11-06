@@ -16,10 +16,8 @@ import {
   closePlayerRuntimeExport,
   closePlayerRuntimePopup,
   openPlayerRuntimeUrl,
-  playerRuntimeForm,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimeImage,
-  skipPlayerRuntimePacing,
   cancelPlayerRuntimeForm,
   clearPlayerRuntimeFormField,
   dismissPlayerRuntimeFormField,
@@ -32,11 +30,16 @@ import {
 } from "../../runtime-adapter.js";
 import {
   activePlayerRuntimeInteraction,
+  playerRuntimeForm,
   playerRuntimeUrlRequest,
   playerRuntimeForeground,
   playerRuntimePacingGate,
   playerRuntimeInteractionActionIds,
+  type PlayerSession,
 } from "../../runtime-view.js";
+import { hatch } from "../../engine-bridge/in-process.js";
+import { bridgeOf } from "../../player-bridge.js";
+import type { ActionCompletionOutcome } from "../../../src/index.js";
 import { invalidAnswerMessage } from "../../../src/interaction-answers.js";
 import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
@@ -64,7 +67,7 @@ export interface PlayerImageInput {
 }
 
 const props = defineProps<{
-  session: PlayerRuntimeSession | null;
+  session: PlayerSession | null;
   reset: number;
   entries: readonly PlayerTranscriptEntryPresentation[];
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
@@ -78,7 +81,7 @@ const props = defineProps<{
    * Brings scene time up to date before input and returns the published session; `null` when the session takes no
    * input, as once a Player error stopped it.
    */
-  observeTime?: () => PlayerRuntimeSession | null;
+  observeTime?: () => PlayerSession | null;
   /**
    * Readies the session before input is evaluated, such as by adopting a state Debug's rewind restored; input goes
    * ahead when it returns or resolves to `true`.
@@ -121,7 +124,7 @@ const lockDialog = computed(() => {
   const shown = props.lock?.dialog.value;
   return shown && shown.dialog.kind !== "password" ? { ...shown, dialog: shown.dialog } : null;
 });
-const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>();
+const emit = defineEmits<{ "update:session": [session: PlayerSession] }>();
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.state)?.actionId : undefined,
 );
@@ -132,9 +135,9 @@ const passwordResumes = computed(() =>
 );
 // An interaction's presentation is fixed for its lifetime. Keep one object per action so frequent time and media
 // observations do not re-render, and re-measure, the controls on every update.
-// Action IDs restart per session; the plan and the host's reset count identify which session an ID belongs to.
+// Action IDs restart per session; the plan instance and the host's reset count identify which session an ID belongs to.
 let presented: {
-  readonly plan: PlayerRuntimeSession["plan"];
+  readonly plan: string;
   readonly reset: number;
   readonly actionId: number;
   readonly value: ReturnType<typeof playerRuntimeForeground>;
@@ -144,14 +147,16 @@ const foreground = computed(() => {
   if (!session) return null;
   const id = actionId.value;
   if (
-    presented?.plan === session.plan &&
+    presented?.plan === session.planToken &&
     presented.reset === props.reset &&
     presented.actionId === id
   )
     return presented.value;
   const value = playerRuntimeForeground(session);
   presented =
-    id === undefined ? null : { plan: session.plan, reset: props.reset, actionId: id, value };
+    id === undefined
+      ? null
+      : { plan: session.planToken, reset: props.reset, actionId: id, value };
   return value;
 });
 // A form's answers change with each edit, unlike the rest of its presentation.
@@ -162,14 +167,14 @@ const form = computed(() => (props.session ? playerRuntimeForm(props.session) : 
  * opened a form of its own. A question that is not a form keeps its text under the field ID `""` in the same way.
  */
 let typed: {
-  readonly plan: PlayerRuntimeSession["plan"];
+  readonly plan: string;
   readonly reset: number;
   readonly texts: Map<string, string>;
 } | null = null;
 function typedTexts(): Map<string, string> | null {
   if (!props.session) return null;
-  if (typed?.plan !== props.session.plan || typed.reset !== props.reset)
-    typed = { plan: props.session.plan, reset: props.reset, texts: new Map() };
+  if (typed?.plan !== props.session.planToken || typed.reset !== props.reset)
+    typed = { plan: props.session.planToken, reset: props.reset, texts: new Map() };
   return typed.texts;
 }
 const typedKey = (actionId: number, fieldId: string) => `${actionId}:${fieldId}`;
@@ -240,7 +245,7 @@ const imageRequest = computed(() =>
   foreground.value?.kind === "ask-image" ? foreground.value : null,
 );
 // A request is one action of one session; its identity is fixed while frequent observations publish new sessions.
-const plan = computed(() => props.session?.plan);
+const plan = computed(() => props.session?.planToken);
 const attach = computed(() =>
   imageRequest.value?.allowFile === true &&
   props.images &&
@@ -291,7 +296,7 @@ type ImageRequestIdentity = NonNullable<typeof attach.value>["request"];
 function presents(request: ImageRequestIdentity): boolean {
   return (
     imageRequest.value !== null &&
-    props.session?.plan === request.plan &&
+    props.session?.planToken === request.plan &&
     props.reset === request.reset &&
     activePlayerRuntimeInteraction(props.session.state)?.actionId === request.actionId
   );
@@ -380,16 +385,16 @@ watch(draft, (text) => {
     typedTexts()?.set(typedKey(actionId.value, ""), text);
   if (!ownsPresentedEditor() || !props.session) return;
   const target = composerOwner!;
-  const { plan } = props.session;
+  const { planToken: plan } = props.session;
   const reset = props.reset;
   typedTexts()?.set(typedKey(target.actionId, target.fieldId), text);
   if (text === formEditor.value?.text) return;
   draftTimer = setTimeout(() => {
     // A replaced session, such as one Debug's rewind restored, takes no text typed for another.
-    if (props.session?.plan !== plan || props.reset !== reset || submitting.value) return;
+    if (props.session?.planToken !== plan || props.reset !== reset || submitting.value) return;
     if (props.holdFormDrafts) return;
     // The text reaches only its own action's field; while another is presented it stays typed for the return.
-    const result = draftPlayerRuntimeForm(props.session, target, text);
+    const result = hatch(props.session, (current) => draftPlayerRuntimeForm(current, target, text));
     if (result?.outcome.kind === "updated") emit("update:session", result.session);
   }, 400);
 });
@@ -420,15 +425,15 @@ useEventListener(
  * never opened by itself, and neither is one written with `alwaysButton: true` or one whose tab the browser did not
  * open: its button opens it.
  */
-const urlTried = new WeakMap<PlayerRuntimeSession["engine"], Set<number>>();
+const urlTried = new Map<string, Set<number>>();
 watch(
   [actionId, () => props.reset],
   () => {
     const session = props.session;
     const id = actionId.value;
     if (!session || id === undefined || foreground.value?.kind !== "open-url") return;
-    const tried = urlTried.get(session.engine) ?? new Set<number>();
-    urlTried.set(session.engine, tried);
+    const tried = urlTried.get(session.id) ?? new Set<number>();
+    urlTried.set(session.id, tried);
     if (tried.has(id)) return;
     tried.add(id);
     // Typically an answer the player just gave presents it, while that answer still holds the controls.
@@ -437,7 +442,7 @@ watch(
     const observed = props.observeTime ? props.observeTime() : session;
     const request = observed ? playerRuntimeUrlRequest(observed) : null;
     if (!observed || request?.actionId !== id || !request.atOnce || !openUrlTab(request.url)) return;
-    const result = openPlayerRuntimeUrl(observed);
+    const result = hatch(observed, openPlayerRuntimeUrl);
     if (result) emit("update:session", result.session);
   },
   { immediate: true },
@@ -533,8 +538,26 @@ function answer(
     answeredByPlayerInput(session, input, () => operation(session));
 }
 
+/** The pacing skip, which `complete` sends to the engine's host as its op (`skipPacing`). */
+const SKIP_PACING = Symbol("skipPacing");
+
+/** Skips the pacing gate `session` presents, over the bridge; `null` when it presents none. */
+async function skipPacingOver(
+  session: PlayerSession,
+): Promise<{ readonly session: PlayerSession; readonly outcome: ActionCompletionOutcome } | null> {
+  const gate = playerRuntimePacingGate(session);
+  if (gate === null) return null;
+  const bridge = bridgeOf(session);
+  const outcome = await bridge.request<ActionCompletionOutcome | null>(session, "skipPacing", {
+    actionId: gate.actionId,
+  });
+  return outcome === null ? null : { session: bridge.latest(session) ?? session, outcome };
+}
+
 async function complete(
-  operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,
+  operation:
+    | ((session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null)
+    | typeof SKIP_PACING,
   refocusInput = true,
   target: "interaction" | "pacing" = "interaction",
   // The action the user acted on, when the input began earlier than this call (a held press).
@@ -548,7 +571,7 @@ async function complete(
     !!document.activeElement?.closest("[data-foreground-controls]");
   submitting.value = true;
   try {
-    const targetId = (current: PlayerRuntimeSession) =>
+    const targetId = (current: PlayerSession) =>
       target === "pacing"
         ? playerRuntimePacingGate(current)?.actionId
         : activePlayerRuntimeInteraction(current.state)?.actionId;
@@ -564,7 +587,8 @@ async function complete(
       if (target === "interaction") showFeedback("This interaction is no longer available.");
       return;
     }
-    const result = operation(session);
+    const result =
+      operation === SKIP_PACING ? await skipPacingOver(session) : hatch(session, operation);
     if (!result) {
       showFeedback(
         foreground.value?.kind === "show-button"
@@ -620,7 +644,7 @@ function textSelected() {
 }
 function skipPacing(refocusInput: boolean, actionId?: number) {
   if (!pacing.value || textSelected()) return;
-  void complete(skipPlayerRuntimePacing, refocusInput, "pacing", actionId);
+  void complete(SKIP_PACING, refocusInput, "pacing", actionId);
 }
 // A press skips the message whose pacing was presented when it began; a gate that elapses while the button is held
 // is not replaced by the next message's gate.

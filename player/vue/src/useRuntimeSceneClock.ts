@@ -1,20 +1,14 @@
 import { computed, ref, shallowReactive, watch, type Ref, type ShallowRef } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
-import type { MediaProgressReport } from "../../../src/index.js";
-import {
-  adoptPlayerRuntimeCatchUp,
-  beginPlayerRuntimeCatchUp,
-  dropPlayerRuntimeCatchUp,
-  observePlayerRuntimeTime,
-  stepPlayerRuntimeCatchUp,
-  type PlayerRuntimeCatchUp,
-  type PlayerRuntimeSession,
-} from "../../runtime-adapter.js";
+import type { MediaProgressReport, TimeObservationOutcome } from "../../../src/index.js";
+import { observeNow } from "../../engine-bridge/in-process.js";
+import { bridgeOf } from "../../player-bridge.js";
 import {
   nextPlayerRuntimeCatchUpStepMs,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeDeadlines,
   playerRuntimeTimers,
+  type PlayerSession,
 } from "../../runtime-view.js";
 
 const DISPLAY_REFRESH_MS = 250;
@@ -34,7 +28,7 @@ const CATCH_UP_TASK_MS = 10;
  * and everything else that observes, observes in one go instead.
  */
 export function useRuntimeSceneClock(
-  session: ShallowRef<PlayerRuntimeSession | null>,
+  session: ShallowRef<PlayerSession | null>,
   mediaReports: () => readonly MediaProgressReport[] = () => [],
   /** While it holds, scene time stands at the last observation and nothing is observed; rebase when it ends. */
   paused: Readonly<Ref<boolean>> = ref(false),
@@ -43,12 +37,14 @@ export function useRuntimeSceneClock(
 ) {
   let origin = performance.now();
   const displayTimeMs = ref(0);
-  // The late observation being caught up on a copy of the session, which goes on in its own tasks.
-  let pending: PlayerRuntimeCatchUp | null = null;
+  // The late observation being caught up on a copy of the session in the host, which goes on in its own tasks. Each
+  // one has its generation: `cancel`, disposal and a new session advance it, so a late continuation does nothing.
+  let pending: { readonly generation: number; readonly session: PlayerSession } | null = null;
+  let generation = 0;
   let nextTask: MessagePort | null = null;
   let disposed = false;
 
-  function sceneTimeMs(current: PlayerRuntimeSession): number {
+  function sceneTimeMs(current: PlayerSession): number {
     if (paused.value) return current.state.observedSessionTimeMs;
     return Math.max(current.state.observedSessionTimeMs, performance.now() - origin);
   }
@@ -65,83 +61,147 @@ export function useRuntimeSceneClock(
   function cancel() {
     nextTask?.close();
     nextTask = null;
-    if (pending !== null) dropPlayerRuntimeCatchUp(pending);
+    generation += 1;
+    if (pending !== null) {
+      const { session: caughtUp } = pending;
+      void bridgeOf(caughtUp)
+        .request(caughtUp, "dropCatchUp", null)
+        .catch(() => {});
+    }
     pending = null;
   }
 
+  /** Whether `own` is still the catch-up under way, on the session shown. */
+  const current = (own: NonNullable<typeof pending>) =>
+    !disposed &&
+    pending === own &&
+    own.generation === generation &&
+    session.value?.id === own.session.id;
+
   /**
-   * Submits an ordinary time observation and publishes the resulting session. A catch-up under way is dropped: this
-   * observation covers its time.
+   * Submits an ordinary time observation and publishes the resulting session, at once. A catch-up under way is dropped:
+   * this observation covers its time.
    */
-  function observe(): PlayerRuntimeSession | null {
-    const current = session.value;
-    if (!current || paused.value) return current;
+  function observe(): PlayerSession | null {
+    const shown = session.value;
+    if (!shown || paused.value) return shown;
     cancel();
-    const result = observePlayerRuntimeTime(current, sceneTimeMs(current), mediaReports());
+    const result = observeNow(shown, sceneTimeMs(shown), mediaReports());
     if (result.outcome.kind === "observed") session.value = result.session;
     return session.value;
   }
 
   /** Observes at once while a catch-up is under way, so what follows comes after it; otherwise does nothing. */
-  function settle(): PlayerRuntimeSession | null {
+  function settle(): PlayerSession | null {
     return pending === null ? session.value : observe();
+  }
+
+  /** One observation over the bridge, published once it was observed and its session is still the one shown. */
+  async function observeLater(
+    shown: PlayerSession,
+    atMs: number,
+    reports: readonly MediaProgressReport[],
+  ) {
+    const bridge = bridgeOf(shown);
+    let outcome: TimeObservationOutcome;
+    try {
+      outcome = await bridge.request<TimeObservationOutcome>(shown, "observeTime", {
+        atMs,
+        media: reports,
+      });
+    } catch {
+      // Refused (another op published meanwhile) or failed: nothing is shown; the clock goes on from the latest.
+      return void scheduleWakeUp(session.value);
+    }
+    if (outcome.kind === "observed" && session.value?.id === shown.id)
+      session.value = bridge.latest(shown);
   }
 
   /**
    * Observes at a deadline or another opportunity, without the result being needed at once. An observation on time,
    * or one with media progress, which is measured now, is one observation. A late one catches up on a copy of the
-   * session (`beginPlayerRuntimeCatchUp`) for one task at a time and publishes nothing until the session adopts the
-   * copy; if the session was used meanwhile, the copy is gone and the session observes in one go.
+   * session in the host, one task at a time, and publishes nothing until the session adopts the copy; if the session
+   * was used meanwhile, the copy is gone and the session observes in one go.
    */
   function catchUp() {
-    const current = session.value;
-    if (!current || paused.value || disposed) return;
+    const shown = session.value;
+    if (!shown || paused.value || disposed) return;
     if (pending !== null) {
-      if (copies()) return continueCatchUp(current, pending);
+      if (copies()) return void step(pending);
       // Debug started meanwhile: Debug follows every observation as it happens.
       return void observe();
     }
-    const targetMs = sceneTimeMs(current);
+    const targetMs = sceneTimeMs(shown);
     const reports = mediaReports();
-    const stepMs = nextPlayerRuntimeCatchUpStepMs(current.state);
-    if (
-      reports.length > 0 ||
-      !copies() ||
-      stepMs === null ||
-      targetMs - stepMs <= CATCH_UP_TASK_MS
-    ) {
-      const result = observePlayerRuntimeTime(current, targetMs, reports);
-      if (result.outcome.kind === "observed") session.value = result.session;
-      return;
-    }
-    pending = beginPlayerRuntimeCatchUp(current, targetMs);
-    continueCatchUp(current, pending);
+    const stepMs = nextPlayerRuntimeCatchUpStepMs(shown.state);
+    if (reports.length > 0 || !copies() || stepMs === null || targetMs - stepMs <= CATCH_UP_TASK_MS)
+      return void observeLater(shown, targetMs, reports);
+    const own = { generation, session: shown };
+    pending = own;
+    void (async () => {
+      try {
+        await bridgeOf(shown).request(shown, "beginCatchUp", { targetMs });
+      } catch {
+        return void end(own, false);
+      }
+      if (current(own)) await step(own);
+    })();
   }
 
-  function continueCatchUp(current: PlayerRuntimeSession, catchingUp: PlayerRuntimeCatchUp) {
-    const until = performance.now() + CATCH_UP_TASK_MS;
-    const step = stepPlayerRuntimeCatchUp(catchingUp, () => performance.now() < until);
+  /** One task of the catch-up `own`: its own request, so input and acknowledgements can come between tasks. */
+  async function step(own: NonNullable<typeof pending>): Promise<void> {
+    if (!current(own)) return;
+    let result: "more" | "done" | "dropped";
+    try {
+      result = await bridgeOf(own.session).request(own.session, "stepCatchUp", {
+        budgetMs: CATCH_UP_TASK_MS,
+      });
+    } catch {
+      result = "dropped";
+    }
+    if (!current(own)) return;
     // The next task goes on. A message, unlike a timer, is neither clamped nor throttled while the page is hidden,
     // where late observations mostly come from.
-    if (step === "more") {
-      // Another opportunity may have stepped meanwhile; one task goes on.
+    if (result === "more") {
       nextTask?.close();
-      nextTask = inNextTask(catchUp);
+      nextTask = inNextTask(() => void step(own));
       return;
     }
+    if (result === "dropped") return end(own, false);
+    let adopted = false;
+    try {
+      ({ adopted } = await bridgeOf(own.session).request<{ readonly adopted: boolean }>(
+        own.session,
+        "adoptCatchUp",
+        null,
+      ));
+    } catch {
+      adopted = false;
+    }
+    if (current(own)) end(own, adopted);
+  }
+
+  /**
+   * Ends the catch-up `own` and schedules from the latest session: an adopted copy publishes; a dropped or refused one
+   * leaves the session to observe in one go, as today's "the copy is gone" does.
+   */
+  function end(own: NonNullable<typeof pending>, adopted: boolean) {
+    if (pending !== own) return;
     pending = null;
-    const adopted = step === "done" ? adoptPlayerRuntimeCatchUp(current, catchingUp) : null;
-    if (adopted !== null) session.value = adopted;
+    nextTask?.close();
+    nextTask = null;
+    if (disposed || session.value?.id !== own.session.id) return;
+    if (adopted) session.value = bridgeOf(own.session).latest(own.session);
     else observe();
   }
 
   let wakeUp: ReturnType<typeof setTimeout> | undefined;
-  function scheduleWakeUp(current: PlayerRuntimeSession | null) {
+  function scheduleWakeUp(current: PlayerSession | null) {
     if (wakeUp !== undefined) clearTimeout(wakeUp);
     wakeUp = undefined;
     // A catch-up belongs to its session and runs only while nothing holds; any other publication leaves it to notice
     // whether the session was used meanwhile.
-    if (pending !== null && (paused.value || pending.engine !== current?.engine)) cancel();
+    if (pending !== null && (paused.value || pending.session.id !== current?.id)) cancel();
     if (!current) return;
     displayTimeMs.value = sceneTimeMs(current);
     if (paused.value || pending !== null) return;
@@ -157,6 +217,7 @@ export function useRuntimeSceneClock(
   watch([session, paused], () => scheduleWakeUp(session.value), { immediate: true });
   tryOnScopeDispose(() => {
     disposed = true;
+    generation += 1;
     scheduleWakeUp(null);
   });
 
@@ -204,6 +265,10 @@ export function useRuntimeSceneClock(
     catchUp,
     settle,
     rebase,
+    /** Where scene time stands for `current` now: what an observation of it reports. */
+    sceneTimeMs,
+    /** Drops a catch-up under way, before an observation that covers its time. */
+    cancel,
     /** The display estimate of scene time; it refreshes only while something presented needs it. */
     displayTimeMs: computed(() => displayTimeMs.value),
     refreshWhile,

@@ -7,7 +7,6 @@ import {
   advancePlayerRuntimeTime,
   completePlayerRuntimeStorageWrite,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
@@ -16,6 +15,7 @@ import {
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
   nextPlayerRuntimeEventMs,
   pendingPlayerRuntimeStorageWrite,

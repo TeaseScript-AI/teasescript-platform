@@ -5,12 +5,12 @@ import { effectScope, nextTick, type Ref } from "vue";
 import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
   pendingPlayerRuntimeStorageWrite,
   playerRuntimePacingGate,

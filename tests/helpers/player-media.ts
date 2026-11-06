@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { MediaDevice, type MediaDeviceElement } from "../../player/media-device.js";
 import {
   advancePlayerRuntimeTime,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
 } from "../../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/compile-project.js";
 import { playerRuntimeMedia } from "../../player/runtime-view.js";
 import type { MediaLoadReport } from "../../src/index.js";
 

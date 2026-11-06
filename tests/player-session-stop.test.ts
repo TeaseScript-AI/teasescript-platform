@@ -11,6 +11,7 @@ import {
 } from "../player/debug-export-assembly.js";
 import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
 import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
+import type * as CompileProject from "../player/compile-project.js";
 import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type * as RuntimeView from "../player/runtime-view.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
@@ -67,7 +68,8 @@ let useDevelopmentTime: (
   log: (text: string) => void,
 ) => { advanceBy(milliseconds: number): Promise<void> };
 // The runtime adapter the composables load, so that the sessions the tests make come from the same module.
-let runtime: typeof RuntimeAdapter;
+// The adapter with the compiler's source Start (`compile-project.ts`), from the modules the composables load.
+let runtime: typeof RuntimeAdapter & typeof CompileProject;
 let view: typeof RuntimeView;
 
 // Load the real Vue composables through the existing build tool: their browser-source imports use Vite resolution.
@@ -81,7 +83,10 @@ before(async () => {
   const time: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/useDevelopmentTime.ts",
   );
-  const adapter: Record<string, unknown> = await loadPlayerModule("player/runtime-adapter.ts");
+  const adapter = {
+    ...(await loadPlayerModule("player/runtime-adapter.ts")),
+    ...(await loadPlayerModule("player/compile-project.ts")),
+  };
   const viewModule: Record<string, unknown> = await loadPlayerModule("player/runtime-view.ts");
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof rewind.useDebugRewind, "function");

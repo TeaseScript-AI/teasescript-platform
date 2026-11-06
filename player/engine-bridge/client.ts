@@ -52,11 +52,19 @@ export class BridgeLostError extends Error {
   override readonly name = "BridgeLostError";
 }
 
+/**
+ * Called with a successful reply as it arrives, before the request's promise settles, so a session's store applies the
+ * reply's publication in arrival order, also when a transport delivers replies early (`in-process.ts`). A throw rejects
+ * the request instead.
+ */
+export type ReplyHook = (result: BridgeResult) => void;
+
 /** What a client section sends: a request for the section's session, without waiting for other requests. */
 export type SectionSend = (
   op: string,
   args: unknown,
   basis: number | null,
+  onReply?: ReplyHook,
 ) => Promise<BridgeResult>;
 
 export interface BridgeClient {
@@ -64,13 +72,22 @@ export interface BridgeClient {
   request(
     op: string,
     args: unknown,
-    options?: { readonly session?: string | null; readonly basis?: number | null },
+    options?: {
+      readonly session?: string | null;
+      readonly basis?: number | null;
+      readonly onReply?: ReplyHook;
+    },
   ): Promise<BridgeResult>;
   /**
    * Runs `body` as one exclusive section of `session`: other requests for that session wait until it ends, so a
    * dependent chain (observe, main-side checks and effects, then an op) sees what a synchronous chain would.
    */
   section<T>(session: string, body: (send: SectionSend) => Promise<T>): Promise<T>;
+  /**
+   * Sends one request at once, ahead of the requests waiting for its session, as `halt` must be: the host handles it on
+   * receipt too.
+   */
+  signal(op: string, args: unknown, session: string): Promise<BridgeResult>;
   /** Ends the Worker: pending requests fail with `BridgeLostError`. */
   terminate(): void;
   /** Calls `listener` once if the Worker is lost. */
@@ -88,7 +105,11 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
     let nextId = 1;
     const pending = new Map<
       number,
-      { resolve: (result: BridgeResult) => void; reject: (error: Error) => void }
+      {
+        resolve: (result: BridgeResult) => void;
+        reject: (error: Error) => void;
+        onReply: ReplyHook | undefined;
+      }
     >();
     const lossListeners: ((error: BridgeLostError) => void)[] = [];
     const locks = new Map<string, Promise<void>>();
@@ -135,15 +156,20 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
       const entry = pending.get(reply.id);
       if (entry === undefined) return;
       pending.delete(reply.id);
-      if (reply.ok)
-        entry.resolve({
-          session: reply.session,
-          revision: reply.revision,
-          eventsThrough: reply.eventsThrough,
-          result: reply.result,
-          view: reply.view,
-        });
-      else entry.reject(new BridgeRequestError(reply.error));
+      if (!reply.ok) return entry.reject(new BridgeRequestError(reply.error));
+      const result: BridgeResult = {
+        session: reply.session,
+        revision: reply.revision,
+        eventsThrough: reply.eventsThrough,
+        result: reply.result,
+        view: reply.view,
+      };
+      try {
+        entry.onReply?.(result);
+      } catch (error) {
+        return entry.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+      entry.resolve(result);
     }
 
     function send(
@@ -151,11 +177,12 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
       args: unknown,
       session: string | null,
       basis: number | null,
+      onReply?: ReplyHook,
     ): Promise<BridgeResult> {
       if (lost !== null) return Promise.reject(lost);
       const id = nextId++;
       return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+        pending.set(id, { resolve, reject, onReply });
         try {
           port.post({ v: BRIDGE_VERSION, kind: "request", id, session, basis, op, args });
         } catch (error) {
@@ -166,29 +193,39 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
       });
     }
 
-    /** Runs `body` once every earlier holder of `key` is done, and holds `key` until `body` settles. */
-    async function exclusive<T>(key: string, body: () => Promise<T>): Promise<T> {
-      const before = locks.get(key) ?? Promise.resolve();
+    /**
+     * Runs `body` once every earlier holder of `key` is done, and holds `key` until `body` settles. With no holder,
+     * `body` starts at once, so a request posts before `request` returns.
+     */
+    function exclusive<T>(key: string, body: () => Promise<T>): Promise<T> {
+      const before = locks.get(key);
       let release!: () => void;
       const held = new Promise<void>((resolve) => (release = resolve));
-      const chain = before.then(() => held);
+      const chain = (before ?? Promise.resolve()).then(() => held);
       locks.set(key, chain);
-      await before;
-      try {
-        return await body();
-      } finally {
-        release();
-        if (locks.get(key) === chain) locks.delete(key);
-      }
+      const run = async (): Promise<T> => {
+        try {
+          return await body();
+        } finally {
+          release();
+          if (locks.get(key) === chain) locks.delete(key);
+        }
+      };
+      return before === undefined ? run() : before.then(run);
     }
 
     const client: BridgeClient = {
       request: (op, args, options = {}) => {
         const session = options.session ?? null;
-        return exclusive(session ?? "", () => send(op, args, session, options.basis ?? null));
+        return exclusive(session ?? "", () =>
+          send(op, args, session, options.basis ?? null, options.onReply),
+        );
       },
       section: (session, body) =>
-        exclusive(session, () => body((op, args, basis) => send(op, args, session, basis))),
+        exclusive(session, () =>
+          body((op, args, basis, onReply) => send(op, args, session, basis, onReply)),
+        ),
+      signal: (op, args, session) => send(op, args, session, null),
       terminate: () => lose("The engine Worker was terminated."),
       onLoss: (listener) => {
         if (lost !== null) listener(lost);

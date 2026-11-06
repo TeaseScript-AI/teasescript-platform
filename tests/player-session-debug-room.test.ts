@@ -4,12 +4,11 @@ import { effectScope, type Ref } from "vue";
 
 import {
   activatePlayerRuntimeButton,
-  compilePlayerProject,
-  createPlayerRuntimeSession,
   restorePlayerRuntimeSessionAt,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import type { CapturedMediaRepository } from "../player/captured-media.js";
 import {
   keptSession,

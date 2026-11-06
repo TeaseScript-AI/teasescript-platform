@@ -4,6 +4,7 @@ import { effectScope, type Ref } from "vue";
 
 import type { RuntimeDebugContext } from "../src/index.js";
 import type * as Adapter from "../player/runtime-adapter.js";
+import type * as CompileProject from "../player/compile-project.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
@@ -29,9 +30,10 @@ interface TraceHost {
 }
 let usePlayerSession: (options: Record<string, never>) => TraceHost;
 // The adapter from the same module graph as the host, whose trace and recorder it must recognize.
-let adapter: Pick<
+let adapter: {
+  createPlayerRuntimeSession: typeof CompileProject.createPlayerRuntimeSession;
+} & Pick<
   typeof Adapter,
-  | "createPlayerRuntimeSession"
   | "createPlayerRuntimeRestorePoint"
   | "restorePlayerRuntimeSession"
   | "submitPlayerRuntimeComposer"
@@ -46,7 +48,10 @@ before(async () => {
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-  const loaded: Record<string, unknown> = await loadPlayerModule("player/runtime-adapter.ts");
+  const loaded = {
+    ...(await loadPlayerModule("player/runtime-adapter.ts")),
+    ...(await loadPlayerModule("player/compile-project.ts")),
+  };
   for (const name of [
     "createPlayerRuntimeSession",
     "createPlayerRuntimeRestorePoint",
@@ -58,7 +63,7 @@ before(async () => {
   adapter = {
     // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
     createPlayerRuntimeSession:
-      loaded.createPlayerRuntimeSession as typeof Adapter.createPlayerRuntimeSession,
+      loaded.createPlayerRuntimeSession as typeof CompileProject.createPlayerRuntimeSession,
     // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
     createPlayerRuntimeRestorePoint:
       loaded.createPlayerRuntimeRestorePoint as typeof Adapter.createPlayerRuntimeRestorePoint,

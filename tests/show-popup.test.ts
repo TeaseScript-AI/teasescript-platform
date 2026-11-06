@@ -6,13 +6,13 @@ import { DebugRecorder } from "../player/debug-recorder.js";
 import {
   closePlayerRuntimePopup,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   playerRuntimeDebugNow,
   playerRuntimeSnapshot,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";

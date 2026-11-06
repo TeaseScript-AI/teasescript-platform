@@ -5,7 +5,11 @@ import {
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
-import { activePlayerRuntimeInteraction } from "../../runtime-view.js";
+import {
+  activePlayerRuntimeInteraction,
+  type PlayerSession,
+  type PlayerSessionView,
+} from "../../runtime-view.js";
 import type { SessionCamera } from "../../session-camera.js";
 
 /**
@@ -49,7 +53,7 @@ interface Capture {
 }
 
 export interface ImageCaptureHost {
-  readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
+  readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly generation: Readonly<Ref<number>>;
   /** The session camera: the camera step uses it while it is open, and never opens or releases it. */
   readonly sessionCamera: SessionCamera<MediaStreamTrack>;
@@ -80,11 +84,11 @@ export function useImageCapture(host: ImageCaptureHost) {
   const capture = shallowRef<Capture | null>(null);
   const cameraOf = (target: Capture) => (target.own ? host.captureCamera : host.sessionCamera);
 
-  const presentedRequest = (current: PlayerRuntimeSession | null) => {
+  const presentedRequest = (current: PlayerSessionView | null) => {
     const action = current && activePlayerRuntimeInteraction(current.state);
     return action?.ui.kind === "image" ? action : null;
   };
-  const answers = (current: PlayerRuntimeSession | null, target: Capture) =>
+  const answers = (current: PlayerSessionView | null, target: Capture) =>
     host.generation.value === target.generation &&
     presentedRequest(current)?.actionId === target.actionId;
 
@@ -223,7 +227,10 @@ export function useImageCapture(host: ImageCaptureHost) {
     return true;
   }
 
-  /** Answers `current`'s request with the preview, from "Use image"; `null` without a preview to answer. */
+  /**
+   * Answers `current`'s request with the preview, from "Use image"; `null` without a preview to answer. An adapter op,
+   * which the input runs on the host's session (`hatch`).
+   */
   function use(current: PlayerRuntimeSession): PlayerRuntimeControlResult | null {
     const target = sync();
     if (target?.phase !== "choose" || target.reference === null || !answers(current, target))

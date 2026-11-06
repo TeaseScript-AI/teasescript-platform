@@ -7,7 +7,7 @@ import { DEMO_PLAYER_PROFILE } from "../../demo-player-profile.js";
 import type { KeptRoomStore, KeptSessionStore } from "../../kept-sessions.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
-import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../compile-project.js";
 import { playerTemporalContext } from "../../runtime-view.js";
 import { browserSavedData } from "../../saved-data.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
@@ -131,7 +131,9 @@ function showSampleNotices() {
 function clearSampleNotices() {
   for (const notice of sampleNotices) player.withdrawNotice(notice.key);
 }
-const startOptions = (recording: Parameters<PlayerSessionStart>[0]) => ({
+// A scenario's factory, which the engine's host runs until L5i starts it through a source `prepare`.
+type ScenarioStart = Extract<PlayerSessionStart, (recording: never) => unknown>;
+const startOptions = (recording: Parameters<ScenarioStart>[0]) => ({
   ...recording,
   temporalContext: playerTemporalContext(),
   wallClockMs: Date.now(),

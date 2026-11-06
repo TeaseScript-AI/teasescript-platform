@@ -29,10 +29,8 @@ import { FileStoreService } from "../../stored-files.js";
 import { LockService, type LockDialog, type LockDialogInput } from "../../lock-service.js";
 import type { LockServices } from "../../encryption/lock.js";
 import {
-  beginPlayerRuntimeRecording,
   completePlayerRuntimeStorageWrite,
   applyPlayerRuntimeStorageEdit,
-  continuePlayerRuntimeSession,
   createPlayerRuntimeRestorePoint,
   playerRuntimeMediaOrigin,
   playerRuntimeSnapshot,
@@ -56,7 +54,18 @@ import {
   playerRuntimeCameraView,
   playerRuntimeMedia,
   playerRuntimePermanentButtons,
+  type PlayerSession,
 } from "../../runtime-view.js";
+import {
+  createInProcessBackend,
+  hatch,
+  heldPlan,
+  heldRecording,
+  holdPlan,
+  introduceNow,
+} from "../../engine-bridge/in-process.js";
+import type { StartOptions } from "../../engine-bridge/ops/session.js";
+import { bridgeOf, type PlayerBridge, type ServiceSection } from "../../player-bridge.js";
 import {
   debugPhotoUses,
   type DebugExportCandidate,
@@ -69,7 +78,7 @@ import {
   type DebugHistorySpill,
 } from "../../debug-history.js";
 import { openDebugHistorySpill, sweepDebugHistories } from "../../debug-history-indexeddb.js";
-import { DebugRecorder, type DebugRecording } from "../../debug-recorder.js";
+import type { DebugRecorder, DebugRecording } from "../../debug-recorder.js";
 import {
   capturedMediaReferencesIn,
   keptPhotoReferences,
@@ -124,6 +133,7 @@ import type {
   RuntimeScriptStorageEntrySnapshot,
   SerializableRuntimeValue,
   TemporalContext,
+  TimeObservationOutcome,
 } from "../../../src/index.js";
 
 import { serializableEquals } from "../../../src/runtime/values/serializable-values.js";
@@ -142,6 +152,8 @@ const SILENCE = silence(50);
 const MEDIA_SAMPLE_MS = 100;
 
 export interface PlayerSessionOptions {
+  /** The engine's host; the in-process backend by default, until the L5 series activates the Worker. */
+  bridge?: Promise<PlayerBridge>;
   /**
    * Trusted host resolution of authored, package-relative media references (for example `sounds/bell.mp3`) to
    * playable URLs. Returning `null` makes the runtime treat the source as not loadable; there is no default access to
@@ -201,25 +213,35 @@ export interface PlayerSessionOptions {
 
 type Activation = {
   readonly kind: "start" | "continue";
-  readonly begin: () => PlayerRuntimeSession;
+  /** Begins the session; a Start or Continue over the bridge resolves once its first publication is applied. */
+  readonly begin: () => PlayerSession | Promise<PlayerSession>;
   /** The marks a continued session had, which it keeps. */
   readonly marks?: DebugHistoryMarks;
   /** The restored session Continue goes on with. */
-  readonly restored?: PlayerRuntimeSession;
+  readonly restored?: PlayerSession;
   /** Why Start shows instead of Continue: the kept session is of a format this Player no longer reads. */
   readonly outdated?: Problem;
 };
 
 /**
- * Creates a new session at Start; pass `recording` on to `createPlayerRuntimeSession`, so a debug export can replay it,
- * while Debug runs its value trace records it from the start, and the script reads whether Debug is on.
+ * Creates a new session at Start. Either a held plan with the options its Start reads then, which starts over the
+ * bridge (`start`); or a transitional factory, which the engine's host runs (`introduceNow`): pass `recording` on to
+ * `createPlayerRuntimeSession`, so a debug export can replay it, while Debug runs its value trace records it from the
+ * start, and the script reads whether Debug is on.
  */
-export type PlayerSessionStart = (recording: {
-  readonly recorder: DebugRecorder;
-  readonly debugTrace?: RuntimeDebugContext;
-  readonly debugMode: boolean;
-  readonly randomControl?: RandomControlOptions;
-}) => PlayerRuntimeSession;
+export type PlayerSessionStart =
+  | {
+      /** The host's token for the plan. */
+      readonly plan: string;
+      /** The Start's data options, read at activation. */
+      readonly options: () => StartOptions;
+    }
+  | ((recording: {
+      readonly recorder: DebugRecorder;
+      readonly debugTrace?: RuntimeDebugContext;
+      readonly debugMode: boolean;
+      readonly randomControl?: RandomControlOptions;
+    }) => PlayerRuntimeSession);
 
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
 // Player state; this host records which session is shown, when presentation must reset, maps
@@ -231,13 +253,22 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     console.warn(`[player] ${diagnostic.code}: ${diagnostic.message}`);
     diagnostics.value = [...diagnostics.value, diagnostic];
   };
-  // Records every session's engine calls from Start, in every build, for a debug export (DEBUGGER.md "Debug export").
-  const recorder = new DebugRecorder();
+  // The engine's host, which owns the plans, the sessions and the recorder of every session's engine calls from Start,
+  // in every build, for a debug export (DEBUGGER.md "Debug export"); in-process until the L5 series activates the Worker.
+  let bridge: PlayerBridge | null = null;
+  const bridgeReady = (options.bridge ?? createInProcessBackend(playerBuildIdentity)).then(
+    (ready) => {
+      bridge = ready;
+      ready.client.onLoss(bridgeLost);
+      return ready;
+    },
+  );
   // The recording up to a Player error, kept for a debug export until the next Start, when Debug's rewind begins the
   // recorder anew at a restored state.
   let failureRecording: DebugRecording | null = null;
-  /** The recording a debug export shows: the one up to a Player error, else the recorder's. */
-  const exportedRecording = () => failureRecording ?? recorder.recording();
+  /** The recording a debug export shows: the one up to a Player error, else the host's recorder's. */
+  const exportedRecording = () =>
+    failureRecording ?? (bridge === null ? null : heldRecording(bridge));
   // Rewind histories that pages which ended without deleting theirs left behind go now.
   if (options.debugHistorySpill === undefined) void sweepDebugHistories();
   // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start. Such an
@@ -246,6 +277,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function reportHostError(error: unknown) {
     hostError.value = error instanceof Error ? error.name : "Error";
     console.error("[player] host error", error);
+    // Nothing of the session shows or runs after the stop: its store applies nothing more, and the host refuses what
+    // it still has queued.
+    if (session.value !== null) bridgeOf(session.value).halt(session.value);
+  }
+  /**
+   * The engine Worker was lost. **The owner's choice point** (L5 series, Doubt 3): what the player sees then is decided
+   * before L5g, which replaces this. Until then it takes the path of an exception of the Player that cannot be
+   * recovered, the error stop. An intentional `terminate()` is no loss and never reaches it.
+   */
+  function bridgeLost(error: Error) {
+    reportHostError(error);
   }
   // Debug's value trace (DEBUGGER.md "Player Debug"), while Debug runs: every session operation records into it.
   const debugTrace = shallowRef<RuntimeDebugContext | null>(null);
@@ -387,7 +429,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     return resolved.state === "ready" ? resolved.url : null;
   };
   const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
-  const session = shallowRef<PlayerRuntimeSession | null>(null);
+  const session = shallowRef<PlayerSession | null>(null);
   // Counts the times this script's saved data were replaced outside Debug's rewind, which ends its history.
   const rewindRetirements = ref(0);
   // While Debug's rewind shows a restored state (DEBUGGER.md "Rewind"), nothing runs on its own: the clock stands, media
@@ -436,7 +478,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     notices.publish(notice);
   }
   function reportFailedMedia(mediaId: number) {
-    const origin = session.value && playerRuntimeMediaOrigin(session.value, mediaId);
+    const origin =
+      session.value &&
+      hatch(session.value, (current) => playerRuntimeMediaOrigin(current, mediaId));
     if (!origin) return;
     const missing = resolvePackageAsset(origin.source) === null;
     // The Player cannot play video yet, so a video file that exists is not the script's problem.
@@ -459,7 +503,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       const current = session.value;
       if (!current) return "delivered";
       if (held.value) return "pending";
-      const result = reportPlayerRuntimeMediaLoad(current, mediaId, report);
+      const result = hatch(current, (current) =>
+        reportPlayerRuntimeMediaLoad(current, mediaId, report),
+      );
       if (result.outcome.kind === "executionPending") return "pending";
       if (result.outcome.kind === "accepted") session.value = result.session;
       return "delivered";
@@ -499,6 +545,33 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const current = clock.observe();
     return stopped.value ? null : current;
   };
+  /**
+   * A service's section of the serviced session, with an observation inside it, as `observeForInput` makes one: the
+   * clock's now and media samples, observed over the bridge, with the stop checked before and after. `null` without a
+   * serviced session, or once a Player error stopped it.
+   */
+  function serviceSection<T>(body: (section: ServiceSection) => Promise<T>): Promise<T | null> {
+    const current = servicedSession.value;
+    if (current === null || stopped.value) return Promise.resolve(null);
+    return bridgeOf(current).section(current, (section) =>
+      body({
+        observe: async () => {
+          if (stopped.value) return null;
+          clock.cancel();
+          const shown = section.session;
+          const outcome = await section.send<TimeObservationOutcome>("observeTime", {
+            atMs: clock.sceneTimeMs(shown),
+            media: device.sample(),
+          });
+          if (stopped.value) return null;
+          if (outcome.kind === "observed" && session.value?.id === shown.id)
+            session.value = section.session;
+          return section.session;
+        },
+        send: (op, args, basis) => section.send(op, args, { basis }),
+      }),
+    );
+  }
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.state).stage.image,
   );
@@ -510,7 +583,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // A speaker's avatar image that is no package file is reported as a Stage image is; the glyph shows instead. The
   // session adds its messages and speakers in place, so each published session's new messages are read, and a speaker
   // is checked when a message first shows it.
-  let readEntries: PlayerRuntimeSession["transcriptEntries"] | null = null;
+  let readEntries: PlayerSession["transcriptEntries"] | null = null;
   let readCount = 0;
   const checkedSpeakers = new Set<string>();
   watch(session, (current) => {
@@ -566,6 +639,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation: () => generation.value,
     observe: observeForInput,
     publish: (next) => (session.value = next),
+    section: serviceSection,
     capturedMedia,
     diagnostic: reportDiagnostic,
     later: (task) => setTimeout(task, 0),
@@ -578,6 +652,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation: () => generation.value,
     observe: observeForInput,
     publish: (next) => (session.value = next),
+    section: serviceSection,
     media: capturedMedia,
     diagnostic: reportDiagnostic,
     later: (task) => setTimeout(task, 0),
@@ -593,6 +668,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation: () => generation.value,
     observe: observeForInput,
     publish: (next) => (session.value = next),
+    section: serviceSection,
     media: capturedMedia,
     diagnostic: reportDiagnostic,
     dialog: (dialog, busy) => (lockDialog.value = dialog === null ? null : { dialog, busy }),
@@ -608,7 +684,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // A script that locks or opens loads the lock code while the Player is online, so locking works offline later; one
   // that locks also loads the public keys' code.
   watch(
-    () => servicedSession.value?.plan,
+    () => {
+      const serviced = servicedSession.value;
+      return serviced === null ? undefined : heldPlan(serviced.connection, serviced.planToken);
+    },
     (plan) => {
       const needs = plan === undefined ? null : planLockNeeds(plan);
       if (needs?.locks !== true) return;
@@ -857,7 +936,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           savedDataRevision.value++;
           for (const stored of scriptWritesStored) stored.set(write!.key, write!.value);
         }
-        session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
+        session.value = hatch(latest, (current) =>
+          completePlayerRuntimeStorageWrite(current, write!.actionId, stored),
+        ).session;
       }
     },
     { flush: "sync" },
@@ -994,7 +1075,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (stored.has(key)) return { kind: "overtaken" };
     if (!liveSession()) return { kind: "saved", live: false };
     const latest = session.value!;
-    const edited = applyPlayerRuntimeStorageEdit(latest, { key, value });
+    const edited = hatch(latest, (current) =>
+      applyPlayerRuntimeStorageEdit(current, { key, value }),
+    );
     if (edited.outcome.kind !== "applied") return { kind: "saved", live: false };
     session.value = edited.session;
     debugEdits.value = {
@@ -1227,7 +1310,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 
   // Starts or restores a session; its scene time continues from the persisted observation, so a
   // gap while no Player ran is not consumed. A state Debug's rewind restored is published `paused` for inspection.
-  function start(next: PlayerRuntimeSession, paused = false) {
+  function start(next: PlayerSession, paused = false) {
     // A failed write concerns the run it happened in.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
     reportedMedia = new Set();
@@ -1252,7 +1335,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   // Publishes the result of a completed runtime action. Input to an inspected state is evaluated only once
   // `prepareInput` adopted it, so a result for the inspected state itself is never published.
-  function update(next: PlayerRuntimeSession) {
+  function update(next: PlayerSession) {
     if (!inspecting.value) session.value = next;
   }
   // Counts the sessions that ended as they played, also within their Start; a state Debug's rewind restored has ended
@@ -1351,7 +1434,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Taken before anything waits: later operations change the session.
     let snapshotJson: string;
     try {
-      snapshotJson = playerRuntimeSnapshotJson(current);
+      snapshotJson = hatch(current, (current) => playerRuntimeSnapshotJson(current));
     } catch {
       // A state this browser cannot write, such as one holding a list too long to save, cannot be kept, and the point kept
       // before must not stand in for it: a reload would go on from an earlier state as if it were this one.
@@ -1366,7 +1449,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const count = events.length;
     const added = events.slice(from, count);
     const last = events[count - 1] ?? null;
-    const planJson = kept.plan && from > 0 ? null : takePlanJson(current.plan);
+    const planJson =
+      kept.plan && from > 0 ? null : takePlanJson(heldPlan(current.connection, current.planToken));
     const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
     // Written once, for the photos they show and for the store.
     const eventsJson = added.map(serializeValidatedRuntimeJson);
@@ -1408,7 +1492,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Discards the session kept for a reload when its state `current` cannot be kept, so the next state that can be is kept
    * anew; while the session runs or waits, a notice says that a reload would lose it.
    */
-  async function forgetKeptSession(current: PlayerRuntimeSession) {
+  async function forgetKeptSession(current: PlayerSession) {
     kept = { plan: false, count: 0, last: null };
     await discardKeptSession(room.value === "debug").catch(() => {});
     const live = current.state.status === "running" || current.state.status === "waiting";
@@ -1457,11 +1541,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Start. Call it instead of `prepare` once the stored values are loaded.
    */
   async function prepareScript(
-    plan: InstructionPlan,
+    plan: InstructionPlan | string,
     create: PlayerSessionStart,
     sources?: ReadonlyMap<string, string>,
   ): Promise<void> {
-    scriptPlan = plan;
+    // The host holds the plan, under the token `prepare` gave it, or as this Player compiled it.
+    const host = await bridgeReady;
+    if (typeof plan === "string") scriptPlan = heldPlan(host, plan);
+    else {
+      holdPlan(host, plan);
+      scriptPlan = plan;
+    }
     lastStart.value = create;
     if (sources !== undefined) scriptSources = sources;
     await prepareKept();
@@ -1490,7 +1580,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   async function restoreKept(
     plan: InstructionPlan,
   ): Promise<
-    | { readonly session: PlayerRuntimeSession; readonly marks: DebugHistoryMarks }
+    | { readonly session: PlayerSession; readonly marks: DebugHistoryMarks }
     | { readonly outdated: Problem }
     | null
   > {
@@ -1518,9 +1608,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         ? null
         : { outdated: { message: `Unsupported instruction-plan revision. ${revisions}` } };
     }
-    let restored: PlayerRuntimeSession;
+    let restored: PlayerSession;
     try {
-      restored = restorePlayerRuntimeSessionAt(plan, found.snapshotJson, found.events);
+      const host = await bridgeReady;
+      restored = introduceNow(host, () =>
+        restorePlayerRuntimeSessionAt(plan, found.snapshotJson, found.events),
+      );
     } catch (error) {
       // The runtime's error says how it refuses a state of another revision.
       const revisions = explain
@@ -1558,7 +1651,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * one Continue goes on with; or why there is none. A debug room's session stays in its browser.
    */
   const exportableSession = computed(
-    (): { readonly session: PlayerRuntimeSession } | { readonly unavailable: string } => {
+    (): { readonly session: PlayerSession } | { readonly unavailable: string } => {
       if (keptScope === null || scriptStorage === undefined)
         return { unavailable: "This Player does not keep sessions." };
       if (room.value === "debug") return { unavailable: "A debug session stays in this browser." };
@@ -1581,7 +1674,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if ("unavailable" in found) throw new StorageTransferError(found.unavailable);
     let restorePoint: PlayerRuntimeRestorePoint;
     try {
-      restorePoint = createPlayerRuntimeRestorePoint(found.session);
+      restorePoint = hatch(found.session, (current) => createPlayerRuntimeRestorePoint(current));
     } catch {
       throw new StorageTransferError(
         "This browser cannot keep the session as it is now, so it cannot be exported. Play on and try again later.",
@@ -1766,7 +1859,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       current.state.debugMode === debugMode
     )
       return;
-    const result = setPlayerRuntimeDebugMode(current, debugMode);
+    const result = hatch(current, (current) => setPlayerRuntimeDebugMode(current, debugMode));
     if (result.outcome.kind !== "set") return;
     session.value = result.session;
     keepSessionLater();
@@ -1784,9 +1877,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (control === null && current.state.randomDraw !== null)
       resolveRandomDraw(current.state.randomDraw.drawId, "natural");
   }
-  function applyRandomControl(current: PlayerRuntimeSession) {
+  function applyRandomControl(current: PlayerSession) {
     if (current.state.status === "halted" || current.state.status === "failed") return;
-    setPlayerRuntimeRandomControl(current, randomControl);
+    hatch(current, (held) => setPlayerRuntimeRandomControl(held, randomControl));
   }
   // A session that runs again while paused at a draw nobody decides any more, such as a restored state adopted after
   // Debug's control ended, goes on naturally.
@@ -1806,7 +1899,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const current = observeForInput();
     if (current === null || inspecting.value || current.state.randomDraw?.drawId !== drawId)
       return null;
-    const result = resumePlayerRuntimeRandomDraw(current, { drawId, outcome });
+    const result = hatch(current, (current) =>
+      resumePlayerRuntimeRandomDraw(current, { drawId, outcome }),
+    );
     session.value = result.session;
     clock.rebase();
     return result.outcome;
@@ -1958,17 +2053,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /**
    * Shows a state Debug's rewind restored (DEBUGGER.md "Rewind") as a new generation of the session, with the marks it
    * had: paused for inspection, or running, as when Return reinstates the session Back left. `create` gets the recorder
-   * to begin anew at the state.
+   * to begin anew at the state; `{ session }` shows a session the host holds again, as Return's parked one.
    */
   function publishRewound(
-    create: PlayerSessionStart,
+    create: PlayerSessionStart | { readonly session: () => PlayerSession },
     state: { readonly paused: boolean; readonly marks: DebugHistoryMarks },
   ) {
     // An unmounted Player publishes nothing.
     if (disposed) return;
     // Nothing runs after a Player error, so the recording is still the one up to the error until it begins anew here.
-    if (stopped.value && failureRecording === null) failureRecording = recorder.recording();
-    const next = create({ recorder, debugMode });
+    if (stopped.value && failureRecording === null) failureRecording = exportedRecording();
+    const next =
+      typeof create === "object" && "session" in create
+        ? create.session()
+        : startedSession(create, { debugMode });
+    if (next instanceof Promise) throw new Error("A rewound state is a factory's session.");
     start(next, state.paused);
     rewoundGeneration = generation.value;
     debugEdits.value = state.marks.editedWhileDebugging;
@@ -2015,10 +2114,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     adoption = adoptShown(session.value).finally(() => (adoption = null));
     return adoption;
   }
-  async function adoptShown(shown: PlayerRuntimeSession): Promise<boolean> {
+  async function adoptShown(shown: PlayerSession): Promise<boolean> {
     const owner = generation.value;
     // The adopted state, exported once before the first await.
-    const adopted = playerRuntimeSnapshot(shown);
+    const adopted = hatch(shown, (current) => playerRuntimeSnapshot(current));
     rewindWork.value = "adopt";
     try {
       if (scriptStorage && adopted.scriptStoragePersistent)
@@ -2044,7 +2143,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Publishes a session that development time jumps (#615) advanced from the current one: playing media seek to the
    * progress the jumps reported, and the scene clock continues from the new observed time.
    */
-  function publishJump(next: PlayerRuntimeSession) {
+  function publishJump(next: PlayerSession) {
     if (inspecting.value) return;
     jumpedRevision.value = next.transcriptRevision;
     session.value = next;
@@ -2059,7 +2158,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (!(await prepareInput())) return;
     const current = observeForInput();
     if (current === null) return;
-    const result = pressPlayerRuntimePermanentButton(current, buttonId);
+    const result = hatch(current, (current) =>
+      pressPlayerRuntimePermanentButton(current, buttonId),
+    );
     if (result.outcome.kind === "pressed") update(result.session);
   }
   /**
@@ -2081,8 +2182,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     activation.value = {
       kind: "start",
       begin: () =>
-        create({
-          recorder,
+        startedSession(create, {
           debugMode,
           ...(debugTrace.value === null ? {} : { debugTrace: debugTrace.value }),
           ...(randomControl === null ? {} : { randomControl }),
@@ -2120,34 +2220,35 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Shows the explicit Continue control for a restored session; its execution, time and media resume only then.
    * Continue records the wall clock and the player's zone and presentation as they are now.
    */
-  function prepareRestore(restored: PlayerRuntimeSession, marks?: DebugHistoryMarks) {
+  function prepareRestore(restored: PlayerSession, marks?: DebugHistoryMarks) {
     activationToken++;
     beginning.value = false;
     camera.release();
     activation.value = {
       kind: "continue",
-      begin: () => {
+      begin: async () => {
+        const host = bridgeOf(restored);
         // The recording of a restored session starts from the state it continues, and so does a new trace epoch.
-        beginPlayerRuntimeRecording(restored, recorder);
+        await host.request(restored, "beginRecording", null);
         debugTrace.value?.reset("restore");
-        let continued: PlayerRuntimeSession = Object.freeze({
-          ...restored,
-          recorder,
-          debugTrace: debugTrace.value,
-        });
+        let continued: PlayerSession = hatch(host.latest(restored) ?? restored, (held) =>
+          withPlayerRuntimeDebugTrace(held, debugTrace.value),
+        );
         // A session kept while paused at a random draw goes on with its natural outcome first: until then, the engine
         // takes no other input.
         const draw = continued.state.randomDraw;
         if (draw !== null)
-          continued = resumePlayerRuntimeRandomDraw(continued, {
-            drawId: draw.drawId,
-            outcome: "natural",
-          }).session;
+          continued = hatch(continued, (held) =>
+            resumePlayerRuntimeRandomDraw(held, { drawId: draw.drawId, outcome: "natural" }),
+          ).session;
         // The script reads whether Debug is on now.
         if (continued.state.debugMode !== debugMode)
-          continued = setPlayerRuntimeDebugMode(continued, debugMode).session;
+          continued = hatch(continued, (held) =>
+            setPlayerRuntimeDebugMode(held, debugMode),
+          ).session;
         applyRandomControl(continued);
-        return continuePlayerRuntimeSession(continued, temporalCapture()).session;
+        await host.request(continued, "continue", { capture: temporalCapture() });
+        return host.latest(continued) ?? continued;
       },
       ...(marks === undefined ? {} : { marks }),
       restored,
@@ -2194,17 +2295,50 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     captures.reset();
     startFrom(pending);
   }
+  /**
+   * The session `create` starts: over the bridge (`start`) for a held plan without Debug's trace or random control,
+   * which cannot cross yet; otherwise in the host, before its first run (`introduceNow`).
+   */
+  function startedSession(
+    create: PlayerSessionStart,
+    recording: {
+      readonly debugMode: boolean;
+      readonly debugTrace?: RuntimeDebugContext;
+      readonly randomControl?: RandomControlOptions;
+    },
+  ): PlayerSession | Promise<PlayerSession> {
+    const host = bridge;
+    if (host === null) throw new Error("The engine's host is not ready.");
+    if (typeof create === "function")
+      return introduceNow(host, (made) => create({ ...recording, recorder: made.recorder }));
+    const startOptions = { ...create.options(), debugMode: recording.debugMode };
+    const { debugTrace: trace, randomControl: control } = recording;
+    if (trace === undefined && control === undefined)
+      return host.start(create.plan, startOptions, true);
+    return introduceNow(host, {
+      plan: create.plan,
+      options: startOptions,
+      extras: {
+        ...(trace === undefined ? {} : { debugTrace: trace }),
+        ...(control === undefined ? {} : { randomControl: control }),
+      },
+      recording: true,
+    });
+  }
   /** Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. */
-  function startFrom(pending: Activation) {
+  async function startFrom(pending: Activation) {
     hostError.value = null;
     failureRecording = null;
-    let next: PlayerRuntimeSession;
+    const token = activationToken;
+    let next: PlayerSession;
     try {
-      next = pending.begin();
+      next = await pending.begin();
     } catch (error) {
       reportHostError(error);
       return;
     }
+    // Replaced, re-prepared, or unmounted while it began over the bridge: an obsolete session never starts.
+    if (disposed || token !== activationToken) return;
     start(next);
     // A new session replaces the one kept before.
     if (pending.kind === "start") {
@@ -2219,6 +2353,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 
   return {
     session: computed(() => session.value),
+    /** The engine's host, once it is ready. */
+    bridge: bridgeReady,
     generation: computed(() => generation.value),
     interactionReset: computed(() => interactionReset.value),
     /**
@@ -2358,7 +2494,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       const current = session.value;
       // The shown state, after a call that threw rebuilt from the recorded calls, or `null` when it cannot be exported, so
       // that the export never presents an earlier state as the one shown; how the session failed is known either way.
-      const snapshot = current === null ? null : playerRuntimeSnapshotOrNull(current);
+      const snapshot =
+        current === null ? null : hatch(current, (current) => playerRuntimeSnapshotOrNull(current));
       const recording = exportedRecording();
       const frozen = {
         build: playerBuildIdentity,
@@ -2367,7 +2504,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           current === null
             ? null
             : {
-                plan: current.plan,
+                plan: heldPlan(current.connection, current.planToken),
                 snapshot,
                 failure: current.state.failure,
                 events: [...current.events],
@@ -2405,7 +2542,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       if (on === (debugTrace.value !== null)) return;
       debugTrace.value = on ? new RuntimeDebugContext() : null;
       if (session.value !== null)
-        session.value = withPlayerRuntimeDebugTrace(session.value, debugTrace.value);
+        session.value = hatch(session.value, (current) =>
+          withPlayerRuntimeDebugTrace(current, debugTrace.value),
+        );
     },
     loadScriptStorage,
     scriptStorageOptions,

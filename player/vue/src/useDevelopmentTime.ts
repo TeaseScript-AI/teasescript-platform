@@ -1,16 +1,13 @@
 import { computed, ref, watch } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
-import {
-  advancePlayerRuntimeTime,
-  stepPlayerRuntimeTime,
-  type PlayerRuntimeSession,
-  type PlayerRuntimeState,
-} from "../../runtime-adapter.js";
+import type { PlayerRuntimeState } from "../../runtime-adapter.js";
+import { bridgeOf } from "../../player-bridge.js";
 import {
   activePlayerRuntimeInteraction,
   nextPlayerRuntimeEventMs,
   playerRuntimeAwaitsHost,
   playerRuntimeMedia,
+  type PlayerSession,
 } from "../../runtime-view.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
@@ -18,11 +15,35 @@ import type { PlayerSessionHost } from "./usePlayerSession";
 const JUMP_TASK_MS = 10;
 
 /**
+ * One step of a jump toward `targetMs` (the `stepTime` op): the session after it, or `current` itself when time did not
+ * move, as at the target or while the session waits for the host. Each step is a request of its own, so the session is
+ * never held while the jump waits; nothing is shown until the jump publishes.
+ */
+async function stepTo(current: PlayerSession, targetMs: number): Promise<PlayerSession> {
+  const bridge = bridgeOf(current);
+  const { moved } = await bridge.request<{ readonly moved: boolean }>(current, "stepTime", {
+    targetMs,
+  });
+  return moved ? (bridge.latest(current) ?? current) : current;
+}
+
+/** Steps to `targetMs` until time stops moving there: `advancePlayerRuntimeTime` over the bridge. */
+async function advanceTo(current: PlayerSession, targetMs: number): Promise<PlayerSession> {
+  for (
+    let next = await stepTo(current, targetMs);
+    next !== current;
+    next = await stepTo(next, targetMs)
+  )
+    current = next;
+  return current;
+}
+
+/**
  * Development time controls of the Player with `?dev` (#615), always active there. Skip advances scene time to the next
  * timed event, and +10 s or +1 min advance it by that amount while the session runs, also during waits and pacing.
  * Auto-skip skips event after event while no input is pending, yielding between tasks; the player's think time before
  * an answer stays real time.
- * Every jump is made of ordinary observations of the session, see `advancePlayerRuntimeTime`, and `log` receives a
+ * Every jump is made of ordinary observations of the session (the `stepTime` op), and `log` receives a
  * line for it ("⏩ 30 s skipped").
  */
 export function useDevelopmentTime(
@@ -68,7 +89,7 @@ export function useDevelopmentTime(
     wake = null;
   });
 
-  async function jump(target: (session: PlayerRuntimeSession) => number | null) {
+  async function jump(target: (session: PlayerSession) => number | null) {
     jumping.value = true;
     const generation = player.generation.value;
     try {
@@ -87,11 +108,17 @@ export function useDevelopmentTime(
         // Each task observes events for a bounded time, so a long jump keeps input and rendering responsive.
         const published = current;
         const until = performance.now() + JUMP_TASK_MS;
-        for (let next = stepPlayerRuntimeTime(current, targetMs); next !== current;) {
-          current = next;
-          if (performance.now() >= until) break;
-          next = stepPlayerRuntimeTime(current, targetMs);
+        try {
+          for (let next = await stepTo(current, targetMs); next !== current;) {
+            current = next;
+            if (performance.now() >= until) break;
+            next = await stepTo(current, targetMs);
+          }
+        } catch {
+          // Refused, as after another op of the session, or failed: the jump ends with what it reached.
+          break;
         }
+        if (disposed || player.generation.value !== generation) return;
         skippedMs += current.state.observedSessionTimeMs - published.state.observedSessionTimeMs;
         if (current !== published) player.publishJump(current);
         if (current.state.observedSessionTimeMs >= targetMs) break;
@@ -124,14 +151,20 @@ export function useDevelopmentTime(
   }
 
   /** Skips events for one task, then publishes them as one jump. */
-  function autoSkipTask() {
+  async function autoSkipTask() {
     const start = player.observe();
     if (start === null || !autoSkippable(start.state)) return;
+    const generation = player.generation.value;
     let current = start;
     const until = performance.now() + JUMP_TASK_MS;
-    do {
-      current = advancePlayerRuntimeTime(current, nextPlayerRuntimeEventMs(current.state)!);
-    } while (performance.now() < until && autoSkippable(current.state));
+    try {
+      do {
+        current = await advanceTo(current, nextPlayerRuntimeEventMs(current.state)!);
+      } while (performance.now() < until && autoSkippable(current.state));
+    } catch {
+      // Refused or failed: the task publishes what it reached.
+    }
+    if (disposed || player.generation.value !== generation || player.stopped.value) return;
     player.publishJump(current);
     record(current.state.observedSessionTimeMs - start.state.observedSessionTimeMs);
   }
@@ -142,7 +175,7 @@ export function useDevelopmentTime(
       if (scheduled !== undefined || !autoSkipDue.value) return;
       scheduled = setTimeout(() => {
         scheduled = undefined;
-        if (autoSkipDue.value) autoSkipTask();
+        if (autoSkipDue.value) void autoSkipTask();
       }, 0);
     },
     { immediate: true },

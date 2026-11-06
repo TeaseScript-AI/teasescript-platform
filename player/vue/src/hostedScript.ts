@@ -1,14 +1,11 @@
 import { shallowRef, type ShallowRef } from "vue";
-import {
-  compilePlayerProject,
-  createPlayerRuntimeSession,
-  type PlayerProject,
-} from "../../runtime-adapter.js";
+import type { PlayerProject } from "../../runtime-adapter.js";
+import type { PrepareResult } from "../../engine-bridge/player-ops.js";
 import type { RuntimePlayerProfileInput } from "../../../src/runtime/host-data/player-profile.js";
 import type { ScriptFailure } from "./ScriptProblems.vue";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { MAIN_FILE_PATH } from "../../../src/project-paths.js";
-import { scriptIdentity, type ScriptIdentity } from "../../script-identity.js";
+import type { ScriptIdentity } from "../../script-identity.js";
 
 export type { ScriptIdentity };
 
@@ -28,7 +25,7 @@ export interface ScriptHost {
 }
 
 /**
- * Compiles the host's script, without running it, and prepares Start, or Continue for the session the script keeps; a
+ * Compiles the host's script in the engine's host (`prepare`), without running it, and prepares Start, or Continue for the session the script keeps; a
  * script that does not compile, or a package that cannot be opened, yields the failure the Player shows instead. Stored
  * values are read ahead too, for the start page; Start reads them again. `identity` is the title and author of `main.tease`'s header, for the title bar.
  */
@@ -41,14 +38,19 @@ export function prepareHostedScript(
 } {
   const failure = shallowRef<ScriptFailure | null>(null);
   const identity = shallowRef<ScriptIdentity>({ title: null, author: null });
-  void Promise.all([host.load(), player.loadScriptStorage()]).then(
-    ([{ project }]) => {
-      identity.value = scriptIdentity(project);
+  void Promise.all([host.load(), player.loadScriptStorage(), player.bridge]).then(
+    async ([{ project }, , bridge]) => {
+      const prepared = await bridge.client.request("prepare", {
+        source: { kind: "source", script: project },
+      });
+      // EVIDENCE: validation: `prepare` replies from the same build with its result.
+      const compilation = prepared.result as PrepareResult;
+      if (compilation.kind !== "prepared" && compilation.kind !== "notCompiled")
+        throw new Error("A source prepared as no compilation.");
+      identity.value = compilation.identity ?? { title: null, author: null };
       // The title names the script where saved data of several scripts is listed.
       if (identity.value.title !== null) player.rememberScriptName(identity.value.title);
-      const compilation = compilePlayerProject(project);
-      const plan = compilation.plan;
-      if (plan === null) {
+      if (compilation.kind === "notCompiled") {
         // Warnings are for the creator's tools, not the start page (PLAYER-UI "Session start and user activation").
         const errors = compilation.diagnostics.filter(
           (diagnostic) => diagnostic.severity === "error",
@@ -63,15 +65,16 @@ export function prepareHostedScript(
         return;
       }
       void player.prepareScript(
-        plan,
-        (recording) =>
-          createPlayerRuntimeSession(plan, {
-            ...recording,
+        compilation.plan,
+        {
+          plan: compilation.plan,
+          options: () => ({
             ...player.scriptStorageOptions(),
             // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
             ...player.temporalCapture(),
             ...(host.playerProfile === undefined ? {} : { playerProfile: host.playerProfile }),
           }),
+        },
         new Map(
           typeof project === "string"
             ? [[MAIN_FILE_PATH, project]]

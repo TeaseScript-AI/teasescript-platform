@@ -20,11 +20,11 @@ import {
 import { permanentButtonProjection } from "../src/runtime/background/permanent-buttons.js";
 import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import {
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   pressPlayerRuntimePermanentButton,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimePermanentButtons } from "../player/runtime-view.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";

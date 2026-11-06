@@ -9,13 +9,12 @@ import {
 } from "../player/kept-sessions.js";
 import {
   activatePlayerRuntimeButton,
-  compilePlayerProject,
-  createPlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import {

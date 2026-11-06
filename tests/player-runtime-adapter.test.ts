@@ -31,11 +31,9 @@ import {
   answerPlayerRuntimeImage,
   beginPlayerRuntimeCatchUp,
   beginPlayerRuntimeRecording,
-  compilePlayerProject,
   completePlayerRuntimeStorageWrite,
   continuePlayerRuntimeSession,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
@@ -47,7 +45,6 @@ import {
   skipPlayerRuntimeImage,
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
-  playerRuntimeForm,
   cancelPlayerRuntimeForm,
   clearPlayerRuntimeFormField,
   dismissPlayerRuntimeFormField,
@@ -56,6 +53,8 @@ import {
   playerRuntimeSnapshotJson,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForm } from "../player/runtime-view.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
   activePlayerRuntimeCapture,
   pendingPlayerRuntimeStorageWrite,

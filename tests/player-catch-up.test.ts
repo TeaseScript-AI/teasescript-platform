@@ -7,7 +7,6 @@ import {
   adoptPlayerRuntimeCatchUp,
   beginPlayerRuntimeCatchUp,
   completePlayerRuntimeStorageWrite,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   playerRuntimeSnapshot,
   skipPlayerRuntimePacing,
@@ -15,6 +14,7 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { pendingPlayerRuntimeStorageWrite } from "../player/runtime-view.js";
 import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
 import { rebuildRecordedSession } from "../player/debug-export.js";

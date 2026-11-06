@@ -3,12 +3,12 @@ import test from "node:test";
 
 import {
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   playerRuntimeSnapshot,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { compileSource } from "../src/compiler.js";
 import { parse } from "../src/parser.js";

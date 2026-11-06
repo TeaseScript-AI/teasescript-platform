@@ -8,12 +8,11 @@ import {
   type KeptSessionUpdate,
 } from "../player/kept-sessions.js";
 import {
-  compilePlayerProject,
-  createPlayerRuntimeSession,
   playerRuntimeSnapshot,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { InstructionPlan } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";

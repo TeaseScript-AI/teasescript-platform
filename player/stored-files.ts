@@ -2,12 +2,10 @@ import type { RuntimeFileStoreActionSnapshot } from "../src/index.js";
 import { storedFileKind } from "../src/runtime/host-data/stored-files.js";
 import type { CapturedMediaStore } from "./captured-media.js";
 import type { PlayerDiagnostic } from "./session-camera.js";
-import {
-  answerPlayerRuntimeFileStore,
-  type PlayerFileStoreAnswer,
-  type PlayerRuntimeSession,
-} from "./runtime-adapter.js";
-import { activePlayerRuntimeFileStore } from "./runtime-view.js";
+import { answerPlayerRuntimeFileStore, type PlayerFileStoreAnswer } from "./runtime-adapter.js";
+import { hatch } from "./engine-bridge/in-process.js";
+import type { ServiceSection } from "./player-bridge.js";
+import { activePlayerRuntimeFileStore, type PlayerSession } from "./runtime-view.js";
 
 /** The store that keeps the files of a file store and vouches for them; the Player's captured-media store. */
 export type FileStoreMedia = Pick<CapturedMediaStore, "add" | "read" | "holds">;
@@ -78,15 +76,20 @@ export function base64FromBytes(bytes: Uint8Array): string {
 
 export interface FileStoreServiceHost {
   /** The published session, or `null` before one starts. */
-  session(): PlayerRuntimeSession | null;
+  session(): PlayerSession | null;
   /** Identifies the published session; it changes when another session starts. */
   generation(): number;
   /**
    * Observes the current time, publishes the result, and returns the published session; `null` when the session takes
    * no input, as once a Player error stopped it.
    */
-  observe(): PlayerRuntimeSession | null;
-  publish(session: PlayerRuntimeSession): void;
+  observe(): PlayerSession | null;
+  publish(session: PlayerSession): void;
+  /**
+   * Runs `body` as one exclusive section of the published session, with an observation inside it; `null` without a
+   * session, or once a Player error stopped it.
+   */
+  section<T>(body: (section: ServiceSection) => Promise<T>): Promise<T | null>;
   readonly media: FileStoreMedia;
   diagnostic(diagnostic: PlayerDiagnostic): void;
   /** Runs `task` later, after the engine had a chance to run. */
@@ -153,11 +156,8 @@ export class FileStoreService {
         this.#settled(key);
         return;
       }
-      const result = answerPlayerRuntimeFileStore(
-        observed,
-        action.actionId,
-        answer,
-        this.#host.media,
+      const result = hatch(observed, (current) =>
+        answerPlayerRuntimeFileStore(current, action.actionId, answer, this.#host.media),
       );
       // `executionPending`: the same answer is offered again in the next service.
       if (result.outcome.kind === "executionPending") return;
@@ -166,7 +166,9 @@ export class FileStoreService {
         this.#host.diagnostic({ code: "file-store-rejected", message: result.outcome.message });
         // Never leave the script waiting: answer this file store as failed instead.
         this.#host.publish(
-          answerPlayerRuntimeFileStore(observed, action.actionId, { kind: "failed" }).session,
+          hatch(observed, (current) =>
+            answerPlayerRuntimeFileStore(current, action.actionId, { kind: "failed" }),
+          ).session,
         );
         return;
       }

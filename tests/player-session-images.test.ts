@@ -3,8 +3,6 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
 
 import {
-  compilePlayerProject,
-  createPlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   observePlayerRuntimeTime,
   type PlayerRuntimeControlResult,
@@ -12,6 +10,7 @@ import {
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import {
   assembleDebugExport,

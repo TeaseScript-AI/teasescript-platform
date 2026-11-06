@@ -26,7 +26,11 @@ import type {
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { runtimeTimedWork, type RuntimeTimedWork } from "../src/runtime/operations/timed-work.js";
 import type { RuntimeSessionView } from "../src/runtime/session.js";
+import { formValueText } from "../src/interaction-answers.js";
 import type {
+  PlayerFormEditorPresentation,
+  PlayerFormFieldPresentation,
+  PlayerFormPresentation,
   PlayerForegroundPresentation,
   PlayerMessagePresentation,
   PlayerPermanentButtonPresentation,
@@ -34,11 +38,58 @@ import type {
   PlayerTimerPresentation,
   PlayerTranscriptEntryPresentation,
 } from "./model.js";
-import type { PlayerRuntimeSession, PlayerRuntimeState } from "./runtime-adapter.js";
+import type { PlayerBridge } from "./player-bridge.js";
+import type { PlayerRuntimeState } from "./runtime-adapter.js";
 
 // What the Player reads from a session's published state, without the engine: the foreground, timers, deadlines,
 // media, buttons and the transcript. These readers run in the main realm; the engine's operations stay in
 // `runtime-adapter.ts` (`player/engine-bridge/inventory.ts` lists both).
+
+/**
+ * What a session shows, as the main realm keeps it and the engine's own session has it too: the publication's revision
+ * and state, and the events, transcript and speakers it has accumulated.
+ */
+export interface PlayerSessionView {
+  /**
+   * Counts the session's publications: every operation publishes a new revision, also one that changed nothing, and also
+   * when the host keeps an earlier one. A publication stays usable until an operation changes the state; from then on
+   * only later ones are.
+   */
+  readonly revision: number;
+  /** What this publication shows; see `PlayerRuntimeState`. */
+  readonly state: PlayerRuntimeState;
+  /**
+   * The first event sequence this session's own runs emitted: a restored session came with the events before it, as
+   * history. `0` for a session that started fresh.
+   */
+  readonly liveEventSequence: number;
+  readonly events: readonly InterpreterEvent[];
+  readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
+  /** By the sequence of the event that created it, the index of each script message in `transcriptEntries`. */
+  readonly transcriptMessageRows: ReadonlyMap<number, number>;
+  /** The indexes of the removed messages in `transcriptEntries`, in ascending order. */
+  readonly transcriptRemovedRows: readonly number[];
+  readonly transcriptRevision: number;
+  readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
+}
+
+/**
+ * A session as the main realm holds it: what it shows, and how to reach it in the engine's host, with no plan, engine,
+ * recorder or trace. A new object for every publication.
+ */
+export interface PlayerSession extends PlayerSessionView {
+  /** The bridge session, unique within its connection. */
+  readonly id: string;
+  /** The bridge connection the session belongs to; session IDs restart per connection. */
+  readonly connection: PlayerBridge;
+  /** The plan instance the session runs, as the host's token for it. */
+  readonly planToken: string;
+  /**
+   * What all publications of the session share (its store): while any of them is reachable, the host keeps the
+   * session; once none is, the bridge releases it there.
+   */
+  readonly lineage: object;
+}
 
 /**
  * Captures the player's time zone and date and time presentation for a new session: the account settings when the host
@@ -64,7 +115,7 @@ export function playerTemporalContext(
 }
 
 export function playerRuntimeForeground(
-  session: PlayerRuntimeSession,
+  session: PlayerSessionView,
 ): PlayerForegroundPresentation | null {
   const action = activeInteraction(session.state);
   if (action === null) return null;
@@ -237,7 +288,7 @@ function timedDeadlines(
 }
 
 export function playerRuntimePacingGate(
-  session: PlayerRuntimeSession,
+  session: PlayerSessionView,
 ): RuntimeChatPacingGateActionSnapshot | null {
   return activePlayerRuntimePacingGate(session.state);
 }
@@ -295,7 +346,7 @@ export function playerRuntimeInteractionActionIds(state: PlayerRuntimeState): re
  * request that a restore, a rewind, or a reload brought back is not live, and the Player never opens it by itself.
  */
 export function playerRuntimeUrlRequest(
-  session: PlayerRuntimeSession,
+  session: PlayerSessionView,
 ): { readonly actionId: number; readonly url: string; readonly atOnce: boolean } | null {
   const { state } = session;
   const action = activeInteraction(state);
@@ -430,7 +481,7 @@ export function playerRuntimeTranscript(events: readonly InterpreterEvent[]): {
 
 /** The script message `entryId` names in the session's transcript, as it shows now, or `null` for any other entry. */
 export function playerRuntimeTranscriptMessage(
-  session: PlayerRuntimeSession,
+  session: PlayerSessionView,
   entryId: string,
 ): PlayerMessagePresentation | null {
   const sequence = playerRuntimeTranscriptEventSequence(entryId);
@@ -628,3 +679,105 @@ export const DEFAULT_SPEAKERS: Readonly<Record<string, PlayerSpeakerPresentation
 
 /** The prefix of a transcript entry ID the adapter derives from its runtime event. */
 const TRANSCRIPT_EVENT_ID = "runtime-event-";
+
+/**
+ * The latest form presentation of each session, by its form state: an edit changes the state, and nothing else
+ * re-renders the form, although every publication carries its own copy of the state. A session is known by its event
+ * accumulator, which all its publications share.
+ */
+const formPresentations = new WeakMap<
+  object,
+  { readonly key: string; readonly presentation: PlayerFormPresentation }
+>();
+
+/** The controls of the pending form as its answers stand, or `null` without a pending form. */
+export function playerRuntimeForm(session: PlayerSessionView): PlayerFormPresentation | null {
+  const action = activeInteraction(session.state);
+  if (action?.ui.kind !== "form" || action.form === undefined) return null;
+  const presentation = session.state.temporalPresentation;
+  const key = JSON.stringify([action.actionId, action.form, presentation]);
+  const cached = formPresentations.get(session.events);
+  if (cached?.key === key) return cached.presentation;
+  const { ui, form } = action;
+  const fields = ui.fields.map((field, index): PlayerFormFieldPresentation => {
+    const value = form.values[index] ?? null;
+    const editing = form.editor?.fieldId === field.id;
+    if (field.kind !== "boolean" && field.kind !== "cycle")
+      return Object.freeze({
+        id: field.id,
+        label: field.text,
+        kind: "value",
+        pressed: false,
+        state: value === null ? null : formValueText(value, presentation),
+        states: Object.freeze([]),
+        optional: field.optional,
+        editing,
+        ...(field.background === undefined ? {} : { authoredFill: field.background }),
+      });
+    const option =
+      field.kind === "cycle"
+        ? typeof value === "number"
+          ? field.options[value]
+          : undefined
+        : field.options?.find((candidate) => candidate.value === value);
+    const authoredFill = option?.background ?? field.background;
+    return Object.freeze({
+      id: field.id,
+      label: field.text,
+      kind: field.kind === "boolean" ? "toggle" : "cycle",
+      pressed: value === true,
+      state: option?.text ?? null,
+      states: Object.freeze(field.options?.map((candidate) => candidate.text) ?? []),
+      optional: false,
+      editing: false,
+      ...(authoredFill === undefined ? {} : { authoredFill }),
+    });
+  });
+  const edited = ui.fields.find((field) => field.id === form.editor?.fieldId);
+  const result = Object.freeze({
+    actionId: action.actionId,
+    fields: Object.freeze(fields),
+    submit: Object.freeze({
+      label: ui.submit.text,
+      ...(ui.submit.background === undefined ? {} : { authoredFill: ui.submit.background }),
+    }),
+    cancel:
+      ui.cancel === null
+        ? null
+        : Object.freeze({
+            label: ui.cancel.text,
+            ...(ui.cancel.background === undefined ? {} : { authoredFill: ui.cancel.background }),
+          }),
+    editor:
+      edited === undefined ||
+      form.editor === null ||
+      edited.kind === "boolean" ||
+      edited.kind === "cycle"
+        ? null
+        : Object.freeze({
+            fieldId: edited.id,
+            label: edited.text,
+            // A date or time control shows its hint beside it, so it has none by default.
+            hint:
+              edited.hint ??
+              (edited.kind === "date" || edited.kind === "time" || edited.kind === "datetime"
+                ? ""
+                : `${edited.text}…`),
+            optional: edited.optional,
+            text: form.editor.text,
+            inputMode:
+              edited.kind === "integer" ? "numeric" : edited.kind === "number" ? "decimal" : "text",
+            // A native date control has no year 0000, so such a value is edited as ISO text.
+            inputType:
+              edited.kind === "date" || edited.kind === "time" || edited.kind === "datetime"
+                ? form.editor.text.startsWith("0000")
+                  ? "text"
+                  : edited.kind === "datetime"
+                    ? "datetime-local"
+                    : edited.kind
+                : "text",
+          } satisfies PlayerFormEditorPresentation),
+  });
+  formPresentations.set(session.events, { key, presentation: result });
+  return result;
+}

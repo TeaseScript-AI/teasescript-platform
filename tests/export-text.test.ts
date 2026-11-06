@@ -5,11 +5,11 @@ import {
   closePlayerRuntimeExport,
   closePlayerRuntimePopup,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   playerRuntimeDebugNow,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { compileSource } from "../src/compiler.js";
 import { MAX_INTERACTION_AGGREGATE_UTF8_BYTES } from "../src/interaction-limits.js";

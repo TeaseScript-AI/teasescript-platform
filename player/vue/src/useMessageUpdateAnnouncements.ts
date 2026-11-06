@@ -1,7 +1,7 @@
 import { nextTick, ref, watch, type Ref } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
 import { MessageUpdateAnnouncer } from "../../message-update-announcer.js";
-import type { PlayerRuntimeSession } from "../../runtime-adapter.js";
+import type { PlayerSession } from "../../runtime-view.js";
 
 /**
  * The text of the Player's status region for changed messages (PLAYER-UI.md "Conversation"). Only changes that live
@@ -9,7 +9,7 @@ import type { PlayerRuntimeSession } from "../../runtime-adapter.js";
  * from the messages as they are, and speaks nothing of its history.
  */
 export function useMessageUpdateAnnouncements(player: {
-  readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
+  readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly generation: Readonly<Ref<number>>;
 }): Readonly<Ref<string>> {
   const text = ref("");

@@ -14,7 +14,7 @@ import {
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import { BRIDGE_VERSION, type BuildIdentity } from "../player/engine-bridge/protocol.js";
-import { compilePlayerProject } from "../player/runtime-adapter.js";
+import { compilePlayerProject } from "../player/compile-project.js";
 import { listRandomSites, validateInstructionPlan } from "../src/index.js";
 
 /*

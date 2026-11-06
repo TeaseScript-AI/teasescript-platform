@@ -3,13 +3,13 @@ import test from "node:test";
 
 import {
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   pressPlayerRuntimePermanentButton,
   restorePlayerRuntimeSession,
   skipPlayerRuntimePacing,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
   playerRuntimeDeadlines,
   playerRuntimeForeground,

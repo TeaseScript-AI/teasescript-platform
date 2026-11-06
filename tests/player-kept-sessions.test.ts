@@ -17,10 +17,10 @@ import {
 import {
   activatePlayerRuntimeButton,
   applyPlayerRuntimeStorageEdit,
-  createPlayerRuntimeSession,
   playerRuntimeSnapshotJson,
   pressPlayerRuntimePermanentButton,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import { interpreterEventProblem, type InterpreterEvent } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";

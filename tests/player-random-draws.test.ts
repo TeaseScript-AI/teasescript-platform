@@ -4,12 +4,11 @@ import { effectScope, type Ref } from "vue";
 
 import {
   advancePlayerRuntimeTime,
-  compilePlayerProject,
-  createPlayerRuntimeSession,
   resumePlayerRuntimeRandomDraw,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeAwaitsHost } from "../player/runtime-view.js";
 import { memoryKeptRoomStore, memoryKeptSessionStore } from "../player/kept-sessions.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";

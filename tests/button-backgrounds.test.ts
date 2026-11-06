@@ -7,13 +7,13 @@ import { deserializeCheckpoint } from "../src/runtime/snapshot/checkpoint.js";
 import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
