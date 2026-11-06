@@ -1,7 +1,7 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, joinSteps, keptSteps, keptText, pathText } from "../budget.js";
+import { joinParts, joinSteps, keptText, pathText, splitPath } from "../budget.js";
 import type { Contract } from "../contract.js";
-import { keptKey, keyBelow, recordPath, sortCost, type Key } from "../definitions.js";
+import { keptKey, keyBelow, keyOf, recordPath, sortCost, type Key } from "../definitions.js";
 import type { Callable } from "../flow-graph.js";
 import { marked } from "../guards.js";
 import { REASON, type IngressNode, type Item } from "../items.js";
@@ -562,97 +562,277 @@ export function marksAt(contract: Contract, holder: Holder | null, asked: Rest):
 }
 
 /**
- * #1784: whether a holder's mark at some path at or below `path` (an id) can hold, `marksAt` of any extension: false
- * only where none does, so a pushed read drops a pending mark that can never mark (`decide`). A walk over the asks
- * `marksAt` can make, on an explicit stack, each (holder, rest) once: along the rest's literal paths, a guarded path at
- * or below it, its own reads where a test reads its first step (`testedSteps`, the first steps `testedBelow` keys),
- * each reference at a prefix (the referenced holder at its shift and the rest below) or below the rest (at its shift),
- * and the holder at a prefix and `ABSENT` where the next step is one no test reads (`referencesAt`); a rest cut at its
- * holder's `depthOf`, as `marksAt` asks it. Once per holder and path; a walk that finds none keeps every rest it
- * visited as none, since what those reach it reached.
+ * #1784 (Sol's design D, the lead's ruling on Astra r1 B1): a holder's marks as a language of path prefixes, compiled
+ * once per pass into one shared automaton: a marking prefix `w` stands for every path below it. Its local prefixes are
+ * its guarded literal paths and the tested paths below each of its own reads whose regions hold the read
+ * (`guardedBelow`); a reference at `where` to `J` seen from `shift` attaches, at `where`, the states `J`'s automaton
+ * reaches past `shift` (an accepting one marks `where` itself). A pending mark is then one of these states, never a
+ * holder and the steps taken: the states a path reaches mark it where one accepts, and none left marks nothing. For a
+ * holder of finite depth, the states a path `p` leaves accept a further `t` iff `marksAt(holder, p.t)`.
  */
-export function canMarkBelow(contract: Contract, holder: Holder, path: number): boolean {
-  if (marksNothing(contract, holder)) return false;
-  const work = contract.pass.program.work;
-  work.charge("eventSteps");
-  const once = holder.belowAt?.get(path);
-  if (once !== undefined) return once;
-  const answer = marksBelow(contract, holder, path);
-  contract.keep(1);
-  (holder.belowAt ??= new Map()).set(path, answer);
-  return answer;
+interface MarkState {
+  readonly next: Map<string, number>;
+  readonly epsilon: number[];
+  accepting: boolean;
 }
 
-/** `canMarkBelow`'s walk. */
-function marksBelow(contract: Contract, holder: Holder, path: number): boolean {
-  const work = contract.pass.program.work;
-  const tested = contract.pass.guards.testedSteps();
-  const start = recordPath(stepsOf(contract, path));
-  work.charge("eventSteps", 1 + start.length);
-  const seen = new Map<Holder, Set<string>>();
-  const visited: (readonly [Holder, string])[] = [];
-  const stack: (readonly [Holder, readonly string[]])[] = [[holder, start]];
-  const below = (asked: Holder, rest: readonly string[]): boolean => {
-    for (let at = 0; at < rest.length; at += 1) {
-      work.charge("eventSteps");
-      if (rest[at] !== ABSENT && !tested.has(rest[at]!))
-        stack.push([asked, keptSteps(contract.work, rest.slice(0, at), [ABSENT])]);
+/** The states a path reaches: marked where one accepts; else those with a step further (sorted ids). */
+export interface MarkResidual {
+  readonly marked: boolean;
+  readonly states: readonly number[];
+}
+
+/** A pass's mark automaton (per contract): its states, each holder's root, and its walks once per state and step. */
+interface MarkAutomaton {
+  readonly states: MarkState[];
+  readonly roots: Map<Holder, number>;
+  readonly starts: Map<Holder, Map<number, MarkResidual>>;
+  readonly moves: Map<number, Map<string, MarkResidual>>;
+}
+
+const AUTOMATA = new WeakMap<Contract, MarkAutomaton>();
+
+const MARKED: MarkResidual = { marked: true, states: [] };
+const NONE: MarkResidual = { marked: false, states: [] };
+
+function automatonOf(contract: Contract): MarkAutomaton {
+  let known = AUTOMATA.get(contract);
+  if (known === undefined)
+    AUTOMATA.set(
+      contract,
+      (known = { states: [], roots: new Map(), starts: new Map(), moves: new Map() }),
+    );
+  return known;
+}
+
+/** Test-only: the states of a pass's mark automaton (Sol's R), `0` where none was compiled. */
+export function markStates(contract: Contract): number {
+  return AUTOMATA.get(contract)?.states.length ?? 0;
+}
+
+function newState(contract: Contract, automaton: MarkAutomaton): number {
+  contract.pass.program.work.charge("eventSteps");
+  contract.keep(3);
+  automaton.states.push({ next: new Map(), epsilon: [], accepting: false });
+  return automaton.states.length - 1;
+}
+
+/** The state at `steps` below `from`, made where none is (a prefix trie). */
+function stateAt(
+  contract: Contract,
+  automaton: MarkAutomaton,
+  from: number,
+  steps: readonly string[],
+): number {
+  let at = from;
+  for (const step of steps) {
+    contract.pass.program.work.charge("eventSteps");
+    let to = automaton.states[at]!.next.get(step);
+    if (to === undefined) {
+      to = newState(contract, automaton);
+      contract.keepText(step.length);
+      automaton.states[at]!.next.set(step, to);
     }
-    let where = 0;
-    for (let length = 0; ; length += 1) {
-      work.charge("eventSteps");
-      if (asked.guarded.has(where)) return true;
-      for (const reference of asked.refsAt.get(where) ?? []) {
-        work.charge("eventSteps");
-        stack.push([reference.to, keptSteps(contract.work, reference.shift, rest.slice(length))]);
-      }
-      if (length === rest.length) break;
-      where = pathBelow(contract, where, rest[length]!);
-      if (where < 0) return false;
-    }
-    const depth = contract.pathDepths[where]!;
-    // (each ancestor step walked, none for a path no deeper than the rest's: a shallower one is not below it)
-    const under = (at: number): boolean => {
-      let steps = 0;
-      for (; contract.pathDepths[at]! > depth; steps += 1) at = contract.pathParents[at]!;
-      work.charge("eventSteps", 1 + steps);
-      return at === where;
-    };
-    for (const at of asked.guarded) if (under(at)) return true;
-    for (const [at, references] of asked.refsAt)
-      if (at !== where && under(at))
-        for (const reference of references) {
-          work.charge("eventSteps");
-          stack.push([reference.to, reference.shift]);
-        }
-    return false;
-  };
-  let hit = false;
-  while (!hit && stack.length > 0) {
-    const [asked, asks] = stack.pop()!;
-    work.charge("eventSteps");
-    if (marksNothing(contract, asked)) continue;
-    // (an ask as deep as the holder's depth is one at its first `depthOf` steps, which this walk covers)
-    const depth = depthOf(contract, asked);
-    if (depth === Infinity) {
-      hit = true;
-      break;
-    }
-    const rest = asks.length > depth ? asks.slice(0, depth) : asks;
-    const name = pathText(rest);
-    if (asked.below?.get(name) === false) continue;
-    let names = seen.get(asked);
-    if (names === undefined) seen.set(asked, (names = new Set()));
-    if (names.has(name)) continue;
-    contract.keepText(name.length);
-    names.add(name);
-    visited.push([asked, name]);
-    hit =
-      (asked.reads.length > 0 && (rest.length === 0 || tested.has(rest[0]!))) || below(asked, rest);
+    at = to;
   }
-  if (hit) return true;
-  for (const [asked, name] of visited) (asked.below ??= new Map()).set(name, false);
-  return false;
+  return at;
+}
+
+/** The states `from` reaches through epsilon edges: marked where one accepts, else those with a step further. */
+function closure(
+  contract: Contract,
+  automaton: MarkAutomaton,
+  from: readonly number[],
+): MarkResidual {
+  const { work } = contract.pass.program;
+  const seen = new Set<number>();
+  const live: number[] = [];
+  const open = [...from];
+  work.charge("eventSteps", 1 + from.length);
+  while (open.length > 0) {
+    const id = open.pop()!;
+    work.charge("eventSteps");
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const state = automaton.states[id]!;
+    if (state.accepting) return MARKED;
+    if (state.next.size > 0) live.push(id);
+    for (const to of state.epsilon) open.push(to);
+  }
+  work.charge("eventSteps", sortCost(live.length));
+  return live.length === 0 ? NONE : { marked: false, states: live.sort((a, b) => a - b) };
+}
+
+/** The states a set of states reaches one step further (each state's step once per pass). */
+export function markStep(contract: Contract, from: readonly number[], asked: string): MarkResidual {
+  const automaton = automatonOf(contract);
+  const { work } = contract.pass.program;
+  // (a choice's selection step as the record key it reads, as `marksAt` asks it)
+  const step = recordPath([asked])[0]!;
+  const into = new Set<number>();
+  for (const id of from) {
+    work.charge("eventSteps");
+    let bySteps = automaton.moves.get(id);
+    let moved = bySteps?.get(step);
+    if (moved === undefined) {
+      const to = automaton.states[id]!.next.get(step);
+      moved = to === undefined ? NONE : closure(contract, automaton, [to]);
+      if (bySteps === undefined) automaton.moves.set(id, (bySteps = new Map()));
+      contract.keep(2 + moved.states.length);
+      bySteps.set(step, moved);
+    }
+    if (moved.marked) return MARKED;
+    for (const state of moved.states) into.add(state);
+  }
+  if (into.size === 0) return NONE;
+  work.charge("eventSteps", sortCost(into.size));
+  return { marked: false, states: [...into].sort((a, b) => a - b) };
+}
+
+/** The states `steps` below a state reach (`closure`, then `markStep` per step), stopping once marked or none. */
+function walk(
+  contract: Contract,
+  automaton: MarkAutomaton,
+  from: number,
+  steps: readonly string[],
+): MarkResidual {
+  let at = closure(contract, automaton, [from]);
+  for (const step of steps) {
+    if (at.marked || at.states.length === 0) break;
+    at = markStep(contract, at.states, step);
+  }
+  return at;
+}
+
+/**
+ * The states a holder's mark is pending at, `path` (an arena id) below its entry: its automaton's root walked by the
+ * path, once per holder and path. Its depth is finite (the caller declines `marks-depth` first).
+ */
+export function markStart(contract: Contract, holder: Holder, path: number): MarkResidual {
+  const automaton = automatonOf(contract);
+  contract.pass.program.work.charge("eventSteps");
+  let byPath = automaton.starts.get(holder);
+  const known = byPath?.get(path);
+  if (known !== undefined) return known;
+  const root = compiled(contract, automaton, holder);
+  const steps = recordPath(stepsOf(contract, path));
+  contract.pass.program.work.charge("eventSteps", 1 + steps.length);
+  const residual = walk(contract, automaton, root, steps);
+  if (byPath === undefined) automaton.starts.set(holder, (byPath = new Map()));
+  contract.keep(2 + residual.states.length);
+  byPath.set(path, residual);
+  return residual;
+}
+
+/**
+ * A holder's root state, compiled with every holder it refers to first (a finite holder's references reach no cycle:
+ * `depthOf` is infinite on one), on an explicit stack.
+ */
+function compiled(contract: Contract, automaton: MarkAutomaton, holder: Holder): number {
+  const known = automaton.roots.get(holder);
+  if (known !== undefined) return known;
+  const { work } = contract.pass.program;
+  const open: Holder[] = [holder];
+  const opened = new Set<Holder>();
+  while (open.length > 0) {
+    const top = open.at(-1)!;
+    work.charge("eventSteps");
+    if (automaton.roots.has(top)) {
+      open.pop();
+      continue;
+    }
+    const waiting = [...top.refsAt.values()]
+      .flat()
+      .map((reference) => reference.to)
+      .filter((to) => !automaton.roots.has(to));
+    if (waiting.length > 0 && !opened.has(top)) {
+      opened.add(top);
+      for (const to of waiting) open.push(to);
+      continue;
+    }
+    open.pop();
+    automaton.roots.set(top, compile(contract, automaton, top));
+  }
+  return automaton.roots.get(holder)!;
+}
+
+/** A holder's own automaton, the holders it refers to compiled. */
+function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): number {
+  const { program, guards } = contract.pass;
+  const root = newState(contract, automaton);
+  // its guarded literal paths
+  for (const at of holder.guarded) {
+    program.work.charge("eventSteps");
+    automaton.states[stateAt(contract, automaton, root, stepsOf(contract, at))]!.accepting = true;
+  }
+  // its own reads: each tested path below a read's key whose region holds the read (`readsAt`'s hit)
+  for (const read of holder.reads) {
+    program.work.charge("eventSteps");
+    let current = read.value;
+    const steps: string[] = [];
+    for (let projection = program.projOf.get(current); projection !== undefined;) {
+      program.work.charge("eventSteps");
+      steps.push(projection.step === "iteration" ? "element" : stepName(projection.step));
+      current = projection.owner;
+      projection = program.projOf.get(current);
+    }
+    const binding = program.occurrenceOf.get(current);
+    const node = program.occNode.get(current);
+    if (binding === undefined || node === undefined || node === null) continue;
+    const base = keyOf(binding, joinSteps(steps.reverse(), read.path));
+    for (const text of guards.guardedBelow(base, node)) {
+      program.work.charge("eventSteps", 1 + text.length);
+      automaton.states[stateAt(contract, automaton, root, splitPath(text))]!.accepting = true;
+    }
+  }
+  // its references: the states each referred holder reaches past its shift, at the site
+  for (const [where, references] of holder.refsAt) {
+    const site = stateAt(contract, automaton, root, stepsOf(contract, where));
+    for (const reference of references) {
+      program.work.charge("eventSteps");
+      const residual = walk(
+        contract,
+        automaton,
+        automaton.roots.get(reference.to)!,
+        reference.shift,
+      );
+      if (residual.marked) automaton.states[site]!.accepting = true;
+      else {
+        contract.keep(residual.states.length);
+        automaton.states[site]!.epsilon.push(...residual.states);
+      }
+    }
+  }
+  return root;
+}
+
+/** Test-only: the holders a pass's mark automaton compiled. */
+export function markHolders(contract: Contract): readonly Holder[] {
+  return [...(AUTOMATA.get(contract)?.roots.keys() ?? [])];
+}
+
+/** Test-only: the paths of a holder's own prefix trie (its states' steps from its root, epsilon edges not followed). */
+export function markPaths(contract: Contract, holder: Holder): readonly (readonly string[])[] {
+  const automaton = automatonOf(contract);
+  const found: (readonly string[])[] = [];
+  const open: (readonly [number, readonly string[]])[] = [
+    [compiled(contract, automaton, holder), []],
+  ];
+  while (open.length > 0) {
+    const [id, trail] = open.pop()!;
+    found.push(trail);
+    for (const [step, to] of automaton.states[id]!.next) open.push([to, joinSteps(trail, [step])]);
+  }
+  return found;
+}
+
+/**
+ * Test-only: whether a holder's automaton answers `marksAt` at `steps` (the states the steps reach accepting), for the
+ * truth checks over real holders (`marksAt` itself unchanged).
+ */
+export function markAccepts(contract: Contract, holder: Holder, steps: readonly string[]): boolean {
+  const automaton = automatonOf(contract);
+  return walk(contract, automaton, compiled(contract, automaton, holder), recordPath(steps)).marked;
 }
 
 /**
