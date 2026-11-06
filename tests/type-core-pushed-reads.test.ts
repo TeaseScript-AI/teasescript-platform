@@ -378,6 +378,32 @@ test("a closed ring of copies each marked two steps deep grows its graph and its
   }
 });
 
+test("a closed ring of copies each marked nine steps deep reaches its check, its held states one chain per node (#1784, Codex r3 B3)", () => {
+  // (four copies, each stored under a test nine steps below its source, read to that depth: every combination of the
+  // pending marks once exhausted the analysis; their union per node is one chain)
+  const steps = ["g", "h", "i", "j", "z4", "z5", "z6", "z7", "z8"];
+  const literal = (value: number): string =>
+    steps.reduceRight((inner, step) => `{${step}:${inner}}`, String(value));
+  const path = steps.join(".");
+  const rows = [0, 1, 2, 3].map((i) => `let p${i}=${literal(i)}`);
+  rows.push("p3.q=p0");
+  for (let i = 3; i > 0; i--) rows.push(`if p${i - 1}.${path} is integer { p${i}=p${i - 1} }`);
+  rows.push("p0=p3", "p3=p3.q", `say "\${p3.q.q.${path}}"`, "exit");
+  const source = rows.join("\n") + "\n";
+  for (const mode of MODES) {
+    const pushed = analysed(source, mode);
+    assert.equal(pushed.answers.budget.exhausted, null);
+    assert.ok(pushed.facts.reads > 0 && pushed.facts.declines.size === 0);
+    // (the native reader with pushed keys past the read's whole path and eight more bottom)
+    sameSettled(pushed, analysed(source, mode, steps.length + 8), source);
+    const files = [{ path: "main.tease", source }];
+    assert.equal(
+      publication(files, mode, GLOBALS),
+      withoutPushedReads(() => publication(files, mode, GLOBALS), steps.length + 8),
+    );
+  }
+});
+
 test("a ring read through a marked copy reaches its check, and its leaves are read marked, in four modes (#1784)", () => {
   // (the issue's source, a second test path, a deeper read, the holder's mark at a rest it does not test)
   for (const source of [
