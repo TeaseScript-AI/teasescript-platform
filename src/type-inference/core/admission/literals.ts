@@ -1469,45 +1469,67 @@ function layersAt(
 }
 
 /**
- * A path below a value whose `marks` are the positions asked along it (`layersOf`), carried through a carrier as its
- * steps are (`Strip`): a position the carrier consumes is dropped (-1), one it prepends below shifts each mark.
+ * A path below a value (`layersOf`), read without copying it: steps a carrier prepends (`head`), then the rest of an
+ * outer view (`tail`), from `start`. A step past the head moves to the tail, so reading a step is constant work.
  */
-interface MarkedStrip extends Strip<MarkedStrip> {
-  readonly steps: readonly string[];
-  readonly marks: readonly number[];
+interface Rope {
+  readonly head: readonly string[];
+  readonly tail: PathView | null;
+}
+interface PathView {
+  readonly rope: Rope;
+  readonly start: number;
+  readonly length: number;
 }
 
-function markedStrip(
-  admission: Admission,
-  steps: readonly string[],
-  marks: readonly number[],
-): MarkedStrip {
-  return {
-    steps,
-    marks,
-    length: steps.length,
-    at: (index) => steps[index],
-    rest: () =>
-      markedStrip(
-        admission,
-        keptSlice(admission.work, steps, 1),
-        marks.map((mark) => (mark > 0 ? mark - 1 : -1)),
-      ),
-    under: (below) =>
-      markedStrip(
-        admission,
-        keptSteps(admission.work, below, steps),
-        marks.map((mark) => (mark < 0 ? mark : mark + below.length)),
-      ),
-  };
+function viewStep(view: PathView, index: number): string | undefined {
+  let at: PathView = view;
+  let step = at.start + index;
+  while (step >= at.rope.head.length && at.rope.tail !== null) {
+    step -= at.rope.head.length;
+    at = at.rope.tail;
+    step += at.start;
+  }
+  return at.rope.head[step];
+}
+
+// (the view one step further, its head left once passed)
+function viewRest(view: PathView): PathView {
+  let at: PathView = { rope: view.rope, start: view.start + 1, length: view.length - 1 };
+  while (at.start >= at.rope.head.length && at.rope.tail !== null) {
+    const tail: PathView = at.rope.tail;
+    at = { rope: tail.rope, start: tail.start + at.start - at.rope.head.length, length: at.length };
+  }
+  return at;
+}
+
+function viewSteps(admission: Admission, view: PathView, count: number): readonly string[] {
+  const out: string[] = [];
+  for (let at = 0; at < count; at += 1) out.push(viewStep(view, at)!);
+  return keptSlice(admission.work, out, 0);
 }
 
 /**
- * Whether a value may hold null after each of `marks` steps of `steps` (-1: not asked), by one descent per pass: a mark
- * at its own level and every mark of a value no literal or carrier composes by `mayHoldNull`; a literal's marks below it
- * by its children, a carried value's by its parts (the carrier table's, an `otherwise`'s fallback only where its operand
- * may be null), as `mayHoldNull` composes one path. Each value, path and marks answered once per pass (`LAYERS`), so a
- * join's growing operands are each read once; a value asked again while its own answer is pending adds nothing.
+ * A value's path in `layersOf`, as a `Strip` the carrier table transforms as it does steps: its view, the shift that
+ * places the asked depths on it (`depths[i] + shift`), the first depth not yet answered above it (`next`), and its
+ * key, made from its parent's and the step taken, so no key spells its path.
+ */
+interface MarkedStrip extends Strip<MarkedStrip> {
+  readonly view: PathView;
+  readonly shift: number;
+  readonly next: number;
+  readonly key: number;
+}
+
+/**
+ * Whether a value may hold null at each of `depths` along `path`, by one descent per pass: a depth at its own level and
+ * every depth of a value no literal or carrier composes by `mayHoldNull`; a literal's depths below it by its children, a
+ * carried value's by its parts (the carrier table's; an `otherwise`'s fallback only where its operand may be null, its
+ * operand where it may hold a value), as `mayHoldNull` composes one path. Each frame is constant work: the depths stay
+ * the asker's (each frame their shift and the first one left), the path a view, the key its parent's and one step
+ * (`LAYERS`, interned per pass). A carried value's answer is kept per pass under its key, so a join's growing operands
+ * are each read once; a literal's children are its own and are kept with it. A value asked again while its own answer
+ * is pending adds nothing.
  */
 function layersOf(
   admission: Admission,
@@ -1518,46 +1540,81 @@ function layersOf(
 ): boolean[] {
   const { program } = admission.pass;
   let memo = LAYERS.get(admission.pass);
-  if (memo === undefined) LAYERS.set(admission.pass, (memo = new Map()));
-  const answers = memo;
-  // (a part: its value and node, its path and the step its own level is at, and the marks along that path; a literal's
-  // children share their parent's path, one step further, so a descent slices no path)
-  type Part = readonly [PlaceId, FlowNode, readonly string[], number, readonly number[]];
+  if (memo === undefined)
+    LAYERS.set(
+      admission.pass,
+      (memo = { keys: new Map(), answers: new Map(), count: { value: 0 } }),
+    );
+  const { keys, answers, count } = memo;
+  const intern = (parent: number, step: string): number => {
+    admission.work.charge("checks");
+    let mine = keys.get(parent);
+    if (mine === undefined) keys.set(parent, (mine = new Map()));
+    let key = mine.get(step);
+    if (key === undefined) mine.set(step, (key = count.value += 1));
+    return key;
+  };
+  const strip = (view: PathView, shift: number, next: number, key: number): MarkedStrip => {
+    const made: MarkedStrip = {
+      view,
+      shift,
+      next,
+      key,
+      length: view.length,
+      at: (index) => viewStep(view, index),
+      rest: () => {
+        let left = next;
+        while (left < depths.length && depths[left]! + shift - 1 < 0) left += 1;
+        return strip(viewRest(view), shift - 1, left, intern(key, "rest"));
+      },
+      // (nothing prepended is the same path, and the same key: a join's operand is asked as its join is)
+      under: (below) =>
+        below.length === 0
+          ? made
+          : strip(
+              { rope: { head: below, tail: view }, start: 0, length: view.length + below.length },
+              shift + below.length,
+              next,
+              intern(key, `under ${keptText(admission.work, below)}`),
+            ),
+    };
+    return made;
+  };
+  // (a frame: its value, its path, where its answers go (`holds`: its own where it is kept, else its keeper's), its
+  // parts, the next part)
+  type Part = readonly [PlaceId, FlowNode, MarkedStrip];
   interface Frame {
     readonly at: PlaceId;
-    readonly text: string | null;
-    readonly holds: boolean[];
+    readonly kept: boolean;
+    readonly holds: Set<number>;
+    readonly into: Set<number>;
+    readonly strip: MarkedStrip;
     readonly parts: readonly Part[];
     next: number;
   }
-  // (a carried value's key, its path's text and its marks; a literal's none: its children are its own, never shared)
-  const textOf = (steps: readonly string[], marks: readonly number[]): string => {
-    const text = `${keptText(admission.work, steps)}#${marks.join(",")}`;
-    keepText(admission.work, text.length);
-    return text;
-  };
-  const pending = new Map<PlaceId, Set<string>>();
-  const open = (
-    at: PlaceId,
-    from: FlowNode,
-    steps: readonly string[],
-    start: number,
-    marks: readonly number[],
-    text: string | null,
-  ): Frame => {
+  const pending = new Map<PlaceId, Set<number>>();
+  const open = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Set<number>): Frame => {
     admission.work.charge("checks");
-    const holds = marks.map((mark) => mark === start && mayHoldNull(admission, at, from, []));
+    const kept = !program.hasOf.has(at);
+    const holds = kept ? new Set<number>() : into;
+    let { next } = here;
+    // (the depth at its own level, if one is)
+    if (next < depths.length && depths[next]! + here.shift === 0) {
+      if (mayHoldNull(admission, at, from, [])) holds.add(next);
+      next += 1;
+    }
     let parts: Part[] = [];
-    if (marks.some((mark) => mark > start)) {
-      if (program.hasOf.has(at))
-        parts = literalChildren(admission, at, steps[start]!).map(
-          (child) => [child.value!, child.node ?? from, steps, start + 1, marks] as const,
+    if (next < depths.length) {
+      const below = strip(here.view, here.shift, next, here.key);
+      if (!kept) {
+        const rest = below.rest();
+        parts = literalChildren(admission, at, viewStep(here.view, 0)!).map(
+          (child) => [child.value!, child.node ?? from, rest] as const,
         );
-      else {
-        const below = marks.map((mark) => (mark > start ? mark - start : -1));
-        const carried = admission.carriersBy(at, markedStrip(admission, steps, below));
+      } else {
         // (an `otherwise`'s operand where it may hold a value, its fallback where it may be null: a side never taken
         // brings nothing, Codex r5–r7 on #1814)
+        const carried = admission.carriersBy(at, below);
         const operand = carried.find(([, , role]) => role === "otherwise/operand")?.[0];
         const falls = operand === undefined || operandNull(admission, operand, from);
         const taken =
@@ -1568,93 +1625,78 @@ function layersOf(
             ([, , role]) =>
               (role !== "otherwise/fallback" || falls) && (role !== "otherwise/operand" || taken),
           )
-          .map(([part, strip]) => [part, from, strip.steps, 0, strip.marks] as const);
+          .map(([part, path]) => [part, from, path] as const);
         if (carried.length === 0)
-          below.forEach((mark, slot) => {
-            if (mark > 0)
-              holds[slot] = mayHoldNull(
+          for (let slot = next; slot < depths.length; slot += 1)
+            if (
+              mayHoldNull(
                 admission,
                 at,
                 from,
-                keptSlice(admission.work, steps, 0, mark),
-              );
-          });
+                viewSteps(admission, here.view, depths[slot]! + here.shift),
+              )
+            )
+              holds.add(slot);
       }
     }
-    if (text !== null) {
+    if (kept) {
       let mine = pending.get(at);
       if (mine === undefined) pending.set(at, (mine = new Set()));
-      mine.add(text);
+      mine.add(here.key);
     }
-    return { at, text, holds, parts, next: 0 };
+    return { at, kept, holds, into, strip: here, parts, next: 0 };
   };
-  const keep = (frame: Frame): void => {
-    if (frame.text === null) return;
-    let mine = answers.get(frame.at);
-    if (mine === undefined) answers.set(frame.at, (mine = new Map()));
-    mine.set(frame.text, frame.holds);
-    pending.get(frame.at)!.delete(frame.text);
+  const out = new Set<number>();
+  const root = strip(
+    { rope: { head: path, tail: null }, start: 0, length: path.length },
+    0,
+    0,
+    intern(-1, `${keptText(admission.work, path)}#${depths.join(",")}`),
+  );
+  const stack: Frame[] = [];
+  const ask = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Set<number>): void => {
+    if (!program.hasOf.has(at)) {
+      const answer = answers.get(at)?.get(here.key);
+      if (answer !== undefined) {
+        for (const slot of answer) into.add(slot);
+        return;
+      }
+      if (pending.get(at)?.has(here.key) === true) return;
+    }
+    stack.push(open(at, from, here, into));
   };
-  // (a non-literal value read from its own level: its path from there and its marks, the memo's key)
-  const own = (
-    steps: readonly string[],
-    start: number,
-    marks: readonly number[],
-  ): readonly [readonly string[], readonly number[], string] => {
-    const rest = start === 0 ? steps : keptSlice(admission.work, steps, start);
-    const below = start === 0 ? marks : marks.map((mark) => (mark >= start ? mark - start : -1));
-    return [rest, below, textOf(rest, below)];
-  };
-  let first: Frame;
-  if (program.hasOf.has(value)) first = open(value, node, path, 0, depths, null);
-  else {
-    const [rest, below, text] = own(path, 0, depths);
-    const already = answers.get(value)?.get(text);
-    if (already !== undefined) return already;
-    first = open(value, node, rest, 0, below, text);
-  }
-  const stack: Frame[] = [first];
-  let last: boolean[] = [];
+  ask(value, node, root, out);
   while (stack.length > 0) {
     const frame = stack.at(-1)!;
-    let opened = false;
-    while (frame.next < frame.parts.length) {
-      const [at, from, steps, start, marks] = frame.parts[frame.next]!;
-      if (program.hasOf.has(at)) {
-        stack.push(open(at, from, steps, start, marks, null));
-        opened = true;
-        break;
-      }
-      const [rest, below, text] = own(steps, start, marks);
-      const answer = answers.get(at)?.get(text);
-      if (answer === undefined && pending.get(at)?.has(text) !== true) {
-        // (asked first here: answered before this frame goes on, its answer added to this frame's when it ends)
-        stack.push(open(at, from, rest, 0, below, text));
-        opened = true;
-        break;
-      }
-      answer?.forEach((holds, slot) => {
-        if (holds) frame.holds[slot] = true;
-      });
+    if (frame.next < frame.parts.length) {
+      const [at, from, here] = frame.parts[frame.next]!;
       frame.next += 1;
+      ask(at, from, here, frame.holds);
+      continue;
     }
-    if (opened) continue;
-    keep(frame);
-    last = frame.holds;
     stack.pop();
-    const parent = stack.at(-1);
-    if (parent !== undefined) {
-      frame.holds.forEach((holds, slot) => {
-        if (holds) parent.holds[slot] = true;
-      });
-      parent.next += 1;
-    }
+    if (!frame.kept) continue;
+    let mine = answers.get(frame.at);
+    if (mine === undefined) answers.set(frame.at, (mine = new Map()));
+    mine.set(frame.strip.key, frame.holds);
+    pending.get(frame.at)!.delete(frame.strip.key);
+    for (const slot of frame.holds) frame.into.add(slot);
   }
-  return last;
+  return depths.map((_, slot) => out.has(slot));
 }
 
-/** Per pass, each value's layers at each path and marks (`layersOf`), shared by every literal's and join's error. */
-const LAYERS = new WeakMap<object, Map<PlaceId, Map<string, boolean[]>>>();
+/**
+ * Per pass, `layersOf`'s keys (each a parent's and one step, interned) and each carried value's answer under its key,
+ * shared by every literal's and join's error.
+ */
+const LAYERS = new WeakMap<
+  object,
+  {
+    readonly keys: Map<number, Map<string, number>>;
+    readonly answers: Map<PlaceId, Map<number, ReadonlySet<number>>>;
+    readonly count: { value: number };
+  }
+>();
 
 function mixedOptional(type: boolean[], kinds: boolean[]): MixedOptional | undefined {
   return type.includes(true) || kinds.includes(true) ? { type, kinds } : undefined;
