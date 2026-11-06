@@ -893,3 +893,52 @@ test("the mark automaton answers as the holders' marks do on branching prefixes,
       assert.ok(marked > 0, source);
     }
 });
+
+test("a closed ring's dead histories are not kept to an unrelated tested depth: no pending state, in four modes (#1784)", () => {
+  // (the blind review's row on the old head: a marked closed ring, a deep test on one unrelated object and a tested `q`
+  // on another, which kept the ring's `q`, `q.q`, … histories pending to that depth)
+  const source = (d: number): string => {
+    const steps = Array.from({ length: d }, (_, i) => `a${i}`);
+    return (
+      [
+        `let depth=${steps.reduceRight((inner, step) => `{${step}:${inner}}`, "0")}`,
+        `if depth.${steps.join(".")} is integer { say "depth" }`,
+        "let other={q:0}",
+        'if other.q is integer { say "other" }',
+        "let p0={s0:0}",
+        "let p1={s0:1}",
+        "let p2={s0:2}",
+        "p2.q=p0",
+        "p2=p1",
+        "if p0.s0 is integer { p1=p0 }",
+        "p0=p2",
+        "p2=p2.q",
+        'say "${p2.q.q.s0}"',
+        "exit",
+      ].join("\n") + "\n"
+    );
+  };
+  for (const mode of MODES) {
+    const sizes = [8, 16].map((d) => {
+      const pushed = analysed(source(d), mode);
+      const label = `d ${d}, ${JSON.stringify(mode)}`;
+      assert.equal(pushed.answers.budget.exhausted, null, label);
+      assert.ok(pushed.facts.reads > 0, label);
+      for (const { violations } of pushed.invariants) assert.deepEqual(violations, [], label);
+      for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
+      assert.equal(
+        pushed.all.reduce((all, facts) => all + facts.pending, 0),
+        0,
+        label,
+      );
+      const files = [{ path: "main.tease", source: source(d) }];
+      assert.equal(
+        publication(files, mode, GLOBALS),
+        withoutPushedReads(() => publication(files, mode, GLOBALS), d + 8),
+        label,
+      );
+      return pushed.states;
+    });
+    assert.deepEqual(sizes[0], sizes[1], JSON.stringify(mode));
+  }
+});
