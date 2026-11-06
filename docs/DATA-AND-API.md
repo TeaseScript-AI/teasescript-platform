@@ -194,9 +194,10 @@ session of the shown script ends when that script is ticked. For each script, ea
 scope with a fresh reference, and every value that held that exported reference, as text, list or set item, object
 property name or value, or dict key or value, gets the new one. The values then replace the scope's saved data all at
 once, with key order kept; the photos are stored first, under the scope's live lock as a Player of it holds, so a
-failure leaves that scope's previous data. A script whose values were replaced loses the session the Player kept for it
-([Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation)), so its next session starts
-with the imported values. Scripts replace one after another, and a failure of one
+failure leaves that scope's previous data. Before its values are replaced, a script loses the session the Player kept
+for it ([Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation)), so its next session
+starts with the imported values; when that session cannot be discarded, the script keeps its previous data. Scripts
+replace one after another, and a failure of one
 leaves the others to continue, so the import reports which scripts kept their previous data. Earlier media records are never overwritten, and photos left unreferenced are reclaimed
 later.
 

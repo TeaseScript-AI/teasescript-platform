@@ -503,3 +503,81 @@ test("the start page's own read offers Start, and a read answered after unmount 
   await settle();
   assert.equal(closing.host.activation.value, null);
 });
+
+test("a saved-data import whose kept session cannot be discarded leaves the script's data, and a reload continues it", async (context) => {
+  stubBrowser(context);
+  for (const refuse of [false, true]) {
+    const at = await browser();
+    await keepAtFirst(context, at);
+    const { host } = page(context, at);
+    await host.loadScriptStorage();
+    await prepare(host);
+    assert.equal(host.activation.value, "continue");
+    if (refuse) at.refused.add(SHOWN);
+    const outcome = await importSaved(host, [SHOWN]).then(
+      () => null,
+      (error: Error) => error.message,
+    );
+    at.refused.clear();
+    if (!refuse) {
+      assert.equal(outcome, null);
+      assert.equal((await values(at, SHOWN)).get("score"), 7);
+      assert.deepEqual(await fresh(context, at), { offered: "start", shown: "First 7" });
+      continue;
+    }
+    assert.match(
+      outcome ?? "",
+      new RegExp(`^Not imported, and their saved data is unchanged: ${SHOWN} `, "u"),
+    );
+    assert.equal((await values(at, SHOWN)).get("score"), 1);
+    assert.deepEqual(await fresh(context, at), { offered: "continue", shown: "First 1" });
+  }
+});
+
+test("among several scripts only the one whose kept session cannot be discarded keeps its data; unchosen ones keep theirs and their sessions", async (context) => {
+  stubBrowser(context);
+  const at = await browser();
+  for (const scope of [SHOWN, OTHER, NEW]) await keepAtFirst(context, at, { scope });
+  const { host } = page(context, at);
+  await host.loadScriptStorage();
+  await prepare(host);
+  at.refused.add(OTHER);
+  const outcome = await importSaved(host, [SHOWN, OTHER], [SHOWN, OTHER, NEW]).then(
+    () => "",
+    (error: Error) => error.message,
+  );
+  at.refused.clear();
+  assert.match(outcome, new RegExp(`unchanged: ${OTHER} \\(`, "u"));
+  assert.doesNotMatch(outcome, new RegExp(`${SHOWN}|${NEW}`, "u"));
+  assert.deepEqual(await fresh(context, at, SHOWN), { offered: "start", shown: "First 7" });
+  for (const scope of [OTHER, NEW]) {
+    assert.equal((await values(at, scope)).get("score"), 1, scope);
+    assert.notEqual(await at.innerKept.session(scope), null, scope);
+  }
+});
+
+test("the debug room imports the script's own saved data only once its kept session is gone, and keeps its own session", async (context) => {
+  stubBrowser(context);
+  for (const refuse of [false, true]) {
+    const at = await browser();
+    await keepAtFirst(context, at);
+    await keepAtFirst(context, at, { room: "debug" });
+    const { host } = page(context, at, { room: "debug" });
+    await host.loadScriptStorage();
+    await prepare(host);
+    assert.equal(host.activation.value, "continue");
+    if (refuse) at.refused.add(SHOWN);
+    const outcome = await importSaved(host, [SHOWN]).then(
+      () => null,
+      (error: Error) => error.message,
+    );
+    at.refused.clear();
+    assert.equal(outcome === null, !refuse, String(outcome));
+    assert.equal((await values(at, SHOWN)).get("score"), refuse ? 1 : 7);
+    assert.deepEqual(
+      await fresh(context, at),
+      refuse ? { offered: "continue", shown: "First 1" } : { offered: "start", shown: "First 7" },
+    );
+    assert.notEqual(await at.innerRooms.session(SHOWN), null, "the debug room's session went");
+  }
+});

@@ -1310,21 +1310,24 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       for (const script of review.bundle.scripts) {
         if (!chosen.has(script.scope)) continue;
         try {
-          if (script.scope === scriptStorage?.scope && inDebugRoom) {
+          const own = script.scope === scriptStorage?.scope;
+          // Without durable captured media, imported photos would not outlive this page.
+          if (own && capturedMediaPersistence === undefined && usesImages(script))
+            throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
+          // The script's next session loads the imported values: its kept session, with its older view, goes first, and
+          // a script whose kept session stays keeps its saved data.
+          await keptSessions.discard(script.scope);
+          if (own) outdated = undefined;
+          if (own && inDebugRoom) {
             const media = ownStoredMedia(script.scope);
             const storage = withCapturedMedia(options.scriptStorage!, media);
             try {
-              if (capturedMediaPersistence === undefined && usesImages(script))
-                throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
               await replaceScript(storage, media, script, review.images);
             } finally {
               await storage.drain();
               media.close();
             }
-          } else if (script.scope === scriptStorage?.scope) {
-            // Without durable captured media, imported photos would not outlive this page.
-            if (capturedMediaPersistence === undefined && usesImages(script))
-              throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
+          } else if (own) {
             await replaceScript(scriptStorage, capturedMedia, script, review.images);
           } else {
             const { storage, media } = options.savedData!.persistence(script.scope);
@@ -1335,12 +1338,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
               media.close();
             }
           }
-          // The script's next session loads the imported values: a kept session, with its older view, does not go on.
-          const discarded = await keptSessions.discard(script.scope).then(
-            () => true,
-            () => false,
-          );
-          if (discarded && script.scope === scriptStorage?.scope) outdated = undefined;
         } catch (error) {
           failed.push(
             `${script.name ?? script.scope} (${error instanceof CapturedMediaNotStoredError ? "its photos could not be stored" : "it could not be saved, for example because storage is full"})`,
