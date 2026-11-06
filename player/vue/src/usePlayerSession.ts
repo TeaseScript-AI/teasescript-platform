@@ -2392,18 +2392,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       }
       return;
     }
-    let opened: boolean;
+    let opened = false;
+    let failed = true;
     try {
       opened = await camera.open(withCamera);
       if (opened && reading && !disposed && token === activationToken) await loadScriptStorage();
+      failed = false;
     } finally {
-      // A superseding prepare already reset it for its own activation.
-      if (token === activationToken) beginning.value = false;
+      // It stays set for a Start that goes on, so the lock asked for in the click is kept; a superseding prepare already
+      // reset it for its own activation.
+      if (token === activationToken && (failed || !opened || disposed)) beginning.value = false;
     }
     // Replaced, re-prepared, or unmounted while it waited: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
-    beginning.value = true;
     try {
       if (begunInFlight !== null) {
         await begunInFlight;
