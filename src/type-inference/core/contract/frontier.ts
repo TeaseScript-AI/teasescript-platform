@@ -1157,7 +1157,7 @@ export function pushedFacts(contract: Contract): {
 
 /**
  * Test-only, #1784: the hold state's invariant over the pass's graph. Every marked or held node's inner node is neither
- * (nesting depth 1); every pending set holds each automaton state once; and per goal, each base node has one canonical
+ * (nesting depth 1); every pending set holds each automaton state once, every union of two both; and per goal, each base node has one canonical
  * pending set, the union of every pending set it was reached with, every held state of it the goal holds being a subset
  * (absorbed). Its violations, the largest pending set, and the held states and base nodes per goal.
  */
@@ -1183,6 +1183,13 @@ export function pushedInvariant(contract: Contract): {
     if (new Set(set.map(nameOf)).size !== set.length)
       violations.push(`pending set ${id}: a mark twice`);
   });
+  // (each union of two sets holds every state of both)
+  for (const [name, id] of frontier.unions) {
+    const [a, b] = name.split(",").map(Number) as [number, number];
+    const union = new Set(id < 0 ? [] : frontier.pendingSets[id]!);
+    if ([...frontier.pendingSets[a]!, ...frontier.pendingSets[b]!].some((each) => !union.has(each)))
+      violations.push(`the union of pending sets ${a} and ${b}: a state missing`);
+  }
   let [held, bases] = [0, 0];
   for (const bySteps of frontier.goals.values())
     for (const goal of bySteps.values()) {
