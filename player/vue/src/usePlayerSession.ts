@@ -585,6 +585,19 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         ? notices.publish(playerNotices.audioBlocked(() => device.retryBlocked()))
         : notices.dismiss(playerNoticeKeys.audioBlocked),
   });
+  /**
+   * The publication boundary of work that completes after a bridge reply: input such as the pacing skip, the clock's
+   * observations and catch-up, development time's jumps, and the services' sections. `next` shows only while the session
+   * that issued the work still owns the UI: `next` is of the shown session's store, no Player error stopped it, and the
+   * Player is mounted. It shows as that store's latest publication, so a reply never brings back an older state. Start,
+   * Continue, Return and the error stop show a new or the stopped session under their own ownership (`activationToken`).
+   */
+  function publishOwned(next: PlayerSession): boolean {
+    const shown = session.value;
+    if (disposed || stopped.value || shown === null || shown.lineage !== next.lineage) return false;
+    session.value = bridgeOf(next).latest(next) ?? next;
+    return true;
+  }
   // A late observation catches up on a copy of the session, except while Debug runs: its history and the debug
   // export's replay then follow each observation as it happens.
   const clock = useRuntimeSceneClock(
@@ -592,6 +605,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     () => device.sample(),
     held,
     () => debugTrace.value === null && randomControl === null,
+    publishOwned,
   );
   // Input and the work that continues it take their session from here when they run: a session a Player error stopped
   // gives none, so what was admitted before the stop and runs only now does nothing. The observation's own publish can
@@ -620,8 +634,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             media: device.sample(),
           });
           if (stopped.value) return null;
-          if (outcome.kind === "observed" && session.value?.id === shown.id)
-            session.value = section.session;
+          if (outcome.kind === "observed") publishOwned(section.session);
           return section.session;
         },
         send: (op, args, basis) => section.send(op, args, { basis }),
@@ -694,7 +707,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session: () => servicedSession.value,
     generation: () => generation.value,
     observe: observeForInput,
-    publish: (next) => (session.value = next),
+    publish: publishOwned,
     section: serviceSection,
     capturedMedia,
     diagnostic: reportDiagnostic,
@@ -707,7 +720,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session: () => servicedSession.value,
     generation: () => generation.value,
     observe: observeForInput,
-    publish: (next) => (session.value = next),
+    publish: publishOwned,
     section: serviceSection,
     media: capturedMedia,
     diagnostic: reportDiagnostic,
@@ -723,7 +736,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session: () => servicedSession.value,
     generation: () => generation.value,
     observe: observeForInput,
-    publish: (next) => (session.value = next),
+    publish: publishOwned,
     section: serviceSection,
     media: capturedMedia,
     diagnostic: reportDiagnostic,
@@ -1411,7 +1424,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // Publishes the result of a completed runtime action. Input to an inspected state is evaluated only once
   // `prepareInput` adopted it, so a result for the inspected state itself is never published.
   function update(next: PlayerSession) {
-    if (!inspecting.value) session.value = next;
+    if (!inspecting.value) publishOwned(next);
   }
   // Counts the sessions that ended as they played, also within their Start; a state Debug's rewind restored has ended
   // before and does not end anew.
@@ -2219,9 +2232,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * progress the jumps reported, and the scene clock continues from the new observed time.
    */
   function publishJump(next: PlayerSession) {
-    if (inspecting.value) return;
+    if (inspecting.value || !publishOwned(next)) return;
     jumpedRevision.value = next.transcriptRevision;
-    session.value = next;
     device.jumped(playerRuntimeMedia(next.state).media);
     clock.rebase();
   }

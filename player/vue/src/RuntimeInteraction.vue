@@ -154,9 +154,7 @@ const foreground = computed(() => {
     return presented.value;
   const value = playerRuntimeForeground(session);
   presented =
-    id === undefined
-      ? null
-      : { plan: session.planToken, reset: props.reset, actionId: id, value };
+    id === undefined ? null : { plan: session.planToken, reset: props.reset, actionId: id, value };
   return value;
 });
 // A form's answers change with each edit, unlike the rest of its presentation.
@@ -441,7 +439,8 @@ watch(
     // Host input happens at the observed time; settling must not be refused once the tab is open.
     const observed = props.observeTime ? props.observeTime() : session;
     const request = observed ? playerRuntimeUrlRequest(observed) : null;
-    if (!observed || request?.actionId !== id || !request.atOnce || !openUrlTab(request.url)) return;
+    if (!observed || request?.actionId !== id || !request.atOnce || !openUrlTab(request.url))
+      return;
     const result = hatch(observed, openPlayerRuntimeUrl);
     if (result) emit("update:session", result.session);
   },
@@ -556,8 +555,7 @@ async function skipPacingOver(
 
 async function complete(
   operation:
-    | ((session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null)
-    | typeof SKIP_PACING,
+    ((session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null) | typeof SKIP_PACING,
   refocusInput = true,
   target: "interaction" | "pacing" = "interaction",
   // The action the user acted on, when the input began earlier than this call (a held press).
@@ -589,6 +587,9 @@ async function complete(
     }
     const result =
       operation === SKIP_PACING ? await skipPacingOver(session) : hatch(session, operation);
+    // A session that another replaced while the skip's reply was in transit gets neither its result nor feedback; the
+    // Player's publication boundary (`update`) refuses it too, and anything after a stop.
+    if (props.session?.lineage !== session.lineage) return;
     if (!result) {
       showFeedback(
         foreground.value?.kind === "show-button"
@@ -789,8 +790,7 @@ async function imageControl(control: ImageControl) {
   const capture = props.capture;
   if (!capture || !props.session || submitting.value || readingImage.value) return;
   if (control === "file") return composer.value?.openPicker();
-  if (control === "use")
-    return complete(answer("button", (session) => capture.use(session)));
+  if (control === "use") return complete(answer("button", (session) => capture.use(session)));
   const ready = props.prepareInput?.() ?? true;
   if (ready !== true && !(await ready)) return;
   if (control === "camera") capture.openCamera();

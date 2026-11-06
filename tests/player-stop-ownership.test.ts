@@ -12,6 +12,7 @@ import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import type * as RuntimeView from "../player/runtime-view.js";
 import type { PlayerSession } from "../player/runtime-view.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
@@ -44,6 +45,8 @@ interface StopHost {
   setDebugTracing(on: boolean): void;
   reportHostError(error: unknown): void;
   observe(): { readonly id: string } | null;
+  update(next: PlayerSession): void;
+  publishJump(next: PlayerSession): void;
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
@@ -51,6 +54,7 @@ let usePlayerSession: (options: {
 }) => StopHost;
 let facade: typeof InProcess;
 let compiler: typeof CompileProject;
+let view: typeof RuntimeView;
 
 before(async () => {
   const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
@@ -61,6 +65,8 @@ before(async () => {
   facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
   compiler = (await loadPlayerModule("player/compile-project.ts")) as typeof compiler;
+  // EVIDENCE: validation: the bundle's session view module, from the same module graph.
+  view = (await loadPlayerModule("player/runtime-view.ts")) as typeof view;
 });
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
@@ -97,7 +103,7 @@ async function mount(context: TestContext, delayMs = 50) {
     bridge.client.terminate();
   });
   await player.bridge;
-  return { bridge, player };
+  return { bridge, player, scope };
 }
 
 const factory =
@@ -373,3 +379,87 @@ test("a Start that replaces an error stop pending on a Start the host rejects ru
   assert.equal(player.stopped.value, false, "the replacement's input runs");
   assert.notEqual(player.observe(), null, "the replacement's clock runs");
 });
+
+/*
+ * Work that completes after a bridge reply shows only while the session that issued it still owns the UI: each
+ * completion as its issuer publishes it (the component's pacing skip through `update`, a development jump, the clock's
+ * observation), against a replacement, a stop and an unmount while its reply is in transit on a 250 ms host.
+ */
+const completions = {
+  "a pacing skip": (bridge: PlayerBridge, player: StopHost, issuer: PlayerSession) => {
+    const gate = view.playerRuntimePacingGate(issuer);
+    assert.ok(gate);
+    const reply = bridge.request(issuer, "skipPacing", { actionId: gate.actionId });
+    // As `RuntimeInteraction` emits it once the reply arrived.
+    return reply.then(() => player.update(bridge.latest(issuer)!));
+  },
+  "a development jump": (bridge: PlayerBridge, player: StopHost, issuer: PlayerSession) => {
+    const reply = bridge.request(issuer, "stepTime", { targetMs: 5_000 });
+    return reply.then(() => player.publishJump(bridge.latest(issuer)!));
+  },
+  "the clock's observation": async (
+    _bridge: PlayerBridge,
+    _player: StopHost,
+    _issuer: PlayerSession,
+  ) => {
+    // Debug's trace makes a late observation one observation over the bridge.
+    document.dispatchEvent(new Event("visibilitychange"));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  },
+};
+for (const [completion, issue] of Object.entries(completions))
+  for (const interference of ["a replacement", "a stop", "an unmount"] as const)
+    test(`${completion} in transit at ${interference} shows nothing of the session it was issued for`, async (context) => {
+      const { bridge, player, scope } = await mount(context, 250);
+      player.setDebugTracing(true);
+      player.prepare(
+        factory('say "old paced"\nwait 10 s\nsay "old late", instant\nshowButton "Done"\nexit'),
+      );
+      await player.activate();
+      const issuer = player.session.value!;
+      later(context, 1_000);
+      const done = issue(bridge, player, issuer).catch(() => {});
+      const changes: (string | null)[] = [];
+      let at: PlayerSession | null = null;
+      if (interference === "a replacement") {
+        player.prepare(factory('say "replacement", instant\nshowButton "New"\nexit'));
+        await player.activate();
+      } else if (interference === "a stop")
+        player.reportHostError(new TypeError("a component failed"));
+      else scope.stop();
+      const stopWatch = watch(
+        player.session,
+        (shown) => {
+          if (
+            interference !== "a replacement" &&
+            (interference === "an unmount" || player.hostError.value !== null)
+          )
+            changes.push(shown?.id ?? null);
+        },
+        { flush: "sync" },
+      );
+      context.after(stopWatch);
+      at = player.session.value;
+      await done;
+      for (let index = 0; index < 10; index += 1) await turn();
+      if (interference === "a replacement") {
+        const shown = player.session.value!;
+        assert.deepEqual(
+          shown.transcriptEntries.map((entry) => entry.text),
+          ["replacement"],
+        );
+        assert.notEqual(shown.lineage, issuer.lineage);
+        assert.equal(facade.heldRecording(bridge)?.plan, facade.heldPlan(bridge, shown.planToken));
+        return;
+      }
+      if (interference === "a stop") {
+        // The stop commits what the host ran, its in-transit reply included, and nothing shows after the stop line.
+        assert.equal(player.hostError.value, "TypeError");
+        assert.deepEqual(changes, []);
+        assert.equal(bridge.frozen(player.session.value!), true);
+        assert.equal(player.session.value, bridge.latest(issuer));
+        return;
+      }
+      assert.deepEqual(changes, [], "an unmounted Player publishes nothing");
+      assert.equal(player.session.value, at);
+    });

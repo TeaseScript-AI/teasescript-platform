@@ -34,6 +34,13 @@ export function useRuntimeSceneClock(
   paused: Readonly<Ref<boolean>> = ref(false),
   /** Whether a late observation may catch up on a copy; otherwise it is one observation. */
   copies: () => boolean = () => true,
+  /**
+   * Shows what an observation or catch-up over the bridge published once its reply arrived, if the session it observed
+   * still owns the UI; the Player's publication boundary.
+   */
+  publishLater: (next: PlayerSession) => void = (next) => {
+    if (session.value?.lineage === next.lineage) session.value = bridgeOf(next).latest(next);
+  },
 ) {
   let origin = performance.now();
   const displayTimeMs = ref(0);
@@ -113,8 +120,7 @@ export function useRuntimeSceneClock(
       // Refused (another op published meanwhile) or failed: nothing is shown; the clock goes on from the latest.
       return void scheduleWakeUp(session.value);
     }
-    if (outcome.kind === "observed" && session.value?.id === shown.id)
-      session.value = bridge.latest(shown);
+    if (outcome.kind === "observed") publishLater(shown);
   }
 
   /**
@@ -190,8 +196,8 @@ export function useRuntimeSceneClock(
     pending = null;
     nextTask?.close();
     nextTask = null;
-    if (disposed || session.value?.id !== own.session.id) return;
-    if (adopted) session.value = bridgeOf(own.session).latest(own.session);
+    if (disposed || session.value?.lineage !== own.session.lineage) return;
+    if (adopted) publishLater(own.session);
     else observe();
   }
 
