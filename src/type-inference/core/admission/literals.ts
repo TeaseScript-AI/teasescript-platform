@@ -1378,7 +1378,7 @@ function mayHoldNull(
       // (an `otherwise`'s own null is its narrowed tree's: its fallback's, each leaf read narrowed, where its operand
       // may be null; the operand's null is what the fallback replaces. Codex r3 on #1819, Astra r2's B2 on #1789)
       if (program.opOf.get(at)?.kind === "fallback") return operandNull(admission, at, from);
-      return itemsHold(at, []);
+      return occurrenceNull(admission, at, from);
     }
     if (program.hasOf.has(at)) {
       const rest = keptSlice(admission.work, steps, 1);
@@ -1472,6 +1472,23 @@ function mayHoldNull(
 }
 
 /**
+ * #1765: whether a value may be null as it is read at its node: its type allows null (its contract's items, which a
+ * rejected store does not reach) and its items there, narrowed, hold null or an unknown no test guards (a typed host
+ * value, Astra r1's B1 on #1819; under `!= null` its unknown is guarded). A written copy narrowed by its assignment or a
+ * test holds none, as the current checker reads it.
+ */
+function occurrenceNull(admission: Admission, at: PlaceId, from: FlowNode): boolean {
+  return (
+    withoutEmpty(admission.run(admission.pass.contract.contractOfValueAt(at, []))).some(
+      (item) => item.tag === "null",
+    ) &&
+    admission
+      .items(at, from, [])
+      .some((item) => item.tag === "null" || (item.tag === "unknown" && item.guarded !== true))
+  );
+}
+
+/**
  * #1765: whether an `otherwise`'s operand may be null at its node: its items there, narrowed as it is read (a written copy
  * narrowed by its assignment or a test never runs its fallback, as the current checker reads it); an operand that is
  * itself an `otherwise`, only where its operand and its fallback both may be (Codex r10's B1). Each node's answer once per
@@ -1493,10 +1510,7 @@ function operandNull(admission: Admission, operand: PlaceId, from: FlowNode): bo
     admission.work.charge("checks");
     const op = program.opOf.get(at);
     if (op?.kind !== "fallback") {
-      known.set(
-        at,
-        admission.items(at, from, []).some((item) => item.tag === "null"),
-      );
+      known.set(at, occurrenceNull(admission, at, from));
       open.pop();
       continue;
     }
