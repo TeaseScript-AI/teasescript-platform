@@ -164,7 +164,7 @@ test("the objects query covers each family's group members at the path its reads
 /** Sources beside the families: each route the query follows or declines, at the reads its oracle asks. */
 const CONTROLS = [
   // F11 at a prefix, a property stored below it, a stored `missing`, a host value beside a literal
-  'let base={a:{},b:1}\nlet w={p:base,h:hostValue}\nbase.a.c=1\nlet y={q:base.zz}\nsay "${w.p.a.c}"\nsay "${y.q.r}"\nexit\n',
+  'let base={a:{},b:1}\nlet w={p:base,h:hostValue}\nbase.a.c=1\nlet y={q:base.zz}\nlet n={p:{a:base.zz}}\nsay "${w.p.a.c}"\nsay "${y.q.r}"\nsay "${n.p.a}"\nexit\n',
   // several objects in one list, the first lacking of each list, the earliest of the lists
   'let xs=[{a:1},{b:1},{a:1,b:1}]\nlet o={p:{a:1}}\no.p={b:1}\nlet e=xs.get(hostValue, default:{c:1})\nsay "${e.a}"\nsay "${o.p.c}"\nexit\n',
   // a fallback, an element added
@@ -179,8 +179,13 @@ test("the objects query names a read's missing writer as the read does on each c
     for (const mode of MODES) {
       const label = `${JSON.stringify(mode)}\n${source}`;
       // (with room for the oracle's reads after the analysis, each control's at every literal path and property)
-      for (const pass of passesOf(source, mode, 30_000_000))
-        assert.deepEqual(inMode(mode, () => compared(pass)).differences, [], label);
+      let covered = 0;
+      for (const pass of passesOf(source, mode, 30_000_000)) {
+        const result = inMode(mode, () => compared(pass));
+        assert.deepEqual(result.differences, [], label);
+        covered += result.covered;
+      }
+      assert.ok(covered > 0, label);
     }
 });
 
@@ -255,5 +260,23 @@ test("each family's objects queries at its members' path cost what the family's 
     });
     // (linear: twice the members, at most about twice the work; k² would be four times)
     assert.ok(units[1]! <= 2.5 * units[0]!, `${shape}: ${units.join(", ")}`);
+  }
+});
+
+test("after the analysis stops, an objects query covers no read: its unfinished queries decline (#1747)", () => {
+  for (const shape of SHAPES) {
+    const mode = MODES[0]!;
+    // (an allowance the family exceeds: the pass stops, and every demand after it finishes as it stood)
+    const passes = passesOf(family(shape, 8, true), mode, 2_000);
+    const pass = passes.at(-1)!;
+    assert.ok(pass.program.work.stopped !== null, shape);
+    inMode(mode, () => {
+      for (const literal of members(pass))
+        assert.equal(
+          pass.solver.run(absentWriterAt(pass.contract, literal, ["p"], "f0")).covered,
+          false,
+          shape,
+        );
+    });
   }
 });
