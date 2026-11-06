@@ -3536,6 +3536,29 @@ function sourcesUnder(directory: string): string[] {
   });
 }
 
+test("a known value under a test reads the branch's narrowing, and a long copy chain's value is still found iteratively (#1073 PR 2 phase 2)", () => {
+  // (a dead branch is no static error: the narrowing admits no kind of the value there; a live one keeps it)
+  for (const [source, plans] of [
+    ["let n = 1.5\nif n is integer { repeat n {} }\nexit\n", true],
+    ["let n = 1\nif n == null { repeat n {} }\nexit\n", true],
+    ["let n = 1.5\nif n is number { repeat n {} }\nexit\n", false],
+    ["let n = 1.5\nlet m = n\nif m is integer { repeat m {} }\nexit\n", true],
+  ] as const)
+    assert.equal(inBothOrders(() => candidate(source)).plan !== null, plans, source);
+  // (Codex r1 on #1884: the filter applies after the evaluator's own iterative walk, so 8,192 copies take no native frame
+  // each, and the known count still plans and runs)
+  const chain =
+    Array.from({ length: 8192 }, (_, i) => `let n${i} = ${i === 0 ? "1" : `n${i - 1}`}`).join(
+      "\n",
+    ) + '\nrepeat n8191 { say "AFTER" }\nexit\n';
+  const compiled = inBothOrders(() => candidate(chain));
+  assert.notEqual(compiled.plan, null);
+  assert.deepEqual(
+    compiled.diagnostics.map((diagnostic) => diagnostic.code),
+    [],
+  );
+});
+
 test("no production code selects the core: only tests reach the candidate entry", () => {
   const root = process.cwd();
   for (const directory of ["src", "playground", "player", "tools"])

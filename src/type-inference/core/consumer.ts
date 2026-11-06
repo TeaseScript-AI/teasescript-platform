@@ -660,27 +660,49 @@ function knownValues(
   index: SliceIndex,
   expected: (call: CallExpression) => TypePlan | undefined,
 ): (expression: Expression) => KnownValue | undefined {
+  // the kinds the branch's narrowing admits at a read (#1073 PR 2): `null` where it says nothing (no node, no answer, or
+  // an unknown among them)
+  const admitted = (expression: Expression): readonly string[] | null => {
+    const node = answers.graph.expressionAt(index.site(expression));
+    const read = node === undefined ? undefined : answers.at(node);
+    if (read === undefined || read === null) return null;
+    const kinds = withoutEmpty(read.items).map((item) => item.tag);
+    return kinds.includes("unknown") ? null : kinds;
+  };
   const values = new KnownValues((identifier) => {
     const initializer = answers.initializers.get(
       siteKey(index.fileOf(identifier), identifier.span),
     );
     if (initializer === undefined) return undefined;
     const expression = index.expressionAt(initializer);
-    // (the branch's narrowing at the read, #1073 PR 2: where it admits no kind of the initializer's value, as `n` under
-    // `if n is integer` with `n = 1.5` or under `if n == null` with `n = 1`, the read never runs with that value, so it
-    // has no known value and a dead branch is no static error)
-    const node = answers.graph.expressionAt(index.site(identifier));
-    const read = node === undefined ? undefined : answers.at(node);
-    if (read === undefined || read === null) return expression;
-    const kinds = withoutEmpty(read.items).map((item) => item.tag);
+    // (a read the narrowing reaches with no kind, or with none of a literal initializer's, never runs with that value,
+    // as `n` under `if n is integer` with `n = 1.5` or under `if n == null` with `n = 1`: it has no known value, so a dead
+    // branch is no static error; constant work, never another value's evaluation, Codex r1 on #1884)
+    const kinds = admitted(identifier);
+    if (kinds === null) return expression;
     if (kinds.length === 0) return undefined;
-    if (kinds.includes("unknown")) return expression;
-    const value = values.known(expression);
-    return value === undefined || admitsKnown(kinds, value) ? expression : undefined;
+    const literal = literalValue(expression);
+    return literal === undefined || admitsKnown(kinds, literal) ? expression : undefined;
   }, expected);
-  const known = (expression: Expression) => values.known(expression);
+  // (and a read's value once evaluated, whatever its initializer: the iterative evaluation first, the filter after)
+  const known = (expression: Expression): KnownValue | undefined => {
+    const value = values.known(expression);
+    if (value === undefined || unwrap(expression).kind !== "identifier") return value;
+    const kinds = admitted(unwrap(expression));
+    return kinds === null || admitsKnown(kinds, value) ? value : undefined;
+  };
   answers.shareKnown(known);
   return known;
+}
+
+/** A literal's own value: a number, a text without interpolation, a boolean or `null`; else `undefined`. */
+function literalValue(expression: Expression): KnownValue | undefined {
+  const at = unwrap(expression);
+  if (at.kind === "numberLiteral" || at.kind === "booleanLiteral") return at.value;
+  if (at.kind === "nullLiteral") return null;
+  if (at.kind === "stringLiteral" && at.parts.every((part) => part.kind === "stringText"))
+    return at.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("");
+  return undefined;
 }
 
 /**
