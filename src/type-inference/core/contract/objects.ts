@@ -76,14 +76,14 @@ export function* absentWriterAt(
   rest: readonly string[],
   step: string,
 ): Work<{ readonly covered: boolean; readonly writer: Writer | null }> {
-  const { proof } = yield* contract.pass.solver.proven(objectsAt(contract, value, rest));
-  if (proof === null || !proof.complete) return UNCOVERED;
-  const { program, definitions, lists } = contract.pass;
+  const { program, definitions, lists, solver } = contract.pass;
   let writer: Writer | null = null;
-  const seen = new Set<number>([proof.id]);
-  const open: ObjectsProof[] = [proof];
+  const first = objectsAt(contract, value, rest);
+  const seen = new Set<string>([first.key]);
+  const open: ProofDemand<ObjectsProof>[] = [first];
   while (open.length > 0) {
-    const node = open.pop()!;
+    const { proof: node } = yield* solver.proven(open.pop()!);
+    if (node === null || !node.complete) return UNCOVERED;
     program.work.charge("invSteps");
     for (const { key, place, path } of node.keys) {
       program.work.charge("invSteps");
@@ -102,8 +102,9 @@ export function* absentWriterAt(
       writer = firstWriter(writer, lackingAt(contract, index, path, step));
     }
     for (const child of node.children)
-      if (!seen.has(child.id)) {
-        seen.add(child.id);
+      if (!seen.has(child.key)) {
+        contract.keepText(child.key.length);
+        seen.add(child.key);
         open.push(child);
       }
   }
@@ -112,19 +113,16 @@ export function* absentWriterAt(
 
 const UNCOVERED = { covered: false, writer: null } as const;
 
-/** The support nodes made per pass (a contract's), by their content: equal content, one id. */
-const SUPPORT = new WeakMap<Contract, Map<string, number>>();
-
 /**
  * What a query gathers: its own sites, writers and keys, and the queries it reads, each once; declined at the first
- * route it does not follow. A query's proof is a node over its readers' nodes, never a copy of their contents, so a
- * support shared by k queries (a call's result, a `get`'s receiver) is held once.
+ * route it does not follow. A query's proof names the queries it reads (their demands), never a copy of their
+ * contents, so a support shared by k queries (a call's result, a `get`'s receiver) is held once.
  */
 class Gathered {
   readonly #lists = new Map<string, ObjectSite>();
   readonly #prior = new Map<string, Writer>();
   readonly #keys = new Map<string, ObjectsProof["keys"][number]>();
-  readonly #children = new Map<number, ObjectsProof>();
+  readonly #children = new Map<string, ProofDemand<ObjectsProof>>();
   complete = true;
 
   public constructor(private readonly contract: Contract) {}
@@ -148,45 +146,37 @@ class Gathered {
     const { proof } = yield* this.contract.pass.solver.proven(demand);
     // (none yet: a query of its own component still running, whose least answer starts empty and whose proof reruns
     // this one when it changes; after a stop, an unfinished one, which declines)
-    if (proof === null && this.contract.pass.program.work.stopped === null) return;
+    if (proof === null && this.contract.pass.program.work.stopped === null) {
+      this.#children.set(demand.key, demand);
+      return;
+    }
     if (proof === null || !proof.complete) {
       this.complete = false;
       return;
     }
-    if (this.#children.has(proof.id)) return;
-    this.contract.keep(1);
-    this.#children.set(proof.id, proof);
+    if (this.#children.has(demand.key)) return;
+    this.contract.keepText(demand.key.length);
+    this.#children.set(demand.key, demand);
   }
 
   public proven(): Proven<ObjectsProof> {
     if (!this.complete) return { items: [], proof: DECLINED };
     const { contract } = this;
-    // (its content by its parts' names and its readers' ids, sorted: one id for equal content, `SUPPORT`)
-    const content = joinParts(
-      ...[...this.#lists.keys(), ...this.#prior.keys(), ...this.#keys.keys()].sort(),
-      "<",
-      ...[...this.#children.keys()].sort((a, b) => a - b),
-    );
-    let ids = SUPPORT.get(contract);
-    if (ids === undefined) SUPPORT.set(contract, (ids = new Map()));
-    let id = ids.get(content);
-    if (id === undefined) {
-      contract.keepText(content.length);
-      ids.set(content, (id = ids.size));
-    }
-    const named = id;
+    // (its own parts and the queries it reads, by their names: equal for equal parts and readers, which a cycle of
+    // queries reaches at once, each reader's support read through its own demand)
+    const names = [...this.#lists.keys(), ...this.#prior.keys(), ...this.#keys.keys()].sort();
+    const children = [...this.#children.keys()].sort();
     return {
       items: [],
       proof: {
         complete: true,
-        id: named,
         lists: [...this.#lists.values()],
         prior: [...this.#prior.values()],
         keys: [...this.#keys.values()],
         children: [...this.#children.values()],
         signature: () => {
-          contract.pass.program.work.charge("sigItems");
-          return String(named);
+          contract.pass.program.work.charge("sigItems", names.length + children.length + 1);
+          return joinParts(...names, "<", ...children);
         },
       },
     };
@@ -201,7 +191,6 @@ class Gathered {
 
 const DECLINED: ObjectsProof = {
   complete: false,
-  id: -1,
   lists: [],
   prior: [],
   keys: [],
