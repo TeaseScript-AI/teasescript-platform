@@ -298,6 +298,13 @@ test("C10 takes a fallback's family from its value's domain where the read canno
       "let a = null\nlet b: integer[]? = hostValue\nsay a otherwise b otherwise [2]",
       "warning-runtime-check | written-target@33:W written-target@33:W | copy-type:b[list,null] copy-type:b.element[integer] copy-typeB:b[list,null]",
     ],
+    // (a known value that may be null, unwritten: its own possible kinds decide, a warning; asking a domain here would
+    // make the requirement definite, the eligibility guard keeps it possible, Astra r2's N1 on #1824)
+    [
+      "otherwise/known-or-null",
+      'let choice = askBoolean "?"\nlet a = 1\nif choice { a = null }\nsay a otherwise "bad"',
+      'warning-runtime-check | written-target@77:W | copy-type:"bad"[integer,number]',
+    ],
     [
       "chain/unknown-link",
       'let a: integer? = hostValue\nlet b = hostValue\nlet result = a otherwise b otherwise "bad"\nsay result',
