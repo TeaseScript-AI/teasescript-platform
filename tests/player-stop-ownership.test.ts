@@ -25,6 +25,7 @@ import { loadPlayerModule } from "./helpers/player-modules.js";
 interface StopHost {
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly hostError: Readonly<Ref<string | null>>;
+  readonly stopped: Readonly<Ref<boolean>>;
   readonly bridge: Promise<PlayerBridge>;
   readonly debugTrace: Readonly<Ref<RuntimeDebugContext | null>>;
   prepare(
@@ -42,6 +43,7 @@ interface StopHost {
   }>;
   setDebugTracing(on: boolean): void;
   reportHostError(error: unknown): void;
+  observe(): { readonly id: string } | null;
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
@@ -348,3 +350,26 @@ for (const kind of [
     assert.equal(facade.heldRecording(bridge)?.operations.length ?? null, recordingAtStop);
     assert.deepEqual(player.debugTrace.value?.status() ?? null, traceAtStop);
   });
+
+test("a Start that replaces an error stop pending on a Start the host rejects runs unstopped", async (context) => {
+  const { bridge, player } = await mount(context);
+  // The host holds no such plan, so it rejects the Start.
+  player.prepare({ plan: "missing-plan", options: () => ({ wallClockMs: 0 }) });
+  const rejected = player.activate();
+  player.reportHostError(new TypeError("a component failed while a Start began"));
+  assert.equal(player.stopped.value, true, "input stops while the stop waits for the Start");
+  player.prepare(factory('say "replacement", instant\nshowButton "Next"\nexit'));
+  const replacement = player.activate();
+  await rejected;
+  await replacement;
+  for (let index = 0; index < 10; index += 1) await turn();
+  const shown = player.session.value;
+  assert.deepEqual(
+    shown?.transcriptEntries.map((entry) => entry.text),
+    ["replacement"],
+  );
+  assert.equal(player.hostError.value, null);
+  assert.equal(bridge.frozen(shown!), false);
+  assert.equal(player.stopped.value, false, "the replacement's input runs");
+  assert.notEqual(player.observe(), null, "the replacement's clock runs");
+});

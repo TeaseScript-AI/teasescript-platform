@@ -276,7 +276,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // exception stops the session where it stands (see `stopped`).
   const hostError = ref<string | null>(null);
   // From a Player error stop until the host acknowledged it (a round trip with a Worker): input stops, nothing renders.
+  // It belongs to the stop `haltingStop` names: only that stop ends it, and a later activation retires it.
   const halting = ref(false);
+  let haltingStop = 0;
+  function haltUntil(stop: number) {
+    haltingStop = stop;
+    halting.value = true;
+  }
+  function endHalting(stop: number) {
+    if (stop === haltingStop) halting.value = false;
+  }
   /**
    * The Player error stop. What shows is what the host ran before the stop, and nothing after it: the stop ends the
    * activation under way, so no Start or Continue completes on its own; the host refuses what the stopped session has
@@ -301,13 +310,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       hostError.value = name;
       return;
     }
-    halting.value = true;
+    haltUntil(stop);
     void starting.then(
       (started) => stopAt(started, name, stop),
       () => {
-        if (stop !== activationToken) return;
-        halting.value = false;
-        hostError.value ??= name;
+        endHalting(stop);
+        if (stop === activationToken) hostError.value ??= name;
       },
     );
   }
@@ -319,14 +327,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const host = bridgeOf(target);
     const acknowledged = host.halt(target);
     const commit = () => {
-      halting.value = false;
+      endHalting(stop);
       if (disposed || stop !== activationToken) return;
       const final = host.latest(target);
       if (final !== null) session.value = final;
       hostError.value ??= name;
     };
     if (host.frozen(target)) return commit();
-    halting.value = true;
+    haltUntil(stop);
     void acknowledged.then(commit);
   }
   /**
@@ -892,6 +900,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function supersede() {
     activationToken++;
+    // A pending error stop is retired with the activation it stopped; the replacement's input runs.
+    halting.value = false;
     const obsolete = continuing;
     continuing = null;
     if (obsolete !== null) void bridgeOf(obsolete).halt(obsolete);
