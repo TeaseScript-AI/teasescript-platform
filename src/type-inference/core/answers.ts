@@ -519,6 +519,25 @@ export interface Answers {
    * stops the analysis.
    */
   completed<T>(again: () => T): T | null;
+  /**
+   * The obligations a published plan's gate reads (#1526 decision 2, condition 1, `lostCheck`): the receiving registry
+   * where a receiving completion ran (`receiving`, its results); after a stop of the analysis, where none runs, or a
+   * completion past its allowance before it found them, once admission settled, the registry's obligations without
+   * results, found as finishing work counted apart (`Consumers.stopObligations`); none elsewhere. `null` where the
+   * obligations are unknown: a stop after admission settled with no seed to find them from, never read as none.
+   */
+  gated():
+    | readonly {
+        readonly obligation: ReceivingObligation;
+        readonly result: ReceivingResult | null;
+      }[]
+    | null;
+  /**
+   * `callback` as finishing work counted apart (`WorkLedger.apart`), in the budget's `apart` and never its total: the
+   * settled pass's publication asked once more where the receiving completion kept no result, so its gate reads the
+   * registry (#1526 decision 2, condition 1, `asked`).
+   */
+  apart<T>(callback: () => T): T;
   at(node: FlowNode): OccurrenceAnswer | null;
   /**
    * The place and path a statement that stores stores into, as `at` reads them there (its node's first live store, else
@@ -1702,6 +1721,28 @@ class CoreAnswers implements Answers {
     for (const item of bySite(ranked))
       if (!order.has(item.obligation)) order.set(item.obligation, order.size);
     return order;
+  }
+
+  public gated(): Answers["receiving"] | null {
+    // (the registry once a receiving completion made it, in its questions asked again too; where it is empty after a
+    // stop of the analysis, where none runs, or after a completion past its allowance before it found its obligations,
+    // the obligations are found again apart; elsewhere the completion runs after the first questions, `asked`)
+    if (this.receiving.length > 0) return this.receiving;
+    const capped = (this.#consumers.completion?.counts.capped ?? 0) > 0;
+    if (this.budget.exhausted === null && !capped) return [];
+    const found = this.apart(() => this.#consumers.stopObligations());
+    // (no seed: unknown where admission settled, which saves one before anything of it can stop; none where it did not,
+    // an unsettled stop, option (a))
+    if (found === null) return this.budget.settled ? null : [];
+    return found.map((obligation) => ({ obligation, result: null }));
+  }
+
+  public apart<T>(callback: () => T): T {
+    try {
+      return this.#pass.program.work.apart(callback);
+    } finally {
+      this.#counted();
+    }
   }
 
   public completed<T>(again: () => T): T | null {

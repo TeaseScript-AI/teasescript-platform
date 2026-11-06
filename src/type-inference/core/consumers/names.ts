@@ -280,7 +280,7 @@ function isNumber(term: TypeTerm): boolean {
  * an operation, a literal, a written type's reference to another place). Each term's projection at a step is made once
  * (`below`) and the `number` test once per term (`isNumber`), so a use costs a walk of its own read's steps.
  */
-function writtenTermOf(walk: Consumers, value: PlaceId): TypeTerm | null {
+export function writtenTermOf(walk: Consumers, value: PlaceId): TypeTerm | null {
   const { program } = walk.pass;
   // (a call's result reads its function's written result type, as a binding read its binding's)
   const result = walk.resultOfCall.get(value);

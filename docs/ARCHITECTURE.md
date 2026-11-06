@@ -98,12 +98,26 @@ snapshot for comparing two analyses of the same sources.
   checks the project again with what it found until a check finds nothing new; the last check alone reports.
   `legacy-state.ts` holds what one check carries to the next, and `legacy-facts.ts` reads its facts. The compiler uses
   no other backend.
-- **Constraint backend (O4), being built:** it collects the constraints of the whole project, solves them once, and
-  checks once. It is built in stages behind the legacy backend and has no production caller until the switch; so far
-  only tests reach its parts: the constraint graph (`graph.ts`) and the collector that makes it in one walk
-  (`collector.ts`), the result relations of the built-in contracts (`adapters/`), the view of the value-kind registry
-  (`registry-view.ts`), and the solver's interned type table (`solver/types.ts`). The condition-shape recognizer
-  (`narrowing-shapes.ts`) is shared: the visitor's branch rules and the collector read the same classification.
+- **Constraint backend (O4), being built:** it collects the whole project's constraints. It is built in stages behind
+  the legacy backend and has no production caller until the switch. Tests
+  reach it through the candidate compile route, `compileSourceWithBackend` and `compileProjectWithBackend`
+  (`src/compiler.ts`, test-only and not exported by `src/index.ts`), with `CORE_BACKEND` (`core/backend.ts`). That
+  backend covers a stated slice of the language and throws `CandidateOutsideSlice` at the first construct outside it.
+  Its route:
+  - `CoreProgram` (`core/program.ts`) indexes one analysis's input: the places and constraints of the collector
+    (`collector.ts`, which makes the constraint graph of `graph.ts` in one walk), the flow graph of
+    `core/flow-graph.ts`, where every statement and expression is a node and what literals prove dead is marked, and
+    its dominators.
+  - `analyseCore` (`core/answers.ts`) runs the analysis in admission's passes with the solver (`core/solver.ts`). It
+    publishes frozen answers: per occurrence its items, route, place and obligations; per place its admitted type and
+    contract; and the program's diagnostics, checks and budget.
+  - The consumer (`coreCheckResult`, `core/consumer.ts`) walks the source with those answers and makes the
+    `TypeCheckResult` that lowering consumes.
+
+  Other O4 foundations include the built-in result relations (`adapters/`, whose operand types the core reads) and
+  the interned type table (`solver/types.ts`). The condition-shape recognizer
+  (`narrowing-shapes.ts`) is shared: the visitor's branch rules and the core read the same classification.
+
 - **The switch:** one change makes the constraint backend the compiler's backend in place of the legacy backend, and
   a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's. The
   switch needs the [shadow gate](TESTING.md#the-switchs-shadow-gate) green.
@@ -129,9 +143,11 @@ prepared-reference invariants and control-flow targets, with function ranges and
 prepared-say dataflow, interaction-result handoffs, and label positions in `instruction-stream-analyses/`. The small
 private capture and validation support files, `capture-support.ts` and `validation-support.ts`, hold only helpers
 shared across those owners.
-`src/compiler/compile-program.ts` owns compilation orchestration, while `src/compiler/lowering/compiler.ts` owns the
-stateful lowering pass: its statement and expression dispatch, temporaries, and function compilation. The families it
-hands constructs to, such as asks and other interactions, say, background actions, calls, and branches and loops, are
+`src/compiler.ts` owns source-compilation orchestration: parsing, validation and backend sequencing.
+`src/compiler/compile-program.ts` assembles the multi-file lowered instruction plan, and
+`src/compiler/lowering/compiler.ts` owns the stateful lowering pass: its statement and expression dispatch,
+temporaries, and function compilation. The families it hands constructs to, such as asks and other interactions, say,
+background actions, calls, and branches and loops, are
 modules beside it in `src/compiler/lowering/`.
 `src/static-evaluation.ts` owns what the compiler knows of values: the constants the source writes, which semantic
 validation, lowering, and the checks of written values read, and `KnownValues`, the values every run gives an
@@ -170,8 +186,7 @@ The technical playground workspace controller lives at `playground/workspace/con
 runtime-to-Player translation and shared action lookup/completion seam lives at `player/runtime-adapter.ts`. The Player
 implementation is under `player/vue/src/`, using the accepted Vue/Tailwind/shadcn-vue/Reka foundation and
 TanStack Vue Virtual for transcript windowing and scroll anchoring. It presents supported interactions and pacing from
-canonical runtime state and events; browser-native CSS owns geometry. The Vue/toolchain boundary is accepted in ADR
-0020. See [`player/README.md`](../player/README.md) for implementation seams, local inspection and the
+canonical runtime state and events; browser-native CSS owns geometry. The Vue/toolchain boundary is accepted in ADR 0020. See [`player/README.md`](../player/README.md) for implementation seams, local inspection and the
 development-preview boundary. Presentation fixtures do not define an engine/Player protocol or the production
 cross-origin host contract.
 

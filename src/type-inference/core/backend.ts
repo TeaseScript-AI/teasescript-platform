@@ -37,7 +37,9 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
  * Rejected after the analysis: any other consumer's diagnostic, a warning about a possible `null` (narrowing's required
  * check, S10), a property read of a value that may be no object, a value `say` may not show, an argument of another
  * kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested `SLICE_DEPTH` deep. A
- * stop of the analysis is no exclusion: the program compiles with the stop's warning and its checks at runtime (D4 a′).
+ * stop compiles with its warning and its checks at runtime (D4 a′), but where admission settled and a store's required
+ * check is not carried by the published plan, the program is declined: "a store whose check was lost at the budget"
+ * (#1526 decision 2, condition 1, `consumer.ts` `lostCheck`).
  */
 
 /** Test-only: a program outside the candidate's slice, at its first construct outside it (see above). */

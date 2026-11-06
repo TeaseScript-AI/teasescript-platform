@@ -17,7 +17,8 @@ import {
   stepsText,
   stepsTo,
 } from "../src/type-inference/core/contract/key-ids.js";
-import { prefixesOf } from "../src/type-inference/core/definitions.js";
+import { DefinitionLists, prefixesOf } from "../src/type-inference/core/definitions.js";
+import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import { ingressLeaves, type Item } from "../src/type-inference/core/items.js";
 import {
@@ -118,16 +119,14 @@ const one = (name: string, source: string): Program => ({
  * #1210's programs: projections of host reads (a property, an element, a nested property) in one literal, in records, in
  * lists or bare, two deep and read below, beside another field, another global, a direct read and known data, guarded,
  * changed between, chosen, selected and added; a named source and a named projection the controls.
- * Each `^` marks a host read whose leaf the receiving place's contract at `place` and the receiving read `read` name;
- * `answered`: the read names only the first so many (the others take their test's narrowing, its kind no longer
- * external data, S10 part 2b).
+ * Each `^` marks a host read whose leaf the receiving place's contract at `place` and the receiving read `read` name,
+ * also where a test narrowed it (a test proves the kind, never the ingress, #1073 PR 2).
  */
 const PROJECTED_INGRESS_PROGRAMS: readonly {
   readonly name: string;
   readonly lines: readonly string[];
   readonly place: readonly [string, readonly string[]];
   readonly read: string;
-  readonly answered?: number;
 }[] = [
   {
     name: "records of one property read (the issue's witness)",
@@ -234,7 +233,6 @@ const PROJECTED_INGRESS_PROGRAMS: readonly {
     ],
     place: ["box", ["element", "n"]],
     read: "box[0].n",
-    answered: 1,
   },
   {
     name: "property reads with a tested property below",
@@ -492,9 +490,9 @@ test("a projection of a host read names its ingress's leaf and publishes the sam
       .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
       .join(",");
   const wrong: string[] = [];
-  for (const { name, lines, place, read, answered } of PROJECTED_INGRESS_PROGRAMS) {
+  for (const { name, lines, place, read } of PROJECTED_INGRESS_PROGRAMS) {
     const { source, spans } = unmarked(lines);
-    const expected = `${spans.join(",")} / ${spans.slice(0, answered ?? spans.length).join(",")}`;
+    const expected = `${spans.join(",")} / ${spans.join(",")}`;
     const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
     assert.ok(request !== null, `${name}: its source parses and resolves`);
     const id = new CoreProgram(request).places.find(
@@ -1640,4 +1638,110 @@ test("a group's missing writer is read once per class of alike reads, linear in 
   } finally {
     Contract.prototype.contractOfValueAt = original;
   }
+});
+
+test("a read's signature cuts only its source's prefixes with definitions, tagged by depth: it parts two reads of one source exactly where every prefix's cut does (#1822)", () => {
+  // (a typed k-deep literal read through a copy, as the set's `typed-literal-copy-read`: each read's class asks the
+  // signature of its source, a deep key whose prefixes but one have no definition)
+  const head = "let typed:integer[][][][]=[[[[1]]]]\nlet out=typed";
+  const read = (name: string) => `let ${name}=out[0][0][0][0]`;
+  const programs = [
+    [head, read("a"), read("b")],
+    // a prefix stored in a branch between the reads, the parent or one below it: only that prefix's cut parts them
+    [head, read("a"), "if hostValue is integer { out[0]=[[[2]]] }", read("b")],
+    [head, read("a"), "if hostValue is integer { out[0][0]=[[2]] }", read("b")],
+    // the reads in two branches, a prefix stored after both; a store below the path, which the source's own list cuts
+    [head, "if hostValue is integer {", read("a"), "} else {", read("b"), "}", "out[0]=[[[2]]]"],
+    [head, read("a"), "if hostValue is integer { out[0][0][0][0]=2 }", read("b")],
+    // a prefix stored on the straight path, in a loop, by a call another callable makes (`ownedAway`); a store beside
+    [head, read("a"), "out[0]=[[[2]]]", read("b")],
+    [head, read("a"), "repeat 2 { out[0][0]=[[4]] }", read("b")],
+    [head, "function f { out[0]=[[[5]]] }", read("a"), "f()", read("b")],
+    [head, "let side=[1]", read("a"), "side[0]=2", read("b")],
+  ];
+  const sig = DefinitionLists.prototype.aliasSignature;
+  type Call = {
+    lists: DefinitionLists;
+    source: string;
+    node: FlowNode;
+    calls: boolean;
+    made: string;
+  };
+  let calls: Call[] = [];
+  DefinitionLists.prototype.aliasSignature = function (
+    this: DefinitionLists,
+    source,
+    node,
+    flag = true,
+  ) {
+    const made = sig.call(this, source, node, flag);
+    calls.push({ lists: this, source, node, calls: flag, made });
+    return made;
+  };
+  const check = Consumers.prototype.check;
+  let program: CoreProgram | null = null;
+  Consumers.prototype.check = function (this: Consumers) {
+    program = this.pass.program;
+    check.call(this);
+  };
+  const bound = (sorted: readonly number[], target: number) => {
+    let low = 0;
+    for (let high = sorted.length; low < high;) {
+      const middle = (low + high) >> 1;
+      if (sorted[middle]! < target) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  let [deep, parted] = [0, 0];
+  try {
+    for (const lines of programs)
+      for (const reversed of [false, true]) {
+        calls = [];
+        const source = `${lines.join("\n")}\nexit\n`;
+        inOrder(reversed, () =>
+          analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!),
+        );
+        // today's signature, every prefix cut untagged: the new one's last field but its prefixes' cuts, then each
+        // prefix's of `prefixesOf`, the parent first
+        const today = ({ lists, source, node, calls: flag, made }: Call): string => {
+          const fields = made.split("|");
+          const own = fields
+            .at(-1)!
+            .split(";")
+            .slice(0, flag ? 2 : 1);
+          const [begin, end] = [program!.position(node), program!.positionEnd(node) + 1];
+          for (const prefix of prefixesOf(source)) {
+            const positions = lists.definitionsOf(prefix).eventPositions;
+            own.push(`${bound(positions, begin)},${bound(positions, end)}`);
+          }
+          return [...fields.slice(0, -1), own.join(";")].join("|");
+        };
+        for (const one of calls)
+          for (const other of calls) {
+            if (one.source !== other.source) continue;
+            assert.equal(
+              one.made === other.made,
+              today(one) === today(other),
+              `${one.source}\n${source}`,
+            );
+            // (a pair that only a prefix's cut parts: without the prefixes' cuts they would share one signature)
+            const rest = (call: Call) => {
+              const fields = call.made.split("|");
+              const own = fields
+                .at(-1)!
+                .split(";")
+                .slice(0, call.calls ? 2 : 1);
+              return [...fields.slice(0, -1), own.join(";")].join("|");
+            };
+            if (one.made !== other.made && rest(one) === rest(other)) parted += 1;
+          }
+        deep += calls.filter(({ source }) => prefixesOf(source).length >= 4).length;
+      }
+  } finally {
+    DefinitionLists.prototype.aliasSignature = sig;
+    Consumers.prototype.check = check;
+  }
+  assert.ok(deep > 0, "a deep source's signature was asked");
+  assert.ok(parted > 0, "two reads that a prefix's cut alone parts");
 });

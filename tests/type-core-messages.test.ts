@@ -1552,8 +1552,10 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
 test("a store's property below the warned value is the property its fix names, and following it removes the warning (#1468)", () => {
   const load = 'load("prefs", default: {volume: 5})';
   const given = 'load("prefs", default: {volume: 5, caption: 7})';
+  // (a test of another property, which says nothing of the stored one: a test of `original.entry` itself proves it a
+  // whole number through the copy, so no warning is owed, #1073 PR 2)
   const guarded = (body: string) =>
-    `if original.entry is integer {\n${body.replace(/^/gm, "    ").trimEnd()}\n}\nexit\n`;
+    `if original.marker is integer {\n${body.replace(/^/gm, "    ").trimEnd()}\n}\nexit\n`;
   const cases: readonly (readonly [
     source: string,
     value: string,
@@ -2451,6 +2453,571 @@ test("TSV041's advice names the property an object literal types and its narrowe
 });
 
 /**
+ * #1753 (ADR 0021 rule 4.2): a store whose place is an element below the stored value, through collections alone, is
+ * checked by the value's whole receiving type, which tests every element, where the root's written type proves every
+ * layer of it with its `null` (a `let`, a `global`, a parameter, as the parser reads it: Codex r1's B1, `integer[]?[]`,
+ * and r2's B2, a comment beside it); pasted where `codeAt`
+ * proves it, else in words, and with no fallback, which would replace the whole value. Where no written type proves
+ * the layers (a copy of one), the words name the elements the check tests. An element store keeps its element's test.
+ * Each pasted check compiles under both checkers, where the element's scalar test it replaces is an error. Below a
+ * literal's element, the mixed error names the earliest element's type with its `null`; the element itself keeps its
+ * kinds' words. In four modes.
+ */
+test("a store below its value checks the whole receiving type, null kept, and the mixed error names it (#1753)", () => {
+  const warned = (into: string, value: string, fix: string) =>
+    `${into}, but '${value}' may be a value of another type here. ${STOPS} ${fix} ${OUTSIDE(value)}`;
+  const nullable = "'a' holds whole numbers or null (integer?[])";
+  const cases: readonly (readonly [source: string, site: string, message: string])[] = [
+    [
+      'let a:integer?[]=[1]\na=hostValue\nlet b=a\nlet c=b\nlet xs=[c,["x"]]\nexit\n',
+      "hostValue",
+      warned(
+        nullable,
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer?[] { a=hostValue }'.",
+      ),
+    ],
+    [
+      'let a:integer?[]=[1]\na=hostValue\nlet b=a\nlet c=b\nlet xs=[c,["x"]]\nexit\n',
+      '"x"',
+      "This list mixes a list (integer?[]) and a list (string[]). A list holds one type. Use values of one type in it.",
+    ],
+    [
+      'let a:integer?[]=[1]\na=hostValue\nlet xs=[{f:a},{f:["x"]}]\nexit\n',
+      '"x"',
+      "This list mixes objects whose property 'f' holds a list (integer?[]) in one and a list (string[]) in another. " +
+        "A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let xs=[[1,null],["x"]]\nexit\n',
+      '"x"',
+      "This list mixes a list (integer?[]) and a list (string[]). A list holds one type. Use values of one type in it.",
+    ],
+    [
+      'let n:integer?=1\nlet xs=[n,"x"]\nexit\n',
+      '"x"',
+      "This list mixes a whole number (integer) and text (string). A list holds one type. To allow both, declare it " +
+        "as 'let xs: (integer | string)[] =[n,\"x\"]'.",
+    ],
+    [
+      "let d:integer? dict=dict {}\nd=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "'d' holds whole numbers or null (integer? dict)",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer? dict { d=hostValue }'.",
+      ),
+    ],
+    [
+      "let a:integer?[][]=[[1]]\na=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "An element of an element of 'a' is declared as a whole number (integer) or null",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer?[][] { a=hostValue }'.",
+      ),
+    ],
+    [
+      "let a:integer[]=[1]\nlet b=[1, hostValue]\na=b\nexit\n",
+      "b",
+      warned(
+        "'a' holds whole numbers (integer[])",
+        "b",
+        "Check 'b' first, as in 'if b is integer[] { a=b }'.",
+      ),
+    ],
+    [
+      "let a:integer[]=[1]\nlet b=[hostValue otherwise null]\na=b\nexit\n",
+      "b",
+      "'a' holds whole numbers (integer[]), but 'b' may be null here. " +
+        `${STOPS} Check 'b' first, as in 'if b is integer[] { a=b }'.`,
+    ],
+    // (every layer's `null`, from the written type: Codex r1's B1)
+    ...[
+      "An element of 'a' is declared as a list or null",
+      "An element of an element of 'a' is declared as a whole number (integer)",
+    ].map(
+      (into) =>
+        [
+          "let a:integer[]?[]=[[1]]\na=hostValue\nexit\n",
+          "hostValue",
+          warned(
+            into,
+            "hostValue",
+            "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { a=hostValue }'.",
+          ),
+        ] as const,
+    ),
+    [
+      "let a:integer[]?=[1]\na=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "'a' holds whole numbers (integer[])",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer[]? { a=hostValue }'.",
+      ),
+    ],
+    [
+      "global g: integer[]? dict = dict {}\ng=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "An element of an element of 'g' is declared as a whole number (integer)",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer[]? dict { g=hostValue }'.",
+      ),
+    ],
+    [
+      'function f(p: integer[]?[]) {\n    p=hostValue\n    say "${p.length}"\n}\nf([[1]])\nexit\n',
+      "hostValue",
+      warned(
+        "An element of an element of 'p' is declared as a whole number (integer)",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { p=hostValue }'.",
+      ),
+    ],
+    // (the annotation as the parser reads it, beside a comment and a default: Codex r2's B2)
+    [
+      'let a /* was: string[][] = [["old"]] */ : integer[]?[] = [[1]]\na=hostValue\nexit\n',
+      "hostValue",
+      warned(
+        "An element of an element of 'a' is declared as a whole number (integer)",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { a=hostValue }'.",
+      ),
+    ],
+    [
+      'function f(p: integer[]?[] = [[1]]) {\n    p=hostValue\n    say "${p.length}"\n}\nf()\nexit\n',
+      "hostValue",
+      warned(
+        "An element of an element of 'p' is declared as a whole number (integer)",
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { p=hostValue }'.",
+      ),
+    ],
+    // (a copy of a written type: no written type proves its layers, so the words name the elements)
+    [
+      "let x:integer[]?[]=[[1]]\nlet b=x\nb=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "An element of an element of 'b' is declared as a whole number (integer)",
+        "hostValue",
+        "Check that every element of every element of 'hostValue' is a whole number (integer) first.",
+      ),
+    ],
+    [
+      "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        "An element of an element of 'b' is declared as a whole number (integer)",
+        "hostValue",
+        "Check that every element of every value of 'hostValue' is a whole number (integer) first.",
+      ),
+    ],
+    // (unproved, the layer between keeps its own check)
+    [
+      "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
+      "hostValue",
+      `An element of 'b' is declared as a list or null, but 'hostValue' may be a value of another type here. ${STOPS} ${OUTSIDE("hostValue")}`,
+    ],
+    [
+      "let x:integer[]?[]=[[1]]\nlet a={f: x}\na.f=[hostValue]\nexit\n",
+      "hostValue",
+      warned(
+        "An element of an element of 'a.f' is declared as a whole number (integer)",
+        "hostValue",
+        "Check that every element of 'hostValue' is a whole number (integer) first.",
+      ),
+    ],
+    // (words where no form holds: a declaration's start value)
+    [
+      "let a:integer?[]=hostValue\nexit\n",
+      "hostValue",
+      warned(nullable, "hostValue", "Check that 'hostValue' is a list (integer?[]) first."),
+    ],
+    // (an element store, and a literal's element: the element's own test)
+    [
+      "let a:integer?[]=[1]\na[0]=hostValue\nexit\n",
+      "hostValue",
+      warned(
+        nullable,
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer { a[0]=hostValue }'.",
+      ),
+    ],
+    [
+      "let a:integer?[]=[1]\na=[1, hostValue]\nexit\n",
+      "hostValue",
+      warned(
+        nullable,
+        "hostValue",
+        "Check 'hostValue' first, as in 'if hostValue is integer { a=[1, hostValue] }'.",
+      ),
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, site, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.site === site && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+  // (each pasted check compiles under both checkers; the scalar test it replaces does not)
+  const errors = (source: string) => [
+    ...compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] })
+      .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
+      .map((diagnostic) => `current ${diagnostic.code}`),
+    ...reported(main(source))
+      .filter((each) => each.error)
+      .map((each) => `core ${each.code}`),
+  ];
+  for (const followed of [
+    "let a:integer?[]=[1]\nif hostValue is integer?[] { a=hostValue }\nexit\n",
+    "let d:integer? dict=dict {}\nif hostValue is integer? dict { d=hostValue }\nexit\n",
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[][] { a=hostValue }\nexit\n",
+    "let a:integer[]=[1]\nlet b=[1, hostValue]\nif b is integer[] { a=b }\nexit\n",
+    "let a:integer[]?[]=[[1]]\nif hostValue is integer[]?[] { a=hostValue }\nexit\n",
+    "let a:integer[]?=[1]\nif hostValue is integer[]? { a=hostValue }\nexit\n",
+    "global g: integer[]? dict = dict {}\nif hostValue is integer[]? dict { g=hostValue }\nexit\n",
+  ])
+    assert.deepEqual(errors(followed), [], followed);
+  assert.deepEqual(
+    errors("let a:integer?[]=[1]\nif hostValue is integer { a=hostValue }\nexit\n"),
+    ["current TSV041", "core TSV041"],
+  );
+});
+
+/**
+ * #1765: a mixed element's written type keeps each layer between the element and its leaf that may hold `null`, on both
+ * sides and through a property, a literal's own null and a written copy's type alike, as the current checker's first
+ * sentence does; a layer that may not stays plain. The element itself stays as today (#1753). In four modes.
+ */
+test("a mixed element's type keeps the null of every layer between the element and its leaf (#1765)", () => {
+  const ONE = "A list holds one type. Use values of one type in it.";
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      'let a:integer[]?[]=[[1],null]\nlet xs=[a,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[]?[]=[[1],null]\nlet xs=[a,[["x"],null]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[]?[]). ${ONE}`,
+    ],
+    [
+      'let a:integer?[]?[]=[[1],null]\nlet xs=[{f:a},{f:[["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer?[]?[]) in one and a list (string[][]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[]?[]=[[1],null]\nlet ys=[a]+[[["x"]]]\nexit\n',
+      "'+' would mix a list (integer[]?[]) and a list (string[][]). A list holds one type. To allow both, declare " +
+        "the list as 'let ys: ((integer | string)[]?)[][] =[a]+[[[\"x\"]]]'.",
+    ],
+    // (a written copy's optional layer with no null among its values: its type's)
+    [
+      'let a:integer[]?[]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (an inline join's other operand brings the null a written copy's type lacks: Codex r1's B1)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[a+[[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a plain copy of a written binding is its declared type, whatever a rejected store put there: Codex r2's B1)
+    [
+      'let a:integer[][]=[[1],null]\nlet xs=[a,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\na+=[null]\nlet xs=[a,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    // (an indirect copy, by index or `otherwise`: its declared type too, Codex r3's B1)
+    [
+      'let a:integer[][][]=[[[1],null]]\nlet xs=[a[0],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1],null]\nlet xs=[a otherwise [[2]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a nested join of a copy and a literal: the literal's null, the copy's declared type)
+    [
+      'let a:integer[][]=[[1],null]\nlet xs=[(a+[[1]])+[null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1],null]\nlet xs=[a+[[2]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a join below a literal, a property, an index, an `otherwise` or a projection: its operand's null, each form by its own
+    // rule; Codex r4's B1)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]],[[["x"]]]]\nexit\n',
+      `This list mixes a list (integer[]?[][]) and a list (string[][][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[{f:a+[[2],null]},{f:[["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer[]?[]) in one and a list (string[][]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]][0],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[(a+[[2],null]) otherwise [[3]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[({f:a+[[2],null]}).f,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (an inferred result, and a read of an unwritten binding: their place's admitted type; Codex r4's B2)
+    [
+      'let a:integer[]?[]=[[1]]\nlet b:string[][]=[["x"]]\nfunction give { return a }\nlet xs=[give(),b]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let b=[[1],null]\nlet xs=[b,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a written copy below a literal: its declared type, whatever a rejected store put there)
+    [
+      'let a:integer[][]=[[1],null]\nlet xs=[[a],[[["x"]]]]\nexit\n',
+      `This list mixes a list (integer[][][]) and a list (string[][][]). ${ONE}`,
+    ],
+    // (an `otherwise`: its fallback only where its operand may be null, its operand's null never at its own level)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[null otherwise [[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[]?=null\nlet xs=[[a otherwise [1]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a carried value, by what it carries: a `get`'s receiver and default, a dict's values, a method's receiver;
+    // Codex r5's B1)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]].get(0,default: [[3]]),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[[].get(0,default: a+[[2],null]),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[(dict {k:a+[[2],null]}).get("k",default: [[3]]),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[(dict {k:a+[[2],null]}).values[0],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[(dict {k:a+[[2],null]}).values,[[["x"]]]]\nexit\n',
+      `This list mixes a list (integer[]?[][]) and a list (string[][][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[(a+[[2],null]).toSet().toList(),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[(a+[[2],null]).take(1),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]].removeAt(0),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a join's sides by the same rule: an inferred result's admitted type, on either side and through `+=`; Codex r5's
+    // B2; `xs=[take(a)]` / `xs += …` is #1813's decision)
+    [
+      'let a:integer[]?[]=[[1]]\nfunction take(v:integer[]?[]) { return v }\nlet xs=[take(a)]+[[["x"]]]\nexit\n',
+      "'+' would mix a list (integer[]?[]) and a list (string[][]). A list holds one type. To allow both, declare " +
+        "the list as 'let xs: (integer | string)[][][] =[take(a)]+[[[\"x\"]]]'.",
+    ],
+    [
+      'let a:integer[]?[]=[[1]]\nfunction take(v:integer[]?[]) { return v }\nlet xs=[[["x"]]]+[take(a)]\nexit\n',
+      "'+' would mix a list (string[][]) and a list (integer[]?[]). A list holds one type. To allow both, declare " +
+        "the list as 'let xs: (string | integer)[][][] =[[[\"x\"]]]+[take(a)]'.",
+    ],
+    [
+      'let a:integer[]?[]=[[1]]\nfunction take(v:integer[]?[]) { return v }\nlet xs=[[["x"]]]\nxs += [take(a)]\nexit\n',
+      "'+=' would mix a list (string[][]) and a list (integer[]?[]). A list holds one type. To allow both, declare " +
+        "the list with the type '(string | integer)[][][]'.",
+    ],
+    // (an undecided read: its own items, `null` alone settling no type; Codex r5's B3)
+    [
+      'let a=null\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (at its own level, any value by its own items: a method's result is a new list whatever its receiver's null, and a
+    // choice's null is its own; Codex r6's B1 and B2)
+    [
+      'function use(a:integer[]?) {\n  if a != null {\n    let xs=[[a.take(1)],[["x"]]]\n  }\n}\nuse([1])\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict?=dict{k:[1]}\nif a != null {\n  let xs=[[a.values]]+[[[["x"]]]]\n}\nexit\n',
+      "'+' would mix a list (integer[][][]) and a list (string[][][]). A list holds one type. To allow both, declare " +
+        "the list as 'let xs: (integer | string)[][][][] =[[a.values]]+[[[[\"x\"]]]]'.",
+    ],
+    [
+      'let xs=[(askChoice null) otherwise [[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (an `otherwise` at a layer: its fallback's null only where its operand may be null, on either side; Codex r3 on
+    // #1819)
+    [
+      'let xs=[[["x"]],[([1] otherwise null)]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[([1] otherwise null)],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let n:integer[]?=[1]\nif hostValue == 1 { n=null }\nlet xs=[[["x"]],[(n otherwise null)]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[]?[]). ${ONE}`,
+    ],
+    // (an operand narrowed where it is read never runs its fallback: by its assignment, at its own level and below it)
+    [
+      'let n:integer[]?=[1]\nlet xs=[[["x"]],[(n otherwise null)]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]?=[[1]]\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a nested `otherwise`: its own fallback's null only where its operand may be null too; Codex r10's B1)
+    [
+      'let n:integer[][]?=[[1]]\nlet xs=[(n otherwise null) otherwise [[1],null],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let n:integer[][]?=[[1]]\nlet xs=[[["x"]],(n otherwise null) otherwise [[1],null]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    // (a direct `otherwise`'s fallback read narrowed too: `m` holds `[1]` here; a fallback that may be null keeps it,
+    // Astra r2's B2)
+    [
+      'let m:integer[]?=[1]\nlet xs=[[(null otherwise m)],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let m:integer[]?=[1]\nlet xs=[[["x"]],[(null otherwise m)]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      'let m:integer[]?=[1]\nif hostValue == 1 { m=null }\nlet xs=[[(null otherwise m)],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a value at a layer's own level as it is read: a written copy narrowed by its value holds none, one host-assigned
+    // may, and so may an `otherwise`'s host-assigned operand, #1840; the current checker's)
+    [
+      'let a:integer[]?=[1]\nlet xs=[[["x"]],[a]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[]?=hostValue\nlet xs=[[a],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]?=null\na=hostValue\nlet xs=[[(a otherwise null)],[[["x"]]]]\nexit\n',
+      `This list mixes a list (integer[][]?[]) and a list (string[][][]). ${ONE}`,
+    ],
+    // (a layer that is a copy's own level, held in an inferred one, as it is read there: `n` holds `[2]`; a copy's term
+    // only where it decides the layer from above; Codex r5 on #1819)
+    [
+      'let n:integer[]?=[2]\nlet h={p:[n]}\nlet xs=[h,{p:[["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'p' holds a list (integer[][]) in one and a list (string[][]) in " +
+        "another. A list holds one type. Give 'p' one type in every element.",
+    ],
+    [
+      'let n:integer[]?=[2]\nlet h={p:[n]}\nlet xs=[{p:[["x"]]},h]\nexit\n',
+      "This list mixes objects whose property 'p' holds a list (string[][]) in one and a list (integer[][]) in " +
+        "another. A list holds one type. Give 'p' one type in every element.",
+    ],
+    // (known differences, #1838: an `otherwise` inside a default, `load`, property or index keeps, in admission's items,
+    // the null its never-run fallback brings, so the outer `otherwise` counts its own fallback too; the current checker
+    // says `integer[][]`. Admission's to repair, not the message layer's; these turn to `integer[][]` with it)
+    ...[
+      "[].get(0,default: (n otherwise null))",
+      'load("key",default: (n otherwise null))',
+      "{p:(n otherwise null)}.p",
+      "[(n otherwise null)][0]",
+    ].map(
+      (inner) =>
+        [
+          `let n:integer[][]?=[[1]]\nlet xs=[(${inner}) otherwise [[1],null],[["x"]]]\nexit\n`,
+          `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+        ] as const,
+    ),
+    // (a join's operand bound to a literal holding null: its place's undecided type, read by its own items; Codex r7)
+    [
+      'let a=[null]\nlet xs=[a+[[1]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a join's operand admission rejected brings nothing to the join's result, ADR 0021 1.1: inline, through a method
+    // and to a later join; Astra r1's B1)
+    [
+      'let xs=[([[1]]+[["x"],null]),[["y"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[([[1]]+[["x"],null]).take(1),[["y"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[[1]]]+[[["x"],null]]+[[["y"]]]\nexit\n',
+      "'+' would mix a list (integer[][]) and a list (string[][]). A list holds one type. To allow both, declare " +
+        "the list with the type '((integer | string)[]?)[][]'.",
+    ],
+    // (a value with no place, a method's result: its own items)
+    [
+      'let xs=[[[1],null].take(2),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    // (a property read of a literal-bound binding holding no null: plain)
+    [
+      'let o={p:[[1]]}\nlet xs=[o.p,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    // (no layer that may hold null: plain)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[[1]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+  // (a dict's value layer that may hold null keeps it too; the container's word is #1762's)
+  for (const mode of MODES) {
+    const [mixed] = inMode(mode, () =>
+      reported(main('let a:integer[]? dict=dict {}\nlet xs=[a,dict {k: [["x"]]}]\nexit\n')),
+    ).filter((each) => each.code === "TSV044");
+    assert.match(mixed?.message ?? "", /mixes a \w+ \(integer\[\]\?/u, JSON.stringify(mode));
+  }
+});
+
+/**
  * #1730 Codex r1 B1: a warning's landing and owner (`landingOf`, `ownerOf`) find the value a statement gives and a
  * literal's part by their start, so k warnings, each in its own statement or each an element of one list, read the
  * statements' values and the list's elements O(k log k) times, not once per earlier one (k = 64 to 256, at most ×2.5
@@ -2647,4 +3214,476 @@ test("a message's walk and owner index charge their work, to the analysis and no
   });
   for (let at = 1; at < work.length; at += 1)
     assert.ok(work[at]! <= 2.5 * work[at - 1]!, work.join(", "));
+});
+/**
+ * #1790: a mixed error names the later element's leaf type with the `null` it may hold, as the current checker's first
+ * sentence does, by #1765's rule at the leaf: a literal's `null`, a written collection copied whole (also below a
+ * property), a typed host value unless a still-valid test excludes `null`, not a narrowed copy at the layer itself. A
+ * scalar element is its own leaf, so its `or null` is named too (`[false,b[0]]`). In four modes.
+ */
+test("a mixed error keeps the later element's null below it (#1790)", () => {
+  const ONE = "A list holds one type. Use values of one type in it.";
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      'let xs=[[1],["x",null]]\nexit\n',
+      `This list mixes a list (integer[]) and a list (string?[]). ${ONE}`,
+    ],
+    [
+      'let b:string?[]=["x"]\nlet xs=[[1],b]\nexit\n',
+      `This list mixes a list (integer[]) and a list (string?[]). ${ONE}`,
+    ],
+    [
+      'let xs=[[1,null],["x",null]]\nexit\n',
+      `This list mixes a list (integer?[]) and a list (string?[]). ${ONE}`,
+    ],
+    [
+      'let xs=[{f:[1]},{f:["x",null]}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer[]) in one and a list (string?[]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (a narrowed copy at a property's scalar: its occurrence's kinds, no null, as the current checker names it)
+    [
+      "let atom:integer?=61\nlet item={v:atom}\nlet other={v:false}\nlet xs=[other,item]\nexit\n",
+      "This list mixes objects whose property 'v' holds true or false (boolean) in one and a whole number (integer) in " +
+        "another. A list holds one type. Give 'v' one type in every element.",
+    ],
+    // (a written collection copied whole below a property: its elements' null, Codex r2 on #1819)
+    [
+      'let n:string?[]=["s"]\nlet xs=[{f:[1]},{f:n}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer[]) in one and a list (string?[]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (a written copy narrowed as its occurrence is: a type test's kinds, a non-null scalar inside a fresh list; Codex r1
+    // on #1819)
+    [
+      "let n:string | boolean=hostValue\nif n is string { let xs=[1,n] }\nexit\n",
+      "This list mixes a whole number (integer) and text (string). A list holds one type. To allow both, declare it as " +
+        "'let xs: (integer | string)[] =[1,n]'.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[{f:[false]},{f:[n]}]\nexit\n",
+      "This list mixes objects whose property 'f' holds a list (boolean[]) in one and a list (integer[]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (an `otherwise` whose fallback never runs adds no null: a literal, narrowed by assignment or a test, at a property,
+    // deeper and at the element; one whose operand may be null keeps its fallback's; Codex r3 on #1819)
+    [
+      "let xs=[[false],[(1 otherwise null)]]\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer[]). ${ONE}`,
+    ],
+    [
+      "let xs=[{f:[false]},{f:[(1 otherwise null)]}]\nexit\n",
+      "This list mixes objects whose property 'f' holds a list (boolean[]) in one and a list (integer[]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let xs=[[[false]],[[(1 otherwise null)]]]\nexit\n",
+      `This list mixes a list (boolean[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      "let n:integer?=1\nlet xs=[[false],[(n otherwise null)]]\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer[]). ${ONE}`,
+    ],
+    [
+      "let n:integer?=hostValue\nif n is integer { let xs=[[false],[(n otherwise null)]] }\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer[]). ${ONE}`,
+    ],
+    [
+      "let xs=[false,(1 otherwise null)]\nexit\n",
+      "This list mixes true or false (boolean) and a whole number (integer). A list holds one type. To allow both, " +
+        "declare it as 'let xs: (boolean | integer)[] =[false,(1 otherwise null)]'.",
+    ],
+    [
+      "let m=[1,null]\nlet xs=[[false],[(m[0] otherwise null)]]\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer?[]). ${ONE}`,
+    ],
+    // (a known difference, #1838: an inferred copy of an `otherwise` keeps, in admission's items, the null its never-run
+    // fallback brings (#1836 is its binding form); the current checker says `integer[]`. Admission's to repair, not the
+    // message layer's; it turns to `integer[]` with it)
+    [
+      "let n=1 otherwise null\nlet xs=[[false],[n]]\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer?[]). ${ONE}`,
+    ],
+    // (a typed host value at the leaf, directly, as a `get` default and as a method's result: `null` unless a test
+    // excludes it, and again after a later store; Astra r1 on #1819)
+    ...["n", "[].get(0,default:n)", "[n].first"].map(
+      (leaf) =>
+        [
+          `let n:integer?=hostValue\nlet xs=[[false],[2,${leaf}]]\nexit\n`,
+          `This list mixes a list (boolean[]) and a list (integer?[]). ${ONE}`,
+        ] as const,
+    ),
+    [
+      "let n:integer?=hostValue\nif n is integer {\nlet xs=[[false],[2,n]]\n}\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer[]). ${ONE}`,
+    ],
+    [
+      "let n:integer?=hostValue\nif n != null {\nn=hostValue\nlet xs=[[false],[2,n]]\n}\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer?[]). ${ONE}`,
+    ],
+    [
+      "let n:integer=hostValue\nlet xs=[[false],[2,n]]\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer[]). ${ONE}`,
+    ],
+    // (a known difference, #1847: a `!= null` test leaves no mark on a typed host value's unknown items, so its `null`
+    // stays; the current checker says `integer[]`. The value layer's to repair; it turns to `integer[]` with it)
+    [
+      "let n:integer?=hostValue\nif n != null {\nlet xs=[[false],[2,n]]\n}\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer?[]). ${ONE}`,
+    ],
+    // (a scalar element is its own leaf: its `or null` named, as the checker does)
+    [
+      "let b=[1,null]\nlet xs=[false,b[0]]\nexit\n",
+      "This list mixes true or false (boolean) and a whole number (integer) or null. A list holds one type. To allow " +
+        "both, declare it as 'let xs: (boolean | integer | null)[] =[false,b[0]]'.",
+    ],
+    // (no null: plain)
+    [
+      'let b:string[]=["x"]\nlet xs=[[1],b]\nexit\n',
+      `This list mixes a list (integer[]) and a list (string[]). ${ONE}`,
+    ],
+    [
+      'let b:string?="x"\nlet xs=[1,b]\nexit\n',
+      "This list mixes a whole number (integer) and text (string). A list holds one type. To allow both, declare " +
+        "it as 'let xs: (integer | string)[] =[1,b]'.",
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+});
+/**
+ * #1762: a mixed error names a dict layer of its elements' type as a dict, as the current checker's first sentence does:
+ * a written copy's (one that may be null too), a literal's, below a list, below a property, two deep, and a join's;
+ * each side by its own values where a list and a dict meet. In four modes.
+ */
+test("a mixed element's type names its dict layers as dicts (#1762)", () => {
+  const ONE = "A list holds one type. Use values of one type in it.";
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      'let a:integer?[] dict=dict {}\nlet xs=[a,dict {k: ["x"]}]\nexit\n',
+      `This list mixes a dict (integer?[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+    // (a written copy that may be null: a dict still)
+    [
+      'let a:integer[] dict?=dict {}\nlet xs=[a,dict {k: ["x"]}]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+    // (an `otherwise` whose dict fallback never runs is its operand, a list, both orders; Codex r5 on #1814)
+    [
+      'let xs=[([[1]] otherwise dict {k:[2]}),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[["x"]],([[1]] otherwise dict {k:[2]})]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    // (nor an operand proved null: the fallback is the value; Codex r6 on #1814)
+    [
+      'let a:integer[] dict?=null\nlet xs=[(a otherwise [[1]]),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict?=null\nlet xs=[[["x"]],(a otherwise [[1]])]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    // (nor below its own level: the dict a proved-null operand's written type has deeper is not followed either, both
+    // orders, below a property, through a join; Codex r7 on #1814)
+    [
+      'let a:integer dict[]?=null\nlet xs=[(a otherwise [[1]]),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer dict[]?=null\nlet xs=[[["x"]],(a otherwise [[1]])]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict dict?=null\nlet xs=[{f:(a otherwise [[[1]]])},{f:[[["x"]]]}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer[][][]) in one and a list (string[][][]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[] dict dict?=null\nlet xs=[(a otherwise [[[1]]])]+[[[["x"]]]]\nexit\n',
+      "'+' would mix a list (integer[][][]) and a list (string[][][]). A list holds one type. To allow both, declare " +
+        "the list as 'let xs: (integer | string)[][][][] =[(a otherwise [[[1]]])]+[[[[\"x\"]]]]'.",
+    ],
+    // (#1838, a known difference, the lead's ruling (A): an inferred copy of an `otherwise` keeps the dict its operand,
+    // proved null, cannot give, as its items keep a never-run fallback's null; the current checker names a list. The
+    // row turns with #1838's repair at admission)
+    [
+      'let a:integer[] dict?=dict {k:[1]}\na=null\nlet copy=(a otherwise [[1]])\nlet xs=[copy,[["x"]]]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[dict {k: [1]},dict {k: ["x"]}]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict=dict {}\nlet xs=[[a],[dict {k: ["x"]}]]\nexit\n',
+      `This list mixes a list (integer[] dict[]) and a list (string[] dict[]). ${ONE}`,
+    ],
+    [
+      'let xs=[dict {k: dict {j: [1]}},dict {k: dict {j: ["x"]}}]\nexit\n',
+      `This list mixes a dict (integer[] dict dict) and a dict (string[] dict dict). ${ONE}`,
+    ],
+    [
+      'let xs=[{f: dict {k: [1]}},{f: dict {k: ["x"]}}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a dict (integer[] dict) in one and a dict (string[] dict) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (a list and a dict at one path: each side by its own values, Codex r1 on #1814)
+    [
+      'let xs=[[[1]],dict {k:["x"]}]\nexit\n',
+      `This list mixes a list (integer[][]) and a dict (string[] dict). ${ONE}`,
+    ],
+    [
+      'let xs=[dict {k:[1]},[["x"]]]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[a,dict {k:["x"]}]\nexit\n',
+      `This list mixes a list (integer[][]) and a dict (string[] dict). ${ONE}`,
+    ],
+    [
+      'let xs=[{f:[[1]]},{f:dict {k:["x"]}}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer[][]) in one and a dict (string[] dict) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (a host-assigned written dict carried through `otherwise`: its written dict, through the carrier, also below a
+    // property and through an intermediate copy; Astra r1 on #1814)
+    [
+      'let a:integer[] dict?=null\na=hostValue\nlet xs=[(a otherwise dict {}),dict {k:["x"]}]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict?=null\na=hostValue\nlet xs=[{f:(a otherwise dict {})},{f:dict {k:["x"]}}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a dict (integer[] dict) in one and a dict (string[] dict) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[] dict?=null\na=hostValue\nlet b=a otherwise dict {}\nlet xs=[b,dict {k:["x"]}]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict?=null\na=hostValue\nlet xs=[a otherwise dict {k:[1]}]+[dict {k:["x"]}]\nexit\n',
+      "'+' would mix a dict (integer[] dict) and a dict (string[] dict). A list holds one type. Use values of one " +
+        "type in both lists.",
+    ],
+    // (a host-assigned written dict through a default, its own read: a `load`'s, on either side and below a property,
+    // and a `get`'s; Codex r8 on #1814)
+    [
+      'let a:integer[] dict=dict {k:[1]}\na=hostValue\nlet xs=[load("key",default:a)]+[dict {k:["x"]}]\nexit\n',
+      "'+' would mix a dict (integer[] dict) and a dict (string[] dict). A list holds one type. Use values of one " +
+        "type in both lists.",
+    ],
+    [
+      'let a:integer[] dict=dict {k:[1]}\na=hostValue\nlet xs=[dict {k:["x"]}]+[load("key",default:a)]\nexit\n',
+      "'+' would mix a dict (string[] dict) and a dict (integer[] dict). A list holds one type. Use values of one " +
+        "type in both lists.",
+    ],
+    [
+      'let a:integer[] dict=dict {k:[1]}\na=hostValue\nlet xs=[{f:load("key",default:a)}]+[{f:dict {k:["x"]}}]\nexit\n',
+      "'+' would mix objects whose property 'f' holds a dict (integer[] dict) in one and a dict (string[] dict) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[] dict=dict {k:[1]}\na=hostValue\nlet xs=[[].get(0,default:a)]+[dict {k:["x"]}]\nexit\n',
+      "'+' would mix a dict (integer[] dict) and a dict (string[] dict). A list holds one type. Use values of one " +
+        "type in both lists.",
+    ],
+    // (a list of dicts at the leaf: a list, as before)
+    [
+      'let xs=[[dict {k: 1}],[dict {k: "x"}]]\nexit\n',
+      `This list mixes a list (integer dict[]) and a list (string dict[]). ${ONE}`,
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+  // (a dict copy that may hold null there: a dict; the element's own null is #1753's, so only the type's text)
+  for (const mode of MODES) {
+    const [mixed] = inMode(mode, () =>
+      reported(
+        main('let a:integer[] dict?=dict {}\na=hostValue\nlet xs=[a,dict {k: ["x"]}]\nexit\n'),
+      ),
+    ).filter((each) => each.code === "TSV044");
+    assert.match(
+      mixed?.message ?? "",
+      /^This list mixes a dict \(integer\[\] dict\)/u,
+      JSON.stringify(mode),
+    );
+  }
+  // (a join's, its fix as the join's)
+  for (const mode of MODES) {
+    const [mixed] = inMode(mode, () =>
+      reported(main('let xs=[dict {k: [1]}]+[dict {k: ["x"]}]\nexit\n')),
+    ).filter((each) => each.code === "TSV044");
+    assert.match(
+      mixed?.message ?? "",
+      /^'\+' would mix a dict \(integer\[\] dict\) and a dict \(string\[\] dict\)\. /u,
+      JSON.stringify(mode),
+    );
+  }
+});
+
+/**
+ * #1763: a store's check where the value's landing was unknown, an argument's (its parameter, by its place or its name,
+ * also inside a literal or another value) and an index target's (one list or dict step per index), tests the value by
+ * its whole receiving type, as #1753's does where the landing is known, and a storing method's argument (`add`, `addAll`)
+ * by its receiver's (`addAll`'s never null), or no check where its receiver is off the place's path; a flat index store
+ * keeps its element's test.
+ * Each pasted check compiles under both checkers. In four modes.
+ */
+test("a store's check tests an argument or an index target by its whole receiving type (#1763)", () => {
+  const warned = (into: string, fix: string) =>
+    `${into}, but 'hostValue' may be a value of another type here. ${STOPS} ${fix} ${OUTSIDE("hostValue")}`;
+  const check = (code: string) => `Check 'hostValue' first, as in '${code}'.`;
+  const p = "'p' holds whole numbers or null (integer?[])";
+  const deep = (name: string) =>
+    `An element of an element of '${name}' is declared as a whole number (integer) or null`;
+  const f = (parameters: string, call: string) =>
+    `function f(${parameters}) {\n  say "\${p.length}"\n}\n${call}\nexit\n`;
+  const g = (call: string) => `function g(p: integer?[]) {\n  return p.length\n}\n${call}\nexit\n`;
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      f("p: integer?[]", "f(hostValue)"),
+      warned(p, check("if hostValue is integer?[] { f(hostValue) }")),
+    ],
+    [
+      f("q: integer, p: integer?[]", "f(1, p: hostValue)"),
+      warned(p, check("if hostValue is integer?[] { f(1, p: hostValue) }")),
+    ],
+    [
+      f("q: integer, p: integer?[]", "f(p: hostValue, q: 1)"),
+      warned(p, check("if hostValue is integer?[] { f(p: hostValue, q: 1) }")),
+    ],
+    [
+      f("p: integer?[][]", "f([hostValue])"),
+      warned(deep("p"), check("if hostValue is integer?[] { f([hostValue]) }")),
+    ],
+    // (past another call's argument before it, out to the argument that holds it)
+    [
+      `function h(n: integer) {\n  return [n]\n}\n${f("p: integer?[][]", "f([h(1), hostValue])")}`,
+      warned(deep("p"), "Check that 'hostValue' is a list (integer?[]) first."),
+    ],
+    [g("let x=[g(hostValue)]"), warned(p, "Check that 'hostValue' is a list (integer?[]) first.")],
+    [
+      "let a:integer?[][]=[[1]]\na[0]=hostValue\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[] { a[0]=hostValue }")),
+    ],
+    [
+      'let d:integer?[] dict=dict {}\nd["k"]=hostValue\nexit\n',
+      warned(deep("d"), check('if hostValue is integer?[] { d["k"]=hostValue }')),
+    ],
+    // (an index target through parentheses, Codex r1 on #1817)
+    [
+      "let a:integer?[][]=[[1]]\n(a)[0]=hostValue\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[] { (a)[0]=hostValue }")),
+    ],
+    // (a storing method's argument: `add`'s a member of its receiver, `addAll`'s its receiver whole; a user function
+    // named `add` is its own; a method whose parameter is no element keeps its parameter's test; Astra r1 on #1817)
+    [
+      "let a:integer?[][]=[[1]]\na.add(hostValue)\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[] { a.add(hostValue) }")),
+    ],
+    [
+      "let a:integer?[][]=[[1]]\na.addAll(hostValue)\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[][] { a.addAll(hostValue) }")),
+    ],
+    [
+      'function add(p: integer) {\n  say "${p}"\n}\nadd(hostValue)\nexit\n',
+      warned(
+        "'p' is declared as a whole number (integer)",
+        check("if hostValue is integer { add(hostValue) }"),
+      ),
+    ],
+    // (a method read through parentheses; a receiver off the place's path gives no check; `addAll` takes a list,
+    // never null; Codex r3 on #1817)
+    [
+      "let a:integer?[][]=[[1]]\n(a.add)(hostValue)\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[] { (a.add)(hostValue) }")),
+    ],
+    [
+      "let a:integer?[][][]=[[[1]]]\na.first.add(hostValue)\nexit\n",
+      `An element of an element of an element of 'a' is declared as a whole number (integer) or null, but ` +
+        `'hostValue' may be a value of another type here. ${STOPS} ${OUTSIDE("hostValue")}`,
+    ],
+    [
+      "let a:integer?[][]?=[[1]]\nif a == null { exit }\na.addAll(hostValue)\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[][] { a.addAll(hostValue) }")),
+    ],
+    [
+      "let a:integer?[][]=[[1]]\nsay a.take(hostValue)\nexit\n",
+      warned(
+        "take() needs a whole number (integer)",
+        check("if hostValue is integer { say a.take(hostValue) }"),
+      ),
+    ],
+    // (a flat index store: its element's test)
+    [
+      "let a:integer?[]=[1]\na[0]=hostValue\nexit\n",
+      warned(
+        "'a' holds whole numbers or null (integer?[])",
+        check("if hostValue is integer { a[0]=hostValue }"),
+      ),
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.site === "hostValue" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+  // (a call names its own file's function, where another file declares one of the same name, Codex r1 on #1817)
+  for (const mode of MODES) {
+    const files = [
+      {
+        path: "main.tease",
+        source:
+          'function f(p:integer?[]) { return p.length }\nf(hostValue)\ncall "other.tease"\nexit\n',
+      },
+      {
+        path: "other.tease",
+        source: "function f(p:string?[]) { return p.length }\nf(hostValue)\nend\n",
+      },
+    ];
+    const fixes = inMode(mode, () => reported(files))
+      .map((each) => /as in '([^']*)'/u.exec(each.message)?.[1])
+      .filter((each) => each !== undefined)
+      .sort();
+    assert.deepEqual(
+      fixes,
+      ["if hostValue is integer?[] { f(hostValue) }", "if hostValue is string?[] { f(hostValue) }"],
+      JSON.stringify(mode),
+    );
+  }
+  // (each pasted check compiles under both checkers)
+  const errors = (source: string) => [
+    ...compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] })
+      .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
+      .map((diagnostic) => `current ${diagnostic.code}`),
+    ...reported(main(source))
+      .filter((each) => each.error)
+      .map((each) => `core ${each.code}`),
+  ];
+  for (const followed of [
+    f("p: integer?[]", "if hostValue is integer?[] { f(hostValue) }"),
+    f("p: integer?[][]", "if hostValue is integer?[] { f([hostValue]) }"),
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { a[0]=hostValue }\nexit\n",
+    'let d:integer?[] dict=dict {}\nif hostValue is integer?[] { d["k"]=hostValue }\nexit\n',
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { a.add(hostValue) }\nexit\n",
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[][] { a.addAll(hostValue) }\nexit\n",
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { (a.add)(hostValue) }\nexit\n",
+    "let a:integer?[][]?=[[1]]\nif a == null { exit }\nif hostValue is integer?[][] { a.addAll(hostValue) }\nexit\n",
+  ])
+    assert.deepEqual(errors(followed), [], followed);
 });

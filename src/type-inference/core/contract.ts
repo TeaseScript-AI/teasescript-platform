@@ -644,6 +644,11 @@ export class Contract {
     return this.#stopped.size > 0;
   }
 
+  /** The places some decision stopped at (`stop`), each once, as a lookup: none of their keys made. */
+  public get stoppedPlaces(): ReadonlyMap<PlaceId, unknown> {
+    return this.#stopped;
+  }
+
   /** Whether the decision of `place` at `path`, or at a key above it, stopped (`stop`); the running demand asked. */
   public stopped(place: PlaceId, path: readonly string[]): boolean {
     // (a wrapper's family is asked by its cursor, so one key is never asked in two forms)
@@ -791,8 +796,12 @@ export class Contract {
     return contractOfValue(this, value, flow);
   }
 
+  /**
+   * A chain of property reads' root (`positions.ts`'s `chainOf`), from the pass's memoised index: its making is shared
+   * work (r4.349), counted to the total and to no demand's allowance, whichever reader asks first.
+   */
   public chainOf(value: PlaceId): ChainRoot | null {
-    return chainOf(this, value);
+    return this.work.shared(() => chainOf(this, value));
   }
 
   /** `keyBelowIn`: the key `rest` below `key` in its identity (a wrapper's family's a cursor's children). */

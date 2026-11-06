@@ -142,7 +142,8 @@ export function boundaryFor(
   item: Item,
   owed: Obligation | (() => Obligation) | null,
 ): void {
-  if (!isExternal(item)) return;
+  // (also a kind a type test proved of external data: the test proves the kind, never the ingress, #1073 PR 2)
+  if (!isExternal(item) && item.fromExternal !== true) return;
   // the landing index: an ingress's store's boundary, its own read's check, or the consumer's check (r4.10)
   const unreached = item.ingress !== undefined && resolve(admission, item.ingress);
   if (item.ingress !== undefined && item.loose !== true && !unreached) return;

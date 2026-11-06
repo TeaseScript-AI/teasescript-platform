@@ -1,0 +1,771 @@
+{
+ "schema": 1,
+ "from": "sol-classifier-group-preparation-1",
+ "groups": [
+  {
+   "id": "C01",
+   "parent": null,
+   "state": "conforms",
+   "title": "Error wording changes with the same acceptance and program",
+   "witness": "2acea92ee456 f1-r1-corpus.mjs/list/plain/a=other (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C01"
+  },
+  {
+   "id": "C02C-A",
+   "parent": "C02C",
+   "state": "conforms",
+   "title": "Unknown otherwise integer fallback gains its destination check",
+   "witness": "fae9f38667e0 1165-probe9-matrix.mjs/op-fallback (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02C-A"
+  },
+  {
+   "id": "C02L-D",
+   "parent": "C02L",
+   "state": "defect",
+   "title": "An open written object hides a destination descendant obligation",
+   "closes": "#1749",
+   "witness": "d17ede94dbb2 1249-astra-r2-written-origins.mjs/below-object/store/true/false (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-D"
+  },
+  {
+   "id": "C02L-S01",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "binding copies",
+   "witness": "278dd24cd04d f1-r1-corpus.mjs/list/object/a=root\nroot=a (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S01"
+  },
+  {
+   "id": "C02L-S02",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "binding copies / list literal stores",
+   "witness": "df7d44263630 f1-r3-domains.mjs/list | field | cycle | list-host | read (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S02"
+  },
+  {
+   "id": "C02L-S03",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "binding copies / list literal stores / object literal stores",
+   "witness": "95d976a3933a f1-r3-domains.mjs/list | null-intermediate | cycle | list-host | unread (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S03"
+  },
+  {
+   "id": "C02L-S04",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "binding copies / object literal stores",
+   "witness": "4acbd62db9a9 f1-r3-domains.mjs/object | empty-intermediate | cycle | nothing | read (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S04"
+  },
+  {
+   "id": "C02L-S05",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "binding copies / object literal stores / projected copies",
+   "witness": "d1f63c176841 f1-r3-new-corpus.mjs/graph/644 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S05"
+  },
+  {
+   "id": "C02L-S06",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "binding copies / constant empty-list get defaults",
+   "witness": "bafcf5e7164c f1-r1-corpus.mjs/object/get/a=root\nroot=a (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S06"
+  },
+  {
+   "id": "C02L-S07",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "list literal stores",
+   "witness": "633600bf7b13 f1-r3-domains.mjs/list | nested | fan-out | list-host | read (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S07"
+  },
+  {
+   "id": "C02L-S08",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "list literal stores / object literal stores",
+   "witness": "95399a602c50 f1-r3-domains.mjs/list | null-intermediate | fan-out | list-host | unread (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S08"
+  },
+  {
+   "id": "C02L-S09",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "object literal stores",
+   "witness": "fb33e4f0d419 f1-r3-domains.mjs/list | empty-intermediate | chain | nothing | read (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S09"
+  },
+  {
+   "id": "C02L-S10",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "constant empty-list get defaults",
+   "witness": "2f54378de09a f1-r1-corpus.mjs/object/get/ (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S10"
+  },
+  {
+   "id": "C02L-S11",
+   "parent": "C02L",
+   "state": "conforms",
+   "title": "nested collection declarations",
+   "witness": "86ed640c78a9 s8b-astra-r4-trace.mjs/075-0-8 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#C02L-S11"
+  },
+  {
+   "id": "C03",
+   "parent": null,
+   "state": "conforms",
+   "title": "JSON expected types on expression and file routes",
+   "witness": "334e4a87ad87 1165-astra-written-spines.mjs/typedParse@64 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C03"
+  },
+  {
+   "id": "C04",
+   "parent": null,
+   "state": "conforms",
+   "title": "Loads keep their existing type checks",
+   "witness": "721f846ecda2 s8d-astra-run-host.mjs/typed-load-default (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C04"
+  },
+  {
+   "id": "C05",
+   "parent": null,
+   "state": "conforms",
+   "title": "JSON/object loads check defaults and repair properties",
+   "witness": "6fdb17bb8543 1223-astra-witness-source.mjs/optional-load (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C05"
+  },
+  {
+   "id": "D01",
+   "parent": null,
+   "state": "defect",
+   "title": "A copied widened number loses the required integer-destination error",
+   "closes": "#1745",
+   "witness": "1a5d390eda79 fixture:cp9-cells/review/several-destination-snapshots (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#D01"
+  },
+  {
+   "id": "D02",
+   "parent": null,
+   "state": "defect",
+   "title": "Independently populated object copies lose their mixed-element error",
+   "closes": "#1746",
+   "witness": "3060d89af631 f1-astra-r2-projection-cases.mjs/same-identity-locals-c-b-a (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#D02"
+  },
+  {
+   "id": "R01",
+   "parent": null,
+   "state": "conforms",
+   "title": "New TSV041 warnings for values whose destination fit is uncertain",
+   "witness": "481599a4319b f1-r1-corpus.mjs/integer/plain/a.f=hostValue (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R01"
+  },
+  {
+   "id": "R02",
+   "parent": null,
+   "state": "conforms",
+   "title": "Copies retain written destination types",
+   "witness": "e5e8229924f3 f1-astra-projection-cases.mjs/path-cycle-local/integer?/2.5 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R02"
+  },
+  {
+   "id": "R03",
+   "parent": null,
+   "state": "conforms",
+   "title": "Mismatched default types are errors",
+   "witness": "528f9bd16e91 fixture:cp9-cells/C10/list-get (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R03"
+  },
+  {
+   "id": "R04",
+   "parent": null,
+   "state": "conforms",
+   "title": "Whole-object stores check every conflicting property",
+   "witness": "dd2ca916dc7e 1188-astra-r4-containment-controls.mjs/bare/number/false/false (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R04"
+  },
+  {
+   "id": "R05",
+   "parent": null,
+   "state": "conforms",
+   "title": "New TSV041 errors with separate uncertain-value warnings",
+   "witness": "7b2391c422cf f1-r3-new-corpus.mjs/integer?/direct/self/rejection (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R05"
+  },
+  {
+   "id": "R06",
+   "parent": null,
+   "state": "conforms",
+   "title": "Uncertain object property access gains TSV043 warnings",
+   "witness": "268edc45aef0 f1-r3-domains.mjs/integer | empty-intermediate | one | list-host | read (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R06"
+  },
+  {
+   "id": "R06E",
+   "parent": null,
+   "state": "conforms",
+   "title": "Empty selections and their receivers gain warnings",
+   "witness": "da72db600d22 1303-astra-runtime.mjs/untyped-random (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R06E"
+  },
+  {
+   "id": "R06I",
+   "parent": null,
+   "state": "conforms",
+   "title": "Unknown list indices gain whole-number warnings",
+   "witness": "f05fbc984d77 3a-spike10-consumers.mjs/consumer/index/property/external (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R06I"
+  },
+  {
+   "id": "R07",
+   "parent": null,
+   "state": "conforms",
+   "title": "Setting an absent literal property becomes an error",
+   "witness": "8fd2ef3ead78 f1-r1-corpus.mjs/integer?/plain/a.q=a (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R07"
+  },
+  {
+   "id": "R08C",
+   "parent": null,
+   "state": "conforms",
+   "title": "Known-invalid conversions are errors even with a default",
+   "witness": "25fcc9b7a708 1105-astra-make-cases.mjs/v1/nested-json/typed (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R08C"
+  },
+  {
+   "id": "R08I",
+   "parent": null,
+   "state": "conforms",
+   "title": "Known invalid indices are errors",
+   "witness": "36a7e0fb025e 3a-spike10-consumers.mjs/consumer/index/property/null (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R08I"
+  },
+  {
+   "id": "R09",
+   "parent": null,
+   "state": "conforms",
+   "title": "Absent-literal errors coexist with uncertain-property warnings",
+   "witness": "e06878d1e072 f1-r3-domains.mjs/integer | nested | self | fitting | read (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R09"
+  },
+  {
+   "id": "R10",
+   "parent": null,
+   "state": "conforms",
+   "title": "New TSV041 and TSV043 warnings check both value and receiver",
+   "witness": "6da5030349ea f1-r3-domains.mjs/integer[] | empty-intermediate | fan-out | list-host | read (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R10"
+  },
+  {
+   "id": "R11",
+   "parent": null,
+   "state": "conforms",
+   "title": "New destination/default and access/conversion errors with separate warnings",
+   "witness": "5b3e6cf9832d f1-r3-domains.mjs/integer? | nested | self | list-host | read (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R11"
+  },
+  {
+   "id": "R12",
+   "parent": null,
+   "state": "conforms",
+   "title": "Conflicting copied-object elements become TSV044 errors",
+   "witness": "ee9fed908d22 1192-astra-class-and-sibling-families.mjs/g1-parse-b,w,a (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R12"
+  },
+  {
+   "id": "R13",
+   "parent": null,
+   "state": "conforms",
+   "title": "Mixed-element errors coexist with destination checks",
+   "witness": "940c96a441b7 1188-astra-r4-r5-retained-families.mjs/cycle/number/false/none/direct (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R13"
+  },
+  {
+   "id": "R14",
+   "parent": null,
+   "state": "conforms",
+   "title": "Mixed-list TSV044 errors move or identify a different conflicting leaf",
+   "witness": "6fb3350e0594 f1-astra-projection-cases.mjs/454 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R14"
+  },
+  {
+   "id": "R15",
+   "parent": null,
+   "state": "conforms",
+   "title": "TSV041 errors move to the conflicting copied property",
+   "witness": "96a689c884b6 f1-r1-corpus.mjs/integer?[]/get/a={f:\"bad\",g:typed} (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R15"
+  },
+  {
+   "id": "R16",
+   "parent": null,
+   "state": "conforms",
+   "title": "A nullable written copy loses a false null error and gains its host check",
+   "witness": "7784e4123c37 f1-r1-corpus.mjs/graph/43 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R16"
+  },
+  {
+   "id": "R17",
+   "parent": null,
+   "state": "conforms",
+   "title": "Identical object values returned by get lose a false mix error",
+   "witness": "112f865dcf38 sol-admission-recon-shapes.mjs/alias-gets-plain-8.tease (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#R17"
+  },
+  {
+   "id": "U01-A",
+   "parent": "U01",
+   "state": "conforms",
+   "title": "Repeated invalid elements at one written collection boundary",
+   "witness": "7f9a2c9ac802 1241-astra-r4.mjs/original-32 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U01-A"
+  },
+  {
+   "id": "U01-B",
+   "parent": "U01",
+   "state": "conforms",
+   "title": "False null-store error removed beside a retained use error",
+   "witness": "21e0a8ecc2f1 f1-astra-projection-cases.mjs/local-then-landing/integer?/null (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U01-B"
+  },
+  {
+   "id": "U02-A",
+   "parent": "U02",
+   "state": "conforms",
+   "title": "An inferred scalar becomes optional at a later null store",
+   "witness": "8722315ec14a 1268-astra-r4-cases.mjs/declaration-index-nullable (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U02-A"
+  },
+  {
+   "id": "U02-B",
+   "parent": "U02",
+   "state": "conforms",
+   "title": "Nullable written properties retain null through copies",
+   "witness": "3db3ea04105e f1-r1-corpus.mjs/graph/42 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U02-B"
+  },
+  {
+   "id": "U02-C",
+   "parent": "U02",
+   "state": "conforms",
+   "title": "An inferred whole-object place becomes optional",
+   "witness": "19c2c9e638ef 1293-r3-matrix-cases.mjs/r3/ring/n2/d0/f1/null (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U02-C"
+  },
+  {
+   "id": "U02-D",
+   "parent": "U02",
+   "state": "conforms",
+   "title": "Optional properties carried through whole-object stores",
+   "witness": "33e0c8352fcd 1188-astra-pr-r1-cases.mjs/apr-own::own/control/nullable (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U02-D"
+  },
+  {
+   "id": "U02-E",
+   "parent": "U02",
+   "state": "conforms",
+   "title": "A snapshot of null excludes a later non-null source mutation",
+   "witness": "37649eb5da39 fixture:cp9-cells/A2/prefix-snapshot (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U02-E"
+  },
+  {
+   "id": "U02-S-down-forward",
+   "parent": "U02",
+   "state": "conforms",
+   "title": "Step-changing copy cycle, down-forward",
+   "witness": "f68d674e4a0a 1249-astra-copy-and-cycle-cases.mjs/stepped/down/false/false/false (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U02-S-down-forward"
+  },
+  {
+   "id": "U02-S-down-reverse",
+   "parent": "U02",
+   "state": "conforms",
+   "title": "Step-changing copy cycle, down-reverse",
+   "witness": "f2c12d2a0e56 1249-astra-copy-and-cycle-cases.mjs/stepped/down/true/false/false (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U02-S-down-reverse"
+  },
+  {
+   "id": "U02-S-up-forward",
+   "parent": "U02",
+   "state": "conforms",
+   "title": "Step-changing copy cycle, up-forward",
+   "witness": "01b71937ea26 1249-astra-copy-and-cycle-cases.mjs/stepped/composed/false/false/false (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U02-S-up-forward"
+  },
+  {
+   "id": "U02-S-up-reverse",
+   "parent": "U02",
+   "state": "conforms",
+   "title": "Step-changing copy cycle, up-reverse",
+   "witness": "7d2ce1c44f94 1249-astra-copy-and-cycle-cases.mjs/stepped/composed/true/false/false (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U02-S-up-reverse"
+  },
+  {
+   "id": "U03-D",
+   "parent": "U03",
+   "state": "defect",
+   "title": "Independently populated copies with the same origin enter an inferred list",
+   "closes": "#1746",
+   "witness": "b3c29193446b f1-astra-r2-projection-cases.mjs/same-identity-locals-a-b-c (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U03-D"
+  },
+  {
+   "id": "U03-S-down-forward",
+   "parent": "U03",
+   "state": "conforms",
+   "title": "Step-changing copy cycle, down-forward",
+   "witness": "eb14849912aa 1249-astra-copy-and-cycle-cases.mjs/stepped/down/false/false/true (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U03-S-down-forward"
+  },
+  {
+   "id": "U03-S-down-reverse",
+   "parent": "U03",
+   "state": "conforms",
+   "title": "Step-changing copy cycle, down-reverse",
+   "witness": "99ce9e947348 1249-astra-copy-and-cycle-cases.mjs/stepped/down/true/false/true (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U03-S-down-reverse"
+  },
+  {
+   "id": "U03-S-up-forward",
+   "parent": "U03",
+   "state": "conforms",
+   "title": "Step-changing copy cycle, up-forward",
+   "witness": "09b1d3a05067 1249-astra-copy-and-cycle-cases.mjs/stepped/composed/false/false/true (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U03-S-up-forward"
+  },
+  {
+   "id": "U03-S-up-reverse",
+   "parent": "U03",
+   "state": "conforms",
+   "title": "Step-changing copy cycle, up-reverse",
+   "witness": "c7ddd0c8fe0e 1249-astra-copy-and-cycle-cases.mjs/stepped/composed/true/false/true (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U03-S-up-reverse"
+  },
+  {
+   "id": "U04-A",
+   "parent": "U04",
+   "state": "pending",
+   "title": "Nullable written list use lacks its required guard",
+   "closes": "r4.374 until S10 AD-1/U5 (#1073) and S9b written/receiving bridge (#1072)",
+   "witness": "0d49a0fcb499 1405-settled-sweep-demand.mjs/case/nullableListCopy/0 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-A"
+  },
+  {
+   "id": "U04-B",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Written destination or external checks accompany missing-property errors",
+   "witness": "98df8fd18bfe f1-r1-corpus.mjs/string/get/a.q=a (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-B"
+  },
+  {
+   "id": "U04-C",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Missing-property error gains the next receiver warning",
+   "witness": "e03722ed1f3c f1-r1-corpus.mjs/graph/195 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-C"
+  },
+  {
+   "id": "U04-E",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Mixed-property errors coexist with external/written checks and absent-property errors",
+   "witness": "8e5527bbf331 f1-astra-r2-projection-cases.mjs/copy-chain-locals-a-b-c2 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-E"
+  },
+  {
+   "id": "U04-F",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Opaque own first/last/random members retain runtime obligations",
+   "witness": "9985c58807ed s8d-astra-verify-mutant-source.mjs/source (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-F"
+  },
+  {
+   "id": "U04-G",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "A get default returns the same object; false mixed error removed",
+   "witness": "ae1eccd2e9f2 f1-r1-corpus.mjs/graph/131 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-G"
+  },
+  {
+   "id": "U04-I",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Invalid receiver indexing moves to the full member expression",
+   "witness": "f9e232d46bc2 1240-astra-work.mjs/071-2-1 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-I"
+  },
+  {
+   "id": "U04-K",
+   "parent": "U04",
+   "state": "pending",
+   "title": "Unmodelled findAll result loses exact empty-selection rejection",
+   "closes": "r4.374 until S9b text/regex calls (#1072), including #1321 empty-selection obligation",
+   "witness": "51368c38b731 1303-astra-probes.mjs/gap-1321-written (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-K"
+  },
+  {
+   "id": "U04-L",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Depth-changing cycles report the conflict at its first direct property use",
+   "witness": "820695810b8f 1249-astra-r2-written-origins.mjs/stepped/up/list/true/true (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-L"
+  },
+  {
+   "id": "U04-M",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Invalid method/signature diagnostics move or name the receiver",
+   "witness": "f77777a4cbce s9b-astra-probes.mjs/sort-elements (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-M"
+  },
+  {
+   "id": "U04-N",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "False null-store errors removed beside missing-property errors",
+   "witness": "766a6d4d3ceb f1-r1-corpus.mjs/graph/234 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-N"
+  },
+  {
+   "id": "U04-Q",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Known-error rejection becomes a warned, checked numeric destination",
+   "witness": "3866f066fa0a fixture:cp9-cells/r46/m3/sol-m3/control-get (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-Q"
+  },
+  {
+   "id": "U04-R",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Missing literal-property reads retain their error at the member expression",
+   "witness": "171e9171b279 f1-r1-corpus.mjs/graph/206 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-R"
+  },
+  {
+   "id": "U04-S",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Invalid property-store receivers use the member-expression site",
+   "witness": "f27ebe0c1982 fixture:cp9-cells/r46/m3/astra-m3/store-receiver/integer (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-S"
+  },
+  {
+   "id": "U04-T",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Known whole-copy relay errors become warnings with complete destination checks",
+   "witness": "84a43ec69fbc 1293-r3-matrix-cases.mjs/r3/relay/true/\"x\" (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-T"
+  },
+  {
+   "id": "U04-U",
+   "parent": "U04",
+   "state": "pending",
+   "title": "A collection union call loses the mixed-element rejection",
+   "closes": "r4.374 until S9b collection calls (#1072), including the owed TSV044 rejection",
+   "witness": "bf11b0efe123 1272-astra-joins.mjs/join-union-method-deferred (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-U"
+  },
+  {
+   "id": "U04-W",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Every conflicting known property is reported instead of one generic mix",
+   "witness": "05cd45f0a027 1359-r1-ordering-cases.mjs/concrete-conflicts-padding-0-third-2-order-201 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-W"
+  },
+  {
+   "id": "U04-Z-C1",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Coupled written/numeric cycles retain their deciders and add required numeric errors",
+   "witness": "81e94c63aa86 1188-r5-cycles.mjs/cycles::whole/3/integer-integer-none/back/place (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C1"
+  },
+  {
+   "id": "U04-Z-C10",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "A parenthesized number property keeps the integer-index error",
+   "witness": "6296d4fba773 3a-spike10-consumers.mjs/consumer/index/paren/fraction (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C10"
+  },
+  {
+   "id": "U04-Z-C2",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Two coupled copy components retain their mixed-property error and external receiving checks",
+   "witness": "7eac439e12ed 1188-astra-pr-r1-cases.mjs/apr-own::own/two-scc/1/True/True (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C2"
+  },
+  {
+   "id": "U04-Z-C3",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Strict copied numeric destinations reject the fractional whole store before the later mixed literal",
+   "witness": "7ceddc30e0c4 1188-astra-rejected-and-opaque-families.mjs/dead/integer/2.5/nested/false/literal (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C3"
+  },
+  {
+   "id": "U04-Z-C4",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "A rejected object-to-list store retains the invalid index error and adds a receiving warning",
+   "witness": "e6cca8fae418 f1-r1-corpus.mjs/cycle/integer?/a=[b]\nb=a[0] (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C4"
+  },
+  {
+   "id": "U04-Z-C5",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "Both known conflicting properties are checked at a copied written destination",
+   "witness": "fe2aa72ed986 f1-r3-new-corpus.mjs/graph/812 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C5"
+  },
+  {
+   "id": "U04-Z-C6",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "A mixed incoming literal meets an already decided written-property destination",
+   "witness": "e040c551f293 f1-astra-r2-projection-cases.mjs/plain-after-landing-b-c-a (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C6"
+  },
+  {
+   "id": "U04-Z-C7",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "The earliest literal element still decides later stores after another element is rejected",
+   "witness": "5c7f0eac81bd 1313-astra-composite-cases.mjs/different-{p:\"text\"}-false (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C7"
+  },
+  {
+   "id": "U04-Z-C8",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "A separate external integer destination gains its warning and check beside the nested mixed-list error",
+   "witness": "b4bdfc543891 1249-astra-stop-sample.mjs/67-default/2 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C8"
+  },
+  {
+   "id": "U04-Z-C9",
+   "parent": "U04",
+   "state": "conforms",
+   "title": "An invalid nested literal retains TSV044 while its member receiver becomes uncertain",
+   "witness": "3f1d61a0c962 1165-matrix.mjs/m-selection-first-mixed-nested (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#C9"
+  },
+  {
+   "id": "U04-Z-H",
+   "parent": "U04",
+   "state": "defect",
+   "title": "Host-copy chain loses its integer destination and decides string from a later store",
+   "closes": "#1751",
+   "witness": "1ee326902234 1192-astra-class-and-sibling-families.mjs/g4-chain-3 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#H"
+  },
+  {
+   "id": "U04-Z-N",
+   "parent": "U04",
+   "state": "defect",
+   "title": "Coupled written/numeric first-deciders lose number-copy obligations",
+   "closes": "#1745",
+   "witness": "a58ce89cdb5f 1188-r5-cycles.mjs/cycles::whole/3/integer-string-none/full/projected (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#N"
+  },
+  {
+   "id": "U04-Z-RC",
+   "parent": "U04",
+   "state": "defect",
+   "title": "Rejected-value cycles change the first decider of a new whole copy",
+   "closes": "#1752",
+   "witness": "013935bb0d3c 1188-r5-cycles.mjs/cycles::whole/3/none-string-none/back/place (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#RC"
+  },
+  {
+   "id": "U04-Z-RP",
+   "parent": "U04",
+   "state": "defect",
+   "title": "Source-order permutations propagate the value of a rejected whole store",
+   "closes": "#1752",
+   "witness": "6f1004edfeb6 1293-sol-r2-permutations.mjs/r2 repeated/('good', 'bad', 'bad')/[2, 0, 1]/True (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#RP"
+  },
+  {
+   "id": "U04-Z-RW",
+   "parent": "U04",
+   "state": "defect",
+   "title": "A rejected whole store transports a written numeric contribution into later copies",
+   "closes": "#1752",
+   "witness": "824be7c9b933 1188-astra-r4-containment-controls.mjs/bare/number/false/83 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#RW"
+  },
+  {
+   "id": "U04-Z-T",
+   "parent": "U04",
+   "state": "defect",
+   "title": "Transported nullable collection domains survive, but their diagnostics lose null and offer a scalar fix",
+   "closes": "#1753",
+   "witness": "1a2f192ba18e 1188-astra-admission-matrix.mjs/written-integer?[]-hostValue-false (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-u04/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#T"
+  },
+  {
+   "id": "W01",
+   "parent": null,
+   "state": "conforms",
+   "title": "TSV041 names the declared type, deciding line and usable fix",
+   "witness": "743767f764ee f1-astra-projection-cases.mjs/path-cycle-local/integer/\"bad\" (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#W01"
+  },
+  {
+   "id": "W02",
+   "parent": null,
+   "state": "conforms",
+   "title": "TSV011 names the repeat operand and whole-number fix",
+   "witness": "c186fecaefdd f1-astra-projection-cases.mjs/path-cycle-local/string/\"bad\" (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#W02"
+  },
+  {
+   "id": "W03",
+   "parent": null,
+   "state": "conforms",
+   "title": "TSV041 and TSV011 sentences both change",
+   "witness": "d67a056e16cd f1-astra-projection-cases.mjs/path-cycle-local/string/8 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#W03"
+  },
+  {
+   "id": "W04",
+   "parent": null,
+   "state": "conforms",
+   "title": "TSV043 names the index or receiver and whole-number fix",
+   "witness": "17c0b55c9449 3a-spike10-consumers.mjs/consumer/index/property/fraction (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#W04"
+  },
+  {
+   "id": "W05",
+   "parent": null,
+   "state": "conforms",
+   "title": "TSV012 names the iterable",
+   "witness": "f09be66b81f0 3a-spike14-gates.mjs/cell/C13/0 (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#W05"
+  },
+  {
+   "id": "W06",
+   "parent": null,
+   "state": "conforms",
+   "title": "TSV010 names the whole-number range requirement",
+   "witness": "191d4813daa1 1241-astra-paste.mjs/nested join of integer at range bound/box.items.join() (source order, sharing on)",
+   "evidence": "/home/peter/work/evidence/1075-sol-author-map/dff711474d398ba442470ddf221efbf7c385a7b4/groups.json#W06"
+  }
+ ]
+}

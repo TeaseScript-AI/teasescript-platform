@@ -92,6 +92,12 @@ export interface Item {
    * (AD-3).
    */
   readonly called?: true;
+  /**
+   * A kind a type test proved of external data (`narrowedItems`, #1073): the test proves the kind, never the ingress, so a
+   * consumer still asks C9's boundary of the ingress the data came by (the lead's ruling (a) on #1073 PR 2). Travels as
+   * the guard mark does.
+   */
+  readonly fromExternal?: true;
   /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4 r4.14). */
   readonly fan?: string;
   /**
@@ -174,6 +180,24 @@ export function makeItem(
  * the two travel together.
  */
 export function marksOf(from: readonly Item[]): {
+  readonly guarded?: true;
+  readonly called?: true;
+  readonly fromExternal?: true;
+} {
+  return {
+    ...(from.some((each) => each.guarded === true) ? { guarded: true as const } : {}),
+    ...(from.some((each) => each.called === true) ? { called: true as const } : {}),
+    ...(from.some((each) => each.fromExternal === true) ? { fromExternal: true as const } : {}),
+  };
+}
+
+/**
+ * The marks a computed item takes from its operands (`marksOf` without `fromExternal`): an operator's row, a
+ * conversion, a length, a declared result or a key is computed, so it is never external data a test refined (#1073
+ * PR 2: only a transfer that keeps the value, a copy, a merge of one kind, a literal's element or a selection, carries
+ * that mark).
+ */
+export function computedMarks(from: readonly Item[]): {
   readonly guarded?: true;
   readonly called?: true;
 } {
@@ -547,7 +571,7 @@ export function itemsSignature(items: readonly Item[], scope: ItemScope): string
         item.writer === null ? "" : writerKey(item.writer),
         item.context ?? "",
         item.word ?? "",
-        `${item.guarded === true ? "g" : ""}${item.called === true ? "c" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}`,
+        `${item.guarded === true ? "g" : ""}${item.called === true ? "c" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}${item.fromExternal === true ? "x" : ""}`,
         item.fan ?? "",
         spellingIdentity(item.spelling),
       ].join("|"),

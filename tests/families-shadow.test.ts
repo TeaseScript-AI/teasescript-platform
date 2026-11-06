@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -25,7 +26,7 @@ const tool = resolve("tests/families/shadow.mjs");
  * the legacy analysis of `abort` aborts its process in the first mode; the core's of `costly` charges 100 units against an
  * allowance of 10 there; `noisy` writes stderr text without a newline before its analysis, whose legacy route then
  * exhausts the heap there; `large` plans 1 MB and its legacy route throws right after its outcome; `block` (an area of
- * its own) waits 10 s in its legacy analysis.
+ * its own) writes the file `SHADOW_BLOCKING` names, then waits 10 s in its legacy analysis.
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": "export class WorkLedger { charge() {} }\n",
@@ -51,7 +52,8 @@ export const CORE_BACKEND = {
   },
 };
 `,
-  "src/type-inference/legacy-rounds.js": `let compiled = 0;
+  "src/type-inference/legacy-rounds.js": `import { writeFileSync } from "node:fs";
+let compiled = 0;
 const exhaust = () => {
   const held = [];
   for (;;) held.push(new Array(100000).fill(held.length));
@@ -68,7 +70,10 @@ export const LEGACY_BACKEND = {
       queueMicrotask(() => {
         throw new Error("large worker error");
       });
-    if (source === "block") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
+    if (source === "block") {
+      writeFileSync(process.env.SHADOW_BLOCKING, "");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
+    }
     if (source === "leak" && !mode.reversed && !mode.unshared && compiled > 0) exhaust();
     if (source === "idle" && !mode.reversed && !mode.unshared)
       setTimeout(() => {
@@ -377,8 +382,9 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
     join(folder, "tests/families/blocked/cases.mjs"),
     'export const cases = [["block", "block"]];\n',
   );
+  const blocking = join(folder, "blocking");
   const runner = spawn(process.execPath, [tool, folder, "blocked", "--memory", "16"], {
-    env,
+    env: { ...env, SHADOW_BLOCKING: blocking },
     stdio: "ignore",
   });
   const childrenOf = (pid: number) =>
@@ -394,14 +400,13 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
         }
       })
       .map(Number);
-  let routes: number[] = [];
-  for (let tries = 0; tries < 100 && routes.length === 0; tries += 1) {
+  // (inside the blocking compile, which marks its start: a fixed wait would let a slow load meet an idle route, which
+  // ends on the parent's disconnect without its watcher, #1854; 30 s is only a safety net)
+  for (let tries = 0; tries < 600 && !existsSync(blocking); tries += 1)
     await new Promise((resolve) => setTimeout(resolve, 50));
-    routes = childrenOf(runner.pid!);
-  }
+  assert.ok(existsSync(blocking), "a route's process entered the blocking compile");
+  const routes = childrenOf(runner.pid!);
   assert.ok(routes.length > 0, "the runner started a route's process");
-  // (past the route's load of the tree, into the blocking compile)
-  await new Promise((resolve) => setTimeout(resolve, 500));
   runner.kill("SIGKILL");
   // (a process that ended, reaped or not yet)
   const alive = (pid: number) => {

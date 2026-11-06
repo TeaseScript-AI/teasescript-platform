@@ -17,7 +17,11 @@ for (const [action, status] of [
   ["hang", "TIMEOUT"],
 ])
   test(`process ${action}`, async () => {
-    const client = new ProcessClient("/unused", { worker, timeoutMs: 500 });
+    // (#1850: startup and a reply have 5 s; only a hang is meant to reach the deadline, so it alone keeps 500 ms)
+    const client = new ProcessClient("/unused", {
+      worker,
+      timeoutMs: action === "hang" ? 500 : 5000,
+    });
     try {
       assert.equal((await client.run(config(action))).status, status);
     } finally {
@@ -25,7 +29,8 @@ for (const [action, status] of [
     }
   });
 test("timed-out worker is replaced; old exit cannot poison the next case", async () => {
-  const client = new ProcessClient("/unused", { worker, timeoutMs: 500 });
+  // (#1850: 5 s, so that the replacement's startup and reply fit it on a loaded worker; the hang reaches it all the same)
+  const client = new ProcessClient("/unused", { worker, timeoutMs: 5000 });
   try {
     assert.equal((await client.run(config("hang"))).status, "TIMEOUT");
     assert.equal((await client.run(config("ok"))).status, "PASS");

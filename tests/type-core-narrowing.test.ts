@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore, type CorePass } from "../src/type-inference/core/answers.js";
+import { WorkLedger } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { annotationTags } from "../src/type-inference/core/contract/terms.js";
 import {
@@ -13,12 +14,13 @@ import {
 } from "../src/type-inference/core/items.js";
 import { narrowedItems, type NarrowingForm } from "../src/type-inference/core/narrowing.js";
 import { siteKey } from "../src/type-inference/core/program.js";
+import type { Obligation } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingAt, narrowingPass, nodeAt, routeAt } from "./helpers/type-core-narrowing.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
-import { inMode, MODES } from "./helpers/type-core-oracles.js";
+import { inMode, MODES, stopSet } from "./helpers/type-core-oracles.js";
 import type { CompactRecord } from "./helpers/type-core-records.js";
 
 /*
@@ -1459,6 +1461,161 @@ test("a read below a selection takes its narrowing, each selected owner's own se
   }
 });
 
+test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 PR 2, #1320)", () => {
+  // (a record's outcome, its diagnostics' kinds and classes and its checks' kinds, in the three modes `record` asks)
+  const answer = (...lines: readonly string[]): string => {
+    const { outcome, diagnostics, checks } = record(...lines);
+    return [
+      outcome,
+      ...diagnostics.map((d) => `${d.kind} ${d.class}`),
+      ...checks.map((c) => `${c.kind}${c.boundary === true ? " boundary" : ""}`),
+    ].join(", ");
+  };
+  const flag = 'let flag = askBoolean "?"';
+  // G holds at a consumer: a fitting kind is quiet, as at a store
+  for (const [test, use] of [
+    ["n != null", "repeat n {}"],
+    ["n is integer", "repeat n {}"],
+    ["n != null", 'say "${n}"'],
+  ] as const)
+    assert.equal(
+      answer(flag, "let n = 1", "if flag { n = null }", `if ${test} { ${use} }`),
+      "valid",
+      `${test}: ${use}`,
+    );
+  // a nearer store after the test answers the consumer exactly: an invalid value stays invalid (V30 §13)
+  assert.equal(
+    answer(flag, "let n = 1", "if flag { n = null }", "if n != null { n = null\n repeat n {} }"),
+    "compile-error, integer-use compile-error",
+  );
+  // a test of the read's own key keeps its guard (§3.2)
+  assert.equal(
+    answer("let box = {n: 1.5}", "if box.n < 2 { repeat box.n {} }"),
+    "warning-runtime-check, integer-use warning-runtime-check, integer-check",
+  );
+  // the test proves a kind, never an ingress (C9, the lead's ruling (a)): external data keeps exactly one boundary
+  // check, at its ingress store or, where no store brought it, at the consumer (r4.10), through every transfer that
+  // keeps the value; a computed result brings no data in (Codex r1–r3 on #1770: the typed store, the operator, the
+  // selection without an ingress are rows)
+  const transfers: readonly (readonly [string, string, string, string, string])[] = [
+    ["a read", "", "integer", "repeat X {}", "valid, copy-type boundary"],
+    ["a copy", "", "integer", "let c = X\n repeat c {}", "valid, copy-type boundary"],
+    [
+      "a merge of one kind",
+      "",
+      "integer",
+      "let xs = [X, 1]\n repeat xs[0] {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a literal's element",
+      "",
+      "integer",
+      "let xs = [X]\n repeat xs[0] {}",
+      "valid, copy-type boundary",
+    ],
+    ["a selection", "", "integer[]", "repeat X[0] {}", "valid, copy-type boundary"],
+    [
+      "an operator",
+      "",
+      "integer",
+      "let out: integer = X + 1\n repeat out {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a typed store",
+      "",
+      "integer",
+      "let out: integer = X\n repeat out {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "an argument",
+      "function f(p: integer) {\n repeat p {}\n}\n",
+      "integer",
+      "f(X)",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a result",
+      "function g(p): integer {\n return p\n}\n",
+      "integer",
+      "let out = g(X)\n repeat out {}",
+      "valid, copy-type boundary",
+    ],
+    [
+      "a default",
+      "",
+      "integer",
+      "let out: integer = X otherwise 0\n repeat out {}",
+      "warning, static warning, copy-type boundary",
+    ],
+  ];
+  for (const [name, prelude, type, body, expected] of transfers)
+    for (const [where, before, read] of [
+      ["an ingress store", "let raw = hostValue\n", "raw"],
+      ["no ingress store", "", "hostValue"],
+    ] as const)
+      assert.equal(
+        answer(`${prelude}${before}if ${read} is ${type} {\n${body.replaceAll("X", read)}\n}`),
+        expected,
+        `${name}, ${where}`,
+      );
+  // a stopped read keeps its C9 check: the stop leaves the kinds unknown, never the ingress (Codex r4), at the read's
+  // root occurrence or at the store that brought the data in, with its target, site and domain
+  for (const [source, expected] of [
+    ["if hostValue is integer {repeat hostValue {}}", "hostValue [unknown] 32-41"],
+    ['if hostValue is string[] {say "${hostValue}"}', "hostValue [unknown] 33-42"],
+    // (a projection's own read, data or computed, is the occurrence's check alone, Codex r5)
+    ["if hostValue is integer[] {repeat hostValue[0] {}}", "hostValue [unknown] 34-43"],
+    ["if hostValue is integer[] {repeat hostValue.length {}}", "hostValue [unknown] 34-43"],
+    ["if hostValue is integer {let out:integer=hostValue\nrepeat out {}}", "out [integer] 41-50"],
+    [
+      "if hostValue is integer[] {let out:integer=hostValue[0]\nrepeat out {}}",
+      "out [integer] 43-52",
+    ],
+  ] as const)
+    for (const mode of MODES) {
+      const stopped = stopSet(
+        [{ path: "main.tease", source: `${source}\nexit\n` }],
+        mode,
+        ["hostValue"],
+        1,
+      )!;
+      // EVIDENCE: `stoppedRecord` serializes the answers' `checks`, a list of `Obligation`s.
+      const { checks } = JSON.parse(stopped.record) as { checks: readonly Obligation[] };
+      assert.ok(stopped.record.includes('"context":"budget"'), `${source}: a read stops`);
+      assert.equal(
+        checks
+          .filter((c) => c.boundary === true)
+          .map((c) => `${c.target} [${c.against.join("|")}] ${c.site.start}-${c.site.end}`)
+          .join("; "),
+        expected,
+        `${source} ${JSON.stringify(mode)}`,
+      );
+    }
+  // #1320: a scalar under its test needs no operand check; a list under an element test keeps C6's emptiness, read
+  // directly and at a row (a consumer's descendant demand takes its path's G)
+  assert.equal(
+    answer("let v = hostValue", 'if v is string { say "${v}" }'),
+    "valid, copy-type boundary",
+  );
+  for (const [test, use] of [
+    ["xs is string[]", 'say "${xs}"'],
+    ["xs is string[][]", 'say "${xs[0]}"'],
+  ] as const)
+    assert.equal(
+      answer("let xs = hostValue", `if ${test} { ${use} }`),
+      "warning-runtime-check, member-read warning-runtime-check, copy-type boundary, empty-check",
+      `${test}: ${use}`,
+    );
+  // without the test, the operand check stays
+  assert.equal(
+    answer("let xs = hostValue", 'say "${xs}"'),
+    "warning-runtime-check, operator warning-runtime-check, copy-type boundary, operand",
+  );
+});
+
 /** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */
 function queryDoubling(source: (k: number) => string, marker: string, delta: number): number {
   const [small, large] = [64, 128].map((k) => {
@@ -1986,7 +2143,8 @@ test("a program without a test lists no narrowing (#1251)", () => {
 
 /**
  * #1251, Astra r1's witness: a root tested only in an `or`'s right operand keeps its narrowing for a stored read after
- * the early exit (an integer), with no warning or check.
+ * the early exit (an integer), with no warning; the test proves a kind, never an ingress, so `b`'s external data keeps
+ * its boundary check where it enters (C9, #1073 PR 2), as the fixture's `n1-unknown-positive` records.
  */
 test("a root tested in an or's right operand keeps its narrowing for a stored read (#1251)", () => {
   const source = [
@@ -2001,7 +2159,11 @@ test("a root tested in an or's right operand keeps its narrowing for a stored re
   for (const mode of MODES) {
     const answers = inMode(mode, () => analyseCore(request));
     assert.deepEqual(answers.diagnostics, [], JSON.stringify(mode));
-    assert.deepEqual(answers.checks, [], JSON.stringify(mode));
+    assert.deepEqual(
+      answers.checks.map((c) => [c.kind, c.target, c.boundary, c.site.start]),
+      [["copy-type", "b", true, source.indexOf("hostOther")]],
+      JSON.stringify(mode),
+    );
   }
 });
 
@@ -2031,5 +2193,143 @@ test("a program without a test does not pay for the narrowing index; the same wi
       withTest - without >= index,
       `k = ${k}: ${without} without the test, ${withTest} with it, index ${index}`,
     );
+  }
+});
+
+test("a deep path's events are its prefixes' and collections' that hold one, wherever they stand (#1640)", () => {
+  const rows = ["let rows = [[[1, null]]]", "let other = [1]"];
+  const test = (body: string): string[] => [
+    ...rows,
+    `if rows[0][0][1] != null { ${body}\n repeat rows[0][0][1] {} }`,
+  ];
+  const lists = "let m: integer?[][] = [[1]]";
+  check(
+    [
+      ["held", test("say 1"), "repeat rows[0][0][1]", 7, "non-null: holds"],
+      ["another collection", test("other.reverse()"), "repeat rows[0][0][1]", 7, "non-null: holds"],
+      [
+        "the innermost collection",
+        test("rows[0][0].reverse()"),
+        "repeat rows[0][0][1]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a middle collection",
+        test("rows[0].reverse()"),
+        "repeat rows[0][0][1]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a middle prefix's store",
+        test("rows[0] = [[null]]"),
+        "repeat rows[0][0][1]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a mutated prefix that is no collection of the path (a property step below it)",
+        [
+          "let rows = [{xs: [1, null]}, [3]]",
+          "if rows[0].xs[0] != null { rows[1].reverse()\n repeat rows[0].xs[0] {} }",
+        ],
+        "repeat rows[0].xs[0]",
+        7,
+        "non-null: holds",
+      ],
+      [
+        "a quoted property's collection",
+        [
+          "let box = {element: [[1, null]]}",
+          "if box.element[0][0] != null { box.element[0].reverse()\n repeat box.element[0][0] {} }",
+        ],
+        "repeat box.element[0][0]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a collection below a variable index",
+        [
+          "let rows = [[1, null]]",
+          "let i = 0",
+          "if rows[i][0] != null { rows[i].reverse()\n repeat rows[i][0] {} }",
+        ],
+        "repeat rows[i][0]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a collection below a fixed key",
+        [
+          'let d = dict {"a": [1, null]}',
+          'if d["a"][0] != null { d["a"].reverse()\n repeat d["a"][0] {} }',
+        ],
+        'repeat d["a"][0]',
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a collection mutated in a later operand: that operand's read",
+        [
+          "let rows = [[1, null]]",
+          "if rows[0][0] != null and rows.reverse() == null and rows[0][0] > 0 { repeat rows[0][0] {} }",
+        ],
+        "rows[0][0] > 0",
+        0,
+        "non-null: branch",
+      ],
+      [
+        "a collection mutated in a later operand: the body's read",
+        [
+          "let rows = [[1, null]]",
+          "if rows[0][0] != null and rows.reverse() == null and rows[0][0] > 0 { repeat rows[0][0] {} }",
+        ],
+        "repeat rows[0][0]",
+        7,
+        "non-null: branch",
+      ],
+      [
+        "a positive collection test's element step",
+        [lists, "if m is integer[][] { m[0].reverse()\n repeat m[0][0] {} }"],
+        "repeat m[0][0]",
+        7,
+        "is integer element: branch",
+      ],
+    ],
+    at,
+  );
+});
+
+test("a deep path's narrowing makes no text per prefix: its events' kept text grows with the path, not its square (#1640)", () => {
+  // (#1770's family: a k-deep chain of selections under its own null test, read once below it)
+  const chain = (k: number): string =>
+    Array.from({ length: k }, (_, i) => (i % 2 === 0 ? ".first" : ".last")).join("");
+  const nested = (k: number, leaf: string): string => `${"[".repeat(k)}${leaf}${"]".repeat(k)}`;
+  const source = (k: number): string =>
+    [
+      'let choice = askBoolean "change?"',
+      `let rows = ${nested(k, "1")}`,
+      `if choice { rows = ${nested(k, "null")} }`,
+      `if rows${chain(k)} != null { let sink: integer = rows${chain(k)} }`,
+      "exit",
+    ].join("\n");
+  const charge = WorkLedger.prototype.charge;
+  let units = 0;
+  WorkLedger.prototype.charge = function (this: WorkLedger, ...args) {
+    if (args[0] === "literalUnits" && /narrowing(-events)?\.js/.test(new Error().stack!))
+      units += args[1] ?? 1;
+    charge.apply(this, args);
+  };
+  const kept = (k: number): number => {
+    units = 0;
+    analyseCore(coreRequest([{ path: "main.tease", source: source(k) }])!);
+    return units;
+  };
+  try {
+    const [small, large] = [kept(64), kept(128)];
+    assert.ok(large <= 2.25 * small, `${small} at 64, ${large} at 128`);
+  } finally {
+    WorkLedger.prototype.charge = charge;
   }
 });

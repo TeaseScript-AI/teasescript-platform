@@ -69,10 +69,10 @@ const RELATIONS: OperationRelations = Object.freeze({
   },
 });
 
-/** The relations table, built once. */
+/** The relations table, built once. The adapter tests read it; no backend does (the core's rules: `core/contract/`). */
 export function operationRelations(): OperationRelations {
   return RELATIONS;
 }
 
-/** Reading a property on a receiver kind, for stage 3: a held part, a computed result, or no such member. */
+/** Reading a property on a receiver kind: a held part, a computed result, or no such member (read by the adapter tests). */
 export { memberOf } from "./members.js";
