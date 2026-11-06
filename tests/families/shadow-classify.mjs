@@ -12,6 +12,7 @@
 // summary as one JSON line and a verdict line (`gate: green` only where no row is `open` and nothing failed to
 // classify). Exit 1 for unclassified or ambiguous pairs, invalid input or conflicting duplicates; with `--gate`
 // (the S11 checklist's run, which needs `--expect`) also while any row is `open`.
+// Taxonomy v5 (from v4): the class declined/lost check (#1781), at the natural allowance and at the control alike.
 import { createHash } from "node:crypto";
 import { createReadStream, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -20,7 +21,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 /** The taxonomy's version: a class added, removed or changed in its rule makes the next. */
-export const VERSION = 4;
+export const VERSION = 5;
+/** What the version changed from the one before, as the gate report states it. */
+export const VERSION_CHANGE =
+  "v4 → v5: the class declined/lost check (#1781), a program the core declines where a stop lost a check it requires, at the natural allowance and at the control alike";
 
 const S9B = "S9b #1072 (candidate coverage; retired or deferred syntax is no release requirement)";
 const S10 = "S10 #1073";
@@ -159,14 +163,13 @@ const COMPLETED = new Set(["plan", "rejected"]);
  */
 const CONTROL = 16;
 /**
- * The texts a program is declined with where a stop lost a check it requires (#1781, #1526 decision 2, condition 1,
- * `core/consumer.ts`). They arise only at such a stop, which the control's demand reaches: each is a listed row of the
- * control's table, not an exclusion, so no pair class names them and a natural pair that has one stays a problem.
+ * The texts the core declines a program with where a stop lost a check it requires (#1781, #1526 decision 2,
+ * condition 1, `core/consumer.ts`): the class declined/lost check's. Any other decline text stays a problem.
  */
-export const CONTROL_DECLINED = [
+const LOST_CHECK = new Set([
   "a store whose check was lost at the budget",
   "a store whose required checks could not be established at the budget",
-].map((text) => ({ id: `declined: ${text}`, text, authority: "#1781" }));
+]);
 
 /**
  * The route pair's classes. `state`: `pass`, `attributed` (the rule class is known; S11 still owes each source's
@@ -250,6 +253,15 @@ export const PAIR_CLASSES = [
       !f.delta.checks &&
       !f.delta.plan &&
       f.delta.diagnosticText,
+  },
+  {
+    id: "declined/lost check",
+    state: "accepted (condition 1; condition 2 list)",
+    rule: "neither route failed or threw, and the core declined the program because a stop lost a check it requires: it left its slice at 'a store whose check was lost at the budget' or 'a store whose required checks could not be established at the budget'",
+    authority:
+      "#1781 (#1526 decision 2, condition 1: the legacy compiles; condition 2 re-assesses every such case before the switch)",
+    witness: "c0f15845029f 1241-astra-r4-extra.mjs/original-1",
+    match: (f) => f.kind === "outside" && LOST_CHECK.has(f.outside),
   },
   ...EXCLUSIONS.map(([text, owner, witness, words]) => ({
     id: `excluded/${typeof text === "string" ? text : words}`,
@@ -720,12 +732,12 @@ export function classifier(groups = null) {
     r.witnesses.sort((a, b) => a.bytes - b.bytes || (a.key < b.key ? -1 : 1));
     r.witnesses.length = Math.min(r.witnesses.length, 3);
   };
-  // (the control's runs that left the slice, one row a rule of `EXCLUSIONS` as the pair classes match it, one a text of
-  // `CONTROL_DECLINED`, and one a text no rule matches; information only, r4.382)
-  const excluded = PAIR_CLASSES.filter((c) => c.id.startsWith("excluded/"));
-  const controlRows = new Map(
-    [...excluded, ...CONTROL_DECLINED].map((c) => [c.id, { runs: 0, witnesses: [] }]),
+  // (the control's runs that left the slice, one row a class that names a text, declined/lost check and each rule of
+  // `EXCLUSIONS`, as the pair classes match it, and one a text no rule matches; information only, r4.382)
+  const excluded = PAIR_CLASSES.filter(
+    (c) => c.id.startsWith("excluded/") || c.id === "declined/lost check",
   );
+  const controlRows = new Map(excluded.map((c) => [c.id, { runs: 0, witnesses: [] }]));
   const unlisted = new Map();
   const pairs = [];
   const sharing = [];
@@ -799,9 +811,7 @@ export function classifier(groups = null) {
           if (run.completion) totals.controlCompletionRuns += 1;
           if (run.outcome === "failed") totals.controlFailedRuns += 1;
           if (run.outcome === "outside") {
-            const rule =
-              excluded.find((c) => c.match({ kind: "outside", outside: run.outside })) ??
-              CONTROL_DECLINED.find((d) => d.text === run.outside);
+            const rule = excluded.find((c) => c.match({ kind: "outside", outside: run.outside }));
             if (rule === undefined && !unlisted.has(run.outside))
               unlisted.set(run.outside, { runs: 0, witnesses: [] });
             const r = rule === undefined ? unlisted.get(run.outside) : controlRows.get(rule.id);
@@ -952,10 +962,7 @@ export function classifier(groups = null) {
       controlCompletionRuns: totals.controlCompletionRuns,
       controlFailedRuns: totals.controlFailedRuns,
       controlOutside: [
-        ...[...excluded, ...CONTROL_DECLINED].map((c) => ({
-          rule: c.id,
-          ...controlRows.get(c.id),
-        })),
+        ...excluded.map((c) => ({ rule: c.id, ...controlRows.get(c.id) })),
         ...[...unlisted]
           .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
           .map(([text, r]) => ({ rule: "unlisted", text, ...r })),
@@ -1049,6 +1056,8 @@ function markdown(result) {
   return [
     `# Shadow gate (taxonomy v${result.version}): ${result.verdict}`,
     "",
+    `Taxonomy ${VERSION_CHANGE}.`,
+    "",
     "| Route pair class | State | Pairs | Sources | Smallest witnesses |",
     "| --- | --- | ---: | ---: | --- |",
     ...result.pairs.filter((r) => r.pairs > 0 || r.state !== "open").map(line),
@@ -1079,7 +1088,7 @@ function markdown(result) {
     `Information (not gated): sources whose core publication differs across the four modes ${t.fourModeDifferences}.`,
     `Open: ${result.open.join(", ") || "none"}. Problems: ${result.problems.length}.`,
     "",
-    `| Left the slice at the demand control (${result.coverage.control}), by exclusion rule or listed decline | Runs | Smallest witnesses |`,
+    `| Left the slice at the demand control (${result.coverage.control}), by exclusion rule or decline | Runs | Smallest witnesses |`,
     "| --- | ---: | --- |",
     ...control.map(
       (r) =>

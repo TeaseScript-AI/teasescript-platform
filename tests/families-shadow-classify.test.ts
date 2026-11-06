@@ -90,7 +90,10 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
   const rerun = witnesses.filter((r) => r.set === "copies");
   // (#1744's presence sources, recorded by shadow.mjs at main 575c699b9; and Sol's traversal control past a function
   // declaration, `return-controlled.json` of the classifier-group preparation, the return statement's witness)
-  const holes = witnesses.filter((r) => r.set === "holes" || r.set === "return-control");
+  // (and v5's: gate run 5's record of a natural decline by the lost-check gate, #1781, at main 830497aaf)
+  const holes = witnesses.filter(
+    (r) => r.set === "holes" || r.set === "return-control" || r.set === "declined",
+  );
   const result = C.classifyRecords(
     entries(research),
     new Set([...research.map((r) => r.key), ...UNAVAILABLE]),
@@ -162,6 +165,8 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
       "excluded/this tag query expression",
       // (v4's: #1775's decline, which no gate source has reached yet)
       "excluded/a typed parse's or load's default that a stop left open",
+      // (v5's: the research's records predate #1781; gate run 5's own record is checked with the presence sources)
+      "declined/lost check",
       "failed/legacy-heap",
       "failed/other",
       "exception",
@@ -598,13 +603,14 @@ test("the control's runs that left the slice are counted by exclusion rule, from
   );
   const table: { rule: string; text?: string; runs: number; witnesses: { key: string }[] }[] =
     result.coverage.controlOutside;
-  // (every rule of the pair classes' exclusions has its row, in their order, zeros included, then each listed decline)
+  // (every class that names a text, declined/lost check and the exclusions, has its row, in their order, zeros included)
   const classes: { id: string }[] = C.PAIR_CLASSES;
-  const rules = classes.map((c) => c.id).filter((id) => id.startsWith("excluded/"));
-  const declined: { id: string; text: string; authority: string }[] = C.CONTROL_DECLINED;
+  const rules = classes
+    .map((c) => c.id)
+    .filter((id) => id.startsWith("excluded/") || id === "declined/lost check");
   assert.deepEqual(
     table.filter((r) => r.rule !== "unlisted").map((r) => r.rule),
-    [...rules, ...declined.map((d) => d.id)],
+    rules,
   );
   const runs = (rule: string) => table.find((r) => r.rule === rule)?.runs;
   assert.equal(runs("excluded/this function declaration"), 1);
@@ -643,7 +649,7 @@ test("the control's runs that left the slice are counted by exclusion rule, from
     );
     assert.equal(ran.status, 0, ran.stderr);
     const json = JSON.parse(readFileSync(join(folder, "out", "gate.json"), "utf8"));
-    assert.equal(json.coverage.controlOutside.length, rules.length + declined.length + 1);
+    assert.equal(json.coverage.controlOutside.length, rules.length + 1);
     const md = readFileSync(join(folder, "out", "gate.md"), "utf8").split("\n");
     const at = md.findIndex((l) => l.startsWith("Coverage ("));
     assert.equal(md[at + 1], "Unlisted control texts: 1.");
@@ -653,7 +659,7 @@ test("the control's runs that left the slice are counted by exclusion rule, from
     ])
       assert.ok(md.includes(row), `${row}\n${md.filter((l) => l.includes("| 1 |")).join("\n")}`);
     assert.equal(
-      md.filter((l) => l.startsWith("| excluded/") && l.endsWith(" | 0 |  |")).length,
+      md.filter((l) => /^\| (excluded\/|declined\/)/.test(l) && l.endsWith(" | 0 |  |")).length,
       rules.length - 2,
     );
   } finally {
@@ -1010,68 +1016,80 @@ test("gate.md keeps a witness's | and line breaks inside their cell", async () =
   void C;
 });
 
-test("a program declined where a stop lost a required check is a listed row of the control's table, #1781's, not an unlisted text", async () => {
+test("taxonomy v5's declined/lost check: a decline by the lost-check gate is its class at the natural allowance and at the control, any other decline text a problem (#1781)", async () => {
   const C = await load();
-  const declined: { id: string; text: string; authority: string }[] = C.CONTROL_DECLINED;
-  assert.deepEqual(
-    declined.map((d) => [d.id, d.authority]),
-    [
-      ["declined: a store whose check was lost at the budget", "#1781"],
-      ["declined: a store whose required checks could not be established at the budget", "#1781"],
+  assert.equal(C.VERSION, 5);
+  const texts = [
+    "a store whose check was lost at the budget",
+    "a store whose required checks could not be established at the budget",
+  ];
+  const at = (text: string | null) => ({
+    outcome: "outside",
+    outside: text,
+    decisionCounts: { ordinary: [], completion: [] },
+  });
+  // (natural: the source-order modes declined, one text each, the reversed ones planned; the control declines them all)
+  const declined = (key: string, natural: (string | null)[]) => ({
+    ...record(key, (i) => (natural[i] ? { core: at(natural[i]), delta: undefined } : {})),
+    demands: [
+      { demand: 16, rows: MODES.map((mode, i) => ({ mode, core: at(texts[i % 2]!) })) },
+      control(64),
     ],
-  );
-  // (both texts at the control, in two modes each; the record's natural runs plan)
-  const texts = [declined[0]!.text, declined[1]!.text, declined[0]!.text, declined[1]!.text];
-  const outside = {
-    demand: 16,
-    rows: control(16).rows.map((row, i) => ({
-      mode: row.mode,
-      core: {
-        outcome: "outside",
-        outside: texts[i],
-        decisionCounts: { ordinary: [], completion: [] },
-      },
-    })),
-  };
-  const left = { ...record("declined", () => ({})), demands: [outside, control(64)] };
-  const result = C.classifyRecords(entries([left]));
-  const table: { rule: string; runs: number; witnesses: { key: string }[] }[] =
-    result.coverage.controlOutside;
+  });
+  const lost = declined("lost", [texts[0]!, texts[1]!, null, null]);
+  const other = declined("other", [
+    "a store whose check was dropped at the budget",
+    null,
+    null,
+    null,
+  ]);
+  const result = C.classifyRecords(entries([lost, other]));
   assert.deepEqual(
-    table
-      .filter((r) => r.rule.startsWith("declined: "))
-      .map((r) => [r.rule, r.runs, r.witnesses[0]?.key]),
-    declined.map((d) => [d.id, 2, "declined"]),
-  );
-  assert.equal(table.filter((r) => r.rule === "unlisted").length, 0);
-  // (information only: the gate's state is the plain record's)
-  const plain = C.classifyRecords(
-    entries([{ ...record("declined", () => ({})), demands: [control(16), control(64)] }]),
+    result.perPair
+      .filter((p: { key: string }) => p.key === "lost")
+      .map((p: { class: string }) => p.class),
+    ["declined/lost check", "declined/lost check", "agree", "agree"],
   );
   assert.deepEqual(
-    [result.coverage.state, result.verdict, result.open],
-    [plain.coverage.state, plain.verdict, plain.open],
+    result.problems.map((p: { problem: string; key: string }) => [p.problem, p.key]),
+    [["unclassified", "other"]],
   );
-  // (published: gate.md says no unlisted text and lists each row)
+  // (its state is accepted: it never opens the gate)
+  const row = result.pairs.find((r: { id: string }) => r.id === "declined/lost check");
+  assert.deepEqual(
+    [row.state, row.pairs, row.sources],
+    ["accepted (condition 1; condition 2 list)", 2, 1],
+  );
+  assert.ok(!result.open.includes("declined/lost check"));
+  // (the control: its row of the table, both records' runs, and no unlisted text)
+  const table: { rule: string; runs: number }[] = result.coverage.controlOutside;
+  assert.deepEqual(
+    table.filter((r) => r.runs > 0).map((r) => [r.rule, r.runs]),
+    [["declined/lost check", 8]],
+  );
+  // (published: gate.md states the version's change, the class's row and no unlisted text)
   const folder = mkdtempSync(join(tmpdir(), "shadow-declined-"));
   try {
-    writeFileSync(join(folder, "declined.jsonl"), `${JSON.stringify(left)}\n`);
+    writeFileSync(join(folder, "lost.jsonl"), `${JSON.stringify(lost)}\n`);
     const ran = spawnSync(
       process.execPath,
-      [tool, join(folder, "declined.jsonl"), "--groups", "none", "--out", join(folder, "out")],
+      [tool, join(folder, "lost.jsonl"), "--groups", "none", "--out", join(folder, "out")],
       { encoding: "utf8" },
     );
     assert.equal(ran.status, 0, ran.stderr);
     const md = readFileSync(join(folder, "out", "gate.md"), "utf8").split("\n");
+    assert.ok(md[0]!.startsWith("# Shadow gate (taxonomy v5): "), md[0]);
+    assert.equal(md[2], `Taxonomy ${C.VERSION_CHANGE}.`);
+    assert.ok(
+      md.some((l) =>
+        l.startsWith("| declined/lost check | accepted (condition 1; condition 2 list) | 2 | 1 | "),
+      ),
+    );
     assert.equal(
       md[md.findIndex((l) => l.startsWith("Coverage (")) + 1],
       "Unlisted control texts: 0.",
     );
-    for (const d of declined)
-      assert.ok(
-        md.some((l) => l.startsWith(`| ${d.id} | 2 | `)),
-        md.filter((l) => l.startsWith("| declined")).join("\n"),
-      );
+    assert.ok(md.some((l) => l.startsWith("| declined/lost check | 4 | ")));
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }
