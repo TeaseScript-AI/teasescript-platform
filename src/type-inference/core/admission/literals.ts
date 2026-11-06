@@ -1,4 +1,4 @@
-import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
+import type { PlaceId, SourceSite } from "../../graph.js";
 import { operandsOf, type Strip } from "../carriers.js";
 import type { Admission } from "../admission.js";
 import type { MixedSteps } from "../result.js";
@@ -1452,15 +1452,16 @@ function mayHoldNull(
     return program.opOf.get(at)?.kind === "fallback"
       ? operandNull(admission, at, from)
       : occurrenceNull(admission, at, from);
-  const term = (path: readonly string[]): TypeTerm | null =>
-    drive(admission, earliestDecider(admission, at, from, path, null))?.term ?? null;
-  const copied = holdsSource(admission, at) ? term(steps) : null;
-  // (a copy's term where the copy decides the layer from above, its parent layer's term too: `b: string?[]` in
-  // `[[1],b]`; one whose own level the layer is, `atom` in `{v:atom}`, as it is read there, narrowed: Codex r1 on #1819)
-  if (copied !== null)
-    return term(keptSlice(admission.work, steps, 0, steps.length - 1)) !== null
-      ? typeTags(copied).includes("null")
-      : occurrenceNull(admission, at, from, steps);
+  const decided = holdsSource(admission, at)
+    ? drive(admission, earliestDecider(admission, at, from, steps, null))
+    : null;
+  // (a copy's term where the deciding copy stands above the layer, which lies below its own level: `b: string?[]` in
+  // `[[1],b]`, `d`'s element in `held = d + [2]`; where the layer is the deciding copy's own level, `atom` in
+  // `{v:atom}`, as it is read there, narrowed: Codex r1 on #1819, #1901)
+  if (decided !== null && decided.term !== null)
+    return decided.own === true
+      ? occurrenceNull(admission, at, from, steps)
+      : typeTags(decided.term).includes("null");
   const key = contract.copiedKey(at) ?? contract.resultKey(at);
   if (key !== null) {
     const path = joinSteps(stepsArray(keyStepsIn(contract, key)), steps);

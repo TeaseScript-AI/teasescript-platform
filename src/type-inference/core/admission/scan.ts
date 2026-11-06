@@ -241,6 +241,8 @@ export function* earliestDecider(
   /** Whether a list join carries the deciding copy (`term`), and whether one of its written operands holds `null`. */
   readonly joined?: boolean;
   readonly joinedNull?: boolean;
+  /** Whether the deciding copy (`term`) stands at the asked path's end: the path is the copy's own level (#1901). */
+  readonly own?: boolean;
 } | null> {
   const { program, values, contract } = admission.pass;
   // (a cursor's span read one step at a time and by its path's id, never made: G3 stage 1)
@@ -263,8 +265,12 @@ export function* earliestDecider(
   const stops = stopsOf(admission, value, node);
   const siteOf = (stop: Stop): SourceSite | null => program.places[stop.value]?.site ?? null;
   // the earliest copy whose written type reaches the rest of the path
-  let copy: { readonly key: EvaluationKey; readonly term: TypeTerm; readonly stop: Stop } | null =
-    null;
+  let copy: {
+    readonly key: EvaluationKey;
+    readonly term: TypeTerm;
+    readonly stop: Stop;
+    readonly length: number;
+  } | null = null;
   // (a list join's written operands by `joinedDomain`, each whatever came before or after it: an open one leaves the
   // value open there, one holding `null` makes it optional, Codex r9's B1 on #1310)
   let joinedNull = false;
@@ -320,14 +326,14 @@ export function* earliestDecider(
       if (domain === "open") return { term, site: siteOf(stop) };
       joinedNull ||= typeTags(term).includes("null");
       if (domain === "kinds" && (copy === null || compareKeys(stop.key, copy.key) < 0))
-        copy = { key: stop.key, term, stop };
+        copy = { key: stop.key, term, stop, length };
     }
     for (const stop of written ?? []) {
       program.work.charge("checks");
       if (copy !== null && compareKeys(stop.key, copy.key) > 0) break;
       if (stop.via?.joined === true) continue;
       const term = yield* termOf(stop, length);
-      if (term !== null) copy = { key: stop.key, term, stop };
+      if (term !== null) copy = { key: stop.key, term, stop, length };
     }
   }
   const copied = () => ({
@@ -335,6 +341,7 @@ export function* earliestDecider(
     site: siteOf(copy!.stop),
     joined: copy!.stop.via?.joined === true,
     joinedNull,
+    own: copy!.length === at.length,
   });
   // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
   const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];

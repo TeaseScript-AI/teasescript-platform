@@ -1107,6 +1107,7 @@ export function* writtenDecider(
   readonly tags?: readonly ItemTag[];
   readonly joined?: boolean;
   readonly joinedNull?: boolean;
+  readonly own?: boolean;
 } | null> {
   const caches = summaryCaches(admission);
   const { program, contract } = admission.pass;
@@ -1369,6 +1370,8 @@ export function* writtenDecider(
       site: siteOf(s.copy.value),
       joined: s.copy.joined,
       joinedNull: s.joinedNull,
+      // (the copy stands at the asked path's end: the path is its own level, as the scan's `own`, #1901)
+      own: s.copy.depth === at.length,
     };
   return s.first === null ? null : { term: null, site: siteOf(s.first.value), tags: s.first.tags };
 }
