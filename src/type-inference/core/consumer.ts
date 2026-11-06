@@ -1294,8 +1294,10 @@ function lostCheck(
  * contract the completion completed that a published check carries at the obligation's path, with the contract's own
  * type there: a typed parse's or load's reader of the value stored (F18), or, where the natural plan does not check the
  * store whole, its part checks there (#1682). Where no result exists, a completion past its allowance or a stop of the
- * analysis, only the complete store check keeps it, or a typed parse's or load's reader where the destination's type is
- * the call's own (a `let` whose whole initializer is the call): there the reader is the natural check. A stricter reader
+ * analysis, three clauses keep it, else it declines: the complete store check; a typed parse's or load's reader where the
+ * destination's type is the call's own (a `let` whose whole initializer is the call), there the natural check; and a
+ * typed call that is the whole value of an element of a stored literal, which keeps the obligation for that element,
+ * where its reader is at least as strict as the contract there (with a result, as everywhere). A stricter reader
  * is never a lost check: it rejects at most what the natural reader rejects, both from the written type. A check against
  * bare `unknown` where the contract owes a domain carries nothing.
  */
@@ -1321,9 +1323,7 @@ function keeps(
     return (
       whole ||
       (store.kind === "letStatement" &&
-        (read.kind === "loadExpression"
-          ? checks.has(read)
-          : read.kind === "callExpression" && core.expected.has(read)))
+        (readerOf(read, checks, core) !== undefined || elementsCarry(read, [], null, checks, core)))
     );
   }
   // (a shape is the suitability the value's own structure proves where it is not lost; a complete result there is the
@@ -1355,13 +1355,11 @@ function keeps(
     const at = type === null || type === undefined ? null : typeAt(type, below);
     return at !== null && narrower(at, contract.ref);
   };
-  const reader =
-    value.kind === "loadExpression"
-      ? checks.get(value)?.type
-      : value.kind === "callExpression"
-        ? core.expected.get(value)
-        : undefined;
-  if (carries(reader)) return true;
+  if (
+    carries(readerOf(value, checks, core)) ||
+    elementsCarry(value, below, contract.ref, checks, core)
+  )
+    return true;
   if (answers.completedCheck(index.site(value))) return false;
   // (the part checks at or below the obligation's path, at least one, each the contract's type there where it has one:
   // a weaker one stands for nothing, #1645's whole object)
@@ -1376,6 +1374,68 @@ function keeps(
       const at = typeAt(contract.ref, steps.slice(below.length));
       return at === null || JSON.stringify(part.type) === JSON.stringify(at);
     })
+  );
+}
+
+/** The type a typed parse or load reads its value as (F18), `undefined` for any other value. */
+function readerOf(
+  value: Expression,
+  checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  core: CoreRuntimeChecks,
+): TypePlan | undefined {
+  return value.kind === "loadExpression"
+    ? checks.get(value)?.type
+    : value.kind === "callExpression"
+      ? core.expected.get(value)
+      : undefined;
+}
+
+/**
+ * Whether a stored literal carries a contract at `below` (property names and `[]` for an element) by its typed calls:
+ * followed through its properties and elements, each a typed parse's or load's whole value whose reader is at least as
+ * strict as the contract there; with no contract (a `let` of its own, whose element types are its calls' own), each a
+ * typed call. The value itself is a literal holding them, never the call alone (`readerOf`'s).
+ */
+function elementsCarry(
+  value: Expression,
+  below: readonly string[],
+  contract: TypePlan | null,
+  checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  core: CoreRuntimeChecks,
+): boolean {
+  const carried = (at: Expression, steps: readonly string[], type: TypePlan | null): boolean => {
+    const node = unwrap(at);
+    if (node.kind === "listLiteral" || node.kind === "setLiteral") {
+      if (node.elements.length === 0) return false;
+      // (below an element step, each element carries the obligation's own contract; at the literal's own level, the
+      // contract's element, any where it leaves the element open)
+      if (steps.length > 0)
+        return (
+          steps[0] === "[]" && node.elements.every((one) => carried(one, steps.slice(1), type))
+        );
+      const element =
+        type === null
+          ? null
+          : type.kind === "list" || type.kind === "set"
+            ? type.element
+            : undefined;
+      return element !== undefined && node.elements.every((one) => carried(one, [], element));
+    }
+    if (node.kind === "objectLiteral") {
+      if (steps.length === 0) return false;
+      const property = node.properties.find((one) => one.name.name === steps[0]);
+      return property !== undefined && carried(property.value, steps.slice(1), type);
+    }
+    const reader = readerOf(node, checks, core);
+    if (reader === undefined) return false;
+    if (type === null) return steps.length === 0;
+    const at2 = typeAt(reader, steps);
+    return at2 !== null && narrower(at2, type);
+  };
+  const root = unwrap(value);
+  return (
+    (root.kind === "listLiteral" || root.kind === "setLiteral" || root.kind === "objectLiteral") &&
+    carried(root, below, contract)
   );
 }
 

@@ -37,6 +37,15 @@ test("over the matrix of destinations, value forms and stops, a stopped plan nev
     if (outcome.kind === "published" && run.stop !== "unsettled program stop")
       assert.equal(outcome.escapes, false, where);
   }
+  // (a typed call that is the whole value of an element of a stored literal keeps the obligation for that element: at
+  // every completed decision stop a literal of a parse publishes, and the escape check above holds it to the natural
+  // plan's `["x"]`, which both replace by the default; capped into a place typed elsewhere it has no result, #1832)
+  const literal = runs.filter(
+    (run) => run.cell.includes("literal of parse") && run.stop === "decision stop, completed",
+  );
+  assert.ok(literal.length > 0);
+  for (const run of literal)
+    assert.equal(run.outcome.kind, "published", `${run.cell} (${run.mode}) ${run.at}`);
   // (every kind of stop is reached, and declined and published runs are both there)
   const kinds = new Set(runs.map((run) => run.stop));
   for (const kind of [
