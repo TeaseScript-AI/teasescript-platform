@@ -312,6 +312,7 @@ function* valueAt(
         kind: "contract",
         file: site.file,
         offset: site.start,
+        // #1668: the demand's own run: its frame's flow, taken as it starts
         make: () => contractOfOp(contract, operation, stepsArray(ref.steps())),
       };
       return contract.entered(value, yield demand);
