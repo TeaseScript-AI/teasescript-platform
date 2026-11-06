@@ -4007,6 +4007,7 @@ test("the check and the baselines take one set of areas: each folder of tests/fa
     };
     const generator = 'export const cases = [["one", "say 1"]];\n';
     write(join(tree, "src", "index.js"), "export {};\n");
+    write(join(tree, ".sha"), `${"0".repeat(40)}\n`);
     write(join(families, "area", "one.mjs"), generator);
     write(join(families, "data", "table.json"), "{}\n");
     write(join(families, "loose.mjs"), "export {};\n");
@@ -4039,6 +4040,7 @@ test("the check and the baselines take one set of areas: each folder of tests/fa
     const state = spawnSync(process.execPath, [baselines, "state", tree, root, "--read-only"], {
       encoding: "utf8",
     });
+    assert.notEqual(state.stdout.trim(), "", state.stderr);
     const areas = state.stdout
       .trim()
       .split("\n")
