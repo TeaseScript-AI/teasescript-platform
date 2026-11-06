@@ -432,11 +432,14 @@ function mixedSentence(
   // the steps to the property that differs, and the collections below it
   const property = path.findLastIndex((step) => step !== "element" && step !== "entry");
   const below = path.slice(property + 1);
-  const nested = (types: readonly ItemTag[]): string => {
+  // (each layer between them optional where it may hold null, #1765: `optional`'s flags for the steps after the first)
+  const nested = (types: readonly ItemTag[], optional: readonly boolean[] = []): string => {
     let written = typeText(types);
-    for (const step of below.toReversed())
+    for (let at = below.length - 1; at >= 0; at -= 1) {
       written =
-        written === null ? null : collectionText(step === "entry" ? "dict" : "list", written);
+        written === null ? null : collectionText(below[at] === "entry" ? "dict" : "list", written);
+      if (written !== null && at > 0 && optional[at - 1] === true) written = `${written}?`;
+    }
     const outer = below[0] === "entry" ? "dict" : "list";
     return below.length === 0 || written === null
       ? described(types)
@@ -452,12 +455,12 @@ function mixedSentence(
       .map(propertyName)
       .join(".");
     return (
-      `${mixes} objects whose property '${name}' holds ${nested(rule.type)} in one and ` +
-      `${nested(kinds)} in another. ${holds} Give '${name}' one type in every ` +
+      `${mixes} objects whose property '${name}' holds ${nested(rule.type, rule.optional?.type)} in one and ` +
+      `${nested(kinds, rule.optional?.kinds)} in another. ${holds} Give '${name}' one type in every ` +
       `${collection === "dict" ? "value" : "element"}.`
     );
   }
-  const first = `${mixes} ${nested(rule.type)} and ${nested(kinds)}. ${holds}`;
+  const first = `${mixes} ${nested(rule.type, rule.optional?.type)} and ${nested(kinds, rule.optional?.kinds)}. ${holds}`;
   if (rule.operator !== undefined) return `${first}${mixedJoinFix(rule, source, diagnosed)}`;
   const both = path.length === 0 ? typeText([...rule.type, ...kinds]) : null;
   if (both === null) return `${first} Use values of one type in it.`;

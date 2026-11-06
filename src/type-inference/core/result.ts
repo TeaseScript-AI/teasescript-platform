@@ -248,6 +248,12 @@ export type DiagnosticRule =
        * (`null` and numbers kept): the type a fix writes; `null` below a property.
        */
       readonly levels?: readonly (readonly ItemTag[])[] | null;
+      /**
+       * Whether each collection layer strictly between the elements (or `path`'s last property) and the leaf may hold
+       * `null`, the earliest element's (`type`) and the other's (`kinds`), outermost first: the sentence's written
+       * types (#1765); absent where none may.
+       */
+      readonly optional?: { readonly type: readonly boolean[]; readonly kinds: readonly boolean[] };
     }
   /**
    * V30 §19: an `askChoice` whose buttons return values of more than one type (the diagnostic's kinds), stored in
