@@ -4,13 +4,16 @@ import { PLAYER } from "../src/speaker-terms.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { captureTemporalContext } from "../src/temporal-capture.js";
 import { actionAwaitsHost } from "../src/runtime/actions/interrupts.js";
-import type {
-  RuntimeCaptureActionSnapshot,
-  RuntimeChatPacingGateActionSnapshot,
-  RuntimeFileStoreActionSnapshot,
-  RuntimeInteractionActionSnapshot,
-  RuntimeLockActionSnapshot,
-  RuntimeStorageWriteActionSnapshot,
+import {
+  interactionDeadlineMs,
+  type RuntimeCaptureActionSnapshot,
+  type RuntimeChatPacingGateActionSnapshot,
+  type RuntimeFileStoreActionSnapshot,
+  type RuntimeForegroundActionSnapshot,
+  type RuntimeInteractionActionSnapshot,
+  type RuntimeLockActionSnapshot,
+  type RuntimeLockChoice,
+  type RuntimeStorageWriteActionSnapshot,
 } from "../src/runtime/actions/model.js";
 import { formSummaryOf, type FormSummaryLine } from "../src/runtime/actions/form.js";
 import {
@@ -38,9 +41,9 @@ import type {
   PlayerTimerPresentation,
   PlayerTranscriptEntryPresentation,
 } from "./model.js";
-import type { InstructionFacts } from "./engine-bridge/instruction-facts.js";
+import type { InstructionFact, InstructionFacts } from "./engine-bridge/instruction-facts.js";
+import type { PlayerCallView, PlayerCriticalState } from "./engine-bridge/session-protocol.js";
 import type { PlayerBridge } from "./player-bridge.js";
-import type { PlayerRuntimeState } from "./runtime-adapter.js";
 
 // What the Player reads from a session's published state, without the engine: the foreground, timers, deadlines,
 // media, buttons and the transcript. These readers run in the main realm; the engine's operations stay in
@@ -57,8 +60,8 @@ export interface PlayerSessionView {
    * only later ones are.
    */
   readonly revision: number;
-  /** What this publication shows; see `PlayerRuntimeState`. */
-  readonly state: PlayerRuntimeState;
+  /** What this publication shows: the critical view, without the active calls (`PlayerCriticalState`). */
+  readonly state: PlayerCriticalState;
   /**
    * The first event sequence this session's own runs emitted: a restored session came with the events before it, as
    * history. `0` for a session that started fresh.
@@ -87,6 +90,8 @@ export interface PlayerSession extends PlayerSessionView {
   readonly planToken: string;
   /** Where in the script each instruction this publication's view names is, by instruction index. */
   readonly instructions: InstructionFacts;
+  /** The active calls while the session's calls are viewed (`demandCallView`), else `null`. */
+  readonly callView: PlayerCallView | null;
   /**
    * What all publications of the session share (its store): while any of them is reachable, the host keeps the
    * session; once none is, the bridge releases it there.
@@ -228,7 +233,7 @@ export function playerRuntimeForeground(
  * show their frozen remaining time.
  */
 export function playerRuntimeTimers(
-  state: PlayerRuntimeState,
+  state: PlayerCriticalState,
   currentSessionTimeMs: number,
 ): readonly PlayerTimerPresentation[] {
   const now = Math.max(state.observedSessionTimeMs, currentSessionTimeMs);
@@ -272,7 +277,7 @@ export function playerRuntimeTimers(
 }
 
 /** Session-time deadlines at which the Player must observe time again: those of the session's timed work. */
-export function playerRuntimeDeadlines(state: PlayerRuntimeState): readonly number[] {
+export function playerRuntimeDeadlines(state: PlayerCriticalState): readonly number[] {
   return timedDeadlines(state, () => true);
 }
 
@@ -313,7 +318,7 @@ export function activePlayerRuntimePacingGate(
 
 /** The pending `takePhoto()` the Player must answer, if any. */
 export function activePlayerRuntimeCapture(
-  state: PlayerRuntimeState,
+  state: PlayerCriticalState,
 ): RuntimeCaptureActionSnapshot | null {
   const action = state.status === "waiting" ? state.foregroundAction : null;
   return action?.kind === "capture" ? action : null;
@@ -321,7 +326,7 @@ export function activePlayerRuntimeCapture(
 
 /** The file store the session waits for, or `null`. */
 export function activePlayerRuntimeFileStore(
-  state: PlayerRuntimeState,
+  state: PlayerCriticalState,
 ): RuntimeFileStoreActionSnapshot | null {
   const action = state.status === "waiting" ? state.foregroundAction : null;
   return action?.kind === "fileStore" ? action : null;
@@ -329,14 +334,14 @@ export function activePlayerRuntimeFileStore(
 
 /** The lock step the session waits for, or `null`; while an expiry block runs, its dialog is not one. */
 export function activePlayerRuntimeLock(
-  state: PlayerRuntimeState,
+  state: PlayerCriticalState,
 ): RuntimeLockActionSnapshot | null {
   const action = state.status === "waiting" ? state.foregroundAction : null;
   return action?.kind === "lock" ? action : null;
 }
 
 /** The questions that can still be answered: the presented one and one that a running block suspended. */
-export function playerRuntimeInteractionActionIds(state: PlayerRuntimeState): readonly number[] {
+export function playerRuntimeInteractionActionIds(state: PlayerCriticalState): readonly number[] {
   return [state.foregroundAction, state.suspendedAction].flatMap((action) =>
     action?.kind === "interaction" ? [action.actionId] : [],
   );
@@ -376,7 +381,7 @@ export function playerRuntimeUrlRequest(
  * is already due, such as one of media that stalled, gives the next whole millisecond, so time moves on. `null` when
  * nothing is scheduled, for example while only player input, loading media, or paused timers remain.
  */
-export function nextPlayerRuntimeEventMs(state: PlayerRuntimeState): number | null {
+export function nextPlayerRuntimeEventMs(state: PlayerCriticalState): number | null {
   const times = timedDeadlines(state, (work) => !work.silent);
   if (state.status !== "failed") {
     for (const action of state.backgroundActions) {
@@ -429,7 +434,7 @@ export function nextPlayerRuntimeCatchUpStepMs(state: RuntimeSessionView): numbe
 
 /** The permanent buttons the session shows, in creation order; a session that has ended or failed shows none. */
 export function playerRuntimePermanentButtons(
-  state: PlayerRuntimeState,
+  state: PlayerCriticalState,
 ): readonly PlayerPermanentButtonPresentation[] {
   if (state.status !== "running" && state.status !== "waiting") return Object.freeze([]);
   return Object.freeze(
@@ -440,12 +445,12 @@ export function playerRuntimePermanentButtons(
 }
 
 /** Where the script shows the camera view now: in the floating window, over the Stage, or not at all (`null`). */
-export function playerRuntimeCameraView(state: PlayerRuntimeState): "window" | "stage" | null {
+export function playerRuntimeCameraView(state: PlayerCriticalState): "window" | "stage" | null {
   return state.cameraView?.shown === true ? state.cameraView.placement : null;
 }
 
 /** The Stage image and active media the Player presents and plays; see `MediaPlaybackProjection`. */
-export function playerRuntimeMedia(state: PlayerRuntimeState): {
+export function playerRuntimeMedia(state: PlayerCriticalState): {
   readonly stage: StageProjection;
   readonly media: readonly MediaPlaybackProjection[];
 } {
@@ -454,7 +459,7 @@ export function playerRuntimeMedia(state: PlayerRuntimeState): {
 
 /** The `save`/`delete` waiting for the host to persist it, if any. */
 export function pendingPlayerRuntimeStorageWrite(
-  state: PlayerRuntimeState,
+  state: PlayerCriticalState,
 ): RuntimeStorageWriteActionSnapshot | null {
   const foreground = state.foregroundAction;
   return foreground?.kind === "storageWrite" ? foreground : null;
@@ -799,9 +804,310 @@ export function playerRuntimeMediaOrigin(
 } | null {
   for (const action of session.state.backgroundActions) {
     if (action.kind !== "media" || action.media.mediaId !== mediaId) continue;
-    const location = session.instructions[action.owningInstruction];
-    if (location === undefined) return null;
-    return Object.freeze({ media: action.media.media, source: action.media.source, location });
+    const fact = session.instructions[action.owningInstruction];
+    if (fact === undefined) return null;
+    return Object.freeze({
+      media: action.media.media,
+      source: action.media.source,
+      location: Object.freeze({ path: fact.path, line: fact.line }),
+    });
   }
   return null;
+}
+
+/** What a Debug countdown counts down to: a `wait`, a `showButton` timeout, or chat pacing. */
+export interface PlayerRuntimeDebugCountdown {
+  readonly kind: "wait" | "button" | "pacing";
+  readonly deadlineMs: number;
+}
+
+/** The fact of instruction `index`, which the view names (`instructionFacts`); a view that lacks it is a fault. */
+function factAt(instructions: InstructionFacts, index: number): InstructionFact {
+  const fact = instructions[index];
+  if (fact === undefined) throw new Error(`The view names no instruction ${index}.`);
+  return fact;
+}
+
+/**
+ * The deadline of the current foreground wait for Player Debug countdowns, from the critical view only: an authored
+ * `wait` (not a blocking `timer`, which lowers to the same delay), a presented `showButton` with a timeout, or a
+ * message's reading time. Suspended actions behind a running block never count; that block's own foreground work
+ * does. A countdown ends only when its action settles or loses the foreground.
+ */
+export function playerRuntimeDebugCountdown(
+  session: Pick<PlayerSession, "state" | "instructions">,
+): PlayerRuntimeDebugCountdown | null {
+  const { state: snapshot } = session;
+  if (snapshot.status !== "running" && snapshot.status !== "waiting") return null;
+  const foreground = snapshot.foregroundAction;
+  let countdown: PlayerRuntimeDebugCountdown | null = null;
+  if (foreground?.kind === "interaction") {
+    const deadlineMs = interactionDeadlineMs(foreground);
+    if (deadlineMs !== null) countdown = { kind: "button", deadlineMs };
+  } else if (foreground?.kind === "delay") {
+    if (factAt(session.instructions, foreground.owningInstruction).kind === "wait")
+      countdown = { kind: "wait", deadlineMs: foreground.deadlineMs };
+  } else if (foreground?.kind === "chatPacingGate") {
+    countdown = { kind: "pacing", deadlineMs: foreground.deadlineMs };
+  }
+  return countdown === null ? null : Object.freeze(countdown);
+}
+
+/** A script position as Player Debug shows it: the file's package path and its one-based line. */
+export interface PlayerDebugSourceLocation {
+  readonly path: string;
+  readonly line: number;
+}
+
+/** What the foreground action waits for, as Player Debug names it. */
+export type PlayerDebugWaitKind =
+  | "wait"
+  | "timer"
+  | "button"
+  | "choice"
+  | "input"
+  | "image"
+  | "popup"
+  | "url"
+  | "export"
+  | "pacing"
+  | "media"
+  | "save"
+  | "photo"
+  | "file"
+  | "lock"
+  | "unlock";
+
+/** One active call, innermost first: a function, a called file, or a timer, media cue or permanent-button block. */
+export interface PlayerDebugCall {
+  readonly kind: "function" | "file" | "timer" | "media" | "button";
+  /** The function or block name, or the called file's path. */
+  readonly name: string;
+  /** Where it was called, or for a block, the position it interrupted. */
+  readonly from: PlayerDebugSourceLocation;
+}
+
+/** One timer of the session, hidden ones included. */
+export interface PlayerDebugTimer {
+  readonly actionId: number;
+  /** A blocking `timer` runs in the foreground; an async timer in the background. */
+  readonly blocking: boolean;
+  readonly display: "hidden" | "visible" | "mystery";
+  readonly label: string | null;
+  readonly repeat: boolean;
+  /** `suspended`: a blocking timer that stands still while a block interrupts it. */
+  readonly state: "running" | "paused" | "suspended";
+  readonly remainingMs: number;
+  readonly startedAt: PlayerDebugSourceLocation;
+}
+
+/** One active audio or video instance, with the statement that started it. */
+export interface PlayerDebugMedia {
+  readonly mediaId: number;
+  readonly media: "audio" | "video";
+  readonly source: string;
+  /** `false` until the Player reported its load. */
+  readonly loaded: boolean;
+  readonly state: "running" | "paused";
+  readonly playheadMs: number;
+  readonly startedAt: PlayerDebugSourceLocation;
+}
+
+/** Player Debug's view of where the session is, derived from a published view; see `playerRuntimeDebugNow`. */
+export interface PlayerRuntimeDebugNow {
+  /** Where execution continues, or `null` once the session ended or failed. */
+  readonly next: PlayerDebugSourceLocation | null;
+  /** The foreground action the script waits for and the statement that requested it. */
+  readonly waitingAt: {
+    readonly kind: PlayerDebugWaitKind;
+    readonly at: PlayerDebugSourceLocation;
+    /**
+     * A lock step's openers, never its text, password, or key: whether its dialog asks the player, whether a password
+     * was written or its password field asks for one, how many public keys an encrypt call has, whether a decrypt call
+     * has a key, its time lock's moment in epoch milliseconds, or `null`, which the lock dialog suggests for a chosen
+     * time lock, and the openers the player chooses in the lock dialog.
+     */
+    readonly lock?: {
+      readonly dialog: boolean;
+      readonly password: boolean;
+      readonly publicKeys: number;
+      readonly key: boolean;
+      readonly timeLockMs: number | null;
+      readonly choices: readonly RuntimeLockChoice[];
+    };
+  } | null;
+  readonly calls: readonly PlayerDebugCall[];
+  readonly timers: readonly PlayerDebugTimer[];
+  readonly media: readonly PlayerDebugMedia[];
+}
+
+function debugLocation(fact: InstructionFact, line = fact.line): PlayerDebugSourceLocation {
+  return Object.freeze({ path: fact.path, line });
+}
+
+function debugWaitKind(
+  instructions: InstructionFacts,
+  action: RuntimeForegroundActionSnapshot,
+): PlayerDebugWaitKind {
+  switch (action.kind) {
+    case "delay":
+      return factAt(instructions, action.owningInstruction).kind === "wait" ? "wait" : "timer";
+    case "interaction":
+      return action.interactionKind === "button" ||
+        action.interactionKind === "choice" ||
+        action.interactionKind === "image" ||
+        action.interactionKind === "popup" ||
+        action.interactionKind === "url" ||
+        action.interactionKind === "export"
+        ? action.interactionKind
+        : "input";
+    case "chatPacingGate":
+      return "pacing";
+    case "mediaPlayback":
+      return "media";
+    case "storageWrite":
+      return "save";
+    case "capture":
+      return "photo";
+    case "fileStore":
+      return "file";
+    case "lock":
+      return action.call === "encryptText" || action.call === "encryptFile" ? "lock" : "unlock";
+  }
+}
+
+/**
+ * The active calls, innermost first, also of a failed session, where they are the calls the error happened in, or
+ * `null` while the view has no call view (`callView`). Work is proportional to the call depth.
+ */
+export function playerRuntimeCalls(
+  session: Pick<PlayerSession, "state" | "instructions" | "callView">,
+): readonly PlayerDebugCall[] | null {
+  const { instructions, state: snapshot, callView } = session;
+  if (callView === null) return null;
+  // Each frame runs in the file that the next inner frame was called from, the innermost in the next statement's file.
+  const calls: PlayerDebugCall[] = [];
+  let runningIn = factAt(instructions, snapshot.nextInstruction).path;
+  for (const call of [...callView.calls].reverse()) {
+    const returnFact = factAt(instructions, call.returnInstruction);
+    const from =
+      call.interruption === null
+        ? debugLocation(returnFact, call.callSiteSpan.start.line + 1)
+        : debugLocation(returnFact);
+    calls.push(
+      Object.freeze({
+        kind: call.kind === "file" ? "file" : (call.interruption ?? "function"),
+        name: call.kind === "file" ? runningIn : call.functionName,
+        from,
+      }),
+    );
+    runningIn = from.path;
+  }
+  return Object.freeze(calls);
+}
+
+/**
+ * Where the session is, for Player Debug's Now view at display scene time `nowMs`: the next statement, the statement
+ * whose foreground action it waits for, the active calls, every timer, hidden ones included, and the active media, or
+ * `null` while the view has no call view (`callView`). Paths are package paths, relative to the folder of the entry
+ * script. Read-only, from the published view alone; its result shares nothing with the view.
+ */
+export function playerRuntimeDebugNow(
+  session: Pick<PlayerSession, "state" | "instructions" | "callView">,
+  nowMs: number,
+): PlayerRuntimeDebugNow | null {
+  const { instructions, state: snapshot } = session;
+  const calls = playerRuntimeCalls(session);
+  if (calls === null) return null;
+  const now = Math.max(snapshot.observedSessionTimeMs, nowMs);
+  const active = snapshot.status === "running" || snapshot.status === "waiting";
+  const foreground = snapshot.foregroundAction;
+
+  const timers: PlayerDebugTimer[] = [];
+  const delays = [
+    ...(foreground === null ? [] : [{ action: foreground, suspended: false }]),
+    ...(snapshot.suspendedAction === null
+      ? []
+      : [{ action: snapshot.suspendedAction, suspended: true }]),
+  ];
+  for (const { action, suspended } of delays) {
+    if (action.kind !== "delay" || debugWaitKind(instructions, action) !== "timer") continue;
+    timers.push({
+      actionId: action.actionId,
+      blocking: true,
+      display: action.display,
+      label: action.label,
+      repeat: false,
+      state: suspended ? "suspended" : "running",
+      remainingMs: Math.max(
+        0,
+        action.deadlineMs - (suspended ? (snapshot.suspendedAtMs ?? now) : now),
+      ),
+      startedAt: debugLocation(factAt(instructions, action.owningInstruction)),
+    });
+  }
+  for (const action of snapshot.backgroundActions) {
+    if (action.kind !== "timer") continue;
+    const timer = action.timer;
+    timers.push({
+      actionId: action.actionId,
+      blocking: false,
+      display: timer.display,
+      label: timer.label,
+      repeat: timer.repeat,
+      state: timer.deadlineMs === null ? "paused" : "running",
+      remainingMs:
+        timer.deadlineMs === null ? (timer.remainingMs ?? 0) : Math.max(0, timer.deadlineMs - now),
+      startedAt: debugLocation(factAt(instructions, action.owningInstruction)),
+    });
+  }
+
+  const mediaOwners = new Map<number, number>();
+  for (const action of snapshot.backgroundActions)
+    if (action.kind === "media") mediaOwners.set(action.media.mediaId, action.owningInstruction);
+  const media = snapshot.media.map((projection) =>
+    Object.freeze({
+      mediaId: projection.mediaId,
+      media: projection.media,
+      source: projection.source,
+      loaded: projection.loaded,
+      state: projection.state,
+      playheadMs: projection.playheadMs,
+      startedAt: debugLocation(factAt(instructions, mediaOwners.get(projection.mediaId)!)),
+    }),
+  );
+
+  return Object.freeze({
+    next: active ? debugLocation(factAt(instructions, snapshot.nextInstruction)) : null,
+    waitingAt:
+      active && foreground !== null
+        ? Object.freeze({
+            kind: debugWaitKind(instructions, foreground),
+            at: debugLocation(factAt(instructions, foreground.owningInstruction)),
+            ...(foreground.kind === "lock"
+              ? {
+                  // The password field of `password: askPassword(...)` is a password opener, not the dialog.
+                  lock: Object.freeze({
+                    dialog:
+                      foreground.phase === "ask" &&
+                      (foreground.passwordField === null || foreground.choices.length > 0),
+                    password: foreground.password !== null || foreground.passwordField !== null,
+                    publicKeys: foreground.publicKeys.length,
+                    key: foreground.key !== null,
+                    timeLockMs: foreground.timeLockMs,
+                    // A copy: the result shares nothing with the view.
+                    choices: Object.freeze([...foreground.choices]),
+                  }),
+                }
+              : {}),
+          })
+        : null,
+    calls: active ? calls : Object.freeze([]),
+    timers: Object.freeze(
+      active
+        ? timers.sort((left, right) => left.actionId - right.actionId).map((t) => Object.freeze(t))
+        : [],
+    ),
+    media: Object.freeze(active ? media : []),
+  });
 }

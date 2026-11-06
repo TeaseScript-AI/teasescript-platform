@@ -18,6 +18,7 @@ import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
+import { published } from "./helpers/debug-readers.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { answerWith, type Intent } from "./helpers/player-input.js";
 import { loadHostFacade, onHostAll } from "./helpers/host-sessions.js";
@@ -38,6 +39,7 @@ interface StopHost {
   };
   reportHostError(error: unknown): void;
   observe(): PlayerRuntimeSession | null;
+  demandCallView(): { release(): void };
   pressPermanentButton(buttonId: number): Promise<void>;
   editSavedData(edit: {
     readonly key: string;
@@ -267,6 +269,55 @@ test("a Player error stops the session where it stands, and late writes do not c
   await settle();
   assert.deepEqual(said(host), []);
   assert.ok(host.session.value && view.pendingPlayerRuntimeStorageWrite(host.session.value.state));
+});
+
+test("a session a Player error stopped shows its calls without a demand, which asks the stopped session nothing", async (context) => {
+  stubBrowser(context);
+  const host = mount(context, () =>
+    usePlayerSession({
+      scriptStorage: {
+        scope: "test",
+        load: async () => [],
+        write: async () => {},
+        replace: async () => {},
+        clear: async () => {},
+      },
+      capabilities: { camera: false },
+    }),
+  );
+  await host.loadScriptStorage();
+  host.prepare(() =>
+    runtime.createPlayerRuntimeSession(
+      'function inner {\n  wait 5 s\n}\ninner()\nsay "after", instant\nexit',
+    ),
+  );
+  await host.activate();
+  const shown = () => published(host.session.value);
+  assert.equal(shown().callView, null, "nothing asked for the calls");
+  const bridge = shown().connection;
+  let asked = 0;
+  const viewCalls = bridge.viewCalls.bind(bridge);
+  bridge.viewCalls = (session, on) => {
+    asked += 1;
+    return viewCalls(session, on);
+  };
+  const before = shown();
+  host.reportHostError(new TypeError("A component failed."));
+  await settle();
+  // The stop's acknowledgement froze the session with its calls; what it shows is unchanged.
+  const stopped = shown();
+  assert.equal(stopped.revision, before.revision);
+  assert.deepEqual(stopped.state, before.state);
+  assert.deepEqual(
+    view.playerRuntimeCalls(stopped)?.map((call) => call.name),
+    ["inner"],
+  );
+  // Debug's Now view, opened only now, asks the stopped session for nothing.
+  const demand = host.demandCallView();
+  await settle();
+  demand.release();
+  await settle();
+  assert.equal(asked, 0);
 });
 
 test("input admitted just before a Player error does not run after it", async (context) => {

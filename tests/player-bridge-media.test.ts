@@ -24,6 +24,7 @@ import {
 import type { MediaReportOutcome } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
+import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";
 import { hatch, inProcessBridge } from "./helpers/in-process-bridge.js";
 
 /*
@@ -88,11 +89,14 @@ async function prepared(bridge: PlayerBridge): Promise<{ token: string; metadata
   return { token: result.plan, metadata: result.metadata };
 }
 
+/** Whether the tape views the session's calls (L5f): what it shows then holds what Debug's readers give (`viewed`). */
+let viewing = false;
+
 /** What a session shows, comparable across backends, with the readers over it. */
 const shown = (session: PlayerSession) => ({
   revision: session.revision,
   state: session.state,
-  instructions: session.instructions,
+  ...(viewing ? { viewed: viewed(session) } : { instructions: session.instructions }),
   events: [...session.events],
   media: playerRuntimeMedia(session.state),
   camera: playerRuntimeCameraView(session.state),
@@ -154,9 +158,14 @@ async function play(
 }
 
 /** A tape of L5d's ops: refusals without effect, then the script played to its end. */
-async function tape(bridge: PlayerBridge): Promise<{ steps: unknown[]; last: PlayerSession }> {
+async function tape(
+  bridge: PlayerBridge,
+  calls = false,
+): Promise<{ steps: unknown[]; last: PlayerSession }> {
   const { token, metadata } = await prepared(bridge);
   let session = await bridge.start(token, START, false);
+  viewing = calls;
+  if (calls) session = await viewCalls(bridge, session, true);
   const steps: unknown[] = [shown(session), metadata];
   // `planMetadata` gives what `prepare` gave; a token the host does not hold gives null.
   steps.push((await bridge.client.request("planMetadata", { plan: token })).result);
@@ -187,6 +196,7 @@ async function tape(bridge: PlayerBridge): Promise<{ steps: unknown[]; last: Pla
     report: loaded,
   });
   steps.push({ op: "reportMediaLoad", result, shown: shown(bridge.latest(session)!) });
+  viewing = false;
   return { steps, last: bridge.latest(session)! };
 }
 
@@ -198,6 +208,10 @@ test("L5d's ops give the same replies, views, origins and events in-process and 
   try {
     const played = await tape(inProcess);
     assert.deepEqual((await tape(worker)).steps, played.steps);
+    // With the call view (L5f) the critical view is the same, and the full view equal across the backends.
+    const full = await tape(await inProcessBridge(), true);
+    assert.deepEqual((await tape(worker, true)).steps, full.steps);
+    assert.deepEqual(withoutViews(full.steps), withoutViews(played.steps, ["instructions"]));
     // The refusals came first, then the media's own reports.
     const outcomes = played.steps.flatMap((step) => {
       const outcome =
@@ -283,9 +297,9 @@ test("instruction facts are made once per instruction of a plan, however often i
   const { token } = await prepared(bridge);
   const session = await bridge.start(token, START, false);
   // The facts of one publication are the same objects in the next: read from the plan's cache, not made again.
-  const first = hatch(session, (held) => instructionFacts(held));
+  const first = hatch(session, (held) => instructionFacts(held, false));
   const later = await play(bridge, session, [], 2);
-  const again = hatch(later, (held) => instructionFacts(held));
+  const again = hatch(later, (held) => instructionFacts(held, false));
   for (const index of Object.keys(first).map(Number))
     if (index in again) assert.equal(again[index], first[index]);
   assert.ok(Object.keys(first).length > 0);

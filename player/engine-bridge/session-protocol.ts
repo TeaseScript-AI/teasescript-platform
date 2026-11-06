@@ -1,4 +1,5 @@
 import type { InterpreterEvent } from "../../src/runtime/events.js";
+import type { RuntimeSessionCall } from "../../src/runtime/session.js";
 import type { InstructionFacts } from "./instruction-facts.js";
 import type { PlanMetadata } from "./player-ops.js";
 import type { PlayerRuntimeState } from "../runtime-adapter.js";
@@ -9,18 +10,41 @@ import type { PlayerRuntimeState } from "../runtime-adapter.js";
  * after that cursor, so the main side's store applies them contiguously; a publication's identity is its revision.
  */
 
+/**
+ * What every publication shows (the critical view): the session's state without its active calls, which only Debug's
+ * Now view and the error dialog read, and which a recursive script makes up to 1024 frames long.
+ */
+export type PlayerCriticalState = Omit<PlayerRuntimeState, "calls">;
+
+/** The full view's addition to the critical one: the active calls, while the main side asks for them (`viewCalls`). */
+export interface PlayerCallView {
+  readonly calls: readonly RuntimeSessionCall[];
+}
+
+/**
+ * The call view of a session's latest publication, as `viewCalls` answers it and `halt`'s acknowledgement carries it:
+ * the main side merges it into the publication of the same revision, never into another.
+ */
+export interface CallViewReply {
+  readonly revision: number;
+  readonly instructions: InstructionFacts;
+  readonly callView: PlayerCallView | null;
+}
+
 /** One publication of a session: its state, its revision, and its events after the cursor `from`. */
 export interface Publication {
   readonly revision: number;
-  readonly state: PlayerRuntimeState;
+  readonly state: PlayerCriticalState;
   /** The cursor before this publication: how many of the session's events were handed out before. */
   readonly from: number;
   /** The cursor after it. */
   readonly eventsThrough: number;
   /** The session's events in `(from, eventsThrough]`, in order. */
   readonly events: readonly InterpreterEvent[];
-  /** Where in the script each instruction the view names is, by instruction index: those owning its media. */
+  /** Where in the script each instruction the view names is, by instruction index (`instructionFacts`). */
   readonly instructions: InstructionFacts;
+  /** The active calls while the session's calls are viewed (`viewCalls`), else `null`. */
+  readonly callView: PlayerCallView | null;
 }
 
 /** The first publication of a session the host now holds, from cursor 0, with what stays fixed for its lifetime. */

@@ -21,7 +21,12 @@ export interface HostSession {
   accepts(basis: number | null): boolean;
   /** The session's revision now. */
   readonly revision: number;
+  /** What `halt`'s acknowledgement carries for the session, when its kind of session gives anything. */
+  atStop?(): StopPayload;
 }
+
+/** What a session's stop acknowledgement carries: its kind of session defines it, and that kind's client reads it. */
+export type StopPayload = OpOutcome["result"];
 
 /** What an op returns: its result, and for a session op the session's revision and view after it. */
 export interface OpOutcome {
@@ -309,10 +314,23 @@ export function startBridgeHost(
    * Halts the session on receipt: every request of it the host has not dispatched is refused from now on. The
    * acknowledgement follows every reply to an op of the session that ran, so it waits for one still awaited.
    */
+  /**
+   * What the stop of session `id` froze, read once its last op ran (the Player's: the stopped publication's call view).
+   * A fault reading it still acknowledges the stop, without it.
+   */
+  function stopPayload(id: string): StopPayload {
+    try {
+      return held.get(id)?.atStop?.() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   function halt(request: BridgeRequest): void {
     const acknowledge = () => {
+      const result = stopPayload(request.session!);
       try {
-        reply(request, { ok: true, revision: null, eventsThrough: null, result: null, view: null });
+        reply(request, { ok: true, revision: null, eventsThrough: null, result, view: null });
       } catch {
         // As in `drain`: a fault posting the reply stops nothing.
       }

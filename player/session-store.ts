@@ -1,5 +1,5 @@
 import type { InterpreterEvent } from "../src/runtime/events.js";
-import type { Introduction, Publication } from "./engine-bridge/session-protocol.js";
+import type { CallViewReply, Introduction, Publication } from "./engine-bridge/session-protocol.js";
 import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "./model.js";
 import type { PlayerBridge } from "./player-bridge.js";
 import { appendTranscript, DEFAULT_SPEAKERS, type PlayerSession } from "./runtime-view.js";
@@ -57,9 +57,29 @@ export class SessionStore {
     if (this.#phase === "live") this.#phase = "stopping";
   }
 
-  /** Applies nothing more: what is shown is what the host ran before the stop. */
-  freeze(): void {
+  /**
+   * Applies nothing more: what is shown is what the host ran before the stop, with the call view `final` of the
+   * acknowledgement when it is of that publication (`mergeCallView`).
+   */
+  freeze(final: CallViewReply | null = null): void {
+    if (this.#phase === "frozen") return;
+    if (final !== null) this.mergeCallView(final);
     this.#phase = "frozen";
+  }
+
+  /**
+   * Merges `reply` into the store's publication of the same revision, as a new session of that revision with its
+   * instruction facts and call view: its state, events and transcript are the publication's. A reply of another
+   * revision is dropped, and so is any reply once the store froze. Returns the merged session, or `null`.
+   */
+  mergeCallView(reply: CallViewReply): PlayerSession | null {
+    if (this.halted || reply.revision !== this.#session.revision) return null;
+    this.#session = Object.freeze({
+      ...this.#session,
+      instructions: reply.instructions,
+      callView: reply.callView,
+    });
+    return this.#session;
   }
 
   /**
@@ -93,6 +113,7 @@ export class SessionStore {
       revision: view.revision,
       state: Object.freeze(view.state),
       instructions: view.instructions,
+      callView: view.callView,
       liveEventSequence: this.#liveEventSequence,
       events: this.#events,
       transcriptEntries: this.#entries,

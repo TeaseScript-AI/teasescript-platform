@@ -40,6 +40,7 @@ import {
 } from "../player/runtime-view.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
+import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
 /*
@@ -181,10 +182,15 @@ async function prepared(bridge: PlayerBridge): Promise<string> {
   return result.kind === "prepared" ? result.plan : "";
 }
 
-/** The tape through `bridge`: each step's op, outcome, and the session it shows after it. */
-async function playTape(bridge: PlayerBridge, recording = false) {
+/**
+ * The tape through `bridge`: each step's op, outcome, and the session it shows after it, with what Debug's readers give
+ * for it (`viewed`), with the call view on (`calls`) or off.
+ */
+async function playTape(bridge: PlayerBridge, recording = false, calls = false) {
   let session: PlayerSession = await bridge.start(await prepared(bridge), START, recording);
-  const steps: unknown[] = [shown(session)];
+  if (calls) session = await viewCalls(bridge, session, true);
+  const seen = (current: PlayerSession) => ({ ...shown(current), viewed: viewed(current) });
+  const steps: unknown[] = [seen(session)];
   for (const [name, step] of TAPE) {
     const sent = step(session);
     assert.ok(sent, name);
@@ -194,7 +200,7 @@ async function playTape(bridge: PlayerBridge, recording = false) {
       sent.args,
     );
     session = bridge.latest(session)!;
-    steps.push({ name, op: sent.op, outcome, session: shown(session) });
+    steps.push({ name, op: sent.op, outcome, session: seen(session) });
   }
   return { steps, session };
 }
@@ -205,6 +211,10 @@ test("L5c's ops give the same replies, publications and events in-process and in
     const local = await playTape(await inProcessBridge());
     const remote = await playTape(worker);
     assert.deepEqual(remote.steps, local.steps);
+    // With the call view (L5f) the critical view is the same, and the full view equal across the backends.
+    const full = await playTape(await inProcessBridge(), false, true);
+    assert.deepEqual((await playTape(worker, false, true)).steps, full.steps);
+    assert.deepEqual(withoutViews(full.steps), withoutViews(local.steps));
     // Every input of the tape answered, so the session ran to its end.
     assert.deepEqual(
       local.steps.slice(1).map((step) => {
@@ -322,10 +332,12 @@ test("L5c's ops give what today's adapter calls give, and the recording keeps ho
     const sent = step(session)!;
     const result = direct(session, sent.op, sent.args);
     if (result !== null) session = result.session;
+    // A publication carries the critical view: the state without its active calls (L5f).
+    const { calls: _calls, ...critical } = session.state;
     steps.push({
       name,
       outcome: result?.outcome ?? null,
-      state: session.state,
+      state: critical,
       events: [...session.events],
     });
   }

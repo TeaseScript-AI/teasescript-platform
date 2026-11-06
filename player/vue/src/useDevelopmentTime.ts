@@ -1,6 +1,6 @@
 import { computed, ref, watch } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
-import type { PlayerRuntimeState } from "../../runtime-adapter.js";
+import type { PlayerCriticalState } from "../../engine-bridge/session-protocol.js";
 import { bridgeOf } from "../../player-bridge.js";
 import {
   activePlayerRuntimeInteraction,
@@ -191,12 +191,12 @@ export function useDevelopmentTime(
 
 export type DevelopmentTime = ReturnType<typeof useDevelopmentTime>;
 
-function skippable(state: PlayerRuntimeState): boolean {
+function skippable(state: PlayerCriticalState): boolean {
   return !playerRuntimeAwaitsHost(state) && nextPlayerRuntimeEventMs(state) !== null;
 }
 
 /** Auto-skip leaves input to the player and does not run ahead of a load result, which decides what happens next. */
-function autoSkippable(state: PlayerRuntimeState): boolean {
+function autoSkippable(state: PlayerCriticalState): boolean {
   return (
     skippable(state) &&
     activePlayerRuntimeInteraction(state) === null &&

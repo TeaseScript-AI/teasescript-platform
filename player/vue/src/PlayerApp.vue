@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { hatch } from "../../engine-bridge/in-process.js";
-import { computed, nextTick, onErrorCaptured, provide, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onErrorCaptured, provide, ref, watch } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import { Bug, SquareSplitHorizontal } from "@lucide/vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
@@ -35,7 +34,7 @@ import { isRemovedEntry } from "./transcriptPresentation";
 import { explainValues } from "./explainValues";
 import { usePlayerDebug } from "./usePlayerDebug";
 import { debugStageImage } from "./debugStageImage";
-import { playerRuntimeCalls, playerRuntimeDebugNow } from "../../runtime-adapter.js";
+import { playerRuntimeCalls } from "../../runtime-view.js";
 import DebugExportDialog from "./DebugExportDialog.vue";
 import RuntimeFailure from "./RuntimeFailure.vue";
 import SessionEndDialog from "./SessionEndDialog.vue";
@@ -217,11 +216,11 @@ const debugExport = useDebugExport(
           overridden: props.media !== undefined,
         }),
       ),
-      media: (session.value === null
+      // The active media, as Debug's Now view lists them, from the critical view.
+      media: (session.value === null ||
+      (session.value.state.status !== "running" && session.value.state.status !== "waiting")
         ? []
-        : hatch(session.value, (held) =>
-            playerRuntimeDebugNow(held, props.player.sceneTimeMs.value),
-          ).media
+        : session.value.state.media
       ).map(({ mediaId, media, loaded, state, source }) => ({
         mediaId,
         media,
@@ -323,11 +322,24 @@ watch(
       );
   },
 );
-// The calls a script error happened in, for the error dialog while it is open.
+// The calls a script error happened in, for the error dialog while it is open with a failure: its session's call view,
+// which the stop froze with it, or the shown session's from the first publication with it on.
+const failureShown = computed(() => errorDialogOpen.value && !!session.value?.state.failure);
+let failureCallView: { release(): void } | null = null;
+watch(
+  failureShown,
+  (shown) => {
+    if (shown) failureCallView ??= props.player.demandCallView();
+    else {
+      failureCallView?.release();
+      failureCallView = null;
+    }
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => failureCallView?.release());
 const failureCalls = computed(() =>
-  errorDialogOpen.value && session.value?.state.failure
-    ? hatch(session.value, playerRuntimeCalls)
-    : [],
+  failureShown.value && session.value ? (playerRuntimeCalls(session.value) ?? []) : [],
 );
 // Open in Debug shows the Debug panel's Now tab, which names the error and its statement, and focuses the tab.
 async function openFailureInDebug() {

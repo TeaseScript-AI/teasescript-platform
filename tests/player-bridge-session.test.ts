@@ -21,6 +21,7 @@ import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoin
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
+import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
 
 /*
@@ -66,15 +67,20 @@ const shown = (session: PlayerSession) => ({
   transcript: session.transcriptEntries.map((entry) => entry.text),
 });
 
-/** A tape of L5b's ops on one session, each step's result and the session it shows after it. */
-async function playTape(bridge: PlayerBridge): Promise<unknown[]> {
+/**
+ * A tape of L5b's ops on one session, each step's result and the session it shows after it, with what Debug's readers
+ * give for it (`viewed`), with the call view on (`calls`) or off.
+ */
+async function playTape(bridge: PlayerBridge, calls = false): Promise<unknown[]> {
   const plan = await prepared(bridge, SCRIPT);
   let session = await bridge.start(plan, { wallClockMs: 0, temporalContext: TEMPORAL }, false);
-  const steps: unknown[] = [shown(session)];
+  if (calls) session = await viewCalls(bridge, session, true);
+  const seen = (current: PlayerSession) => ({ ...shown(current), viewed: viewed(current) });
+  const steps: unknown[] = [seen(session)];
   const send = async (op: string, args: unknown) => {
     const result = await bridge.request(session, op, args);
     session = bridge.latest(session)!;
-    steps.push({ op, result, session: shown(session) });
+    steps.push({ op, result, session: seen(session) });
   };
   // A pacing skip for an action the session does not present changes nothing.
   await send("skipPacing", { actionId: -1 });
@@ -94,7 +100,7 @@ async function playTape(bridge: PlayerBridge): Promise<unknown[]> {
     bridge.request(session, "observeTime", { atMs: 9_600, media: [] }, { basis: 1 }),
     (error: unknown) => error instanceof BridgeRequestError && error.code === "basis",
   );
-  steps.push(shown(bridge.latest(session)!));
+  steps.push(seen(bridge.latest(session)!));
   return steps;
 }
 
@@ -102,7 +108,12 @@ test("L5b's ops give the same replies, publications and events in-process and in
   const inProcess = await inProcessBridge();
   const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
   try {
-    assert.deepEqual(await playTape(worker), await playTape(inProcess));
+    const critical = await playTape(inProcess);
+    assert.deepEqual(await playTape(worker), critical);
+    // With the call view (L5f) the critical view is the same, and the full view equal across the backends.
+    const full = await playTape(inProcess, true);
+    assert.deepEqual(await playTape(worker, true), full);
+    assert.deepEqual(withoutViews(full), withoutViews(critical));
   } finally {
     worker.client.terminate();
   }
@@ -152,6 +163,7 @@ test("a store applies publications by revision and requires their events to cont
     eventsThrough: 0,
     events: [],
     instructions: {},
+    callView: null,
     planToken: plan,
     metadata: null,
     liveEventSequence: 0,
@@ -163,6 +175,7 @@ test("a store applies publications by revision and requires their events to cont
     eventsThrough,
     events: [],
     instructions: {},
+    callView: null,
   });
   // An eventless publication still applies: its revision is new.
   assert.equal(store.apply(publication(2, 0, 0)), true);

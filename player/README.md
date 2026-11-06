@@ -157,7 +157,9 @@ Auto-skip and the jumps open from their labels. While Debug runs, `playerRuntime
 wait that the countdown line under the foreground controls shows, and the scene clock refreshes its display estimate
 for it. The **Now** tab (`DebugNow.vue`) combines `playerRuntimeDebugNow` (next statement, waiting statement, calls,
 timers, and media with their start statements) with the Stage's load reports for its current image element
-(`stageImageObservation`, judged by `debugStageImageStatus`); it adds nothing to the session. Automation finds the
+(`stageImageObservation`, judged by `debugStageImageStatus`); it adds nothing to the session. Its readers read only the
+published view: while the tab or the error dialog's call chain shows, the session's publications carry its active calls
+(`demandCallView`), from the first one after it opens; a session a Player error stopped carries them already. Automation finds the
 controls by role and name (the `Debug menu` switch in Player Settings, the Debug launcher,
 the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` buttons) or by
 `[data-player-setting="debug-menu"]`, `[data-debug-active]` and `data-development-time-action` (`skip`, `advance-10s`,

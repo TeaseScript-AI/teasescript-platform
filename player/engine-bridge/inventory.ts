@@ -14,7 +14,7 @@ export type BridgeFamily =
   "L5b" | "L5c" | "L5d" | "L5e" | "L5f" | "L5g" | "L5h" | "L5i" | "activation";
 
 /** Families whose PRs have landed: none of their entries may remain in `RATCHET`. */
-export const COMPLETED_FAMILIES: readonly BridgeFamily[] = ["L5b", "L5c", "L5d", "L5e"];
+export const COMPLETED_FAMILIES: readonly BridgeFamily[] = ["L5b", "L5c", "L5d", "L5e", "L5f"];
 
 /** The `src/` modules the main realm may load, grouped by why. */
 export const ALLOWED_SOURCE: readonly {
@@ -149,49 +149,6 @@ export interface RatchetEntry {
 }
 
 export const RATCHET: readonly RatchetEntry[] = [
-  // L5f
-  {
-    importer: "player/vue/src/DebugNow.vue",
-    target: "player/engine-bridge/in-process.ts",
-    name: "hatch",
-    family: "L5f",
-  },
-  {
-    importer: "player/vue/src/DebugNow.vue",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeDebugNow",
-    family: "L5f",
-  },
-  {
-    importer: "player/vue/src/PlayerApp.vue",
-    target: "player/engine-bridge/in-process.ts",
-    name: "hatch",
-    family: "L5f",
-  },
-  {
-    importer: "player/vue/src/PlayerApp.vue",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeCalls",
-    family: "L5f",
-  },
-  {
-    importer: "player/vue/src/PlayerApp.vue",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeDebugNow",
-    family: "L5f",
-  },
-  {
-    importer: "player/vue/src/usePlayerDebug.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "hatch",
-    family: "L5f",
-  },
-  {
-    importer: "player/vue/src/usePlayerDebug.ts",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeDebugCountdown",
-    family: "L5f",
-  },
   // L5h
   {
     importer: "player/debug-history.ts",
@@ -520,9 +477,6 @@ export const ADAPTER_EXPORTS: Readonly<
   restorePlayerRuntimeSessionAt: { kind: "op", family: "L5i" },
   withPlayerRuntimeDebugTrace: { kind: "op", family: "L5i" },
   answeredByPlayerInput: { kind: "op", family: "L5c" },
-  playerRuntimeDebugCountdown: { kind: "planReader", family: "L5f" },
-  playerRuntimeCalls: { kind: "planReader", family: "L5f" },
-  playerRuntimeDebugNow: { kind: "planReader", family: "L5f" },
   answerPlayerRuntimeCapture: { kind: "op", family: "L5e" },
   answerPlayerRuntimeFileStore: { kind: "op", family: "L5e" },
   answerPlayerRuntimeLock: { kind: "op", family: "L5e" },
@@ -582,6 +536,9 @@ export const VIEW_READERS: readonly string[] = [
   "playerRuntimeCameraView",
   "playerRuntimeMedia",
   "playerRuntimeMediaOrigin",
+  "playerRuntimeDebugCountdown",
+  "playerRuntimeCalls",
+  "playerRuntimeDebugNow",
   "pendingPlayerRuntimeStorageWrite",
   "playerRuntimeTranscriptEventSequence",
   "playerRuntimeTranscript",

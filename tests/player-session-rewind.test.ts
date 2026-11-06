@@ -12,11 +12,12 @@ import {
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { playerRuntimeForeground } from "../player/runtime-view.js";
+import { playerRuntimeForeground, type PlayerSession } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import { memoryKeptRoomStore, type KeptRoomStore } from "../player/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
+import { published } from "./helpers/debug-readers.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
 
@@ -78,6 +79,7 @@ interface RewindHost {
     expected: SerializableRuntimeValue | undefined;
   }): Promise<{ readonly kind: string }>;
   observe(): PlayerRuntimeSession | null;
+  demandCallView(): { release(): void };
   debugRecording(): {
     readonly anchorSnapshot: RuntimeSnapshot;
     readonly endSnapshot: RuntimeSnapshot;
@@ -760,4 +762,81 @@ test("a session-local state that rewind adopted leaves Play again session-local"
   await choose(context, host, "Go");
   assert.equal(said(host).at(-1), "1");
   assert.deepEqual(writes, []);
+});
+
+/** The shown session as the Player holds it: a published view, with its lineage and call view. */
+const shownView = (host: RewindHost): PlayerSession => published(host.session.value);
+
+test("the call view follows the shown session through Back and Return while a demand stands, and ends with it", async (context) => {
+  const { host, rewind, scope } = createHost(context, memoryStorage().provider);
+  await start(context, host);
+  await choose(context, host, "One");
+  const tip = shownView(host);
+  const bridge = tip.connection;
+  const sent: { readonly lineage: object; readonly on: boolean }[] = [];
+  const viewCalls = bridge.viewCalls.bind(bridge);
+  bridge.viewCalls = (session, on) => {
+    sent.push({ lineage: session.lineage, on });
+    return viewCalls(session, on);
+  };
+
+  // A demand released while its request is in flight: the end follows the start, and none stays.
+  host.demandCallView().release();
+  await settle(context);
+  assert.deepEqual(sent.splice(0), [
+    { lineage: tip.lineage, on: true },
+    { lineage: tip.lineage, on: false },
+  ]);
+  assert.equal(shownView(host).callView, null);
+
+  const demand = host.demandCallView();
+  // A second demand asks for nothing more.
+  const second = host.demandCallView();
+  await settle(context);
+  assert.deepEqual(sent, [{ lineage: tip.lineage, on: true }]);
+  assert.notEqual(shownView(host).callView, null);
+
+  // Back shows another lineage: the left one's calls are no longer viewed, the shown one's are.
+  assert.equal(await rewind.back(0), true);
+  await settle(context);
+  const inspected = shownView(host);
+  assert.notEqual(inspected.lineage, tip.lineage);
+  assert.deepEqual(sent.slice(1), [
+    { lineage: tip.lineage, on: false },
+    { lineage: inspected.lineage, on: true },
+  ]);
+  assert.notEqual(shownView(host).callView, null);
+
+  // Return shows the left lineage again, with its calls viewed again.
+  assert.equal(rewind.returnToSession(), true);
+  await settle(context);
+  assert.equal(shownView(host).lineage, tip.lineage);
+  assert.deepEqual(sent.slice(3), [
+    { lineage: inspected.lineage, on: false },
+    { lineage: tip.lineage, on: true },
+  ]);
+  assert.notEqual(shownView(host).callView, null);
+
+  // Released while inspecting: the call view ends, and Return asks for none.
+  assert.equal(await rewind.back(0), true);
+  await settle(context);
+  second.release();
+  demand.release();
+  // A second release does nothing.
+  demand.release();
+  await settle(context);
+  const back = shownView(host);
+  assert.deepEqual(sent.slice(-1), [{ lineage: back.lineage, on: false }]);
+  assert.equal(back.callView, null);
+  const count = sent.length;
+  assert.equal(rewind.returnToSession(), true);
+  await settle(context);
+  assert.equal(sent.length, count, "without a demand, Return asks for no call view");
+
+  // An unmount ends a demand still standing.
+  host.demandCallView();
+  await settle(context);
+  assert.deepEqual(sent.at(-1), { lineage: tip.lineage, on: true });
+  scope.stop();
+  assert.deepEqual(sent.at(-1), { lineage: tip.lineage, on: false });
 });
