@@ -3,6 +3,7 @@ import type { RootType } from "../src/root.js";
 import { allowed } from "../src/allowed.js";
 import "./side.js";
 import "./names.js";
+import "./export-names.js";
 
 export { fromRoot } from "../src/root.js";
 // A namespace export named `require` is a key; it binds nothing.

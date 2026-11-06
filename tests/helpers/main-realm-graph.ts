@@ -52,6 +52,13 @@ function refuse(label: string, form: string): never {
  */
 function isKey(node: ts.Identifier): boolean {
   const parent = node.parent;
+  // In `export { a as b }` without `from`, `a` refers to a binding of this module; `b`, and both names of a re-export
+  // with `from`, are export names.
+  if (ts.isExportSpecifier(parent))
+    return (
+      parent.parent.parent.moduleSpecifier !== undefined ||
+      (parent.propertyName ?? parent.name) !== node
+    );
   return (
     ((ts.isPropertyAccessExpression(parent) ||
       ts.isPropertyAssignment(parent) ||
@@ -59,13 +66,9 @@ function isKey(node: ts.Identifier): boolean {
       ts.isGetAccessorDeclaration(parent) ||
       ts.isSetAccessorDeclaration(parent) ||
       ts.isPropertyDeclaration(parent) ||
-      ts.isExportSpecifier(parent) ||
       ts.isNamespaceExport(parent)) &&
       parent.name === node) ||
-    ((ts.isBindingElement(parent) ||
-      ts.isImportSpecifier(parent) ||
-      ts.isExportSpecifier(parent)) &&
-      parent.propertyName === node)
+    ((ts.isBindingElement(parent) || ts.isImportSpecifier(parent)) && parent.propertyName === node)
   );
 }
 

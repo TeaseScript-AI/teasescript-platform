@@ -86,6 +86,7 @@ test("the walk reads every import form once and stops at Worker-side code", () =
   assert.deepEqual(fixture.modules, [
     "player/alias/aliased.ts",
     "player/entry.ts",
+    "player/export-names.ts",
     "player/names.ts",
     "player/panel.vue",
     "player/side.ts",
@@ -128,6 +129,7 @@ test("the walk refuses each loading form it does not model", () => {
     ["require-alias.ts", named],
     ["require-import.ts", named],
     ["require-parameter.ts", named],
+    ["require-export.ts", named],
     ["require-import-equals.vue", unmodelled("CommonJS require()")],
     ["url.ts", unmodelled("new URL(…, import.meta.url) outside new Worker(…)")],
     ["computed-import.ts", unmodelled("an import() of a computed specifier")],
