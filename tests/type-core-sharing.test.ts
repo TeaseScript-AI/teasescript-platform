@@ -27,7 +27,6 @@ import {
   propertyStep,
 } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import { inOrder } from "./helpers/type-core-oracles.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { VALUE_KIND_NAMES } from "../src/value-kinds.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
