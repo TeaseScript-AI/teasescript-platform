@@ -1,5 +1,5 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
-import type { Strip } from "../carriers.js";
+import { operandsOf, type Strip } from "../carriers.js";
 import type { Admission } from "../admission.js";
 import type { MixedSteps } from "../result.js";
 import {
@@ -1538,8 +1538,8 @@ function dictHeld(admission: Admission, at: PlaceId, steps: readonly string[]): 
 /**
  * #1762: whether a value is a dict at its own level: an `otherwise` its operand where the operand, narrowed at its node,
  * may hold a value, and its fallback where the operand may be null (a fallback never run names no dict, nor an operand
- * proved null, Codex r5–r6 on #1814); any other value by its items (`dictHeld`). Each node's answer once per pass and
- * node (`DICT_OWN`), an `otherwise` after the sides it takes, so a chain is walked once.
+ * proved null, Codex r5–r6 on #1814); any other value by its items (`dictHeld`) or its own reads (a default). Each
+ * node's answer once per pass and node (`DICT_OWN`), a value after the sides it takes, so a chain is walked once.
  */
 function dictOwn(admission: Admission, value: PlaceId, from: FlowNode): boolean {
   const { program } = admission.pass;
@@ -1556,15 +1556,26 @@ function dictOwn(admission: Admission, value: PlaceId, from: FlowNode): boolean 
     }
     admission.work.charge("checks");
     const op = program.opOf.get(at);
-    if (op?.kind !== "fallback") {
-      known.set(at, dictHeld(admission, at, []));
+    // (any other value a dict by its items, or where an operand that is its own read is: a `get`'s, a `load`'s or a
+    // parse's default, which hands the value on whole; its items lose a host-assigned written dict, Codex r8 on #1814)
+    const sides =
+      op?.kind === "fallback"
+        ? [
+            ...(admission.items(op.left, from, []).some((item) => item.tag !== "null")
+              ? [op.left]
+              : []),
+            ...(operandNull(admission, op.left, from) ? [op.right] : []),
+          ]
+        : dictHeld(admission, at, [])
+          ? null
+          : operandsOf(program, at)
+              .filter((operand) => operand.own)
+              .map((operand) => operand.operand);
+    if (sides === null) {
+      known.set(at, true);
       open.pop();
       continue;
     }
-    const sides = [
-      ...(admission.items(op.left, from, []).some((item) => item.tag !== "null") ? [op.left] : []),
-      ...(operandNull(admission, op.left, from) ? [op.right] : []),
-    ];
     const missing = sides.find((side) => !known.has(side));
     if (missing !== undefined) open.push(missing);
     else {
