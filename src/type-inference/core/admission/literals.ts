@@ -1531,14 +1531,15 @@ function viewSteps(admission: Admission, view: PathView, count: number): readonl
 
 /**
  * A value's path in `layersOf`, as a `Strip` the carrier table transforms as it does steps: its view, the shift that
- * places the asked depths on it (`depths[i] + shift`), the first depth not yet answered above it (`next`), and its
- * key, made from its parent's and the step taken, so no key spells its path.
+ * places the asked depths on it (`depths[i] + shift`), the first depth not yet answered above it (`next`), and its key,
+ * made from its parent's and the step taken, so no key spells its path; `null` below a literal's step, where no key is
+ * asked again.
  */
 interface MarkedStrip extends Strip<MarkedStrip> {
   readonly view: PathView;
   readonly shift: number;
   readonly next: number;
-  readonly key: number;
+  readonly key: number | null;
 }
 
 /**
@@ -1546,10 +1547,11 @@ interface MarkedStrip extends Strip<MarkedStrip> {
  * every depth of a value no literal or carrier composes by `mayHoldNull`; a literal's depths below it by its children, a
  * carried value's by its parts (the carrier table's; an `otherwise`'s fallback only where its operand may be null, its
  * operand where it may hold a value), as `mayHoldNull` composes one path. Each frame is constant work: the depths stay
- * the asker's (each frame their shift and the first one left), the path a view, the key its parent's and one step
- * (`LAYERS`, interned per pass). A carried value's answer is kept per pass under its key, so a join's growing operands
- * are each read once; a literal's children are its own and are kept with it. A value asked again while its own answer
- * is pending adds nothing.
+ * the asker's (each frame their shift and the first one left), the path a view, each answer written once. A value the
+ * asker's own carriers reach, before any literal's step, keeps its answer per pass under its key (`LAYERS`, its parent's
+ * key and one step, interned), so a join's growing operands are each read once; below a literal's step no key is asked
+ * again, and each answer goes straight to the nearest value that keeps one (Codex r12–r14). A value asked again while
+ * its own answer is pending adds nothing.
  */
 function layersOf(
   admission: Admission,
@@ -1566,7 +1568,8 @@ function layersOf(
       (memo = { keys: new Map(), answers: new Map(), count: { value: 0 } }),
     );
   const { keys, answers, count } = memo;
-  const intern = (parent: number, step: string): number => {
+  const intern = (parent: number | null, step: string): number | null => {
+    if (parent === null) return null;
     admission.work.charge("checks");
     let mine = keys.get(parent);
     if (mine === undefined) keys.set(parent, (mine = new Map()));
@@ -1574,7 +1577,7 @@ function layersOf(
     if (key === undefined) mine.set(step, (key = count.value += 1));
     return key;
   };
-  const strip = (view: PathView, shift: number, next: number, key: number): MarkedStrip => {
+  const strip = (view: PathView, shift: number, next: number, key: number | null): MarkedStrip => {
     const made: MarkedStrip = {
       view,
       shift,
@@ -1595,42 +1598,41 @@ function layersOf(
               { rope: { head: below, tail: view }, start: 0, length: view.length + below.length },
               shift + below.length,
               next,
-              intern(key, `under ${keptText(admission.work, below)}`),
+              key === null ? null : intern(key, `under ${keptText(admission.work, below)}`),
             ),
     };
     return made;
   };
-  // (a frame: its value, its path, its answers (`holds`, a bit per depth: its own where it is kept, else its keeper's),
-  // where they go, its parts, the next part; a bit mask moves an answer in one step, Codex r13)
-  interface Bits {
-    bits: bigint;
-  }
+  // (a frame: its value, its path, the answers it keeps (`holds`: its own where it is kept, else those of the value that
+  // keeps them), where they go, its parts, the next part)
   type Part = readonly [PlaceId, FlowNode, MarkedStrip];
   interface Frame {
     readonly at: PlaceId;
     readonly kept: boolean;
-    readonly holds: Bits;
-    readonly into: Bits;
+    readonly holds: Set<number>;
+    readonly into: Set<number>;
     readonly strip: MarkedStrip;
     readonly parts: readonly Part[];
     next: number;
   }
   const pending = new Map<PlaceId, Set<number>>();
-  const open = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Bits): Frame => {
+  const open = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Set<number>): Frame => {
     admission.work.charge("checks");
-    const kept = !program.hasOf.has(at);
-    const holds: Bits = kept ? { bits: 0n } : into;
+    const literal = program.hasOf.has(at);
+    const kept = !literal && here.key !== null;
+    const holds = kept ? new Set<number>() : into;
     let { next } = here;
     // (the depth at its own level, if one is)
     if (next < depths.length && depths[next]! + here.shift === 0) {
-      if (mayHoldNull(admission, at, from, [])) holds.bits |= 1n << BigInt(next);
+      if (mayHoldNull(admission, at, from, [])) holds.add(next);
       next += 1;
     }
     let parts: Part[] = [];
     if (next < depths.length) {
       const below = strip(here.view, here.shift, next, here.key);
-      if (!kept) {
-        const rest = below.rest();
+      if (literal) {
+        // (a literal's children: no key below its step)
+        const rest = strip(viewRest(here.view), here.shift - 1, next, null);
         parts = literalChildren(admission, at, viewStep(here.view, 0)!).map(
           (child) => [child.value!, child.node ?? from, rest] as const,
         );
@@ -1661,18 +1663,18 @@ function layersOf(
                 keptSlice(admission.work, longest, 0, depths[slot]! + here.shift),
               )
             )
-              holds.bits |= 1n << BigInt(slot);
+              holds.add(slot);
         }
       }
     }
     if (kept) {
       let mine = pending.get(at);
       if (mine === undefined) pending.set(at, (mine = new Set()));
-      mine.add(here.key);
+      mine.add(here.key!);
     }
     return { at, kept, holds, into, strip: here, parts, next: 0 };
   };
-  const out: Bits = { bits: 0n };
+  const out = new Set<number>();
   const root = strip(
     { rope: { head: path, tail: null }, start: 0, length: path.length },
     0,
@@ -1680,11 +1682,11 @@ function layersOf(
     intern(-1, `${keptText(admission.work, path)}#${depths.join(",")}`),
   );
   const stack: Frame[] = [];
-  const ask = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Bits): void => {
-    if (!program.hasOf.has(at)) {
+  const ask = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Set<number>): void => {
+    if (here.key !== null && !program.hasOf.has(at)) {
       const answer = answers.get(at)?.get(here.key);
       if (answer !== undefined) {
-        into.bits |= answer;
+        for (const slot of answer) into.add(slot);
         return;
       }
       if (pending.get(at)?.has(here.key) === true) return;
@@ -1704,22 +1706,22 @@ function layersOf(
     if (!frame.kept) continue;
     let mine = answers.get(frame.at);
     if (mine === undefined) answers.set(frame.at, (mine = new Map()));
-    mine.set(frame.strip.key, frame.holds.bits);
-    pending.get(frame.at)!.delete(frame.strip.key);
-    frame.into.bits |= frame.holds.bits;
+    mine.set(frame.strip.key!, frame.holds);
+    pending.get(frame.at)!.delete(frame.strip.key!);
+    for (const slot of frame.holds) frame.into.add(slot);
   }
-  return depths.map((_, slot) => ((out.bits >> BigInt(slot)) & 1n) === 1n);
+  return depths.map((_, slot) => out.has(slot));
 }
 
 /**
- * Per pass, `layersOf`'s keys (each a parent's and one step, interned) and each carried value's answer under its key,
- * shared by every literal's and join's error.
+ * Per pass, `layersOf`'s keys (each a parent's and one step, interned) and the answer of each value the asker's own
+ * carriers reach under its key, shared by every literal's and join's error.
  */
 const LAYERS = new WeakMap<
   object,
   {
     readonly keys: Map<number, Map<string, number>>;
-    readonly answers: Map<PlaceId, Map<number, bigint>>;
+    readonly answers: Map<PlaceId, Map<number, ReadonlySet<number>>>;
     readonly count: { value: number };
   }
 >();
