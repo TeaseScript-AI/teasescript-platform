@@ -84,7 +84,7 @@ const INTEGER_TYPE = /\(([^()]*integer[^()]*)\)/;
  * checker's sentence: the checker's sentence changed exactly where the issue's defect is, on the whole-number side.
  * - #1843: an element's own `or null` dropped, for a copy at the element that may be null;
  * - #1847: a `!= null` test of a typed host value not seen, its `?` at the tested layer kept;
- * - #1858: the earliest side's leaf `?` dropped for an `otherwise` of a typed host value with a `null` fallback.
+ * - #1858: the leaf `?` dropped for an `otherwise` of a typed host value with a `null` fallback, on either side.
  */
 function mixedInherited(
   row: MixedDimensions,
@@ -101,8 +101,7 @@ function mixedInherited(
     open.includes("#1858") &&
     row.kind === "hostOrNull" &&
     row.at === 0 &&
-    row.nullAt === row.depth &&
-    !row.later
+    row.nullAt === row.depth
   )
     out.push(["#1858", (sentence) => sentence.replace("integer?", "integer")]);
   if (open.includes("#1847") && row.kind === "notNull" && row.at > 0)

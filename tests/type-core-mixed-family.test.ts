@@ -32,7 +32,7 @@ import { inMode, MODES } from "./helpers/type-core-oracles.js";
  * the inherited classes, each its issue's work:
  * - an element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
  * - a typed host value under `!= null`, which leaves no mark on its unknown items, #1847;
- * - the earliest side's leaf `?` of an `otherwise` of a typed host value with a `null` fallback, #1858.
+ * - the leaf `?` of an `otherwise` of a typed host value with a `null` fallback, on either side, #1858.
  * Each class is exactly its issue's change of the checker's sentence (`mixedExplained`, Codex r12 on #1789). A source
  * only one checker reports on is outside the candidate slice there and is not compared.
  */
