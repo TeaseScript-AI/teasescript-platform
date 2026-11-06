@@ -346,6 +346,7 @@ function captureHarness(
   const sent: string[] = [];
   const diagnostics: PlayerDiagnostic[] = [];
   const held = new Set<string>();
+  const discarded: string[] = [];
   const service = new CaptureService(answer, {
     session: () => state.session,
     generation: () => state.generation,
@@ -358,7 +359,11 @@ function captureHarness(
         onSend(op, args);
       },
     ),
-    capturedMedia: { holds: (reference, kind) => kind === "image" && held.has(reference) },
+    capturedMedia: {
+      holds: (reference, kind) => kind === "image" && held.has(reference),
+      // The answers here name media no store made; what the service lets go of is only recorded.
+      discard: (reference) => void discarded.push(reference),
+    },
     diagnostic: (diagnostic) => diagnostics.push(diagnostic),
     later: (task) => setImmediate(task),
   });
@@ -375,7 +380,7 @@ function captureHarness(
     if (!bridge.frozen(state.session!)) await halting;
     service.reset();
   };
-  return { state, sent, diagnostics, held, service, start, stop };
+  return { state, sent, diagnostics, held, discarded, service, start, stop };
 }
 
 const turns = async (count: number) => {

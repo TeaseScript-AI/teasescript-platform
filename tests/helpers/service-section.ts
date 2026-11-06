@@ -6,13 +6,15 @@ import type { PlayerSession } from "../../player/runtime-view.js";
  * `current()` gives, whose observation observes that session at its own scene time (no clock moves in these tests),
  * and whose sends show their publications through `show`, as `publishOwned` does; none once the session's store froze
  * at a stop. `onSend` sees each request right
- * before it is posted, the observation's included, so a test can act at that moment.
+ * before it is posted, the observation's included, so a test can act at that moment. `advance` gives how far an
+ * observation moves the session's scene time, as the Player's clock does when time passed; none by default.
  */
 export function serviceSection(
   bridge: PlayerBridge,
   current: () => PlayerSession | null,
   show: (next: PlayerSession) => void,
   onSend: (op: string, args: unknown) => void = () => {},
+  advance: (session: PlayerSession) => number = () => 0,
 ): <T>(body: (section: ServiceSection) => Promise<T>) => Promise<T | null> {
   return (body) => {
     const session = current();
@@ -21,7 +23,8 @@ export function serviceSection(
     return bridge.section(session, (section) =>
       body({
         observe: async () => {
-          const args = { atMs: section.session.state.observedSessionTimeMs, media: [] };
+          const at = section.session.state.observedSessionTimeMs;
+          const args = { atMs: at + advance(section.session), media: [] };
           onSend("observeTime", args);
           await section.send("observeTime", args);
           show(section.session);
