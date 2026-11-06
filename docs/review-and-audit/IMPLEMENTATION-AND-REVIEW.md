@@ -153,19 +153,22 @@ lens above. Escalate uncertainty that cannot be bounded through a separately ass
 Run the applicable configured verification required by `AGENTS.md` and
 [`TESTING.md`](../TESTING.md), including `git diff --check`. Use focused temporary negative probes
 when test infrastructure is a substantial part of the change or material doubt remains about
-whether relied-on checks detect representative defects for the intended reason. Probe only in
-disposable local or isolated test state. Never commit, push, or expose probes to shared or
-operational state. Restore every temporary change and rerun affected clean checks.
+whether relied-on checks detect representative defects for the intended reason; a full-route plan
+also has one for each clause of its construction ([mutants](../DEVELOPMENT-WORKFLOW.md#evidence)).
+Probe only in disposable local or isolated test state. Never commit or push probes or expose them to
+operational state; a probe's patch may be kept in the route's evidence directory
+([Evidence](../DEVELOPMENT-WORKFLOW.md#evidence)). Restore every temporary change and rerun affected
+clean checks.
 
 ## Findings and outcome
 
 Use the existing finding classes and blocking-evidence rules. Each finding gives the governing
 requirement, supported path, real boundary, or class-appropriate rationale; evidence where
 applicable; practical impact; and the smallest complete repair or follow-up.
-The review comment records the exact head, comparison base, scope, blockers and non-blocking
-findings, checks and outcomes, including failures, warnings, skips, unavailable checks, remaining
-uncertainty, and whether the change can land. Landing requires no blocker and sufficient evidence
-for the complete result.
+The review comment records the exact head SHA, comparison base, scope, blockers and non-blocking
+findings, from the second round on whether each earlier finding is closed, checks and outcomes,
+including failures, warnings, skips, unavailable checks, remaining uncertainty, and whether the
+change can land. Landing requires no blocker and sufficient evidence for the complete result.
 
 ### Convergence
 
@@ -173,8 +176,9 @@ When sibling findings and isolated repairs stop reducing uncertainty, report non
 common invariant or coverage gap. The implementer adopts, or the reviewer recommends or requires,
 the smallest systematic repair or evidence method that can establish completeness. Material scope,
 redesign, issue split, or execution-strategy changes require the applicable owner or coordinator
-decision; unbounded uncertainty may require a separately assigned audit. No fixed count applies, and
-repeated one-off patches do not prove convergence.
+decision ([Review convergence](../DEVELOPMENT-WORKFLOW.md#review-convergence)); unbounded uncertainty
+may require a separately assigned audit. No fixed review count applies, and repeated one-off patches
+do not prove convergence.
 
 ## Compact working checklist
 
