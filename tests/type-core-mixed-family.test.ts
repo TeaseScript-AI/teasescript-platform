@@ -20,9 +20,10 @@ import { inMode, MODES } from "./helpers/type-core-oracles.js";
  *   not, an `otherwise` of a copy);
  * - the pair as elements, properties or `+` operands;
  * - both orders.
- * Here, one case per carrier kind, position and order, the carried layer's relation to the null turned through six
- * classes (`RELATIONS`: an interior carrier with the null below it, the element's with the leaf's, the deepest with none,
- * the null at its layer, the shallow side's two), in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
+ * Here, each carrier (and the plain side) at every position with every relation of its carried layer to the null
+ * (`RELATIONS`: an interior carrier with the null below it, the element's with the leaf's, the deepest with none, the
+ * null at its layer, the shallow side's two), each copy at every position with two of them, the order turned through
+ * them, in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
  * the inherited classes, each its issue's work:
  * - the later element's leaf `null`, #1790 (#1819, stacked on this);
  * - an element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
@@ -41,10 +42,10 @@ async function family<T>(name: string): Promise<T> {
 // (the issues still open here, each a class of differences `mixedExplained` names exactly)
 const OPEN = ["#1790", "#1843", "#1847"];
 
-// (the sample: for each kind, its six position and order slots take the carried layer's six relations to the null,
-// turned by the kind so that every relation meets every position and order across the kinds: an interior carrier with
-// the null just below it (Codex r13), the element's with the leaf's, the deepest with none, the null at the carried
-// layer, and the shallow side's element and deepest layer)
+// (the sample: each carrier, and the plain side, at every position with every relation of its carried layer to the null
+// (`RELATIONS`); each copy at every position with two, the element's with the leaf's and an interior one alone; the
+// order turned through them. The structural combinations of carrier, position and null, not a rotation over their
+// marginals, Codex r14)
 const RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])[] = [
   [3, 1, 2],
   [3, 0, 3],
@@ -53,15 +54,21 @@ const RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])
   [2, 0, 1],
   [2, 1, 2],
 ];
+const COPY_RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])[] = [
+  [3, 0, 3],
+  [3, 1, 0],
+];
+const CARRIERS = ["plain", "take", "index", "get", "operand", "fallback", "property", "join"];
 
 function sampled(cases: readonly (readonly [string, string])[]): (readonly [string, string])[] {
   const kinds = [...new Set(cases.map(([name]) => mixedDimensions(name).kind))];
   const positions = [...new Set(cases.map(([name]) => mixedDimensions(name).position))];
   const out: (readonly [string, string])[] = [];
-  kinds.forEach((kind, k) =>
-    positions.forEach((position, p) =>
-      [false, true].forEach((later, o) => {
-        const [depth, carried, nullAt] = RELATIONS[(k + 2 * p + o) % RELATIONS.length]!;
+  let turn = 0;
+  for (const kind of kinds)
+    for (const position of positions)
+      for (const [depth, carried, nullAt] of CARRIERS.includes(kind) ? RELATIONS : COPY_RELATIONS) {
+        const later = turn++ % 2 === 1;
         const at = kind === "plain" ? -1 : carried;
         const found = cases.find(([name]) => {
           const d = mixedDimensions(name);
@@ -76,9 +83,7 @@ function sampled(cases: readonly (readonly [string, string])[]): (readonly [stri
         });
         assert.ok(found !== undefined, `${kind} ${position} ${later}`);
         out.push(found);
-      }),
-    ),
-  );
+      }
   return out;
 }
 
