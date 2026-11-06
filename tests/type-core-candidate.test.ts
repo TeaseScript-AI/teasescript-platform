@@ -3543,6 +3543,11 @@ test("a known value under a test reads the branch's narrowing, and a long copy c
     ["let n = 1\nif n == null { repeat n {} }\nexit\n", true],
     ["let n = 1.5\nif n is number { repeat n {} }\nexit\n", false],
     ["let n = 1.5\nlet m = n\nif m is integer { repeat m {} }\nexit\n", true],
+    // (an operand's read too, Codex r2 on #1884: the copy inside the fallback never runs with 1.5)
+    [
+      'let n = 1.5\nlet m = n\nif m is integer { repeat (m otherwise 0) { say "BODY" } }\nsay "AFTER"\nexit\n',
+      true,
+    ],
   ] as const)
     assert.equal(inBothOrders(() => candidate(source)).plan !== null, plans, source);
   // (Codex r1 on #1884: the filter applies after the evaluator's own iterative walk, so 8,192 copies take no native frame
