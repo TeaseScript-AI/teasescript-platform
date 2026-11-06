@@ -739,3 +739,63 @@ for (const atDraw of [false, true])
     assert.notEqual(host.resolveAsset(taken), null);
     assert.equal(host.resolveAsset(next), null);
   });
+
+// A repeating timer's draw that the service's own observation reaches holds the photo back (`randomDrawPending`): the
+// engine never took it, so it is released, and the capture takes a new one once the draw is decided (#1882; the case of
+// Astra's r1 review). Only the browser's clock moves; nothing is injected into the session.
+test("a photo held back at a random draw the capture's observation reaches is released, and the capture takes a new one", async (context) => {
+  stubBrowser(context);
+  encoding.started = 0;
+  let now = 0;
+  context.mock.method(performance, "now", () => now);
+  const host = mount(context, () => usePlayerSession({ capabilities: { camera: true } }));
+  host.setRandomControl({ filter: { kinds: ["timerRepeat"] } });
+  host.prepare(({ recorder }) =>
+    runtime.createPlayerRuntimeSession(
+      [
+        "let first = takePhoto()",
+        'showButton "Next"',
+        "let tick = timer(duration: (1..=2) s, async: true, repeat: true)",
+        "let second = takePhoto()",
+        'showButton "Done"',
+        "exit",
+      ].join("\n"),
+      { recorder },
+    ),
+  );
+  const binding = (name: string) =>
+    runtime
+      .playerRuntimeSnapshot(host.session.value!)
+      .frames[0]!.bindings.find((entry) => entry.name === name)?.value;
+  const until = async (done: () => boolean, message: string) => {
+    for (let turn = 0; !done(); turn++) {
+      assert.ok(turn < 400, message);
+      await settle(5);
+    }
+  };
+  await host.activate();
+  await until(() => typeof binding("first") === "string", "the first photo was not taken");
+  const first = binding("first");
+  assert.ok(typeof first === "string" && /:1$/u.test(first));
+  const heldBack = first.replace(/:1$/u, ":2");
+  const release = holdEncoding();
+  context.after(release);
+  const pressed = runtime.activatePlayerRuntimeButton(host.session.value!);
+  assert.ok(pressed);
+  host.update(pressed.session);
+  await until(() => encoding.started === 2, "the second photo was not encoded");
+  assert.equal(host.session.value!.state.randomDraw, null);
+  // Three seconds pass while the photo is encoded; the capture's own observation then reaches the timer's draw.
+  now = 3_000;
+  release();
+  await until(() => host.session.value!.state.randomDraw != null, "no draw paused the session");
+  await settle(40);
+  assert.equal(binding("second"), undefined);
+  assert.equal(host.resolveAsset(heldBack), null, "the photo the engine did not take is held");
+  assert.notEqual(host.resolveAsset(first), null);
+  host.setRandomControl(null);
+  await until(() => typeof binding("second") === "string", "the capture did not go on");
+  const second = binding("second");
+  assert.ok(typeof second === "string" && second !== heldBack);
+  assert.notEqual(host.resolveAsset(second), null);
+});

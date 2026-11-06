@@ -10,6 +10,7 @@ import { RgbaImage } from "../player/rgba-image.js";
 import {
   observePlayerRuntimeTime,
   playerRuntimeSnapshot,
+  resumePlayerRuntimeRandomDraw,
   type PlayerCaptureAnswer,
 } from "../player/runtime-adapter.js";
 import type { PlayerSession } from "../player/runtime-view.js";
@@ -46,8 +47,13 @@ async function until(done: () => boolean, message: string) {
 const pause = (milliseconds = 60) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 type Producer = "capture" | "file" | "encrypt" | "decrypt";
-/** When the service is reset: never, while the answer is made, at the observation before its send, or as it is sent. */
-type Moment = "none" | "whileMade" | "beforeSend" | "afterSend" | "stopBeforeSend";
+/**
+ * When the service is reset: never, while the answer is made, at the observation before its send, or as it is sent.
+ * `drawAtObservation` resets nothing: time passes at the answer's observation, a repeating timer's draw pauses the
+ * session there, and the engine answers `randomDrawPending` without taking the answer, which the service settles.
+ */
+type Moment =
+  "none" | "whileMade" | "beforeSend" | "afterSend" | "stopBeforeSend" | "drawAtObservation";
 
 const ANSWER_OPS = {
   capture: "answerCapture",
@@ -66,18 +72,28 @@ async function serviced(producer: Producer, moment: Moment) {
   const files: string[] = [];
   if (producer === "encrypt" || producer === "decrypt")
     files.push(store.add("image", png()).reference);
-  const source = {
-    capture: "let made = takePhoto()\nexit",
-    file: `let made = fileFromBase64("${PNG}", default: "")\nexit`,
-    encrypt: `let photo = "${files[0]}"\nlet made = encryptFile(photo, password: "p", publicKey: false, timeLock: false)\nexit`,
-    decrypt: `let photo = "${files[0]}"\nlet locked = encryptFile(photo, password: "p", publicKey: false, timeLock: false)\nlet made = decryptFile(locked, password: "p", default: null)\nexit`,
-  }[producer];
+  const drawing = moment === "drawAtObservation";
+  const source =
+    (drawing ? "let tick = timer(duration: (1..=2) s, async: true, repeat: true)\n" : "") +
+    {
+      capture: "let made = takePhoto()\nexit",
+      file: `let made = fileFromBase64("${PNG}", default: "")\nexit`,
+      encrypt: `let photo = "${files[0]}"\nlet made = encryptFile(photo, password: "p", publicKey: false, timeLock: false)\nexit`,
+      decrypt: `let photo = "${files[0]}"\nlet locked = encryptFile(photo, password: "p", publicKey: false, timeLock: false)\nlet made = decryptFile(locked, password: "p", default: null)\nexit`,
+    }[producer];
   const target = producer === "decrypt" ? 2 : 1;
   let session: PlayerSession | null = introduced(
     bridge,
-    createPlayerRuntimeSession(source, { wallClockMs: NOW_MS, storedFiles: files }),
+    createPlayerRuntimeSession(source, {
+      wallClockMs: NOW_MS,
+      storedFiles: files,
+      // Debug's random control pauses at the timer's next duration.
+      ...(drawing ? { randomControl: { filter: { kinds: ["timerRepeat" as const] } } } : {}),
+    }),
   );
   let answers = 0;
+  let drawn = false;
+  let resumed = false;
   let observes = 0;
   let interrupted = false;
   const services: { request(): void; reset(): void; stop(): void }[] = [];
@@ -90,11 +106,12 @@ async function serviced(producer: Producer, moment: Moment) {
       setImmediate(() => services.forEach((service) => service.request()));
     }
   };
+  let adds = 0;
   // While the target answer is made: the photo waits for its encoding, a lock for the file it reads.
   const making = gate();
   let reads = 0;
   const media: FileStoreMedia = {
-    add: (kind, data, details) => store.add(kind, data, details),
+    add: (kind, data, details) => (adds++, store.add(kind, data, details)),
     holds: (reference, kind) => store.holds(reference, kind),
     discard: (reference) => store.discard(reference),
     read: async (reference) => {
@@ -124,6 +141,28 @@ async function serviced(producer: Producer, moment: Moment) {
         if ((moment === "beforeSend" || moment === "stopBeforeSend") && atObservation) interrupt();
         if (moment === "afterSend" && op === ANSWER_OPS[producer] && answers === target)
           interrupt();
+        // The draw is decided once the answer it held back was sent: the next answer is taken.
+        if (drawing && drawn && !resumed && op === ANSWER_OPS[producer]) {
+          resumed = true;
+          setImmediate(() => {
+            assert.ok(session!.state.randomDraw !== null, "no draw paused the session");
+            // The timer's next repeats may be due by then too: each is decided as it comes.
+            for (;;) {
+              const draw = session!.state.randomDraw;
+              if (draw === null) break;
+              session = hatch(session!, (held) =>
+                resumePlayerRuntimeRandomDraw(held, { drawId: draw.drawId, outcome: "natural" }),
+              ).session;
+            }
+            services.forEach((service) => service.request());
+          });
+        }
+      },
+      () => {
+        // Time passes up to the target answer's observation, past the timer's first expiry.
+        if (!drawing || drawn || answers !== target - 1) return 0;
+        drawn = true;
+        return 3_000;
       },
     ),
     diagnostic: (diagnostic: { message: string }) => assert.fail(diagnostic.message),
@@ -147,21 +186,24 @@ async function serviced(producer: Producer, moment: Moment) {
   else if (producer === "file") services.push(new FileStoreService({ ...host, media }));
   else services.push(lockService(host, media));
   services.forEach((service) => service.request());
-  if (moment === "whileMade") {
-    await until(() => interrupted, "the answer was not made");
+  try {
+    if (moment === "whileMade") {
+      await until(() => interrupted, "the answer was not made");
+      await pause();
+      making.open();
+    }
+    if (moment === "stopBeforeSend") {
+      await until(() => interrupted, "the service was not stopped");
+      await pause(150);
+    } else
+      await until(
+        () => session!.state.status === "halted" || session!.state.status === "failed",
+        `the session did not end (${session!.state.status})`,
+      );
+  } finally {
     await pause();
-    making.open();
+    services.forEach((service) => service.stop());
   }
-  if (moment === "stopBeforeSend") {
-    await until(() => interrupted, "the service was not stopped");
-    await pause(150);
-  } else
-    await until(
-      () => session!.state.status === "halted" || session!.state.status === "failed",
-      `the session did not end (${session!.state.status})`,
-    );
-  await pause();
-  services.forEach((service) => service.stop());
   const snapshot = hatch(session!, playerRuntimeSnapshot);
   const values = Object.fromEntries(
     snapshot.frames[0]!.bindings.map((binding) => [binding.name, binding.value]),
@@ -172,7 +214,7 @@ async function serviced(producer: Producer, moment: Moment) {
     ),
   );
   // How many answers were made: photos taken, or files a lock step read.
-  const produced = producer === "capture" ? photos : reads;
+  const produced = producer === "capture" ? photos : producer === "file" ? adds : reads;
   return { store, used, made: values["made"], answers, produced, status: snapshot.status };
 }
 
@@ -210,14 +252,21 @@ async function holdsExactly(store: CapturedMediaStore, used: ReadonlySet<string>
 }
 
 for (const producer of ["capture", "file", "encrypt", "decrypt"] as const)
-  for (const moment of ["none", "whileMade", "beforeSend", "afterSend"] as const) {
+  for (const moment of [
+    "none",
+    "whileMade",
+    "beforeSend",
+    "afterSend",
+    "drawAtObservation",
+  ] as const) {
     // A file store's answer is made at once.
     if (producer === "file" && moment === "whileMade") continue;
-    test(`${producer}, reset ${moment}: the store holds exactly the media the session's state uses`, async () => {
+    const when = moment === "drawAtObservation" ? "a draw at its observation" : `reset ${moment}`;
+    test(`${producer}, ${when}: the store holds exactly the media the session's state uses`, async () => {
       const result = await serviced(producer, moment);
       assert.equal(result.status, "halted");
-      // A retired answer is made again: one more photo, or one more read of the lock step's file.
-      if (moment === "whileMade")
+      // A retired, or not taken, answer is made again: one more photo or file, or one more read of the lock's file.
+      if (moment === "whileMade" || moment === "drawAtObservation")
         assert.equal(
           result.produced,
           producer === "decrypt" ? 3 : 2,
