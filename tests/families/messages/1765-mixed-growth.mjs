@@ -1,8 +1,7 @@
-// #1765's generated mixed-list family, its work (#1789, the lead's family rule; the owner's test-cost rule moved the
-// second doubling out of CI): each carrier kind of `1765-mixed-family.mjs` deep (a nest of dicts and lists behind it,
-// three quarters of the size deep, errors at ever longer paths) and wide (size wrapped elements before as many
-// disagreeing ones), and a carrier at every depth of the nest (`every:`). `tests/type-core-mixed-family.test.ts` runs the
-// first doubling of each.
+// #1765's generated mixed-list family, its work (#1789; the lead's family rule after Codex r9–r14 and the owner's
+// test-cost rule): one shape per composition dimension the walk's work must stay bounded over main at, each scaled from
+// one size so that the three sizes are two doublings. `tests/type-core-mixed-family.test.ts` runs the first doubling of
+// each shape; the queue runs all three against main, the head's work over main's flat (the lead's transport bar).
 const CARRIERS = {
   take: (value) => `(${value}).take(9)`,
   index: (value) => `[${value}][0]`,
@@ -12,42 +11,90 @@ const CARRIERS = {
   property: (value) => `{p:${value}}.p`,
   join: (value) => `(${value})+[]`,
 };
+const nest = (n, wrap = (value) => value) => {
+  let first = "[1]";
+  let second = '["x"]';
+  for (let at = 0; at < n; at += 1) {
+    first = wrap(`dict {k:[${first}]}`);
+    second = `[dict {k:${second}}]`;
+  }
+  return [first, second];
+};
+const dense = (n, wrap) => {
+  let first = "[1]";
+  let second = '["x"]';
+  for (let at = 0; at < n; at += 1) {
+    first = wrap(`[${first},null]`);
+    second = `[${second}]`;
+  }
+  return `let xs=[${first},${second}]\nexit\n`;
+};
+const chain = (n, written) => {
+  let type = "integer";
+  let first = "1";
+  let second = '"x"';
+  for (let at = 0; at < n + 1; at += 1) {
+    type = `${type}?[]`;
+    first = `[${first},null]`;
+    second = `[${second}]`;
+  }
+  for (let at = 0; at < n; at += 1) {
+    type += "[]";
+    first = `[${first}]`;
+  }
+  const bind = written ? `let c:${type}=hostValue` : `let c=${first}`;
+  return `${bind}\nlet xs=[c${"[0]".repeat(n)},${second}]\nexit\n`;
+};
+const wide = (k, made) =>
+  `let xs=[[${Array.from({ length: k }, (_, at) => made(`[${at}]`)).join(",")}],${Array.from({ length: k }, (_, at) => `[["s${at}"]]`).join(",")}]\nexit\n`;
 export const sizes = [16, 32, 64];
-export const shapes = {};
-for (const [kind, made] of Object.entries(CARRIERS)) {
-  shapes[`deep:${kind}`] = (size) => {
+export const shapes = {
+  // nest depth: the nest alone, and behind a carrier (Astra r2)
+  "nest-depth:plain": (size) => {
+    const [a, b] = nest((size * 3) / 2);
+    return `let xs=[${a},${b}]\nexit\n`;
+  },
+  "nest-depth:behind": (size) => {
+    const [a, b] = nest((size * 3) / 2);
+    return `let xs=[[${a}].take(1)[0],[${b}].take(1)[0]]\nexit\n`;
+  },
+  // join width: a wide operand joined size times (Astra r1), and a wide earliest literal (Codex r9)
+  "join-width:take": (size) =>
+    `let xs=[[${Array.from({ length: size }, (_, at) => `[${at}]`).join(",")}].take(${size})]${Array.from({ length: size }, (_, at) => `+[[["s${at}"]]]`).join("")}\nexit\n`,
+  "join-width:earliest": (size) => wide(size, (value) => value),
+  // the left-nested otherwise chain (Codex r11)
+  "otherwise-chain": (size) =>
+    `let n:integer[][]?=[[1]]\nif hostValue == 1 { n=null }\nlet xs=[${"(".repeat(8 * size)}n${") otherwise null".repeat(8 * size)},[["x"]]]\nexit\n`,
+  // index-chain length at a written and an inferred copy (Codex r13)
+  "index-chain:written": (size) => chain(size / 2, true),
+  "index-chain:inferred": (size) => chain(size / 2, false),
+  // null density: a null at every layer, alone and under carriers (Codex r13, r14)
+  "null-density:plain": (size) => dense((size * 3) / 4, (value) => value),
+  "null-density:take": (size) => dense((size * 3) / 4, CARRIERS.take),
+  "null-density:index": (size) => dense((size * 3) / 4, CARRIERS.index),
+  "null-density:property": (size) => dense((size * 3) / 4, CARRIERS.property),
+  "null-density:take-first": (size) => {
     let first = "[1]";
     let second = '["x"]';
     for (let at = 0; at < (size * 3) / 4; at += 1) {
-      first = `dict {k:[${first}]}`;
-      second = `[dict {k:${second}}]`;
-    }
-    return `let xs=[${made(`[${first}]`)},${made(`[${second}]`)}]\nexit\n`;
-  };
-  shapes[`wide:${kind}`] = (size) =>
-    `let xs=[[${Array.from({ length: size }, (_, at) => made(`[${at}]`)).join(",")}],${Array.from({ length: size }, (_, at) => `[["s${at}"]]`).join(",")}]\nexit\n`;
-}
-// (Codex r12 on #1789: a carrier at every depth of the nest, not only around it)
-for (const kind of ["take", "index", "property"]) {
-  const made = CARRIERS[kind];
-  shapes[`every:${kind}`] = (size) => {
-    let first = "[1]";
-    let second = '["x"]';
-    for (let at = 0; at < (size * 3) / 4; at += 1) {
-      first = made(`dict {k:[${first}]}`);
-      second = `[dict {k:${second}}]`;
+      first = `([null,${first}]).take(9)`;
+      second = `[${second}]`;
     }
     return `let xs=[${first},${second}]\nexit\n`;
-  };
-}
-export const recorded = {
-  commands: [
-    [
-      'env -u NODE_OPTIONS node tests/families/shadow.mjs "$SX_TREE" messages --only only.json --out shadow.jsonl',
-      "sx-job campaign i1765-growth-shadow-f3e23c25b (job 11060358184325, tree f3e23c25b); " +
-        "desktop:~/work/evidence/1765-family/f3e23c25bf0398dd794c5e76913b7e34bda93d53/shadow-growth/out/shadow.jsonl",
-    ],
-  ],
-  sources: 51,
-  sha256: "33c6396ffeee3953ad0f237528e76d389eb25b013bbdac1cd2411026da59f33f",
+  },
 };
+for (const [kind, made] of Object.entries(CARRIERS)) {
+  // each carrier kind: deep (a nest behind it), wide (size wrapped elements before as many disagreeing ones)
+  shapes[`deep:${kind}`] = (size) => {
+    const [a, b] = nest((size * 3) / 4);
+    return `let xs=[${made(`[${a}]`)},${made(`[${b}]`)}]\nexit\n`;
+  };
+  shapes[`wide:${kind}`] = (size) => wide(size, made);
+}
+// carrier depth: a carrier at every depth of the nest (Codex r12)
+for (const kind of ["take", "index", "property"])
+  shapes[`every:${kind}`] = (size) => {
+    const [a, b] = nest((size * 3) / 4, CARRIERS[kind]);
+    return `let xs=[${a},${b}]\nexit\n`;
+  };
+export const recorded = { commands: [], sources: 0, sha256: "" };

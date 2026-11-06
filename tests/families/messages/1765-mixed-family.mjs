@@ -2,7 +2,8 @@
 // the owner's test-cost rule moved it out of CI). A whole-number side two or three lists deep against its text twin:
 // its `null` at no layer, at each layer or at the leaf; at the element or any layer its value carried (`take`, an index,
 // a `get` default, an `otherwise`'s operand or fallback, a property, a join), or a copy (narrowed, maybe null, held in
-// an inferred one, a typed host value plain, tested by `is` or `!= null` or stored again, an `otherwise` of a copy);
+// an inferred one, a typed host value plain, tested by `is` or `!= null` or stored again, an `otherwise` of a copy or
+// of two);
 // the pair as list elements, object properties or the operands of `+`; both orders. A case's name is its dimensions:
 // `d<depth>/n<null layer>/<kind>@<layer>/<position>/<first|later>`, which `tests/type-core-mixed-family.test.ts` samples.
 const CARRIERS = {
@@ -36,6 +37,12 @@ const COPIES = {
   }),
   orNull: (list) => ({ value: list, read: "(c otherwise null)" }),
   hostOrNull: () => ({ value: "hostValue", read: "(c otherwise null)" }),
+  // (an `otherwise` of two copies, each kept by the walk: the maybe-null copy of the layer and a null-free twin)
+  orCopy: (list, _, plain, plainType) => ({
+    value: list,
+    after: `if hostValue == 1 { c=null }\nlet d:${plainType}=${plain}\n`,
+    read: "(c otherwise d)",
+  }),
 };
 const KINDS = ["plain", ...Object.keys(CARRIERS), ...Object.keys(COPIES)];
 const POSITIONS = {
@@ -51,12 +58,15 @@ function side(leaf, depth, nullAt, at, kind, before, block) {
         ? "integer"
         : "string"
       : `${type(layer + 1)}${nullAt === layer + 1 ? "?" : ""}[]`;
+  const plainType = (layer) =>
+    layer === depth ? (leaf === "1" ? "integer" : "string") : `${plainType(layer + 1)}[]`;
+  const plain = (layer) => (layer === depth ? leaf : `[${plain(layer + 1)}]`);
   const build = (layer) => {
     if (layer === depth) return leaf;
     const list = `[${build(layer + 1)}${nullAt === layer + 1 ? ",null" : ""}]`;
     if (at !== layer) return list;
     if (kind in CARRIERS) return CARRIERS[kind](list);
-    const copy = COPIES[kind](list, type(layer));
+    const copy = COPIES[kind](list, type(layer), plain(layer), plainType(layer));
     before.push(`let c:${type(layer)}${copy.sure ? "" : "?"}=${copy.value}\n${copy.after ?? ""}`);
     if (copy.block !== undefined) block.push(...copy.block);
     return copy.read;

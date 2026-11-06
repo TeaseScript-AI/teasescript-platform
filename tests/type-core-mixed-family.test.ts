@@ -43,7 +43,7 @@ async function family<T>(name: string): Promise<T> {
 const OPEN = ["#1790", "#1843", "#1847"];
 
 // (the sample: each carrier, and the plain side, at every position with every relation of its carried layer to the null
-// (`RELATIONS`); each copy at every position with two, the element's with the leaf's and an interior one alone; the
+// (`RELATIONS`); each copy at every position with two, the element's with a null below it and an interior one alone; the
 // order turned through them. The structural combinations of carrier, position and null, not a rotation over their
 // marginals, Codex r14)
 const RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])[] = [
@@ -55,7 +55,7 @@ const RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])
   [2, 1, 2],
 ];
 const COPY_RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])[] = [
-  [3, 0, 3],
+  [3, 0, 2],
   [3, 1, 0],
 ];
 const CARRIERS = ["plain", "take", "index", "get", "operand", "fallback", "property", "join"];
@@ -106,13 +106,12 @@ test("a mixed-list error's type text equals the current checker's across the sam
 });
 
 /**
- * #1765's invariant, its work: each carrier kind deep (a nest behind it, or a carrier at every depth of the nest, ×4.5 per
- * doubling, as the nest alone grows) and wide (wrapped elements before as many disagreeing ones, ×2.5), at the first
- * doubling of
- * `tests/families/messages/1765-mixed-growth.mjs` (the second runs on the queue). One mode: the four-mode growth tests
- * in `type-core-messages.test.ts` cover the evaluator's other dimensions.
+ * #1765's invariant, its work (the lead's family rule): each composition dimension of
+ * `tests/families/messages/1765-mixed-growth.mjs` (nest depth, join width, the otherwise chain, index chains, null
+ * density, each carrier kind deep, wide and at every depth) at its first doubling, in one mode. The queue runs both
+ * doublings in four modes against main, the head's work over main's flat.
  */
-test("a mixed-list error's layers grow linearly behind every carrier kind (#1765)", async () => {
+test("a mixed-list error's work grows as its dimensions do (#1765)", async () => {
   const { shapes, sizes } = await family<{
     shapes: Record<string, (size: number) => string>;
     sizes: readonly number[];
@@ -126,7 +125,8 @@ test("a mixed-list error's layers grow linearly behind every carrier kind (#1765
   };
   for (const [shape, make] of Object.entries(shapes)) {
     const [small, large] = [sizes[0]!, sizes[1]!].map((size) => total(make(size)));
-    const bound = shape.startsWith("wide:") ? 2.5 : 4.5;
+    // (width and the otherwise chain linear, ×2.5; depth as the errors' paths grow, ×4.5)
+    const bound = /^(wide:|join-width:|otherwise-chain)/.test(shape) ? 2.5 : 4.5;
     assert.ok(large! <= bound * small!, `${shape}: ${small}, ${large}`);
   }
 });
