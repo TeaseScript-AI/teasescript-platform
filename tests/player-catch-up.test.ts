@@ -134,10 +134,19 @@ before(async () => {
  * the page show again.
  */
 async function mount(context: TestContext, source: string, randomControl?: RandomControlOptions) {
-  // Event targets are the only browser surface these scripts use; no media elements are created.
-  for (const name of ["document", "window"]) {
+  // Event targets are the only browser surface these scripts use, with the silent audio elements Start primes.
+  const surface: Record<string, unknown> = {
+    document: new EventTarget(),
+    window: new EventTarget(),
+    Audio: class {
+      src = "";
+      play = async () => {};
+      pause() {}
+    },
+  };
+  for (const name of ["document", "window", "Audio"]) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
-    Object.defineProperty(globalThis, name, { configurable: true, value: new EventTarget() });
+    Object.defineProperty(globalThis, name, { configurable: true, value: surface[name] });
     context.after(() => {
       if (previous) Object.defineProperty(globalThis, name, previous);
       else Reflect.deleteProperty(globalThis, name);

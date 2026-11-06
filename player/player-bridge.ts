@@ -146,11 +146,15 @@ export class PlayerBridge {
     post: (onReply: (result: BridgeResult) => void) => Promise<BridgeResult>,
     publish: PublishHook | undefined,
   ): Promise<R> {
+    let fenced = false;
     const reply = await post((result) => {
+      const store = this.store(id);
+      // A reply after the stop's acknowledgement is of nothing that ran before the stop: it never shows.
+      fenced = store?.halted === true;
       // EVIDENCE: validation: a session op's view is its publication, from the same build, or null.
-      this.store(id)?.apply(result.view as Publication | null, publish);
+      store?.apply(result.view as Publication | null, publish);
     });
-    if (this.store(id)?.halted === true) throw haltedError();
+    if (fenced) throw haltedError();
     // EVIDENCE: validation: the op's result comes from the same build as its caller expects it.
     return reply.result as R;
   }
