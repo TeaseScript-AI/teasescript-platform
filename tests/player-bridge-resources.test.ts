@@ -143,6 +143,7 @@ async function playTape(
     { ...valid, held: holed },
     { ...valid, held: {} },
     { ...valid, actionId: 1.5, held: [] },
+    { ...valid, actionId: -1, held: [] },
     { ...valid, answer: "unavailable", held: [] },
     // The adapter would make these an unavailable camera, so the bridge refuses them first.
     { ...valid, answer: { kind: "bogus", reason: "failed" }, held: [] },

@@ -53,7 +53,9 @@ function answerOp<A>(
     (args) =>
       isRecord(args) &&
       exactly(args, ["actionId", "answer", "held"]) &&
+      typeof args.actionId === "number" &&
       Number.isSafeInteger(args.actionId) &&
+      args.actionId >= 0 &&
       isRecord(args.answer) &&
       checkAnswer(args.answer) &&
       (args.held === null || isHeldMedia(args.held)),
