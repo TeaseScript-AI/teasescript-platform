@@ -253,7 +253,7 @@ async function rawExchange(messages: unknown[]): Promise<unknown[]> {
   return received.slice(1);
 }
 
-test("the Worker refuses a wrong version, a malformed envelope and an old ID, and ignores a message without an ID", async () => {
+test("the Worker refuses a wrong version, a malformed envelope and an old ID, and ignores a message without an ID or a malformed flat form", async () => {
   const request = (id: number, extra: Readonly<Record<string, unknown>> = {}) => ({
     v: BRIDGE_VERSION,
     kind: "request",
@@ -270,6 +270,9 @@ test("the Worker refuses a wrong version, a malformed envelope and an old ID, an
     { v: BRIDGE_VERSION, kind: "request" },
     request(10),
     request(10),
+    // A flat form (`transport.ts`) is decoded first; a malformed one has no readable ID, so it is ignored.
+    { v: BRIDGE_VERSION, kind: "nested", nodes: [request(11)], links: [] },
+    { v: BRIDGE_VERSION, kind: "nested", nodes: [request(12)], links: [0, "id", 5] },
     request(99),
   ]);
   const codes = replies.map((reply) => {
@@ -277,7 +280,7 @@ test("the Worker refuses a wrong version, a malformed envelope and an old ID, an
     const { id, ok, error } = reply as { id: number; ok: boolean; error?: { code: string } };
     return ok ? `${id} ok` : `${id} ${error!.code}`;
   });
-  assert.deepEqual(codes, ["5 version", "6 envelope", "10 ok", "10 order", "99 ok"]);
+  assert.deepEqual(codes, ["5 version", "6 envelope", "10 ok", "10 order", "11 ok", "99 ok"]);
 });
 
 test("a lost Worker fails its pending requests and every later one; nothing is retried", async () => {
