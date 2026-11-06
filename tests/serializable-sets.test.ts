@@ -111,7 +111,7 @@ test("nested sets are validated once: a print per value below a set, not its who
     for (let level = 0; level < depth; level += 1) value = set(value);
     return value;
   };
-  // Each set below the root has one part; the leaf is hashed once; at most a set's part and its parent's are held.
+  // Each set below the root has one part; the leaf is hashed once; one print is held at a time.
   for (const depth of [1024, 2048, 10_000]) {
     assert.deepEqual(validationWork(chain(depth)), {
       failure: null,
@@ -119,13 +119,12 @@ test("nested sets are validated once: a print per value below a set, not its who
         setValidationPrints: depth - 1,
         setValidationPrintParts: depth - 1,
         setValidationPrintTextUnits: numberKeyLength(1),
-        setValidationPrintSortedParts: depth - 1,
-        setValidationPrintsRetainedPeak: 2,
+        setValidationPrintsRetainedPeak: 1,
       },
     });
   }
 
-  // Lists, objects, dicts, and sets in turn below a set: one print each; sets, objects, and dicts sort their one part.
+  // Lists, objects, dicts, and sets in turn below a set: one print each.
   const mixed = (depth: number): SerializableRuntimeValue => {
     let value: SerializableRuntimeValue = 1;
     for (let level = 1; level < depth; level += 1) {
@@ -150,13 +149,12 @@ test("nested sets are validated once: a print per value below a set, not its who
         setValidationPrints: below,
         setValidationPrintParts: below,
         setValidationPrintTextUnits: numberKeyLength(1) + labelled * textKeyLength("v"),
-        setValidationPrintSortedParts: below - Math.floor(below / 4),
-        setValidationPrintsRetainedPeak: 2,
+        setValidationPrintsRetainedPeak: 1,
       },
     });
   }
 
-  // A wide set of lists holds a print per list; a set of wide sets sorts each one's members.
+  // A wide set of lists holds a print per list; so does a set of wide sets, whose members are hashed, not held.
   for (const width of [4096, 8192]) {
     const members = Array.from({ length: width }, (_, index) => list(index, "x"));
     let textUnits = 0;
@@ -168,7 +166,6 @@ test("nested sets are validated once: a print per value below a set, not its who
         setValidationPrints: width,
         setValidationPrintParts: 2 * width,
         setValidationPrintTextUnits: textUnits,
-        setValidationPrintSortedParts: 0,
         setValidationPrintsRetainedPeak: width,
       },
     });
@@ -185,9 +182,7 @@ test("nested sets are validated once: a print per value below a set, not its who
         setValidationPrints: width,
         setValidationPrintParts: width * width,
         setValidationPrintTextUnits: textUnits,
-        setValidationPrintSortedParts: width * width,
-        // The members' prints so far, and the last member's parts while they are sorted.
-        setValidationPrintsRetainedPeak: 2 * width - 1,
+        setValidationPrintsRetainedPeak: width,
       },
     });
   }
@@ -202,7 +197,6 @@ test("nested sets are validated once: a print per value below a set, not its who
         setValidationPrints: 1,
         setValidationPrintParts: 1,
         setValidationPrintTextUnits: textKeyLength(name) + textKeyLength(text),
-        setValidationPrintSortedParts: 1,
         setValidationPrintsRetainedPeak: 1,
       },
     });
@@ -226,6 +220,48 @@ test("nested sets are validated once: a print per value below a set, not its who
     failure: null,
     work: {},
   });
+});
+
+test("a wide object or dict below a set is validated without sorting its parts", () => {
+  // The base keyed such a member once, sorting its names (width - 1 comparisons when they are already in order).
+  let comparisons = 0;
+  const sort = Array.prototype.sort;
+  const counted = (value: SerializableRuntimeValue) => {
+    Array.prototype.sort = function <T>(this: T[], compare?: (left: T, right: T) => number): T[] {
+      // EVIDENCE: invariant: Array.prototype.sort sorts its receiver, a T[], in place and returns it.
+      return sort.call(
+        this,
+        compare === undefined
+          ? undefined
+          : (left: T, right: T) => {
+              comparisons += 1;
+              return compare(left, right);
+            },
+      ) as T[];
+    };
+    try {
+      return validationWork(value);
+    } finally {
+      Array.prototype.sort = sort;
+    }
+  };
+  for (const kind of ["object", "dict"] as const) {
+    for (const width of [2048, 4096, 8192]) {
+      const names = Array.from({ length: width }, (_, index) => String(index).padStart(6, "0"));
+      const parts = names.map((name): [string, SerializableRuntimeValue] => [name, 0]);
+      comparisons = 0;
+      assert.deepEqual(counted(set(kind === "object" ? object(...parts) : dict(...parts))), {
+        failure: null,
+        work: {
+          setValidationPrints: 1,
+          setValidationPrintParts: width,
+          setValidationPrintTextUnits: width * (textKeyLength("000000") + numberKeyLength(0)),
+          setValidationPrintsRetainedPeak: 1,
+        },
+      });
+      assert.equal(comparisons, 0, `${kind} ${width}`);
+    }
+  }
 });
 
 test("set members whose prints are equal are compared by their whole value", () => {

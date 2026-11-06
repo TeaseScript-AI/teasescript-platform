@@ -1031,16 +1031,14 @@ function captureAndValidateSerializableValue(
  * that is a list, set, object, or dict, or a part of one below a set, gets a print (`compositePrint`) computed once
  * from its parts' prints. A set compares its other members by their exact `leafKey`, and its list, set, object, and
  * dict members by print, and by `valueKey` only within a print they share. The prints live only in this validation's
- * work: those of the finished parts of each value being validated, and the parts a print sorts. On ordinary input the
- * extra work is linear in the values below sets and their keys' text, plus sorting the parts of each set, object, and
- * dict among them; members that share a print cost one `valueKey` each.
+ * work: those of the finished parts of each value being validated. On ordinary input the extra work is linear in the
+ * values below sets and their keys' text, with no sorting; members that share a print cost one `valueKey` each.
  */
 function validateSerializableValueInternal(value: unknown, rootPath: string): string | null {
   const work: PrintWork = {
     prints: 0,
     parts: 0,
     textUnits: 0,
-    sortedParts: 0,
     exactKeys: 0,
     exactKeyLength: 0,
     retained: 0,
@@ -1373,12 +1371,10 @@ interface PrintWork {
   parts: number;
   /** The UTF-16 units of the leaf keys and labels hashed. */
   textUnits: number;
-  /** The parts sorted for the prints of sets, objects, and dicts. */
-  sortedParts: number;
   /** The `valueKey` calls of members that share a print, and their length. */
   exactKeys: number;
   exactKeyLength: number;
-  /** The prints held now, in the validation's work and in the parts being sorted, and the most held at once. */
+  /** The prints held now in the validation's work, and the most held at once. */
   retained: number;
   retainedPeak: number;
 }
@@ -1393,7 +1389,6 @@ function recordPrintWork(work: PrintWork): void {
     recordValidationTestWork("setValidationPrints", work.prints);
     recordValidationTestWork("setValidationPrintParts", work.parts);
     recordValidationTestWork("setValidationPrintTextUnits", work.textUnits);
-    recordValidationTestWork("setValidationPrintSortedParts", work.sortedParts);
   }
   if (work.exactKeys > 0) {
     recordValidationTestWork("setValidationExactKeys", work.exactKeys);
@@ -1409,6 +1404,7 @@ const SET_PRINT = 2;
 const OBJECT_PRINT = 3;
 const DICT_PRINT = 4;
 const PART_PRINT = 5;
+const UNORDERED_PART_PRINT = 6;
 
 /** Mixes a sequence of prints into one (cyrb53's steps over their 32-bit halves); the sequence starts with its length. */
 class PrintMix {
@@ -1443,9 +1439,9 @@ function leafPrint(value: SerializableRuntimeValue, work: PrintWork): number {
 
 /**
  * The print of a validated list, set, object, or dict, from `composites`, the prints of its list, set, object, and dict
- * parts in order: equal for values equal by `==`, because it is built from the parts `valueKey` uses, sorted where
- * `valueKey` sorts them. A list's parts keep their order; a set's members, and an object's properties and a dict's
- * entries, each a print of its name or key and its value, are sorted by print.
+ * parts in order: equal for values equal by `==`, because it is built from the parts `valueKey` uses, in their order
+ * only where `valueKey` keeps it. A list's parts are mixed in order; a set's members, and an object's properties and a
+ * dict's entries, each a print of its name or key and its value, in any order (`UnorderedPrintMix`).
  */
 function compositePrint(
   value: CompositeValue,
@@ -1475,31 +1471,55 @@ function compositePrint(
       for (const item of value.items) print.add(partPrint(item));
       return print.finish();
     }
-    case "set":
-      return sortedPrint(SET_PRINT, value.items.map(partPrint), work);
-    case "object":
-      return sortedPrint(
-        OBJECT_PRINT,
-        value.properties.map((property) => labelled(property.name, property.value)),
-        work,
-      );
-    case "dict":
-      return sortedPrint(
-        DICT_PRINT,
-        value.entries.map((entry) => labelled(entry.key, entry.value)),
-        work,
-      );
+    case "set": {
+      const print = new UnorderedPrintMix(SET_PRINT);
+      for (const item of value.items) print.add(partPrint(item));
+      return print.finish();
+    }
+    case "object": {
+      const print = new UnorderedPrintMix(OBJECT_PRINT);
+      for (const property of value.properties) print.add(labelled(property.name, property.value));
+      return print.finish();
+    }
+    case "dict": {
+      const print = new UnorderedPrintMix(DICT_PRINT);
+      for (const entry of value.entries) print.add(labelled(entry.key, entry.value));
+      return print.finish();
+    }
   }
 }
 
-function sortedPrint(tag: number, parts: number[], work: PrintWork): number {
-  retainPrints(work, parts.length);
-  work.sortedParts += parts.length;
-  parts.sort((left, right) => left - right);
-  const print = new PrintMix(tag, parts.length);
-  for (const part of parts) print.add(part);
-  retainPrints(work, -parts.length);
-  return print.finish();
+/**
+ * Mixes prints in any order into one: their count, and the sum modulo 2^53 of a mix of each, with no sorting. A sum is
+ * weaker than an ordered mix against crafted collisions; set members whose prints then collide cost one `valueKey` each.
+ */
+class UnorderedPrintMix {
+  readonly #tag: number;
+  #count = 0;
+  /** The sum's low 32 bits and high 21 bits. */
+  #low = 0;
+  #high = 0;
+
+  constructor(tag: number) {
+    this.#tag = tag;
+  }
+
+  add(print: number): void {
+    const part = new PrintMix(UNORDERED_PART_PRINT, 1);
+    part.add(print);
+    const mixed = part.finish();
+    const low = this.#low + (mixed >>> 0);
+    const carry = low >= 4294967296 ? 1 : 0;
+    this.#low = low - carry * 4294967296;
+    this.#high = (this.#high + Math.floor(mixed / 4294967296) + carry) % 2097152;
+    this.#count += 1;
+  }
+
+  finish(): number {
+    const print = new PrintMix(this.#tag, this.#count);
+    print.add(this.#high * 4294967296 + this.#low);
+    return print.finish();
+  }
 }
 
 /**
