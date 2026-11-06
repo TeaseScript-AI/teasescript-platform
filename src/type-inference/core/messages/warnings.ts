@@ -19,7 +19,7 @@ import type {
   StoreStep,
   WorkPlace,
 } from "../result.js";
-import type { Landing, MessageSource } from "./site.js";
+import type { Landing, LandingStep, MessageSource } from "./site.js";
 import {
   argumentFixOf,
   capitalized,
@@ -325,14 +325,19 @@ function checkFix(
 
 /**
  * The steps from a store's value at its site down to the rule's place: those of the place below the value's landing
- * (`MessageSource.landing`), where the landing is on the place's path; else `null`.
+ * (`MessageSource.landing`), where the landing is on the place's path; else `null`. An index is a list's or a dict's
+ * step (#1763).
  */
 function stepsBelow(rule: StoreRule, landing: Landing | null): readonly StoreStep[] | null {
   const above = landing?.steps ?? [];
-  const same = (a: StoreStep, b: StoreStep): boolean =>
+  const same = (a: LandingStep, b: StoreStep): boolean =>
     "property" in a
       ? "property" in b && a.property === b.property
-      : "collection" in b && a.collection === b.collection;
+      : "index" in a
+        ? "collection" in b && b.collection !== "set"
+        : "member" in a
+          ? "collection" in b
+          : "collection" in b && a.collection === b.collection;
   return landing === null ||
     rule.root === null ||
     rule.root.kind === "result" ||
@@ -351,20 +356,32 @@ function stepsBelow(rule: StoreRule, landing: Landing | null): readonly StoreSte
  * type followed down the value's landing to the place (`receivingType`). Anywhere else the rule's leaf alone does not
  * prove the layers between (a copy of a written type), so a leaf's words name the elements the check tests, and a layer
  * between keeps its own check. `undefined`
- * where the place is the value itself, a property below it, or off its landing: the place's own test.
+ * where the place is the value itself, a property below it, or off its landing: the place's own test. `unproved` for a
+ * storing method's argument whose landing is off the place's path: no test, the place's own failing on a collection.
  */
 function wholeCheck(
   rule: StoreRule,
   site: SourceSite,
   source: MessageSource,
-): { readonly test: Test } | { readonly words: string; readonly leaf: string } | undefined {
+):
+  | { readonly test: Test }
+  | { readonly words: string; readonly leaf: string }
+  | { readonly unproved: true }
+  | undefined {
   // (its landing asked, and charged, only for a place below a collection)
   if (!rule.steps.some((step) => "collection" in step)) return undefined;
   const landing = source.landing(site);
   const below = stepsBelow(rule, landing);
+  // (a storing method's argument off the place's path, or with no name to its receiver: no level proved, Codex r3 on
+  // #1817: `a.first.add(x)`, `f().add(x)`)
+  if (
+    landing?.method !== undefined &&
+    (below === null || !below.every((step) => "collection" in step))
+  )
+    return { unproved: true };
   if (below === null || below.length === 0 || !below.every((step) => "collection" in step))
     return undefined;
-  const type = receivingType(rule, landing!.steps, below, source);
+  const type = receivingType(rule, landing!, below, source);
   // (unproved, a layer between keeps its own check, no test of the elements: the leaf's words name them)
   if (
     type === null &&
@@ -393,12 +410,12 @@ function wholeCheck(
 
 /**
  * The written type a store's value receives (`wholeCheck`): its root's declared type (a `let`'s, a `global`'s or a
- * parameter's, as the parser read the declaration: Codex r2's B2, no text of it is searched), followed through the collections `above` the value, which must
+ * parameter's, as the parser read the declaration: Codex r2's B2, no text of it is searched), followed down the value's landing, which must
  * reach the place through the collections `below`; else `null`.
  */
 function receivingType(
   rule: StoreRule,
-  above: readonly StoreStep[],
+  landing: Landing,
   below: readonly { readonly collection: "list" | "set" | "dict" }[],
   source: MessageSource,
 ): TypeAnnotation | null {
@@ -406,17 +423,23 @@ function receivingType(
   if (root === null || root.site === null) return null;
   const declared = source.declared(root.site);
   // (each collection step's element type, through the layer's `?`; a union there, or an unrestricted collection, is none)
-  const element = (type: TypeAnnotation | null, step: StoreStep): TypeAnnotation | null => {
+  // (an index's step is a list's or a dict's, #1763)
+  const element = (type: TypeAnnotation | null, step: LandingStep): TypeAnnotation | null => {
     const at = type?.kind === "optionalType" ? type.value : type;
     return at !== null &&
       at !== undefined &&
-      "collection" in step &&
-      (at.kind === "listType" || at.kind === "setType" || at.kind === "dictType")
+      (("collection" in step &&
+        (at.kind === "listType" || at.kind === "setType" || at.kind === "dictType")) ||
+        ("index" in step && (at.kind === "listType" || at.kind === "dictType")) ||
+        ("member" in step &&
+          (at.kind === "listType" || at.kind === "setType" || at.kind === "dictType")))
       ? at.element
       : null;
   };
   let value = declared;
-  for (const step of above) value = element(value, step);
+  for (const step of landing.steps) value = element(value, step);
+  // (`addAll` takes a list, never null, whatever its receiver's layer holds: Codex r3 on #1817)
+  if (landing.method === "elements" && value?.kind === "optionalType") value = value.value;
   let leaf = value;
   for (const step of below) leaf = element(leaf, step);
   return leaf === null ? null : value;
@@ -538,7 +561,7 @@ export function warningFix(
   // replace the whole value, #1753)
   const whole = rule.rule === "store" ? wholeCheck(rule, site, source) : undefined;
   if (whole !== undefined) {
-    if (isLiteral(text) || context === "missing") return "";
+    if (isLiteral(text) || context === "missing" || "unproved" in whole) return "";
     if ("test" in whole)
       return (
         inPlace(whole.test) ?? checkFix(subject, whole.test, null, { source, site, diagnosed })
