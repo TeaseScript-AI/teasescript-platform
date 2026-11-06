@@ -1,0 +1,9 @@
+global rounds: integer = 3
+global function total(values: list, start: integer = 0) {
+  let running = start
+  for value in values { running = running + value }
+  return running
+}
+let scores = [4, 8, 15]
+say "Total ${total(scores)}", instant
+goto "rounds/next.tease"

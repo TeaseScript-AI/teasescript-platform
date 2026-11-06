@@ -1,0 +1,1032 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "name": "maze-dfs-bfs",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/workloads/maze-dfs-bfs.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "minimax-tictactoe",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/workloads/minimax-tictactoe.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "shuffle-sort-search",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/workloads/shuffle-sort-search.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "log-text-processing",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/workloads/log-text-processing.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "inventory-scores",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/workloads/inventory-scores.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "recursive-calls",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/workloads/recursive-calls.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "numeric-physics",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/workloads/numeric-physics.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "capture-order",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/capture-order.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "writes-index-order-and-copy",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/writes-index-order-and-copy.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "calls-default-evaluation-order",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/calls-default-evaluation-order.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "loops-continue-break-and-scopes",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/loops-continue-break-and-scopes.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "rng-atomic-index-and-rhs",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/rng-atomic-index-and-rhs.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "scalar-tail-branches-and-scopes",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/scalar-tail-branches-and-scopes.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "calls-wait-and-default-continuation",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/calls-wait-and-default-continuation.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "call-default-and-parked-scalar",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/call-default-and-parked-scalar.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "call-recursive-loop-ownership",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/call-recursive-loop-ownership.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "call-list-value-ownership-and-void",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/call-list-value-ownership-and-void.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "call-global-and-root-visibility",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/call-global-and-root-visibility.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "values-alias-and-equality",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/values-alias-and-equality.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "loop-source-mutation",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/loop-source-mutation.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "fresh-nested-alias",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/fresh-nested-alias.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "scope-dead-values",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/scope-dead-values.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "error-target-before-rhs-seed-1",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/error-target-before-rhs.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 1,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "error-target-before-rhs-seed-5",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/error-target-before-rhs.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "error-target-before-rhs-seed-42",
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "benchmarks/runtime/probes/error-target-before-rhs.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 42,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "project-globals",
+      "project": true,
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "tools/runtime-oracle/cases/project-globals/main.tease"
+        },
+        {
+          "path": "lib/rounds.tease",
+          "file": "tools/runtime-oracle/cases/project-globals/lib/rounds.tease"
+        }
+      ],
+      "options": {
+        "images": [
+          {
+            "path": "images/cover.png",
+            "keywords": [
+              "cover"
+            ]
+          }
+        ]
+      },
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "stored level",
+          "fresh": {
+            "seed": 7,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0,
+            "scriptStorage": [
+              {
+                "key": "level",
+                "value": 2
+              }
+            ]
+          }
+        },
+        {
+          "label": "no stored level",
+          "fresh": {
+            "seed": 7,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "project-rounds",
+      "project": true,
+      "files": [
+        {
+          "path": "main.tease",
+          "file": "tools/runtime-oracle/cases/project-rounds/main.tease"
+        },
+        {
+          "path": "rounds/next.tease",
+          "file": "tools/runtime-oracle/cases/project-rounds/rounds/next.tease"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "waits-for-input",
+      "files": [
+        {
+          "path": "main.tease",
+          "source": "say \"Hello\", instant\nlet name = askText(\"Name\")\nsay name\nexit\n"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "runtime-failure",
+      "files": [
+        {
+          "path": "main.tease",
+          "source": "let xs = [1, 2]\nsay \"Before\", instant\nsay \"${xs[5]}\"\nexit\n"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "run",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "seeded-random",
+      "files": [
+        {
+          "path": "main.tease",
+          "source": "let a = randomInteger(1..=100)\nlet b = chance(50)\nsay \"${a} ${b}\", instant\nexit\n"
+        }
+      ],
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "seed 1",
+          "fresh": {
+            "seed": 1,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        },
+        {
+          "label": "seed 2",
+          "fresh": {
+            "seed": 2,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "core-store-parts",
+      "files": [
+        {
+          "path": "main.tease",
+          "source": "let seed: integer = 7\nlet copy = hostInit\ncopy.open = seed\ncopy = hostValue\nsay \"REACHED\"\nexit\n"
+        }
+      ],
+      "options": {
+        "globals": [
+          "hostInit",
+          "hostValue"
+        ]
+      },
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "fitting",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0,
+            "globals": {
+              "hostInit": {
+                "kind": "object",
+                "properties": [
+                  {
+                    "name": "open",
+                    "value": 1
+                  }
+                ]
+              },
+              "hostValue": {
+                "kind": "object",
+                "properties": [
+                  {
+                    "name": "open",
+                    "value": 3
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "label": "violating",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0,
+            "globals": {
+              "hostInit": {
+                "kind": "object",
+                "properties": [
+                  {
+                    "name": "open",
+                    "value": 1
+                  }
+                ]
+              },
+              "hostValue": {
+                "kind": "object",
+                "properties": [
+                  {
+                    "name": "open",
+                    "value": "x"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "core-object-presence",
+      "files": [
+        {
+          "path": "main.tease",
+          "source": "let seed = hostValue\nsay \"BEFORE\"\nlet n = seed.name\nsay \"AFTER\"\nexit\n"
+        }
+      ],
+      "options": {
+        "globals": [
+          "hostValue"
+        ]
+      },
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "present",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0,
+            "globals": {
+              "hostValue": {
+                "kind": "object",
+                "properties": [
+                  {
+                    "name": "name",
+                    "value": "x"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "label": "absent",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0,
+            "globals": {
+              "hostValue": {
+                "kind": "object",
+                "properties": []
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "core-stop-moved-check",
+      "files": [
+        {
+          "path": "main.tease",
+          "source": "let v: integer = hostValue\nsay \"AFTER\"\nexit\n"
+        }
+      ],
+      "options": {
+        "globals": [
+          "hostValue"
+        ]
+      },
+      "allowance": 50,
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "whole",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0,
+            "globals": {
+              "hostValue": 1
+            }
+          }
+        },
+        {
+          "label": "fraction",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0,
+            "globals": {
+              "hostValue": 1.5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "core-stop-unstopped",
+      "files": [
+        {
+          "path": "main.tease",
+          "source": "let v: integer = hostValue\nsay \"AFTER\"\nexit\n"
+        }
+      ],
+      "options": {
+        "globals": [
+          "hostValue"
+        ]
+      },
+      "routes": [
+        "legacy",
+        "core"
+      ],
+      "runs": [
+        {
+          "label": "whole",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0,
+            "globals": {
+              "hostValue": 1
+            }
+          }
+        },
+        {
+          "label": "fraction",
+          "fresh": {
+            "seed": 5,
+            "wallClockMs": 1791633600000,
+            "baseDelayMs": 0,
+            "delayPerWordMs": 0,
+            "delayPerCharacterMs": 0,
+            "globals": {
+              "hostValue": 1.5
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

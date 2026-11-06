@@ -9,6 +9,7 @@
     "player/vue/index.html",
     "player/vue/src/lib/utils.ts",
     "tests/**/*.test.ts",
+    "tests/runtime-pipeline-oracle.oracle.ts",
     "tests/property/replay.ts",
     "tools/oxlint/{run,test}.mjs",
     "tools/oxlint/check-evidence.test.mjs",
