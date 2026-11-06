@@ -1419,9 +1419,12 @@ function elementsCarry(
         return property !== undefined && carried(property.value, steps.slice(1), type);
       }
       if (type.kind !== "object") return false;
+      // (the literal's properties indexed once: the walk visits each property at most once, as the store's own check of
+      // the value does, so its work is that check's, charged where publication made it)
+      const own = new Map(node.properties.map((one) => [one.name.name, one.value]));
       return type.properties.every((wanted) => {
-        const property = node.properties.find((one) => one.name.name === wanted.name);
-        return property !== undefined && carried(property.value, [], wanted.type);
+        const value = own.get(wanted.name);
+        return value !== undefined && carried(value, [], wanted.type);
       });
     }
     const leaf = leafKind(node);
