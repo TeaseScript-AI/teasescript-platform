@@ -277,32 +277,57 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const hostError = ref<string | null>(null);
   // From a Player error stop until the host acknowledged it (a round trip with a Worker): input stops, nothing renders.
   const halting = ref(false);
+  /**
+   * The Player error stop. What shows is what the host ran before the stop, and nothing after it: the stop ends the
+   * activation under way, so no Start or Continue completes on its own; the host refuses what the stopped session has
+   * not run, and its store applies the replies to what it ran until the host acknowledges the stop. The stopped session
+   * is the shown one, else the one still beginning: a Continue's restored session at once, a Start's once its reply
+   * names it. Its last publication then shows, and the stop renders after it; input stops at once (`stopped`).
+   */
   function reportHostError(error: unknown) {
     const name = error instanceof Error ? error.name : "Error";
     console.error("[player] host error", error);
-    const shown = session.value;
-    if (shown === null) {
+    const restoring = continuing;
+    const starting = sessionBeginning;
+    continuing = null;
+    activationToken += 1;
+    beginning.value = false;
+    const stop = activationToken;
+    const target = session.value ?? restoring;
+    // A Continue still beginning beside a shown session runs nothing more either.
+    if (restoring !== null && restoring !== target) void bridgeOf(restoring).halt(restoring);
+    if (target !== null) return stopAt(target, name, stop);
+    if (starting === null) {
       hostError.value = name;
       return;
     }
-    // What shows is what the host ran before the stop, and nothing after it: the host refuses what the session has not
-    // run, and the store applies the replies to what it ran until the host acknowledges the stop. The stop renders
-    // then, at once in-process; input stops at once either way (`stopped`).
-    const host = bridgeOf(shown);
-    const acknowledged = host.halt(shown);
-    // The stop line: the shown session becomes the frozen store's last publication, everything the host ran, which its
-    // recording and export hold; nothing after it shows, as nothing more applies.
+    halting.value = true;
+    void starting.then(
+      (started) => stopAt(started, name, stop),
+      () => {
+        if (stop !== activationToken) return;
+        halting.value = false;
+        hostError.value ??= name;
+      },
+    );
+  }
+  /**
+   * Stops at `target`: once its store froze at the host's acknowledgement, its last publication is the shown session,
+   * which the recording and export hold, and the stop renders. A later activation or unmount supersedes it.
+   */
+  function stopAt(target: PlayerSession, name: string, stop: number) {
+    const host = bridgeOf(target);
+    const acknowledged = host.halt(target);
     const commit = () => {
-      const final = host.latest(shown);
-      if (final !== null && session.value?.id === shown.id) session.value = final;
+      halting.value = false;
+      if (disposed || stop !== activationToken) return;
+      const final = host.latest(target);
+      if (final !== null) session.value = final;
       hostError.value ??= name;
     };
-    if (host.frozen(shown)) return commit();
+    if (host.frozen(target)) return commit();
     halting.value = true;
-    void acknowledged.then(() => {
-      halting.value = false;
-      commit();
-    });
+    void acknowledged.then(commit);
   }
   /**
    * The engine Worker was lost. **The owner's choice point** (L5 series, Doubt 3): what the player sees then is decided
@@ -859,6 +884,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
   // obsolete one's requests run in the host before the replacement's, which claims the recorder and trace last.
   let begunInFlight: Promise<void> | null = null;
+  // The session that Start or Continue is beginning, once the host names it; an error stop stops at it.
+  let sessionBeginning: Promise<PlayerSession> | null = null;
   /**
    * A new activation, preparation or end replaces the one under way: a Continue still beginning is halted in the host,
    * so its queued requests, such as starting the recording of an obsolete session, are refused without effect.
@@ -2421,6 +2448,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return;
     }
     if (!(begun instanceof Promise)) return started(pending, begun);
+    sessionBeginning = begun;
     const settled = begun.then(
       (next) => {
         if (!disposed && token === activationToken) started(pending, next);
@@ -2433,6 +2461,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     begunInFlight = settled;
     void settled.finally(() => {
       if (begunInFlight === settled) begunInFlight = null;
+      if (sessionBeginning === begun) sessionBeginning = null;
     });
     return settled;
   }

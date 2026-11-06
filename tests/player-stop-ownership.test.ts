@@ -34,6 +34,12 @@ interface StopHost {
   ): void;
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
+  debugExportCandidate(shown: {
+    readonly player: object;
+    readonly host: object;
+  }): Promise<{
+    readonly session: { readonly transcriptEntries: readonly { readonly text: string }[] } | null;
+  }>;
   setDebugTracing(on: boolean): void;
   reportHostError(error: unknown): void;
 }
@@ -272,3 +278,73 @@ test("a session op still awaited does not delay the halt fence: a request behind
     [3, true],
   ]);
 });
+
+for (const kind of [
+  "start-in-transit",
+  "start-queued",
+  "continue-queued",
+  "continue-begin-in-transit",
+  "continue-in-transit",
+] as const)
+  test(`an error stop while a session begins (${kind}) shows what the host ran, and nothing after the stop line`, async (context) => {
+    const { bridge, player } = await mount(context);
+    const afterStop: string[] = [];
+    const stopWatch = watch(
+      player.session,
+      (shown) => {
+        if (shown !== null && player.hostError.value !== null) afterStop.push(shown.id);
+      },
+      { flush: "sync" },
+    );
+    context.after(stopWatch);
+    let compiled: Promise<unknown> = Promise.resolve();
+    let continueSent!: () => void;
+    const sent = new Promise<void>((resolve) => (continueSent = resolve));
+    if (kind.startsWith("start")) {
+      const plan = compiler.compilePlayerProject(
+        'say "started", instant\nshowButton "Next"\nexit',
+      ).plan!;
+      player.prepare({ plan: facade.holdPlan(bridge, plan), options: () => ({ wallClockMs: 0 }) });
+      if (kind === "start-queued")
+        compiled = bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
+    } else {
+      player.setDebugTracing(true);
+      if (kind === "continue-queued")
+        compiled = bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
+      player.prepareRestore(
+        compiler.createPlayerRuntimeSession('say "restored", instant\nshowButton "Next"\nexit'),
+      );
+      if (kind === "continue-in-transit") {
+        const request = bridge.client.request;
+        context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+          const result = request(...args);
+          if (args[0] === "continue") continueSent();
+          return result;
+        });
+      }
+    }
+    const beginning = player.activate();
+    if (kind === "continue-in-transit") await sent;
+    player.reportHostError(new TypeError(`a component failed during ${kind}`));
+    await compiled;
+    await beginning;
+    for (let index = 0; index < 10; index += 1) await turn();
+    const shown = player.session.value;
+    const recordingAtStop = facade.heldRecording(bridge)?.operations.length ?? null;
+    const traceAtStop = player.debugTrace.value?.status() ?? null;
+    for (let index = 0; index < 10; index += 1) await turn();
+    assert.deepEqual(afterStop, [], "nothing shows after the stop line");
+    assert.equal(player.hostError.value, "TypeError");
+    if (shown !== null) {
+      assert.equal(bridge.frozen(shown), true, "the stopped session's store froze");
+      assert.deepEqual(stopLine(bridge, player).export, shown.state.observedSessionTimeMs);
+      const exported = await player.debugExportCandidate({ player: {}, host: {} });
+      assert.deepEqual(
+        exported.session?.transcriptEntries.map((entry) => entry.text),
+        shown.transcriptEntries.map((entry) => entry.text),
+      );
+    }
+    // Nothing of the activation runs after the stop: the recording and trace stay as they stood.
+    assert.equal(facade.heldRecording(bridge)?.operations.length ?? null, recordingAtStop);
+    assert.deepEqual(player.debugTrace.value?.status() ?? null, traceAtStop);
+  });
