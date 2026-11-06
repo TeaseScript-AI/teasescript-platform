@@ -9,9 +9,9 @@ import { positions } from "../positions.js";
 import type { Work } from "../solver.js";
 import type { FlowSink } from "./contributions.js";
 import { entered, ingressLeafOf } from "./ingress.js";
-import { canonicalKey, isKeyId, keyDepthIn, stepsArray, type PathRef } from "./key-ids.js";
+import { canonicalKey, isKeyId, keyDepthIn, spanRef, stepsArray, type PathRef } from "./key-ids.js";
 import { hostAt, propertyOnly, unknownItem } from "./kinds.js";
-import { lackingAt, pathAt } from "./literal-index.js";
+import { lackingAt, pathAt, pathDepth } from "./literal-index.js";
 import { depthOf, marksAt, marksNothing } from "./marks.js";
 import type { Holder, IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
 
@@ -58,14 +58,17 @@ type FNode =
   | { readonly kind: "mark"; readonly inner: number }
   /**
    * #1784: `inner` (neither marked nor held) reached below entries whose holders' marks the rest decides: its pending
-   * set (`internPending`), each holder with the steps taken since its entry, once.
+   * set (`internPending`), each holder with the steps taken since its entry (an arena path), once.
    */
   | { readonly kind: "hold"; readonly inner: number; readonly set: number };
 
-/** A holder's mark not decided yet, and the steps taken since its entry (`decide`). */
+/**
+ * A holder's mark not decided yet, and the steps taken since its entry (`decide`): their path in the contract's path
+ * arena (`pathAt`, one step per child), so a step further is one lookup and its name a number, never a copy of the steps.
+ */
 interface Pending {
   readonly holder: Holder;
-  readonly steps: readonly string[];
+  readonly path: number;
 }
 
 /** A node one step below another: `Sum(node, step)`, its nodes as found, each passed once to every reader. */
@@ -363,7 +366,7 @@ interface Decision {
 function pendingName(frontier: Frontier, each: Pending): string {
   let holder = frontier.holders.get(each.holder);
   if (holder === undefined) frontier.holders.set(each.holder, (holder = frontier.holders.size));
-  return JSON.stringify([holder, each.steps]);
+  return JSON.stringify([holder, each.path]);
 }
 
 /** #1784: a set of pending marks by their names, interned once: its id; -1 for none. */
@@ -395,8 +398,9 @@ function decide(frontier: Frontier, adds: readonly Pending[]): Decision {
     step(frontier);
     const depth = depthOf(contract, each.holder);
     if (depth === Infinity) throw new Decline("marks-depth");
-    if (each.steps.length >= depth) {
-      if (marksAt(contract, each.holder, each.steps)) return { marked: true, rest: -1 };
+    if (pathDepth(contract, each.path) >= depth) {
+      if (marksAt(contract, each.holder, spanRef(contract, each.path)))
+        return { marked: true, rest: -1 };
       continue;
     }
     rest.set(pendingName(frontier, each), each);
@@ -409,12 +413,12 @@ function advance(frontier: Frontier, set: number, s: string): Decision {
   let bySteps = frontier.advances.get(set);
   const known = bySteps?.get(s);
   if (known !== undefined) return known;
-  const work = frontier.contract.work;
+  const { contract } = frontier;
   const decision = decide(
     frontier,
-    frontier.pendingSets[set]!.map(({ holder, steps }) => ({
+    frontier.pendingSets[set]!.map(({ holder, path }) => ({
       holder,
-      steps: keptSteps(work, steps, [s]),
+      path: pathAt(contract, path, s),
     })),
   );
   if (bySteps === undefined) frontier.advances.set(set, (bySteps = new Map()));
@@ -479,7 +483,8 @@ function routeOf(
     throw new Decline("ingress");
   if (read.guarded) return (node) => markNode(frontier, node);
   if (marksNothing(contract, read.holder)) return null;
-  const decision = decide(frontier, [{ holder: read.holder!, steps }]);
+  const path = steps.reduce((at, step) => pathAt(contract, at, step), 0);
+  const decision = decide(frontier, [{ holder: read.holder!, path }]);
   return (node) => pendingBelow(frontier, node, decision);
 }
 
@@ -508,7 +513,7 @@ function selfMarks(
       throw new Decline("ingress");
     if (entry.guarded) guarded = true;
     else if (!marksNothing(contract, entry.holder))
-      pending.push({ holder: entry.holder!, steps: [s] });
+      pending.push({ holder: entry.holder!, path: pathAt(contract, 0, s) });
   }
   const decision: Decision = guarded ? { marked: true, rest: -1 } : decide(frontier, pending);
   if (!decision.marked && decision.rest < 0) return;
@@ -933,9 +938,9 @@ function termOf(frontier: Frontier, id: number): { leaves: number[]; next: numbe
 function endMarks(frontier: Frontier, set: number): boolean {
   const known = frontier.endMarks.get(set);
   if (known !== undefined) return known;
-  const marks = frontier.pendingSets[set]!.some(({ holder, steps }) => {
+  const marks = frontier.pendingSets[set]!.some(({ holder, path }) => {
     step(frontier);
-    return marksAt(frontier.contract, holder, steps);
+    return marksAt(frontier.contract, holder, spanRef(frontier.contract, path));
   });
   frontier.endMarks.set(set, marks);
   return marks;
@@ -1193,7 +1198,7 @@ export function pushedInvariant(contract: Contract): {
   const violations: string[] = [];
   if (frontier === undefined) return { violations, largest: 0, held: 0, bases: 0 };
   const nameOf = (each: Pending): string =>
-    JSON.stringify([frontier.holders.get(each.holder), each.steps]);
+    JSON.stringify([frontier.holders.get(each.holder), each.path]);
   frontier.nodes.forEach((node, id) => {
     if (node.kind !== "mark" && node.kind !== "hold") return;
     const inner = frontier.nodes[node.inner]!.kind;
