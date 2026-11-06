@@ -135,7 +135,7 @@ before(async () => {
  */
 async function mount(context: TestContext, source: string, randomControl?: RandomControlOptions) {
   // Event targets are the only browser surface these scripts use, with the silent audio elements Start primes.
-  const surface: Record<string, unknown> = {
+  const surface = {
     document: new EventTarget(),
     window: new EventTarget(),
     Audio: class {
@@ -144,9 +144,9 @@ async function mount(context: TestContext, source: string, randomControl?: Rando
       pause() {}
     },
   };
-  for (const name of ["document", "window", "Audio"]) {
+  for (const [name, value] of Object.entries(surface)) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
-    Object.defineProperty(globalThis, name, { configurable: true, value: surface[name] });
+    Object.defineProperty(globalThis, name, { configurable: true, value });
     context.after(() => {
       if (previous) Object.defineProperty(globalThis, name, previous);
       else Reflect.deleteProperty(globalThis, name);
