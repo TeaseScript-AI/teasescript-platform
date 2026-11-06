@@ -96,10 +96,10 @@ export const recorded = {
   commands: [
     [
       'env -u NODE_OPTIONS node tests/families/shadow.mjs "$SX_TREE" messages --only only.json --out shadow.jsonl',
-      "sx-job campaign i1765-family-4c28e674a (job 11060340446c68, tree 4c28e674a); " +
-        "desktop:~/work/evidence/1765-family/4c28e674a1b20c76e040be0b9c8c394f05b67bb7/shadow-family-0/out/shadow.jsonl",
+      "sx-job campaign i1765-records-f036d6734 (job 1106052456c1dd, tree f036d6734); " +
+        "desktop:~/work/evidence/1765-family/f036d6734ec9633b603aec0b143c64fccc2387e8/shadow-family/out/shadow.jsonl",
     ],
   ],
-  sources: 2094,
-  sha256: "acb9653ac43a594118763a6cd1b73e2362ce3a321d19677a4d7e26df082ad517",
+  sources: 2202,
+  sha256: "6a3a641bf35bcc969dc3ebb5c9f505ef4a5d1b85e98da39754aee10bfcc86099",
 };

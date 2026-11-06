@@ -106,4 +106,14 @@ export const inherited = {
   "null-density:take-first": "#1857",
   "every:take": "#1857",
 };
-export const recorded = { commands: [], sources: 0, sha256: "" };
+export const recorded = {
+  commands: [
+    [
+      'env -u NODE_OPTIONS node tests/families/shadow.mjs "$SX_TREE" messages --only only.json --out shadow.jsonl',
+      "sx-job campaign i1765-records-f036d6734 (job 1106052456376f, tree f036d6734); " +
+        "desktop:~/work/evidence/1765-family/f036d6734ec9633b603aec0b143c64fccc2387e8/shadow-growth/out/shadow.jsonl",
+    ],
+  ],
+  sources: 87,
+  sha256: "1dd3463cecdd9b56212209478e3227ce8b9990b60c37813da241f0fd637e492e",
+};
