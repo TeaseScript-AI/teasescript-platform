@@ -13,6 +13,7 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { InstructionPlan } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
@@ -39,6 +40,7 @@ interface KeepHost {
   activate(): Promise<void>;
   toStartPage(): Promise<void>;
   temporalCapture(): PlayerRuntimeSessionOptions;
+  readonly bridge: Promise<PlayerBridge>;
 }
 let usePlayerSession: (options: {
   scriptStorage: ScriptStorageProvider;
@@ -309,11 +311,26 @@ test("Start and Continue record the zone and clock at the click, not those prepa
   assert.equal(reloaded.activation.value, "continue");
   await tasks();
   process.env["TZ"] = "America/Sao_Paulo";
+  // The host's first reply of the Continue (`beginRecording`) is held; meanwhile the zone and the clock change. The
+  // Continue records them as they were at the click (#1886).
+  const bridge = await reloaded.bridge;
+  const request = bridge.client.request.bind(bridge.client);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    const sent = request(...args);
+    return args[0] === "beginRecording" ? sent.then(async (reply) => (await held, reply)) : sent;
+  });
   const resumed = Date.now();
-  await reloaded.activate();
+  const continuing = reloaded.activate();
+  const clicked = Date.now();
+  process.env["TZ"] = "Asia/Kolkata";
+  context.mock.method(Date, "now", () => clicked + 20_000);
+  release();
+  await continuing;
   const go = recorded(reloaded.session.value);
   assert.equal(go.zone, "America/Sao_Paulo");
-  assert.ok(go.epochMs! >= resumed && go.epochMs! <= Date.now());
+  assert.ok(go.epochMs! >= resumed && go.epochMs! <= clicked, "the clock of the click");
 });
 
 /** Holds `at`'s next publication until `release()`; `entered` gives its update once it is issued. */
