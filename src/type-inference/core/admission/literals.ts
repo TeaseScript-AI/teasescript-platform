@@ -1503,9 +1503,18 @@ function viewRest(view: PathView): PathView {
   return at;
 }
 
+// (its first `count` steps, read once from the front: Codex r13)
 function viewSteps(admission: Admission, view: PathView, count: number): readonly string[] {
   const out: string[] = [];
-  for (let at = 0; at < count; at += 1) out.push(viewStep(view, at)!);
+  let at: PathView | null = view;
+  let from = view.start;
+  while (at !== null && out.length < count) {
+    const { head } = at.rope;
+    for (let step = from; step < head.length && out.length < count; step += 1)
+      out.push(head[step]!);
+    at = at.rope.tail;
+    from = at?.start ?? 0;
+  }
   return keptSlice(admission.work, out, 0);
 }
 
@@ -1580,27 +1589,30 @@ function layersOf(
     };
     return made;
   };
-  // (a frame: its value, its path, where its answers go (`holds`: its own where it is kept, else its keeper's), its
-  // parts, the next part)
+  // (a frame: its value, its path, its answers (`holds`, a bit per depth: its own where it is kept, else its keeper's),
+  // where they go, its parts, the next part; a bit mask moves an answer in one step, Codex r13)
+  interface Bits {
+    bits: bigint;
+  }
   type Part = readonly [PlaceId, FlowNode, MarkedStrip];
   interface Frame {
     readonly at: PlaceId;
     readonly kept: boolean;
-    readonly holds: Set<number>;
-    readonly into: Set<number>;
+    readonly holds: Bits;
+    readonly into: Bits;
     readonly strip: MarkedStrip;
     readonly parts: readonly Part[];
     next: number;
   }
   const pending = new Map<PlaceId, Set<number>>();
-  const open = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Set<number>): Frame => {
+  const open = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Bits): Frame => {
     admission.work.charge("checks");
     const kept = !program.hasOf.has(at);
-    const holds = kept ? new Set<number>() : into;
+    const holds: Bits = kept ? { bits: 0n } : into;
     let { next } = here;
     // (the depth at its own level, if one is)
     if (next < depths.length && depths[next]! + here.shift === 0) {
-      if (mayHoldNull(admission, at, from, [])) holds.add(next);
+      if (mayHoldNull(admission, at, from, [])) holds.bits |= 1n << BigInt(next);
       next += 1;
     }
     let parts: Part[] = [];
@@ -1626,17 +1638,20 @@ function layersOf(
               (role !== "otherwise/fallback" || falls) && (role !== "otherwise/operand" || taken),
           )
           .map(([part, path]) => [part, from, path] as const);
-        if (carried.length === 0)
+        // (a value no carrier composes: each depth by `mayHoldNull`, its path one read of the longest)
+        if (carried.length === 0) {
+          const longest = viewSteps(admission, here.view, depths.at(-1)! + here.shift);
           for (let slot = next; slot < depths.length; slot += 1)
             if (
               mayHoldNull(
                 admission,
                 at,
                 from,
-                viewSteps(admission, here.view, depths[slot]! + here.shift),
+                keptSlice(admission.work, longest, 0, depths[slot]! + here.shift),
               )
             )
-              holds.add(slot);
+              holds.bits |= 1n << BigInt(slot);
+        }
       }
     }
     if (kept) {
@@ -1646,7 +1661,7 @@ function layersOf(
     }
     return { at, kept, holds, into, strip: here, parts, next: 0 };
   };
-  const out = new Set<number>();
+  const out: Bits = { bits: 0n };
   const root = strip(
     { rope: { head: path, tail: null }, start: 0, length: path.length },
     0,
@@ -1654,11 +1669,11 @@ function layersOf(
     intern(-1, `${keptText(admission.work, path)}#${depths.join(",")}`),
   );
   const stack: Frame[] = [];
-  const ask = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Set<number>): void => {
+  const ask = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Bits): void => {
     if (!program.hasOf.has(at)) {
       const answer = answers.get(at)?.get(here.key);
       if (answer !== undefined) {
-        for (const slot of answer) into.add(slot);
+        into.bits |= answer;
         return;
       }
       if (pending.get(at)?.has(here.key) === true) return;
@@ -1678,11 +1693,11 @@ function layersOf(
     if (!frame.kept) continue;
     let mine = answers.get(frame.at);
     if (mine === undefined) answers.set(frame.at, (mine = new Map()));
-    mine.set(frame.strip.key, frame.holds);
+    mine.set(frame.strip.key, frame.holds.bits);
     pending.get(frame.at)!.delete(frame.strip.key);
-    for (const slot of frame.holds) frame.into.add(slot);
+    frame.into.bits |= frame.holds.bits;
   }
-  return depths.map((_, slot) => out.has(slot));
+  return depths.map((_, slot) => ((out.bits >> BigInt(slot)) & 1n) === 1n);
 }
 
 /**
@@ -1693,7 +1708,7 @@ const LAYERS = new WeakMap<
   object,
   {
     readonly keys: Map<number, Map<string, number>>;
-    readonly answers: Map<PlaceId, Map<number, ReadonlySet<number>>>;
+    readonly answers: Map<PlaceId, Map<number, bigint>>;
     readonly count: { value: number };
   }
 >();

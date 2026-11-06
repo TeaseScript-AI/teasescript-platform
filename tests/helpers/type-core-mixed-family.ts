@@ -76,7 +76,7 @@ const INTEGER_TYPE = /\(([^()]*integer[^()]*)\)/;
  * - #1843: an element's own `or null` dropped, for a copy at the element that may be null;
  * - #1847: a `!= null` test of a typed host value not seen, its `?` at the tested layer kept.
  */
-export function mixedInherited(
+function mixedInherited(
   row: MixedDimensions,
   open: readonly string[],
 ): readonly (readonly [string, (sentence: string) => string])[] {
