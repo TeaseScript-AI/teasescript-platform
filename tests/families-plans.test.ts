@@ -9,12 +9,13 @@ const tool = resolve("tests/families/plans.mjs");
 
 /**
  * A built tree's modules as the plans comparison loads them: a ledger whose allowance is 1,000 or a test's, and a compile
- * that charges it by its source: `over` 5,000 units (past 4 times the allowance), `slow` 300 after waiting 100 ms in
- * every run (its eight runs together past a 0.5 s safety net, each within it), `hang` 1 after waiting 1 s, any other 300;
+ * that charges it by its source: `over` 5,000 units (past 4 times the allowance), `slow` 300 after waiting 700 ms in
+ * every run (its eight runs together past a 3 s safety net, each within it), `hang` 1 after waiting 6 s, any other 300;
  * the held family's stop search, one analysis at a test allowance of 10, 300 for `stopped` (30 times that allowance,
  * within 4 times its natural one) and 5,000 for `searched` (past 4 times its natural one), each at its one settled stop
- * 300; `settling` waits 300 ms in the head's first compile and as the base's next search starts (each within a 0.5 s
- * net, together past it), `lost` 1 s as its search starts.
+ * 300; `settling` waits 1.8 s in the head's first compile and as the base's next search starts (each within a 3 s
+ * net, together past it), `lost` 6 s as its search starts. (#1850: margins of over a second either way, which a loaded
+ * worker keeps, where a 0.5 s net left 200 ms.)
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": `let test = null;
@@ -40,9 +41,9 @@ const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0
 let settling = import.meta.url.includes("/head/");
 export function compileProjectWithBackend(files) {
   const source = files[0].source;
-  if (source === "settling" && settling) (settling = false), wait(300);
-  if (source === "slow") wait(100);
-  if (source === "hang") wait(1000);
+  if (source === "settling" && settling) (settling = false), wait(1800);
+  if (source === "slow") wait(700);
+  if (source === "hang") wait(6000);
   ledger().charge("frames", source === "over" ? 5000 : source === "hang" ? 1 : 300);
   return { plan: { instructions: [] }, diagnostics: [] };
 }
@@ -64,8 +65,8 @@ export const heldFamily = () =>
   ["stopped", "searched", "settling", "lost"].map((name) => ({ name, source: name, slice: true }));
 let settling = import.meta.url.includes("/base/");
 export function heldStops(c, mode) {
-  if (c.name === "settling" && settling) (settling = false), wait(300);
-  if (c.name === "lost") wait(1000);
+  if (c.name === "settling" && settling) (settling = false), wait(1800);
+  if (c.name === "lost") wait(6000);
   mode.run(() => new WorkLedger(10).charge("frames", c.name === "searched" ? 5000 : 300));
   return [{ allowance: 10, phase: "admission" }];
 }
@@ -98,7 +99,7 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
         join(folder, "head"),
         set,
         "--timeout",
-        "0.5",
+        "3",
         "--out",
         out,
         ...more,
@@ -134,7 +135,7 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
   for (const name of ["fine", "slow"]) assert.equal(outcome(name).differing, 0, name);
   assert.deepEqual(outcome("hang"), {
     stalled: undefined,
-    uncharged: "safety net 0.5 s",
+    uncharged: "safety net 3 s",
     run: { tree: "base", mode: 0, at: "natural" },
     work: undefined,
     allowance: undefined,
@@ -177,7 +178,7 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
       { name: "settling" },
       {
         name: "lost",
-        uncharged: "safety net 0.5 s",
+        uncharged: "safety net 3 s",
         run: { tree: "base", mode: 0, at: "stop search, between", analysis: 0 },
       },
     ].map((record) => ({
