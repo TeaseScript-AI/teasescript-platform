@@ -3164,8 +3164,9 @@ test("a message's walk and owner index charge their work, to the analysis and no
 /**
  * #1765, Astra r1's B2 on #1789: each value's optionality at a path is asked once per pass, whichever literal's or
  * join's error asks it, so a wide `.take(k)` operand joined with k lists one after another is walked once, not once per
- * join; and a wide earliest literal element before k disagreeing ones is walked once, not once per error (Codex r9's
- * B1): the analysis's work grows with k (at most ×2.5 per doubling), in four modes.
+ * join; a wide earliest literal element before k disagreeing ones is walked once, not once per error (Codex r9's B1);
+ * and a chain of `otherwise`s answers each operand once (Codex r11's B2): the analysis's work grows with k (at most ×2.5
+ * per doubling), in four modes.
  */
 test("a mixed join's layers read each value at a path once per pass (#1765)", () => {
   const wide = (k: number): string =>
@@ -3175,6 +3176,9 @@ test("a mixed join's layers read each value at a path once per pass (#1765)", ()
       `let xs=[${wide(k)}.take(${k})]${Array.from({ length: k }, (_, at) => `+[[["s${at}"]]]`).join("")}\nexit\n`,
     (k: number): string =>
       `let xs=[${wide(k)},${Array.from({ length: k }, (_, at) => `[["s${at}"]]`).join(",")}]\nexit\n`,
+    // (a chain of 8k `otherwise`s nested to the left, each a carrier asking its operand: each node once, Codex r11's B2)
+    (k: number): string =>
+      `let n:integer[][]?=[[1]]\nif hostValue == 1 { n=null }\nlet xs=[${"(".repeat(8 * k)}n${") otherwise null".repeat(8 * k)},[["x"]]]\nexit\n`,
   ];
   for (const source of sources)
     for (const mode of MODES) {

@@ -1373,16 +1373,39 @@ function mayHoldNull(
   // (an `otherwise`'s operand may be null where its items at its node hold null, narrowed as it is read there: a
   // written copy narrowed by its assignment or a test never runs its fallback, as the current checker reads it; an
   // operand that is itself an `otherwise` only where its operand and its fallback both may be, Codex r10's B1)
+  // (each node's answer once per pass and node, an `otherwise` after its operand and fallback, so a chain of them is
+  // walked once, whichever carrier in it asks: Codex r11's B2)
+  let byNode = NARROWED.get(admission.pass);
+  if (byNode === undefined) NARROWED.set(admission.pass, (byNode = new Map()));
+  const narrowed = byNode;
   const operandNull = (operand: PlaceId, from: FlowNode): boolean => {
+    let known = narrowed.get(from);
+    if (known === undefined) narrowed.set(from, (known = new Map()));
     const open = [operand];
     while (open.length > 0) {
-      const at = open.pop()!;
+      const at = open.at(-1)!;
+      if (known.has(at)) {
+        open.pop();
+        continue;
+      }
       admission.work.charge("checks");
       const op = program.opOf.get(at);
-      if (op?.kind === "fallback") open.push(op.right, op.left);
-      else if (!admission.items(at, from, []).some((item) => item.tag === "null")) return false;
+      if (op?.kind !== "fallback") {
+        known.set(
+          at,
+          admission.items(at, from, []).some((item) => item.tag === "null"),
+        );
+        open.pop();
+        continue;
+      }
+      const left = known.get(op.left);
+      const right = known.get(op.right);
+      if (left === false || right === false || (left === true && right === true)) {
+        known.set(at, left === true && right === true);
+        open.pop();
+      } else open.push(left === undefined ? op.left : op.right);
     }
-    return true;
+    return known.get(operand)!;
   };
   type Part = readonly [PlaceId, FlowNode, readonly string[]];
   // (a value's answer at a path where its form decides it, else the parts whose answers decide it)
@@ -1486,6 +1509,9 @@ function mayHoldNull(
   }
   return last;
 }
+
+/** Per pass and node, whether an `otherwise`'s operand may be null there (`mayHoldNull`'s `operandNull`). */
+const NARROWED = new WeakMap<object, Map<FlowNode, Map<PlaceId, boolean>>>();
 
 /** Per pass, each value's answer at each path (`mayHoldNull`), shared by every literal's and join's error. */
 const OPTIONAL = new WeakMap<object, Map<PlaceId, Map<string, boolean>>>();
