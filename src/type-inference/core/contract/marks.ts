@@ -611,9 +611,11 @@ function marksBelow(contract: Contract, holder: Holder, path: number): boolean {
       if (where < 0) return false;
     }
     const depth = contract.pathDepths[where]!;
+    // (each ancestor step walked, none for a path no deeper than the rest's: a shallower one is not below it)
     const under = (at: number): boolean => {
-      work.charge("eventSteps", 1 + contract.pathDepths[at]! - depth);
-      while (contract.pathDepths[at]! > depth) at = contract.pathParents[at]!;
+      let steps = 0;
+      for (; contract.pathDepths[at]! > depth; steps += 1) at = contract.pathParents[at]!;
+      work.charge("eventSteps", 1 + steps);
       return at === where;
     };
     for (const at of asked.guarded) if (under(at)) return true;
