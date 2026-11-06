@@ -3473,6 +3473,28 @@ test("a mixed element's type names its dict layers as dicts (#1762)", () => {
       "'+' would mix a dict (integer[] dict) and a dict (string[] dict). A list holds one type. Use values of one " +
         "type in both lists.",
     ],
+    // (a host-assigned written dict through a default, its own read: a `load`'s, on either side and below a property,
+    // and a `get`'s; Codex r8 on #1814)
+    [
+      'let a:integer[] dict=dict {k:[1]}\na=hostValue\nlet xs=[load("key",default:a)]+[dict {k:["x"]}]\nexit\n',
+      "'+' would mix a dict (integer[] dict) and a dict (string[] dict). A list holds one type. Use values of one " +
+        "type in both lists.",
+    ],
+    [
+      'let a:integer[] dict=dict {k:[1]}\na=hostValue\nlet xs=[dict {k:["x"]}]+[load("key",default:a)]\nexit\n',
+      "'+' would mix a dict (string[] dict) and a dict (integer[] dict). A list holds one type. Use values of one " +
+        "type in both lists.",
+    ],
+    [
+      'let a:integer[] dict=dict {k:[1]}\na=hostValue\nlet xs=[{f:load("key",default:a)}]+[{f:dict {k:["x"]}}]\nexit\n',
+      "'+' would mix objects whose property 'f' holds a dict (integer[] dict) in one and a dict (string[] dict) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[] dict=dict {k:[1]}\na=hostValue\nlet xs=[[].get(0,default:a)]+[dict {k:["x"]}]\nexit\n',
+      "'+' would mix a dict (integer[] dict) and a dict (string[] dict). A list holds one type. Use values of one " +
+        "type in both lists.",
+    ],
     // (a list of dicts at the leaf: a list, as before)
     [
       'let xs=[[dict {k: 1}],[dict {k: "x"}]]\nexit\n',
