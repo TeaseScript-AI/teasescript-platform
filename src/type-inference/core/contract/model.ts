@@ -321,7 +321,7 @@ export interface ObjectsProof extends Proof {
   readonly lists: readonly ObjectSite[];
   readonly prior: readonly Writer[];
   readonly keys: readonly {
-    readonly key: CanonicalKey;
+    readonly key: Key;
     readonly place: PlaceId;
     readonly path: readonly string[];
   }[];
