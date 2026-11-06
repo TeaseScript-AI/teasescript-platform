@@ -4,6 +4,7 @@ import { effectScope, watch, type Ref } from "vue";
 
 import type * as CompileProject from "../player/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
+import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type { StartOptions } from "../player/engine-bridge/ops/session.js";
 import { startBridgeHost, type HostSession } from "../player/engine-bridge/worker-host.js";
 import { BRIDGE_VERSION } from "../player/engine-bridge/protocol.js";
@@ -57,6 +58,7 @@ let usePlayerSession: (options: {
 }) => StopHost;
 let facade: typeof InProcess;
 let compiler: typeof CompileProject;
+let adapter: typeof RuntimeAdapter;
 let view: typeof RuntimeView;
 
 before(async () => {
@@ -68,6 +70,8 @@ before(async () => {
   facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
   compiler = (await loadPlayerModule("player/compile-project.ts")) as typeof compiler;
+  // EVIDENCE: validation: the bundle's adapter, whose sessions the facade's host holds.
+  adapter = (await loadPlayerModule("player/runtime-adapter.ts")) as typeof adapter;
   // EVIDENCE: validation: the bundle's session view module, from the same module graph.
   view = (await loadPlayerModule("player/runtime-view.ts")) as typeof view;
 });
@@ -559,4 +563,41 @@ test("a Continue whose capture throws fails after its recording began, so the fa
   const recording = facade.heldRecording(bridge)!;
   assert.notEqual(recording.plan, facade.heldPlan(bridge, earlier.planToken));
   assert.equal(JSON.stringify(recording.plan).includes("restored"), true);
+});
+
+test("a Continue serialized behind one still beginning records its own click's zone and clock", async (context) => {
+  let epoch = 1_793_966_400_000;
+  context.mock.method(Date, "now", () => epoch);
+  let captures = 0;
+  const { bridge, player } = await mount(context, 0, undefined, () => {
+    captures += 1;
+    return DEFAULT_TEMPORAL_CONTEXT;
+  });
+  // The first Continue's `beginRecording` reply is held, so the second waits for it (`begunInFlight`).
+  const request = bridge.client.request.bind(bridge.client);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let first = true;
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    const reply = request(...args);
+    if (args[0] !== "beginRecording" || !first) return reply;
+    first = false;
+    return reply.then(async (result) => (await held, result));
+  });
+  player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
+  const obsolete = player.activate();
+  assert.equal(captures, 1);
+  player.prepareRestore(
+    compiler.createPlayerRuntimeSession('say "new", instant\nshowButton "New"\nexit'),
+  );
+  const replacing = player.activate();
+  assert.equal(captures, 2, "the second Continue captured in its click");
+  epoch += 20_000;
+  release();
+  await Promise.all([obsolete, replacing]);
+  assert.equal(player.hostError.value, null);
+  const capture = facade.hatch(player.session.value!, (session) =>
+    adapter.playerRuntimeSnapshot(session).temporalCaptures.at(-1)!,
+  );
+  assert.equal(capture.epochMs, 1_793_966_400_000, "the clock of its own click");
 });

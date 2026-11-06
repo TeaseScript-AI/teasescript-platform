@@ -217,6 +217,11 @@ type Activation = {
   readonly kind: "start" | "continue";
   /** Begins the session; a Start or Continue over the bridge resolves once its first publication is applied. */
   readonly begin: () => PlayerSession | Promise<PlayerSession>;
+  /**
+   * Samples what the activation records of its click (#1886), before anything it waits for: a Continue's zone,
+   * presentation and clock. `begin` goes on with the latest sample, or samples itself without one.
+   */
+  readonly sample?: () => void;
   /** The marks a continued session had, which it keeps. */
   readonly marks?: DebugHistoryMarks;
   /** The restored session Continue goes on with. */
@@ -2350,8 +2355,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     supersede();
     beginning.value = false;
     camera.release();
+    // The capture of this Continue's latest click, or what capturing threw; `begin` takes it.
+    let sampled:
+      | { readonly capture: ReturnType<typeof temporalCapture> }
+      | { readonly error: unknown }
+      | null = null;
+    const sample = () => {
+      try {
+        sampled = { capture: temporalCapture() };
+      } catch (error) {
+        sampled = { error };
+      }
+    };
     activation.value = {
       kind: "continue",
+      sample,
       begin: async () => {
         const host = bridgeOf(restored);
         continuing = restored;
@@ -2361,16 +2379,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           if (disposed || owner !== activationToken)
             throw new Error("A replaced Continue goes no further.");
         };
-        // Continue records the zone, presentation and clock of the click (#1886), before any reply. A capture that
-        // throws fails the Continue where it failed before: after its recording began, so the failure's recording is
-        // the restored session's, not the previous one's.
-        let capture: ReturnType<typeof temporalCapture> | null = null;
-        let captureError: unknown;
-        try {
-          capture = temporalCapture();
-        } catch (error) {
-          captureError = error;
-        }
+        // Continue records the zone, presentation and clock of the click (#1886), before any reply or wait. A capture
+        // that throws fails the Continue where it failed before: after its recording began, so the failure's recording
+        // is the restored session's, not the previous one's.
+        if (sampled === null) sample();
+        const taken = sampled!;
+        sampled = null;
         // The recording of a restored session starts from the state it continues, and so does a new trace epoch.
         await host.request(restored, "beginRecording", null);
         owned();
@@ -2391,8 +2405,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             setPlayerRuntimeDebugMode(held, debugMode),
           ).session;
         applyRandomControl(continued);
-        if (capture === null) throw captureError;
-        await host.request(continued, "continue", { capture });
+        if (!("capture" in taken)) throw taken.error;
+        await host.request(continued, "continue", { capture: taken.capture });
         owned();
         return host.latest(continued) ?? continued;
       },
@@ -2429,6 +2443,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       // `takePhoto()` is unconfigured (settled before `open` returns): nothing waits but the host's replies.
       void camera.open(false);
       captures.reset();
+      // What it records of the click is sampled now, before it waits for an activation still beginning.
+      pending.sample?.();
       try {
         if (begunInFlight !== null) {
           await begunInFlight;
@@ -2454,6 +2470,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Replaced, re-prepared, or unmounted while it waited: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
+    // As before, a camera's Continue samples once the camera answered, and before it waits for another activation.
+    pending.sample?.();
     try {
       if (begunInFlight !== null) {
         await begunInFlight;
