@@ -2,12 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { CorePass } from "../src/type-inference/core/answers.js";
+import type { Contract } from "../src/type-inference/core/contract.js";
+import {
+  collectMarks,
+  depthOf,
+  markAccepts,
+  markHolders,
+  markPaths,
+  marksAt,
+  markStates,
+} from "../src/type-inference/core/contract/marks.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { Consumers } from "../src/type-inference/core/consumers.js";
 import {
   pushedFacts,
   pushedInvariant,
-  withoutMarkPruning,
   withoutPushedReads,
 } from "../src/type-inference/core/contract/frontier.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
@@ -80,7 +89,18 @@ function analysed(source: string, mode = MODES[0]!, oracle: "native" | number | 
       oracle === null ? run() : withoutPushedReads(run, oracle === "native" ? null : oracle);
     const all = passes.map((pass) => pushedFacts(pass.contract));
     const invariants = passes.map((pass) => pushedInvariant(pass.contract));
-    return { answers, facts: all.at(-1)!, all, invariants, settled: passes.map(settledAnswers) };
+    // (the automaton's size as the analysis left it, before the truth checks compile every holder)
+    const states = passes.map((pass) => markStates(pass.contract));
+    const truth = passes.map((pass) => markTruth(pass.contract));
+    return {
+      answers,
+      facts: all.at(-1)!,
+      all,
+      invariants,
+      truth,
+      states,
+      settled: passes.map(settledAnswers),
+    };
   } finally {
     Consumers.prototype.check = check;
   }
@@ -91,6 +111,37 @@ function pushedSlots(analysis: ReturnType<typeof analysed>): string {
   return JSON.stringify(
     analysis.settled.map((answers) => [...answers].filter(([key]) => key.startsWith("pr|"))),
   );
+}
+
+/**
+ * #1784: the mark automaton against `marksAt` on a pass's real holders: every path of each compiled holder's own prefix
+ * trie, and each one step further by each step the trie names and one none does; the asks, the marked ones and every
+ * path where the two differ.
+ */
+function markTruth(contract: Contract): {
+  readonly asked: number;
+  readonly marked: number;
+  readonly differences: readonly string[];
+} {
+  let [asked, positive] = [0, 0];
+  const differences: string[] = [];
+  collectMarks(contract);
+  for (const holder of [...contract.holders.values(), ...markHolders(contract)]) {
+    if (depthOf(contract, holder) === Infinity) continue;
+    const found = markPaths(contract, holder);
+    const steps = new Set<string>(["zz"]);
+    for (const each of found) for (const step of each) steps.add(step);
+    for (const each of found)
+      for (const tail of [[], ...[...steps].map((step) => [step])]) {
+        const asks = [...each, ...tail];
+        asked += 1;
+        const automaton = markAccepts(contract, holder, asks);
+        if (automaton) positive += 1;
+        if (automaton !== marksAt(contract, holder, asks))
+          differences.push(`${holder.id} at ${asks.join(".")}: automaton ${automaton}`);
+      }
+  }
+  return { asked, marked: positive, differences };
 }
 
 /** Every slot both analyses settled, pass by pass, answers the same (the pushed slots, the read's own, apart). */
@@ -437,7 +488,7 @@ function heldRing(n: number, d: number, m: number, closed: boolean): string {
   return rows.join("\n") + "\n";
 }
 
-test("a ring's held marks are one pending set per goal and base node, a mark that cannot mark dropped, in four modes (#1784)", () => {
+test("a ring's held marks are one pending set per goal and base node, its automaton answering as the holders' marks do, in four modes (#1784)", () => {
   // (a sample of the family the queue runs whole: one doubling of the ring, the depth and the marked copies)
   for (const n of [3, 6])
     for (const d of [2, 4])
@@ -456,12 +507,8 @@ test("a ring's held marks are one pending set per goal and base node, a mark tha
               // (the marks still pending at a node: one per marked copy, whatever the depth)
               assert.ok(largest <= m, `${label}: ${largest}`);
             }
-            // (a dropped mark is one no path below it marks: the marks and the publication as with every one kept)
-            assert.equal(
-              pushedSlots(pushed),
-              pushedSlots(withoutMarkPruning(() => analysed(source, mode))),
-              label,
-            );
+            // (the pending states accept what the holders' marks mark, on every real holder's paths)
+            for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
             const native = analysed(source, mode, horizon ?? "native");
             assert.ok(
               pushed.answers.budget.total <= native.answers.budget.total,
@@ -471,11 +518,6 @@ test("a ring's held marks are one pending set per goal and base node, a mark tha
             assert.equal(
               published,
               withoutPushedReads(() => publication(files, mode, GLOBALS), horizon),
-              label,
-            );
-            assert.equal(
-              published,
-              withoutMarkPruning(() => publication(files, mode, GLOBALS)),
               label,
             );
           }
@@ -627,12 +669,8 @@ test("where the native reader ends, a read through a marked route answers what i
       const [pushed, native] = [analysed(source, mode), analysed(source, mode, "native")];
       sameSettled(pushed, native, source);
       compared += samePushedSlots(pushed, native, source);
-      // (a pending mark dropped is one that cannot mark: the same pushed slots with every one kept to depth)
-      assert.equal(
-        pushedSlots(pushed),
-        pushedSlots(withoutMarkPruning(() => analysed(source, mode))),
-        source,
-      );
+      // (the pending states accept what the holders' marks mark, on every real holder's paths)
+      for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], source);
     }
     if (!source.includes("hostValue")) assert.ok(compared > 0, source);
   }
@@ -676,8 +714,11 @@ test("a pushed read's mark walk charges no negative work, a reference above the 
     for (const mode of MODES) {
       const pushed = analysed(source, mode);
       assert.ok(pushed.facts.reads > 0 && pushed.facts.declines.size === 0, JSON.stringify(mode));
-      assert.ok(
-        pushed.invariants.some(({ held }) => held > 0),
+      // (its marks resolve before any hold: the publication the native reader's)
+      const files = [{ path: "main.tease", source }];
+      assert.equal(
+        publication(files, mode, GLOBALS),
+        withoutPushedReads(() => publication(files, mode, GLOBALS)),
         JSON.stringify(mode),
       );
     }
@@ -731,4 +772,84 @@ test("marking a route's leaves before their join is marking their join, except w
     for (const word of late)
       for (const pair of [`${tag}:null/${word}`, `${tag}:${word}/null`])
         assert.ok(failing.includes(pair), pair);
+});
+
+/** Astra r1 B1's family: a projection's holder marked through its shifted reference, below `d` nested or flat steps. */
+function shiftedRing(d: number, nested: boolean): string {
+  const steps = Array.from({ length: d }, (_, i) => `h${i}`);
+  const literal = nested
+    ? steps.reduceRight((inner, step) => `{${step}:${inner}}`, "0")
+    : `{${steps.map((step) => `${step}:0`).join(",")}}`;
+  const read = nested ? steps.join(".") : steps.at(-1)!;
+  const z = Array.from({ length: d + 2 }, (_, i) => `z${i}`);
+  return (
+    [
+      `let x={g:${literal}}`,
+      `x={g:${literal}}`,
+      `let saved={g:${literal}}`,
+      "if x.g is object { saved=x }",
+      `let z=${z.reduceRight((inner, step) => `{${step}:${inner}}`, "0")}`,
+      `if z.${z.join(".")} is integer { say "z" }`,
+      `let p0=${literal}`,
+      `let p1=${literal}`,
+      `let p2=${literal}`,
+      "p0=x.g",
+      "p2.q=p0",
+      "p2=p1",
+      "p1=p0",
+      "p2=p2.q",
+      `say "\${p2.q.${read}}"`,
+      "exit",
+    ].join("\n") + "\n"
+  );
+}
+
+test("a shifted reference's held marks keep no history: the automaton's size is the depth's none, in four modes (#1784, Astra r1 B1)", () => {
+  // (a sample of the family the queue runs to 128: one doubling, nested and flat, the deep test beside it)
+  for (const nested of [true, false])
+    for (const mode of MODES) {
+      const sizes = [4, 8].map((d) => {
+        const source = shiftedRing(d, nested);
+        const pushed = analysed(source, mode);
+        const label = `d ${d}, nested ${nested}, ${JSON.stringify(mode)}`;
+        assert.equal(pushed.answers.budget.exhausted, null, label);
+        assert.ok(pushed.facts.reads > 0 && pushed.facts.declines.size === 0, label);
+        for (const { violations } of pushed.invariants) assert.deepEqual(violations, [], label);
+        for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
+        // (no pending state left: each route's mark accepts at once)
+        assert.equal(
+          pushed.all.reduce((all, facts) => all + facts.pending, 0),
+          0,
+          label,
+        );
+        const files = [{ path: "main.tease", source }];
+        assert.equal(
+          publication(files, mode, GLOBALS),
+          withoutPushedReads(() => publication(files, mode, GLOBALS)),
+          label,
+        );
+        return pushed.states;
+      });
+      assert.deepEqual(sizes[0], sizes[1], `nested ${nested}, ${JSON.stringify(mode)}`);
+    }
+});
+
+test("the mark automaton answers as the holders' marks do on branching prefixes, two references at a site and their union (#1784)", () => {
+  const sources = [
+    // one holder: `a` and `c` unmarked, `a.b` marked, `c.b` not, `c.d` marked (Sol's counterexample to a depth key)
+    'let x={g:{a:{b:1},c:{d:2}}}\nx={g:{a:{b:3},c:{d:4}}}\nlet saved=x\nif x.g.a.b is integer { saved=x }\nif x.g.c.d is integer { saved=x }\nlet copied=x.g\nsay "${copied.a.b} ${copied.c.d}"\nexit\n',
+    'let a={k:0}\nlet x={g:{k:1}}\nif a is object { x={g:a} }\nlet p0=x\nlet p1={g:{k:2}}\nlet p2={g:{k:3}}\np2.q=p0\np2=p1\np1=p0\np2=p2.q\nsay "${p2.q.g.k}"\nexit\n',
+    'let a={k:0,l:"a"}\nlet b={k:"b",l:3}\nlet saved=a\nlet other=b\nif a.k is integer { saved=a }\nif b.l is integer { other=b }\nlet x=[a,b]\nlet first=x.get(0, default: {k:0,l:0})\nsay "${first.k} ${first.l}"\nexit\n',
+    'let a={k:0,l:1}\nlet b={k:2,l:3}\nlet saved=a\nlet other=b\nif a.k is integer { saved=a }\nif b.l is integer { other=b }\nlet x={g:{h:a},j:{h:b}}\nsay "${x.g.h.k} ${x.j.h.l}"\nexit\n',
+  ];
+  for (const source of sources)
+    for (const mode of MODES) {
+      const pushed = analysed(source, mode);
+      let marked = 0;
+      for (const truth of pushed.truth) {
+        assert.deepEqual(truth.differences, [], `${JSON.stringify(mode)}\n${source}`);
+        marked += truth.marked;
+      }
+      assert.ok(marked > 0, source);
+    }
 });

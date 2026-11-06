@@ -35,9 +35,6 @@ export interface Holder {
   firsts?: ReadonlySet<string> | null;
   /** #1278: per path it holds references at, those references by the first step their marks can depend on. */
   byStep?: Map<number, ReferencesByStep>;
-  /** #1784: per path id, and per rest a walk visited, whether its mark at the path or below can hold (`canMarkBelow`). */
-  belowAt?: Map<number, boolean>;
-  below?: Map<string, boolean>;
 }
 
 /** A holder's references at a path (`marksAt`), by the first step each one's mark can depend on, or any. */
