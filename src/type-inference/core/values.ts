@@ -27,6 +27,7 @@ import {
   type CanonicalKey,
   isPathSteps,
   isSteps,
+  type PathRef,
   keyStepsIn,
   type Rest,
   someStep,
@@ -36,7 +37,6 @@ import {
   stepsFrom,
   stepsJoin,
   stepsRest,
-  stepsText,
   stepsTo,
   type Steps,
 } from "./contract/key-ids.js";
@@ -65,6 +65,7 @@ import {
   memberStep,
   measuresLength,
   memberResult,
+  type MethodCategory,
   methodCategory,
   selectsElement,
   shownResult,
@@ -134,9 +135,29 @@ function keyOfSteps(place: PlaceId, rest: Steps): Key {
   return isPathSteps(rest) ? keyOfText(place, rest.text()) : keyOf(place, rest);
 }
 
+/** What a method that gives a copy of its receiver's elements gives (`toList`, `toSet`, `take`, `takeLast`). */
+type CopyGives = Extract<MethodCategory["gives"], { readonly kind: "copy" }>;
+
+/** An operation that is such a method, with its receiver. */
+type CopyOperation = Extract<ValueConstraint, { readonly kind: "operation" }> & {
+  readonly receiver: PlaceId;
+};
+
+/** Whether an operation is a method that gives a copy of its receiver's elements (`#copied`). */
+function copyMethod(c: ValueConstraint): c is CopyOperation {
+  return (
+    c.kind === "operation" &&
+    c.contract.family === "method" &&
+    c.receiver !== null &&
+    methodCategory(c.contract.name)?.gives.kind === "copy"
+  );
+}
+
 export class Values {
   /** The route each read took, by key, node and `before`, recorded as the read is answered. */
   readonly #routes = new Map<string, ReadRoute>();
+  /** Each path a read asks at as an array, as its arena span (`valueItems`): made once in this pass, charged (#1857). */
+  readonly #asked = new WeakMap<readonly string[], PathRef>();
   /** Per read, the narrowing it takes (`#narrowingOf`), and per place, its stable chain's binding (`#stableBinding`). */
   readonly #narrowings = new Map<PlaceId, NarrowedRead | null>();
   readonly #narrowingsBelow = new Map<PlaceId, Map<string, NarrowedRead | null>>();
@@ -548,6 +569,18 @@ export class Values {
 
   /** The value of a place at a node, read at the path `rest` below it. */
   public valueItems(value: PlaceId, node: FlowNode | null, asked: Rest): Work<readonly Item[]> {
+    // (a path asked as an array read as its arena span, made once per array in this pass: the demands below it are
+    // named by its path's id, never by its text, and its steps are views of the arena's, never copies, #1857)
+    if (isSteps(asked) && asked.length > 0) {
+      let span = this.#asked.get(asked);
+      if (span === undefined) {
+        const { contract } = this.pass;
+        span = spanRef(contract, contract.pathIdOf(asked));
+        contract.keep(1);
+        this.#asked.set(asked, span);
+      }
+      asked = span;
+    }
     // (G3 stage 1: a cursor's span read by its path's id)
     if (!isSteps(asked) && asked.kind === "span") return this.valueItemsAt(value, node, asked.id());
     const rest = isSteps(asked) ? asked : asked.steps();
@@ -1078,7 +1111,8 @@ export class Values {
   *#literalItems(literal: PlaceId, rest: Steps, node: FlowNode | null): Work<readonly Item[]> {
     const site = this.pass.program.places[literal]?.site ?? null;
     return yield {
-      key: joinParts("lit", literal, stepsText(rest), node?.id ?? "-"),
+      // (the path by its id, a span's name: a key's length no longer grows with its path's, #1857)
+      key: joinParts("lit", literal, `.${this.#pathId(rest)}`, node?.id ?? "-"),
       kind: "value",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -1103,15 +1137,42 @@ export class Values {
     const site = this.pass.program.places[c.result]?.site ?? c.site;
     const below = rest.length > 0 && c.kind === "load" && c.key === null;
     const items = yield {
-      key: below ? joinParts("op-below", c.result) : joinParts("op", c.result, stepsText(rest)),
+      key: below
+        ? joinParts("op-below", c.result)
+        : joinParts("op", c.result, `.${this.#pathId(rest)}`),
       kind: "value",
       file: site.file,
       offset: site.start,
-      // (an operation's own walk keeps its paths: a record's steps copied out)
-      make: () => this.operationValue(c, node, stepsArray(rest)),
+      // (an operation's own walk keeps its paths: a record's steps copied out; a copy of a collection's elements reads
+      // its path as steps, its views kept, #1857)
+      make: () =>
+        copyMethod(c)
+          ? this.#copyValue(c, node, rest)
+          : this.operationValue(c, node, stepsArray(rest)),
     };
     // (the one answer below the root is the path's but for the mark of an element step there, `hostAt`)
     return below ? [...items, ...emptyAt(rest)] : items;
+  }
+
+  /** The arena id of a path a demand is named by: a record's own, an array's found (`Contract.pathIdOf`, #1857). */
+  #pathId(rest: Steps): number {
+    return isPathSteps(rest) ? rest.path : this.pass.contract.pathIdOf(rest);
+  }
+
+  /**
+   * The demand of `#operationItems` for a method that gives a copy of its receiver's elements (`copyMethod`): as
+   * `operationValue` answers it, its path read as steps (#1857).
+   */
+  *#copyValue(c: CopyOperation, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
+    const { program, contract } = this.pass;
+    const at = program.exprAt(c.site) ?? node;
+    // F19a: a reference's method is opaque, by the receiver's contract before its exact value (r4.44), as `#operation`
+    if (heldReference(yield* contract.valueReceiver(c.receiver)))
+      return alternatives([OPAQUE_MEMBER], program.scope);
+    const gives = methodCategory(c.contract.name)?.gives;
+    // (`copyMethod` chose it: a copy's, whose `#operation` branch this is)
+    if (gives?.kind !== "copy") return yield* this.operationValue(c, node, stepsArray(rest));
+    return alternatives(yield* this.#copied(gives, c.receiver, at, rest), program.scope);
   }
 
   /** The demand of `#operationItems`. */
@@ -1189,6 +1250,53 @@ export class Values {
     } else if (c.kind === "operation") out = yield* this.#operation(c, at, rest);
     else out = external();
     return alternatives(out, scope);
+  }
+
+  /**
+   * F10: a copy of the elements, which may hold none where it takes a count: a receiver's own elements, or those its kind
+   * declares (a range's whole numbers), read at `rest`, steps or an array (#1857).
+   */
+  *#copied(copy: CopyGives, owner: PlaceId, at: FlowNode | null, rest: Steps): Work<Item[]> {
+    const receiver = yield* this.valueItems(owner, at, []);
+    // the receiver's own collection is not the copy's kind (a range's `toList` gives a list)
+    if (rest.length === 0)
+      return [
+        carried(makeItem(copy.into), receiver),
+        ...receiver.filter((item) => !COPIED.has(item.tag)),
+      ];
+    const kinds = withoutEmpty(receiver);
+    const declared = kinds.some((item) => kindElement(item.tag) !== undefined);
+    return [
+      // a kind's declared elements may be none (a range's bounds decide): the copy's element step keeps that mark
+      ...(declared && rest.length === 1 ? [EMPTY] : []),
+      ...(rest.length === 1
+        ? kinds.flatMap((item) => {
+            const element = kindElement(item.tag);
+            return element === undefined
+              ? []
+              : [
+                  carried(
+                    {
+                      ...makeItem(element, item.writer, { context: item.context }),
+                      cert: item.cert,
+                    },
+                    [item],
+                  ),
+                ];
+          })
+        : []),
+      ...(kinds.some((item) => kindElement(item.tag) === undefined)
+        ? yield* this.valueItems(
+            owner,
+            at,
+            // (the copy's element step stands for the receiver's: a path that starts with it is the receiver's own)
+            rest.at(0) === "element"
+              ? stepsRest(rest)
+              : stepsAfter(["element"], stepsFrom(rest, 1)),
+          )
+        : []),
+      ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
+    ];
   }
 
   /**
@@ -1423,44 +1531,9 @@ export class Values {
       }
       return out;
     }
-    // F10: a copy of the elements, which may hold none where it takes a count: a receiver's own elements, or those its
-    // kind declares (a range's whole numbers)
-    if (method !== undefined && c.receiver !== null && method.gives.kind === "copy") {
-      const copy = method.gives;
-      const receiver = yield* this.valueItems(c.receiver, at, []);
-      // the receiver's own collection is not the copy's kind (a range's `toList` gives a list)
-      if (rest.length === 0)
-        return [
-          carried(makeItem(copy.into), receiver),
-          ...receiver.filter((item) => !COPIED.has(item.tag)),
-        ];
-      const kinds = withoutEmpty(receiver);
-      const declared = kinds.some((item) => kindElement(item.tag) !== undefined);
-      return [
-        // a kind's declared elements may be none (a range's bounds decide): the copy's element step keeps that mark
-        ...(declared && rest.length === 1 ? [EMPTY] : []),
-        ...(rest.length === 1
-          ? kinds.flatMap((item) => {
-              const element = kindElement(item.tag);
-              return element === undefined
-                ? []
-                : [
-                    carried(
-                      {
-                        ...makeItem(element, item.writer, { context: item.context }),
-                        cert: item.cert,
-                      },
-                      [item],
-                    ),
-                  ];
-            })
-          : []),
-        ...(kinds.some((item) => kindElement(item.tag) === undefined)
-          ? yield* this.valueItems(c.receiver, at, joinSteps(["element"], rest.slice(1)))
-          : []),
-        ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
-      ];
-    }
+    // F10: a copy of the elements (`#copied`)
+    if (method !== undefined && c.receiver !== null && method.gives.kind === "copy")
+      return yield* this.#copied(method.gives, c.receiver, at, rest);
     if (family === "operator" && name === "+" && rest.length > 0) {
       // #1384: an indexed run's terms holding the property, and those between them
       const indexed = yield* indexedPlus(this.pass, c.result, rest, true, (term) =>

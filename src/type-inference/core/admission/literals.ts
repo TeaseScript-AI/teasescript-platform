@@ -306,10 +306,20 @@ export function literalElements(
   const conflicts = new Map<string, readonly (readonly string[])[]>();
   // (per key, the paths where what the elements definitely hold meets, A2's)
   const atCopies = new Map<string, ReadonlySet<string>>();
-  // (a literal of two elements or more that lands in no written type: its elements are compared)
+  // (an element that may give a concrete kind: every one but a value proved to hold only `null`, which decides nothing,
+  // ADR 0021 §1.3's `deciding`, and has no descendants: #1857)
+  const contributes = (d: Definition): boolean => {
+    const own = d.value === undefined ? [] : (program.hasOf.get(d.value) ?? []);
+    return !(own.length === 1 && own[0]!.type.kind === "atom" && own[0]!.type.name === "null");
+  };
+  // (a literal of two elements or more that may give a concrete kind, landing in no written type: its elements are
+  // compared; with one at most, no pair of them can be mixed, at its root or below it, #1857)
   const compared = (cell: PlaceId, list: readonly Definition[]): boolean => {
     const owner = program.cellOwner.get(cell);
-    return owner?.kind === "cell" && list.length >= 2 && contract.landsIn(owner.owner, []) === null;
+    if (owner?.kind !== "cell") return false;
+    let concrete = 0;
+    for (const d of list) if (contributes(d) && ++concrete === 2) break;
+    return concrete >= 2 && contract.landsIn(owner.owner, []) === null;
   };
   // (the compared elements' own structures, announced before any is asked, so a nest of them is listed inside first
   // whichever cell the order takes first: #1444)

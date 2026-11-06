@@ -920,11 +920,15 @@ export class PathSteps {
       joinedId(this.#contract, this.path, idOf(this.#contract, then)),
     );
   }
-  /** `strip`'s steps followed by its own: their path the arena's join (`joinedId`) where asked. */
+  /**
+   * `strip`'s steps followed by its own: the arena's steps of their join (`joinedId`, `stepsOfId`), which every reader of
+   * that path shares, never a copy of both made for each (#1857).
+   */
   after(strip: readonly string[]): PathSteps {
     if (strip.length === 0) return this;
-    return new PathSteps(this.#contract, joinSteps(strip, ownSteps(this)), () =>
-      joinedId(this.#contract, idOf(this.#contract, strip), this.path),
+    return stepsOfId(
+      this.#contract,
+      keyIdAt(0, joinedId(this.#contract, idOf(this.#contract, strip), this.path)),
     );
   }
   /** It as a `Rest`, read as an array's steps are (`arrayRef`): views, never a copy. */
