@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { SWEEP } from "./helpers/sweep.js";
@@ -16,6 +17,9 @@ import {
 } from "../src/index.js";
 import {
   differentialRun,
+  thisBuild,
+  type PipelineAdapter,
+  type Stage,
   type DifferentialInput,
   type DifferentialReport,
   type HostDriver,
@@ -54,6 +58,16 @@ interface GeneratedProgram {
   readonly project?: boolean;
   readonly sources: readonly ProjectSourceFile[];
 }
+
+interface Shrinker {
+  shrink(
+    source: string,
+    preserves: (source: string) => boolean,
+  ): { readonly source: string; readonly minimal: boolean };
+}
+
+// EVIDENCE: validation: the shrinker module exports `shrink` of this shape.
+const { shrink } = (await import(path.join(tools, "shrink.mjs"))) as Shrinker;
 
 interface Generator {
   readonly families: readonly string[];
@@ -253,6 +267,9 @@ test("a 10,000-level host list runs, restores and compares on the supported path
     [[]],
   );
 
+  // An array compares by its length and every position, also a sparse one.
+  assert.ok(!compareStructures(new Array(1), new Array(2)).equal);
+
   // Signed zero survives writing and hashing, where native JSON loses it.
   const zero = deepList(DEPTH, 0);
   const negative = deepList(DEPTH, -0);
@@ -294,6 +311,25 @@ test("a host drives both sides through interactions, and both must make the same
   assert.deepEqual(hosted.verdict, { kind: "equivalent" });
   assert.deepEqual(hosted.outcomes.left, { kind: "completed" });
   assert.ok(hosted.tailSteps > 0);
+  // A host may reuse its call objects: each call is recorded as it was made (Sol r1 #1).
+  const reusing = (): HostDriver => {
+    const call = { kind: "observeTime" as const, nowMs: 0 };
+    return {
+      next(view) {
+        const work = runtimeTimedWork(view);
+        if (work.length === 0) return null;
+        call.nowMs = Math.min(...work.map((item) => item.deadlineMs));
+        return call;
+      },
+    };
+  };
+  assert.deepEqual(
+    differentialRun(single("waits", "wait 1 ms\nwait 1 ms\nexit\n", { seed: 3 }), {
+      ...CUTS,
+      host: reusing,
+    }).verdict,
+    { kind: "equivalent" },
+  );
   // Without a host, the driver's own settles delays only, so the run waits at the first choice.
   assert.deepEqual(differentialRun(input, CUTS).outcomes.left, { kind: "waiting" });
   // A right side whose host answers otherwise differs at the host call itself.
@@ -302,6 +338,50 @@ test("a host drives both sides through interactions, and both must make the same
     host: (side) => choosingHost(side === "left" ? 1 : 0),
   });
   assertDiscrepancyAt(differing, ["state", "host"]);
+});
+
+const STORES = 'let letters = fileFromBase64("YWJj", default: "")\nsay "kept", instant\nexit\n';
+
+/**
+ * A host with a file store: it keeps each stored file under a new reference, and its captured-media admission vouches
+ * for each reference once, so that it is used up as it answers, as a recorded Player's is. `vouches` false answers no.
+ */
+function storingHost(vouches = true): HostDriver {
+  let next = 1;
+  return {
+    next(view) {
+      const action = view.foregroundAction;
+      if (action?.kind === "fileStore" && action.operation === "store") {
+        const references = action.files.map(() => `stored:${next++}`);
+        const pending = new Set(references);
+        return {
+          kind: "completeAction",
+          request: {
+            actionId: action.actionId,
+            actionKind: "fileStore",
+            payload: { kind: "stored", references },
+          },
+          capturedMedia: { holds: (reference) => vouches && pending.delete(reference) },
+        };
+      }
+      const work = runtimeTimedWork(view);
+      return work.length === 0
+        ? null
+        : { kind: "observeTime", nowMs: Math.min(...work.map((item) => item.deadlineMs)) };
+    },
+  };
+}
+
+test("a captured-media admission is replayed on every restore route from what it answered, not reused", () => {
+  const input = single("stores", STORES, { seed: 3 });
+  const stored = differentialRun(input, { ...CUTS, host: () => storingHost() });
+  reports.push(stored);
+  assert.deepEqual(stored.verdict, { kind: "equivalent" });
+  assert.deepEqual(stored.outcomes.left, { kind: "completed" });
+  assert.ok(stored.tailSteps > 0);
+  // A right side whose admission vouches for nothing differs at the host call's recorded answers.
+  const refused = differentialRun(input, { ...CUTS, host: (side) => storingHost(side === "left") });
+  assertDiscrepancyAt(refused, ["state", "host"]);
 });
 
 /** A copy of `record` with `change` applied, the injection's only effect. */
@@ -338,7 +418,7 @@ function injected(
   const report = differentialRun(input, {
     ...CUTS,
     inject: (record, at) => {
-      if (applied || !where(record, at)) return record;
+      if (applied || at.side !== "right" || !where(record, at)) return record;
       applied = true;
       return changed(record, change);
     },
@@ -501,6 +581,196 @@ test("-0 against 0 at a deep leaf is a discrepancy through the harness's writing
   );
 });
 
+test("the shrinker reduces every positive integer literal above 1, also one that starts with 1", () => {
+  const reduced = shrink("say 10, instant\nexit\n", (source) =>
+    /^say \d+, instant\nexit\n$/u.test(source),
+  );
+  assert.equal(reduced.source, "say 1, instant\nexit\n");
+});
+
+/** This build with one session method of each fresh session throwing: a harness's own failure at that step. */
+function throwingIn(method: "executeInstruction" | "exportTaggedSnapshot"): PipelineAdapter {
+  const build = thisBuild("faulty");
+  const fault = () => {
+    throw new Error(`test-only ${method} fault`);
+  };
+  const fresh: typeof build.sessions.createFreshRuntimeSession = (...args) => {
+    const session = build.sessions.createFreshRuntimeSession(...args);
+    if (method === "executeInstruction") session.executeInstruction = fault;
+    else session.exportTaggedSnapshot = fault;
+    return session;
+  };
+  return { ...build, sessions: { ...build.sessions, createFreshRuntimeSession: fresh } };
+}
+
+/** This build whose debug context cannot start a restored epoch: a failure in a restore route's setup. */
+function restoreSetupFault(): PipelineAdapter {
+  const build = thisBuild("faulty");
+  class Context extends build.sessions.RuntimeDebugContext {
+    public override reset(origin: "start" | "restore"): void {
+      if (origin === "restore") throw new Error("test-only restore setup fault");
+      super.reset(origin);
+    }
+  }
+  return { ...build, sessions: { ...build.sessions, RuntimeDebugContext: Context } };
+}
+
+/**
+ * Each stage's own fault, with the side it is on and the class it must have: every stage passes through one boundary,
+ * so its failure is reported as that stage's and that side's, never escapes, and never counts as a discrepancy.
+ */
+const STAGE_FAULTS: readonly {
+  readonly stage: Stage;
+  readonly side: "left" | "right";
+  readonly options: () => Parameters<typeof differentialRun>[1];
+}[] = [
+  {
+    stage: "compile",
+    side: "right",
+    options: () => ({
+      right: {
+        ...thisBuild("faulty"),
+        compile: () => {
+          throw new Error("test-only compile fault");
+        },
+      },
+    }),
+  },
+  { stage: "probe", side: "left", options: () => ({ left: throwingIn("executeInstruction") }) },
+  {
+    stage: "host",
+    side: "right",
+    options: () => ({
+      host: (side) => ({
+        next: (view) => {
+          if (side === "right") throw new Error("test-only host fault");
+          const work = runtimeTimedWork(view);
+          return work.length === 0
+            ? null
+            : { kind: "observeTime", nowMs: Math.min(...work.map((item) => item.deadlineMs)) };
+        },
+      }),
+    }),
+  },
+  { stage: "step", side: "right", options: () => ({ right: throwingIn("executeInstruction") }) },
+  {
+    stage: "capture",
+    side: "right",
+    options: () => ({ right: throwingIn("exportTaggedSnapshot") }),
+  },
+  { stage: "restore", side: "right", options: () => ({ right: restoreSetupFault() }) },
+  {
+    stage: "write",
+    side: "right",
+    options: () => ({
+      inject: (record, at) => {
+        if (at.side === "right" && at.state === 1) throw new Error("test-only write fault");
+        return record;
+      },
+    }),
+  },
+];
+
+for (const { stage, side, options } of STAGE_FAULTS)
+  test(`a fault at the ${stage} stage is that side's harness failure, never an escape or a discrepancy`, () => {
+    const report = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
+      ...CUTS,
+      ...options(),
+    });
+    assert.deepEqual(report.verdict, { kind: "not-compared", side, because: "harness-failure" });
+    const outcome = report.outcomes[side];
+    assert.equal(outcome?.kind === "harness-failure" ? outcome.stage : outcome?.kind, stage);
+  });
+
+test("a public restore call that throws is the engine's own behaviour, a discrepancy on that route", () => {
+  const build = thisBuild("faulty");
+  const report = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
+    ...CUTS,
+    right: {
+      ...build,
+      sessions: {
+        ...build.sessions,
+        deserializeRuntimeSession: () => {
+          throw new Error("test-only restore refusal");
+        },
+      },
+    },
+  });
+  assert.equal(report.verdict.kind, "discrepancy");
+  if (report.verdict.kind === "discrepancy")
+    assert.equal(report.verdict.at.tail, "checkpoint-json");
+});
+
+/** The restore routes, listed here independently of the driver's own list. */
+const ROUTES_TO_RESTORE = [
+  "fork",
+  "checked-snapshot",
+  "trusted-snapshot",
+  "tagged-snapshot",
+  "checkpoint",
+  "checkpoint-json",
+] as const;
+
+for (const route of ROUTES_TO_RESTORE)
+  test(`a restored state that both sides corrupt alike on the ${route} route still differs from the uninterrupted run`, () => {
+    const applied = new Set<string>();
+    const report = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
+      ...CUTS,
+      inject: (record, at) => {
+        if (at.tail !== route || at.state !== at.cut || applied.has(at.side)) return record;
+        applied.add(at.side);
+        return changed(record, (copy) => {
+          snapshotOf(copy).rng ^= 1;
+        });
+      },
+    });
+    assert.deepEqual([...applied].sort(), ["left", "right"]);
+    const verdict = report.verdict;
+    assert.equal(verdict.kind, "discrepancy", JSON.stringify(verdict));
+    if (verdict.kind !== "discrepancy") return;
+    assert.deepEqual(
+      { tail: verdict.at.tail, against: verdict.at.against },
+      { tail: route, against: "uninterrupted" },
+    );
+    assert.deepEqual(verdict.mismatches[0]!.path.slice(0, 3), ["state", "snapshot", "rng"]);
+  });
+
+interface Exits {
+  exitStatus(reports: readonly Pick<DifferentialReport, "verdict">[]): number;
+}
+// EVIDENCE: validation: the CLI's exit module exports `exitStatus` of this shape.
+const { exitStatus } = (await import(path.join(tools, "exit.mjs"))) as Exits;
+
+test("the campaign CLI exits 0 identical, 1 differences, 2 usage or harness failure", () => {
+  const verdict = (kind: string, because?: string) => ({
+    // EVIDENCE: validation: each kind and reason given below is one of the verdicts the driver reports.
+    verdict: (because === undefined
+      ? { kind }
+      : { kind, side: "right", because }) as DifferentialReport["verdict"],
+  });
+  assert.equal(
+    exitStatus([verdict("equivalent"), verdict("not-compared", "unsupported-route")]),
+    0,
+  );
+  assert.equal(exitStatus([verdict("equivalent"), verdict("discrepancy")]), 1);
+  assert.equal(exitStatus([verdict("mapping-failure")]), 1);
+  assert.equal(exitStatus([verdict("discrepancy"), verdict("not-compared", "harness-failure")]), 2);
+  assert.equal(exitStatus([verdict("not-compared", "serializer-failure")]), 2);
+  const cli = (...args: string[]) =>
+    spawnSync(process.execPath, [path.join(tools, "run.mjs"), ...args], { encoding: "utf8" });
+  for (const args of [
+    ["--count", "1"],
+    ["--seed", "1", "--count", "nonsense"],
+    ["--seed", "1", "--from", "nope"],
+    ["--seed", "1", "--count", "0"],
+    ["--seed", "1", "--route", "other"],
+  ])
+    assert.equal(cli(...args).status, 2, args.join(" "));
+  const ran = cli("--seed", "3", "--count", "1");
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.equal(ran.stdout.trim().split("\n").length, 1);
+});
+
 test("a writing failure and an unanswered correspondence stay harness classifications, never discrepancies", () => {
   // A record the harness cannot write: a test-only value whose property throws when read.
   const throwing = injected(
@@ -522,6 +792,20 @@ test("a writing failure and an unanswered correspondence stay harness classifica
   assert.equal(throwing.outcomes.right?.kind, "serializer-failure");
 
   // A correspondence that does not know the first instruction.
+  // A run that ends exactly at the step limit completed; one step fewer is censored.
+  const unlimited = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), CUTS);
+  const atLimit = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
+    ...CUTS,
+    maxSteps: unlimited.steps,
+  });
+  assert.deepEqual(atLimit.outcomes.left, { kind: "completed" });
+  assert.equal(atLimit.steps, unlimited.steps);
+  const below = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
+    ...CUTS,
+    maxSteps: unlimited.steps - 1,
+  });
+  assert.equal(below.outcomes.left?.kind, "censored");
+
   const unknown = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
     ...CUTS,
     correspondence: {

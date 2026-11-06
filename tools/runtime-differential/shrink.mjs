@@ -61,7 +61,7 @@ export function shrink(source, preserves, { maxTrials = 10000 } = {}) {
   let changed = true;
   while (changed && trials < maxTrials) {
     changed = false;
-    for (const match of source.matchAll(/\b[2-9][0-9]*\b/g)) {
+    for (const match of source.matchAll(/\b(?:[2-9]|[1-9][0-9]+)\b/g)) {
       const candidate =
         source.slice(0, match.index) + "1" + source.slice(match.index + match[0].length);
       if (check(candidate)) {

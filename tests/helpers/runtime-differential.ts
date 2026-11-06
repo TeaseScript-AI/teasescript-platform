@@ -84,7 +84,7 @@ export interface PipelineAdapter {
 }
 
 /** This build, in this process. */
-function thisBuild(label: string): PipelineAdapter {
+export function thisBuild(label: string): PipelineAdapter {
   return {
     label,
     compile(input, route) {
@@ -138,9 +138,16 @@ export type SideOutcome =
   | { readonly kind: "compile-rejected"; readonly diagnostics: unknown }
   | { readonly kind: "unsupported-route"; readonly reason: string }
   | { readonly kind: "admission-rejected"; readonly error: string }
-  | { readonly kind: "serializer-failure"; readonly error: string }
-  | { readonly kind: "harness-failure"; readonly error: string }
+  | { readonly kind: "serializer-failure"; readonly stage: Stage; readonly error: string }
+  | { readonly kind: "harness-failure"; readonly stage: Stage; readonly error: string }
   | { readonly kind: "censored"; readonly reason: string };
+
+/**
+ * Where in a pair's life a side's harness failure came from: its compilation, the left side's run that places the cut
+ * points, its host's `next`, a step, the capture of a restore point, the setup of a restore route around the public
+ * restore call, or the writing of a record.
+ */
+export type Stage = "compile" | "probe" | "host" | "step" | "capture" | "restore" | "write";
 
 /** Each restore route, independent: never one rebuilt from another. */
 const RESTORE_TAILS = [
@@ -209,7 +216,7 @@ export interface DifferentialReport {
 export interface SideRecord {
   readonly state: {
     readonly operation: string;
-    /** The host call that led to this state, as `callRecord` holds it, or `null`. */
+    /** The host call that led to this state, as `recordedHost` records it, or `null`. */
     readonly host: unknown;
     readonly result: unknown;
     readonly decisions: readonly unknown[];
@@ -224,6 +231,7 @@ export interface SideRecord {
 
 /** Where an injection applies: the run, its cut, and the state index. */
 export interface InjectionSite {
+  readonly side: "left" | "right";
   readonly tail: Tail;
   readonly cut: number | null;
   readonly state: number;
@@ -238,7 +246,7 @@ export interface DifferentialOptions {
   readonly maxCuts?: number;
   /** The steps after which a run is censored; 5,000 by default. */
   readonly maxSteps?: number;
-  /** A corruption of the right side's records, in the harness and never in the engine: the sensitivity controls. */
+  /** A corruption of a side's records, in the harness and never in the engine: the sensitivity controls. */
   readonly inject?: (record: SideRecord, at: InjectionSite) => SideRecord;
   /** The most mismatches a discrepancy reports; 10 by default. */
   readonly limit?: number;
@@ -246,7 +254,8 @@ export interface DifferentialOptions {
    * The host, one per run, made by this factory for each side's uninterrupted run (and the cut probe's, as `left`). The driver
    * asks it whenever its side is neither runnable nor paused at a random draw; `null` ends the run as waiting. Without
    * it, the driver observes the next delay deadline. Restore routes replay their side's uninterrupted host calls at the
-   * same state index, so every run of a side, and both sides, observe time at the same points.
+   * same state index, so every run of a side, and both sides, observe time at the same points; a captured-media
+   * admission is replayed from the questions and answers its uninterrupted call recorded.
    */
   readonly host?: (side: "left" | "right") => HostDriver;
 }
@@ -271,17 +280,91 @@ export type HostCall =
   | { readonly kind: "applyExternalStorageEdit"; readonly edit: unknown }
   | { readonly kind: "setDebugMode"; readonly enabled: unknown };
 
-/** A host call as its record holds it: plain data, a captured-media admission only as its presence. */
+type CapturedMedia = NonNullable<ActionCompletionOptions["capturedMedia"]>;
+
+/** One question a captured-media admission answered: as `player/debug-export.ts` records its admission queries. */
+interface AdmissionQuery {
+  readonly reference: string;
+  readonly kind: Parameters<CapturedMedia["holds"]>[1];
+  readonly result: boolean;
+}
+
+/**
+ * A host call as its record holds it, plain data: a captured-media admission as the questions it was asked during the
+ * call and its answers, in order, or `null` without one.
+ */
 type HostCallRecord =
   | Exclude<HostCall, { readonly kind: "completeAction" }>
   | (Omit<Extract<HostCall, { readonly kind: "completeAction" }>, "capturedMedia"> & {
-      readonly capturedMedia: boolean;
+      readonly capturedMedia: readonly AdmissionQuery[] | null;
     });
 
-function callRecord(call: HostCall): HostCallRecord {
-  if (call.kind !== "completeAction") return call;
-  const { capturedMedia, ...rest } = call;
-  return { ...rest, capturedMedia: capturedMedia !== undefined };
+/**
+ * A detached copy of a host call's plain data, so that a host that reuses its objects cannot change a recorded call.
+ * Throws `SerializerFailure` for a call that is not plain data.
+ */
+function detached<T>(call: T): T {
+  // EVIDENCE: validation: `canonicalText` writes plain data as JSON, which `JSON.parse` reads back as the same data.
+  return JSON.parse(canonicalText(call)) as T;
+}
+
+/**
+ * Applies `call`, recorded detached, with its captured-media admission's questions and answers recorded; returns
+ * both.
+ */
+function recordedHost(
+  session: RuntimeSession,
+  call: HostCall,
+  debugTrace: RuntimeDebugContext | null,
+): {
+  readonly result: RuntimeSessionResult & { readonly outcome?: unknown };
+  readonly record: HostCallRecord;
+} {
+  if (call.kind !== "completeAction") {
+    const record = detached(call);
+    return { result: applyHost(session, record, debugTrace), record };
+  }
+  const { capturedMedia, ...given } = call;
+  const rest = detached(given);
+  if (capturedMedia === undefined)
+    return {
+      result: applyHost(session, rest, debugTrace),
+      record: { ...rest, capturedMedia: null },
+    };
+  const queries: AdmissionQuery[] = [];
+  const recording: CapturedMedia = {
+    holds: (reference, kind) => {
+      const result = capturedMedia.holds(reference, kind);
+      queries.push({ reference, kind, result });
+      return result;
+    },
+  };
+  const result = applyHost(session, { ...rest, capturedMedia: recording }, debugTrace);
+  return { result, record: { ...rest, capturedMedia: queries } };
+}
+
+/**
+ * The host call a restore route replays from its record, independent of any host object's state: its captured-media
+ * admission answers the recorded questions in order, and `false` to any other. A different or a missing question then
+ * shows in the replay's own record, a discrepancy at `state.host`.
+ */
+function replayed(record: HostCallRecord): HostCall {
+  if (record.kind !== "completeAction") return record;
+  const { capturedMedia: queries, ...rest } = record;
+  if (queries === null) return rest;
+  let next = 0;
+  return {
+    ...rest,
+    capturedMedia: {
+      holds: (reference, kind) => {
+        const expected = queries[next];
+        next += 1;
+        return expected !== undefined && expected.reference === reference && expected.kind === kind
+          ? expected.result
+          : false;
+      },
+    },
+  };
 }
 
 /** Applies `call` to `session`, with `debugTrace`. */
@@ -323,15 +406,10 @@ function deadlineHost(timedWork: typeof runtimeTimedWork): HostSource {
     const work = timedWork(view);
     if (work.length === 0) return null;
     if (work.some((item) => item.kind === "media"))
-      throw new HostUnavailable(
-        "The driver's own host settles delays only; give a host for media.",
-      );
+      throw new Error("The driver's own host settles delays only; give a host for media.");
     return { kind: "observeTime", nowMs: Math.min(...work.map((item) => item.deadlineMs)) };
   };
 }
-
-/** The driver's own host cannot settle what the side waits for. */
-class HostUnavailable extends Error {}
 
 const DEFAULT_MAX_CUTS = 32;
 const DEFAULT_MAX_STEPS = 5_000;
@@ -371,7 +449,12 @@ type Operation =
   | { readonly kind: "end"; readonly outcome: SideOutcome };
 
 /** What a side does next at `state` from `view`: resume a paused draw, execute, make its host's call, or end. */
-function nextOperation(view: RuntimeSessionView, state: number, host: HostSource): Operation {
+function nextOperation(
+  side: "left" | "right",
+  view: RuntimeSessionView,
+  state: number,
+  host: HostSource,
+): Operation {
   if (view.status === "halted") return { kind: "end", outcome: { kind: "completed" } };
   if (view.status === "failed") {
     const failure = view.failure!;
@@ -388,13 +471,7 @@ function nextOperation(view: RuntimeSessionView, state: number, host: HostSource
   }
   if (view.randomDraw !== null) return { kind: "resume", drawId: view.randomDraw.drawId };
   if (view.runnable) return { kind: "execute" };
-  let call;
-  try {
-    call = host(state, view);
-  } catch (error) {
-    if (!(error instanceof HostUnavailable)) throw error;
-    return { kind: "end", outcome: { kind: "harness-failure", error: error.message } };
-  }
+  const call = classified(side, "host", () => host(state, view));
   return call === null ? { kind: "end", outcome: { kind: "waiting" } } : { kind: "host", call };
 }
 
@@ -406,10 +483,11 @@ type Step =
 class Side {
   private readonly debug: RuntimeDebugContext;
   private nextRecord: number;
-  /** The host calls this run made, by the state index each was made at. */
-  public readonly calls = new Map<number, HostCall>();
+  /** The host calls this run made, as their records, by the state index each was made at. */
+  public readonly calls = new Map<number, HostCallRecord>();
 
   public constructor(
+    private readonly name: "left" | "right",
     adapter: PipelineAdapter,
     public readonly session: RuntimeSession,
     private readonly decisions: DecisionLog,
@@ -429,7 +507,7 @@ class Side {
   }
 
   public step(): Step {
-    const next = nextOperation(this.session.view(), this.state, this.host);
+    const next = nextOperation(this.name, this.session.view(), this.state, this.host);
     if (next.kind === "end") return next;
     const observer: unknown[] = [];
     // A passive observer: it never returns `true`, so it never ends an operation.
@@ -451,6 +529,7 @@ class Side {
     this.decisions.calls = [];
     let result: RuntimeSessionResult & { readonly outcome?: unknown };
     let operation: string;
+    let call: HostCallRecord | null = null;
     if (next.kind === "resume") {
       operation = `resume ${next.drawId}`;
       result = this.session.resumeRandomDraw({ drawId: next.drawId, outcome: "natural" }, traced);
@@ -460,11 +539,10 @@ class Side {
     } else {
       // A host operation takes the debug trace only, as the public contract gives it.
       operation = `host ${next.call.kind}`;
-      this.calls.set(this.state, next.call);
-      result = applyHost(this.session, next.call, this.debug);
+      ({ result, record: call } = recordedHost(this.session, next.call, this.debug));
+      this.calls.set(this.state, call);
     }
     this.state += 1;
-    const call = next.kind === "host" ? callRecord(next.call) : null;
     return {
       kind: "record",
       record: this.record(operation, call, result, observer, result.instructionTrace ?? null),
@@ -534,13 +612,24 @@ function notCompared(side: "left" | "right", outcome: SideOutcome): Stop {
   return new Stop({ kind: "not-compared", side, because: outcome.kind }, { side, outcome });
 }
 
-function write(record: SideRecord, side: "left" | "right"): Written {
+/** Writes a record's two parts as `canonicalText`. */
+function write(record: SideRecord): Written {
+  return { record, state: canonicalText(record.state), traces: canonicalText(record.traces) };
+}
+
+/**
+ * Runs one stage of one side: the boundary every stage of a pair passes through, so that a side's failure is
+ * classified alike wherever it happens. A writing failure is `serializer-failure` and any other exception
+ * `harness-failure`, each naming the stage and the side; a verdict already reached, and a mapping failure, pass through.
+ */
+function classified<T>(side: "left" | "right", stage: Stage, run: () => T): T {
   try {
-    return { record, state: canonicalText(record.state), traces: canonicalText(record.traces) };
+    return run();
   } catch (error) {
+    if (error instanceof Stop || error instanceof MappingFailure) throw error;
     if (error instanceof SerializerFailure)
-      throw notCompared(side, { kind: "serializer-failure", error: error.message });
-    throw error;
+      throw notCompared(side, { kind: "serializer-failure", stage, error: error.message });
+    throw notCompared(side, { kind: "harness-failure", stage, error: errorText(error) });
   }
 }
 
@@ -656,13 +745,15 @@ export function differentialRun(
       return;
     compareData(oracle.record, candidate.record, at);
   };
-  const inject = (record: SideRecord, at: InjectionSite) => options.inject?.(record, at) ?? record;
+  /** A side's record, injected into when the options say so, and written: the write stage. */
+  const written = (side: "left" | "right", record: SideRecord, at: Omit<InjectionSite, "side">) =>
+    classified(side, "write", () => write(options.inject?.(record, { ...at, side }) ?? record));
 
   try {
     // Compile on both sides: equal rejections are equivalent, compared as diagnostics.
     const compiled = {
-      left: adapters.left.compile(input, route),
-      right: adapters.right.compile(input, route),
+      left: classified("left", "compile", () => adapters.left.compile(input, route)),
+      right: classified("right", "compile", () => adapters.right.compile(input, route)),
     };
     const compileSite: ComparisonSite = {
       tail: "compile",
@@ -714,13 +805,13 @@ export function differentialRun(
     };
 
     // Where the cuts are, from the left side's uninterrupted run without records; a host call is a wait.
-    {
+    classified("left", "probe", () => {
       const probe = fresh("left", new DecisionLog(input.random));
       const host = newHost("left");
       const waits: number[] = [];
       const emitting: number[] = [];
       let steps = 0;
-      let next = nextOperation(probe.view(), steps, host);
+      let next = nextOperation("left", probe.view(), steps, host);
       while (next.kind !== "end" && steps < maxSteps) {
         const result =
           next.kind === "resume"
@@ -730,7 +821,7 @@ export function differentialRun(
               : applyHost(probe, next.call, null);
         steps += 1;
         if (result.events.length > 0) emitting.push(steps);
-        next = nextOperation(probe.view(), steps, host);
+        next = nextOperation("left", probe.view(), steps, host);
         if (next.kind === "host") waits.push(steps);
       }
       const faulted = next.kind === "end" && next.outcome.kind === "structured-fault";
@@ -743,13 +834,14 @@ export function differentialRun(
       );
       progress.cuts = cutInfo.cuts;
       progress.overCap = cutInfo.overCap;
-    }
+    });
     const cuts = new Set(progress.cuts);
 
     // The uninterrupted run, both sides in lockstep, keeping each side's state texts and its restore points.
     const logs = { left: new DecisionLog(input.random), right: new DecisionLog(input.random) };
     const sides = {
       left: new Side(
+        "left",
         adapters.left,
         fresh("left", logs.left),
         logs.left,
@@ -758,6 +850,7 @@ export function differentialRun(
         0,
       ),
       right: new Side(
+        "right",
         adapters.right,
         fresh("right", logs.right),
         logs.right,
@@ -771,46 +864,37 @@ export function differentialRun(
       left: new Map<number, RestorePoint>(),
       right: new Map<number, RestorePoint>(),
     };
-    const capture = (side: "left" | "right", state: number) => {
-      const session = sides[side].session;
-      const log = new DecisionLog(input.random);
-      const checkpoint = session.exportCheckpoint();
-      points[side].set(state, {
-        fork: { session: session.fork(log.options()), log },
-        "checked-snapshot": session.exportSnapshot(),
-        "trusted-snapshot": session.exportTrustedSnapshot(),
-        "tagged-snapshot": session.exportTaggedSnapshot(),
-        checkpoint,
-        "checkpoint-json": adapters[side].sessions.serializeCheckpoint(checkpoint),
+    const capture = (side: "left" | "right", state: number) =>
+      classified(side, "capture", () => {
+        const session = sides[side].session;
+        const log = new DecisionLog(input.random);
+        const checkpoint = session.exportCheckpoint();
+        points[side].set(state, {
+          fork: { session: session.fork(log.options()), log },
+          "checked-snapshot": session.exportSnapshot(),
+          "trusted-snapshot": session.exportTrustedSnapshot(),
+          "tagged-snapshot": session.exportTaggedSnapshot(),
+          checkpoint,
+          "checkpoint-json": adapters[side].sessions.serializeCheckpoint(checkpoint),
+        });
       });
-    };
-    const step = (side: "left" | "right", run: Side): Step => {
-      try {
-        return run.step();
-      } catch (error) {
-        throw notCompared(side, { kind: "harness-failure", error: errorText(error) });
-      }
-    };
+    const step = (side: "left" | "right", run: Side): Step =>
+      classified(side, "step", () => run.step());
     let ended: { readonly left: SideOutcome; readonly right: SideOutcome };
     {
       let state = 0;
-      const at = (): InjectionSite => ({ tail: "uninterrupted", cut: null, state });
-      let written = {
-        left: write(sides.left.opening("start"), "left"),
-        right: write(inject(sides.right.opening("start"), at()), "right"),
+      const at = () => ({ tail: "uninterrupted" as const, cut: null, state });
+      let records = {
+        left: written("left", sides.left.opening("start"), at()),
+        right: written("right", sides.right.opening("start"), at()),
       };
       for (;;) {
-        compare(written.left, written.right, { ...at(), against: "other-side" });
-        states.left.push(written.left.state);
-        states.right.push(written.right.state);
+        compare(records.left, records.right, { ...at(), against: "other-side" });
+        states.left.push(records.left.state);
+        states.right.push(records.right.state);
         if (cuts.has(state)) {
           capture("left", state);
           capture("right", state);
-        }
-        if (state >= maxSteps) {
-          const censored = { kind: "censored", reason: `${maxSteps} steps` } as const;
-          outcomes = { left: censored, right: censored };
-          throw new Stop({ kind: "not-compared", side: "left", because: "censored" });
         }
         const leftStep = step("left", sides.left);
         const rightStep = step("right", sides.right);
@@ -822,10 +906,17 @@ export function differentialRun(
           };
           break;
         }
+        // A run that would take a step past the limit is censored; one that ends at the limit is not.
+        if (state >= maxSteps) {
+          const censored = { kind: "censored", reason: `${maxSteps} steps` } as const;
+          outcomes = { left: censored, right: censored };
+          throw new Stop({ kind: "not-compared", side: "left", because: "censored" });
+        }
         state += 1;
-        written = {
-          left: write(leftStep.record, "left"),
-          right: write(inject(rightStep.record, at()), "right"),
+        progress.steps = state;
+        records = {
+          left: written("left", leftStep.record, at()),
+          right: written("right", rightStep.record, at()),
         };
       }
       progress.steps = state;
@@ -844,58 +935,69 @@ export function differentialRun(
     // Every restore route from every cut, both sides in lockstep, to the end.
     for (const cut of progress.cuts)
       for (const tail of RESTORE_TAILS) {
-        const restore = (side: "left" | "right"): Side | SideRecord => {
-          const point = points[side].get(cut)!;
-          const api = adapters[side].sessions;
-          const log = tail === "fork" ? point.fork.log : new DecisionLog(input.random);
-          try {
+        const restore = (side: "left" | "right"): Side | SideRecord =>
+          classified(side, "restore", () => {
+            const point = points[side].get(cut)!;
+            const api = adapters[side].sessions;
+            const log = tail === "fork" ? point.fork.log : new DecisionLog(input.random);
             let session: RuntimeSession;
-            if (tail === "fork") session = point.fork.session;
-            else if (tail === "checked-snapshot" || tail === "trusted-snapshot")
-              session = api.createRuntimeSession(plans[side], point[tail], log.options());
-            else if (tail === "tagged-snapshot")
-              session = api.createTaggedRuntimeSession(plans[side], point[tail], log.options());
-            else if (tail === "checkpoint")
-              session = api.restoreRuntimeSession(point[tail], log.options());
-            else session = api.deserializeRuntimeSession(point[tail], log.options());
+            try {
+              // Only the public restore call itself: what it throws is engine behaviour, compared below.
+              if (tail === "fork") session = point.fork.session;
+              else if (tail === "checked-snapshot" || tail === "trusted-snapshot")
+                session = api.createRuntimeSession(plans[side], point[tail], log.options());
+              else if (tail === "tagged-snapshot")
+                session = api.createTaggedRuntimeSession(plans[side], point[tail], log.options());
+              else if (tail === "checkpoint")
+                session = api.restoreRuntimeSession(point[tail], log.options());
+              else session = api.deserializeRuntimeSession(point[tail], log.options());
+            } catch (error) {
+              // A route that does not restore is a state of its own, which disagrees with the uninterrupted run.
+              return {
+                state: {
+                  operation: "restore",
+                  host: null,
+                  result: { thrown: errorText(error) },
+                  decisions: [],
+                  snapshot: null,
+                },
+                traces: { observer: [], instructionTrace: null, debug: null },
+              };
+            }
             // The side's uninterrupted host calls, replayed by state index.
             const calls = sides[side].calls;
-            return new Side(
+            const run = new Side(
+              side,
               adapters[side],
               session,
               log,
               "restore",
-              (state) => calls.get(state) ?? null,
+              (state) => {
+                const recorded = calls.get(state);
+                return recorded === undefined ? null : replayed(recorded);
+              },
               cut,
             );
-          } catch (error) {
-            // A route that does not restore is a state of its own, which disagrees with the uninterrupted run.
-            return {
-              state: {
-                operation: "restore",
-                host: null,
-                result: { thrown: errorText(error) },
-                decisions: [],
-                snapshot: null,
-              },
-              traces: { observer: [], instructionTrace: null, debug: null },
-            };
-          }
-        };
+            return run;
+          });
         const runs = { left: restore("left"), right: restore("right") };
         let state = cut;
-        const at = (): InjectionSite => ({ tail, cut, state });
-        const opening = (run: Side | SideRecord) =>
-          run instanceof Side ? run.opening("restore") : run;
-        let written = {
-          left: write(opening(runs.left), "left"),
-          right: write(inject(opening(runs.right), at()), "right"),
+        const at = () => ({ tail, cut, state });
+        const opening = (side: "left" | "right") => {
+          const run = runs[side];
+          return run instanceof Side
+            ? classified(side, "restore", () => run.opening("restore"))
+            : run;
+        };
+        let records = {
+          left: written("left", opening("left"), at()),
+          right: written("right", opening("right"), at()),
         };
         for (;;) {
-          compare(written.left, written.right, { ...at(), against: "other-side" });
+          compare(records.left, records.right, { ...at(), against: "other-side" });
           for (const side of ["left", "right"] as const) {
             const expected = states[side][state]!;
-            if (state !== cut && written[side].state === expected) continue;
+            if (state !== cut && records[side].state === expected) continue;
             // EVIDENCE: validation: `states` holds `canonicalText` of a record's state, which `JSON.parse` reads back.
             const reference = JSON.parse(expected) as SideRecord["state"];
             // A restored state has no operation that led to it, which its uninterrupted counterpart has.
@@ -906,7 +1008,7 @@ export function differentialRun(
             // Within one side the identity holds: both records are the same build's.
             const within = compareStructures(
               { state: counterpart },
-              { state: written[side].record.state },
+              { state: records[side].record.state },
               { limit },
             );
             if (!within.equal)
@@ -938,9 +1040,9 @@ export function differentialRun(
           if (leftStep.kind === "end" || rightStep.kind === "end") break;
           state += 1;
           progress.tailSteps += 1;
-          written = {
-            left: write(leftStep.record, "left"),
-            right: write(inject(rightStep.record, at()), "right"),
+          records = {
+            left: written("left", leftStep.record, at()),
+            right: written("right", rightStep.record, at()),
           };
         }
       }

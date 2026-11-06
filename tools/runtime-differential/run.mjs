@@ -2,11 +2,12 @@
 //   node tools/runtime-differential/run.mjs --seed S --count N [--from I] [--route legacy|core] [--shrink]
 // runs generated programs (seed, index from I to I + N - 1) through this build against itself and writes one JSON line
 // per program: seed, index, runtime seed, input and plan digests, the verdict, its first mismatch path, and with
-// `--shrink` the reduced repro of a discrepancy and its signature. Exit 0 when no pair is a discrepancy or a mapping
-// failure, 1 when one is, 2 on a usage or harness error.
+// `--shrink` the reduced repro of a discrepancy and its signature. The arguments are validated before anything runs;
+// the exit status is `exit.mjs`'s one decision: 0 identical, 1 differences, 2 a usage or harness failure.
 
 import { parseArgs } from "node:util";
 
+import { exitStatus, wholeNumber } from "./exit.mjs";
 import { generate } from "./generate.mjs";
 import { shrink } from "./shrink.mjs";
 
@@ -17,6 +18,9 @@ const { canonicalDigest, renderPath } = await import(
 );
 
 let options;
+let seed;
+let first;
+let count;
 try {
   ({ values: options } = parseArgs({
     options: {
@@ -27,16 +31,16 @@ try {
       shrink: { type: "boolean", default: false },
     },
   }));
-  if (options.seed === undefined || !["legacy", "core"].includes(options.route))
-    throw new Error("--seed is required, and --route is legacy or core");
+  if (options.seed === undefined) throw new Error("--seed is required");
+  if (!["legacy", "core"].includes(options.route)) throw new Error("--route is legacy or core");
+  seed = wholeNumber(options.seed, "--seed", 0);
+  first = wholeNumber(options.from, "--from", 0);
+  count = wholeNumber(options.count, "--count", 1);
 } catch (error) {
   process.stderr.write(`${error.message}\n`);
   process.exit(2);
 }
 
-const seed = Number(options.seed);
-const first = Number(options.from);
-const count = Number(options.count);
 const route = options.route;
 
 const input = (program) => ({
@@ -58,11 +62,12 @@ function signature(report) {
   return `${verdict.kind}:${report.route}:${path}`;
 }
 
-let failed = false;
+const reports = [];
 try {
   for (let index = first; index < first + count; index += 1) {
     const program = generate(seed, index);
     const report = differentialRun(input(program), { route });
+    reports.push(report);
     const verdict = report.verdict;
     const line = {
       seed,
@@ -74,6 +79,7 @@ try {
       plan: report.plans.left,
       verdict: verdict.kind,
       ...(verdict.kind === "not-compared" ? { because: verdict.because, side: verdict.side } : {}),
+      ...(verdict.kind === "not-compared" ? { outcome: report.outcomes[verdict.side] } : {}),
       ...(verdict.kind === "discrepancy" || verdict.kind === "mapping-failure"
         ? { at: verdict.at }
         : {}),
@@ -86,7 +92,6 @@ try {
       cpuMs: report.cpuMs,
     };
     if (verdict.kind === "discrepancy" || verdict.kind === "mapping-failure") {
-      failed = true;
       if (options.shrink && !program.project) {
         const wanted = line.signature;
         const reduced = shrink(program.sources[0].source, (source) => {
@@ -102,4 +107,4 @@ try {
   process.stderr.write(`${error.stack ?? error}\n`);
   process.exit(2);
 }
-process.exitCode = failed ? 1 : 0;
+process.exitCode = exitStatus(reports);

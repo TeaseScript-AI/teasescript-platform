@@ -209,8 +209,13 @@ export function compareStructures(
     const leftObject = left as Readonly<Record<string, unknown>>;
     // EVIDENCE: validation: as above, for the candidate side.
     const rightObject = right as Readonly<Record<string, unknown>>;
-    const leftKeys = Object.keys(leftObject);
-    const rightKeys = Object.keys(rightObject);
+    // An array by its length and every position, holes read as `undefined`; an object by its own keys.
+    const keysOf = (value: unknown, record: Readonly<Record<string, unknown>>) =>
+      Array.isArray(value)
+        ? Array.from({ length: value.length }, (_, index) => String(index))
+        : Object.keys(record);
+    const leftKeys = keysOf(left, leftObject);
+    const rightKeys = keysOf(right, rightObject);
     if (leftKind === "array") {
       if (leftKeys.length !== rightKeys.length) mismatch(item, left, right);
     } else if (
