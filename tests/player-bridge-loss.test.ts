@@ -33,6 +33,7 @@ import { serviceSection } from "./helpers/service-section.js";
 /** The changed consumers, each with a request in flight at the loss. */
 const CHANGED = [
   "a capture answer",
+  "an uncertain answer's media",
   "a file store answer",
   "a lock answer",
   "an input section's observation",
@@ -149,6 +150,40 @@ test("a capture answer in flight when the Worker is lost ends quietly", async ()
   service.stop();
   assert.deepEqual(state.sent, ["observeTime", "answerCapture"]);
   assert.equal(state.diagnostics, 0);
+});
+
+test("a photo whose answer was in flight when the Worker was lost is kept, and no second photo is taken", async () => {
+  // `sendAnswer` (answer-media.ts) owns this: an answer the runtime may have taken keeps its media, also once the
+  // Player stops and resets its services.
+  covered.add("an uncertain answer's media");
+  const bridge = await inProcessBridge(50);
+  const session = introduced(bridge, createPlayerRuntimeSession("let photo = takePhoto()\nexit"));
+  const { state, host } = serviceHost(bridge, session, "answerCapture");
+  let photos = 0;
+  const discarded: string[] = [];
+  const service = new CaptureService(
+    async () => {
+      photos++;
+      return { kind: "captured", reference: "photo-1" };
+    },
+    {
+      ...host,
+      capturedMedia: {
+        holds: (reference, kind) => reference === "photo-1" && kind === "image",
+        discard: (reference) => void discarded.push(reference),
+      },
+    },
+  );
+  assert.deepEqual(
+    await unhandledDuring(async () => {
+      await posted(service, state, "answerCapture");
+      // The Player error stop the loss is resets the services, as `usePlayerSession` does.
+      service.reset();
+    }),
+    [],
+  );
+  service.stop();
+  assert.deepEqual([photos, discarded], [1, []]);
 });
 
 test("a file store answer in flight when the Worker is lost ends quietly", async () => {
