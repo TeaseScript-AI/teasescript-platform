@@ -1,13 +1,6 @@
 import type { CorePass } from "./answers.js";
 import { joinParts, keepText, keptParts, type WorkLedger } from "./budget.js";
-import {
-  keyOf,
-  keyPath,
-  keyPlace,
-  type Definition,
-  type Key,
-  type PositionRange,
-} from "./definitions.js";
+import { keyPlace, type Definition, type Key, type PositionRange } from "./definitions.js";
 import type { FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, type ContextWord, type Item, type ItemTag } from "./items.js";
 import { locationOf, stablePath, type Narrowing, type NarrowingIndex } from "./narrowing.js";
@@ -121,10 +114,9 @@ export class NarrowingEvents {
   /** Per narrowing, the word of its condition's window (`#inWindow`), and its lists' static answers per range set. */
   readonly #windowWords = new Map<Narrowing, ContextWord | null>();
   readonly #statics = new Map<Narrowing, Map<number, Map<number, StaticEvents[]>>>();
-  /** Per narrowing, its event lists (X6's, by position), made once; per key, its prefixes' keys and its parent. */
+  /** Per narrowing, its event lists (X6's, by position), made once; per key, its prefixes' keys with definitions. */
   readonly #eventsOf = new Map<Narrowing, readonly EventList[]>();
   readonly #prefixesOf = new Map<Key, readonly Key[]>();
-  readonly #parents = new Map<Key, Key | null>();
   /** Per loop head, its loop. */
   readonly #loops = new Map<FlowNode, FlowLoop>();
   /** The program's ledger. */
@@ -356,37 +348,15 @@ export class NarrowingEvents {
   }
 
   /**
-   * G's prefixes' keys (`prefixesOf`'s list: the parent first, `place|` last), one walk up the keys' parents, once
-   * per key: each key's parent is made once per pass, its text charged as kept, so the Gs of every prefix of one path
-   * (a collection test over a chain of selections, #1073) share their prefixes' texts (Codex r1 on #1742), and one G's
-   * list costs its own length, a unit per step (Codex r4 on #1742).
+   * G's prefixes' keys that hold a definition or a loop's add (the definitions' `stored` trie), the parent first: one walk
+   * of G's key's steps down that trie, once per key, as the trie's own texts (#1640; G3 3b, as `reachingDef`). A prefix
+   * with none has no event and no text, so it adds nothing to G's lists.
    */
   #prefixes(g: Narrowing): readonly Key[] {
     this.#work.charge("eventSteps");
-    const work = this.#work;
     const known = this.#prefixesOf.get(g.key);
     if (known !== undefined) return known;
-    const made: Key[] = [];
-    let at = g.key;
-    let done = false;
-    for (const _ of steps(work, "eventSteps", () => !done)) {
-      let parent = this.#parents.get(at);
-      if (parent === undefined) {
-        const path = keyPath(at);
-        parent = null;
-        if (path.length > 0) {
-          path.pop();
-          parent = keyOf(keyPlace(at), path);
-          keepText(work, parent.length);
-        }
-        this.#parents.set(at, parent);
-      }
-      if (parent === null) done = true;
-      else {
-        made.push(parent);
-        at = parent;
-      }
-    }
+    const made = this.pass.definitions.stored.above(g.key, false);
     this.#prefixesOf.set(g.key, made);
     return made;
   }
