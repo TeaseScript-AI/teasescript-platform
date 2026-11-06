@@ -1227,7 +1227,7 @@ export function pushedInvariant(contract: Contract): {
         );
         if (frontier.pendingSets[node.set]!.some((each) => !names.has(nameOf(each))))
           violations.push(
-            `goal ${goal.node}|${goal.step}: a held state of ${node.inner} outside its union`,
+            `goal ${goal.node} at ${goal.step}: a held state of ${node.inner} outside its union`,
           );
         if (
           union !== undefined &&
@@ -1236,7 +1236,7 @@ export function pushedInvariant(contract: Contract): {
             return at.kind === "hold" && at.inner === node.inner && at.set === union;
           })
         )
-          violations.push(`goal ${goal.node}|${goal.step}: the union of ${node.inner} not held`);
+          violations.push(`goal ${goal.node} at ${goal.step}: the union of ${node.inner} not held`);
       }
       bases += seen.size;
     }
