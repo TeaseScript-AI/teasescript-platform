@@ -20,26 +20,25 @@ export interface MixedDimensions {
   readonly later: boolean;
 }
 
-// (a name is every value its case is generated from; one with another segment names an axis the sample does not take)
-const NAME = /^d(\d+)\/n(\d+)\/t(\d+)\/(\w+)@(-?\d+)\/(\w+)\/(first|later)$/;
+// (a case's name is its axis values, `<axis>:<value>` in the generator's order of its axes; these are the ones the
+// dimensions read. A name with another axis throws until they read it too)
+const AXES = ["depth", "nullAt", "at", "kind", "position", "twin", "later"];
 
-/**
- * A case's dimensions, from its name (`d<depth>/n<null layer>/t<twin's null layer>/<kind>@<layer>/<position>/
- * <first|later>`); a name of any other form throws.
- */
+/** A case's dimensions, from its name; a name whose axes are not exactly `AXES`, in order, throws. */
 export function mixedDimensions(name: string): MixedDimensions {
-  const match = NAME.exec(name);
-  if (match === null)
-    throw new Error(`a family case name with an axis the sample does not take: ${name}`);
-  const [, depth, nullAt, twin, kind, at, position, order] = match;
+  const parts = name.split("/").map((part) => part.split(":"));
+  if (parts.some((part) => part.length !== 2) || parts.map(([axis]) => axis).join() !== AXES.join())
+    throw new Error(`a family case name whose axes are not ${AXES.join(", ")}: ${name}`);
+  const value = new Map(parts.map(([axis, text]) => [axis!, text!]));
+  const number = (axis: string): number => Number(value.get(axis));
   return {
-    depth: Number(depth),
-    nullAt: Number(nullAt),
-    twin: Number(twin),
-    kind: kind!,
-    at: Number(at),
-    position: position!,
-    later: order === "later",
+    depth: number("depth"),
+    nullAt: number("nullAt"),
+    at: number("at"),
+    kind: value.get("kind")!,
+    position: value.get("position")!,
+    twin: number("twin"),
+    later: value.get("later") === "true",
   };
 }
 

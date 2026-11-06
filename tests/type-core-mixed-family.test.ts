@@ -71,28 +71,29 @@ const ONE: Readonly<Record<string, readonly Relation[]>> = {
 };
 
 // (the coverage invariant, the lead's after Codex r16–r18 each found an axis those relations missed: a case's classes,
-// from its name, which is every value the generator makes it from. One per axis (the relation, the depth triple; the
-// side's null above or below its twin's; the order; the kind; the position) and one per pair of axes the transport
-// composes (the relation with the order, the carried layer with the kind). The sample holds every class the family has)
-const AXES = ["at", "depth", "kind", "later", "nullAt", "position", "twin"];
+// from its name, which is exactly its values on the generator's axes (`axes`, the only values a case varies by). One
+// per value of each axis; the relation (the depth triple) and the side's null above or below its twin's; and one per
+// pair of axes the transport composes (the relation with the order, the carried layer with the kind). The sample holds
+// every class the family has)
 function classes(row: MixedDimensions): string[] {
-  assert.deepEqual(Object.keys(row).sort(), AXES, "an axis the coverage classes do not read");
   const relation = `${row.depth},${row.at},${row.nullAt}`;
-  const order = row.later ? "later" : "first";
   const twin =
     row.twin === 0 ? "-" : row.nullAt === 0 ? "free" : row.nullAt < row.twin ? "above" : "below";
   return [
+    ...Object.entries(row).map(([axis, value]) => `${axis} ${String(value)}`),
     `relation ${relation}`,
     `twin ${twin}`,
-    `order ${order}`,
-    `kind ${row.kind}`,
-    `position ${row.position}`,
-    `relation×order ${relation} ${order}`,
+    `relation×later ${relation} ${row.later}`,
     `layer×kind ${row.depth}@${row.at} ${row.kind}`,
   ];
 }
 
-function sampled(cases: readonly (readonly [string, string])[]): (readonly [string, string])[] {
+function sampled(
+  cases: readonly (readonly [string, string])[],
+  axes: readonly string[],
+): (readonly [string, string])[] {
+  // (each case's name is its values on the generator's axes, so a value a case varies by is one the invariant reads)
+  for (const [name] of cases) assert.deepEqual(Object.keys(mixedDimensions(name)), axes, name);
   const kinds = [...new Set(cases.map(([name]) => mixedDimensions(name).kind))];
   const positions = [...new Set(cases.map(([name]) => mixedDimensions(name).position))];
   const out: (readonly [string, string])[] = [];
@@ -128,12 +129,16 @@ function sampled(cases: readonly (readonly [string, string])[]): (readonly [stri
 }
 
 test("a mixed-list error's type text equals the current checker's across the sampled family (#1765)", async () => {
-  const { cases } = await family<{ cases: readonly (readonly [string, string])[] }>(
-    "1765-mixed-family.mjs",
-  );
+  const { cases, axes } = await family<{
+    cases: readonly (readonly [string, string])[];
+    axes: readonly (readonly [string, unknown])[];
+  }>("1765-mixed-family.mjs");
   const differing: string[] = [];
   let compared = 0;
-  for (const [name, source] of sampled(cases)) {
+  for (const [name, source] of sampled(
+    cases,
+    axes.map(([axis]) => axis),
+  )) {
     const { current, core } = mixedSentences(source);
     for (const each of core) assert.deepEqual(each, core[0], name);
     const row = mixedDimensions(name);

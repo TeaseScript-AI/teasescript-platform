@@ -5,9 +5,9 @@
 // an inferred one, a typed host value plain, tested by `is` or `!= null` or stored again, an `otherwise` of a copy or
 // of two);
 // the pair as list elements, object properties or the operands of `+`, joined with a second disagreeing side, or the
-// whole-number side itself a `+` of two sides whose nulls are at different layers; both orders. A case's name is every
-// value it is generated from, `d<depth>/n<null layer>/t<the twin's null layer, 0 for none>/<kind>@<layer>/<position>/
-// <first|later>`: `tests/type-core-mixed-family.test.ts` samples it by them (its coverage invariant).
+// whole-number side itself a `+` of two sides whose nulls are at different layers; both orders. The family is the product
+// of its axes (`axes`), a case's source made from its axis values alone and its name exactly them, `<axis>:<value>` in
+// the axes' order: `tests/type-core-mixed-family.test.ts` samples it by them (its coverage invariant).
 const CARRIERS = {
   take: (value) => `(${value}).take(9)`,
   index: (value) => `[${value}][0]`,
@@ -82,29 +82,47 @@ function side(leaf, depth, nullAt, at, kind, before, block) {
   return build(0);
 }
 
-export const cases = [];
-for (const depth of [2, 3])
-  for (let nullAt = 0; nullAt <= depth; nullAt += 1)
-    for (let at = -1; at < depth; at += 1)
-      for (const kind of at < 0 ? ["plain"] : KINDS.slice(1))
-        for (const [position, make] of Object.entries(POSITIONS))
-          for (const later of [false, true]) {
-            const before = [];
-            const block = [];
-            const one = side("1", depth, nullAt, at, kind, before, block);
-            const joined = position === "joinNulls";
-            const twinAt = joined ? (nullAt % depth) + 1 : 0;
-            const twin = side("2", depth, twinAt, -1, "plain", [], []);
-            const a = joined ? `(([${one}]).take(9)+([${twin}]).take(9))` : one;
-            const text = side('"x"', depth, 0, -1, "plain", [], []);
-            const b = joined ? `[${text}]` : text;
-            const other = side("true", depth, 0, -1, "plain", [], []);
-            const pair = later ? make(b, a, other) : make(a, b, other);
-            cases.push([
-              `d${depth}/n${nullAt}/t${twinAt}/${kind}@${at}/${position}/${later ? "later" : "first"}`,
-              `${before.join("")}${block[0] ?? ""}${pair}\n${block[1] ?? ""}exit\n`,
-            ]);
-          }
+const range = (from, to) => Array.from({ length: to - from + 1 }, (_, at) => from + at);
+// (the family's axes, in order, each with its values given the axes before it: the only values a case varies by. A
+// parameter a case varies by enters here, and so its name and the sampled test's coverage invariant, which asserts a
+// name's axes are these, the lead's ruling on #1789)
+export const axes = [
+  ["depth", () => [2, 3]],
+  ["nullAt", ({ depth }) => range(0, depth)],
+  ["at", ({ depth }) => range(-1, depth - 1)],
+  ["kind", ({ at }) => (at < 0 ? ["plain"] : KINDS.slice(1))],
+  ["position", () => Object.keys(POSITIONS)],
+  // (the twin's null layer, where the whole-number side is joined with its twin; 0 for none)
+  ["twin", ({ depth, nullAt, position }) => [position === "joinNulls" ? (nullAt % depth) + 1 : 0]],
+  ["later", () => [false, true]],
+];
+
+// (a case's source, from its axis values alone)
+function source({ depth, nullAt, at, kind, position, twin: twinAt, later }) {
+  const before = [];
+  const block = [];
+  const one = side("1", depth, nullAt, at, kind, before, block);
+  const joined = position === "joinNulls";
+  const twin = side("2", depth, twinAt, -1, "plain", [], []);
+  const a = joined ? `(([${one}]).take(9)+([${twin}]).take(9))` : one;
+  const text = side('"x"', depth, 0, -1, "plain", [], []);
+  const b = joined ? `[${text}]` : text;
+  const other = side("true", depth, 0, -1, "plain", [], []);
+  const make = POSITIONS[position];
+  const pair = later ? make(b, a, other) : make(a, b, other);
+  return `${before.join("")}${block[0] ?? ""}${pair}\n${block[1] ?? ""}exit\n`;
+}
+
+const product = (next, values) =>
+  next === axes.length
+    ? [values]
+    : axes[next][1](values).flatMap((value) =>
+        product(next + 1, { ...values, [axes[next][0]]: value }),
+      );
+export const cases = product(0, {}).map((values) => [
+  axes.map(([axis]) => `${axis}:${values[axis]}`).join("/"),
+  source(values),
+]);
 export const globals = ["hostValue"];
 export const recorded = {
   commands: [
