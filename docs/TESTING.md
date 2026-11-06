@@ -167,7 +167,8 @@ before it. An empty cell has no corpus yet.
 | Backend | none yet: its checks, compatibility documents, and area label come when the backend exists | | |
 | Player | `npm run check`; the [scoped visual check](#player-browser-and-visual-verification) after a visible UI change; [`npm run test:player:browser`](#local-browser-smoke-and-future-host-e2e-gate) for a change to `player/` or its fixture packages | `npm run test:player:browser` plus [`npm run test:player:preview`](#player-browser-and-visual-verification) | a real-device check |
 
-The compiler's shadow gate (`tests/families/shadow.mjs`) is a campaign run from the tree after merges and reported on the tracker issue; it is not a per-pull-request level.
+The compiler's shadow gate (`tests/families/shadow.mjs`) is a campaign run from the tree after merges and reported on
+the tracker issue; it is not a per-pull-request level.
 
 ## Test admission and consolidation
 

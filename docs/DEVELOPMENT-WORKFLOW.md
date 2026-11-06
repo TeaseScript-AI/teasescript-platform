@@ -520,9 +520,9 @@ summarises what a later reader needs from it.
 
 ### Review rounds
 
-The builder starts each code review round with a brief that gives the head, the plan, the earlier findings and their answers, and the scope.
-Its brief gives the head, the plan, the earlier findings and their answers, and the scope. Its only write is one comment
-on the pull request, with the content in
+The builder starts each code review round as a new reviewer session with a compact brief: the head, the plan, the
+earlier findings and their answers, the diff since the last round, and the scope. The reviewer's only write is one
+comment on the pull request, with the content in
 [Findings and outcome](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#findings-and-outcome): the comment names the
 exact head SHA and, from the second round on, states for each earlier finding whether it is closed. Rounds after the
 first are scoped to the open findings. Findings follow [Review convergence](#review-convergence).
