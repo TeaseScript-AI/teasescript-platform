@@ -13,28 +13,35 @@ import { inMode, MODES, sentences } from "./helpers/type-core-oracles.js";
  * - its `null` at no layer, at each layer between the element and the leaf, or at the leaf;
  * - at the element or any layer, its value carried: `take`, an index, a `get` default, an `otherwise`'s operand or
  *   fallback, a property, a join, a written copy narrowed by its value or one that may be null, or a narrowed copy held
- *   in an inferred one (`h={p:c}`, read as `h.p`);
+ *   in an inferred one (`h={p:c}`, read as `h.p`), or a typed host value (its type nullable or not), tested by `is` or
+ *   `!= null`, or tested and then stored again;
  * - the pair as list elements, object properties, or the operands of `+`;
  * - in both orders and four modes.
  * The modes agree on every source. Where both checkers report the error, the first sentences are equal, except the
  * inherited classes below, each the work of its issue:
  * - the later element's own or leaf `null`, #1790 (#1819, stacked on this);
- * - the earliest element's own `or null` (a copy that may be null at the element), #1843.
+ * - the earliest element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
+ * - a typed host value under `!= null`, which leaves no mark on its unknown items, #1847.
  * A source only one checker reports on is outside the candidate slice there and is not compared.
  */
-const WRAPS: Readonly<Record<string, ((value: string) => string) | "narrowed" | "maybe" | "held">> =
-  {
-    take: (value) => `(${value}).take(9)`,
-    index: (value) => `[${value}][0]`,
-    get: (value) => `[].get(0, default: ${value})`,
-    operand: (value) => `(${value} otherwise null)`,
-    fallback: (value) => `(null otherwise ${value})`,
-    property: (value) => `{p:${value}}.p`,
-    join: (value) => `(${value})+[]`,
-    narrowed: "narrowed",
-    maybe: "maybe",
-    held: "held",
-  };
+type Copy = "narrowed" | "maybe" | "held" | "host" | "sure" | "is" | "notNull" | "invalidated";
+const WRAPS: Readonly<Record<string, ((value: string) => string) | Copy>> = {
+  take: (value) => `(${value}).take(9)`,
+  index: (value) => `[${value}][0]`,
+  get: (value) => `[].get(0, default: ${value})`,
+  operand: (value) => `(${value} otherwise null)`,
+  fallback: (value) => `(null otherwise ${value})`,
+  property: (value) => `{p:${value}}.p`,
+  join: (value) => `(${value})+[]`,
+  narrowed: "narrowed",
+  maybe: "maybe",
+  held: "held",
+  host: "host",
+  sure: "sure",
+  is: "is",
+  notNull: "notNull",
+  invalidated: "invalidated",
+};
 const POSITIONS: Readonly<Record<string, (a: string, b: string) => string>> = {
   element: (a, b) => `let xs=[${a},${b}]`,
   property: (a, b) => `let xs=[{f:${a}},{f:${b}}]`,
@@ -50,6 +57,13 @@ interface Row {
   readonly later: boolean;
 }
 
+// (a copy's declaration, and the block a test or a later store wraps the pair in)
+const HOSTED: Readonly<Record<string, readonly [string, string]>> = {
+  is: ["if c is T {\n", "}\n"],
+  notNull: ["if c != null {\n", "}\n"],
+  invalidated: ["if c != null {\nc=hostValue\n", "}\n"],
+};
+
 function side(
   leaf: string,
   depth: number,
@@ -57,6 +71,7 @@ function side(
   wrapAt: number,
   wrap: string,
   declarations: string[],
+  block: string[],
 ): string {
   const type = (at: number): string =>
     at === depth
@@ -70,9 +85,13 @@ function side(
     if (wrapAt !== at) return list;
     const made = WRAPS[wrap]!;
     if (typeof made === "function") return made(list);
+    const written = `${type(at)}${made === "sure" ? "" : "?"}`;
+    const value = made === "narrowed" || made === "maybe" || made === "held" ? list : "hostValue";
     declarations.push(
-      `let c:${type(at)}?=${list}\n${made === "maybe" ? "if hostValue == 1 { c=null }\n" : ""}${made === "held" ? "let h={p:c}\n" : ""}`,
+      `let c:${written}=${value}\n${made === "maybe" ? "if hostValue == 1 { c=null }\n" : ""}${made === "held" ? "let h={p:c}\n" : ""}`,
     );
+    const hosted = HOSTED[made];
+    if (hosted !== undefined) block.push(hosted[0].replace("T", type(at)), hosted[1]);
     return made === "held" ? "h.p" : "c";
   };
   return build(0);
@@ -87,11 +106,12 @@ function rows(): Row[] {
           for (const make of Object.values(POSITIONS))
             for (const later of [false, true]) {
               const declarations: string[] = [];
-              const a = side("1", depth, nullAt, wrapAt, wrap, declarations);
-              const b = side('"x"', depth, 0, -1, "", []);
+              const block: string[] = [];
+              const a = side("1", depth, nullAt, wrapAt, wrap, declarations, block);
+              const b = side('"x"', depth, 0, -1, "", [], []);
               const pair = later ? make(b, a) : make(a, b);
               out.push({
-                source: `${declarations.join("")}${pair}\nexit\n`,
+                source: `${declarations.join("")}${block[0] ?? ""}${pair}\n${block[1] ?? ""}exit\n`,
                 depth,
                 nullAt,
                 wrapAt,
@@ -105,9 +125,10 @@ function rows(): Row[] {
 // (the inherited classes: a row whose whole-number side holds null where it is the later element's own value or leaf,
 // or the earliest element's own value)
 function inherited(row: Row): string | null {
-  const own = row.wrap === "maybe" && row.wrapAt === 0;
+  const own = row.wrapAt === 0 && ["maybe", "host", "invalidated"].includes(row.wrap);
   if (row.later && (row.nullAt === row.depth || own)) return "#1790";
   if (!row.later && own) return "#1843";
+  if (row.wrap === "notNull") return "#1847";
   return null;
 }
 
