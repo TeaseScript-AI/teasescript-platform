@@ -5,8 +5,9 @@
 // an inferred one, a typed host value plain, tested by `is` or `!= null` or stored again, an `otherwise` of a copy or
 // of two);
 // the pair as list elements, object properties or the operands of `+`, joined with a second disagreeing side, or the
-// whole-number side itself a `+` of two sides whose nulls are at different layers; both orders. A case's name is its dimensions:
-// `d<depth>/n<null layer>/<kind>@<layer>/<position>/<first|later>`, which `tests/type-core-mixed-family.test.ts` samples.
+// whole-number side itself a `+` of two sides whose nulls are at different layers; both orders. A case's name is every
+// value it is generated from, `d<depth>/n<null layer>/t<the twin's null layer, 0 for none>/<kind>@<layer>/<position>/
+// <first|later>`: `tests/type-core-mixed-family.test.ts` samples it by them (its coverage invariant).
 const CARRIERS = {
   take: (value) => `(${value}).take(9)`,
   index: (value) => `[${value}][0]`,
@@ -91,15 +92,16 @@ for (const depth of [2, 3])
             const before = [];
             const block = [];
             const one = side("1", depth, nullAt, at, kind, before, block);
-            const twin = side("2", depth, (nullAt % depth) + 1, -1, "plain", [], []);
             const joined = position === "joinNulls";
+            const twinAt = joined ? (nullAt % depth) + 1 : 0;
+            const twin = side("2", depth, twinAt, -1, "plain", [], []);
             const a = joined ? `(([${one}]).take(9)+([${twin}]).take(9))` : one;
             const text = side('"x"', depth, 0, -1, "plain", [], []);
             const b = joined ? `[${text}]` : text;
             const other = side("true", depth, 0, -1, "plain", [], []);
             const pair = later ? make(b, a, other) : make(a, b, other);
             cases.push([
-              `d${depth}/n${nullAt}/${kind}@${at}/${position}/${later ? "later" : "first"}`,
+              `d${depth}/n${nullAt}/t${twinAt}/${kind}@${at}/${position}/${later ? "later" : "first"}`,
               `${before.join("")}${block[0] ?? ""}${pair}\n${block[1] ?? ""}exit\n`,
             ]);
           }

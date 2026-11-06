@@ -12,19 +12,30 @@ import { inMode, MODES, sentences } from "./type-core-oracles.js";
 export interface MixedDimensions {
   readonly depth: number;
   readonly nullAt: number;
+  /** The twin's null layer where the whole-number side is joined with its twin (`joinNulls`), else 0. */
+  readonly twin: number;
   readonly kind: string;
   readonly at: number;
   readonly position: string;
   readonly later: boolean;
 }
 
-/** A case's dimensions, from its name (`d<depth>/n<null layer>/<kind>@<layer>/<position>/<first|later>`). */
+// (a name is every value its case is generated from; one with another segment names an axis the sample does not take)
+const NAME = /^d(\d+)\/n(\d+)\/t(\d+)\/(\w+)@(-?\d+)\/(\w+)\/(first|later)$/;
+
+/**
+ * A case's dimensions, from its name (`d<depth>/n<null layer>/t<twin's null layer>/<kind>@<layer>/<position>/
+ * <first|later>`); a name of any other form throws.
+ */
 export function mixedDimensions(name: string): MixedDimensions {
-  const [depth, nullAt, carried, position, order] = name.split("/");
-  const [kind, at] = carried!.split("@");
+  const match = NAME.exec(name);
+  if (match === null)
+    throw new Error(`a family case name with an axis the sample does not take: ${name}`);
+  const [, depth, nullAt, twin, kind, at, position, order] = match;
   return {
-    depth: Number(depth!.slice(1)),
-    nullAt: Number(nullAt!.slice(1)),
+    depth: Number(depth),
+    nullAt: Number(nullAt),
+    twin: Number(twin),
     kind: kind!,
     at: Number(at),
     position: position!,

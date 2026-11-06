@@ -4,6 +4,7 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import type { MixedDimensions } from "./helpers/type-core-mixed-family.js";
 import {
   mixedCompared,
   mixedDimensions,
@@ -24,8 +25,8 @@ import { inMode, MODES } from "./helpers/type-core-oracles.js";
  * - both orders.
  * Here, each kind at every position with every relation of its carried layer to the null (`RELATIONS`: the null one
  * and two layers below it, inside and at the leaf, three below at the leaf, at its layer, none), the order turned
- * through them, and the two joined positions (`ONE`: the twin's join in both orders of its answers) in both orders, in
- * four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
+ * through them, and the two joined positions (`ONE`: the twin's join in both orders of its answers) in both orders;
+ * then each case that brings a class the sample lacks (`classes`, the coverage invariant); in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
  * the inherited classes, each its issue's work:
  * - the later element's leaf `null`, #1790 (#1819, stacked on this);
  * - an element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
@@ -49,8 +50,7 @@ const OPEN = ["#1790", "#1843", "#1847", "#1858"];
 // null's distance below it inside a list and at the leaf), the order turned through them; the joined positions at one
 // relation or two (`ONE`): a second disagreeing side asks the first join again at the interior relation, and the side
 // joined with its twin in both orders of their answers, the side's null above the twin's (Codex r17's witness) and
-// below it (a copy two lists in, the twin's at the element's own layer, Codex r18). The structural combinations of kind, position and null, not a rotation over
-// their marginals, Codex r14–r17)
+// below it (a copy two lists in, the twin's at the element's own layer, Codex r18))
 type Relation = readonly [depth: number, at: number, nullAt: number];
 const RELATIONS: readonly Relation[] = [
   [3, 1, 2],
@@ -69,6 +69,28 @@ const ONE: Readonly<Record<string, readonly Relation[]>> = {
     [3, 2, 0],
   ],
 };
+
+// (the coverage invariant, the lead's after Codex r16–r18 each found an axis those relations missed: a case's classes,
+// from its name, which is every value the generator makes it from. One per axis (the relation, the depth triple; the
+// side's null above or below its twin's; the order; the kind; the position) and one per pair of axes the transport
+// composes (the relation with the order, the carried layer with the kind). The sample holds every class the family has)
+const AXES = ["at", "depth", "kind", "later", "nullAt", "position", "twin"];
+function classes(row: MixedDimensions): string[] {
+  assert.deepEqual(Object.keys(row).sort(), AXES, "an axis the coverage classes do not read");
+  const relation = `${row.depth},${row.at},${row.nullAt}`;
+  const order = row.later ? "later" : "first";
+  const twin =
+    row.twin === 0 ? "-" : row.nullAt === 0 ? "free" : row.nullAt < row.twin ? "above" : "below";
+  return [
+    `relation ${relation}`,
+    `twin ${twin}`,
+    `order ${order}`,
+    `kind ${row.kind}`,
+    `position ${row.position}`,
+    `relation×order ${relation} ${order}`,
+    `layer×kind ${row.depth}@${row.at} ${row.kind}`,
+  ];
+}
 
 function sampled(cases: readonly (readonly [string, string])[]): (readonly [string, string])[] {
   const kinds = [...new Set(cases.map(([name]) => mixedDimensions(name).kind))];
@@ -94,6 +116,14 @@ function sampled(cases: readonly (readonly [string, string])[]): (readonly [stri
           assert.ok(found !== undefined, `${kind} ${position} ${later}`);
           out.push(found);
         }
+  // (then each case, in the family's order, that brings a class no sampled case has)
+  const taken = new Set(out.flatMap(([name]) => classes(mixedDimensions(name))));
+  for (const each of cases) {
+    const mine = classes(mixedDimensions(each[0]));
+    if (mine.every((one) => taken.has(one))) continue;
+    out.push(each);
+    for (const one of mine) taken.add(one);
+  }
   return out;
 }
 
