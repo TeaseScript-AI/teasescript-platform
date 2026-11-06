@@ -2231,7 +2231,8 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
  * A built tree's library whose analyses charge its ledger (allowance 1,000) 300 units a run: `over` 5,000 more on the
  * head, `both` on both trees, `budget` 1,500 more (past its allowance, within 4 times it); `ledgers` 7,001 more on three
  * ledgers of allowances 1,000, 2,000 and 1,000 (within 4 times the largest only); `noisy` on the head writes 1 MiB on
- * stderr, then charges 5,000; `slowall` waits 600 ms each run on each tree, and `hang` 3 s in the head's first. Where
+ * stderr, then charges 5,000; `slowall` waits 1.8 s each run on each tree, and `hang` 6 s in the head's first (#1850: under a 3 s safety net, a margin
+ * of over a second either way). Where
  * `between`, the modes wait 1.5 s before the first: between the source's runs, in none; `grow` charges 90,000 on the
  * head on a ledger of allowance 100,000, within 4 times it; without a `ledger`, it charges
  * a ledger of its own, which no runner counts.
@@ -2262,8 +2263,8 @@ export function publicationHashes(files, mode) {
     process.stderr.write("x".repeat(1 << 20));
     ledger.charge("frames", 5000);
   }
-  if (source === "slowall") wait(600);
-  if (${head} && source === "hang" && mode === modes[0]) wait(3000);
+  if (source === "slowall") wait(1800);
+  if (${head} && source === "hang" && mode === modes[0]) wait(6000);
   return { parts: ["a", "b"], unanswered: 0 };
 }
 `;
@@ -2318,12 +2319,12 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
       printed.slice(1, -2).map(({ source, verdict, uncharged }) => [source, verdict ?? uncharged]);
     const MODES = ["src-on", "src-off", "rev-on", "rev-off"];
 
-    // both trees in one process, a safety net of 1 s a run: `over` stalls in the head's first run at the charge that
+    // both trees in one process, a safety net of 3 s a run: `over` stalls in the head's first run at the charge that
     // passes 4 × 1,000 units, `both` in the base's (the head's not run), `noisy` too though its stderr is backed up;
     // `budget` ends past its allowance, `ledgers` within 4 times the largest allowance it charged; `slowall` ends, each
     // tree's run within the safety net, a run of both trees together past it; `hang` reaches it: uncharged work, no stall
     const paired = join(directory, "paired.work.jsonl");
-    const ran = run(runner, folder, base, head, "--timeout", "1", "--work", paired);
+    const ran = run(runner, folder, base, head, "--timeout", "3", "--work", paired);
     assert.equal(ran.status, 1, ran.stderr);
     const ended = lines(ran.stdout).at(-1);
     assert.deepEqual([ended.stalled, ended.uncharged, ended.units], [3, 1, 4]);
@@ -2356,7 +2357,7 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
     );
     const slowest = record.get("slowall").runs.map(({ ms }: { ms: number[] }) => ms[0]! + ms[1]!);
     assert.ok(
-      record.get("slowall").stalled === undefined && slowest.every((ms: number) => ms > 1000),
+      record.get("slowall").stalled === undefined && slowest.every((ms: number) => ms > 3000),
       String(slowest),
     );
     assert.deepEqual(
@@ -2418,7 +2419,7 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
         "--baseline",
         baseline,
         "--timeout",
-        "1",
+        "3",
         "--work",
         file,
       );
