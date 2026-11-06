@@ -5,6 +5,7 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
@@ -15,7 +16,7 @@ import {
 import { request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime-adapter.js";
@@ -47,7 +48,7 @@ test("the development package folder offers its images with their XMP keywords, 
   await writeFile(join(root, "notes.txt"), "not an image");
 
   const server = await listening(createPlaygroundServer({ packageRoot: root }));
-  context.after(() => new Promise((resolve) => server.close(resolve)));
+  closeAfter(context, server);
 
   const catalog = await get(server, "/dev-package/catalog.json");
   assert.equal(catalog.status, 200);
@@ -107,7 +108,7 @@ test("the catalog follows edits that keep a file's size and time, and skips what
   const time = 1_700_000_000;
   await utimes(sidecar, time, time);
   const server = await listening(createPlaygroundServer({ packageRoot: root }));
-  context.after(() => new Promise((resolve) => server.close(resolve)));
+  closeAfter(context, server);
   const catalog = async () =>
     JSON.parse((await get(server, "/dev-package/catalog.json")).body.toString("utf8"));
   assert.deepEqual((await catalog()).images, [{ path: "room.png", keywords }]);
@@ -147,7 +148,7 @@ test("the catalog follows edits that keep a file's size and time, and skips what
   }
 
   const missing = await listening(createPlaygroundServer({ packageRoot: join(root, "absent") }));
-  context.after(() => new Promise((resolve) => missing.close(resolve)));
+  closeAfter(context, missing);
   const response = await get(missing, "/dev-package/catalog.json");
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(response.body.toString("utf8")), {
@@ -173,7 +174,7 @@ test("the package folder serves only what its catalog lists: no hidden files or 
   await copyFile(join(fixtures, "keywords.jpg"), join(root, ".private/hidden.jpg"));
   await symlink(join(root, "room.jpg"), join(root, "inside-link.jpg"));
   const server = await listening(createPlaygroundServer({ packageRoot: root }));
-  context.after(() => new Promise((resolve) => server.close(resolve)));
+  closeAfter(context, server);
   assert.equal((await get(server, "/dev-package/files/room.jpg")).status, 200);
   assert.equal((await get(server, "/dev-package/files/.private/hidden.jpg")).status, 404);
   assert.equal((await get(server, "/dev-package/files/inside-link.jpg")).status, 404);
@@ -182,7 +183,7 @@ test("the package folder serves only what its catalog lists: no hidden files or 
 test("a root of packages offers each direct subfolder as a package, with only its own files", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "teasescript-packages-"));
   context.after(() => rm(root, { recursive: true, force: true }));
-  await cp(packages, root, { recursive: true });
+  await writableCopy(packages, root);
   await mkdir(join(root, ".hidden"));
   await writeFile(join(root, ".hidden/main.tease"), "exit\n");
   await symlink(join(root, "house"), join(root, "linked"));
@@ -192,7 +193,7 @@ test("a root of packages offers each direct subfolder as a package, with only it
   await symlink(root, rootLink);
   context.after(() => rm(rootLink, { force: true }));
   const server = await listening(createPlaygroundServer({ packagesRoot: rootLink }));
-  context.after(() => new Promise((resolve) => server.close(resolve)));
+  closeAfter(context, server);
   const catalog = async (id: string) =>
     JSON.parse((await get(server, `/dev-package/${id}/catalog.json`)).body.toString("utf8"));
 
@@ -283,7 +284,7 @@ test("a package lists every .tease file it can read, and compiling it reports th
   await writeFile(join(root, "odd/latin1.tease"), Buffer.from([0x73, 0x61, 0x79, 0x20, 0xe9]));
   await writeFile(join(root, "odd/notes/Upper.TEASE"), "exit\n");
   const server = await listening(createPlaygroundServer({ packagesRoot: root }));
-  context.after(() => new Promise((resolve) => server.close(resolve)));
+  closeAfter(context, server);
   const catalog = async () =>
     JSON.parse((await get(server, "/dev-package/odd/catalog.json")).body.toString("utf8"));
 
@@ -422,10 +423,46 @@ test("a playground serves one package folder or a root of packages, not both", (
 
 test("without a development package folder, its routes are absent", async (context) => {
   const server = await listening(createPlaygroundServer());
-  context.after(() => new Promise((resolve) => server.close(resolve)));
+  closeAfter(context, server);
   assert.equal((await get(server, "/dev-package/catalog.json")).status, 404);
   assert.equal((await get(server, "/dev-package/files/room.jpg")).status, 404);
 });
+
+/**
+ * A copy of a fixture folder the test may edit: every copied folder and file writable by its owner. `cp` keeps the
+ * source's modes, and a worker's tree (`sx-tree`) is read-only by design, so a plain copy of it is read-only too and
+ * the test's own edits and its cleanup fail there.
+ */
+async function writableCopy(from: string, to: string): Promise<void> {
+  await cp(from, to, { recursive: true });
+  for (const entry of [
+    to,
+    ...(await readdir(to, { recursive: true })).map((name) => join(to, name)),
+  ]) {
+    const { mode } = await stat(entry);
+    await chmod(entry, mode | 0o200);
+  }
+}
+
+/**
+ * The server closed when the test ends, on a bounded wait (its connections ended, then at most 5 s), and never what
+ * keeps the test file running: it is unreferenced from the start, so a failure ends the file, whatever hook failed.
+ */
+function closeAfter(context: TestContext, server: Server): void {
+  server.unref();
+  context.after(
+    () =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 5_000);
+        timer.unref();
+        server.closeAllConnections();
+        server.close(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      }),
+  );
+}
 
 async function listening(server: Server): Promise<Server> {
   await new Promise<void>((resolve, reject) => {
