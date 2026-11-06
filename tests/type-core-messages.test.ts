@@ -3533,3 +3533,157 @@ test("a mixed element's type names its dict layers as dicts (#1762)", () => {
     );
   }
 });
+
+/**
+ * #1763: a store's check where the value's landing was unknown, an argument's (its parameter, by its place or its name,
+ * also inside a literal or another value) and an index target's (one list or dict step per index), tests the value by
+ * its whole receiving type, as #1753's does where the landing is known, and a storing method's argument (`add`, `addAll`)
+ * by its receiver's (`addAll`'s never null), or no check where its receiver is off the place's path; a flat index store
+ * keeps its element's test.
+ * Each pasted check compiles under both checkers. In four modes.
+ */
+test("a store's check tests an argument or an index target by its whole receiving type (#1763)", () => {
+  const warned = (into: string, fix: string) =>
+    `${into}, but 'hostValue' may be a value of another type here. ${STOPS} ${fix} ${OUTSIDE("hostValue")}`;
+  const check = (code: string) => `Check 'hostValue' first, as in '${code}'.`;
+  const p = "'p' holds whole numbers or null (integer?[])";
+  const deep = (name: string) =>
+    `An element of an element of '${name}' is declared as a whole number (integer) or null`;
+  const f = (parameters: string, call: string) =>
+    `function f(${parameters}) {\n  say "\${p.length}"\n}\n${call}\nexit\n`;
+  const g = (call: string) => `function g(p: integer?[]) {\n  return p.length\n}\n${call}\nexit\n`;
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      f("p: integer?[]", "f(hostValue)"),
+      warned(p, check("if hostValue is integer?[] { f(hostValue) }")),
+    ],
+    [
+      f("q: integer, p: integer?[]", "f(1, p: hostValue)"),
+      warned(p, check("if hostValue is integer?[] { f(1, p: hostValue) }")),
+    ],
+    [
+      f("q: integer, p: integer?[]", "f(p: hostValue, q: 1)"),
+      warned(p, check("if hostValue is integer?[] { f(p: hostValue, q: 1) }")),
+    ],
+    [
+      f("p: integer?[][]", "f([hostValue])"),
+      warned(deep("p"), check("if hostValue is integer?[] { f([hostValue]) }")),
+    ],
+    // (past another call's argument before it, out to the argument that holds it)
+    [
+      `function h(n: integer) {\n  return [n]\n}\n${f("p: integer?[][]", "f([h(1), hostValue])")}`,
+      warned(deep("p"), "Check that 'hostValue' is a list (integer?[]) first."),
+    ],
+    [g("let x=[g(hostValue)]"), warned(p, "Check that 'hostValue' is a list (integer?[]) first.")],
+    [
+      "let a:integer?[][]=[[1]]\na[0]=hostValue\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[] { a[0]=hostValue }")),
+    ],
+    [
+      'let d:integer?[] dict=dict {}\nd["k"]=hostValue\nexit\n',
+      warned(deep("d"), check('if hostValue is integer?[] { d["k"]=hostValue }')),
+    ],
+    // (an index target through parentheses, Codex r1 on #1817)
+    [
+      "let a:integer?[][]=[[1]]\n(a)[0]=hostValue\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[] { (a)[0]=hostValue }")),
+    ],
+    // (a storing method's argument: `add`'s a member of its receiver, `addAll`'s its receiver whole; a user function
+    // named `add` is its own; a method whose parameter is no element keeps its parameter's test; Astra r1 on #1817)
+    [
+      "let a:integer?[][]=[[1]]\na.add(hostValue)\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[] { a.add(hostValue) }")),
+    ],
+    [
+      "let a:integer?[][]=[[1]]\na.addAll(hostValue)\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[][] { a.addAll(hostValue) }")),
+    ],
+    [
+      'function add(p: integer) {\n  say "${p}"\n}\nadd(hostValue)\nexit\n',
+      warned(
+        "'p' is declared as a whole number (integer)",
+        check("if hostValue is integer { add(hostValue) }"),
+      ),
+    ],
+    // (a method read through parentheses; a receiver off the place's path gives no check; `addAll` takes a list,
+    // never null; Codex r3 on #1817)
+    [
+      "let a:integer?[][]=[[1]]\n(a.add)(hostValue)\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[] { (a.add)(hostValue) }")),
+    ],
+    [
+      "let a:integer?[][][]=[[[1]]]\na.first.add(hostValue)\nexit\n",
+      `An element of an element of an element of 'a' is declared as a whole number (integer) or null, but ` +
+        `'hostValue' may be a value of another type here. ${STOPS} ${OUTSIDE("hostValue")}`,
+    ],
+    [
+      "let a:integer?[][]?=[[1]]\nif a == null { exit }\na.addAll(hostValue)\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[][] { a.addAll(hostValue) }")),
+    ],
+    [
+      "let a:integer?[][]=[[1]]\nsay a.take(hostValue)\nexit\n",
+      warned(
+        "take() needs a whole number (integer)",
+        check("if hostValue is integer { say a.take(hostValue) }"),
+      ),
+    ],
+    // (a flat index store: its element's test)
+    [
+      "let a:integer?[]=[1]\na[0]=hostValue\nexit\n",
+      warned(
+        "'a' holds whole numbers or null (integer?[])",
+        check("if hostValue is integer { a[0]=hostValue }"),
+      ),
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.site === "hostValue" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+  // (a call names its own file's function, where another file declares one of the same name, Codex r1 on #1817)
+  for (const mode of MODES) {
+    const files = [
+      {
+        path: "main.tease",
+        source:
+          'function f(p:integer?[]) { return p.length }\nf(hostValue)\ncall "other.tease"\nexit\n',
+      },
+      {
+        path: "other.tease",
+        source: "function f(p:string?[]) { return p.length }\nf(hostValue)\nend\n",
+      },
+    ];
+    const fixes = inMode(mode, () => reported(files))
+      .map((each) => /as in '([^']*)'/u.exec(each.message)?.[1])
+      .filter((each) => each !== undefined)
+      .sort();
+    assert.deepEqual(
+      fixes,
+      ["if hostValue is integer?[] { f(hostValue) }", "if hostValue is string?[] { f(hostValue) }"],
+      JSON.stringify(mode),
+    );
+  }
+  // (each pasted check compiles under both checkers)
+  const errors = (source: string) => [
+    ...compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] })
+      .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
+      .map((diagnostic) => `current ${diagnostic.code}`),
+    ...reported(main(source))
+      .filter((each) => each.error)
+      .map((each) => `core ${each.code}`),
+  ];
+  for (const followed of [
+    f("p: integer?[]", "if hostValue is integer?[] { f(hostValue) }"),
+    f("p: integer?[][]", "if hostValue is integer?[] { f([hostValue]) }"),
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { a[0]=hostValue }\nexit\n",
+    'let d:integer?[] dict=dict {}\nif hostValue is integer?[] { d["k"]=hostValue }\nexit\n',
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { a.add(hostValue) }\nexit\n",
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[][] { a.addAll(hostValue) }\nexit\n",
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { (a.add)(hostValue) }\nexit\n",
+    "let a:integer?[][]?=[[1]]\nif a == null { exit }\nif hostValue is integer?[][] { a.addAll(hostValue) }\nexit\n",
+  ])
+    assert.deepEqual(errors(followed), [], followed);
+});
