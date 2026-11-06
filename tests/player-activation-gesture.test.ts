@@ -21,15 +21,21 @@ import { loadPlayerModule } from "./helpers/player-modules.js";
 
 interface GestureHost {
   readonly session: Readonly<Ref<PlayerSession | null>>;
-  prepare(create: { readonly plan: string; readonly options: () => StartOptions }): void;
+  readonly bridge: Promise<PlayerBridge>;
+  prepare(
+    create:
+      | { readonly plan: string; readonly options: () => StartOptions }
+      | ((recording: { readonly recorder: never }) => PlayerRuntimeSession),
+  ): void;
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
 }
 let usePlayerSession: (options: {
-  readonly bridge: Promise<PlayerBridge>;
+  readonly bridge?: Promise<PlayerBridge>;
   readonly capabilities?: { readonly camera: boolean };
 }) => GestureHost;
 let createInProcessBackend: typeof InProcess.createInProcessBackend;
+let heldRecording: typeof InProcess.heldRecording;
 
 before(async () => {
   const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
@@ -40,6 +46,9 @@ before(async () => {
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
   // EVIDENCE: validation: checked as a function above, from the bundle the composable runs in.
   createInProcessBackend = facade.createInProcessBackend as typeof createInProcessBackend;
+  assert.equal(typeof facade.heldRecording, "function");
+  // EVIDENCE: validation: checked as a function above, from the bundle the composable runs in.
+  heldRecording = facade.heldRecording as typeof heldRecording;
 });
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
@@ -148,4 +157,37 @@ test("a Start with the camera asks for it within the click, before any reply", a
   void host.activate();
   assert.equal(calls.getUserMedia, 1, "the camera was asked for within the click");
   assert.ok(calls.play > 0, "the audio unlock played within the click");
+});
+
+test("a Continue a new Start replaced cannot take over the recording, even from behind an async prepare", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() => usePlayerSession({}))!;
+  context.after(() => scope.stop());
+  const bridge = await host.bridge;
+  host.prepareRestore(createPlayerRuntimeSession('say "restored", instant\nwait 10 s\nexit'));
+  // The host awaits a source prepare, so the Continue's first request waits behind it.
+  const compiling = bridge.client.request("prepare", {
+    source: { kind: "source", script: 'say "x"\nexit' },
+  });
+  const continuing = host.activate();
+  // A new Start replaces the Continue while its request still waits.
+  host.prepare(({ recorder }) =>
+    createPlayerRuntimeSession('say "new", instant\nwait 10 s\nexit', { recorder }),
+  );
+  await host.activate();
+  await compiling;
+  await continuing;
+  for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    shown(host)?.transcriptEntries.map((entry) => entry.text),
+    ["new"],
+    "the new session shows",
+  );
+  // The recording is the new session's: its plan is the new script's, not the restored one's.
+  const recording = heldRecording(bridge);
+  assert.ok(recording);
+  const plan = JSON.stringify(recording.plan);
+  assert.equal(plan.includes("restored"), false, "the obsolete Continue took over the recording");
+  assert.equal(plan.includes("new"), true);
 });

@@ -99,17 +99,15 @@ export function createInProcessBackend(
   const context = playerOpsContext();
   const sessions = startBridgeHost(hostPort, playerBridgeOps(context), build);
   const bridge = new PlayerBridge(client);
-  backends.set(bridge, {
-    bridge,
-    context,
-    sessions,
-    flush: (session) => {
-      for (let index = 0; index < transit.length;) {
-        if (transit[index]!.session !== session) index += 1;
-        else toClient?.(transit.splice(index, 1)[0]!.data);
-      }
-    },
-  });
+  const flush = (session: string) => {
+    for (let index = 0; index < transit.length;) {
+      if (transit[index]!.session !== session) index += 1;
+      else toClient?.(transit.splice(index, 1)[0]!.data);
+    }
+  };
+  // A stop's acknowledgement and the replies before it arrive at once, so the stop is synchronous here.
+  bridge.deliverInTransit = flush;
+  backends.set(bridge, { bridge, context, sessions, flush });
   return bridge;
 }
 

@@ -168,8 +168,11 @@ test("a store applies publications by revision and requires their events to cont
   // A newer one whose events do not continue the cursor is a gap, never merged.
   assert.throws(() => store.apply(publication(3, 4, 5)), PublicationGapError);
   assert.equal(store.session.revision, 2);
-  store.halt();
-  assert.equal(store.apply(publication(3, 0, 0)), false);
+  // Stopping still applies what the host ran; frozen, nothing more.
+  store.stopping();
+  assert.equal(store.apply(publication(3, 0, 0)), true);
+  store.freeze();
+  assert.equal(store.apply(publication(4, 0, 0)), false);
 });
 
 test("a hatch call delivers its session's replies still in transit first, so no publication overtakes another", async () => {
@@ -323,35 +326,78 @@ test("restore, beginRecording, Continue, a throw: the session recovers from the 
   assert.equal(heldRecording(bridge)?.operations.length, 0);
 });
 
-test("at a Player error stop, a request queued behind prepare is refused and a reply in transit never shows", async () => {
-  const halted = (error: unknown) => error instanceof BridgeRequestError && error.code === "halted";
-  // A request queued in the host behind an async prepare: the host takes `halt` ahead of its queue and refuses it.
-  const host = await inProcessBridge();
-  const plan = await prepared(host, SCRIPT);
-  const stopping = await host.start(plan, { wallClockMs: 0, temporalContext: TEMPORAL }, false);
-  const compiling = host.client.request("prepare", {
-    source: { kind: "source", script: 'say "x"\nexit' },
-  });
-  const queued = host.request(stopping, "observeTime", { atMs: 200, media: [] });
-  host.halt(stopping);
-  await assert.rejects(queued, halted);
-  await compiling;
-  assert.equal(
-    hatch(stopping, (held) => held.state.observedSessionTimeMs),
-    0,
-    "the queued observation never ran",
-  );
+/** What a stopped session shows, and what its host and recording hold: their scene times and revision. */
+function stopLine(bridge: PlayerBridge, session: PlayerSession) {
+  const shown = bridge.latest(session)!;
+  const recording = heldRecording(bridge);
+  return {
+    shown: [shown.revision, shown.state.observedSessionTimeMs, shown.events.length],
+    host: hatch(shown, (held) => [
+      held.revision,
+      held.state.observedSessionTimeMs,
+      held.events.length,
+    ]),
+    export: hatch(shown, (held) => playerRuntimeSnapshot(held).observedSessionTimeMs),
+    recording: recording?.endSnapshot?.observedSessionTimeMs ?? null,
+  };
+}
 
-  // A reply in transit: its publication is fenced at the store, and its request rejects as `halted`.
-  const delayed = await inProcessBridge(50);
-  const delayedPlan = await prepared(delayed, SCRIPT);
-  const session = await delayed.start(
-    delayedPlan,
-    { wallClockMs: 0, temporalContext: TEMPORAL },
-    false,
-  );
-  const inTransit = delayed.request(session, "observeTime", { atMs: 100, media: [] });
-  delayed.halt(session);
-  await assert.rejects(inTransit, halted);
-  assert.equal(delayed.latest(session)!.revision, session.revision, "nothing shows after the stop");
+for (const delayMs of [0, 50, 250])
+  test(`at a Player error stop, what shows is what the host ran, and nothing it had not run (${delayMs} ms)`, async () => {
+    const halted = (error: unknown) =>
+      error instanceof BridgeRequestError && error.code === "halted";
+    // An observation the host ran, whose reply is in transit at the stop: it shows, as the export and recording hold.
+    const bridge = await inProcessBridge(delayMs);
+    const plan = await prepared(bridge, SCRIPT);
+    const session = await bridge.start(plan, { wallClockMs: 0, temporalContext: TEMPORAL }, true);
+    const ran = bridge.request(session, "observeTime", { atMs: 1_000, media: [] });
+    await bridge.halt(session);
+    await ran;
+    const line = stopLine(bridge, session);
+    assert.deepEqual(line.shown, line.host, "the UI shows what the host ran");
+    assert.equal(line.shown[1], 1_000);
+    assert.equal(line.export, 1_000);
+    assert.equal(line.recording, 1_000);
+
+    // A request queued behind an async prepare when `halt` arrives: refused, with no effect on the export.
+    const other = await inProcessBridge(delayMs);
+    const otherPlan = await prepared(other, SCRIPT);
+    const stopping = await other.start(
+      otherPlan,
+      { wallClockMs: 0, temporalContext: TEMPORAL },
+      true,
+    );
+    const compiling = other.client.request("prepare", {
+      source: { kind: "source", script: 'say "x"\nexit' },
+    });
+    const queued = other.request(stopping, "observeTime", { atMs: 2_000, media: [] });
+    await other.halt(stopping);
+    await assert.rejects(queued, halted);
+    await compiling;
+    const untouched = stopLine(other, stopping);
+    assert.deepEqual(untouched.shown, untouched.host);
+    assert.equal(untouched.export, 0, "the queued observation never ran");
+    assert.equal(untouched.recording, 0);
+  });
+
+test("over a Worker, a stop's acknowledgement follows the replies to what the host ran before it", async () => {
+  const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
+  try {
+    const plan = await prepared(worker, SCRIPT);
+    const session = await worker.start(plan, { wallClockMs: 0, temporalContext: TEMPORAL }, false);
+    const ran = worker.request(session, "observeTime", { atMs: 1_000, media: [] });
+    const stop = worker.halt(session);
+    // The stop is no faster than a round trip: the store freezes only at the acknowledgement.
+    assert.equal(worker.frozen(session), false);
+    await stop;
+    await ran;
+    assert.equal(worker.frozen(session), true);
+    assert.equal(worker.latest(session)!.state.observedSessionTimeMs, 1_000);
+    await assert.rejects(
+      worker.request(session, "observeTime", { atMs: 2_000, media: [] }),
+      (error: unknown) => error instanceof BridgeRequestError && error.code === "halted",
+    );
+  } finally {
+    worker.client.terminate();
+  }
 });

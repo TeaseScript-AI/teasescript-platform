@@ -156,14 +156,34 @@ export class PlayerBridge {
   }
 
   /**
-   * Stops `session` at a Player error: its store applies nothing more, and the host refuses whatever the session still
-   * has queued (`halt`), so late answers and reports are dropped.
+   * Delivers the replies of a session still in transit, at once, where the transport can (the in-process backend);
+   * `null` with a Worker, whose replies arrive as they do.
    */
-  halt(session: PlayerSession): void {
+  deliverInTransit: ((session: string) => void) | null = null;
+
+  /**
+   * Stops `session` at a Player error. The host refuses whatever the session has not run (`halt`), so late answers and
+   * reports are dropped; the store still applies the replies to ops the host ran, which arrive before the host's
+   * acknowledgement, and freezes there. What is shown is then what the host ran, which its recording and export hold.
+   * Resolves once frozen: at once in-process, a round trip later with a Worker.
+   */
+  halt(session: PlayerSession): Promise<void> {
     const store = this.store(session);
-    if (store === null || store.halted) return;
-    store.halt();
-    void this.#client.signal("halt", null, session.id).catch(() => {});
+    if (store === null || store.halted) return Promise.resolve();
+    store.stopping();
+    const acknowledged = this.#client
+      .signal("halt", null, session.id, () => store.freeze())
+      .then(
+        () => {},
+        () => store.freeze(),
+      );
+    this.deliverInTransit?.(session.id);
+    return acknowledged;
+  }
+
+  /** Whether `session`'s store froze at a stop, as it does at once in-process. */
+  frozen(session: PlayerSession): boolean {
+    return this.store(session)?.halted ?? true;
   }
 
   /** Releases `session` in the host now; its store goes with it. */

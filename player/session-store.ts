@@ -13,7 +13,8 @@ export class PublicationGapError extends Error {
  * The main side's copy of one session: its latest publication, and the events, transcript and speakers its publications
  * accumulated, built with the same `appendTranscript` the engine's adapter uses. A publication's identity is its
  * revision: an older or repeated one is dropped. A newer one must continue the store's event cursor, or it is a
- * `PublicationGapError`, never a silent merge. Once halted (a Player error stop), the store applies nothing more.
+ * `PublicationGapError`, never a silent merge. At a Player error stop it applies the replies to ops the host ran before
+ * the stop, until the host's acknowledgement, and then nothing more.
  */
 export class SessionStore {
   readonly #id: string;
@@ -27,7 +28,8 @@ export class SessionStore {
   readonly #speakers: Record<string, PlayerSpeakerPresentation> = { ...DEFAULT_SPEAKERS };
   #transcriptRevision = 0;
   #cursor = 0;
-  #halted = false;
+  /** `live`; `stopping` from a Player error stop until the host acknowledged it; then `frozen`. */
+  #phase: "live" | "stopping" | "frozen" = "live";
   #session: PlayerSession;
 
   constructor(id: string, connection: PlayerBridge, introduction: Introduction) {
@@ -42,13 +44,22 @@ export class SessionStore {
     return this.#session;
   }
 
+  /** Whether the store froze at a Player error stop: it applies nothing more. */
   get halted(): boolean {
-    return this.#halted;
+    return this.#phase === "frozen";
   }
 
-  /** Stops applying publications: what the host sends after a Player error stop is never shown. */
-  halt(): void {
-    this.#halted = true;
+  /**
+   * A Player error stop began: the store still applies the replies to ops the host ran before it, which arrive before
+   * the host's acknowledgement, and freezes at that acknowledgement (`freeze`).
+   */
+  stopping(): void {
+    if (this.#phase === "live") this.#phase = "stopping";
+  }
+
+  /** Applies nothing more: what is shown is what the host ran before the stop. */
+  freeze(): void {
+    this.#phase = "frozen";
   }
 
   /**
@@ -56,7 +67,7 @@ export class SessionStore {
    * `publish`, in the same tick (a request's effects before Vue renders it). Returns whether it applied.
    */
   apply(view: Publication | null, publish?: (next: PlayerSession) => void): boolean {
-    if (this.#halted || view === null || view.revision <= this.#session.revision) return false;
+    if (this.halted || view === null || view.revision <= this.#session.revision) return false;
     if (view.from !== this.#cursor)
       throw new PublicationGapError(
         `A publication of events from ${view.from} does not continue the ${this.#cursor} held.`,

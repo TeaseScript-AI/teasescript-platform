@@ -119,7 +119,9 @@ const HOST_OPS: BridgeOps = {
  * Returns the host's sessions, which only an in-process backend in the same realm reads (`in-process.ts`).
  *
  * `halt` (a session request) is handled on receipt, ahead of the requests still waiting: from then on every request of
- * that session but `release` is refused as `halted`, so what a Player error stop left queued has no effect.
+ * that session but `release` is refused as `halted`, so what a Player error stop left queued has no effect. Its reply
+ * acknowledges the stop: it follows every reply to an op of the session that ran, as replies are posted in order and one
+ * still awaited is answered first.
  */
 export function startBridgeHost(
   port: HostPort,
@@ -149,7 +151,9 @@ export function startBridgeHost(
   let lastId = 0;
   /** The awaited op that later requests wait behind, or `null`. */
   let busy: Promise<void> | null = null;
-  const waiting: unknown[] = [];
+  /** The session of the awaited op, whose reply `halt`'s acknowledgement must follow. */
+  let busySession: string | null = null;
+  const waiting: Received[] = [];
 
   const reply = (request: { id: number; session: string | null }, body: ReplyBody): void => {
     const envelope = { v: BRIDGE_VERSION, kind: "reply", id: request.id, session: request.session };
@@ -163,7 +167,13 @@ export function startBridgeHost(
   const refuse = (request: { id: number; session: string | null }, error: BridgeError): void =>
     reply(request, { ok: false, error });
 
-  function handle(data: unknown): void | Promise<void> {
+  /** A message as received: `previous` is the ID it fails to follow, or `null` when it is in order. */
+  interface Received {
+    readonly data: unknown;
+    readonly previous: number | null;
+  }
+
+  function handle({ data, previous }: Received): void | Promise<void> {
     const request = readRequest(data);
     if (typeof request === "string") {
       // A reply needs the request's ID; a message without a readable one gets none.
@@ -183,11 +193,13 @@ export function startBridgeHost(
         );
       return;
     }
-    if (request.id <= lastId) {
-      refuse(request, refusal("order", `Request ${request.id} does not follow request ${lastId}.`));
+    if (previous !== null) {
+      refuse(
+        request,
+        refusal("order", `Request ${request.id} does not follow request ${previous}.`),
+      );
       return;
     }
-    lastId = request.id;
     // Whatever goes wrong in dispatch, the request still gets its reply.
     const failed = (error: unknown) => refuse(request, engineError(error, false));
     try {
@@ -263,10 +275,11 @@ export function startBridgeHost(
     );
   }
 
-  /** Handles `data`, then each waiting message, until an op is awaited. */
-  function drain(data: unknown): void {
-    for (let next: unknown = data, more = true; more;) {
+  /** Handles `first`, then each waiting message, until an op is awaited. */
+  function drain(first: Received): void {
+    for (let next: Received = first, more = true; more;) {
       let pending: void | Promise<void> = undefined;
+      const request = readRequest(next.data);
       try {
         pending = handle(next);
       } catch {
@@ -274,23 +287,21 @@ export function startBridgeHost(
         // reply must not stop the requests after it.
       }
       if (pending !== undefined) {
+        busySession = typeof request === "string" ? null : request.session;
         busy = pending
           .catch(() => {})
           .then(() => {
             busy = null;
-            if (waiting.length > 0) drain(waiting.shift());
+            busySession = null;
+            const after = waiting.shift();
+            if (after !== undefined) drain(after);
           });
         return;
       }
-      more = waiting.length > 0;
-      if (more) next = waiting.shift();
+      const after = waiting.shift();
+      more = after !== undefined;
+      if (after !== undefined) next = after;
     }
-  }
-
-  /** `halt` as `data` holds it, or `null` when `data` is no readable `halt` request. */
-  function haltOf(data: unknown): BridgeRequest | null {
-    const request = readRequest(data);
-    return typeof request !== "string" && request.op === "halt" ? request : null;
   }
 
   function halt(request: BridgeRequest): void {
@@ -309,11 +320,30 @@ export function startBridgeHost(
     }
   }
 
+  // Request IDs are admitted in receipt order, so a request waiting behind an awaited op keeps its place, and `halt`,
+  // handled at once, follows the same order.
   port.listen((data) => {
-    const stop = haltOf(data);
-    if (stop !== null) halt(stop);
-    else if (busy !== null) waiting.push(data);
-    else drain(data);
+    const request = readRequest(data);
+    let previous: number | null = null;
+    if (typeof request !== "string") {
+      if (request.id <= lastId) previous = lastId;
+      else lastId = request.id;
+      if (request.op === "halt") {
+        // The acknowledgement follows every reply to an op that ran: one still awaited for this session first.
+        if (previous === null && busy !== null && busySession === request.session) {
+          const awaited = busy;
+          return void awaited.then(() => halt(request));
+        }
+        if (previous === null) return halt(request);
+        return refuse(
+          request,
+          refusal("order", `Request ${request.id} does not follow request ${previous}.`),
+        );
+      }
+    }
+    const received = { data, previous };
+    if (busy !== null) waiting.push(received);
+    else drain(received);
   });
   port.post({ v: BRIDGE_VERSION, kind: "ready", build });
   return sessions;

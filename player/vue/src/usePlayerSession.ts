@@ -275,12 +275,30 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start. Such an
   // exception stops the session where it stands (see `stopped`).
   const hostError = ref<string | null>(null);
+  // From a Player error stop until the host acknowledged it (a round trip with a Worker): input stops, nothing renders.
+  const halting = ref(false);
   function reportHostError(error: unknown) {
-    hostError.value = error instanceof Error ? error.name : "Error";
+    const name = error instanceof Error ? error.name : "Error";
     console.error("[player] host error", error);
-    // Nothing of the session shows or runs after the stop: its store applies nothing more, and the host refuses what
-    // it still has queued.
-    if (session.value !== null) bridgeOf(session.value).halt(session.value);
+    const shown = session.value;
+    if (shown === null) {
+      hostError.value = name;
+      return;
+    }
+    // What shows is what the host ran before the stop, and nothing after it: the host refuses what the session has not
+    // run, and the store applies the replies to what it ran until the host acknowledges the stop. The stop renders
+    // then, at once in-process; input stops at once either way (`stopped`).
+    const host = bridgeOf(shown);
+    const acknowledged = host.halt(shown);
+    if (host.frozen(shown)) {
+      hostError.value = name;
+      return;
+    }
+    halting.value = true;
+    void acknowledged.then(() => {
+      halting.value = false;
+      hostError.value ??= name;
+    });
   }
   /**
    * The engine Worker was lost. **The owner's choice point** (L5 series, Doubt 3): what the player sees then is decided
@@ -444,7 +462,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // An exception of the Player itself stops the session where it stands (PLAYER-UI "Session end and failure"): nothing
   // of it runs, observes time, or takes input any more, and late answers, reports, and writes are dropped. Its
   // transcript, Stage, and recording stay for the error dialog and a debug export, until the next Start.
-  const stopped = computed(() => hostError.value !== null);
+  const stopped = computed(() => hostError.value !== null || halting.value);
   const held = computed(() => inspecting.value || drawPending.value || stopped.value);
   // Which random draws Debug decides or pauses at; every session of the Player gets it.
   let randomControl: RandomControlOptions | null = null;
@@ -832,6 +850,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
 
   let activationToken = 0;
+  // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
+  let continuing: PlayerSession | null = null;
+  /**
+   * A new activation, preparation or end replaces the one under way: a Continue still beginning is halted in the host,
+   * so its queued requests, such as starting the recording of an obsolete session, are refused without effect.
+   */
+  function supersede() {
+    activationToken++;
+    const obsolete = continuing;
+    continuing = null;
+    if (obsolete !== null) void bridgeOf(obsolete).halt(obsolete);
+  }
   // The latest Start, which the start page offers again where no kept session goes on, as after the end dialog or an
   // import that replaced the saved data, and which the debug room's restarts run.
   const lastStart = shallowRef<PlayerSessionStart | null>(null);
@@ -840,7 +870,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let disposed = false;
   tryOnScopeDispose(() => {
     disposed = true;
-    activationToken++;
+    supersede();
     dropPreparedPlanJson();
     unsavedPlanJson = null;
     loads.clear();
@@ -1290,7 +1320,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Continue is discarded, and any late answer belongs to an older session generation and is ignored.
    */
   function endSession() {
-    activationToken++;
+    supersede();
     beginning.value = false;
     activation.value = null;
     captures.reset();
@@ -2176,7 +2206,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   /** Shows Start for `create`, with `outdated`, why the kept session cannot continue, on the start page. */
   function prepareStart(create: PlayerSessionStart, outdated?: Problem) {
-    activationToken++;
+    supersede();
     beginning.value = false;
     // A new session needs its own camera; a superseded acquisition never stays open.
     camera.release();
@@ -2224,13 +2254,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function prepareRestore(given: PlayerSession | PlayerRuntimeSession, marks?: DebugHistoryMarks) {
     // A session restored outside the host, such as one an embedding host restored, is registered there first.
     const restored = "lineage" in given ? given : introduceNow(requireBridge(), () => given);
-    activationToken++;
+    supersede();
     beginning.value = false;
     camera.release();
     activation.value = {
       kind: "continue",
       begin: async () => {
         const host = bridgeOf(restored);
+        continuing = restored;
         // The recording of a restored session starts from the state it continues, and so does a new trace epoch.
         await host.request(restored, "beginRecording", null);
         debugTrace.value?.reset("restore");
@@ -2268,7 +2299,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const pending = activation.value;
     if (!pending || clearing.value || importing.value) return;
     activation.value = null;
-    const token = ++activationToken;
+    // The activation it replaces, such as a Continue still beginning, goes.
+    supersede();
+    const token = activationToken;
     const withCamera = options.capabilities?.camera === true;
     const reading = pending.kind === "start" && scriptStorage !== undefined;
     // Everything the browser allows only within the player's click runs here, before any await or request: the
@@ -2365,11 +2398,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return;
     }
     if (!(begun instanceof Promise)) return started(pending, begun);
-    return begun.then((next) => {
-      if (!disposed && token === activationToken) started(pending, next);
-    }, reportHostError);
+    return begun.then(
+      (next) => {
+        if (!disposed && token === activationToken) started(pending, next);
+      },
+      (error: unknown) => {
+        // An obsolete activation's failure stops nothing: the session that replaced it goes on.
+        if (!disposed && token === activationToken) reportHostError(error);
+      },
+    );
   }
   function started(pending: Activation, next: PlayerSession) {
+    if (continuing?.id === next.id) continuing = null;
     start(next);
     // A new session replaces the one kept before.
     if (pending.kind === "start") {

@@ -87,7 +87,7 @@ export interface BridgeClient {
    * Sends one request at once, ahead of the requests waiting for its session, as `halt` must be: the host handles it on
    * receipt too.
    */
-  signal(op: string, args: unknown, session: string): Promise<BridgeResult>;
+  signal(op: string, args: unknown, session: string, onReply?: ReplyHook): Promise<BridgeResult>;
   /** Ends the Worker: pending requests fail with `BridgeLostError`. */
   terminate(): void;
   /** Calls `listener` once if the Worker is lost. */
@@ -141,7 +141,11 @@ export function openBridge(
         announced = true;
         lost = new BridgeLostError(message);
         port.terminate();
-        rejectClient(new BridgeStartupError(message));
+        // Requests sent before `ready` (`openBridge`) fail with the startup failure too.
+        const failure = new BridgeStartupError(message);
+        for (const entry of pending.values()) entry.reject(failure);
+        pending.clear();
+        rejectClient(failure);
         return;
       }
       lose(message);
@@ -239,7 +243,7 @@ export function openBridge(
         exclusive(session, () =>
           body((op, args, basis, onReply) => send(op, args, session, basis, onReply)),
         ),
-      signal: (op, args, session) => send(op, args, session, null),
+      signal: (op, args, session, onReply) => send(op, args, session, null, onReply),
       terminate: () => lose("The engine Worker was terminated."),
       onLoss: (listener) => {
         if (lost !== null) listener(lost);
