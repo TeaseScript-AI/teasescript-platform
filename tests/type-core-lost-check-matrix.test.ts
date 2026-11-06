@@ -41,7 +41,9 @@ test("over the matrix of destinations, value forms and stops, a stopped plan nev
   // every completed decision stop a literal of a parse publishes, and the escape check above holds it to the natural
   // plan's `["x"]`, which both replace by the default; capped into a place typed elsewhere it has no result, #1832)
   const literal = runs.filter(
-    (run) => run.cell.includes("literal of parse") && run.stop === "decision stop, completed",
+    (run) =>
+      /^(fresh|copy|property) \/ literal of parse/u.test(run.cell) &&
+      run.stop === "decision stop, completed",
   );
   assert.ok(literal.length > 0);
   for (const run of literal)
@@ -108,14 +110,45 @@ test("Codex r4's rows: a cap while the completion finds its obligations is gated
     }
     assert.ok(declined > 0, source);
   }
-  // (#1460: a load into a `let` of its own, whose reader is the natural check, publishes at its settled publication stop,
-  // program allowance 681 in source order with sharing, where the store's own contract is lost)
-  const own = 'let seed = load("seed", default: [{n: 1}, {m: 2}])\nsay "X"\nexit\n';
-  const request = coreRequest([{ path: "main.tease", source: own }], ["hostValue", "hostOther"])!;
-  const stopped = mode.run(() => withTestAllowance(681, () => analyseCore(request))).budget;
-  assert.deepEqual(
-    [stopped.exhausted, stopped.stoppedIn, stopped.settled],
-    ["work", "publication", true],
+  // (Codex r5's B1: a load into a `let` of its own, whose type a later store decides, after a completion past its
+  // allowance, has no result: declined, #1832, where the plan would print `{n: [["x"]]}`)
+  const own =
+    'let pad={f0:0}\npad={f1:1}\npad={f2:2}\npad={f3:3}\npad={f4:4}\nlet b=load("k",default:{})\nsay toJson(b)\nb={n:[[1]]}\nsay toJson(b)\nsay "AFTER"\nexit\n';
+  assert.throws(
+    () => mode.run(() => withTestDemandAllowance(16, compiled(own))),
+    (error) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === "a store whose check was lost at the budget",
   );
-  assert.ok(mode.run(() => withTestAllowance(681, compiled(own))).plan !== null);
+});
+
+test("Codex r5's rows: a stored literal carries its contract by its typed calls' readers and its own scalar leaves", () => {
+  // (results exist: the readers and the literal's structure carry the whole contract, so the plan publishes and reads as
+  // the natural one, `["x"]` replaced by the default)
+  for (const mode of HELD_MODES)
+    for (const [source, globals] of [
+      [
+        'let b=[fromJson(hostValue,default:[1],files:false),[1]]\nsay toJson(b)\nsay "AFTER"\nexit\n',
+        { hostValue: '["x"]' },
+      ],
+      [
+        'let b={n:fromJson(hostValue,default:[[1]],files:false),m:fromJson(hostOther,default:[[1]],files:false)}\nsay toJson(b)\nsay "AFTER"\nexit\n',
+        { hostValue: '[["x"]]', hostOther: '[["x"]]' },
+      ],
+    ] as const) {
+      const compiled = (demand?: number) =>
+        mode.run(() => {
+          const once = () =>
+            compileSourceWithBackend(source, { globals: ["hostValue", "hostOther"] }, CORE_BACKEND);
+          return demand === undefined ? once() : withTestDemandAllowance(demand, once);
+        });
+      const natural = compiled().plan!;
+      const stopped = compiled(16).plan;
+      assert.ok(stopped !== null, `${source} (${mode.name})`);
+      assert.deepEqual(
+        runGlobals(stopped, globals).said,
+        runGlobals(natural, globals).said,
+        mode.name,
+      );
+    }
 });

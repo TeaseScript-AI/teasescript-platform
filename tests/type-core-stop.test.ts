@@ -316,6 +316,9 @@ test("after a stop a typed default's null leaves its level open, as without one 
  * A source's typed loads and parses as its plan reads them (`load` and `expected` lines, `plannedContent`), or how the
  * candidate route ends without one: no plan (its errors), or declined.
  */
+/** The lost-check gate's decline (#1526 decision 2, condition 1). */
+const LOST_CHECK = "a store whose check was lost at the budget";
+
 function readers(source: string): string[] {
   try {
     const { plan, diagnostics } = compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND);
@@ -324,7 +327,7 @@ function readers(source: string): string[] {
       .filter((line) => /^(load|expected) /u.test(line))
       .map((line) => line.replace(/ repair=\w+$/u, ""));
   } catch (error) {
-    if (error instanceof CandidateOutsideSlice) return ["declined"];
+    if (error instanceof CandidateOutsideSlice) return [`declined: ${error.what}`];
     throw error;
   }
 }
@@ -387,12 +390,13 @@ test("a stop does not change what a typed load or parse reads: a record without 
   for (const source of sources)
     for (const mode of HELD_MODES) {
       const unstopped = mode.run(() => readers(source));
-      for (const stop of readerStops(source, mode))
-        assert.deepEqual(
-          mode.run(() => stop(() => readers(source))),
-          unstopped,
-          `${source} (${mode.name})`,
-        );
+      for (const stop of readerStops(source, mode)) {
+        // (or declined where the stop left the load's store without a result: #1526 decision 2, an accepted
+        // over-decline, #1832, no result's reader standing for the natural check)
+        const stopped = mode.run(() => stop(() => readers(source)));
+        if (JSON.stringify(stopped) !== JSON.stringify([`declined: ${LOST_CHECK}`]))
+          assert.deepEqual(stopped, unstopped, `${source} (${mode.name})`);
+      }
     }
   // the unstopped readers the family holds every stop to, by the defaults' own types (V30 §13)
   assert.deepEqual(readers('let seed = load("seed", default: [{n: 1}, {m: 2}])\nexit\n'), [
@@ -496,9 +500,20 @@ test("after a stop a load still takes its default for a stored value its default
     const end = source.indexOf(")\n") + 1;
     for (const mode of HELD_MODES)
       for (const stop of [<T>(make: () => T): T => make(), ...sampled(readerStops(source, mode))]) {
-        const { plan } = mode.run(() =>
-          stop(() => compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND)),
-        );
+        // (a stop that leaves the load's store without a result declines, #1526 decision 2, an accepted over-decline,
+        // #1832; every published plan reads as unstopped)
+        let plan;
+        try {
+          ({ plan } = mode.run(() =>
+            stop(() => compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND)),
+          ));
+        } catch (error) {
+          assert.ok(
+            error instanceof CandidateOutsideSlice && error.what === LOST_CHECK,
+            `${source} (${mode.name})`,
+          );
+          continue;
+        }
         assert.ok(plan !== null, `${source} (${mode.name})`);
         const loaded = (value: SerializableRuntimeValue) => {
           const snapshot = createImmediatePacingRuntimeSnapshot(plan, {
@@ -4849,17 +4864,25 @@ test("a settled stop decides a typed parse's nested default by its syntax, its c
   ]) {
     const unstopped = stopRun(source);
     const [low, high] = walkEnds(source);
-    for (const allowance of [low, Math.floor((low + high) / 2)])
+    for (const allowance of [low, Math.floor((low + high) / 2)]) {
+      // (or declined: the parse's store has no result at a program stop, and only a complete store check keeps it,
+      // #1526 decision 2, an accepted over-decline, #1832)
+      let stopped: StopRun;
+      try {
+        stopped = stopRun(source, allowance);
+      } catch (error) {
+        assert.ok(
+          error instanceof CandidateOutsideSlice && error.what === LOST_CHECK,
+          `@${allowance}`,
+        );
+        continue;
+      }
       assert.deepEqual(
-        stopProblems({
-          unstopped,
-          stopped: stopRun(source, allowance),
-          fitting: [],
-          violating: [],
-        }),
+        stopProblems({ unstopped, stopped, fitting: [], violating: [] }),
         [],
         `@${allowance}`,
       );
+    }
   }
 });
 

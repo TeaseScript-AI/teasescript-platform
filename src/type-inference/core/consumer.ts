@@ -1291,15 +1291,13 @@ function lostCheck(
 /**
  * Whether the plan keeps an obligation's check at its store (`lostCheck`): a shape the analysis proved, or one a complete
  * store check carries; a contract proved open; a complete store check (settled or received, its whole type); or a
- * contract the completion completed that a published check carries at the obligation's path, with the contract's own
- * type there: a typed parse's or load's reader of the value stored (F18), or, where the natural plan does not check the
- * store whole, its part checks there (#1682). Where no result exists, a completion past its allowance or a stop of the
- * analysis, three clauses keep it, else it declines: the complete store check; a typed parse's or load's reader where the
- * destination's type is the call's own (a `let` whose whole initializer is the call), there the natural check; and a
- * typed call that is the whole value of an element of a stored literal, which keeps the obligation for that element,
- * where its reader is at least as strict as the contract there (with a result, as everywhere). A stricter reader
- * is never a lost check: it rejects at most what the natural reader rejects, both from the written type. A check against
- * bare `unknown` where the contract owes a domain carries nothing.
+ * contract the completion completed that a published check carries at the obligation's path: a typed parse's or load's
+ * reader of the value stored at least as strict as the contract there (F18), the stored literal's own structure, its typed
+ * calls' readers and its scalar leaves, at least as strict (`elementsCarry`), or, where the natural plan does not check the
+ * store whole, its part checks there equal to it (#1682). With no result, a completion past its allowance or a stop of the
+ * analysis, only a complete store check keeps it, else it declines (#1832). A stricter reader is never a lost check: it
+ * accepts no more values than the natural reader. A check against bare `unknown` where the contract owes a domain carries
+ * nothing.
  */
 function keeps(
   answers: Answers,
@@ -1314,18 +1312,9 @@ function keeps(
   const own = published.get(store);
   const whole = own?.state === "complete" && checks.has(store);
   // (no result, a completion past its allowance or a stop of the analysis: the plan is the settled pass's, and only its
-  // complete store check carries what the obligation requires, or a typed parse's or load's reader where the
-  // destination's type is the call's own, a `let` whose whole initializer is the call (#1460): there the reader is the
-  // natural check; into a place typed elsewhere a reader may be weaker than its store's check, and a partial store check
-  // than the natural plan's, which nothing tells (#1832))
-  if (result === null) {
-    const read = unwrap(store.kind === "letStatement" ? store.initializer : store.value);
-    return (
-      whole ||
-      (store.kind === "letStatement" &&
-        (readerOf(read, checks, core) !== undefined || elementsCarry(read, [], null, checks, core)))
-    );
-  }
+  // complete store check carries what the obligation requires; a reader, even of a `let` of its own, may be weaker than a
+  // later store makes the natural check, and a partial store check than the natural plan's, which nothing tells (#1832))
+  if (result === null) return whole;
   // (a shape is the suitability the value's own structure proves where it is not lost; a complete result there is the
   // requirement's, which a shape owes no more of)
   if (obligation.extent === "shape" || "shape" in result) return result.state !== "lost" || whole;
@@ -1391,52 +1380,77 @@ function readerOf(
 }
 
 /**
- * Whether a stored literal carries a contract at `below` (property names and `[]` for an element) by its typed calls:
- * followed through its properties and elements, each a typed parse's or load's whole value whose reader is at least as
- * strict as the contract there; with no contract (a `let` of its own, whose element types are its calls' own), each a
- * typed call. The value itself is a literal holding them, never the call alone (`readerOf`'s).
+ * Whether a stored literal carries a contract at `below` (property names and `[]` for an element) by its own structure:
+ * followed through its properties and elements to the contract's level, a list or set whose every element carries the
+ * contract's element, an object whose property carries each property the contract lists, a typed parse's or load's whole
+ * value whose reader is at least as strict as the contract there, or a scalar literal of a kind at least as strict. The
+ * value itself is a literal holding them, never the call alone (`readerOf`'s).
  */
 function elementsCarry(
   value: Expression,
   below: readonly string[],
-  contract: TypePlan | null,
+  contract: TypePlan,
   checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   core: CoreRuntimeChecks,
 ): boolean {
-  const carried = (at: Expression, steps: readonly string[], type: TypePlan | null): boolean => {
+  const carried = (at: Expression, steps: readonly string[], type: TypePlan): boolean => {
     const node = unwrap(at);
     if (node.kind === "listLiteral" || node.kind === "setLiteral") {
-      if (node.elements.length === 0) return false;
-      // (below an element step, each element carries the obligation's own contract; at the literal's own level, the
-      // contract's element, any where it leaves the element open)
       if (steps.length > 0)
         return (
-          steps[0] === "[]" && node.elements.every((one) => carried(one, steps.slice(1), type))
+          steps[0] === "[]" &&
+          node.elements.length > 0 &&
+          node.elements.every((one) => carried(one, steps.slice(1), type))
         );
       const element =
-        type === null
-          ? null
-          : type.kind === "list" || type.kind === "set"
+        node.kind === "listLiteral"
+          ? type.kind === "list"
+            ? type.element
+            : undefined
+          : type.kind === "set"
             ? type.element
             : undefined;
-      return element !== undefined && node.elements.every((one) => carried(one, [], element));
+      if (element === undefined) return false;
+      return element === null || node.elements.every((one) => carried(one, [], element));
     }
     if (node.kind === "objectLiteral") {
-      if (steps.length === 0) return false;
-      const property = node.properties.find((one) => one.name.name === steps[0]);
-      return property !== undefined && carried(property.value, steps.slice(1), type);
+      if (steps.length > 0) {
+        const property = node.properties.find((one) => one.name.name === steps[0]);
+        return property !== undefined && carried(property.value, steps.slice(1), type);
+      }
+      if (type.kind !== "object") return false;
+      return type.properties.every((wanted) => {
+        const property = node.properties.find((one) => one.name.name === wanted.name);
+        return property !== undefined && carried(property.value, [], wanted.type);
+      });
     }
+    const leaf = leafKind(node);
+    if (leaf !== null) return steps.length === 0 && narrower(leaf, type);
     const reader = readerOf(node, checks, core);
-    if (reader === undefined) return false;
-    if (type === null) return steps.length === 0;
-    const at2 = typeAt(reader, steps);
-    return at2 !== null && narrower(at2, type);
+    const there = reader === undefined ? null : typeAt(reader, steps);
+    return there !== null && narrower(there, type);
   };
   const root = unwrap(value);
   return (
     (root.kind === "listLiteral" || root.kind === "setLiteral" || root.kind === "objectLiteral") &&
     carried(root, below, contract)
   );
+}
+
+/** The type a scalar literal proves by its own syntax, `null` for any other expression. */
+function leafKind(node: Expression): TypePlan | null {
+  switch (node.kind) {
+    case "numberLiteral":
+      return { kind: node.numericType };
+    case "stringLiteral":
+      return { kind: "string" };
+    case "booleanLiteral":
+      return { kind: "boolean" };
+    case "nullLiteral":
+      return { kind: "null" };
+    default:
+      return null;
+  }
 }
 
 /**

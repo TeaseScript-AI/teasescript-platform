@@ -15,7 +15,8 @@ import { HELD_MODES, heldStops, testedStops, type HeldMode } from "./type-core-h
 import { plannedContent, plannedStores, runGlobals } from "./type-core-route.js";
 
 // #1526 decision 2, condition 1 (TABLE r4.390): the lost-check gate's invariant over a generated matrix. Each cell is a
-// destination of type `integer[][]` and a value form bringing `[["x"]]` into it, alone or after sixteen stores that make
+// destination of type `integer[][]` (its own, a copy's, a property's, a written one, one a later store decides, an object
+// literal's property) and a value form bringing `[["x"]]` into it, alone or after sixteen stores that make
 // the receiving completion reach its allowance; each run is a stop of it (a decision's at a demand allowance, a settled
 // or unsettled program stop, a capped completion, a cap while the completion found its obligations), classified by its
 // analysis. A published stopped plan never lets through what the natural plan rejects; a declined one names the
@@ -34,6 +35,11 @@ const DESTINATIONS = {
   copy: (value: string) => `let a = [[1]]\nlet b = a\nb = ${value}`,
   property: (value: string) => `let a = {f: [[1]]}\nlet b = a\nb.f = ${value}`,
   written: (value: string) => `let b: integer[][] = [[1]]\nb = ${value}`,
+  // (a later store decides the destination's type: the first store's natural check is against it)
+  later: (value: string) => `let b = ${value}\nsay toJson(b)\nb = [[1]]`,
+  // (an object destination, the value one property of a stored object literal)
+  object: (value: string) =>
+    `let a = {n: [[1]], m: 1}\nlet b = a\nb = {n: ${value}, m: 2}\nsay toJson(b.n)`,
 } as const;
 
 /** A value form, and what makes it bring `[["x"]]` (the natural plan rejects it into every typed destination). */
@@ -61,6 +67,10 @@ const VALUES: Readonly<Record<string, ValueForm>> = {
   },
   "get default": { text: "[hostValue].get(0, default: [[1]])", globals: { hostValue: NESTED_X } },
   "literal of host": { text: "[hostValue]", globals: { hostValue: list(["x"]) } },
+  "mixed literal of parse": {
+    text: "[fromJson(hostValue, default: [1], files: false), [1]]",
+    globals: { hostValue: '["x"]' },
+  },
   "literal of parse": {
     text: "[fromJson(hostValue, default: [1], files: false)]",
     globals: { hostValue: '["x"]' },
