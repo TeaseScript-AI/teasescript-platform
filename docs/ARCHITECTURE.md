@@ -145,7 +145,8 @@ shared across those owners.
 `src/compiler.ts` owns source-compilation orchestration: parsing, validation and backend sequencing.
 `src/compiler/compile-program.ts` assembles the multi-file lowered instruction plan, and
 `src/compiler/lowering/compiler.ts` owns the stateful lowering pass: its statement and expression dispatch,
-temporaries, and function compilation. The families it hands constructs to, such as asks and other interactions, say, background actions, calls, and branches and loops, are
+temporaries, and function compilation. The families it hands constructs to, such as asks and other interactions, say,
+background actions, calls, and branches and loops, are
 modules beside it in `src/compiler/lowering/`.
 `src/static-evaluation.ts` owns what the compiler knows of values: the constants the source writes, which semantic
 validation, lowering, and the checks of written values read, and `KnownValues`, the values every run gives an
