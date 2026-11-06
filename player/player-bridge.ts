@@ -13,7 +13,7 @@ import { SessionStore } from "./session-store.js";
 export type PublishHook = (next: PlayerSession) => void;
 
 /** What a reply to a request whose session the Player stopped is rejected with: nothing after the stop shows. */
-export function haltedError(): BridgeRequestError {
+function haltedError(): BridgeRequestError {
   return new BridgeRequestError({
     kind: "bridge",
     class: "BridgeRefusal",

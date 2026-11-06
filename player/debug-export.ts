@@ -49,8 +49,6 @@ import {
 
 export {
   DebugExportError,
-  parseEditedWhileDebugging,
-  parseRewoundWhileDebugging,
   type DebugEditedWhileDebugging,
   type DebugRewoundWhileDebugging,
 } from "./debug-history-marks.js";

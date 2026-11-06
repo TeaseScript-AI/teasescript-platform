@@ -5,6 +5,7 @@
     "src/playback.ts",
     "playground/browser.ts",
     "playground/server.ts",
+    "player/engine-bridge/engine.worker.ts",
     "player/vue/index.html",
     "player/vue/src/lib/utils.ts",
     "tests/**/*.test.ts",

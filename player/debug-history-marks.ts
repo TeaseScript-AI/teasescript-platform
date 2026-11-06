@@ -72,7 +72,7 @@ export function exactly(
 }
 
 /** A scene time in milliseconds: finite and not negative, fractions included, as the Player's clock observes it. */
-export function sceneTime(value: unknown, path: string): number {
+function sceneTime(value: unknown, path: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
     fail(path, "must be a finite, non-negative number of milliseconds");
   return value;
