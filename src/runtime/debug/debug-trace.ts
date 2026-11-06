@@ -14,9 +14,10 @@ import type {
   SerializableRuntimeValue,
 } from "../values/serializable-values.js";
 import type { RuntimeSnapshot } from "../snapshot/state.js";
-import { isCameraView, isMediaHandle, isTimerHandle } from "../values/value-predicates.js";
-import { valueNotationPrefix } from "../values/value-text.js";
 import { RUNTIME_DEBUG_TRACE_LIMITS } from "./debug-trace-limits.js";
+import { previewOf } from "./debug-preview.js";
+
+export { runtimeDebugPreview } from "./debug-preview.js";
 
 /** What a trace record observed. */
 export type RuntimeDebugRecordKind =
@@ -1839,15 +1840,6 @@ function copyDependencies(deps: DebugDependencies): DebugDependencies {
   return { ids: [...settled(deps)], omitted: deps.omitted };
 }
 
-const PREVIEW_SPAN: PlanSourceLocation = Object.freeze({
-  so: 0,
-  sl: 0,
-  sc: 0,
-  eo: 0,
-  el: 0,
-  ec: 0,
-});
-
 /** The variable a binding key names, or `null` for any other key. */
 function variableOf(
   key: string | null,
@@ -1859,33 +1851,6 @@ function variableOf(
     scope: scope === GLOBAL_SCOPE_ID ? ("global" as const) : scope,
     name: key.slice(separator + 1),
   });
-}
-
-/**
- * A value as the trace previews it: `say` notation cut at `RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters` while it is
- * written, so a debugger can show a live value the same way as a recorded one.
- */
-export function runtimeDebugPreview(value: SerializableRuntimeValue): {
-  readonly text: string;
-  readonly truncated: boolean;
-} {
-  return previewOf(value);
-}
-
-function previewOf(value: SerializableRuntimeValue): { text: string; truncated: boolean } {
-  return valueNotationPrefix(
-    value,
-    PREVIEW_SPAN,
-    (handle) =>
-      isTimerHandle(handle)
-        ? "<timer>"
-        : isMediaHandle(handle)
-          ? "<media>"
-          : isCameraView(handle)
-            ? "<camera>"
-            : "<permanent button>",
-    RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters,
-  );
 }
 
 function recordBytes(record: TraceRecord): number {

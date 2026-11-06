@@ -6,11 +6,11 @@ import {
   advancePlayerRuntimeTime,
   compilePlayerProject,
   createPlayerRuntimeSession,
-  playerRuntimeAwaitsHost,
   resumePlayerRuntimeRandomDraw,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeAwaitsHost } from "../player/runtime-view.js";
 import { memoryKeptRoomStore, memoryKeptSessionStore } from "../player/kept-sessions.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";

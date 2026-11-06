@@ -9,11 +9,11 @@ import {
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   playerRuntimeDebugNow,
-  playerRuntimeForeground,
   playerRuntimeSnapshot,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";

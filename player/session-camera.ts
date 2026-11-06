@@ -9,11 +9,11 @@ import type {
   CaptureTrack,
 } from "./capture-device.js";
 import {
-  activePlayerRuntimeCapture,
   answerPlayerRuntimeCapture,
   type PlayerCaptureAnswer,
   type PlayerRuntimeSession,
 } from "./runtime-adapter.js";
+import { activePlayerRuntimeCapture } from "./runtime-view.js";
 
 /** A bounded Player diagnostic for developers; never shown as an ordinary Player notice. */
 export interface PlayerDiagnostic {

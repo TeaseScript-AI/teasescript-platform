@@ -8,10 +8,7 @@ import {
   completePlayerRuntimeStorageWrite,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
-  nextPlayerRuntimeEventMs,
   observePlayerRuntimeTime,
-  pendingPlayerRuntimeStorageWrite,
-  playerRuntimeDeadlines,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
   stepPlayerRuntimeTime,
@@ -19,6 +16,11 @@ import {
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import {
+  nextPlayerRuntimeEventMs,
+  pendingPlayerRuntimeStorageWrite,
+  playerRuntimeDeadlines,
+} from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { MediaProgressReport } from "../src/index.js";
 import { harness } from "./helpers/player-media.js";

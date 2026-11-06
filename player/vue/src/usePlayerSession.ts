@@ -29,18 +29,12 @@ import { FileStoreService } from "../../stored-files.js";
 import { LockService, type LockDialog, type LockDialogInput } from "../../lock-service.js";
 import type { LockServices } from "../../encryption/lock.js";
 import {
-  activePlayerRuntimeInteraction,
   beginPlayerRuntimeRecording,
   completePlayerRuntimeStorageWrite,
   applyPlayerRuntimeStorageEdit,
   continuePlayerRuntimeSession,
   createPlayerRuntimeRestorePoint,
-  playerTemporalContext,
-  pendingPlayerRuntimeStorageWrite,
-  playerRuntimeCameraView,
-  playerRuntimeMedia,
   playerRuntimeMediaOrigin,
-  playerRuntimePermanentButtons,
   playerRuntimeSnapshot,
   playerRuntimeSnapshotJson,
   playerRuntimeSnapshotOrNull,
@@ -55,6 +49,14 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
+import {
+  activePlayerRuntimeInteraction,
+  playerTemporalContext,
+  pendingPlayerRuntimeStorageWrite,
+  playerRuntimeCameraView,
+  playerRuntimeMedia,
+  playerRuntimePermanentButtons,
+} from "../../runtime-view.js";
 import {
   debugPhotoUses,
   type DebugExportCandidate,
@@ -77,12 +79,14 @@ import {
   type KeptRoomStore,
   type KeptSessionStore,
 } from "../../kept-sessions.js";
+import { RuntimeDebugContext } from "../../../src/index.js";
 import {
   CheckpointError,
-  INSTRUCTION_PLAN_VERSION,
-  RUNTIME_SNAPSHOT_VERSION,
-  RuntimeDebugContext,
-} from "../../../src/index.js";
+  serializeValidatedRuntimeJson,
+} from "../../../src/runtime/snapshot/checkpoint-json.js";
+import { INSTRUCTION_PLAN_VERSION } from "../../../src/plan/model.js";
+import { RUNTIME_SNAPSHOT_VERSION } from "../../../src/runtime/snapshot/snapshot-format.js";
+import { validateScriptStorageEntries } from "../../../src/runtime/host-data/script-storage.js";
 import type { Problem } from "./ProblemCard.vue";
 import type { SavedDataHost } from "../../saved-data.js";
 import { playerBuildIdentity } from "../../build-identity.js";
@@ -111,18 +115,17 @@ import {
   playerNotices,
   type PlayerNotice,
 } from "../../notices.js";
-import {
-  validateScriptStorageEntries,
-  type InstructionPlan,
-  type InterpreterEvent,
-  type RandomControlOptions,
-  type RandomDrawResolutionOutcome,
-  type RandomOutcome,
-  type RuntimeScriptStorageEntrySnapshot,
-  type SerializableRuntimeValue,
-  type TemporalContext,
+import type {
+  InstructionPlan,
+  InterpreterEvent,
+  RandomControlOptions,
+  RandomDrawResolutionOutcome,
+  RandomOutcome,
+  RuntimeScriptStorageEntrySnapshot,
+  SerializableRuntimeValue,
+  TemporalContext,
 } from "../../../src/index.js";
-import { serializeValidatedRuntimeJson } from "../../../src/runtime/snapshot/checkpoint.js";
+
 import { serializableEquals } from "../../../src/runtime/values/serializable-values.js";
 import { IMAGE_SKIP_TEXT } from "../../../src/image-input.js";
 import { silence } from "./generatedAudio";

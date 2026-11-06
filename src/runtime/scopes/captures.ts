@@ -4,6 +4,8 @@ import { internalFault, RuntimeFault } from "../errors.js";
 import type { RuntimeScopeFrameSnapshot, RuntimeSnapshot } from "../snapshot/state.js";
 import { copySpan } from "../../plan/source-location.js";
 
+export { cloneCaptures } from "./capture-copy.js";
+
 /*
  * Shared variables of blocks (V30 §14). A timer expiry block, media block, or permanent button block uses the
  * function, loop, and block variables of the code that created it as that code does: one variable, not a copy. When
@@ -18,12 +20,6 @@ import { copySpan } from "../../plan/source-location.js";
 export interface RuntimeCaptureSnapshot {
   readonly name: string;
   readonly scopeId: number;
-}
-
-export function cloneCaptures(
-  captures: readonly RuntimeCaptureSnapshot[],
-): RuntimeCaptureSnapshot[] {
-  return captures.map((capture) => ({ name: capture.name, scopeId: capture.scopeId }));
 }
 
 /**

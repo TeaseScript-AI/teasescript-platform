@@ -12,6 +12,7 @@ import {
 import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
 import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
 import type * as RuntimeAdapter from "../player/runtime-adapter.js";
+import type * as RuntimeView from "../player/runtime-view.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
@@ -67,6 +68,7 @@ let useDevelopmentTime: (
 ) => { advanceBy(milliseconds: number): Promise<void> };
 // The runtime adapter the composables load, so that the sessions the tests make come from the same module.
 let runtime: typeof RuntimeAdapter;
+let view: typeof RuntimeView;
 
 // Load the real Vue composables through the existing build tool: their browser-source imports use Vite resolution.
 before(async () => {
@@ -80,6 +82,7 @@ before(async () => {
     "player/vue/src/useDevelopmentTime.ts",
   );
   const adapter: Record<string, unknown> = await loadPlayerModule("player/runtime-adapter.ts");
+  const viewModule: Record<string, unknown> = await loadPlayerModule("player/runtime-view.ts");
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof rewind.useDebugRewind, "function");
   assert.equal(typeof time.useDevelopmentTime, "function");
@@ -92,6 +95,9 @@ before(async () => {
   useDevelopmentTime = time.useDevelopmentTime as typeof useDevelopmentTime;
   // EVIDENCE: validation: the source module the compiled one is built from; checked by one export above.
   runtime = adapter as typeof runtime;
+  assert.equal(typeof viewModule.playerRuntimeForeground, "function");
+  // EVIDENCE: validation: the source module the compiled one is built from; checked by one export above.
+  view = viewModule as typeof view;
 });
 
 class FakeTrack extends EventTarget {
@@ -228,16 +234,12 @@ test("a Player error stops the session where it stands, and late writes do not c
   );
   await host.activate();
   assert.equal(host.stopped.value, false, "a new Start runs again");
-  assert.ok(
-    host.session.value && runtime.pendingPlayerRuntimeStorageWrite(host.session.value.state),
-  );
+  assert.ok(host.session.value && view.pendingPlayerRuntimeStorageWrite(host.session.value.state));
   host.reportHostError(new TypeError("A component failed."));
   finishWrite();
   await settle();
   assert.deepEqual(said(host), []);
-  assert.ok(
-    host.session.value && runtime.pendingPlayerRuntimeStorageWrite(host.session.value.state),
-  );
+  assert.ok(host.session.value && view.pendingPlayerRuntimeStorageWrite(host.session.value.state));
 });
 
 test("input admitted just before a Player error does not run after it", async (context) => {
@@ -604,7 +606,7 @@ test("a debug export offers a photo only the replay saves, also after a Player e
     };
   };
   const label = () => {
-    const foreground = runtime.playerRuntimeForeground(host.session.value!);
+    const foreground = view.playerRuntimeForeground(host.session.value!);
     return foreground?.kind === "show-button" ? foreground.label : null;
   };
   await host.activate();

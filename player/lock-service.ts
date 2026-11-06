@@ -1,19 +1,17 @@
-import {
-  fileType,
-  OCTET_STREAM,
-  storedFileKind,
-  type RuntimeLockActionSnapshot,
-  type RuntimeLockChoice,
-  type RuntimeLockNotice,
+import type {
+  RuntimeLockActionSnapshot,
+  RuntimeLockChoice,
+  RuntimeLockNotice,
 } from "../src/index.js";
+import { fileType, OCTET_STREAM, storedFileKind } from "../src/runtime/host-data/stored-files.js";
 import type { LockServices, ReadLock } from "./encryption/lock.js";
 import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey, type PublicKey } from "../src/public-keys.js";
 import {
-  activePlayerRuntimeLock,
   answerPlayerRuntimeLock,
   type PlayerLockAnswer,
   type PlayerRuntimeSession,
 } from "./runtime-adapter.js";
+import { activePlayerRuntimeLock } from "./runtime-view.js";
 import type { PlayerDiagnostic } from "./session-camera.js";
 import { base64FromBytes, bytesFromBase64, type FileStoreMedia } from "./stored-files.js";
 

@@ -1,12 +1,13 @@
-import { storedFileKind, type RuntimeFileStoreActionSnapshot } from "../src/index.js";
+import type { RuntimeFileStoreActionSnapshot } from "../src/index.js";
+import { storedFileKind } from "../src/runtime/host-data/stored-files.js";
 import type { CapturedMediaStore } from "./captured-media.js";
 import type { PlayerDiagnostic } from "./session-camera.js";
 import {
-  activePlayerRuntimeFileStore,
   answerPlayerRuntimeFileStore,
   type PlayerFileStoreAnswer,
   type PlayerRuntimeSession,
 } from "./runtime-adapter.js";
+import { activePlayerRuntimeFileStore } from "./runtime-view.js";
 
 /** The store that keeps the files of a file store and vouches for them; the Player's captured-media store. */
 export type FileStoreMedia = Pick<CapturedMediaStore, "add" | "read" | "holds">;

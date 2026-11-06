@@ -1,9 +1,6 @@
 import {
-  checkedOutcome,
   classifyTokens,
   parse,
-  randomDrawAlternatives,
-  runtimeDebugPreview,
   sourceEnclosingSpans,
   type LanguageToken,
   type LanguageTokenClass,
@@ -13,6 +10,9 @@ import {
   type SourceEnclosingSpans,
   type SourceSpan,
 } from "../../../src/index.js";
+import { checkedOutcome } from "../../../src/runtime/random/random-kinds.js";
+import { randomDrawAlternatives } from "../../../src/runtime/random/random-alternatives.js";
+import { runtimeDebugPreview } from "../../../src/runtime/debug/debug-preview.js";
 
 /**
  * How the random draw picker (DEBUGGER.md "Random draws") offers a draw's outcomes: a button for each when the draw has

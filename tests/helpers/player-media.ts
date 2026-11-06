@@ -4,10 +4,10 @@ import {
   advancePlayerRuntimeTime,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
 } from "../../player/runtime-adapter.js";
+import { playerRuntimeMedia } from "../../player/runtime-view.js";
 import type { MediaLoadReport } from "../../src/index.js";
 
 // A deterministic stand-in for HTMLAudioElement: tests move `position` to simulate what was actually played.

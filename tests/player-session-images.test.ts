@@ -7,12 +7,12 @@ import {
   createPlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   observePlayerRuntimeTime,
-  playerRuntimeForeground,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground } from "../player/runtime-view.js";
 import {
   assembleDebugExport,
   chooseDebugCategory,

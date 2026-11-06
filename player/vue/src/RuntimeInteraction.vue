@@ -11,16 +11,12 @@ import type { LockDialog as LockDialogState, LockDialogInput } from "../../lock-
 import { computed, nextTick, onUnmounted, ref, watch, type Ref } from "vue";
 import { useEventListener } from "@vueuse/core";
 import {
-  activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
   answeredByPlayerInput,
   closePlayerRuntimeExport,
   closePlayerRuntimePopup,
   openPlayerRuntimeUrl,
-  playerRuntimeUrlRequest,
-  playerRuntimeForeground,
   playerRuntimeForm,
-  playerRuntimePacingGate,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimeImage,
   skipPlayerRuntimePacing,
@@ -28,13 +24,19 @@ import {
   clearPlayerRuntimeFormField,
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
-  playerRuntimeInteractionActionIds,
   stepPlayerRuntimeFormField,
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
+import {
+  activePlayerRuntimeInteraction,
+  playerRuntimeUrlRequest,
+  playerRuntimeForeground,
+  playerRuntimePacingGate,
+  playerRuntimeInteractionActionIds,
+} from "../../runtime-view.js";
 import { invalidAnswerMessage } from "../../../src/interaction-answers.js";
 import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";

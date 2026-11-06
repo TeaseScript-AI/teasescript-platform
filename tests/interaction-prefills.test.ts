@@ -4,11 +4,11 @@ import test from "node:test";
 import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
-  playerRuntimeForeground,
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {

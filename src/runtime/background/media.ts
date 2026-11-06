@@ -2,7 +2,8 @@ import { formatDuration } from "../../duration.js";
 import type { HandlePropertyName } from "../../handle-members.js";
 import { interpolateCeilMs, interpolateRoundMs } from "./exact-interpolation.js";
 import type { SerializableRuntimeValue } from "../values/serializable-values.js";
-import { cloneCaptures, type RuntimeCaptureSnapshot } from "../scopes/captures.js";
+import type { RuntimeCaptureSnapshot } from "../scopes/captures.js";
+import { cloneCaptures } from "../scopes/capture-copy.js";
 
 /**
  * Audio or video playback state. The enclosing background action owns an ADR 0016 action ID; the media ID is the

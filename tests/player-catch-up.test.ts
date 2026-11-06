@@ -9,13 +9,13 @@ import {
   completePlayerRuntimeStorageWrite,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  pendingPlayerRuntimeStorageWrite,
   playerRuntimeSnapshot,
   skipPlayerRuntimePacing,
   stepPlayerRuntimeCatchUp,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { pendingPlayerRuntimeStorageWrite } from "../player/runtime-view.js";
 import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
 import { rebuildRecordedSession } from "../player/debug-export.js";
 import type { RandomControlOptions } from "../src/index.js";

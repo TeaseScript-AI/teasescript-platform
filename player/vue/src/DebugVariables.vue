@@ -11,10 +11,8 @@ import {
   playerDebugMessageOrigin,
   playerDebugVariables,
 } from "../../debug-variables.js";
-import {
-  playerRuntimeDebugVariables,
-  playerRuntimeTranscriptMessage,
-} from "../../runtime-adapter.js";
+import { playerRuntimeDebugVariables } from "../../runtime-adapter.js";
+import { playerRuntimeTranscriptMessage } from "../../runtime-view.js";
 import DebugTraceRows from "./DebugTraceRows.vue";
 import type { PlayerDebugExplained } from "./usePlayerDebug";
 import type { PlayerSessionHost } from "./usePlayerSession";

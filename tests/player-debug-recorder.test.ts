@@ -13,7 +13,6 @@ import {
 } from "../player/debug-export.js";
 import { DebugRecorder } from "../player/debug-recorder.js";
 import {
-  activePlayerRuntimeCapture,
   advancePlayerRuntimeTime,
   answeredByPlayerInput,
   answerPlayerRuntimeCapture,
@@ -24,11 +23,9 @@ import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  pendingPlayerRuntimeStorageWrite,
   pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
   playerRuntimeDebugVariables,
-  playerRuntimeForeground,
   restorePlayerRuntimeSession,
   restorePlayerRuntimeSessionAt,
   resumePlayerRuntimeRandomDraw,
@@ -40,6 +37,11 @@ import {
   submitPlayerRuntimeForm,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import {
+  activePlayerRuntimeCapture,
+  pendingPlayerRuntimeStorageWrite,
+  playerRuntimeForeground,
+} from "../player/runtime-view.js";
 import {
   createCheckpoint,
   DEFAULT_TEMPORAL_CONTEXT,

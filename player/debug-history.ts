@@ -1,17 +1,17 @@
-import { CheckpointError, type InstructionPlan, type InterpreterEvent } from "../src/index.js";
+import type { InstructionPlan, InterpreterEvent } from "../src/index.js";
+import { CheckpointError } from "../src/runtime/snapshot/checkpoint-json.js";
 import type { DebugEditedWhileDebugging, DebugRewoundWhileDebugging } from "./debug-export.js";
 import type {
   PlayerForegroundPresentation,
   PlayerSpeakerPresentation,
   PlayerTranscriptEntryPresentation,
 } from "./model.js";
+import { playerRuntimeSnapshotJson, type PlayerRuntimeSession } from "./runtime-adapter.js";
 import {
   activePlayerRuntimeInteraction,
   playerRuntimeForeground,
-  playerRuntimeSnapshotJson,
   playerRuntimeTranscript,
-  type PlayerRuntimeSession,
-} from "./runtime-adapter.js";
+} from "./runtime-view.js";
 
 /**
  * Where Debug's rewind history keeps snapshots that no longer fit its memory budget (`debug-history-indexeddb.ts`). It

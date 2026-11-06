@@ -1,11 +1,11 @@
 import { computed, onScopeDispose, shallowRef, watch, type Ref } from "vue";
 import type { CapturedMediaStore } from "../../captured-media.js";
 import {
-  activePlayerRuntimeInteraction,
   answerPlayerRuntimeImage,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
+import { activePlayerRuntimeInteraction } from "../../runtime-view.js";
 import type { SessionCamera } from "../../session-camera.js";
 
 /**

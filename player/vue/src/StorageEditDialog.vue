@@ -10,11 +10,12 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import { Input } from "@/components/ui/input";
 import Switch from "@/components/ui/switch/Switch.vue";
 import { Textarea } from "@/components/ui/textarea";
+import type { SerializableRuntimeValue } from "../../../src/index.js";
+import { validateScriptStorageEntries } from "../../../src/runtime/host-data/script-storage.js";
 import {
-  validateScriptStorageEntries,
-  type SerializableRuntimeValue,
-} from "../../../src/index.js";
-import { CheckpointError, serializeValidatedRuntimeJson } from "../../../src/runtime/snapshot/checkpoint.js";
+  CheckpointError,
+  serializeValidatedRuntimeJson,
+} from "../../../src/runtime/snapshot/checkpoint-json.js";
 import { storageNotation } from "../../storage-preview.js";
 import type { PlayerSessionHost, SavedDataEditResult } from "./usePlayerSession";
 

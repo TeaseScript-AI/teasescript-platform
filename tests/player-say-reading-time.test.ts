@@ -5,16 +5,18 @@ import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerRuntimeDeadlines,
-  playerRuntimeForeground,
-  playerRuntimeMedia,
-  playerRuntimePacingGate,
-  playerRuntimePermanentButtons,
   pressPlayerRuntimePermanentButton,
   restorePlayerRuntimeSession,
   skipPlayerRuntimePacing,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import {
+  playerRuntimeDeadlines,
+  playerRuntimeForeground,
+  playerRuntimeMedia,
+  playerRuntimePacingGate,
+  playerRuntimePermanentButtons,
+} from "../player/runtime-view.js";
 
 /*
  * What the Player presents while a paced message is read (owner decision on #829, 2026-10-11): nothing new appears

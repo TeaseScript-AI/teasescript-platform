@@ -6,13 +6,13 @@ import type { DebugHistoryPoint, DebugHistorySpill } from "../player/debug-histo
 import type { DebugRecorder } from "../player/debug-recorder.js";
 import {
   createPlayerRuntimeSession,
-  playerRuntimeForeground,
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import { memoryKeptRoomStore, type KeptRoomStore } from "../player/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";

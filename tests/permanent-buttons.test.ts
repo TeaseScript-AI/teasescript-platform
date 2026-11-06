@@ -22,10 +22,10 @@ import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import {
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerRuntimePermanentButtons,
   pressPlayerRuntimePermanentButton,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { playerRuntimePermanentButtons } from "../player/runtime-view.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";

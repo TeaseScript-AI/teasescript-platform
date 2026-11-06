@@ -5,10 +5,10 @@ import { effectScope, type Ref } from "vue";
 import type { CapturedMediaLocks } from "../player/captured-media-persistence.js";
 import {
   createPlayerRuntimeSession,
-  pendingPlayerRuntimeStorageWrite,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { pendingPlayerRuntimeStorageWrite } from "../player/runtime-view.js";
 import type { SavedDataHost } from "../player/saved-data.js";
 import { createLocalScriptStorage, type ScriptStorageProvider } from "../player/script-storage.js";
 import {

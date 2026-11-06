@@ -1,17 +1,15 @@
-import {
-  interpreterEventProblem,
-  validateScriptStorageEntries,
-  type InterpreterEvent,
-  type RuntimeScriptStorageEntrySnapshot,
-} from "../src/index.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
+import type { InterpreterEvent, RuntimeScriptStorageEntrySnapshot } from "../src/index.js";
+import { interpreterEventProblem } from "../src/runtime/event-validation.js";
+import { validateScriptStorageEntries } from "../src/runtime/host-data/script-storage.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
+
 import {
   storableCapturedMedia,
   type CapturedMediaRecord,
   type CapturedMediaRepository,
 } from "./captured-media.js";
 import type { MediaInUse } from "./captured-media-persistence.js";
-import { parseEditedWhileDebugging, parseRewoundWhileDebugging } from "./debug-export.js";
+import { parseEditedWhileDebugging, parseRewoundWhileDebugging } from "./debug-history-marks.js";
 import type { DebugHistoryMarks } from "./debug-history.js";
 import type { ScriptStorageProvider } from "./script-storage.js";
 

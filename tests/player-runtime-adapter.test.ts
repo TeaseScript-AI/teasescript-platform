@@ -26,7 +26,6 @@ import { utc } from "./helpers/temporal-fixtures.js";
 
 import {
   activatePlayerRuntimeButton,
-  activePlayerRuntimeCapture,
   adoptPlayerRuntimeCatchUp,
   answerPlayerRuntimeCapture,
   answerPlayerRuntimeImage,
@@ -34,17 +33,10 @@ import {
   beginPlayerRuntimeRecording,
   compilePlayerProject,
   completePlayerRuntimeStorageWrite,
-  pendingPlayerRuntimeStorageWrite,
   continuePlayerRuntimeSession,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerTemporalContext,
-  playerRuntimeDeadlines,
-  playerRuntimeForeground,
-  playerRuntimeMedia,
-  playerRuntimePacingGate,
-  playerRuntimeTimers,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
   restorePlayerRuntimeSessionAt,
@@ -62,9 +54,19 @@ import {
   draftPlayerRuntimeForm,
   playerRuntimeSnapshot,
   playerRuntimeSnapshotJson,
-  playerRuntimeTranscript,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import {
+  activePlayerRuntimeCapture,
+  pendingPlayerRuntimeStorageWrite,
+  playerTemporalContext,
+  playerRuntimeDeadlines,
+  playerRuntimeForeground,
+  playerRuntimeMedia,
+  playerRuntimePacingGate,
+  playerRuntimeTimers,
+  playerRuntimeTranscript,
+} from "../player/runtime-view.js";
 
 test("a Player session starts at main.tease of a project, or of a single source", () => {
   const files = [

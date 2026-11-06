@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
-  playerRuntimeForeground,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
@@ -12,6 +11,7 @@ import {
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { compileSource } from "../src/compiler.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 

@@ -1,15 +1,17 @@
 import { computed, ref, watch } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
 import {
-  activePlayerRuntimeInteraction,
   advancePlayerRuntimeTime,
-  nextPlayerRuntimeEventMs,
-  playerRuntimeAwaitsHost,
-  playerRuntimeMedia,
   stepPlayerRuntimeTime,
   type PlayerRuntimeSession,
   type PlayerRuntimeState,
 } from "../../runtime-adapter.js";
+import {
+  activePlayerRuntimeInteraction,
+  nextPlayerRuntimeEventMs,
+  playerRuntimeAwaitsHost,
+  playerRuntimeMedia,
+} from "../../runtime-view.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 // How long one task may observe events of a jump before it yields to input and rendering.

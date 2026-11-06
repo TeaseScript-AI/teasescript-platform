@@ -5,15 +5,17 @@ import {
   adoptPlayerRuntimeCatchUp,
   beginPlayerRuntimeCatchUp,
   dropPlayerRuntimeCatchUp,
-  nextPlayerRuntimeCatchUpStepMs,
   observePlayerRuntimeTime,
-  pendingPlayerRuntimeStorageWrite,
-  playerRuntimeDeadlines,
-  playerRuntimeTimers,
   stepPlayerRuntimeCatchUp,
   type PlayerRuntimeCatchUp,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
+import {
+  nextPlayerRuntimeCatchUpStepMs,
+  pendingPlayerRuntimeStorageWrite,
+  playerRuntimeDeadlines,
+  playerRuntimeTimers,
+} from "../../runtime-view.js";
 
 const DISPLAY_REFRESH_MS = 250;
 // Browsers fire longer `setTimeout` delays immediately; a later wake-up re-schedules the rest.

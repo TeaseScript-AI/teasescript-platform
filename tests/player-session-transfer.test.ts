@@ -5,9 +5,9 @@ import {
   compilePlayerProject,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
-  playerRuntimeForeground,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { playerRuntimeForeground } from "../player/runtime-view.js";
 import {
   readPlayerTransferFile,
   readPlayerTransferText,
