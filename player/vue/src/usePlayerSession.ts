@@ -6,6 +6,7 @@ import { planLockNeeds } from "../../plan-metadata.js";
 import {
   CapturedMediaNotStoredError,
   CapturedMediaStore,
+  insertOrConfirm,
   isCapturedMediaReference,
   isWellFormedCapturedMediaReference,
   type CapturedMediaRecord,
@@ -1553,14 +1554,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     try {
       // A new session replaces the one kept before.
       if (from === 0) await discardKeptSession(inDebugRoom);
+      // The session is kept only with every photo it uses: one that cannot be stored keeps the session kept before.
       if (inDebugRoom) {
         // The debug room stores the session's photos like its saved ones.
-        await capturedMedia.promote(references).catch(() => {});
+        await capturedMedia.promote(references);
       } else {
         // The photos no save stored go with the session, a photo already kept as it is; a stored one stays stored
         // while the session uses it (`capturedMediaStorage`).
         for (const photo of capturedMedia.sessionRecords(references))
-          await store.media.add(photo).catch(() => {});
+          await insertOrConfirm(store.media, photo);
       }
       await store.publish(keptScope, {
         planJson: planJson?.json ?? null,
@@ -2082,7 +2084,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   /**
    * Stores a new debug room with a copy of the script's own saved values and photos as they are now, or none when
-   * `empty`. Resolves to the references of its photos.
+   * `empty`. Resolves to the references of the photos it copied, none when the room could not be created as a copy: the
+   * Player then holds those photos itself.
    */
   async function createDebugRoom(scope: string, empty: boolean): Promise<ReadonlySet<string>> {
     let entries: readonly RuntimeScriptStorageEntrySnapshot[] = [];
@@ -2095,18 +2098,25 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     } catch {
       // Saved data this browser cannot read is not copied; the debug room starts without it.
     }
+    const all = () => new Set(photos.map((photo) => photo.reference));
+    // The photos the room holds as copied, only once a creation that copied them succeeded.
+    let copied: ReadonlySet<string> = new Set();
     try {
       await debugRooms.create(scope, entries, photos);
+      copied = all();
     } catch {
       // Another tab created it meanwhile, or this browser cannot keep it: then it lives in this page.
       if ((await debugRooms.read(scope).catch(() => null)) === null) {
         debugRooms = memoryKeptRoomStore();
-        await debugRooms
+        copied = await debugRooms
           .create(scope, entries, photos)
-          .catch(() => debugRooms.create(scope, [], []));
+          .then(all, () => debugRooms.create(scope, [], []).then(() => new Set<string>()));
       }
     }
-    return new Set(photos.map((photo) => photo.reference));
+    // A photo the room did not take is held here, so a keep or save that uses it stores it in the room.
+    for (const photo of photos)
+      if (!copied.has(photo.reference)) capturedMedia.restoreSessionMedia(photo.reference, photo);
+    return copied;
   }
   /** The script's stored photos, checked as the Player reads them. */
   async function storedPhotos(scope: string): Promise<readonly CapturedMediaRecord[]> {
