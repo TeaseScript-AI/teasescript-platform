@@ -83,12 +83,37 @@ function moduleChecker(source: ts.SourceFile): ts.TypeChecker {
   return ts.createProgram({ rootNames: [source.fileName], options, host }).getTypeChecker();
 }
 
-/** Whether identifier `node` refers to a binding the module declares (`checker` from `moduleChecker`). */
+/** Whether `inner` lies within `outer`, both of one source file. */
+const within = (inner: ts.Node, outer: ts.Node): boolean =>
+  inner.pos >= outer.pos && inner.end <= outer.end;
+
+/**
+ * Whether identifier `node` refers to a binding the module declares (`checker` from `moduleChecker`). The checker also
+ * resolves a parameter's initializer to a declaration in its function's body, which it only reports (TS2373): at run
+ * time the parameters cannot see the body, so the name resolves from outside that function instead.
+ */
 function declaredInModule(node: ts.Identifier, checker: ts.TypeChecker): boolean {
-  const symbol = ts.isShorthandPropertyAssignment(node.parent)
+  let symbol = ts.isShorthandPropertyAssignment(node.parent)
     ? checker.getShorthandAssignmentValueSymbol(node.parent)
     : checker.getSymbolAtLocation(node);
-  return (symbol?.declarations?.length ?? 0) > 0;
+  for (;;) {
+    const declarations = symbol?.declarations ?? [];
+    if (declarations.length === 0) return false;
+    let hiding: ts.Node | undefined;
+    for (let scope = node.parent; scope !== undefined && hiding === undefined; scope = scope.parent)
+      if (
+        ts.isFunctionLike(scope) &&
+        "body" in scope &&
+        scope.body !== undefined &&
+        scope.parameters.some((parameter) => within(node, parameter)) &&
+        declarations.every((declaration) => within(declaration, scope.body!))
+      )
+        hiding = scope;
+    if (hiding === undefined) return true;
+    symbol = checker
+      .getSymbolsInScope(hiding.parent, ts.SymbolFlags.Value)
+      .find((candidate) => candidate.name === node.text);
+  }
 }
 
 /** Whether `node` is `import.meta.<name>`. */
