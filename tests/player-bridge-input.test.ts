@@ -217,7 +217,8 @@ test("L5c's ops give the same replies, publications and events in-process and in
         ["choice", "completed"],
         ["button", "completed"],
         ["step", "updated"],
-        ["clear", "updated"],
+        // A required field refuses to be cleared, on both backends alike.
+        ["clear", "invalidPayload"],
         ["dismiss", "updated"],
         ["step again", "updated"],
         ["draft", "updated"],
