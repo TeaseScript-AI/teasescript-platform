@@ -2,6 +2,7 @@
 import type { require as Kind } from "../src/root.js";
 
 export type { require } from "../src/root.js";
+export * as require from "../src/allowed.js";
 export const kind: Kind = 1;
 export const getter = {
   get require(): number {

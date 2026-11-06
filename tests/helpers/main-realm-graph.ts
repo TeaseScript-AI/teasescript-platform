@@ -46,7 +46,8 @@ function refuse(label: string, form: string): never {
 
 /**
  * Whether identifier `node` is a property name or key, which neither binds nor refers to anything: `a.require`,
- * `{ require: … }`, a member named `require`, `{ require: x } = …`, or a module's export of that name. A shorthand
+ * `{ require: … }`, a member named `require`, `{ require: x } = …`, or a module's export of that name, also
+ * `export * as require`. A shorthand
  * `{ require }` refers to a binding, so it is none.
  */
 function isKey(node: ts.Identifier): boolean {
@@ -58,7 +59,8 @@ function isKey(node: ts.Identifier): boolean {
       ts.isGetAccessorDeclaration(parent) ||
       ts.isSetAccessorDeclaration(parent) ||
       ts.isPropertyDeclaration(parent) ||
-      ts.isExportSpecifier(parent)) &&
+      ts.isExportSpecifier(parent) ||
+      ts.isNamespaceExport(parent)) &&
       parent.name === node) ||
     ((ts.isBindingElement(parent) ||
       ts.isImportSpecifier(parent) ||
