@@ -319,8 +319,6 @@ export interface ObjectSite {
  */
 export interface ObjectsProof extends Proof {
   readonly complete: boolean;
-  /** Its support node's id in its pass, one per content (its own parts and its readers' ids). */
-  readonly id: number;
   readonly lists: readonly ObjectSite[];
   readonly prior: readonly Writer[];
   readonly keys: readonly {
@@ -328,8 +326,8 @@ export interface ObjectsProof extends Proof {
     readonly place: PlaceId;
     readonly path: readonly string[];
   }[];
-  /** The queries it reads, each a node of its own: its support is theirs and its own parts. */
-  readonly children: readonly ObjectsProof[];
+  /** The queries it reads, by their demands: its support is theirs and its own parts. */
+  readonly children: readonly ProofDemand<ObjectsProof>[];
 }
 
 /** A layer summary's proof (`layerDemand`): its support, `null` where the summary declined. */
