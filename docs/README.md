@@ -49,6 +49,7 @@ ADRs.
   implementation/review guidance or explicitly assigned audit guidance.
 - `DEVELOPMENT-WORKFLOW.md` owns the universal issue, branch, pull-request, documentation, merge, and verification
   workflow.
+- `ORCHESTRATION.md`: coordinators' rules of thumb; guidance, not workflow.
 - `PATCH-PUBLICATION.md` owns the verified patch protocol and security contract.
 - `../tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` owns the project-agent source and installed-layout
   contract; `chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder; and
