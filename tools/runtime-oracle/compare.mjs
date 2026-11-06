@@ -1,12 +1,15 @@
 // Compares a candidate pipeline with the runtime oracle's frozen one (docs/TESTING.md "Runtime pipeline oracle").
 //
-//   node tools/runtime-oracle/compare.mjs [--manifest FILE] [--from DIR] [--candidate DIR]
-//       [--only A,B] [--details] [--replace-candidate REL=FILE] [--replace-oracle REL=FILE]
+//   node tools/runtime-oracle/compare.mjs [--manifest FILE] [--from DIR] [--candidate DIR] [--only A,B] [--details]
+//       [--timed N] [--replace-candidate REL=FILE] [--replace-oracle REL=FILE]
 //
-// First the oracle must reproduce the results its manifest pins; then the candidate (this checkout's build by default)
-// must give the same result on every case and route. Prints one JSON report. Exit 0: reproduced and identical; 1: a
-// difference; 2: the oracle cannot be used (manifest, root, tooling or Node do not match). `--replace-*` (tests only)
-// loads FILE in place of a root's REL; a replaced oracle never counts as reproduced.
+// First the oracle must reproduce the results its manifest pins; then, within each build, every run restored at every
+// cut must agree with the same run uninterrupted; then the candidate (this checkout's build by default) must give the
+// same result as the oracle on every case and route. Prints one JSON report. Exit 0: all of that holds; 1: it does not;
+// 2: the oracle cannot be used (manifest, root, tooling or Node do not match). `--only` runs the named cases alone,
+// `--details` adds the oracle's results, `--timed N` adds N CPU samples per run, each transcript equal to its build's
+// untimed one (CPU never decides the exit), and `--replace-*` (tests only) loads FILE in place of a root's REL; a
+// replaced oracle never counts as reproduced.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -42,6 +45,7 @@ export function compare({
   replace = {},
   only = null,
   details = false,
+  timed = 0,
 } = {}) {
   const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
   const casesFile = path.resolve(checkout, manifest.cases.file);
@@ -57,13 +61,11 @@ export function compare({
   if (node !== manifest.node)
     throw new Error(`Node ${node} runs this, the oracle is sealed for ${manifest.node}`);
   const oracleRoot = materialize(manifest, { from });
-  const oracle = runRoot(
-    oracleRoot,
-    Object.keys(manifest.output),
-    casesFile,
-    replace.oracle ?? [],
+  const oracle = runRoot(oracleRoot, Object.keys(manifest.output), casesFile, {
+    replace: replace.oracle ?? [],
     only,
-  );
+    timed,
+  });
   // With `--only`, the sealed results of the cases it names.
   const sealed = Object.fromEntries(
     Object.entries(manifest.results).filter(
@@ -79,9 +81,22 @@ export function compare({
     candidate,
     Object.keys(closure(candidate, manifest.entries).output),
     casesFile,
-    replace.candidate ?? [],
-    only,
+    { replace: replace.candidate ?? [], only, timed },
   );
+  // Within each build first: every run restored at every cut agrees with the same run uninterrupted.
+  const restore = [];
+  for (const [side, report] of [
+    ["oracle", oracle],
+    ["candidate", candidateRun],
+  ])
+    for (const [key, value] of Object.entries(report.results))
+      for (const run of value.runs ?? [])
+        if (
+          run.threw === undefined &&
+          canonicalJson({ cuts: run.cuts, end: run.end }) !==
+            canonicalJson({ cuts: run.restored.cuts, end: run.restored.end })
+        )
+          restore.push({ side, key, label: run.label });
   const mismatches = [];
   for (const key of Object.keys({ ...oracle.results, ...candidateRun.results })) {
     if (oracle.digests[key] === candidateRun.digests[key]) continue;
@@ -89,6 +104,10 @@ export function compare({
     for (const item of found) mismatches.push({ key, ...item });
     if (mismatches.length >= MISMATCHES) break;
   }
+  // Timed samples: each one's transcript equals its build's untimed one; their CPU only describes.
+  const samples = [oracle, candidateRun].flatMap((report) =>
+    Object.values(report.timing ?? {}).flatMap((runs) => runs.flatMap((run) => run.samples)),
+  );
   const classifications = {};
   for (const [key, value] of Object.entries(oracle.results))
     (classifications[value.classification] ??= []).push(key);
@@ -97,10 +116,22 @@ export function compare({
     commit: manifest.commit,
     reproduced: reproduction.length === 0 && !oracle.replaced,
     reproduction,
+    restoreAgrees: restore.length === 0,
+    restore,
     identical: mismatches.length === 0,
     mismatches: mismatches.slice(0, MISMATCHES),
     count: Object.keys(oracle.results).length,
     classifications,
+    ...(timed > 0
+      ? {
+          timing: {
+            samples: samples.length,
+            matched: samples.every((sample) => sample.matched),
+            oracle: oracle.timing,
+            candidate: candidateRun.timing,
+          },
+        }
+      : {}),
     ...(details ? { results: oracle.results } : {}),
   };
 }
@@ -119,6 +150,7 @@ function parse(argv) {
     else if (name === "--from") options.from = value;
     else if (name === "--candidate") options.candidate = path.resolve(value);
     else if (name === "--only") options.only = value.split(",");
+    else if (name === "--timed") options.timed = Number(value);
     else if (name === "--replace-candidate") (options.replace.candidate ??= []).push(value);
     else if (name === "--replace-oracle") (options.replace.oracle ??= []).push(value);
     else throw new Error(`unknown option ${name}`);
@@ -127,13 +159,15 @@ function parse(argv) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  let report;
+  // The exit status is set, not forced: a report larger than a pipe's buffer must be written out completely first.
   try {
-    report = compare(parse(process.argv.slice(2)));
+    const report = compare(parse(process.argv.slice(2)));
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    const timedOk = report.timing === undefined || report.timing.matched;
+    process.exitCode =
+      report.reproduced && report.restoreAgrees && report.identical && timedOk ? 0 : 1;
   } catch (error) {
     console.error(`runtime oracle: ${error.message}`);
-    process.exit(2);
+    process.exitCode = 2;
   }
-  console.log(JSON.stringify(report, null, 2));
-  process.exit(report.reproduced && report.identical ? 0 : 1);
 }

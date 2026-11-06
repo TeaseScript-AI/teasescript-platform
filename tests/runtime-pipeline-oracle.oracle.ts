@@ -24,6 +24,7 @@ const cases = JSON.parse(
 
 /** The sealed manifest's fields this test changes. */
 interface Manifest {
+  commit: string;
   closure: Record<string, string>;
   output: Record<string, string>;
   cases: { sha256: string };
@@ -66,105 +67,199 @@ test("the frozen pipeline reproduces its sealed results, and this checkout's bui
   }
 });
 
-test("a root loads only its own build and the packages its lockfile installs", () => {
-  const work = scratch();
-  try {
-    const outside = path.join(work.directory, "outside.js");
-    fs.writeFileSync(outside, "export const outside = 1;\n");
-    const stubs = {
-      "dist/src/compiler.js": "export {};\n",
-      "dist/src/type-inference/core/backend.js":
-        "export class CandidateOutsideSlice extends Error {}\nexport const CORE_BACKEND = {};\n",
-      "dist/src/type-inference/core/budget.js":
-        "export const withTestAllowance = (_n, run) => run();\n",
-      "dist/src/runtime/snapshot/checkpoint-json.js":
-        "export const serializeValidatedRuntimeJson = JSON.stringify;\n",
-    };
-    const lock = (packages: Record<string, unknown>) =>
-      JSON.stringify({ lockfileVersion: 3, packages: { "": {}, ...packages } });
-    const locked = {
-      "node_modules/locked": { version: "1.0.0" },
-      // A platform binding the lockfile marks optional, which this install lacks.
-      "node_modules/binding": { version: "1.0.0", optional: true },
-    };
-    const installed = {
+// Where admission is decided (admission.mjs's one `admit`), by real location and origin: at a load in a root's process,
+// at the certification of a root's files, and at the seal. Each row is a site, a kind of file or root, and whether it is
+// admitted; a refused row names the reason it is refused for.
+interface AdmissionRow {
+  readonly site: "load" | "certify" | "seal";
+  readonly kind: string;
+  readonly admitted: boolean;
+  readonly reason?: RegExp;
+}
+
+const OUTSIDE = /resolves outside the root's inventory/u;
+const ADMISSION: readonly (AdmissionRow & {
+  readonly index?: string;
+  readonly tree?: Record<string, string>;
+})[] = [
+  { site: "load", kind: "a locked package", admitted: true, index: 'import "locked";\n' },
+  {
+    site: "load",
+    kind: "a locked package's internal scope",
+    admitted: true,
+    index: 'import "locked/modules/inner.js";\n',
+  },
+  {
+    site: "load",
+    kind: "an unlocked package directly in a locked one's node_modules",
+    admitted: false,
+    reason: OUTSIDE,
+    index: 'import "locked/nested.js";\n',
+  },
+  {
+    site: "load",
+    kind: "an unlocked package in a node_modules deeper inside a locked one",
+    admitted: false,
+    reason: OUTSIDE,
+    index: 'import "locked/deeper.js";\n',
+  },
+  {
+    site: "load",
+    kind: "a data module",
+    admitted: false,
+    reason: OUTSIDE,
+    index: 'import "data:text/javascript,export default 1";\n',
+  },
+  {
+    site: "load",
+    kind: "a file outside the root",
+    admitted: false,
+    reason: OUTSIDE,
+    index: "import OUTSIDE_URL;\n",
+  },
+  {
+    site: "load",
+    kind: "a built file linked from outside the root",
+    admitted: false,
+    reason: OUTSIDE,
+    index: "LINK",
+  },
+  {
+    site: "load",
+    kind: "a locked package at another version",
+    admitted: false,
+    reason: /installed at 2\.0\.0, locked at 1\.0\.0/u,
+    index: 'import "locked";\n',
+    tree: {
       "node_modules/locked/package.json":
-        '{"name":"locked","version":"1.0.0","type":"module","main":"index.js"}',
-      "node_modules/locked/index.js": "export const locked = 1;\n",
-      // A package's own internal scope stays that package's.
-      "node_modules/locked/modules/package.json": '{"type":"module"}',
-      "node_modules/locked/modules/inner.js": "export const inner = 1;\n",
-      // An unlocked directory below a locked package's node_modules is another package, also without metadata.
-      "node_modules/locked/node_modules/unlocked/index.js": "export const unlocked = 1;\n",
-      "node_modules/locked/nested.js": 'export * from "./node_modules/unlocked/index.js";\n',
-    };
-    const controls: readonly {
-      readonly name: string;
-      readonly index: string;
-      readonly lock?: string;
-      readonly version?: string;
-      readonly refused: RegExp | null;
-    }[] = [
-      { name: "a locked package", index: 'import "locked";\n', refused: null },
-      {
-        name: "a locked package's internal scope",
-        index: 'import "locked/modules/inner.js";\n',
-        refused: null,
-      },
-      {
-        name: "an unlocked package nested in a locked one",
-        index: 'import "locked/nested.js";\n',
-        refused: /resolves outside the root's inventory/u,
-      },
-      {
-        name: "a data module",
-        index: 'import "data:text/javascript,export default 1";\n',
-        refused: /resolves outside the root's inventory/u,
-      },
-      {
-        name: "a file outside the root",
-        index: `import ${JSON.stringify(pathToFileURL(outside).href)};\n`,
-        refused: /resolves outside the root's inventory/u,
-      },
-      {
-        name: "a locked package at another version",
-        index: 'import "locked";\n',
-        version: "2.0.0",
-        refused: /installed at 2\.0\.0, locked at 1\.0\.0/u,
-      },
-      {
-        name: "a locked package that is not installed",
-        index: "export {};\n",
-        lock: lock({ ...locked, "node_modules/missing": { version: "1.0.0" } }),
-        refused: /'node_modules\/missing' is not installed/u,
-      },
-    ];
-    for (const control of controls) {
-      const root = path.join(work.directory, control.name.replaceAll(" ", "-").replaceAll("'", ""));
-      writeTree(root, {
-        ...stubs,
-        ...installed,
-        "dist/src/index.js": control.index,
-        "package-lock.json": control.lock ?? lock(locked),
-        ...(control.version === undefined
-          ? {}
-          : {
-              "node_modules/locked/package.json": `{"name":"locked","version":"${control.version}","type":"module","main":"index.js"}`,
-            }),
-      });
-      const files = path.join(root, "files.json");
-      fs.writeFileSync(files, JSON.stringify(["dist/src/index.js", ...Object.keys(stubs)]));
-      const { status, stderr } = oracle("run.mjs", ["--root", root, "--files", files], "[]");
-      if (control.refused === null) assert.equal(status, 0, `${control.name}: ${stderr}`);
-      else {
-        assert.notEqual(status, 0, control.name);
-        assert.match(stderr, control.refused, control.name);
+        '{"name":"locked","version":"2.0.0","type":"module","main":"index.js"}',
+    },
+  },
+  {
+    site: "load",
+    kind: "a locked package that is not installed",
+    admitted: false,
+    reason: /'node_modules\/missing' is not installed/u,
+    index: "export {};\n",
+    tree: { "package-lock.json": "MISSING" },
+  },
+  {
+    site: "certify",
+    kind: "a cached root whose build and packages link to the candidate's",
+    admitted: false,
+    reason: /is not inside the root/u,
+  },
+  {
+    site: "seal",
+    kind: "a cached root whose source was changed after it was built",
+    admitted: false,
+  },
+];
+
+/** A small root, as a run sees one: stub entries, one locked package with an internal scope, and unlocked nests. */
+function fixtureRoot(root: string, row: (typeof ADMISSION)[number], outside: string): string[] {
+  const stubs: Record<string, string> = {
+    "dist/src/compiler.js": "export {};\n",
+    "dist/src/type-inference/core/backend.js":
+      "export class CandidateOutsideSlice extends Error {}\nexport const CORE_BACKEND = {};\n",
+    "dist/src/type-inference/core/budget.js":
+      "export const withTestAllowance = (_n, run) => run();\n",
+    "dist/src/runtime/snapshot/checkpoint-json.js":
+      "export const serializeValidatedRuntimeJson = JSON.stringify;\n",
+  };
+  const lock = (packages: Record<string, unknown>) =>
+    JSON.stringify({ lockfileVersion: 3, packages: { "": {}, ...packages } });
+  const locked = {
+    "node_modules/locked": { version: "1.0.0" },
+    // A platform binding the lockfile marks optional, which this install lacks: every row admits its absence.
+    "node_modules/binding": { version: "1.0.0", optional: true },
+  };
+  const index = (row.index ?? "").replace(
+    "OUTSIDE_URL",
+    JSON.stringify(pathToFileURL(outside).href),
+  );
+  writeTree(root, {
+    ...stubs,
+    "node_modules/locked/package.json":
+      '{"name":"locked","version":"1.0.0","type":"module","main":"index.js"}',
+    "node_modules/locked/index.js": "export const locked = 1;\n",
+    "node_modules/locked/modules/package.json": '{"type":"module"}',
+    "node_modules/locked/modules/inner.js": "export const inner = 1;\n",
+    "node_modules/locked/node_modules/unlocked/index.js": "export const unlocked = 1;\n",
+    "node_modules/locked/nested.js": 'export * from "./node_modules/unlocked/index.js";\n',
+    "node_modules/locked/lib/node_modules/unlocked/index.js": "export const deeper = 1;\n",
+    "node_modules/locked/deeper.js": 'export * from "./lib/node_modules/unlocked/index.js";\n',
+    ...(index === "LINK" ? {} : { "dist/src/index.js": index }),
+    "package-lock.json": lock(locked),
+    ...row.tree,
+    ...(row.tree?.["package-lock.json"] === "MISSING"
+      ? { "package-lock.json": lock({ ...locked, "node_modules/missing": { version: "1.0.0" } }) }
+      : {}),
+  });
+  if (index === "LINK") fs.symlinkSync(outside, path.join(root, "dist/src/index.js"));
+  return ["dist/src/index.js", ...Object.keys(stubs)];
+}
+
+for (const [index, row] of ADMISSION.entries())
+  test(`admission, at the ${row.site}: ${row.kind} is ${row.admitted ? "admitted" : "refused"}`, () => {
+    const work = scratch();
+    try {
+      const outside = path.join(work.directory, "outside.js");
+      fs.writeFileSync(outside, "export const outside = 1;\n");
+      const root = path.join(work.directory, `row-${index}`);
+      let status: number | null;
+      let stderr: string;
+      if (row.site === "load") {
+        const files = path.join(work.directory, "files.json");
+        fs.writeFileSync(files, JSON.stringify(fixtureRoot(root, row, outside)));
+        ({ status, stderr } = oracle("run.mjs", ["--root", root, "--files", files], "[]"));
+      } else if (row.site === "certify") {
+        // The cached root's files are the candidate's own, linked: the same bytes, not the frozen root's.
+        fs.mkdirSync(root);
+        for (const entry of [
+          "dist",
+          "node_modules",
+          "src",
+          "tools",
+          "package.json",
+          "package-lock.json",
+          "tsconfig.json",
+          ".nvmrc",
+        ])
+          fs.symlinkSync(path.join(checkout, entry), path.join(root, entry));
+        ({ status, stderr } = oracle("compare.mjs", ["--from", root, "--only", "project-rounds"]));
+      } else {
+        // A root in the oracle home with a receipt and a changed source: the seal must not use it.
+        const sealed = manifest();
+        const home = path.join(work.directory, "home");
+        writeTree(path.join(home, sealed.commit), {
+          "materialized.json": "{}",
+          "src/compiler.ts": "// changed after the build\n",
+        });
+        const out = path.join(work.directory, "sealed.json");
+        ({ status, stderr } = oracle(
+          "materialize.mjs",
+          ["--seal", sealed.commit, "--label", "provisional", "--out", out],
+          "",
+          { RUNTIME_ORACLE_HOME: home },
+        ));
+        assert.equal(status, 0, stderr);
+        // EVIDENCE: validation: the seal writes a manifest of this shape, which the comparison checks completely.
+        const resealed = JSON.parse(fs.readFileSync(out, "utf8")) as Manifest;
+        // A fresh build of the commit: its source and its results are the sealed ones, not the changed root's.
+        assert.equal(resealed.closure["src/compiler.ts"], sealed.closure["src/compiler.ts"]);
+        assert.deepEqual(resealed.results, sealed.results);
+        return;
       }
+      if (row.admitted) assert.equal(status, 0, stderr);
+      else {
+        assert.notEqual(status, 0);
+        if (row.reason !== undefined) assert.match(stderr, row.reason);
+      }
+    } finally {
+      work.done();
     }
-  } finally {
-    work.done();
-  }
-});
+  });
 
 test("the frozen root refuses an import of this checkout's build", () => {
   const work = scratch();
@@ -248,6 +343,82 @@ test("a candidate whose lowering emits otherwise differs from the oracle, whose 
   } finally {
     fs.rmSync(mutant, { force: true });
   }
+});
+
+/** Runs `body` with a candidate module beside its original, `edit` applied to its text; removes it after. */
+function withMutant(
+  original: string,
+  edit: (text: string) => string,
+  body: (mutant: string) => void,
+) {
+  const file = path.join(checkout, original);
+  const mutant = file.replace(/\.js$/u, ".oracle-mutant.js");
+  const text = fs.readFileSync(file, "utf8");
+  const edited = edit(text);
+  assert.notEqual(edited, text, `the mutation of ${original} applies`);
+  fs.writeFileSync(mutant, edited);
+  try {
+    body(mutant);
+  } finally {
+    fs.rmSync(mutant, { force: true });
+  }
+}
+
+test("a candidate that runs otherwise uninterrupted than restored at every cut is not the oracle", () => {
+  // A session that fails at its second step of a run: a restored run, a new session at every cut, never sees it.
+  withMutant(
+    "dist/src/runtime/session.js",
+    (text) =>
+      text.replace(
+        "stepToEvent(options = {}) {",
+        'stepToEvent(options = {}) {\n        if ((this.oracleMutantSteps = (this.oracleMutantSteps ?? 0) + 1) > 1) throw new Error("mutant");',
+      ),
+    (mutant) => {
+      const { status, report, stderr } = oracle("compare.mjs", [
+        "--only",
+        "project-rounds",
+        "--replace-candidate",
+        `dist/src/runtime/session.js=${mutant}`,
+      ]);
+      assert.equal(status, 1, stderr);
+      assert.ok(report !== null);
+      assert.equal(report.reproduced, true);
+      assert.ok(!report.restoreAgrees || !report.identical);
+    },
+  );
+});
+
+test("a candidate that names another file in its diagnostics differs from the oracle", () => {
+  withMutant(
+    "dist/src/compiler.js",
+    (text) => text.replace("path: file.path", 'path: "wrong-file.tease"'),
+    (mutant) => {
+      const { status, report, stderr } = oracle("compare.mjs", [
+        "--only",
+        "project-rounds",
+        "--replace-candidate",
+        `dist/src/compiler.js=${mutant}`,
+      ]);
+      assert.equal(status, 1, stderr);
+      assert.ok(report !== null);
+      assert.equal(report.identical, false);
+      assert.ok(report.mismatches.some((item) => item.path.endsWith("/path")));
+    },
+  );
+});
+
+test("every timed sample gives its build's untimed transcript; its CPU only describes", () => {
+  const { status, report, stderr } = oracle("compare.mjs", [
+    "--only",
+    "project-rounds",
+    "--timed",
+    "2",
+  ]);
+  assert.equal(status, 0, stderr);
+  assert.ok(report?.timing !== undefined);
+  // Two routes, each one run, two samples, in both builds; the core refuses this project.
+  assert.ok(report.timing.samples > 0);
+  assert.equal(report.timing.matched, true);
 });
 
 test("an oracle that no longer gives its sealed result fails as such, though it equals the candidate", () => {

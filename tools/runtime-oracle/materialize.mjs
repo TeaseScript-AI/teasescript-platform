@@ -2,8 +2,9 @@
 //
 //   node tools/runtime-oracle/materialize.mjs [--manifest FILE] [--from DIR]   materializes the manifest's root, or
 //       adopts DIR (a built tree of the same commit, such as sx-tree's) after the same checks; prints the root
-//   node tools/runtime-oracle/materialize.mjs --seal COMMIT --label provisional|final [--seam SHA]
-//       writes tools/runtime-oracle/manifest.json for COMMIT, its results from the oracle's own run
+//   node tools/runtime-oracle/materialize.mjs --seal COMMIT --label provisional|final [--seam SHA] [--out FILE]
+//       writes tools/runtime-oracle/manifest.json (or FILE) for COMMIT, from a root acquired and built afresh, with that
+//       root's own results; a root already in the oracle home is never sealed
 //
 // The root is $RUNTIME_ORACLE_HOME/<commit>, by default ~/.cache/teasescript/runtime-oracle/<commit>: outside the
 // checkout, so no tool of the checkout reads it. It is the commit's tree (`git archive`, no `.git`), installed from its
@@ -16,7 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalJson } from "../benchmark-runtime.mjs";
-import { lockedPackages } from "./admission.mjs";
+import { certifyFiles, inventory } from "./admission.mjs";
 import { closure, ENTRIES, sha256 } from "./closure.mjs";
 
 export const checkout = fileURLToPath(new URL("../..", import.meta.url));
@@ -88,14 +89,27 @@ function casesWithText(casesFile, only = null) {
  * Runs every case of `casesFile` through `root`'s pipeline in a process of its own that may load only `builtFiles`
  * and the root's locked packages. Returns the runner's report and each result's digest.
  */
-export function runRoot(root, builtFiles, casesFile, replace = [], only = null) {
+export function runRoot(
+  root,
+  builtFiles,
+  casesFile,
+  { replace = [], only = null, timed = 0 } = {},
+) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "runtime-oracle-"));
   try {
     const files = path.join(scratch, "files.json");
     fs.writeFileSync(files, JSON.stringify(builtFiles));
     const child = spawnSync(
       process.execPath,
-      [runner, "--root", root, "--files", files, ...replace.flatMap((item) => ["--replace", item])],
+      [
+        runner,
+        "--root",
+        root,
+        "--files",
+        files,
+        ...(timed > 0 ? ["--timed", String(timed)] : []),
+        ...replace.flatMap((item) => ["--replace", item]),
+      ],
       {
         input: JSON.stringify(casesWithText(casesFile, only)),
         encoding: "utf8",
@@ -134,6 +148,10 @@ function toolIdentity(root) {
  * packages. Throws naming the first difference.
  */
 export function verify(root, manifest) {
+  // Every file the manifest certifies must really be inside the root, not reached through a link, before its bytes
+  // count; its locked packages are checked with the same inventory (admission.mjs).
+  const certified = [...Object.keys(manifest.output), ...Object.keys(manifest.closure)];
+  certifyFiles(inventory(root, certified), certified);
   const found = closure(root, manifest.entries);
   for (const [kind, expected, actual] of [
     ["closure", manifest.closure, found.sources],
@@ -146,7 +164,6 @@ export function verify(root, manifest) {
           `${root}: ${kind} file ${key} is ${actual[key] ?? "missing"}, the manifest has ${expected[key] ?? "none"}`,
         );
   }
-  lockedPackages(root);
   const nvmrc = fs.readFileSync(path.join(root, ".nvmrc"), "utf8").trim();
   if (nvmrc !== manifest.node)
     throw new Error(`${root}: .nvmrc says ${nvmrc}, the manifest ${manifest.node}`);
@@ -196,7 +213,14 @@ export function materialize(manifest, { from = null } = {}) {
 }
 
 function parse(argv) {
-  const options = { manifest: defaultManifest, from: null, seal: null, label: null, seam: null };
+  const options = {
+    manifest: defaultManifest,
+    from: null,
+    seal: null,
+    label: null,
+    seam: null,
+    out: defaultManifest,
+  };
   for (let index = 0; index < argv.length; index += 2) {
     const [name, value] = [argv[index], argv[index + 1]];
     if (value === undefined) throw new Error(`${name} needs a value`);
@@ -205,22 +229,22 @@ function parse(argv) {
     else if (name === "--seal") options.seal = value;
     else if (name === "--label") options.label = value;
     else if (name === "--seam") options.seam = value;
+    else if (name === "--out") options.out = path.resolve(value);
     else throw new Error(`unknown option ${name}`);
   }
   return options;
 }
 
-/** Writes the manifest of `commit`: the closure, output and packages of its root, and its own results. */
-async function seal({ seal: commit, label, seam }) {
+/**
+ * Writes the manifest of `commit` to `out`: the closure, output and packages of a root acquired and built afresh for it,
+ * never one found in the oracle home, and that root's own results.
+ */
+async function seal({ seal: commit, label, seam, out }) {
   if (label !== "provisional" && label !== "final")
     throw new Error("--label is provisional or final");
   if (label === "final" && seam === null) throw new Error("a final seal names its --seam");
   const full = run("git", ["-C", checkout, "rev-parse", `${commit}^{commit}`]);
-  // A root this tool materialized before is reused: the seal hashes what it holds anew.
-  const existing = path.join(oracleHome(), full);
-  const { root, tree } = fs.existsSync(path.join(existing, "materialized.json"))
-    ? { root: existing, tree: run("git", ["-C", checkout, "rev-parse", `${full}^{tree}`]) }
-    : acquire(full, oracleHome(), null);
+  const { root, tree } = acquire(full, oracleHome(), null);
   const found = closure(root, ENTRIES);
   const casesFile = path.join(checkout, "tools", "runtime-oracle", "cases.json");
   const lockfile = fs.readFileSync(path.join(root, "package-lock.json"));
@@ -241,12 +265,14 @@ async function seal({ seal: commit, label, seam }) {
     formats: null,
     results: {},
   };
+  const certified = [...Object.keys(found.output), ...Object.keys(found.sources)];
+  certifyFiles(inventory(root, certified), certified);
   const ran = runRoot(root, Object.keys(found.output), casesFile);
   manifest.formats = ran.formats;
   manifest.results = ran.digests;
-  fs.writeFileSync(defaultManifest, `${JSON.stringify(manifest, null, 2)}\n`);
+  fs.writeFileSync(out, `${JSON.stringify(manifest, null, 2)}\n`);
   materialize(manifest);
-  return defaultManifest;
+  return out;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -3,3 +3,4 @@ say "Next ${extra} of ${rounds}", instant
 wait 2 s
 say "Done", instant
 exit
+say "Never", instant

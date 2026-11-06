@@ -1,28 +1,31 @@
 // Runs the oracle's cases through one root's pipeline, in this process alone (docs/TESTING.md "Runtime pipeline
-// oracle"). Usage: node tools/runtime-oracle/run.mjs --root DIR --files FILE [--replace REL=FILE ...] < cases
+// oracle"). Usage: node tools/runtime-oracle/run.mjs --root DIR --files FILE [--timed N] [--replace REL=FILE ...] < cases
 //
 // FILE lists the root's built files (relative to DIR) that it may load; the cases arrive on standard input with their
 // source text. Before the root's first import, a resolve hook admits only what `admission.mjs` admits, so this process
 // shares no module with another root. The result goes to standard output as one JSON document. `--replace` (tests
 // only) loads FILE in place of the root's REL, to check that a changed module is detected; such a run says so.
+// `--timed N` also runs each uninterrupted transcript N more times and reports their CPU beside the results, each
+// sample's transcript checked against the untimed one; CPU only describes, it decides nothing.
 
 import fs from "node:fs";
 import { registerHooks } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { canonicalJson, eventsDigest, sha256, stateDigest } from "../benchmark-runtime.mjs";
-import { admits, inventory } from "./admission.mjs";
+import { admitsUrl, inventory } from "./admission.mjs";
 import { builtPath } from "./closure.mjs";
 
 const BUDGET = 2_000_000_000;
 const MAXIMUM_CUTS = 10_000;
 
 function parse(argv) {
-  const options = { root: null, files: null, replace: new Map() };
+  const options = { root: null, files: null, replace: new Map(), timed: 0 };
   for (let index = 0; index < argv.length; index += 1) {
     const [name, value] = [argv[index], argv[index + 1]];
     if (name === "--root") options.root = path.resolve(value);
     else if (name === "--files") options.files = value;
+    else if (name === "--timed") options.timed = Number(value);
     else if (name === "--replace") {
       const [relative, file] = value.split("=");
       options.replace.set(relative, path.resolve(file));
@@ -48,7 +51,7 @@ registerHooks({
   resolve(specifier, context, nextResolve) {
     const resolved = nextResolve(specifier, context);
     const url = replacements.get(resolved.url) ?? resolved.url;
-    if (!replacing.has(url) && !admits(admitted, url))
+    if (!replacing.has(url) && !admitsUrl(admitted, url))
       throw new Error(
         `runtime oracle: '${specifier}' resolves outside the root's inventory (${url})`,
       );
@@ -63,12 +66,12 @@ const core = await load("src/type-inference/core/backend.ts");
 const budget = await load("src/type-inference/core/budget.ts");
 const json = await load("src/runtime/snapshot/checkpoint-json.ts");
 
-/** A diagnostic as compared: what it says and where, in the file it belongs to. */
+/** A diagnostic as compared: what it says and where, in the project file it belongs to. */
 const diagnostic = (item) => ({
   code: item.code,
   severity: item.severity,
   message: item.message,
-  file: item.file ?? null,
+  path: item.path ?? null,
   span: [item.span.start.offset, item.span.end.offset],
 });
 
@@ -90,18 +93,18 @@ function compile(testCase, route) {
 }
 
 /**
- * A run of `plan` from fresh options to its end, a wait for input, or a failure: every cut with its digests, and at
- * every cut a restore from the checkpoint's text, which the run goes on with.
+ * A transcript of `plan` from fresh options to its end, a wait for input, or a failure: every cut with its digests.
+ * `restoring` replaces the session at every cut by one restored from its checkpoint's text, which the run goes on with;
+ * otherwise the same session runs uninterrupted.
  */
-function record(plan, fresh) {
+function transcript(plan, fresh, restoring) {
   let session = api.createFreshRuntimeSession(plan, fresh);
   let instructions = 0;
   const cuts = [];
+  const checkpoints = [];
   const cut = (kind, result) => {
     instructions += result.instructionsExecuted;
     const snapshot = session.exportSnapshot();
-    const checkpoint = api.serializeCheckpoint(session.exportCheckpoint());
-    session = api.deserializeRuntimeSession(checkpoint);
     cuts.push({
       kind,
       instructions,
@@ -111,25 +114,56 @@ function record(plan, fresh) {
       events: result.events.length,
       eventsDigest: eventsDigest(result.events),
       stateDigest: stateDigest(snapshot),
-      checkpointDigest: sha256(checkpoint),
-      restored: stateDigest(session.exportSnapshot()) === stateDigest(snapshot),
     });
+    if (restoring) {
+      const checkpoint = api.serializeCheckpoint(session.exportCheckpoint());
+      checkpoints.push(sha256(checkpoint));
+      session = api.deserializeRuntimeSession(checkpoint);
+    }
     return snapshot;
   };
+  const done = (end) => (restoring ? { cuts, end, checkpoints } : { cuts, end });
   while (cuts.length < MAXIMUM_CUTS) {
     const result = session.stepToEvent({ instructionBudget: BUDGET });
     const snapshot = cut("step", result);
     if (snapshot.status === "running") {
-      if (result.events.length === 0) return { cuts, end: "budget" };
+      if (result.events.length === 0) return done("budget");
       continue;
     }
-    if (snapshot.status !== "waiting") return { cuts, end: snapshot.status };
+    if (snapshot.status !== "waiting") return done(snapshot.status);
     const deadline = snapshot.foregroundAction?.deadlineMs;
-    if (typeof deadline !== "number") return { cuts, end: "input" };
+    if (typeof deadline !== "number") return done("input");
     cut("observe", session.observeTime(deadline));
   }
-  return { cuts, end: "cuts" };
+  return done("cuts");
 }
+
+/**
+ * A run of `plan`: its uninterrupted transcript, and the transcript of the same run restored at every cut, which must
+ * agree with it (`compare.mjs` checks that within each build first).
+ */
+function record(plan, fresh) {
+  const { cuts, end } = transcript(plan, fresh, false);
+  return { cuts, end, restored: transcript(plan, fresh, true) };
+}
+
+/** `options.timed` CPU samples of `plan`'s uninterrupted transcript, each checked against `untimed`. */
+function timedSamples(plan, fresh, untimed) {
+  const expected = canonicalJson(untimed);
+  const samples = [];
+  for (let sample = 0; sample < options.timed; sample += 1) {
+    const start = process.cpuUsage();
+    const timed = transcript(plan, fresh, false);
+    const used = process.cpuUsage(start);
+    samples.push({
+      cpuUs: used.user + used.system,
+      matched: canonicalJson({ cuts: timed.cuts, end: timed.end }) === expected,
+    });
+  }
+  return samples;
+}
+
+const timing = {};
 
 function result(testCase, route) {
   let compiled;
@@ -146,7 +180,13 @@ function result(testCase, route) {
   const planJson = json.serializeValidatedRuntimeJson(compiled.plan);
   const runs = (testCase.runs ?? [{ label: "run", fresh: {} }]).map(({ label, fresh }) => {
     try {
-      return { label, ...record(compiled.plan, fresh) };
+      const run = record(compiled.plan, fresh);
+      if (options.timed > 0)
+        (timing[`${testCase.name}/${route}`] ??= []).push({
+          label,
+          samples: timedSamples(compiled.plan, fresh, { cuts: run.cuts, end: run.end }),
+        });
+      return { label, ...run };
     } catch (error) {
       return { label, threw: String(error?.message ?? error) };
     }
@@ -173,5 +213,6 @@ process.stdout.write(
       checkpoint: api.CHECKPOINT_VERSION,
     },
     results,
+    ...(options.timed > 0 ? { timing } : {}),
   }),
 );

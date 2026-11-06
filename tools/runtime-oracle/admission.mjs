@@ -1,34 +1,31 @@
-// Which files a runtime-oracle root may load (docs/TESTING.md "Runtime pipeline oracle"). One rule, used both before a
-// run (to refuse a root) and by the run's resolve hook (to refuse an import): a root loads Node's built-ins, its own
-// built files, and the files of the packages its own lockfile installs, and nothing else.
+// Which files a runtime-oracle root may load or certify (docs/TESTING.md "Runtime pipeline oracle"). One function,
+// `admit`, decides it by a file's real location, never by the shape of a path it was reached through: the run's resolve
+// hook, the check of a root's built and certified files, and the seal all ask it. A root admits Node's built-ins, its
+// own certified files where they really are inside its canonical directory, and the files of the packages its own
+// lockfile installs.
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const within = (directory, file) => file.startsWith(directory + path.sep);
+
 /**
- * The lockfile key of `file`, a real path under `dependencies` (the real path of a root's `node_modules`): the longest
- * `node_modules/<name>` or `node_modules/@scope/<name>` chain it lies in, as npm keys its lockfile, such as
- * `node_modules/a/node_modules/@s/b`. A package's own subdirectories, also one with a `package.json` of its own, stay
- * that package's; each nested `node_modules` starts another. `null` outside `dependencies`, or for a file directly in it.
+ * The lockfile key of `file`, a real path under `dependencies` (the real path of a root's `node_modules`): the whole
+ * chain up to the package after the last `node_modules` boundary in the path, as npm keys its lockfile, such as
+ * `node_modules/a/node_modules/@s/b`, or `node_modules/a/lib/node_modules/c`, which npm never locks. A package's own
+ * subdirectories, also one with a `package.json` of its own, stay that package's. `null` outside `dependencies`, or for a
+ * file directly in a `node_modules` or scope directory.
  */
 export function ownerKey(file, dependencies) {
-  const relative = path.relative(dependencies, file);
-  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return null;
-  const parts = relative.split(path.sep);
-  const key = [];
-  let index = 0;
-  for (;;) {
-    const name = parts[index]?.startsWith("@")
-      ? parts.slice(index, index + 2)
-      : parts.slice(index, index + 1);
-    // A file directly in a `node_modules` or a scope directory belongs to no package.
-    if (index + name.length >= parts.length) return null;
-    key.push("node_modules", ...name);
-    index += name.length;
-    if (parts[index] !== "node_modules") return key.join("/");
-    index += 1;
-  }
+  if (!within(dependencies, file)) return null;
+  const parts = path.relative(dependencies, file).split(path.sep);
+  // The package starts after the last `node_modules` in the path, or at the top of `dependencies`.
+  const last = parts.lastIndexOf("node_modules");
+  const start = last + 1;
+  const length = parts[start]?.startsWith("@") ? 2 : 1;
+  if (start + length >= parts.length) return null;
+  return ["node_modules", ...parts.slice(0, start + length)].join("/");
 }
 
 /**
@@ -67,26 +64,46 @@ export function lockedPackages(root) {
 }
 
 /**
- * The inventory a root runs with: its built files (real paths) and its locked packages. `builtFiles` are paths
- * relative to `root`.
+ * The inventory of `root`: its canonical directory, the files it certifies (`certified`, paths relative to `root`) where
+ * they must really be, and its locked packages. A certified file is admitted only at its place inside the canonical
+ * directory, so a file reached through a link to elsewhere is not the root's.
  */
-export function inventory(root, builtFiles) {
-  const files = new Set(builtFiles.map((file) => fs.realpathSync(path.join(root, file))));
-  return { root: fs.realpathSync(root), files, ...lockedPackages(root) };
+export function inventory(root, certified) {
+  const canonical = fs.realpathSync(root);
+  const files = new Set(certified.map((file) => path.join(canonical, file)));
+  return { root: canonical, files, ...lockedPackages(root) };
 }
 
-/** Whether a root with `admittedInventory` may load the module at `url`; the one decision every check uses. */
-export function admits(admittedInventory, url) {
+/**
+ * Whether a root with `rootInventory` may load or certify the file at `realFile` (a real path): the one decision every
+ * check uses. Returns what admits it, or `null`.
+ */
+export function admit(rootInventory, realFile) {
+  if (rootInventory.files.has(realFile)) return "certified";
+  if (rootInventory.dependencies === null) return null;
+  const owner = ownerKey(realFile, rootInventory.dependencies);
+  return owner !== null && rootInventory.admitted.has(owner) ? `package ${owner}` : null;
+}
+
+/** Whether a module URL resolves to something `rootInventory` admits: a built-in, or an admitted real file. */
+export function admitsUrl(rootInventory, url) {
   if (url.startsWith("node:")) return true;
   if (!url.startsWith("file:")) return false;
-  let file;
   try {
-    file = fs.realpathSync(fileURLToPath(url));
+    return admit(rootInventory, fs.realpathSync(fileURLToPath(url))) !== null;
   } catch {
     return false;
   }
-  if (admittedInventory.files.has(file)) return true;
-  if (admittedInventory.dependencies === null) return false;
-  const owner = ownerKey(file, admittedInventory.dependencies);
-  return owner !== null && admittedInventory.admitted.has(owner);
+}
+
+/**
+ * Checks that every one of `certified` (relative to `root`) is really where the root says, inside its canonical
+ * directory and not reached through a link: throws naming the first that is not.
+ */
+export function certifyFiles(rootInventory, certified) {
+  for (const file of certified) {
+    const real = fs.realpathSync(path.join(rootInventory.root, file));
+    if (admit(rootInventory, real) !== "certified")
+      throw new Error(`${rootInventory.root}: ${file} is not inside the root (it is ${real})`);
+  }
 }

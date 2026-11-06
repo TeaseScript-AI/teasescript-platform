@@ -17,11 +17,13 @@ const tool = (name: string) => path.join(checkout, "tools", "runtime-oracle", na
 export interface OracleReport {
   readonly reproduced: boolean;
   readonly reproduction: readonly { readonly key: string }[];
+  readonly restoreAgrees: boolean;
   readonly identical: boolean;
   readonly mismatches: readonly { readonly key: string; readonly path: string }[];
   readonly count: number;
   readonly classifications: Readonly<Record<string, readonly string[]>>;
   readonly results?: Readonly<Record<string, OracleResult>>;
+  readonly timing?: { readonly samples: number; readonly matched: boolean };
 }
 
 /** One case and route's result, as the oracle's runner records it. */
@@ -37,9 +39,10 @@ export interface OracleResult {
 
 /** A run of an oracle tool: its exit status, its report when it printed one, and what it said on standard error. */
 export function oracle(
-  name: "compare.mjs" | "run.mjs",
+  name: "compare.mjs" | "run.mjs" | "materialize.mjs",
   args: readonly string[],
   input = "",
+  env: Readonly<Record<string, string>> = {},
 ): {
   readonly status: number | null;
   readonly report: OracleReport | null;
@@ -47,6 +50,7 @@ export function oracle(
 } {
   const child = spawnSync(process.execPath, [tool(name), ...args], {
     cwd: checkout,
+    env: { ...process.env, ...env },
     input,
     encoding: "utf8",
     maxBuffer: 1 << 28,
