@@ -5,10 +5,10 @@ import { effectScope, ref, shallowRef, type Ref, type ShallowRef } from "vue";
 import { CapturedMediaStore } from "../player/captured-media.js";
 import {
   answerPlayerRuntimeImage,
-  createPlayerRuntimeSession,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground, playerRuntimeMedia } from "../player/runtime-view.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 

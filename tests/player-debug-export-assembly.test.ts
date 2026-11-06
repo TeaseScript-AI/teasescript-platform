@@ -22,7 +22,6 @@ import {
   applyPlayerRuntimeStorageEdit,
   beginPlayerRuntimeRecording,
   completePlayerRuntimeStorageWrite,
-  createPlayerRuntimeSession,
   playerRuntimeSnapshotJson,
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
@@ -30,6 +29,7 @@ import {
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
   activePlayerRuntimeLock,
   pendingPlayerRuntimeStorageWrite,

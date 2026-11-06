@@ -14,13 +14,13 @@ import {
 import {
   advancePlayerRuntimeTime,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   playerRuntimeDebugVariables,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
   playerRuntimeTranscriptEventSequence,
   playerRuntimeTranscriptMessage,

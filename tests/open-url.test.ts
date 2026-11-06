@@ -3,12 +3,12 @@ import test from "node:test";
 
 import {
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   openPlayerRuntimeUrl,
   playerRuntimeDebugNow,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground, playerRuntimeUrlRequest } from "../player/runtime-view.js";
 import { openUrlTab, type UrlTab } from "../player/url-tab.js";
 import { compileSource } from "../src/compiler.js";

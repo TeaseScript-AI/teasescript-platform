@@ -8,12 +8,10 @@ import type {
   CaptureRequest,
   CaptureTrack,
 } from "./capture-device.js";
-import {
-  answerPlayerRuntimeCapture,
-  type PlayerCaptureAnswer,
-  type PlayerRuntimeSession,
-} from "./runtime-adapter.js";
-import { activePlayerRuntimeCapture } from "./runtime-view.js";
+import { answerPlayerRuntimeCapture, type PlayerCaptureAnswer } from "./runtime-adapter.js";
+import { hatch } from "./engine-bridge/in-process.js";
+import type { ServiceSection } from "./player-bridge.js";
+import { activePlayerRuntimeCapture, type PlayerSession } from "./runtime-view.js";
 
 /** A bounded Player diagnostic for developers; never shown as an ordinary Player notice. */
 export interface PlayerDiagnostic {
@@ -337,15 +335,20 @@ export class SessionCamera<Track extends CaptureTrack> {
 
 export interface CaptureServiceHost {
   /** The published session, or `null` before one starts. */
-  session(): PlayerRuntimeSession | null;
+  session(): PlayerSession | null;
   /** Identifies the published session; it changes when another session starts. */
   generation(): number;
   /**
    * Observes the current time, publishes the result, and returns the published session; `null` when the session takes
    * no input, as once a Player error stopped it.
    */
-  observe(): PlayerRuntimeSession | null;
-  publish(session: PlayerRuntimeSession): void;
+  observe(): PlayerSession | null;
+  publish(session: PlayerSession): void;
+  /**
+   * Runs `body` as one exclusive section of the published session, with an observation inside it; `null` without a
+   * session, or once a Player error stopped it.
+   */
+  section<T>(body: (section: ServiceSection) => Promise<T>): Promise<T | null>;
   readonly capturedMedia: CapturedMediaAdmission;
   diagnostic(diagnostic: PlayerDiagnostic): void;
   /** Runs `task` later, after the engine had a chance to run. */
@@ -418,11 +421,8 @@ export class CaptureService {
         this.#settled(key);
         return;
       }
-      const result = answerPlayerRuntimeCapture(
-        observed,
-        action.actionId,
-        answer,
-        this.#host.capturedMedia,
+      const result = hatch(observed, (current) =>
+        answerPlayerRuntimeCapture(current, action.actionId, answer, this.#host.capturedMedia),
       );
       // `executionPending`: the same answer is offered again in the next service.
       if (result.outcome.kind === "executionPending") return;
@@ -431,10 +431,12 @@ export class CaptureService {
         this.#host.diagnostic({ code: "capture-rejected", message: result.outcome.message });
         // Never leave the script waiting: answer this capture as unavailable instead.
         this.#host.publish(
-          answerPlayerRuntimeCapture(observed, action.actionId, {
-            kind: "unavailable",
-            reason: "failed",
-          }).session,
+          hatch(observed, (current) =>
+            answerPlayerRuntimeCapture(current, action.actionId, {
+              kind: "unavailable",
+              reason: "failed",
+            }),
+          ).session,
         );
         return;
       }

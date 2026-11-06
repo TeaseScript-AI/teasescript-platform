@@ -8,6 +8,12 @@ import {
 import type { PlayerProject, PlayerScriptDiagnostic } from "../runtime-adapter.js";
 import type { ScriptIdentity } from "../script-identity.js";
 import { planLockNeeds, playerRuntimeStageImages } from "../plan-metadata.js";
+import { DebugRecorder } from "../debug-recorder.js";
+import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
+import { inputOps } from "./ops/input.js";
+import { mediaOps } from "./ops/media.js";
+import { resourceOps } from "./ops/resources.js";
+import { sessionOps } from "./ops/session.js";
 import type { BridgeOps } from "./worker-host.js";
 
 /** What the Player reads from a plan the Worker holds, sent with the plan's token instead of the plan. */
@@ -46,23 +52,6 @@ export type PrepareResult =
 export type PrepareSource =
   | { readonly kind: "source"; readonly script: string | PlayerProject }
   | { readonly kind: "plan"; readonly text: string };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const exactly = (value: Record<string, unknown>, required: string[], optional: string[] = []) =>
-  required.every((key) => Object.hasOwn(value, key)) &&
-  Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
-/**
- * Whether `value` is a plain array of elements that pass `test`, read by index: a cloned array keeps its own
- * properties, such as an `every` or `map` of its own, so one with keys besides its indices is malformed, as is a hole.
- */
-function everyItem(value: unknown, test: (item: unknown) => boolean): boolean {
-  if (!Array.isArray(value) || Object.keys(value).length !== value.length) return false;
-  for (let index = 0; index < value.length; index += 1)
-    if (!Object.hasOwn(value, index) || !test(value[index])) return false;
-  return true;
-}
-const isStringArray = (value: unknown) => everyItem(value, (item) => typeof item === "string");
 
 function isProject(value: unknown): value is PlayerProject {
   if (!isRecord(value) || !exactly(value, ["files"], ["images", "unreadableFiles"])) return false;
@@ -113,7 +102,8 @@ function isPrepareArguments(args: unknown): args is { readonly source: PrepareSo
   );
 }
 
-function metadata(plan: InstructionPlan): PlanMetadata {
+/** What the Player reads from a plan, sent with its token. */
+export function planMetadata(plan: InstructionPlan): PlanMetadata {
   return {
     files: plan.files.map((file) => file.path),
     stageImages: playerRuntimeStageImages(plan),
@@ -122,58 +112,79 @@ function metadata(plan: InstructionPlan): PlanMetadata {
   };
 }
 
-/**
- * The Player's ops. The plans live here, under their tokens; nothing returns one. A source is compiled in the Worker:
- * the compiler loads only then, so a Worker that loads published plans never loads it.
- */
-export function playerBridgeOps(): BridgeOps {
+/** What the Player's ops share on one connection: its plans under their tokens, and its debug recorder. */
+export interface PlayerOpsContext {
+  readonly plans: Map<string, InstructionPlan>;
+  /** Keeps `plan` under a new token, which it returns. */
+  hold(plan: InstructionPlan): string;
+  /** Records the connection's sessions for a debug export; see `DebugRecorder`. */
+  readonly recorder: DebugRecorder;
+}
+
+export function playerOpsContext(): PlayerOpsContext {
   const plans = new Map<string, InstructionPlan>();
   let nextPlan = 1;
-  const hold = (plan: InstructionPlan): string => {
-    const token = `p${nextPlan++}`;
-    plans.set(token, plan);
-    return token;
+  return {
+    plans,
+    hold: (plan) => {
+      const token = `p${nextPlan++}`;
+      plans.set(token, plan);
+      return token;
+    },
+    recorder: new DebugRecorder(),
+  };
+}
+
+/**
+ * The Player's ops. The plans live here, under their tokens; nothing returns one. A source is compiled in the Worker:
+ * the compiler loads only then, so a Worker that loads published plans never loads it. Each family of the L5 series
+ * adds its ops in a module of its own under `ops/`.
+ */
+export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()): BridgeOps {
+  const { plans, hold } = context;
+  /** A published plan's result, or why it is none; read at once, so the requests after it wait for nothing. */
+  const loadPlan = (text: string): PrepareResult => {
+    const loaded = loadInstructionPlan(text);
+    return loaded.kind === "valid"
+      ? {
+          kind: "prepared",
+          plan: hold(loaded.plan),
+          diagnostics: [],
+          identity: null,
+          metadata: planMetadata(loaded.plan),
+        }
+      : loaded.kind === "invalid"
+        ? { kind: "invalid", errors: loaded.validation.errors }
+        : { kind: "unreadable", message: loaded.message };
+  };
+  /** A source's result, after the compiler loads: the only op the host awaits. */
+  const compile = async (script: string | PlayerProject): Promise<PrepareResult> => {
+    const [{ compilePlayerProject }, { scriptIdentity }] = await Promise.all([
+      import("../compile-project.js"),
+      import("../script-identity.js"),
+    ]);
+    const compilation = compilePlayerProject(script);
+    const identity = scriptIdentity(script);
+    return compilation.plan === null
+      ? { kind: "notCompiled", diagnostics: compilation.diagnostics, identity }
+      : {
+          kind: "prepared",
+          plan: hold(compilation.plan),
+          diagnostics: compilation.diagnostics,
+          identity,
+          metadata: planMetadata(compilation.plan),
+        };
   };
   return {
     prepare: {
       session: "none",
       checkArguments: isPrepareArguments,
-      run: async (args) => {
+      run: (args) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
         const { source } = args as { readonly source: PrepareSource };
-        if (source.kind === "plan") {
-          const loaded = loadInstructionPlan(source.text);
-          const result: PrepareResult =
-            loaded.kind === "valid"
-              ? {
-                  kind: "prepared",
-                  plan: hold(loaded.plan),
-                  diagnostics: [],
-                  identity: null,
-                  metadata: metadata(loaded.plan),
-                }
-              : loaded.kind === "invalid"
-                ? { kind: "invalid", errors: loaded.validation.errors }
-                : { kind: "unreadable", message: loaded.message };
-          return { result };
-        }
-        const [{ compilePlayerProject }, { scriptIdentity }] = await Promise.all([
-          import("../runtime-adapter.js"),
-          import("../script-identity.js"),
-        ]);
-        const compilation = compilePlayerProject(source.script);
-        const identity = scriptIdentity(source.script);
-        const result: PrepareResult =
-          compilation.plan === null
-            ? { kind: "notCompiled", diagnostics: compilation.diagnostics, identity }
-            : {
-                kind: "prepared",
-                plan: hold(compilation.plan),
-                diagnostics: compilation.diagnostics,
-                identity,
-                metadata: metadata(compilation.plan),
-              };
-        return { result };
+        return source.kind === "plan"
+          ? { result: loadPlan(source.text) }
+          : compile(source.script).then((result) => ({ result }));
       },
     },
     teardown: {
@@ -185,5 +196,9 @@ export function playerBridgeOps(): BridgeOps {
         return { result: null };
       },
     },
+    ...sessionOps(context),
+    ...inputOps(context),
+    ...mediaOps(context),
+    ...resourceOps(context),
   };
 }

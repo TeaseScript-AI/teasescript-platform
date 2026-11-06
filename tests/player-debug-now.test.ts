@@ -8,7 +8,6 @@ import {
   activatePlayerRuntimeButton,
   advancePlayerRuntimeTime,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   playerRuntimeCalls,
   playerRuntimeDebugNow,
@@ -19,6 +18,7 @@ import {
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 
 // Player Debug's Now view (DEBUGGER.md "Player Debug") locates the session from canonical state: package paths with
 // every folder, one-based lines of the authored source, calls innermost first, and every timer, hidden ones included.

@@ -5,19 +5,30 @@ import { effectScope, nextTick, type Ref } from "vue";
 import type { DebugHistoryPoint, DebugHistorySpill } from "../player/debug-history.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
 import {
-  createPlayerRuntimeSession,
   restorePlayerRuntimeSessionAt,
-  selectPlayerRuntimeChoice,
+  selectPlayerRuntimeChoice as rawSelectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-  playerRuntimeSnapshot,
+  playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import { memoryKeptRoomStore, type KeptRoomStore } from "../player/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+
+/** The value trace the host's session runs with, as the host holds it. */
+const traceOf = (session: PlayerRuntimeSession | null | undefined) =>
+  session === null || session === undefined
+    ? null
+    : onHost((held: PlayerRuntimeSession) => held.debugTrace)(session);
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+const selectPlayerRuntimeChoice = onHost(rawSelectPlayerRuntimeChoice);
+const playerRuntimeSnapshot = onHost(rawPlayerRuntimeSnapshot);
 
 // Debug's rewind through the Player's real session host (DEBUGGER.md "Rewind"): Back shows an earlier state for
 // inspection without running it or touching saved data; new input adopts it as the session, with its saved data.
@@ -107,6 +118,7 @@ let usePlayerDebug: (
 ) => { readonly active: Ref<boolean>; readonly rewind: Readonly<Ref<Rewind | null>> };
 
 before(async () => {
+  await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );
@@ -588,7 +600,7 @@ test("every restored state begins a new epoch of the value trace, which may turn
   const trace = host.debugTrace.value!;
   const epoch = trace.status().epoch;
   assert.equal(await rewind.back(0), true);
-  assert.equal(host.session.value?.debugTrace, trace);
+  assert.equal(traceOf(host.session.value), trace);
   assert.equal(trace.status().epoch, epoch + 1);
   assert.equal(await rewind.forward(), true);
   assert.equal(trace.status().epoch, epoch + 2);

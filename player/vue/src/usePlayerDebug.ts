@@ -1,3 +1,4 @@
+import { hatch } from "../../engine-bridge/in-process.js";
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
 import { debugCountdownText } from "../../presentation.js";
@@ -112,7 +113,7 @@ export function usePlayerDebug(
   const countdown = computed(() => {
     const session = player.session.value;
     if (time.value === null || session === null || player.activation.value !== null) return null;
-    return playerRuntimeDebugCountdown(session);
+    return hatch(session, playerRuntimeDebugCountdown);
   });
   player.refreshSceneTimeWhile(() => countdown.value !== null);
   // The estimate may lag a just-published session until its next refresh; scene time never runs backwards.

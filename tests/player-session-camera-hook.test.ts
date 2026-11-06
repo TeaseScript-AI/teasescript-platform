@@ -3,16 +3,20 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
 import {
-  createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
+  createPlayerRuntimeRestorePoint as rawCreatePlayerRuntimeRestorePoint,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { pendingPlayerRuntimeStorageWrite } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+const createPlayerRuntimeRestorePoint = onHost(rawCreatePlayerRuntimeRestorePoint);
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 interface CameraHost {
@@ -34,6 +38,7 @@ let usePlayerSession: (options: {
 }) => CameraHost;
 
 before(async () => {
+  await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );

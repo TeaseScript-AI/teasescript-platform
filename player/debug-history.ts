@@ -6,7 +6,9 @@ import type {
   PlayerSpeakerPresentation,
   PlayerTranscriptEntryPresentation,
 } from "./model.js";
-import { playerRuntimeSnapshotJson, type PlayerRuntimeSession } from "./runtime-adapter.js";
+import { hatch } from "./engine-bridge/in-process.js";
+import { playerRuntimeSnapshotJson } from "./runtime-adapter.js";
+import type { PlayerSession } from "./runtime-view.js";
 import {
   activePlayerRuntimeInteraction,
   playerRuntimeForeground,
@@ -68,7 +70,7 @@ export interface DebugHistoryRestore {
 
 /** The session being played, as Back parks it. */
 export interface DebugHistoryCurrent {
-  readonly session: PlayerRuntimeSession;
+  readonly session: PlayerSession;
   readonly marks: DebugHistoryMarks;
 }
 
@@ -262,7 +264,7 @@ export class DebugHistory {
   }
 
   /** Takes a published session in: links answers to their points and keeps a point for a new interaction. */
-  follow(session: PlayerRuntimeSession, marks: DebugHistoryMarks) {
+  follow(session: PlayerSession, marks: DebugHistoryMarks) {
     if (this.#inspection !== null) return;
     this.#linkResponses(session.events);
     const interaction = activePlayerRuntimeInteraction(session.state);
@@ -311,7 +313,7 @@ export class DebugHistory {
     const left = inspection === null ? shown : inspection.parked;
     if (inspection === null) {
       const id = this.#nextId++;
-      this.#store.add(id, playerRuntimeSnapshotJson(left.session), true);
+      this.#store.add(id, hatch(left.session, playerRuntimeSnapshotJson), true);
       this.#inspection = {
         parked: left,
         parkedScanned: this.#scanned,
@@ -388,11 +390,7 @@ export class DebugHistory {
     };
   }
 
-  #position(
-    id: number,
-    session: PlayerRuntimeSession,
-    marks: DebugHistoryMarks,
-  ): DebugHistoryPosition {
+  #position(id: number, session: PlayerSession, marks: DebugHistoryMarks): DebugHistoryPosition {
     return {
       id,
       events: session.events,
@@ -467,9 +465,9 @@ export function rewindFutureTranscript(
 }
 
 /** The session's state as JSON, or `null` when it is too large to save (`TSK004`). */
-function stateJsonOrNull(session: PlayerRuntimeSession): string | null {
+function stateJsonOrNull(session: PlayerSession): string | null {
   try {
-    return playerRuntimeSnapshotJson(session);
+    return hatch(session, playerRuntimeSnapshotJson);
   } catch (error) {
     if (error instanceof CheckpointError && error.info.code === "TSK004") return null;
     throw error;

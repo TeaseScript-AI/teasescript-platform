@@ -14,10 +14,10 @@ import {
 } from "../src/index.js";
 import {
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   restorePlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { serializeValidatedRuntimeJsonWithin } from "../src/runtime/snapshot/checkpoint.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 

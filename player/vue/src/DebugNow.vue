@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hatch } from "../../engine-bridge/in-process.js";
 import { computed, ref } from "vue";
 import { useElementVisibility } from "@vueuse/core";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +30,10 @@ const root = ref<HTMLElement | null>(null);
 
 const now = computed(() => {
   const session = props.player.session.value;
-  return session && playerRuntimeDebugNow(session, props.player.sceneTimeMs.value);
+  return (
+    session &&
+    hatch(session, (held) => playerRuntimeDebugNow(held, props.player.sceneTimeMs.value))
+  );
 });
 // Remaining timer times tick like the timer rail, while the tab is on screen.
 const onScreen = useElementVisibility(root);

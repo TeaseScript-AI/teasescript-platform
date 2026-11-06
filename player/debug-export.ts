@@ -25,7 +25,7 @@ import {
   type RuntimeSessionResult,
   type RuntimeSnapshot,
   type StoredFileKind,
-} from "../src/index.js";
+} from "../src/playback.js";
 import {
   CHECKPOINT_FORMAT,
   CHECKPOINT_VERSION,

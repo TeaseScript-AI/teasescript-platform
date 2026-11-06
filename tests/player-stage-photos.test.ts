@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
 import { playerRuntimeStageImages } from "../player/plan-metadata.js";
-import { compilePlayerProject } from "../player/runtime-adapter.js";
+import { compilePlayerProject } from "../player/compile-project.js";
 import type { PhotoSwatches } from "../player/theme/node-vibrant/swatches.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 

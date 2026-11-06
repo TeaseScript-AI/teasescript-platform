@@ -3,14 +3,14 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
 
 import {
-  activatePlayerRuntimeButton,
-  createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
+  activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
+  createPlayerRuntimeRestorePoint as rawCreatePlayerRuntimeRestorePoint,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-  playerRuntimeSnapshot,
+  playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
   pendingPlayerRuntimeStorageWrite,
   playerRuntimePacingGate,
@@ -28,6 +28,12 @@ import {
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { AMSTERDAM, utc } from "./helpers/temporal-fixtures.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
+const createPlayerRuntimeRestorePoint = onHost(rawCreatePlayerRuntimeRestorePoint);
+const playerRuntimeSnapshot = onHost(rawPlayerRuntimeSnapshot);
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 interface StorageHost {
@@ -78,6 +84,7 @@ let usePlayerSession: (options: {
 }) => StorageHost;
 
 before(async () => {
+  await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );
@@ -460,7 +467,8 @@ for (const [name, source, expected] of [
     await nextTick();
     now = 2_000;
     context.mock.timers.tick(2_000);
-    await nextTick();
+    // The deadline's catch-up goes over the bridge (begin, step, adopt), each reply a few microtasks later.
+    for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setImmediate(resolve));
     if (source.startsWith("say")) {
       const waiting: PlayerRuntimeSession | null = host.session.value;
       assert.equal(playerRuntimePacingGate(waiting!), null);
@@ -532,7 +540,7 @@ test("Vue host resolves the player's zone and presentation again at Start and at
   );
 });
 
-test("Vue host's Continue resumes a restored ready session within the activating call", (context) => {
+test("Vue host's Continue resumes a restored ready session from the activation alone", async (context) => {
   const { host } = createHost(context, {
     scope: "test",
     load: async () => [],
@@ -552,8 +560,8 @@ test("Vue host's Continue resumes a restored ready session within the activating
   assert.equal(host.activation.value, "continue");
   assert.equal(beforeActivation, null);
 
-  // No timer, observation, or page lifecycle event is needed after the click.
-  void host.activate();
+  // No timer, observation, or page lifecycle event is needed after the click: Continue resumes from its replies.
+  await host.activate();
   assert.deepEqual(
     host.session.value?.transcriptEntries.map((entry) => entry.text),
     ["Resumed"],

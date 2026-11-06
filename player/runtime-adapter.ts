@@ -1,12 +1,10 @@
 import {
   CHECKPOINT_FORMAT,
   CHECKPOINT_VERSION,
-  compileProject,
   completeAction,
   createFreshRuntimeSession,
   deserializeRuntimeSession,
   interactionDeadlineMs,
-  MAIN_FILE_PATH,
   restoreRuntimeSession,
   RuntimeSessionError,
   serializeCheckpoint,
@@ -25,8 +23,6 @@ import {
   type PermanentButtonPressOutcome,
   type PermanentButtonProjection,
   type PresentationSettings,
-  type ProjectImageFile,
-  type ProjectSourceFile,
   type UnreadablePackageFile,
   type RuntimeInteractionActionSnapshot,
   type CapturedMediaAdmission,
@@ -48,7 +44,8 @@ import {
   type RandomDrawRequest,
   type RandomDrawResolutionOutcome,
   textSha256,
-} from "../src/index.js";
+} from "../src/playback.js";
+import type { ProjectImageFile, ProjectSourceFile } from "../src/index.js";
 import {
   activeInteraction,
   appendTranscript,
@@ -58,9 +55,9 @@ import {
   nextPlayerRuntimeEventMs,
   playerRuntimeAwaitsHost,
   playerRuntimePacingGate,
+  type PlayerSessionView,
 } from "./runtime-view.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
-import { formValueText } from "../src/interaction-answers.js";
 import { IMAGE_SKIP_TEXT } from "../src/image-input.js";
 
 import { instructionSourcePath } from "../src/plan/model.js";
@@ -71,13 +68,7 @@ import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoin
 import type { DebugAnswerInput } from "./debug-export.js";
 import type { DebugRecorder } from "./debug-recorder.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
-import type {
-  PlayerFormEditorPresentation,
-  PlayerFormFieldPresentation,
-  PlayerFormPresentation,
-  PlayerSpeakerPresentation,
-  PlayerTranscriptEntryPresentation,
-} from "./model.js";
+import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "./model.js";
 
 /**
  * What one publication of a session shows: the engine's operational view with the Stage, media, permanent buttons,
@@ -91,31 +82,10 @@ export interface PlayerRuntimeState extends RuntimeSessionView {
   readonly temporalPresentation: PresentationSettings;
 }
 
-export interface PlayerRuntimeSession {
+export interface PlayerRuntimeSession extends PlayerSessionView {
   readonly plan: InstructionPlan;
   /** The engine-owned runner of the session; only this adapter's functions operate it. */
   readonly engine: PlayerRuntimeEngine;
-  /**
-   * Counts the session's publications: every operation publishes a new revision, also one that changed nothing, and also
-   * when the host keeps an earlier one. A publication stays usable until an operation changes the state; from then on
-   * only later ones are.
-   */
-  readonly revision: number;
-  /** What this publication shows; see `PlayerRuntimeState`. */
-  readonly state: PlayerRuntimeState;
-  /**
-   * The first event sequence this session's own runs emitted: a restored session came with the events before it, as
-   * history. `0` for a session that started fresh.
-   */
-  readonly liveEventSequence: number;
-  readonly events: readonly InterpreterEvent[];
-  readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
-  /** By the sequence of the event that created it, the index of each script message in `transcriptEntries`. */
-  readonly transcriptMessageRows: ReadonlyMap<number, number>;
-  /** The indexes of the removed messages in `transcriptEntries`, in ascending order. */
-  readonly transcriptRemovedRows: readonly number[];
-  readonly transcriptRevision: number;
-  readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   /** Records the session's engine calls for a debug export; it never changes them. */
   readonly recorder: DebugRecorder | null;
   /**
@@ -163,6 +133,16 @@ export class PlayerRuntimeEngine {
     this.#runtime = runtime;
     this.#revision = revision;
     this.#current = revision;
+  }
+
+  /** Whether an operation made from publication `revision` may run, as `runtimeAt` decides. */
+  accepts(revision: number): boolean {
+    return revision >= this.#current && revision <= this.#revision;
+  }
+
+  /** Whether a call threw since the runner was last built: the next use rebuilds it, or throws that error again. */
+  get broken(): boolean {
+    return this.#thrown !== null;
   }
 
   /** The runner for publication `at`, rebuilt from its recorder after a call threw. */
@@ -484,40 +464,11 @@ export interface PlayerCompilation {
   readonly diagnostics: readonly PlayerScriptDiagnostic[];
 }
 
-/** Compiles a project, or a single source as the `main.tease` of a one-file project, without running it. */
-export function compilePlayerProject(script: string | PlayerProject): PlayerCompilation {
-  const project =
-    typeof script === "string" ? { files: [{ path: MAIN_FILE_PATH, source: script }] } : script;
-  const compilation = compileProject(project.files, {
-    ...(project.images === undefined ? {} : { images: project.images }),
-    ...(project.unreadableFiles === undefined ? {} : { unreadableFiles: project.unreadableFiles }),
-  });
-  return Object.freeze({
-    plan: compilation.plan,
-    diagnostics: Object.freeze(
-      compilation.diagnostics.map((diagnostic) =>
-        Object.freeze({
-          path: diagnostic.path,
-          line: diagnostic.span.start.line + 1,
-          column: diagnostic.span.start.column + 1,
-          severity: diagnostic.severity,
-          code: diagnostic.code,
-          message: diagnostic.message,
-        }),
-      ),
-    ),
-  });
-}
-
-/**
- * Starts a session of a script: a project, a single source as the `main.tease` of a one-file project, or the plan
- * `compilePlayerProject` made of one. A script that does not compile throws with its first error.
- */
+/** Starts a session of a plan; `compile-project.ts` starts one of a script's source. */
 export function createPlayerRuntimeSession(
-  script: string | PlayerProject | InstructionPlan,
+  plan: InstructionPlan,
   options: PlayerRuntimeSessionOptions = {},
 ): PlayerRuntimeSession {
-  const plan = isInstructionPlan(script) ? script : compiledPlan(script);
   const runtime = createFreshRuntimeSession(plan, {
     ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
     persistentScriptStorage: options.persistentScriptStorage ?? false,
@@ -538,23 +489,6 @@ export function createPlayerRuntimeSession(
     current.run(traceOptions(debugTrace)),
   );
   return publish(appendRuntimeEvents(session, operation.events));
-}
-
-function isInstructionPlan(
-  script: string | PlayerProject | InstructionPlan,
-): script is InstructionPlan {
-  return typeof script !== "string" && "instructions" in script;
-}
-
-function compiledPlan(script: string | PlayerProject): InstructionPlan {
-  const compilation = compilePlayerProject(script);
-  if (compilation.plan !== null) return compilation.plan;
-  const error = compilation.diagnostics.find((diagnostic) => diagnostic.severity === "error");
-  throw new Error(
-    error === undefined
-      ? "The script did not compile."
-      : `${error.path}:${error.line}:${error.column}: ${error.message}`,
-  );
 }
 
 export function createPlayerRuntimeRestorePoint(
@@ -1209,107 +1143,6 @@ export function answerPlayerRuntimeImage(
     session: applyOperation(session, operation, "completed"),
     outcome: operation.outcome,
   });
-}
-
-/**
- * The latest form presentation of each session, by its form state: an edit changes the state, and nothing else
- * re-renders the form, although every publication carries its own copy of the state.
- */
-const formPresentations = new WeakMap<
-  PlayerRuntimeEngine,
-  { readonly key: string; readonly presentation: PlayerFormPresentation }
->();
-
-/** The controls of the pending form as its answers stand, or `null` without a pending form. */
-export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPresentation | null {
-  const action = activeInteraction(session.state);
-  if (action?.ui.kind !== "form" || action.form === undefined) return null;
-  const presentation = session.state.temporalPresentation;
-  const key = JSON.stringify([action.actionId, action.form, presentation]);
-  const cached = formPresentations.get(session.engine);
-  if (cached?.key === key) return cached.presentation;
-  const { ui, form } = action;
-  const fields = ui.fields.map((field, index): PlayerFormFieldPresentation => {
-    const value = form.values[index] ?? null;
-    const editing = form.editor?.fieldId === field.id;
-    if (field.kind !== "boolean" && field.kind !== "cycle")
-      return Object.freeze({
-        id: field.id,
-        label: field.text,
-        kind: "value",
-        pressed: false,
-        state: value === null ? null : formValueText(value, presentation),
-        states: Object.freeze([]),
-        optional: field.optional,
-        editing,
-        ...(field.background === undefined ? {} : { authoredFill: field.background }),
-      });
-    const option =
-      field.kind === "cycle"
-        ? typeof value === "number"
-          ? field.options[value]
-          : undefined
-        : field.options?.find((candidate) => candidate.value === value);
-    const authoredFill = option?.background ?? field.background;
-    return Object.freeze({
-      id: field.id,
-      label: field.text,
-      kind: field.kind === "boolean" ? "toggle" : "cycle",
-      pressed: value === true,
-      state: option?.text ?? null,
-      states: Object.freeze(field.options?.map((candidate) => candidate.text) ?? []),
-      optional: false,
-      editing: false,
-      ...(authoredFill === undefined ? {} : { authoredFill }),
-    });
-  });
-  const edited = ui.fields.find((field) => field.id === form.editor?.fieldId);
-  const result = Object.freeze({
-    actionId: action.actionId,
-    fields: Object.freeze(fields),
-    submit: Object.freeze({
-      label: ui.submit.text,
-      ...(ui.submit.background === undefined ? {} : { authoredFill: ui.submit.background }),
-    }),
-    cancel:
-      ui.cancel === null
-        ? null
-        : Object.freeze({
-            label: ui.cancel.text,
-            ...(ui.cancel.background === undefined ? {} : { authoredFill: ui.cancel.background }),
-          }),
-    editor:
-      edited === undefined ||
-      form.editor === null ||
-      edited.kind === "boolean" ||
-      edited.kind === "cycle"
-        ? null
-        : Object.freeze({
-            fieldId: edited.id,
-            label: edited.text,
-            // A date or time control shows its hint beside it, so it has none by default.
-            hint:
-              edited.hint ??
-              (edited.kind === "date" || edited.kind === "time" || edited.kind === "datetime"
-                ? ""
-                : `${edited.text}…`),
-            optional: edited.optional,
-            text: form.editor.text,
-            inputMode:
-              edited.kind === "integer" ? "numeric" : edited.kind === "number" ? "decimal" : "text",
-            // A native date control has no year 0000, so such a value is edited as ISO text.
-            inputType:
-              edited.kind === "date" || edited.kind === "time" || edited.kind === "datetime"
-                ? form.editor.text.startsWith("0000")
-                  ? "text"
-                  : edited.kind === "datetime"
-                    ? "datetime-local"
-                    : edited.kind
-                : "text",
-          } satisfies PlayerFormEditorPresentation),
-  });
-  formPresentations.set(session.engine, { key, presentation: result });
-  return result;
 }
 
 type FormControlResult = PlayerRuntimeControlResult<

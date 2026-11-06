@@ -52,11 +52,19 @@ export class BridgeLostError extends Error {
   override readonly name = "BridgeLostError";
 }
 
+/**
+ * Called with a successful reply as it arrives, before the request's promise settles, so a session's store applies the
+ * reply's publication in arrival order, also when a transport delivers replies early (`in-process.ts`). A throw rejects
+ * the request instead.
+ */
+export type ReplyHook = (result: BridgeResult) => void;
+
 /** What a client section sends: a request for the section's session, without waiting for other requests. */
 export type SectionSend = (
   op: string,
   args: unknown,
   basis: number | null,
+  onReply?: ReplyHook,
 ) => Promise<BridgeResult>;
 
 export interface BridgeClient {
@@ -64,16 +72,25 @@ export interface BridgeClient {
   request(
     op: string,
     args: unknown,
-    options?: { readonly session?: string | null; readonly basis?: number | null },
+    options?: {
+      readonly session?: string | null;
+      readonly basis?: number | null;
+      readonly onReply?: ReplyHook;
+    },
   ): Promise<BridgeResult>;
   /**
    * Runs `body` as one exclusive section of `session`: other requests for that session wait until it ends, so a
    * dependent chain (observe, main-side checks and effects, then an op) sees what a synchronous chain would.
    */
   section<T>(session: string, body: (send: SectionSend) => Promise<T>): Promise<T>;
-  /** Ends the Worker: pending requests fail with `BridgeLostError`. */
+  /**
+   * Sends one request at once, ahead of the requests waiting for its session, as `halt` must be: the host handles it on
+   * receipt too.
+   */
+  signal(op: string, args: unknown, session: string, onReply?: ReplyHook): Promise<BridgeResult>;
+  /** Ends the Worker: pending requests fail with `BridgeLostError`. An intentional end is no loss: no `onLoss` call. */
   terminate(): void;
-  /** Calls `listener` once if the Worker is lost. */
+  /** Calls `listener` once if the Worker is lost: it failed or sent what no host sends, not `terminate()`. */
   onLoss(listener: (error: BridgeLostError) => void): void;
 }
 
@@ -81,32 +98,58 @@ export interface BridgeClient {
  * Connects to the Worker behind `port` once it is ready and of the same build. A Worker that fails before `ready`, or
  * says it is another build, is a startup failure; after `ready`, a reported failure or an unreadable message loses it.
  */
-export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<BridgeClient> {
-  return new Promise((resolveClient, rejectClient) => {
-    let ready = false;
+export async function connectBridge(port: ClientPort, build: BuildIdentity): Promise<BridgeClient> {
+  const { client, ready } = openBridge(port, build);
+  await ready;
+  return client;
+}
+
+/**
+ * The client of the Worker behind `port`, at once, and `ready`, which settles as `connectBridge` does. Its requests post
+ * at once too; a port that delivers them only once its Worker runs, as a browser's does, keeps them until then.
+ */
+export function openBridge(
+  port: ClientPort,
+  build: BuildIdentity,
+): { readonly client: BridgeClient; readonly ready: Promise<void> } {
+  let opened!: BridgeClient;
+  const ready = new Promise<void>((resolveClient, rejectClient) => {
+    let announced = false;
     let lost: BridgeLostError | null = null;
     let nextId = 1;
     const pending = new Map<
       number,
-      { resolve: (result: BridgeResult) => void; reject: (error: Error) => void }
+      {
+        resolve: (result: BridgeResult) => void;
+        reject: (error: Error) => void;
+        onReply: ReplyHook | undefined;
+      }
     >();
     const lossListeners: ((error: BridgeLostError) => void)[] = [];
     const locks = new Map<string, Promise<void>>();
 
-    const lose = (message: string): void => {
+    // Whether the Worker ended by `terminate()`, which rejects what is pending but reports no loss.
+    let terminated = false;
+    const lose = (message: string, intentional = false): void => {
       if (lost !== null) return;
       lost = new BridgeLostError(message);
+      terminated = intentional;
       port.terminate();
       for (const entry of pending.values()) entry.reject(lost);
       pending.clear();
-      for (const listener of lossListeners) listener(lost);
+      const listeners = lossListeners.splice(0);
+      if (!intentional) for (const listener of listeners) listener(lost);
     };
     const fail = (message: string): void => {
-      if (!ready) {
-        ready = true;
+      if (!announced) {
+        announced = true;
         lost = new BridgeLostError(message);
         port.terminate();
-        rejectClient(new BridgeStartupError(message));
+        // Requests sent before `ready` (`openBridge`) fail with the startup failure too.
+        const failure = new BridgeStartupError(message);
+        for (const entry of pending.values()) entry.reject(failure);
+        pending.clear();
+        rejectClient(failure);
         return;
       }
       lose(message);
@@ -121,11 +164,11 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
       const message = readWorkerMessage(data);
       if (message === null) return fail("The engine Worker sent a message the Player cannot read.");
       if (message.kind === "ready") {
-        if (ready) return lose("The engine Worker announced itself twice.");
+        if (announced) return lose("The engine Worker announced itself twice.");
         if (!sameBuild(message.build, build))
           return fail("The engine Worker belongs to another build of the Player.");
-        ready = true;
-        resolveClient(client);
+        announced = true;
+        resolveClient();
         return;
       }
       settle(message);
@@ -135,15 +178,20 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
       const entry = pending.get(reply.id);
       if (entry === undefined) return;
       pending.delete(reply.id);
-      if (reply.ok)
-        entry.resolve({
-          session: reply.session,
-          revision: reply.revision,
-          eventsThrough: reply.eventsThrough,
-          result: reply.result,
-          view: reply.view,
-        });
-      else entry.reject(new BridgeRequestError(reply.error));
+      if (!reply.ok) return entry.reject(new BridgeRequestError(reply.error));
+      const result: BridgeResult = {
+        session: reply.session,
+        revision: reply.revision,
+        eventsThrough: reply.eventsThrough,
+        result: reply.result,
+        view: reply.view,
+      };
+      try {
+        entry.onReply?.(result);
+      } catch (error) {
+        return entry.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+      entry.resolve(result);
     }
 
     function send(
@@ -151,11 +199,12 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
       args: unknown,
       session: string | null,
       basis: number | null,
+      onReply?: ReplyHook,
     ): Promise<BridgeResult> {
       if (lost !== null) return Promise.reject(lost);
       const id = nextId++;
       return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+        pending.set(id, { resolve, reject, onReply });
         try {
           port.post({ v: BRIDGE_VERSION, kind: "request", id, session, basis, op, args });
         } catch (error) {
@@ -166,34 +215,46 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
       });
     }
 
-    /** Runs `body` once every earlier holder of `key` is done, and holds `key` until `body` settles. */
-    async function exclusive<T>(key: string, body: () => Promise<T>): Promise<T> {
-      const before = locks.get(key) ?? Promise.resolve();
+    /**
+     * Runs `body` once every earlier holder of `key` is done, and holds `key` until `body` settles. With no holder,
+     * `body` starts at once, so a request posts before `request` returns.
+     */
+    function exclusive<T>(key: string, body: () => Promise<T>): Promise<T> {
+      const before = locks.get(key);
       let release!: () => void;
       const held = new Promise<void>((resolve) => (release = resolve));
-      const chain = before.then(() => held);
+      const chain = (before ?? Promise.resolve()).then(() => held);
       locks.set(key, chain);
-      await before;
-      try {
-        return await body();
-      } finally {
-        release();
-        if (locks.get(key) === chain) locks.delete(key);
-      }
+      const run = async (): Promise<T> => {
+        try {
+          return await body();
+        } finally {
+          release();
+          if (locks.get(key) === chain) locks.delete(key);
+        }
+      };
+      return before === undefined ? run() : before.then(run);
     }
 
     const client: BridgeClient = {
       request: (op, args, options = {}) => {
         const session = options.session ?? null;
-        return exclusive(session ?? "", () => send(op, args, session, options.basis ?? null));
+        return exclusive(session ?? "", () =>
+          send(op, args, session, options.basis ?? null, options.onReply),
+        );
       },
       section: (session, body) =>
-        exclusive(session, () => body((op, args, basis) => send(op, args, session, basis))),
-      terminate: () => lose("The engine Worker was terminated."),
+        exclusive(session, () =>
+          body((op, args, basis, onReply) => send(op, args, session, basis, onReply)),
+        ),
+      signal: (op, args, session, onReply) => send(op, args, session, null, onReply),
+      terminate: () => lose("The engine Worker was terminated.", true),
       onLoss: (listener) => {
-        if (lost !== null) listener(lost);
-        else lossListeners.push(listener);
+        if (lost === null) lossListeners.push(listener);
+        else if (!terminated) listener(lost);
       },
     };
+    opened = client;
   });
+  return { client: opened, ready };
 }

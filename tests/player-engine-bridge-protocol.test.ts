@@ -14,7 +14,7 @@ import {
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import { BRIDGE_VERSION, type BuildIdentity } from "../player/engine-bridge/protocol.js";
-import { compilePlayerProject } from "../player/runtime-adapter.js";
+import { compilePlayerProject } from "../player/compile-project.js";
 import { listRandomSites, validateInstructionPlan } from "../src/index.js";
 
 /*
@@ -289,6 +289,18 @@ test("a lost Worker fails its pending requests and every later one; nothing is r
   assert.equal(losses.length, 1);
 });
 
+test("an intentional terminate fails pending and later requests but reports no loss", async () => {
+  const client = await connectBridge(nodeWorkerPort(FIXTURE_WORKER, BUILD), BUILD);
+  const losses: BridgeLostError[] = [];
+  client.onLoss((error) => losses.push(error));
+  const pending = client.request("slow", 0);
+  client.terminate();
+  await assert.rejects(pending, BridgeLostError);
+  await assert.rejects(client.request("slow", 0), BridgeLostError);
+  client.onLoss((error) => losses.push(error));
+  assert.equal(losses.length, 0);
+});
+
 test("the browser Worker's host loads no compiler or language-tooling module until a source is prepared", () => {
   const url = new URL("../player/engine-bridge/engine-host.js", import.meta.url).href;
   const script = [
@@ -309,8 +321,11 @@ test("the browser Worker's host loads no compiler or language-tooling module unt
   // EVIDENCE: fixture: the child script writes the JSON of a list of URLs.
   const loaded = JSON.parse(child.stdout) as string[];
   assert.ok(loaded.some((module) => module.endsWith("/dist/src/plan/load.js")));
+  // The adapter and the recorder run the sessions there, on the playback entry: no compiler comes with them.
+  assert.ok(loaded.some((module) => module.endsWith("/dist/player/runtime-adapter.js")));
+  assert.ok(loaded.some((module) => module.endsWith("/dist/player/debug-recorder.js")));
   const authoring =
-    /\/dist\/src\/(index|compiler|parser|lexer|semantic|type-checker|language-tooling|source-debug-sidecar|static-types|ast-validation)(\.js$|\/)|\/dist\/src\/(type-inference|editor)\/|\/dist\/player\/(runtime-adapter|script-identity)\.js$/;
+    /\/dist\/src\/(index|compiler|parser|lexer|semantic|type-checker|language-tooling|source-debug-sidecar|static-types|ast-validation)(\.js$|\/)|\/dist\/src\/(type-inference|editor)\/|\/dist\/player\/(compile-project|script-identity)\.js$/;
   assert.deepEqual(
     loaded.filter((module) => authoring.test(module)),
     [],

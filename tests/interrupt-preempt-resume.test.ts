@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  createPlayerRuntimeSession,
-  observePlayerRuntimeTime,
-  type PlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
+import { observePlayerRuntimeTime, type PlayerRuntimeSession } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
   playerRuntimeAwaitsHost,
   playerRuntimeDeadlines,

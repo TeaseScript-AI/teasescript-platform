@@ -8,14 +8,13 @@ import {
   type KeptSessionStore,
 } from "../player/kept-sessions.js";
 import {
-  activatePlayerRuntimeButton,
-  compilePlayerProject,
-  createPlayerRuntimeSession,
-  submitPlayerRuntimeComposer,
+  activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
+  submitPlayerRuntimeComposer as rawSubmitPlayerRuntimeComposer,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import {
@@ -32,6 +31,11 @@ import {
 } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
+const submitPlayerRuntimeComposer = onHost(rawSubmitPlayerRuntimeComposer);
 
 interface SessionExport {
   readonly transfer: SessionTransfer;
@@ -80,6 +84,7 @@ let usePlayerSession: (options: {
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 before(async () => {
+  await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );
@@ -171,7 +176,9 @@ async function answerImage(host: TransferHost, name: string): Promise<string> {
   const stored = await host.images.store(new File([PNG], name), { types: null, mime: null });
   assert.ok("reference" in stored, name);
   assert.equal(host.imageCapture.choose(stored.reference), true);
-  const result = host.imageCapture.use(host.session.value!);
+  const result = onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(
+    host.session.value!,
+  );
   assert.equal(result?.outcome.kind, "completed");
   host.update(result!.session);
   return stored.reference;

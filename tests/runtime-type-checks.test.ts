@@ -13,7 +13,7 @@ import {
   type InstructionPlan,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { createPlayerRuntimeSession } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";

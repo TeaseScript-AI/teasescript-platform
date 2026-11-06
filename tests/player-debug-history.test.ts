@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before } from "node:test";
 
 import {
   DebugHistory,
@@ -10,14 +10,20 @@ import {
 } from "../player/debug-history.js";
 import { openDebugHistorySpill } from "../player/debug-history-indexeddb.js";
 import {
-  createPlayerRuntimeSession,
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeForm,
-  type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
-import { playerRuntimeForeground, playerTemporalContext } from "../player/runtime-view.js";
+import { createPlayerRuntimeSession as compiledSession } from "../player/compile-project.js";
+import { heldPlan } from "../player/engine-bridge/in-process.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
+import {
+  playerRuntimeForeground,
+  playerTemporalContext,
+  type PlayerSession,
+} from "../player/runtime-view.js";
+import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
 import type { PlayerTranscriptEntryPresentation } from "../player/model.js";
 
 // Debug's rewind history keeps a point for each newly presented interaction and restores it exactly: its state, and its
@@ -33,24 +39,41 @@ const twoChoices = [
 
 const unmarked: DebugHistoryMarks = { editedWhileDebugging: null, rewoundWhileDebugging: null };
 
-function choose(session: PlayerRuntimeSession, label: string): PlayerRuntimeSession {
+// The engine's host the sessions live in, as the Player's are until the L5 series activates the Worker.
+let bridge: PlayerBridge;
+before(async () => {
+  bridge = await inProcessBridge();
+});
+
+/** A session of `script` that the host holds, as the Player starts one. */
+function createPlayerRuntimeSession(...args: Parameters<typeof compiledSession>): PlayerSession {
+  return introduced(bridge, compiledSession(...args));
+}
+
+/** The plan `session` runs, as the host holds it. */
+const planOf = (session: PlayerSession) => heldPlan(bridge, session.planToken);
+
+function choose(session: PlayerSession, label: string): PlayerSession {
   const foreground = playerRuntimeForeground(session);
   assert.ok(foreground?.kind === "choose");
   const option = foreground.options.find((candidate) => candidate.label === label);
   assert.ok(option, label);
-  return selectPlayerRuntimeChoice(session, option.id)!.session;
+  return hatch(session, (held) => selectPlayerRuntimeChoice(held, option.id))!.session;
 }
 
-function restored(history: DebugHistory, restore: DebugHistoryRestore): PlayerRuntimeSession {
+function restored(history: DebugHistory, restore: DebugHistoryRestore): PlayerSession {
   const { position, snapshotJson } = restore;
-  return restorePlayerRuntimeSessionAt(
-    history.plan,
-    snapshotJson,
-    position.events.slice(0, position.eventCount),
+  return introduced(
+    bridge,
+    restorePlayerRuntimeSessionAt(
+      history.plan,
+      snapshotJson,
+      position.events.slice(0, position.eventCount),
+    ),
   );
 }
 
-function said(session: PlayerRuntimeSession): string[] {
+function said(session: PlayerSession): string[] {
   return session.transcriptEntries.map((entry) => entry.text);
 }
 
@@ -85,8 +108,8 @@ test("Back restores a point exactly, Forward the state it left, and the answer e
   // The adapter's transcript grows in place, so the first state's is copied while it is shown.
   const firstTranscript = [...first.transcriptEntries];
   // The session advances in place, so the first state is exported while it is shown.
-  const firstSnapshot = playerRuntimeSnapshot(first);
-  const history = new DebugHistory(first.plan, Promise.resolve(null));
+  const firstSnapshot = hatch(first, playerRuntimeSnapshot);
+  const history = new DebugHistory(planOf(first), Promise.resolve(null));
   history.follow(first, unmarked);
   const second = choose(first, "One");
   history.follow(second, unmarked);
@@ -104,23 +127,23 @@ test("Back restores a point exactly, Forward the state it left, and the answer e
 
   const back = await history.back(0, () => ({ session: second, marks: unmarked }));
   const atFirst = restored(history, back);
-  assert.deepEqual(playerRuntimeSnapshot(atFirst), firstSnapshot);
+  assert.deepEqual(hatch(atFirst, playerRuntimeSnapshot), firstSnapshot);
   assert.deepEqual(atFirst.transcriptEntries, firstTranscript);
   assert.deepEqual(back.marks.rewoundWhileDebugging, { restoredSceneTimeMs: 0, rewindCount: 1 });
   assert.deepEqual(history.inspection, { points: 1, canForward: true });
   // The state Back left is the future the restored state does not show yet.
   assert.equal(history.future?.eventCount, second.events.length);
 
-  const secondSnapshot = playerRuntimeSnapshot(second);
+  const secondSnapshot = hatch(second, playerRuntimeSnapshot);
   const atSecond = restored(history, await history.forward());
-  assert.deepEqual(playerRuntimeSnapshot(atSecond), secondSnapshot);
+  assert.deepEqual(hatch(atSecond, playerRuntimeSnapshot), secondSnapshot);
   assert.deepEqual(said(atSecond), ["One", "first One"]);
   assert.deepEqual(history.inspection, { points: 2, canForward: false });
 });
 
 test("new input adopts the restored state: later points go, and the point gets its new answer", async () => {
   const first = createPlayerRuntimeSession(twoChoices);
-  const history = new DebugHistory(first.plan, Promise.resolve(null));
+  const history = new DebugHistory(planOf(first), Promise.resolve(null));
   history.follow(first, unmarked);
   const second = choose(first, "One");
   history.follow(second, unmarked);
@@ -144,7 +167,7 @@ test("new input adopts the restored state: later points go, and the point gets i
 
 test("Return reinstates the session Back first left, with its points", async () => {
   const first = createPlayerRuntimeSession(twoChoices);
-  const history = new DebugHistory(first.plan, Promise.resolve(null));
+  const history = new DebugHistory(planOf(first), Promise.resolve(null));
   history.follow(first, unmarked);
   const second = choose(first, "One");
   history.follow(second, unmarked);
@@ -164,7 +187,7 @@ test("Return reinstates the session Back first left, with its points", async () 
 
 test("a session that cannot be left now is not parked, and nothing changes", async () => {
   const first = createPlayerRuntimeSession(twoChoices);
-  const history = new DebugHistory(first.plan, Promise.resolve(null));
+  const history = new DebugHistory(planOf(first), Promise.resolve(null));
   history.follow(first, unmarked);
   await assert.rejects(history.back(0, () => null));
   assert.equal(history.inspection, null);
@@ -173,9 +196,9 @@ test("a session that cannot be left now is not parked, and nothing changes", asy
 test("points beyond the memory budget move to the spill store and are read back from it", async () => {
   const { spill, rows } = memorySpill();
   const first = createPlayerRuntimeSession(twoChoices);
-  const history = new DebugHistory(first.plan, Promise.resolve(spill), 1);
+  const history = new DebugHistory(planOf(first), Promise.resolve(spill), 1);
   history.follow(first, unmarked);
-  const firstSnapshot = playerRuntimeSnapshot(first);
+  const firstSnapshot = hatch(first, playerRuntimeSnapshot);
   const second = choose(first, "One");
   history.follow(second, unmarked);
   await settle();
@@ -186,7 +209,7 @@ test("points beyond the memory budget move to the spill store and are read back 
     history,
     await history.back(0, () => ({ session: second, marks: unmarked })),
   );
-  assert.deepEqual(playerRuntimeSnapshot(atFirst), firstSnapshot);
+  assert.deepEqual(hatch(atFirst, playerRuntimeSnapshot), firstSnapshot);
   // Adopting the restored state deletes the rows of the states it discards.
   history.adopt();
   await settle();
@@ -196,7 +219,7 @@ test("points beyond the memory budget move to the spill store and are read back 
 });
 
 test("without a spill store, or after it failed, points stop at the memory budget and earlier ones stay", async () => {
-  const firstSnapshot = playerRuntimeSnapshot(createPlayerRuntimeSession(twoChoices));
+  const firstSnapshot = hatch(createPlayerRuntimeSession(twoChoices), playerRuntimeSnapshot);
   const size = JSON.stringify(firstSnapshot).length;
   // Without a spill store, the second point no longer fits; a failing one takes the first point, then fails.
   for (const [spill, budget] of [
@@ -204,7 +227,7 @@ test("without a spill store, or after it failed, points stop at the memory budge
     [Promise.resolve(memorySpill(true).spill), 1],
   ] as const) {
     const first = createPlayerRuntimeSession(twoChoices);
-    const history = new DebugHistory(first.plan, spill, budget);
+    const history = new DebugHistory(planOf(first), spill, budget);
     await settle();
     history.follow(first, unmarked);
     await settle();
@@ -217,13 +240,13 @@ test("without a spill store, or after it failed, points stop at the memory budge
       history,
       await history.back(0, () => ({ session: second, marks: unmarked })),
     );
-    assert.deepEqual(playerRuntimeSnapshot(atFirst), firstSnapshot);
+    assert.deepEqual(hatch(atFirst, playerRuntimeSnapshot), firstSnapshot);
   }
 });
 
 test("a state too large to save ends the history as a full store does, and earlier points stay", async (context) => {
   const first = createPlayerRuntimeSession(twoChoices);
-  const history = new DebugHistory(first.plan, Promise.resolve(null), 1_000_000);
+  const history = new DebugHistory(planOf(first), Promise.resolve(null), 1_000_000);
   await settle();
   history.follow(first, unmarked);
   const second = choose(first, "One");
@@ -274,7 +297,7 @@ test("the spill store opens without crypto.randomUUID, which plain-HTTP pages la
 test("a state that cannot be read back is reported, and the history stays as it was", async () => {
   const { spill, rows } = memorySpill();
   const first = createPlayerRuntimeSession(twoChoices);
-  const history = new DebugHistory(first.plan, Promise.resolve(spill), 1);
+  const history = new DebugHistory(planOf(first), Promise.resolve(spill), 1);
   history.follow(first, unmarked);
   const second = choose(first, "One");
   history.follow(second, unmarked);
@@ -293,7 +316,7 @@ test("a state that cannot be read back is reported, and the history stays as it 
 
 test("the grey future is the transcript of the state Forward restores after the shown state's own", async () => {
   const first = createPlayerRuntimeSession(twoChoices);
-  const history = new DebugHistory(first.plan, Promise.resolve(null));
+  const history = new DebugHistory(planOf(first), Promise.resolve(null));
   history.follow(first, unmarked);
   const second = choose(first, "One");
   history.follow(second, unmarked);
@@ -325,9 +348,9 @@ test("the grey future shows a submitted form's answers as Forward does, in the s
       ].join("\n"),
       { temporalContext: playerTemporalContext({ timeZone: "UTC", locale }) },
     );
-    const history = new DebugHistory(first.plan, Promise.resolve(null));
+    const history = new DebugHistory(planOf(first), Promise.resolve(null));
     history.follow(first, unmarked);
-    const submitted = submitPlayerRuntimeForm(first)!.session;
+    const submitted = hatch(first, submitPlayerRuntimeForm)!.session;
     const live = formSummary(submitted.transcriptEntries);
     assert.ok(live?.[0]?.kind === "value", locale);
     // The live transcript writes the date as the player's language does, not as the ISO date the script wrote.
@@ -358,7 +381,7 @@ test("Back and Forward show a changed message as each state had it, and the grey
       "exit",
     ].join("\n"),
   );
-  const history = new DebugHistory(first.plan, Promise.resolve(null));
+  const history = new DebugHistory(planOf(first), Promise.resolve(null));
   history.follow(first, unmarked);
   const second = choose(first, "One");
   history.follow(second, unmarked);

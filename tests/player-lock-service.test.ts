@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before } from "node:test";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
 import { rebuildRecordedSession } from "../player/debug-export.js";
@@ -10,15 +10,22 @@ import { LockService, type LockDialog, type LockDialogInput } from "../player/lo
 import {
   answerPlayerRuntimeLock,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   playerRuntimeSnapshot,
   restorePlayerRuntimeSession,
-  type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
-import { activePlayerRuntimeLock } from "../player/runtime-view.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
+import { activePlayerRuntimeLock, type PlayerSession } from "../player/runtime-view.js";
 import { bytesFromBase64 } from "../player/stored-files.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { fromBase64, openAge, sshIdentity, x25519Identity } from "./helpers/age-keyholder.js";
+import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
+
+// The engine's host the Player's sessions live in, as in production until the L5 series activates the Worker.
+let bridge: PlayerBridge;
+before(async () => {
+  bridge = await inProcessBridge();
+});
 
 /*
  * The Player's lock service (V30 §13): it answers each lock step with real locks, presents the lock and unlock dialogs,
@@ -57,7 +64,7 @@ function relays(down: () => boolean): typeof fetch {
 
 /** A Player around one session: it services lock steps and records the dialogs it shows. */
 class Harness {
-  session: PlayerRuntimeSession;
+  session: PlayerSession;
   readonly media: CapturedMediaStore;
   readonly dialogs: ({ readonly dialog: LockDialog; readonly busy: boolean } | null)[] = [];
   readonly diagnostics: unknown[] = [];
@@ -80,11 +87,14 @@ class Harness {
     } = {},
   ) {
     this.media = options.media ?? new CapturedMediaStore(null, urls, "locks");
-    this.session = createPlayerRuntimeSession(source, {
-      wallClockMs: NOW_MS,
-      storedFiles: options.files ?? [],
-      ...(options.recorder ? { recorder: options.recorder } : {}),
-    });
+    this.session = introduced(
+      bridge,
+      createPlayerRuntimeSession(source, {
+        wallClockMs: NOW_MS,
+        storedFiles: options.files ?? [],
+        ...(options.recorder ? { recorder: options.recorder } : {}),
+      }),
+    );
     const services: LockServices = {
       tlock: loadTlock,
       age: loadAge,
@@ -99,6 +109,7 @@ class Harness {
         this.session = next;
         this.service.request();
       },
+      section: () => Promise.resolve(null),
       media: this.media,
       diagnostic: (diagnostic) => this.diagnostics.push(diagnostic),
       dialog: (dialog, busy) => this.dialogs.push(dialog === null ? null : { dialog, busy }),
@@ -131,7 +142,7 @@ class Harness {
     await this.until(
       () => this.session.state.status === "halted" || this.session.state.status === "failed",
     );
-    const snapshot = playerRuntimeSnapshot(this.session);
+    const snapshot = hatch(this.session, playerRuntimeSnapshot);
     assert.equal(snapshot.failure, null, JSON.stringify(snapshot.failure));
     return Object.fromEntries(
       snapshot.frames[0]!.bindings.map((binding) => [binding.name, binding.value]),
@@ -209,7 +220,10 @@ test("the lock dialog asks for each opener, suggests 7 days, locks with what the
   // The dialog stayed, busy, while the Player locked or opened with what was typed.
   assert.ok(player.dialogs.some((shown) => shown?.busy === true));
   // What the player typed reached neither the state nor an event.
-  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  const recorded = JSON.stringify([
+    hatch(player.session, playerRuntimeSnapshot),
+    player.session.events,
+  ]);
   assert.ok(!recorded.includes("secret words"));
   assert.ok(!recorded.includes("not the password 7"));
 });
@@ -231,10 +245,10 @@ test("the lock dialog's time lock may be switched off: the lock opens only with 
   const unlock = await player.dialog();
   assert.deepEqual(unlock.kind === "unlock" && [unlock.password, unlock.moments], [true, []]);
   assert.deepEqual(player.wakes, []);
-  const waiting = playerRuntimeSnapshot(player.session);
+  const waiting = hatch(player.session, playerRuntimeSnapshot);
   assert.deepEqual(
     playerRuntimeSnapshot(
-      restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(player.session)),
+      restorePlayerRuntimeSession(hatch(player.session, createPlayerRuntimeRestorePoint)),
     ),
     waiting,
   );
@@ -254,7 +268,7 @@ test("the lock dialog's time lock may be switched off: the lock opens only with 
       recording.anchorSnapshot,
       recording.operations,
     ).exportSnapshot(),
-    playerRuntimeSnapshot(player.session),
+    hatch(player.session, playerRuntimeSnapshot),
   );
 });
 
@@ -327,7 +341,10 @@ test("password: askPassword(...) asks in the password field, locks with the type
   const values = await player.ended();
   player.stop();
   assert.deepEqual([values.opened, values.wrong, values.timed], ["fielded", "closed", "closed"]);
-  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  const recorded = JSON.stringify([
+    hatch(player.session, playerRuntimeSnapshot),
+    player.session.events,
+  ]);
   assert.ok(!recorded.includes("field words"));
 });
 
@@ -358,7 +375,10 @@ test("an encrypt call's password field asks first, then the lock dialog for the 
   assert.equal(values.opened, "both");
   const read = readLock(bytesFromBase64(String(values.both))!);
   assert.deepEqual([read?.passwords.length, read?.times.length], [1, 1]);
-  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  const recorded = JSON.stringify([
+    hatch(player.session, playerRuntimeSnapshot),
+    player.session.events,
+  ]);
   assert.ok(!recorded.includes("both words"));
 });
 
@@ -373,11 +393,8 @@ test("a password field whose typed password was lost, as on a reload, asks again
   // Another Player answered the field and was reloaded: this one has nothing typed for the step after it.
   const field = activePlayerRuntimeLock(player.session.state)!;
   assert.deepEqual([field.phase, field.passwordField], ["ask", { hint: null }]);
-  player.session = answerPlayerRuntimeLock(
-    player.session,
-    field.actionId,
-    { kind: "submitted" },
-    player.media,
+  player.session = hatch(player.session, (held) =>
+    answerPlayerRuntimeLock(held, field.actionId, { kind: "submitted" }, player.media),
   ).session;
   player.service.request();
   const again = await player.dialog();
@@ -430,7 +447,10 @@ test("the lock dialog takes public keys, and the unlock dialog sends the unlock 
   player.stop();
   assert.equal(values.opened, "kept for her");
   // The key never reached the state or an event.
-  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  const recorded = JSON.stringify([
+    hatch(player.session, playerRuntimeSnapshot),
+    player.session.events,
+  ]);
   assert.ok(!recorded.includes(key.trim()));
 });
 
@@ -516,11 +536,8 @@ test("a password field with a written key asks again for a password the Player l
   );
   // Another Player answered the field and was reloaded.
   const field = activePlayerRuntimeLock(player.session.state)!;
-  player.session = answerPlayerRuntimeLock(
-    player.session,
-    field.actionId,
-    { kind: "submitted" },
-    player.media,
+  player.session = hatch(player.session, (held) =>
+    answerPlayerRuntimeLock(held, field.actionId, { kind: "submitted" }, player.media),
   ).session;
   player.service.request();
   const again = await player.dialog();
@@ -634,7 +651,7 @@ test("without WebCrypto, as on a Player page over plain HTTP, a lock fails with 
   );
   await player.until(() => player.session.state.status === "failed");
   player.stop();
-  const failure = playerRuntimeSnapshot(player.session).failure;
+  const failure = hatch(player.session, playerRuntimeSnapshot).failure;
   assert.equal(failure?.code, "TSR086");
 });
 

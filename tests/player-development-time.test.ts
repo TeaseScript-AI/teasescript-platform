@@ -3,19 +3,19 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
 import {
-  activatePlayerRuntimeButton,
-  advancePlayerRuntimeTime,
-  completePlayerRuntimeStorageWrite,
-  createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
-  observePlayerRuntimeTime,
-  reportPlayerRuntimeMediaLoad,
+  activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
+  advancePlayerRuntimeTime as rawAdvancePlayerRuntimeTime,
+  completePlayerRuntimeStorageWrite as rawCompletePlayerRuntimeStorageWrite,
+  createPlayerRuntimeRestorePoint as rawCreatePlayerRuntimeRestorePoint,
+  observePlayerRuntimeTime as rawObservePlayerRuntimeTime,
+  reportPlayerRuntimeMediaLoad as rawReportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
-  stepPlayerRuntimeTime,
+  stepPlayerRuntimeTime as rawStepPlayerRuntimeTime,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-  playerRuntimeSnapshot,
+  playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
   nextPlayerRuntimeEventMs,
   pendingPlayerRuntimeStorageWrite,
@@ -25,6 +25,17 @@ import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { MediaProgressReport } from "../src/index.js";
 import { harness } from "./helpers/player-media.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
+const advancePlayerRuntimeTime = onHost(rawAdvancePlayerRuntimeTime);
+const completePlayerRuntimeStorageWrite = onHost(rawCompletePlayerRuntimeStorageWrite);
+const createPlayerRuntimeRestorePoint = onHost(rawCreatePlayerRuntimeRestorePoint);
+const observePlayerRuntimeTime = onHost(rawObservePlayerRuntimeTime);
+const reportPlayerRuntimeMediaLoad = onHost(rawReportPlayerRuntimeMediaLoad);
+const stepPlayerRuntimeTime = onHost(rawStepPlayerRuntimeTime);
+const playerRuntimeSnapshot = onHost(rawPlayerRuntimeSnapshot);
 
 // Development time controls (#615) jump scene time through ordinary observations. A jump must give exactly the
 // session that observing the same scene time in real time gives, so its oracles here are independent observation
@@ -316,6 +327,7 @@ let usePlayerDebug: (
 ) => DebugHost;
 
 before(async () => {
+  await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );

@@ -21,7 +21,6 @@ import {
   completePlayerRuntimeStorageWrite,
   continuePlayerRuntimeSession,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
@@ -37,6 +36,7 @@ import {
   submitPlayerRuntimeForm,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
   activePlayerRuntimeCapture,
   pendingPlayerRuntimeStorageWrite,

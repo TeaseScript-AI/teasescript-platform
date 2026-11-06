@@ -5,11 +5,13 @@ import { effectScope, type Ref } from "vue";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
 import {
-  createPlayerRuntimeSession,
   playerRuntimeSnapshot,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import type * as InProcess from "../player/engine-bridge/in-process.js";
+import type { PlayerSession } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import { answerFileStore } from "../player/stored-files.js";
 import type {
@@ -151,13 +153,15 @@ test("a stored file of no recognized type is kept and read back from durable sto
 });
 
 interface FileHost {
-  readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
+  readonly session: Readonly<Ref<PlayerSession | null>>;
   resolveAsset(path: string): string | null;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
 }
+// The transition facade of the composable's own bundle: its host holds the sessions the host shows.
+let hatch: typeof InProcess.hatch;
 let usePlayerSession: (options: {
   scriptStorage?: ScriptStorageProvider;
   capturedMedia?: { repository: FakeMediaRepository };
@@ -171,6 +175,11 @@ before(async () => {
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
+  const inProcess: Record<string, unknown> = await loadPlayerModule(
+    "player/engine-bridge/in-process.ts",
+  );
+  // EVIDENCE: validation: the facade of the bundle the composable runs in, whose sessions only it reaches.
+  hatch = inProcess.hatch as typeof hatch;
 });
 
 // The browser surface the Player host touches without a camera; no Web Locks, so durable writes are not coordinated.
@@ -237,7 +246,7 @@ async function playInPlayer(
     );
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  const snapshot = playerRuntimeSnapshot(host.session.value);
+  const snapshot = hatch(host.session.value, playerRuntimeSnapshot);
   return {
     host,
     scope,
@@ -401,5 +410,5 @@ test("saved text that only has the shape of a reference stays text in a later se
       picture: `data:image/png;base64,${PNG}`,
     }),
   );
-  assert.deepEqual(playerRuntimeSnapshot(later.host.session.value!).storedFiles, [picture]);
+  assert.deepEqual(hatch(later.host.session.value!, playerRuntimeSnapshot).storedFiles, [picture]);
 });

@@ -6,12 +6,10 @@ import type {
 import { fileType, OCTET_STREAM, storedFileKind } from "../src/runtime/host-data/stored-files.js";
 import type { LockServices, ReadLock } from "./encryption/lock.js";
 import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey, type PublicKey } from "../src/public-keys.js";
-import {
-  answerPlayerRuntimeLock,
-  type PlayerLockAnswer,
-  type PlayerRuntimeSession,
-} from "./runtime-adapter.js";
-import { activePlayerRuntimeLock } from "./runtime-view.js";
+import { answerPlayerRuntimeLock, type PlayerLockAnswer } from "./runtime-adapter.js";
+import { hatch } from "./engine-bridge/in-process.js";
+import type { ServiceSection } from "./player-bridge.js";
+import { activePlayerRuntimeLock, type PlayerSession } from "./runtime-view.js";
 import type { PlayerDiagnostic } from "./session-camera.js";
 import { base64FromBytes, bytesFromBase64, type FileStoreMedia } from "./stored-files.js";
 
@@ -75,12 +73,17 @@ export interface LockDialogInput {
 
 export interface LockServiceHost {
   /** The published session, or `null` before one starts. */
-  session(): PlayerRuntimeSession | null;
+  session(): PlayerSession | null;
   /** Identifies the published session; it changes when another session starts. */
   generation(): number;
   /** Observes the current time, publishes the result, and returns the published session, or `null` without input. */
-  observe(): PlayerRuntimeSession | null;
-  publish(session: PlayerRuntimeSession): void;
+  observe(): PlayerSession | null;
+  publish(session: PlayerSession): void;
+  /**
+   * Runs `body` as one exclusive section of the published session, with an observation inside it; `null` without a
+   * session, or once a Player error stopped it.
+   */
+  section<T>(body: (section: ServiceSection) => Promise<T>): Promise<T | null>;
   readonly media: FileStoreMedia;
   diagnostic(diagnostic: PlayerDiagnostic): void;
   /** Shows a lock dialog, or none; `busy` while the Player locks or opens with what the player gave in it. */
@@ -238,7 +241,9 @@ export class LockService {
         this.#settled(key);
         return;
       }
-      const result = answerPlayerRuntimeLock(observed, action.actionId, answer, this.#host.media);
+      const result = hatch(observed, (current) =>
+        answerPlayerRuntimeLock(current, action.actionId, answer, this.#host.media),
+      );
       // `executionPending`: the same answer is offered again in the next service.
       if (result.outcome.kind === "executionPending") return;
       this.#settled(key);
@@ -247,10 +252,12 @@ export class LockService {
         // Never leave the script waiting: a step fails, and a dialog's answer is dropped, so the dialog asks again.
         if (action.phase === "work")
           this.#host.publish(
-            answerPlayerRuntimeLock(observed, action.actionId, {
-              kind: "failed",
-              reason: "unavailable",
-            }).session,
+            hatch(observed, (current) =>
+              answerPlayerRuntimeLock(current, action.actionId, {
+                kind: "failed",
+                reason: "unavailable",
+              }),
+            ).session,
           );
         else this.#showDialog(null);
         return;

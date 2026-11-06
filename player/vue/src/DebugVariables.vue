@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hatch, heldPlan } from "../../engine-bridge/in-process.js";
 import { computed, nextTick, reactive, ref, shallowRef, watch } from "vue";
 import { ChevronDown, ChevronUp } from "@lucide/vue";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
@@ -38,10 +39,10 @@ watch(
 );
 // Its variables with bounded previews, read once for each session the view shows.
 const variables = shallowRef(
-  session.value === null ? null : playerRuntimeDebugVariables(session.value),
+  session.value === null ? null : hatch(session.value, playerRuntimeDebugVariables),
 );
 watch(session, (shown) => {
-  variables.value = shown === null ? null : playerRuntimeDebugVariables(shown);
+  variables.value = shown === null ? null : hatch(shown, playerRuntimeDebugVariables);
 });
 const live = computed(() =>
   variables.value === null ? null : playerDebugLiveValue(variables.value.variables),
@@ -104,7 +105,8 @@ const filter = ref("");
 const groupPages = reactive(new Map<string, number>());
 const groups = computed(() => {
   if (!background.value || session.value === null || variables.value === null) return [];
-  return playerDebugVariables(session.value.plan, variables.value, trace.value, filter.value);
+  const plan = heldPlan(session.value.connection, session.value.planToken);
+  return playerDebugVariables(plan, variables.value, trace.value, filter.value);
 });
 const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ?? 1);
 </script>

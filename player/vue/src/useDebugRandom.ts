@@ -1,3 +1,4 @@
+import { heldPlan } from "../../engine-bridge/in-process.js";
 import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
 import {
@@ -107,7 +108,10 @@ export function useDebugRandom(player: PlayerSessionHost) {
   watch(on, (active) => player.setRandomControl(active ? control : null), { immediate: true });
   tryOnScopeDispose(() => player.setRandomControl(null));
 
-  const plan = computed(() => player.session.value?.plan ?? null);
+  const plan = computed(() => {
+    const shown = player.session.value;
+    return shown === null ? null : heldPlan(shown.connection, shown.planToken);
+  });
   const sites = computed(
     () =>
       new Map<string, RandomSite>(

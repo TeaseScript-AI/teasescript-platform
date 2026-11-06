@@ -7,11 +7,12 @@ import {
   type DebugHistoryRestore,
 } from "../../debug-history.js";
 import {
-  beginPlayerRuntimeRecording,
   restorePlayerRuntimeSessionAt,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
+import { beginRecordingNow, hatch, heldPlan } from "../../engine-bridge/in-process.js";
+import type { PlayerSession } from "../../runtime-view.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 /**
@@ -39,9 +40,13 @@ export function useDebugRewind(player: PlayerSessionHost) {
     revision.value++;
     void ended?.destroy();
   }
-  function follow(session: PlayerRuntimeSession | null) {
+  function follow(session: PlayerSession | null) {
     if (publishing || session === null) return;
-    history.value ??= new DebugHistory(session.plan, rewind.openSpill(), rewind.memoryBudget);
+    history.value ??= new DebugHistory(
+      heldPlan(session.connection, session.planToken),
+      rewind.openSpill(),
+      rewind.memoryBudget,
+    );
     history.value.follow(session, marks());
     revision.value++;
   }
@@ -126,12 +131,15 @@ export function useDebugRewind(player: PlayerSessionHost) {
   function reinstate(parked: DebugHistoryCurrent) {
     publishing = true;
     try {
+      // The parked session is the host's still: it shows again, its recording begun anew there.
       rewind.publish(
-        ({ recorder }) => {
-          beginPlayerRuntimeRecording(parked.session, recorder);
-          const trace = player.debugTrace.value;
-          trace?.reset("restore");
-          return withPlayerRuntimeDebugTrace(parked.session, trace);
+        {
+          session: () => {
+            beginRecordingNow(parked.session);
+            const trace = player.debugTrace.value;
+            trace?.reset("restore");
+            return hatch(parked.session, (held) => withPlayerRuntimeDebugTrace(held, trace));
+          },
         },
         { paused: false, marks: parked.marks },
       );

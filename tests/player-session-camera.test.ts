@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before } from "node:test";
 
 import {
   CaptureDevice,
@@ -10,12 +10,11 @@ import {
 import { nextCamera } from "../player/camera-choice.js";
 import { CapturedMediaStore } from "../player/captured-media.js";
 import { RgbaImage } from "../player/rgba-image.js";
-import {
-  createPlayerRuntimeSession,
-  type PlayerCaptureAnswer,
-  type PlayerRuntimeSession,
-  playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
+import { type PlayerCaptureAnswer, playerRuntimeSnapshot } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
+import type { PlayerSession } from "../player/runtime-view.js";
+import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
 import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../player/session-camera.js";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -374,8 +373,14 @@ test("a session released while the browser answers never reports its camera as o
   assert.equal(camera.available, false);
 });
 
+// The engine's host the Player's sessions live in, as in production until the L5 series activates the Worker.
+let bridge: PlayerBridge;
+before(async () => {
+  bridge = await inProcessBridge();
+});
+
 function serviceHarness(answer: () => Promise<PlayerCaptureAnswer>) {
-  const state: { session: PlayerRuntimeSession | null; generation: number } = {
+  const state: { session: PlayerSession | null; generation: number } = {
     session: null,
     generation: 0,
   };
@@ -386,13 +391,14 @@ function serviceHarness(answer: () => Promise<PlayerCaptureAnswer>) {
     generation: () => state.generation,
     observe: () => state.session,
     publish: (next) => (state.session = next),
+    section: () => Promise.resolve(null),
     capturedMedia: { holds: (reference, kind) => kind === "image" && held.has(reference) },
     diagnostic: (diagnostic) => diagnostics.push(diagnostic),
     later: (task) => setImmediate(task),
   });
   const start = (source: string) => {
     state.generation++;
-    state.session = createPlayerRuntimeSession(source);
+    state.session = introduced(bridge, createPlayerRuntimeSession(source));
   };
   return { state, service, diagnostics, held, start };
 }
@@ -409,7 +415,7 @@ test("a capture is answered once and its photo continues the script", async () =
   await settle();
   assert.equal(answers, 1);
   assert.equal(harness.state.session?.state.status, "halted");
-  assert.equal(playerRuntimeSnapshot(harness.state.session!).stageImage, "photo-1");
+  assert.equal(hatch(harness.state.session!, playerRuntimeSnapshot).stageImage, "photo-1");
 });
 
 test("a session replaced while its photo is captured gets its own capture serviced", async () => {
@@ -430,7 +436,7 @@ test("a session replaced while its photo is captured gets its own capture servic
   answers[1]?.({ kind: "captured", reference: "new photo" });
   await settle();
   await settle();
-  assert.equal(playerRuntimeSnapshot(harness.state.session!).stageImage, "new photo");
+  assert.equal(hatch(harness.state.session!, playerRuntimeSnapshot).stageImage, "new photo");
 });
 
 test("a captured reference the store does not hold never leaves the script waiting", async () => {

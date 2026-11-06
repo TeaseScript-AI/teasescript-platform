@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hatch, heldPlan } from "../../engine-bridge/in-process.js";
 import { computed, nextTick, onBeforeUnmount, onErrorCaptured, provide, ref, watch } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import { Bug, SquareSplitHorizontal } from "@lucide/vue";
@@ -219,7 +220,8 @@ const debugExport = useDebugExport(
       ),
       media: (session.value === null
         ? []
-        : playerRuntimeDebugNow(session.value, props.player.sceneTimeMs.value).media
+        : hatch(session.value, (held) => playerRuntimeDebugNow(held, props.player.sceneTimeMs.value))
+            .media
       ).map(({ mediaId, media, loaded, state, source }) => ({
         mediaId,
         media,
@@ -323,7 +325,9 @@ watch(
 );
 // The calls a script error happened in, for the error dialog while it is open.
 const failureCalls = computed(() =>
-  errorDialogOpen.value && session.value?.state.failure ? playerRuntimeCalls(session.value) : [],
+  errorDialogOpen.value && session.value?.state.failure
+    ? hatch(session.value, playerRuntimeCalls)
+    : [],
 );
 // Open in Debug shows the Debug panel's Now tab, which names the error and its statement, and focuses the tab.
 async function openFailureInDebug() {
@@ -461,7 +465,10 @@ const stagePhoto = useStagePhoto(stageMedia, prepareStagePhoto);
 // photo and its colour are ready when it shows. They stay between sessions of the same script.
 let releasePreloaded = () => {};
 watch(
-  () => props.player.session.value?.plan,
+  () => {
+    const shown = props.player.session.value;
+    return shown === null ? undefined : heldPlan(shown.connection, shown.planToken);
+  },
   (plan) => {
     if (plan === undefined) return;
     const release = releasePreloaded;

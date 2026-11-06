@@ -3,13 +3,12 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
 import {
-  activatePlayerRuntimeButton,
-  compilePlayerProject,
-  createPlayerRuntimeSession,
+  activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
   restorePlayerRuntimeSessionAt,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import type { CapturedMediaRepository } from "../player/captured-media.js";
 import {
   keptSession,
@@ -27,6 +26,10 @@ import type {
 } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
 
 // The debug room (DEBUGGER.md "Debug room") through the real Vue session host: Debug on during a normal session goes on
 // with a copy in the debug room while the normal session stays as it was; a page opened in the debug room makes it from
@@ -68,6 +71,7 @@ let usePlayerDebug: (
 ) => { readonly menu: Ref<boolean>; readonly on: Readonly<Ref<boolean>> };
 
 before(async () => {
+  await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );
