@@ -2266,6 +2266,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (!pending || clearing.value || importing.value) return;
     activation.value = null;
     const token = ++activationToken;
+    // The engine's host is ready within a task of the Player's start; an activation before that waits for it.
+    if (bridge === null) {
+      await bridgeReady;
+      if (disposed || token !== activationToken) return;
+    }
     const withCamera = options.capabilities?.camera === true;
     const reading = pending.kind === "start" && scriptStorage !== undefined;
     if (!withCamera && !reading) {

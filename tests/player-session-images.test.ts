@@ -136,7 +136,7 @@ function answer(host: ImageHost, reference: string) {
   const session = host.session.value;
   assert.ok(session);
   assert.equal(host.imageCapture.choose(reference), true);
-  const result = host.imageCapture.use(session);
+  const result = onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(session);
   assert.equal(result?.outcome.kind, "completed");
   host.update(result!.session);
 }
@@ -328,7 +328,9 @@ test("an image that never became the preview can be dropped, and Use image answe
   assert.equal(host.resolveAsset(reference), null);
   // The runtime admits only an image the store holds, also when a dropped one is offered as the preview.
   assert.equal(host.imageCapture.choose(reference), true);
-  const result = host.imageCapture.use(host.session.value!);
+  const result = onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(
+    host.session.value!,
+  );
   assert.equal(result?.outcome.kind, "invalidPayload");
   assert.equal(playerRuntimeForeground(result!.session)?.kind, "ask-image");
 });

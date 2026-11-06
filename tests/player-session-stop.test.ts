@@ -19,7 +19,7 @@ import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
-import { loadHostFacade, onHostAll } from "./helpers/host-sessions.js";
+import { loadHostFacade, onHost, onHostAll } from "./helpers/host-sessions.js";
 
 // A Player error stops the session where it stands (PLAYER-UI "Session end and failure"). Input and the work that
 // continues it take their session from `observe()`, which gives none once stopped; these include continuations that
@@ -332,7 +332,7 @@ test("a photo used in the same task as a Player error does not answer", async (c
   assert.equal(host.imageCapture.view.value?.ready, true);
   host.reportHostError(new TypeError("A component failed."));
   const stopped = host.session.value;
-  assert.equal(host.imageCapture.use(stopped!), null);
+  assert.equal(onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(stopped!), null);
   await nextTick();
   assert.equal(host.session.value, stopped);
   assert.equal(host.imageCapture.view.value, null, "the stopped request's steps close");

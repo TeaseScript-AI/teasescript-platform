@@ -176,7 +176,9 @@ async function answerImage(host: TransferHost, name: string): Promise<string> {
   const stored = await host.images.store(new File([PNG], name), { types: null, mime: null });
   assert.ok("reference" in stored, name);
   assert.equal(host.imageCapture.choose(stored.reference), true);
-  const result = host.imageCapture.use(host.session.value!);
+  const result = onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(
+    host.session.value!,
+  );
   assert.equal(result?.outcome.kind, "completed");
   host.update(result!.session);
   return stored.reference;
