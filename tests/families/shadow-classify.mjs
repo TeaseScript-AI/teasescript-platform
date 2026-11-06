@@ -173,7 +173,8 @@ const LOST_CHECK = new Set([
 
 /**
  * The route pair's classes. `state`: `pass`, `attributed` (the rule class is known; S11 still owes each source's
- * accepted expectation) or `open` (blocks the gate); `witness`: the smallest recorded one (a key's first 12 digits and the
+ * accepted expectation), `accepted (condition 1; condition 2 list)` (v5's declined/lost check: #1526 condition 1
+ * accepts it, condition 2 re-assesses each case before the switch) or `open` (blocks the gate); `witness`: the smallest recorded one (a key's first 12 digits and the
  * source's name, in `tests/fixtures/shadow-classify/witnesses.jsonl`) or the test's synthetic case. `match` reads the
  * pair's facts (`pairFacts`).
  */
