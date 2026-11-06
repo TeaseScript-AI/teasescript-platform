@@ -61,14 +61,12 @@ export function* inheritedInto(
 
 /**
  * #1901: whether the copy deciding what `from` inherits at `asked` (`inheritedInto`, once known) reads its written type
- * at its own root (`Admission.inheritedOwn`): never past the deepest path a written type reaches, where a prefix's
- * type is taken below it.
+ * at its own root (`Admission.inheritedOwn`). Past the deepest path a written type reaches no key is recorded, so a
+ * prefix's type taken below it is never its own.
  */
 export function inheritedOwnAt(admission: Admission, from: PlaceId, asked: Rest): boolean {
   const { contract } = admission.pass;
-  const path = restRef(contract, asked);
-  if (path.length > admission.reach) return false;
-  return admission.inheritedOwn.get(keyAtRef(contract, from, path)) === true;
+  return admission.inheritedOwn.get(keyAtRef(contract, from, restRef(contract, asked))) === true;
 }
 
 /** Whether two decisions wait on each other through copies (`cycles`). */
