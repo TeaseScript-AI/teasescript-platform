@@ -290,14 +290,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // then, at once in-process; input stops at once either way (`stopped`).
     const host = bridgeOf(shown);
     const acknowledged = host.halt(shown);
-    if (host.frozen(shown)) {
-      hostError.value = name;
-      return;
-    }
+    // The stop line: the shown session becomes the frozen store's last publication, everything the host ran, which its
+    // recording and export hold; nothing after it shows, as nothing more applies.
+    const commit = () => {
+      const final = host.latest(shown);
+      if (final !== null && session.value?.id === shown.id) session.value = final;
+      hostError.value ??= name;
+    };
+    if (host.frozen(shown)) return commit();
     halting.value = true;
     void acknowledged.then(() => {
       halting.value = false;
-      hostError.value ??= name;
+      commit();
     });
   }
   /**
@@ -852,6 +856,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let activationToken = 0;
   // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
   let continuing: PlayerSession | null = null;
+  // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
+  // obsolete one's requests run in the host before the replacement's, which claims the recorder and trace last.
+  let begunInFlight: Promise<void> | null = null;
   /**
    * A new activation, preparation or end replaces the one under way: a Continue still beginning is halted in the host,
    * so its queued requests, such as starting the recording of an obsolete session, are refused without effect.
@@ -2262,8 +2269,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       begin: async () => {
         const host = bridgeOf(restored);
         continuing = restored;
+        // Only the activation that began it goes on after each reply: a replaced one touches no trace or recorder.
+        const owner = activationToken;
+        const owned = () => {
+          if (disposed || owner !== activationToken)
+            throw new Error("A replaced Continue goes no further.");
+        };
         // The recording of a restored session starts from the state it continues, and so does a new trace epoch.
         await host.request(restored, "beginRecording", null);
+        owned();
         debugTrace.value?.reset("restore");
         let continued: PlayerSession = hatch(host.latest(restored) ?? restored, (held) =>
           withPlayerRuntimeDebugTrace(held, debugTrace.value),
@@ -2282,6 +2296,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           ).session;
         applyRandomControl(continued);
         await host.request(continued, "continue", { capture: temporalCapture() });
+        owned();
         return host.latest(continued) ?? continued;
       },
       ...(marks === undefined ? {} : { marks }),
@@ -2318,6 +2333,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       void camera.open(false);
       captures.reset();
       try {
+        if (begunInFlight !== null) {
+          await begunInFlight;
+          if (disposed || token !== activationToken) return;
+        }
         await startFrom(pending);
       } finally {
         if (token === activationToken) beginning.value = false;
@@ -2337,6 +2356,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     captures.reset();
     beginning.value = true;
     try {
+      if (begunInFlight !== null) {
+        await begunInFlight;
+        if (disposed || token !== activationToken) return;
+      }
       await startFrom(pending);
     } finally {
       if (token === activationToken) beginning.value = false;
@@ -2398,7 +2421,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return;
     }
     if (!(begun instanceof Promise)) return started(pending, begun);
-    return begun.then(
+    const settled = begun.then(
       (next) => {
         if (!disposed && token === activationToken) started(pending, next);
       },
@@ -2407,6 +2430,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (!disposed && token === activationToken) reportHostError(error);
       },
     );
+    begunInFlight = settled;
+    void settled.finally(() => {
+      if (begunInFlight === settled) begunInFlight = null;
+    });
+    return settled;
   }
   function started(pending: Activation, next: PlayerSession) {
     if (continuing?.id === next.id) continuing = null;

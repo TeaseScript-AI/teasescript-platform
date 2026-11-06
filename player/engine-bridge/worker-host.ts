@@ -304,7 +304,18 @@ export function startBridgeHost(
     }
   }
 
+  /**
+   * Halts the session on receipt: every request of it the host has not dispatched is refused from now on. The
+   * acknowledgement follows every reply to an op of the session that ran, so it waits for one still awaited.
+   */
   function halt(request: BridgeRequest): void {
+    const acknowledge = () => {
+      try {
+        reply(request, { ok: true, revision: null, eventsThrough: null, result: null, view: null });
+      } catch {
+        // As in `drain`: a fault posting the reply stops nothing.
+      }
+    };
     try {
       if (request.args !== null)
         return refuse(request, refusal("arguments", "Malformed arguments for 'halt'."));
@@ -314,10 +325,11 @@ export function startBridgeHost(
           refusal("session", "The request names no session the Worker holds."),
         );
       halted.add(request.session);
-      reply(request, { ok: true, revision: null, eventsThrough: null, result: null, view: null });
     } catch {
-      // As in `drain`: a fault posting the reply stops nothing.
+      return;
     }
+    if (busy !== null && busySession === request.session) void busy.then(acknowledge);
+    else acknowledge();
   }
 
   // Request IDs are admitted in receipt order, so a request waiting behind an awaited op keeps its place, and `halt`,
@@ -329,11 +341,6 @@ export function startBridgeHost(
       if (request.id <= lastId) previous = lastId;
       else lastId = request.id;
       if (request.op === "halt") {
-        // The acknowledgement follows every reply to an op that ran: one still awaited for this session first.
-        if (previous === null && busy !== null && busySession === request.session) {
-          const awaited = busy;
-          return void awaited.then(() => halt(request));
-        }
         if (previous === null) return halt(request);
         return refuse(
           request,
