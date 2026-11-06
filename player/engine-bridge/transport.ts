@@ -44,7 +44,7 @@ interface FlatMessage {
   readonly links: (number | string)[];
 }
 
-/** What the measure walks: every object but a buffer view, whose own keys hold only numbers. */
+/** What the measure walks: every object but a buffer view, which native clone copies by its bytes, not its properties. */
 const isWalked = (value: unknown): value is Node =>
   typeof value === "object" && value !== null && !ArrayBuffer.isView(value);
 
