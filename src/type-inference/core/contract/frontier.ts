@@ -785,8 +785,9 @@ function termOf(frontier: Frontier, id: number): { leaves: number[]; next: numbe
 function stateOf(frontier: Frontier, start: number, mark: boolean): number {
   let [node, marked] = [start, mark];
   for (;;) {
-    step(frontier);
     const at = frontier.nodes[node]!;
+    // (a step per marked or held node resolved: a graph without marks charges as before)
+    if (at.kind === "mark" || at.kind === "hold") step(frontier);
     if (at.kind === "mark") [node, marked] = [at.inner, true];
     else if (at.kind === "hold") {
       if (!marked && marksAt(frontier.contract, at.holder, at.steps)) marked = true;
