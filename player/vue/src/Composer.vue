@@ -89,11 +89,15 @@ const textareaElement = computed(() => {
 const input = computed(() => picker.value ?? textareaElement.value);
 const value = computed({
   get: () => props.modelValue,
-  set: (text: string) => emit("update:modelValue", text),
+  set: (text: string) => {
+    if (!discardingComposition) emit("update:modelValue", text);
+  },
 });
 const repeatedValue = computed({
   get: () => props.repeated,
-  set: (text: string) => emit("update:repeated", text),
+  set: (text: string) => {
+    if (!discardingComposition) emit("update:repeated", text);
+  },
 });
 const feedbackId = useId();
 const capsLockId = useId();
@@ -276,28 +280,48 @@ function selectInput(): void {
 /** Whether the player composes text in a field of the composer with an input method (IME). */
 const composing = ref(false);
 let endingComposition = false;
+let discardingComposition = false;
 /**
- * Ends the player's composition: the browser ends it, with its `compositionend`, when the field loses focus, which it
- * gets back in the same task with its state as it was (`releaseOnBlur`). The text and password fields keep a composition
- * as `v-model` does, neither taking its text nor rendering over it before it ends, so an answer given meanwhile is the
- * committed text of the click.
+ * Ends the player's composition, only in `field` when given, and with `discard` without taking its text: the browser
+ * ends it, with its `compositionend`, when the field loses focus, which it gets back in the same task with its state as
+ * it was (`releaseOnBlur`). The text and password fields keep a composition as `v-model` does, neither taking its text
+ * nor rendering over it before it ends, so an answer given meanwhile is the committed text of the click.
  */
-function endComposition(): void {
+function endComposition(field?: HTMLElement, discard = false): void {
   if (!composing.value) return;
   const element = document.activeElement;
   if (
     !(element instanceof HTMLElement) ||
-    (element !== input.value && element !== repeatInput.value)
+    (element !== input.value && element !== repeatInput.value) ||
+    (field !== undefined && element !== field)
   )
     return;
   endingComposition = true;
+  discardingComposition = discard;
   try {
     element.blur();
     element.focus({ preventScroll: true });
   } finally {
     endingComposition = false;
+    discardingComposition = false;
   }
 }
+// A field's text set from outside while the player composes in it (a mismatch's reset, a new interaction's text) wins:
+// the composition ends without taking its text, and the field then shows the text set.
+watch(
+  () => props.modelValue,
+  () => {
+    if (input.value) endComposition(input.value, true);
+  },
+  { flush: "pre" },
+);
+watch(
+  () => props.repeated,
+  () => {
+    if (repeatInput.value) endComposition(repeatInput.value, true);
+  },
+  { flush: "pre" },
+);
 // Whatever makes the fields read-only (an answer in flight, an image being read, a lock at work) ends a composition
 // first, so none stays open in a read-only field.
 watch(
