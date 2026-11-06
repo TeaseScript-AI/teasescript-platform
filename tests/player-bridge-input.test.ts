@@ -22,6 +22,7 @@ import {
   pressPlayerRuntimePermanentButton,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimeImage,
+  stepPlayerRuntimeFormField,
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
   type PlayerRuntimeSession,
@@ -46,7 +47,13 @@ import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 const PLAYER_WORKER = new URL("../player/engine-bridge/node-worker.js", import.meta.url);
-const START = { wallClockMs: 0, temporalContext: DEFAULT_TEMPORAL_CONTEXT };
+// Persistent storage: a save waits for the host's acknowledgement.
+const START = {
+  wallClockMs: 0,
+  temporalContext: DEFAULT_TEMPORAL_CONTEXT,
+  scriptStorage: [],
+  persistentScriptStorage: true,
+};
 const HELD: HeldMedia = [{ reference: "photo-1", kind: "image" }];
 
 /** A script with every L5c input in turn, a permanent button, a save, and a value an edit changes. */
@@ -66,7 +73,7 @@ const SCRIPT = [
   'openUrl("https://example.com")',
   'save 1 as "kept"',
   'showButton "End"',
-  'let edited: int? = load "edited", default: null',
+  'let edited: integer? = load "edited", default: null',
   'say "edited ${edited}", instant',
   'showButton "Last"',
   "exit",
@@ -101,13 +108,20 @@ const TAPE: readonly (readonly [string, Step])[] = [
   ],
   ["button", answer("activateButton", {}, "preselectedKey")],
   [
+    "step",
+    (shown) => ({
+      op: "stepFormField",
+      args: { actionId: presented(shown), fieldId: "first", draft: null },
+    }),
+  ],
+  [
     "draft",
     (shown) => ({
       op: "draftForm",
       args: { actionId: presented(shown), fieldId: "first", text: "Bo" },
     }),
   ],
-  ["form", answer("submitForm", { draft: null })],
+  ["form", answer("submitForm", { draft: "Bo" })],
   ["skip", answer("skipImage")],
   ["image", answer("answerImage", { reference: "photo-1", held: HELD })],
   ["popup", answer("closePopup")],
@@ -177,18 +191,190 @@ test("L5c's ops give the same replies, publications and events in-process and in
     const local = await playTape(await inProcessBridge());
     const remote = await playTape(worker);
     assert.deepEqual(remote.steps, local.steps);
-    console.log(
-      JSON.stringify(
-        local.steps.slice(1).map((step) => {
-          // EVIDENCE: fixture: `playTape` pushes these fields after the first entry.
-          const { name, outcome } = step as { name: string; outcome: { kind: string } | null };
-          return [name, outcome?.kind ?? null];
-        }),
-      ),
+    // Every input of the tape answered, so the session ran to its end.
+    assert.deepEqual(
+      local.steps.slice(1).map((step) => {
+        // EVIDENCE: fixture: `playTape` pushes these fields after the first entry.
+        const { name, outcome } = step as { name: string; outcome: { kind: string } | null };
+        return [name, outcome?.kind ?? null];
+      }),
+      [
+        ["composer", "completed"],
+        ["choice", "completed"],
+        ["button", "completed"],
+        ["step", "updated"],
+        ["draft", "updated"],
+        ["form", "completed"],
+        ["skip", "completed"],
+        ["image", "completed"],
+        ["popup", "completed"],
+        ["export", "completed"],
+        ["url", "completed"],
+        ["write", "completed"],
+        ["press", "pressed"],
+        ["edit", "applied"],
+        ["end", "completed"],
+        ["last", "completed"],
+      ],
     );
-    console.log(JSON.stringify(local.session.transcriptEntries.map((entry) => entry.text)));
-    console.log(local.session.state.status);
+    assert.equal(local.session.state.status, "halted");
+    const said = local.session.transcriptEntries.map((entry) => entry.text);
+    assert.ok(
+      said.includes("hi Ann") && said.includes("tick") && said.includes("edited 7"),
+      said.join(" | "),
+    );
   } finally {
     worker.client.terminate();
   }
+});
+
+/** Today's adapter call for an op of the tape, as the Player made it before L5c, with `input` as `answer()` gave it. */
+function direct(session: PlayerRuntimeSession, op: string, args: Record<string, unknown>) {
+  // EVIDENCE: fixture: the tape's own arguments, typed by the op that takes them.
+  const a = args as {
+    readonly actionId: number;
+    readonly text: string;
+    readonly optionId: string;
+    readonly fieldId: string;
+    readonly draft: string | null;
+    readonly reference: string;
+    readonly held: HeldMedia;
+    readonly stored: boolean;
+    readonly buttonId: number;
+    readonly key: string;
+    readonly value: number;
+    readonly input?: "enter" | "send" | "button" | "preselectedKey" | null;
+  };
+  const call = (): { readonly session: PlayerRuntimeSession; readonly outcome: unknown } | null => {
+    switch (op) {
+      case "submitComposer":
+        return submitPlayerRuntimeComposer(session, a.text);
+      case "selectChoice":
+        return selectPlayerRuntimeChoice(session, a.optionId);
+      case "activateButton":
+        return activatePlayerRuntimeButton(session);
+      case "draftForm":
+        return draftPlayerRuntimeForm(
+          session,
+          { actionId: a.actionId, fieldId: a.fieldId },
+          a.text,
+        );
+      case "stepFormField":
+        return stepPlayerRuntimeFormField(session, a.fieldId, a.draft ?? undefined);
+      case "submitForm":
+        return submitPlayerRuntimeForm(session, a.draft ?? undefined);
+      case "skipImage":
+        return skipPlayerRuntimeImage(session);
+      case "answerImage":
+        return answerPlayerRuntimeImage(session, a.reference, admissionOf(a.held));
+      case "closePopup":
+        return closePlayerRuntimePopup(session);
+      case "closeExport":
+        return closePlayerRuntimeExport(session);
+      case "openUrl":
+        return openPlayerRuntimeUrl(session);
+      case "completeStorageWrite":
+        return completePlayerRuntimeStorageWrite(session, a.actionId, a.stored);
+      case "pressPermanentButton":
+        return pressPlayerRuntimePermanentButton(session, a.buttonId);
+      case "applyStorageEdit":
+        return applyPlayerRuntimeStorageEdit(session, { key: a.key, value: a.value });
+    }
+    throw new Error(`no adapter call for ${op}`);
+  };
+  return a.input === undefined || a.input === null
+    ? call()
+    : answeredByPlayerInput(session, a.input, call);
+}
+
+test("L5c's ops give what today's adapter calls give, and the recording keeps how each answer was given", async () => {
+  const bridge = await inProcessBridge();
+  const viaOps = await playTape(bridge, true);
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(SCRIPT, { ...START, recorder });
+  const steps: unknown[] = [];
+  for (const [name, step] of TAPE) {
+    const sent = step(session)!;
+    const result = direct(session, sent.op, sent.args);
+    if (result !== null) session = result.session;
+    steps.push({
+      name,
+      outcome: result?.outcome ?? null,
+      state: session.state,
+      events: [...session.events],
+    });
+  }
+  assert.deepEqual(
+    viaOps.steps.slice(1).map((step) => {
+      // EVIDENCE: fixture: `playTape` pushes these fields after the first entry.
+      const {
+        name,
+        outcome,
+        session: shownAfter,
+      } = step as { name: string; outcome: unknown; session: ReturnType<typeof shown> };
+      return { name, outcome, state: shownAfter.state, events: shownAfter.events };
+    }),
+    steps,
+  );
+  const recorded = (operations: readonly { readonly kind: string; readonly input?: unknown }[]) =>
+    operations.map(({ kind, input }) => [kind, input ?? null]);
+  assert.deepEqual(
+    recorded(heldRecording(bridge)!.operations),
+    recorded(recorder.recording()!.operations),
+  );
+});
+
+const refused = (code: string) => (error: unknown) =>
+  error instanceof BridgeRequestError && error.kind === "bridge" && error.code === code;
+
+test("L5c's ops refuse malformed arguments, and a stale action, a released or a stopped session, without effect", async () => {
+  const bridge = await inProcessBridge();
+  const session = await bridge.start(await prepared(bridge), START, false);
+  const actionId = presented(session);
+  for (const [op, args] of [
+    ["submitComposer", { actionId, text: 1, input: "enter" }],
+    ["submitComposer", { actionId, text: "x", input: "tap" }],
+    ["submitComposer", { actionId, text: "x" }],
+    ["selectChoice", { actionId: "1", optionId: "a", input: null }],
+    [
+      "answerImage",
+      { actionId, reference: "r", held: [{ reference: "r", kind: "sticker" }], input: null },
+    ],
+    ["answerImage", { actionId, reference: "r", held: {}, input: null }],
+    ["stepFormField", { actionId, fieldId: "f", draft: 3 }],
+    ["pressPermanentButton", { buttonId: "1" }],
+    ["completeStorageWrite", { actionId, stored: "yes" }],
+    ["applyStorageEdit", { key: 1, value: 2 }],
+    ["applyStorageEdit", { key: "k" }],
+  ] as const)
+    await assert.rejects(
+      bridge.request(session, op, args),
+      refused("arguments"),
+      `${op} ${JSON.stringify(args)}`,
+    );
+  // An answer to another action than the presented one changes nothing.
+  const before = bridge.latest(session)!;
+  const stale = await bridge.request<{ readonly kind: string }>(session, "submitComposer", {
+    actionId: actionId + 1,
+    text: "Ann",
+    input: "enter",
+  });
+  assert.deepEqual(stale, { kind: "staleAction", actionId: actionId + 1 });
+  assert.equal(bridge.latest(session), before);
+  // A stopped session takes no answer, and a released one is unknown.
+  await bridge.halt(session);
+  await assert.rejects(
+    bridge.request(session, "submitComposer", { actionId, text: "Ann", input: "enter" }),
+    refused("halted"),
+  );
+  const other = await bridge.start(await prepared(bridge), START, false);
+  bridge.release(other);
+  await assert.rejects(
+    bridge.client.request(
+      "submitComposer",
+      { actionId, text: "Ann", input: "enter" },
+      { session: other.id },
+    ),
+    refused("session"),
+  );
 });
