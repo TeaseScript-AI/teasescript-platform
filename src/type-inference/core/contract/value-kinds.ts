@@ -299,6 +299,24 @@ function* valueAt(
       };
       return contract.entered(value, yield demand);
     }
+    // a fallback's or a `get`'s answer at a path once per value and path, whatever asks, as its root's: each composes
+    // its operands' answers at that path, so a chain of them read below its root by k consumers (C10 descending into a
+    // nullable collection's element) walks each link once, never the chain before it again per reader (Astra r1, Codex
+    // r4 and r5 on #1824)
+    if (operation.kind === "fallback" || operation.kind === "get") {
+      const site = program.places[value]?.site ?? operation.site;
+      const pathSlot = joinParts("cop", value, restPart(rest));
+      flow?.include(pathSlot, "operation");
+      const demand: Demand = {
+        key: pathSlot,
+        kind: "contract",
+        file: site.file,
+        offset: site.start,
+        // #1668: the demand's own run: its frame's flow, taken as it starts
+        make: () => contractOfOp(contract, operation, stepsArray(ref.steps())),
+      };
+      return contract.entered(value, yield demand);
+    }
     // any other operation's on its frame's own stack, not the native one, its read chain new (`inline`): a chain of
     // operands (`o + o + …`, `a otherwise b otherwise …`) costs no native call per level (#1572)
     return contract.entered(

@@ -477,6 +477,11 @@ export class KnownValues {
   readonly #initializer: (identifier: Identifier) => Expression | undefined;
   /** The type a `fromJson` call reads its JSON as, where the plan gives it one (`CallExpressionPlan.expected`). */
   readonly #expected: (call: CallExpression) => TypePlan | undefined;
+  /**
+   * Whether a read's value can reach it: a read whose branch's narrowing admits no kind of its initializer's value never
+   * runs with that value, so it has none (#1073 PR 2), applied to every read the walk evaluates, an operand's included.
+   */
+  readonly #admits: (identifier: Identifier, value: KnownValue) => boolean;
   /** The work left (see `KNOWN_VALUE_WORK`), which regex searches also use up. */
   readonly #work = { remaining: KNOWN_VALUE_WORK };
   /** The work each list, set, dict, regex, or date and time value takes (see `knownSize`), once it was measured. */
@@ -485,9 +490,11 @@ export class KnownValues {
   public constructor(
     initializer: (identifier: Identifier) => Expression | undefined = () => undefined,
     expected: (call: CallExpression) => TypePlan | undefined = () => undefined,
+    admits: (identifier: Identifier, value: KnownValue) => boolean = () => true,
   ) {
     this.#initializer = initializer;
     this.#expected = expected;
+    this.#admits = admits;
   }
 
   /**
@@ -582,7 +589,8 @@ export class KnownValues {
       // The same value as another expression's, which costs no work.
       case "identifier": {
         const initializer = this.#initializer(expression);
-        return initializer === undefined ? undefined : known(initializer);
+        const value = initializer === undefined ? undefined : known(initializer);
+        return value === undefined || this.#admits(expression, value) ? value : undefined;
       }
       case "binaryExpression":
         if (expression.operator === "otherwise") {

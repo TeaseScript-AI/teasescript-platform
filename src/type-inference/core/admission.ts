@@ -33,6 +33,7 @@ import {
   joinElements,
   literalChildren,
   literalElements,
+  type MixedOptional,
   offendingAt,
   siteAt,
   storesAt,
@@ -116,7 +117,7 @@ import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import type { IngressNode, Item, ItemTag } from "./items.js";
 import { propertyStep } from "./program.js";
-import { elementStep, type Obligation } from "./result.js";
+import { elementStep, type MixedSteps, type Obligation } from "./result.js";
 import type { Work } from "./solver.js";
 import { Touches, type Touch } from "./touch.js";
 export { requiredKind } from "./admission/boundaries.js";
@@ -915,6 +916,8 @@ export class Admission {
         readonly earliest: readonly ItemTag[];
         readonly kinds: readonly ItemTag[];
         readonly atCopy: boolean;
+        readonly optional?: MixedOptional;
+        readonly shown?: MixedSteps;
       },
     ) => void,
     undecided?: (cell: PlaceId) => void,
@@ -931,6 +934,8 @@ export class Admission {
       readonly kinds: readonly ItemTag[];
       readonly value: PlaceId;
       readonly levels: readonly (readonly ItemTag[])[] | null;
+      readonly optional?: MixedOptional;
+      readonly shown?: MixedSteps;
     }) => void,
     undecided?: (value: PlaceId) => void,
   ): void {

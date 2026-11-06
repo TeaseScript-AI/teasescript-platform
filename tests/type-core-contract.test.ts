@@ -640,7 +640,8 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
     "let good = [1]\nlet host = hostValue\nlet a5 = good\nlet a4 = a5\nlet a3 = a4\nlet a1 = a3\nlet a0 = a1\n" +
       "if a1 != null {\n  a0 = a1\n}\na5 = a0\na1 = host\nexit\n",
     {
-      record: "6ac9cd3fc25be5c7",
+      // (its route plans since #1073 PR 2 phase 2 admits `!= null`: the record's route text, its analysis unchanged)
+      record: "79fc877582249c8a",
       upToOrder: "e56cd6479164593a",
       compact: [
         "warning-runtime-check",

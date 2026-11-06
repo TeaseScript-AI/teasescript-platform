@@ -93,6 +93,8 @@ const CHARGING = [
   ...core("type-inference/core/exact-path.ts", ["ExactPath.defVal"]),
   ...core("type-inference/core/definitions.ts", [
     "DefinitionLists.definitionsOf",
+    // (a key's prefixes among a set, one charged visit per trie step, its build the program's shared work: G3 3b)
+    "KeyTrie.above",
     "keptParent",
     "DefinitionLists.eventList",
     "DefinitionLists.readSignature",

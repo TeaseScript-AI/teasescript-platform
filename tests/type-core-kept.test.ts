@@ -145,7 +145,11 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a receiver and its property as the code a fallback's warning names, made for its sentence",
   ],
-  "messages/site.ts valueAt spread": [
+  "messages/site.ts givenByCall spread": [
+    1,
+    "a storing method's receiver's steps and one member, made once per file for a landing's search, as the statements' targets are",
+  ],
+  "messages/site.ts descend spread": [
     1,
     "the way from a variable to a warned value, made once for a fix after the analysis and dropped",
   ],

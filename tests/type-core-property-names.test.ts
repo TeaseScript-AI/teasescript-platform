@@ -190,9 +190,13 @@ test("a demand stop with a question stop after it ends the search, its names wit
   assert.ok(request !== null);
   let retried = 0;
   for (const mode of MODES) {
+    // (the allowance one unit past the analysis's own end: its questions pass it)
+    const ended = inMode(mode, () =>
+      withTestDemandAllowance(16, () => analyseCore(request).budget.total),
+    );
     const found = inMode(mode, () =>
       withTestDemandAllowance(16, () =>
-        withTestAllowance(3870, () => {
+        withTestAllowance(ended + 1, () => {
           let answers = analyseCore(request);
           assert.ok(answers.budget.decisions.some((decision) => decision.stopped));
           const node = answers.graph.nodes.find(

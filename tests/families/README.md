@@ -12,9 +12,9 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
   [--allowances natural,16,256] [--shard i/N] [--units 4] [--timeout 1800] [--memory 2048] \
-  [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl] [--only <stall index>]
+  [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl] [--only <stall index>] [--items <sources> | --items-from-env]
 node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base src tree>/<area> [the same options]
-node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/16]
+node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/N]
 node tests/families/stalls.mjs <shards' --work records>... [--rerun <rerun's records>...] [--index <new file>]
 node tests/families/stalls.mjs rerun <stall index> <base> <head> <new folder> [--timeout 600] [--shard i/N | --items <file>]
 ```
@@ -46,7 +46,13 @@ the oracle's own stop: where its questions after a finished analysis pass the al
 unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on either tree agrees only where both trees left
 the same count unanswered and published the same parts up to them (#1592): the allowance is the same on both trees, so
 what it leaves unanswered is too. Such a run is counted apart (`unansweredAlike`); any other is neither agreement nor an
-exception: the runner writes it to `--out` and counts it apart (`unanswered`). It prints one JSON line per generator and
+exception: the runner writes it to `--out` and counts it apart (`unanswered`). Each such run records why on each tree
+(`by`, on `--out` and the source's `--work` line, and on a stored run): `questions` (the analysis finished and the
+oracle's later questions passed the allowance; their cost is #1837's), `stopped` (the analysis's own budget stopped it;
+today's oracle answers a stopped analysis whole, so this does not occur), or `unknown` where the tree's oracle or a run
+stored before this names none. `stalls.mjs` counts them as runner artefacts, one group a reason and `unansweredAlike`,
+each with its runs, sources and first witness, on a line of its own where any group has runs and always in `--index`.
+It prints one JSON line per generator and
 a total (sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, uncharged, modes, runs,
 differences, the unit limit's multiple and the safety net in seconds), and exits 1 when any run differs, throws, leaves
 nodes unanswered other than alike, is uncompared or reaches the safety net, or any source stalls. Run large sizes as one
@@ -70,7 +76,10 @@ the options that cannot change or multiply them, by full name (`--name`, `--owne
 `--for`, `--mem`, `--class`, `--timeout`, `--host`, `--node`, `--commit`, `--checkout`, `--patch`, `--in`, `--after`,
 `--in-result`, `--needs-baseline`, `--data`, `--alone`, `--write`, `--target`, `--big`, `--writable-trees`,
 `--sandbox`, `--dry`), and refuses any other, as `--shards` or another `--items`. A job reads its batch from
-`$SX_ITEMS`, one item a line, its shard last. A replay's per-area report is `stalls.mjs`'s area lines and total, counted
+`$SX_ITEMS`, one item a line, its shard last. A pool can also hand out sources (#1826): `items.mjs sources <area>`
+prints one place a line (`[generator, name, key]`, a repeated source once), `check <file> --area <area>` asks it to hold
+the area's every source once, and a job runs its batch with `run.mjs <area> <base> <head> --items-from-env --work …`,
+whose record names the batch, so the queue's `--target` balances sources rather than shards. A replay's per-area report is `stalls.mjs`'s area lines and total, counted
 in sources, not a sum of the shards' log lines, whose `unansweredAlike` counts runs; a pool's shards run with `--work`,
 whose records it reads.
 
@@ -112,7 +121,8 @@ stalls are rerun by a runner since; the rerun's unit limit is added to its confi
 A replay since #1647 is judged by units. A record made before #1647 is judged by the rule then (a candidate, load or unknown, its time
 clause a heuristic). An
 area's records must share one configuration (another is refused, exit 2), so the area is complete only with its shards
-0/N to N-1/N of one N, together every source of one plan, and a source a plan lists more than once (a repeat, which the
+0/N to N-1/N of one N, together every source of one plan, or with an item pool's batches alone (#1826), each naming the
+area's count of sources and together holding that many (batches beside numbered shards are incomplete), and a source a plan lists more than once (a repeat, which the
 runner runs and counts each time) is one source where its repeats record the same counts, stall and runs, milliseconds
 apart, refused (exit 2, naming the place) where they differ; a source counts as `agreed` only where it was compared in
 every run and agrees, and as `unansweredAlike` where its runs agree but for some unanswered alike, each such source
@@ -171,7 +181,10 @@ removes a baseline.
 `bash tools/corpus/baseline.sh status <commit>` says in one line what each area of the commit's tree holds, and exits 0
 only when each one is complete. Before a base run, ask it: compare the head with a complete area through `--baseline`,
 and store an area that is not from the base tree's own runner and areas
-(`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/16`, one job per shard,
+(`node <base tree>/tests/families/run.mjs <area> <base tree> --store ~/work/baselines --shard i/N`, one job per shard,
+N the area's PLAN count: `copies` in 64 where a baseline first plans it, for a 60-minute wall on the slowest worker
+(#1826), every other area in 16; a baseline that recorded another count keeps it, and `--baseline` compares a head of
+any shard count with it,
 the fixture area as `<base tree>/tools/corpus/fixture`), so that it serves every later run on that tree. The script,
 installed as the desktop's `~/work/trees/hooks/baseline`, fills each new `main`'s tree at low priority where nobody
 stores it. A fill that began runs to its end (#1590, reversing #1567, whose fills cut short were never read); one none
@@ -265,14 +278,15 @@ sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> --
   --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
 ```
 
-`shadow-classify.mjs` (S11's classification, taxonomy version 2) reads the records of a campaign (and the S11 readiness
+`shadow-classify.mjs` (S11's classification, taxonomy version 5) reads the records of a campaign (and the S11 readiness
 research's `results.jsonl`, whose crashed sources have no rows) and gives every route pair (a source in one mode, legacy
 against core) exactly one class, and every source in each order one class of the sharing column, the core with sharing
 on against off (#1711). Each class has its rule in words, a witness and a gate state: `pass`, `attributed` (the rule
-class is known; S11 still owes each source's accepted expectation) or `open`. Pairs: `agree`; `differs/stop`,
+class is known; S11 still owes each source's accepted expectation), `accepted (condition 1; condition 2 list)` or `open`. Pairs: `agree`; `differs/stop`,
 `/surviving`, `/integer`, `/rule` by the codes whose diagnostic identities (path, code, severity, offsets) changed, in
 that precedence, then `/checks`, `/plan`, `/wording` where the identities are equal (the other differing parts are
-columns of the pair); `excluded/<text>`, the research's 53 exclusion texts as 48 rules, and from version 2 `this return statement`, the camera and tag-query texts (#1744) and the open part of a typed default (#1072); `failed/ legacy-heap` (the
+columns of the pair); from version 5 `declined/lost check` (accepted: the core declined the program where a stop lost a
+check it requires, #1781; any other decline text is unclassified); `excluded/<text>`, the research's 53 exclusion texts as 48 rules, and from version 2 `this return statement`, the camera and tag-query texts (#1744) and the open part of a typed default (#1072), and from version 4 a typed default a stop left open (#1775); `failed/ legacy-heap` (the
 legacy route's heap in its analysis with the core finished: legacy behaviour the switch resolves, #1075),
 `failed/other`, `exception`, `aborted-record`, `unavailable`. Sharing: `equal`, `one-mode-stop` and `both-stop-differ`
 (attributed, each row for the stop oracle's judgment), `neither-stops-differ`, `outside`, `uncompared`. Every rule is
@@ -282,7 +296,9 @@ the classifier cannot read whole (a compared row without its four delta parts, a
 record outside `--expect` or a key recorded twice with different readings. The gate table (`gate.json`, `gate.md`) adds
 the differing pairs' parts, the research's inventory signatures (`signatures.tsv`), decision coverage (open unless the
 natural runs hold ordinary decision records and at least one run at the demand control, 16, reaches a receiving
-completion) and, as information only, the sources whose core differs across the four modes; the verdict line is `gate:
+completion) and, as information only, the sources whose core differs across the four modes and the control's runs that
+left the slice, one row a class that names a text, `declined/lost check` and each rule of `EXCLUSIONS` (zeros
+included), and one a text no class names (`Unlisted control texts`, r4.382); the verdict line is `gate:
 green` only with no `open` row, and `--gate` (S11's final run, with `--expect`) exits 1 otherwise. Over the research's
 records it reproduces its aggregate (`~/work/evidence/1728/`):
 
@@ -290,6 +306,20 @@ records it reproduces its aggregate (`~/work/evidence/1728/`):
 env -u NODE_OPTIONS node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --manifest > expect.jsonl
 node tests/families/shadow-classify.mjs <shards' shadow.jsonl>... --expect expect.jsonl --out <folder> [--gate]
 ```
+
+From version 3 the group table in `shadow-groups/` decides the pairs of the four grouped classes (`differs/rule`,
+`/checks`, `/plan`, `/wording`; `--groups <folder>` reads another, `--groups none` none). `groups.json` holds each
+adjudicated group: `conforms`, `defect` or `pending`, its title, what closes an open one, its witness.
+`bindings.jsonl.gz` holds one line a bound pair: its source key and guard by their first 16 digits, its mode, its group,
+its class. A pair takes its binding's group where its key, mode, class and guard (`pairGuard`, the sha256 of its
+reading) all match; otherwise it is `changed` (bound, but its reading or class differs) or `unbound` (no binding). Only
+`conforms` is attributed. `defect` stays open until its issue closes, `pending` until its construction lands, and
+`changed` and `unbound` until a re-adjudication; each closes only by a new table, never by a matching signature (one
+signature spans several groups). `gate.json` names both files' sha256. Keys and guards are kept by their first 16
+digits: two of the gate's sources sharing a key prefix would need a 64-bit collision, and none of today's 12,644 bound
+sources do. `shadow-bind.mjs` writes the table from an adjudication and the run it adjudicated, refusing a
+binding whose raw publication differs from its record's. A re-adjudication replaces both files whole, so the table's
+history is by version, not by diff. The first table is Sol's preparation of gate run 2 (#1744 comment 6655890944).
 
 The #1704 witnesses (`copies`, `--only` with `1188-sol-candidate-neighbours.mjs/node-graft@8`, `node-mixed@8`,
 `node-graft@64`, `node-mixed@64`, `construction/node-graft@64`): at 8 both routes plan in every mode; at 64 the legacy
@@ -312,6 +342,11 @@ runner on `main`'s `src/` tree `a5af3a394`: a fill of every area at the runner's
 
 ## A generator
 
+A folder of `tests/families` that holds an `.mjs` file is an area: the check and the baselines find the areas by
+`sources.mjs`'s `generatorFolders`, the baselines adding the corpus fixture (`tools/corpus/fixture`), and the runner,
+the check and the baselines take every module in an area as a generator. A folder of data only is no area; a utility
+module stays outside the area folders, as `shadow-bind.mjs` does (#1786).
+
 A module `tests/families/<area>/<name>.mjs` with no imports beyond `node:` built-ins and no side effects:
 
 ```js
@@ -321,7 +356,11 @@ export const shapes = { "<shape>": (n) => "<source>" }; // or (n) => [{ path, so
 // or fixed sources: export const cases = [["<name>", "<source>" or [{ path, source }], <globals>?]];
 export const checks = ["publication", "stops"]; // default ["publication"]
 export const globals = ["hostValue"]; // the run's host globals, where they are not the default
-export const recorded = { commands: [["<command>", "<where it is recorded>"]], sources: 0, sha256: "<set key>" };
+export const recorded = {
+  commands: [["<command>", "<where it is recorded>"]],
+  sources: 0,
+  sha256: "<set key>",
+};
 ```
 
 A source runs with the host globals its case gives, else its generator's `globals`, else `hostValue`, `hostOther`,

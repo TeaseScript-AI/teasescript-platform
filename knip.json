@@ -20,10 +20,8 @@
   "project": [
     "src/**/*.ts",
     "playground/**/*.ts",
-    "player/theme/**/*.ts",
-    "player/encryption/**/*.ts",
-    "player/lock-service.ts",
-    "player/vue/**/*.{css,ts,vue}",
+    "player/**/*.ts",
+    "player/vue/**/*.{css,vue}",
     "tests/**/*.ts",
     "tools/oxlint/**/*.mjs",
     "tools/oxlint/**/*.ts",

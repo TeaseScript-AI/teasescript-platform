@@ -1,9 +1,13 @@
 import type {
+  CallExpression,
   Expression,
+  FunctionDeclaration,
+  FunctionParameter,
   ListLiteral,
   ObjectLiteral,
   ObjectProperty,
   Statement,
+  TypeAnnotation,
 } from "../../../ast.js";
 import { selectsElement } from "../method-categories.js";
 import {
@@ -15,7 +19,7 @@ import {
 import type { SourceSpan } from "../../../source.js";
 import type { SourceSite } from "../../graph.js";
 import { expressionParts, statementExpressions } from "../../../expression-children.js";
-import { listDraw } from "../../../list-methods.js";
+import { listDraw, listMethod } from "../../../list-methods.js";
 import type { ItemTag } from "../items.js";
 import type { CheckedDiagnostic, StoreStep } from "../result.js";
 
@@ -44,6 +48,11 @@ export interface MessageSource {
    * list literal's element); `null` where it lands any other way.
    */
   readonly landing: (site: SourceSite) => Landing | null;
+  /**
+   * The written type of the declaration at `site` (a `let`, a `global` or a parameter, as a store's root names it), as
+   * the parser read it; `null` where it has none (#1753).
+   */
+  readonly declared: (site: SourceSite) => TypeAnnotation | null;
   /** The narrowest expression that owns the property `steps` lead to below the value at `site` (`ownerOf`, #1495). */
   readonly owner: (site: SourceSite, steps: readonly StoreStep[]) => SourceSite;
   /**
@@ -266,28 +275,126 @@ function acts(node: Expression): boolean {
   }
 }
 
-/** Where a value lands (`MessageSource.landing`): the variable it is given to, and the steps from it to the value. */
+/**
+ * A step from a landing's variable down to the value: a store's step, or an index, which takes a list's element or a
+ * dict's value alike (#1763: `a[0] = …`, whichever the variable holds).
+ */
+export type LandingStep = StoreStep | { readonly index: true } | { readonly member: true };
+
+/**
+ * Where a value lands (`MessageSource.landing`): the variable it is given to, or for an argument the parameter (#1763),
+ * and the steps from it to the value.
+ */
 export interface Landing {
   readonly root: string;
-  readonly steps: readonly StoreStep[];
+  readonly steps: readonly LandingStep[];
+  /**
+   * A storing method's argument (`add`'s `element`, `addAll`'s `elements`): a landing that does not reach the place,
+   * or a receiver no name reaches (no `root`), proves no level of it (`wholeCheck`, Codex r3 on #1817).
+   */
+  readonly method?: "element" | "elements";
 }
 
-/** A value a statement gives its variable (`MessageSource.landing`): the value, the variable and its steps. */
-export interface Given {
+/** A value a statement gives its variable, or a call its parameter (`MessageSource.landing`): the value, its landing. */
+export interface Given extends Landing {
   readonly value: Expression;
-  readonly root: string;
-  readonly steps: readonly StoreStep[];
 }
 
-/** The variable and the properties an assignment's target names (`box.inner`), else `null`. */
+/** The variable and the properties and indices an assignment's target names (`box.inner`, `a[0]`), else `null`. */
 function targetSteps(target: Expression): Landing | null {
-  const steps: StoreStep[] = [];
+  const steps: LandingStep[] = [];
   let at = target;
-  while (at.kind === "propertyAccessExpression") {
-    steps.unshift({ property: at.property.name });
-    at = at.object;
+  // (through parentheses too, Codex r1 on #1817: `(a)[0] = …`)
+  for (;;) {
+    if (at.kind === "parenthesizedExpression") at = at.expression;
+    else if (at.kind === "propertyAccessExpression" || at.kind === "indexExpression") {
+      steps.push(at.kind === "indexExpression" ? { index: true } : { property: at.property.name });
+      at = at.object;
+    } else break;
   }
-  return at.kind === "identifier" ? { root: at.name, steps } : null;
+  return at.kind === "identifier" ? { root: at.name, steps: steps.reverse() } : null;
+}
+
+/**
+ * The values a call gives (#1763): each argument, positional by its place, named by its name, to the parameter of the
+ * function the callee names (`resolve`); and the value a list's or a set's storing method stores (`decides`, Astra r1
+ * on #1817): `add`'s, a member of its receiver (`{ member: true }`, its element), `addAll`'s, its receiver whole, where
+ * the receiver is a variable's place (`targetSteps`), else no name (`root` empty); each marked by its method. A callee
+ * is read through parentheses (`(a.add)(x)`, Codex r3 on #1817). A method is never the user function of its name.
+ * Appended to `out`, so a source's many arguments are never spread into one call (Codex r1 on #1817).
+ */
+export function givenByCall(
+  call: CallExpression,
+  resolve: (name: string) => FunctionDeclaration | null,
+  out: Given[],
+): void {
+  let callee = call.callee;
+  while (callee.kind === "parenthesizedExpression") callee = callee.expression;
+  if (callee.kind === "propertyAccessExpression") {
+    const method = listMethod(callee.property.name);
+    if (method?.decides !== "element" && method?.decides !== "elements") return;
+    const name = method.parameters[0]?.name;
+    const argument = call.arguments.find((each, position) =>
+      each.kind === "namedArgument" ? each.name.name === name : position === 0,
+    );
+    if (argument === undefined) return;
+    const receiver = targetSteps(callee.object) ?? { root: "", steps: [] };
+    out.push({
+      value: argument.value,
+      root: receiver.root,
+      steps: method.decides === "element" ? [...receiver.steps, { member: true }] : receiver.steps,
+      method: method.decides,
+    });
+    return;
+  }
+  const declared = callee.kind === "identifier" ? resolve(callee.name) : null;
+  if (declared === null) return;
+  const named = parametersByName(declared);
+  call.arguments.forEach((argument, position) => {
+    const parameter =
+      argument.kind === "namedArgument"
+        ? named.get(argument.name.name)
+        : declared.parameters[position];
+    if (parameter !== undefined)
+      out.push({ value: argument.value, root: parameter.name.name, steps: [] });
+  });
+}
+
+/** Each declaration's parameters by name, made on its first named argument (Codex r1 on #1817: no search per one). */
+const PARAMETERS = new WeakMap<FunctionDeclaration, ReadonlyMap<string, FunctionParameter>>();
+
+function parametersByName(declared: FunctionDeclaration): ReadonlyMap<string, FunctionParameter> {
+  let named = PARAMETERS.get(declared);
+  if (named === undefined)
+    PARAMETERS.set(
+      declared,
+      (named = new Map(declared.parameters.map((each) => [each.name.name, each]))),
+    );
+  return named;
+}
+
+/**
+ * The values calls give their parameters, in start order, and each one's nearest argument around it (`-1` for none):
+ * arguments nest, one call's inside another's (`f(g(x))`), so a search climbs out from the last that starts at or
+ * before a site.
+ */
+export interface Arguments {
+  readonly given: readonly Given[];
+  readonly around: readonly number[];
+}
+
+/** `Arguments` of a file's calls' values, sorted by start, each one's nearest argument around it found by a stack. */
+export function argumentsOf(given: Given[]): Arguments {
+  given.sort((a, b) => a.value.span.start.offset - b.value.span.start.offset);
+  const around: number[] = [];
+  const open: number[] = [];
+  given.forEach((entry, at) => {
+    const end = entry.value.span.end.offset;
+    while (open.length > 0 && given[open.at(-1)!]!.value.span.end.offset < end) open.pop();
+    around.push(open.at(-1) ?? -1);
+    open.push(at);
+  });
+  return { given, around };
 }
 
 /** The value a `let`, a `global` or an `=` statement gives its variable, else `null`. */
@@ -308,20 +415,32 @@ function lastStartingBy<T>(
   spanOf: (item: T) => SourceSpan,
   charge: Charge,
 ): T | undefined {
+  return lastStarting(items, start, spanOf, charge).item;
+}
+
+/** `lastStartingBy` with its index, `-1` for none: each item compared read once. */
+function lastStarting<T>(
+  items: readonly T[],
+  start: number,
+  spanOf: (item: T) => SourceSpan,
+  charge: Charge,
+): { readonly at: number; readonly item: T | undefined } {
   let low = 0;
   let high = items.length;
-  let found: T | undefined;
+  let at = -1;
+  let item: T | undefined;
   while (low < high) {
     // (one unit per item compared)
     charge(1);
     const middle = (low + high) >> 1;
-    const item = items[middle]!;
-    if (spanOf(item).start.offset <= start) {
-      found = item;
+    const each = items[middle]!;
+    if (spanOf(each).start.offset <= start) {
+      at = middle;
+      item = each;
       low = middle + 1;
     } else high = middle;
   }
-  return found;
+  return { at, item };
 }
 
 /**
@@ -344,9 +463,17 @@ function valueAt(
   given: readonly Given[],
   site: SourceSite,
   charge: Charge,
-): { readonly found: Given; readonly at: Expression; readonly steps: StoreStep[] } | null {
+): { readonly found: Given; readonly at: Expression; readonly steps: LandingStep[] } | null {
   const found = lastStartingBy(given, site.start, (entry) => entry.value.span, charge);
-  if (found === undefined) return null;
+  return found === undefined ? null : descend(found, site, charge);
+}
+
+/** `valueAt` below one value it found: down its literals' parts to `site`, through parentheses and `otherwise`. */
+function descend(
+  found: Given,
+  site: SourceSite,
+  charge: Charge,
+): { readonly found: Given; readonly at: Expression; readonly steps: LandingStep[] } | null {
   const holds = (expression: Expression | undefined): expression is Expression =>
     expression !== undefined &&
     expression.span.start.offset <= site.start &&
@@ -393,9 +520,38 @@ export function landingOf(
   given: readonly Given[],
   site: SourceSite,
   charge: Charge = NO_CHARGE,
+  calls: Arguments = { given: [], around: [] },
 ): Landing | null {
-  const value = valueAt(given, site, charge);
-  return value === null ? null : { root: value.found.root, steps: value.steps };
+  const value = valueAt(given, site, charge) ?? argumentAt(calls, site, charge);
+  return value === null
+    ? null
+    : {
+        root: value.found.root,
+        steps: value.steps,
+        ...(value.found.method === undefined ? {} : { method: value.found.method }),
+      };
+}
+
+/**
+ * The value at `site` among the values calls give (#1763): from the last argument that starts at or before it, out
+ * through the arguments around it to the first that holds it, then down as `valueAt` goes; `null` in none.
+ */
+function argumentAt(
+  calls: Arguments,
+  site: SourceSite,
+  charge: Charge,
+): { readonly found: Given; readonly at: Expression; readonly steps: LandingStep[] } | null {
+  let { at } = lastStarting(calls.given, site.start, (entry) => entry.value.span, charge);
+  while (at !== -1) {
+    // (one unit per argument climbed out of)
+    charge(1);
+    const found = calls.given[at]!;
+    const { span } = found.value;
+    if (span.start.offset <= site.start && site.end <= span.end.offset)
+      return descend(found, site, charge);
+    at = calls.around[at]!;
+  }
+  return null;
 }
 
 /** The list literal a selection of one element reads (`.random`, `.first`, `.last`, an index), through parentheses. */
