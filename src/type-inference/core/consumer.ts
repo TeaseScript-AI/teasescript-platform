@@ -664,11 +664,37 @@ function knownValues(
     const initializer = answers.initializers.get(
       siteKey(index.fileOf(identifier), identifier.span),
     );
-    return initializer === undefined ? undefined : index.expressionAt(initializer);
+    if (initializer === undefined) return undefined;
+    const expression = index.expressionAt(initializer);
+    // (the branch's narrowing at the read, #1073 PR 2: where it admits no kind of the initializer's value, as `n` under
+    // `if n is integer` with `n = 1.5` or under `if n == null` with `n = 1`, the read never runs with that value, so it
+    // has no known value and a dead branch is no static error)
+    const node = answers.graph.expressionAt(index.site(identifier));
+    const read = node === undefined ? undefined : answers.at(node);
+    if (read === undefined || read === null) return expression;
+    const kinds = withoutEmpty(read.items).map((item) => item.tag);
+    if (kinds.length === 0) return undefined;
+    if (kinds.includes("unknown")) return expression;
+    const value = values.known(expression);
+    return value === undefined || admitsKnown(kinds, value) ? expression : undefined;
   }, expected);
   const known = (expression: Expression) => values.known(expression);
   answers.shareKnown(known);
   return known;
+}
+
+/**
+ * Whether a read's kinds admit a known scalar: `null`, text, a boolean, a whole number as an `integer` or a `number`, a
+ * fraction as a `number`.
+ */
+function admitsKnown(kinds: readonly string[], value: KnownValue): boolean {
+  if (value === null) return kinds.includes("null");
+  if (typeof value === "number")
+    return kinds.includes("number") || (Number.isInteger(value) && kinds.includes("integer"));
+  if (typeof value === "string") return kinds.includes("string");
+  if (typeof value === "boolean") return kinds.includes("boolean");
+  // (a structured value: its kinds are not decided here, so it keeps its known value)
+  return true;
 }
 
 /**

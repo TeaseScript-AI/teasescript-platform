@@ -155,9 +155,19 @@ export function outsideSyntax(
           push([node.object]);
           break;
         case "binaryExpression":
-          if (node.operator !== "otherwise") return outside(node.span, "this binary expression");
+          // (`otherwise`, and the narrowing's own null tests, `x != null` and `x == null`, §13.2's G: every other operator
+          // is S9b's, by its own rule)
+          if (node.operator !== "otherwise" && !nullTest(node))
+            return outside(node.span, "this binary expression");
           push([node.left, node.right]);
           break;
+        case "typeTestExpression": {
+          // (`x is T` and `x is not T`, the narrowing's type test, its type a written type of the slice)
+          const written = annotationOutside(node.type);
+          if (written !== null) return outside(written.span, "this written type");
+          push([node.value]);
+          break;
+        }
         case "callExpression": {
           const call = sliceCall(node);
           if (call === null) return outside(node.span, "this call expression");
@@ -187,6 +197,14 @@ export function outsideSyntax(
     }
   }
   return null;
+}
+
+/** Whether a comparison is a null test, `x != null` or `x == null` (either side the `null`). */
+function nullTest(node: Extract<Expression, { kind: "binaryExpression" }>): boolean {
+  return (
+    (node.operator === "!=" || node.operator === "==") &&
+    (unwrapped(node.left).kind === "nullLiteral" || unwrapped(node.right).kind === "nullLiteral")
+  );
 }
 
 function unwrapped(expression: Expression): Expression {
