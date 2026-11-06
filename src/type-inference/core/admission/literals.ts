@@ -1,4 +1,5 @@
 import type { PlaceId, SourceSite } from "../../graph.js";
+import type { Strip } from "../carriers.js";
 import type { Admission } from "../admission.js";
 import {
   joinParts,
@@ -1370,53 +1371,14 @@ function mayHoldNull(
     withoutEmpty(admission.run(contract.contractOfValueAt(at, steps))).some(
       (item) => item.tag === "null",
     );
-  // (an `otherwise`'s operand may be null where its items at its node hold null, narrowed as it is read there: a
-  // written copy narrowed by its assignment or a test never runs its fallback, as the current checker reads it; an
-  // operand that is itself an `otherwise` only where its operand and its fallback both may be, Codex r10's B1)
-  // (each node's answer once per pass and node, an `otherwise` after its operand and fallback, so a chain of them is
-  // walked once, whichever carrier in it asks: Codex r11's B2)
-  let byNode = NARROWED.get(admission.pass);
-  if (byNode === undefined) NARROWED.set(admission.pass, (byNode = new Map()));
-  const narrowed = byNode;
-  const operandNull = (operand: PlaceId, from: FlowNode): boolean => {
-    let known = narrowed.get(from);
-    if (known === undefined) narrowed.set(from, (known = new Map()));
-    const open = [operand];
-    while (open.length > 0) {
-      const at = open.at(-1)!;
-      if (known.has(at)) {
-        open.pop();
-        continue;
-      }
-      admission.work.charge("checks");
-      const op = program.opOf.get(at);
-      if (op?.kind !== "fallback") {
-        known.set(
-          at,
-          admission.items(at, from, []).some((item) => item.tag === "null"),
-        );
-        open.pop();
-        continue;
-      }
-      const left = known.get(op.left);
-      const right = known.get(op.right);
-      if (left === false || right === false || (left === true && right === true)) {
-        known.set(at, left === true && right === true);
-        open.pop();
-      } else open.push(left === undefined ? op.left : op.right);
-    }
-    return known.get(operand)!;
-  };
   type Part = readonly [PlaceId, FlowNode, readonly string[]];
   // (a value's answer at a path where its form decides it, else the parts whose answers decide it)
   const expand = (at: PlaceId, from: FlowNode, steps: readonly string[]): boolean | Part[] => {
     admission.work.charge("checks");
     if (steps.length === 0) {
-      // (an `otherwise`'s own null is its fallback's, where its operand may be null: the operand's null is what the
-      // fallback replaces, Codex r3 on #1819)
-      const op = program.opOf.get(at);
-      if (op?.kind === "fallback")
-        return operandNull(op.left, from) ? [[op.right, from, []] as const] : false;
+      // (an `otherwise`'s own null is its narrowed tree's: its fallback's, each leaf read narrowed, where its operand
+      // may be null; the operand's null is what the fallback replaces. Codex r3 on #1819, Astra r2's B2 on #1789)
+      if (program.opOf.get(at)?.kind === "fallback") return operandNull(admission, at, from);
       return itemsHold(at, []);
     }
     if (program.hasOf.has(at)) {
@@ -1428,7 +1390,7 @@ function mayHoldNull(
     const carried = admission.carriersOf(at, steps);
     if (carried.length > 0) {
       const operand = carried.find(([, , role]) => role === "otherwise/operand")?.[0];
-      const falls = operand === undefined || operandNull(operand, from);
+      const falls = operand === undefined || operandNull(admission, operand, from);
       return carried
         .filter(([, , role]) => role !== "otherwise/fallback" || falls)
         .map(([part, strip]) => [part, from, strip] as const);
@@ -1510,6 +1472,45 @@ function mayHoldNull(
   return last;
 }
 
+/**
+ * #1765: whether an `otherwise`'s operand may be null at its node: its items there, narrowed as it is read (a written copy
+ * narrowed by its assignment or a test never runs its fallback, as the current checker reads it); an operand that is
+ * itself an `otherwise`, only where its operand and its fallback both may be (Codex r10's B1). Each node's answer once per
+ * pass and node (`NARROWED`), an `otherwise` after its operand and fallback, so a chain is walked once (Codex r11's B2).
+ */
+function operandNull(admission: Admission, operand: PlaceId, from: FlowNode): boolean {
+  const { program } = admission.pass;
+  let byNode = NARROWED.get(admission.pass);
+  if (byNode === undefined) NARROWED.set(admission.pass, (byNode = new Map()));
+  let known = byNode.get(from);
+  if (known === undefined) byNode.set(from, (known = new Map()));
+  const open = [operand];
+  while (open.length > 0) {
+    const at = open.at(-1)!;
+    if (known.has(at)) {
+      open.pop();
+      continue;
+    }
+    admission.work.charge("checks");
+    const op = program.opOf.get(at);
+    if (op?.kind !== "fallback") {
+      known.set(
+        at,
+        admission.items(at, from, []).some((item) => item.tag === "null"),
+      );
+      open.pop();
+      continue;
+    }
+    const left = known.get(op.left);
+    const right = known.get(op.right);
+    if (left === false || right === false || (left === true && right === true)) {
+      known.set(at, left === true && right === true);
+      open.pop();
+    } else open.push(left === undefined ? op.left : op.right);
+  }
+  return known.get(operand)!;
+}
+
 /** Per pass and node, whether an `otherwise`'s operand may be null there (`mayHoldNull`'s `operandNull`). */
 const NARROWED = new WeakMap<object, Map<FlowNode, Map<PlaceId, boolean>>>();
 
@@ -1528,10 +1529,10 @@ function intermediateDepths(path: readonly string[]): number[] {
 }
 
 /**
- * #1765: whether each of `depths` along `path` may hold null for a side (`mayHoldNull` at each), by one walk down the
- * path: what the side holds at each depth, a literal's children followed and any other value kept with the depth it
- * was met at, each depth an OR over what it holds there. One walk per error, not a descent per depth (#1762's deep nest
- * of alternating dicts and lists, cubic otherwise); each value at a path from the pass's memo.
+ * #1765: whether each of `depths` along `path` may hold null for a side, every depth by `mayHoldNull`'s rule, read by one
+ * descent down the path (`layersOf`): through a literal's children and through a carried value's parts alike (Astra r2's
+ * B1 on #1789: a carrier's literal was descended once per longer prefix), each value at its own level and each leaf from
+ * `mayHoldNull`'s memo.
  */
 function layersAt(
   admission: Admission,
@@ -1540,32 +1541,188 @@ function layersAt(
   path: readonly string[],
   depths: readonly number[],
 ): boolean[] {
-  const { program } = admission.pass;
-  type Held = { readonly value: PlaceId; readonly node: FlowNode; readonly from: number | null };
-  let held: Held[] = [{ value, node, from: null }];
-  let depth = 0;
-  return depths.map((wanted) => {
-    for (; depth < wanted; depth += 1) {
-      const next: Held[] = [];
-      for (const each of held) {
-        admission.work.charge("checks");
-        if (each.from === null && program.hasOf.has(each.value))
-          for (const child of literalChildren(admission, each.value, path[depth]!))
-            next.push({ value: child.value!, node: child.node ?? each.node, from: null });
-        else next.push(each.from === null ? { ...each, from: depth } : each);
-      }
-      held = next;
-    }
-    return held.some((each) =>
-      mayHoldNull(
-        admission,
-        each.value,
-        each.node,
-        each.from === null ? [] : keptSlice(admission.work, path, each.from, wanted),
-      ),
-    );
-  });
+  return depths.length === 0 ? [] : layersOf(admission, value, node, path, depths);
 }
+
+/**
+ * A path below a value whose `marks` are the positions asked along it (`layersOf`), carried through a carrier as its
+ * steps are (`Strip`): a position the carrier consumes is dropped (-1), one it prepends below shifts each mark.
+ */
+interface MarkedStrip extends Strip<MarkedStrip> {
+  readonly steps: readonly string[];
+  readonly marks: readonly number[];
+}
+
+function markedStrip(
+  admission: Admission,
+  steps: readonly string[],
+  marks: readonly number[],
+): MarkedStrip {
+  return {
+    steps,
+    marks,
+    length: steps.length,
+    at: (index) => steps[index],
+    rest: () =>
+      markedStrip(
+        admission,
+        keptSlice(admission.work, steps, 1),
+        marks.map((mark) => (mark > 0 ? mark - 1 : -1)),
+      ),
+    under: (below) =>
+      markedStrip(
+        admission,
+        keptSteps(admission.work, below, steps),
+        marks.map((mark) => (mark < 0 ? mark : mark + below.length)),
+      ),
+  };
+}
+
+/**
+ * Whether a value may hold null after each of `marks` steps of `steps` (-1: not asked), by one descent per pass: a mark
+ * at its own level and every mark of a value no literal or carrier composes by `mayHoldNull`; a literal's marks below it
+ * by its children, a carried value's by its parts (the carrier table's, an `otherwise`'s fallback only where its operand
+ * may be null), as `mayHoldNull` composes one path. Each value, path and marks answered once per pass (`LAYERS`), so a
+ * join's growing operands are each read once; a value asked again while its own answer is pending adds nothing.
+ */
+function layersOf(
+  admission: Admission,
+  value: PlaceId,
+  node: FlowNode,
+  path: readonly string[],
+  depths: readonly number[],
+): boolean[] {
+  const { program } = admission.pass;
+  let memo = LAYERS.get(admission.pass);
+  if (memo === undefined) LAYERS.set(admission.pass, (memo = new Map()));
+  const answers = memo;
+  // (a part: its value and node, its path and the step its own level is at, and the marks along that path; a literal's
+  // children share their parent's path, one step further, so a descent slices no path)
+  type Part = readonly [PlaceId, FlowNode, readonly string[], number, readonly number[]];
+  interface Frame {
+    readonly at: PlaceId;
+    readonly text: string | null;
+    readonly holds: boolean[];
+    readonly parts: readonly Part[];
+    next: number;
+  }
+  // (a carried value's key, its path's text and its marks; a literal's none: its children are its own, never shared)
+  const textOf = (steps: readonly string[], marks: readonly number[]): string => {
+    const text = `${keptText(admission.work, steps)}#${marks.join(",")}`;
+    keepText(admission.work, text.length);
+    return text;
+  };
+  const pending = new Map<PlaceId, Set<string>>();
+  const open = (
+    at: PlaceId,
+    from: FlowNode,
+    steps: readonly string[],
+    start: number,
+    marks: readonly number[],
+    text: string | null,
+  ): Frame => {
+    admission.work.charge("checks");
+    const holds = marks.map((mark) => mark === start && mayHoldNull(admission, at, from, []));
+    let parts: Part[] = [];
+    if (marks.some((mark) => mark > start)) {
+      if (program.hasOf.has(at))
+        parts = literalChildren(admission, at, steps[start]!).map(
+          (child) => [child.value!, child.node ?? from, steps, start + 1, marks] as const,
+        );
+      else {
+        const below = marks.map((mark) => (mark > start ? mark - start : -1));
+        const carried = admission.carriersBy(at, markedStrip(admission, steps, below));
+        const operand = carried.find(([, , role]) => role === "otherwise/operand")?.[0];
+        const falls = operand === undefined || operandNull(admission, operand, from);
+        parts = carried
+          .filter(([, , role]) => role !== "otherwise/fallback" || falls)
+          .map(([part, strip]) => [part, from, strip.steps, 0, strip.marks] as const);
+        if (carried.length === 0)
+          below.forEach((mark, slot) => {
+            if (mark > 0)
+              holds[slot] = mayHoldNull(
+                admission,
+                at,
+                from,
+                keptSlice(admission.work, steps, 0, mark),
+              );
+          });
+      }
+    }
+    if (text !== null) {
+      let mine = pending.get(at);
+      if (mine === undefined) pending.set(at, (mine = new Set()));
+      mine.add(text);
+    }
+    return { at, text, holds, parts, next: 0 };
+  };
+  const keep = (frame: Frame): void => {
+    if (frame.text === null) return;
+    let mine = answers.get(frame.at);
+    if (mine === undefined) answers.set(frame.at, (mine = new Map()));
+    mine.set(frame.text, frame.holds);
+    pending.get(frame.at)!.delete(frame.text);
+  };
+  // (a non-literal value read from its own level: its path from there and its marks, the memo's key)
+  const own = (
+    steps: readonly string[],
+    start: number,
+    marks: readonly number[],
+  ): readonly [readonly string[], readonly number[], string] => {
+    const rest = start === 0 ? steps : keptSlice(admission.work, steps, start);
+    const below = start === 0 ? marks : marks.map((mark) => (mark >= start ? mark - start : -1));
+    return [rest, below, textOf(rest, below)];
+  };
+  let first: Frame;
+  if (program.hasOf.has(value)) first = open(value, node, path, 0, depths, null);
+  else {
+    const [rest, below, text] = own(path, 0, depths);
+    const already = answers.get(value)?.get(text);
+    if (already !== undefined) return already;
+    first = open(value, node, rest, 0, below, text);
+  }
+  const stack: Frame[] = [first];
+  let last: boolean[] = [];
+  while (stack.length > 0) {
+    const frame = stack.at(-1)!;
+    let opened = false;
+    while (frame.next < frame.parts.length) {
+      const [at, from, steps, start, marks] = frame.parts[frame.next]!;
+      if (program.hasOf.has(at)) {
+        stack.push(open(at, from, steps, start, marks, null));
+        opened = true;
+        break;
+      }
+      const [rest, below, text] = own(steps, start, marks);
+      const answer = answers.get(at)?.get(text);
+      if (answer === undefined && pending.get(at)?.has(text) !== true) {
+        // (asked first here: answered before this frame goes on, its answer added to this frame's when it ends)
+        stack.push(open(at, from, rest, 0, below, text));
+        opened = true;
+        break;
+      }
+      answer?.forEach((holds, slot) => {
+        if (holds) frame.holds[slot] = true;
+      });
+      frame.next += 1;
+    }
+    if (opened) continue;
+    keep(frame);
+    last = frame.holds;
+    stack.pop();
+    const parent = stack.at(-1);
+    if (parent !== undefined) {
+      frame.holds.forEach((holds, slot) => {
+        if (holds) parent.holds[slot] = true;
+      });
+      parent.next += 1;
+    }
+  }
+  return last;
+}
+
+/** Per pass, each value's layers at each path and marks (`layersOf`), shared by every literal's and join's error. */
+const LAYERS = new WeakMap<object, Map<PlaceId, Map<string, boolean[]>>>();
 
 function mixedOptional(type: boolean[], kinds: boolean[]): MixedOptional | undefined {
   return type.includes(true) || kinds.includes(true) ? { type, kinds } : undefined;
