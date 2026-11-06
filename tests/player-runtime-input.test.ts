@@ -106,7 +106,7 @@ async function mount(
   {
     delayMs = 250,
     scriptStorage,
-  }: { delayMs?: number; scriptStorage?: ScriptStorageProvider } = {},
+  }: { delayMs?: number | null; scriptStorage?: ScriptStorageProvider } = {},
 ) {
   const surface = {
     document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
@@ -127,7 +127,8 @@ async function mount(
       else Reflect.deleteProperty(globalThis, name);
     });
   }
-  const bridge = facade.createInProcessBackend(BUILD, { delayMs });
+  // `delayMs: null`: each reply arrives on a microtask, as in production.
+  const bridge = facade.createInProcessBackend(BUILD, delayMs === null ? {} : { delayMs });
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
@@ -474,7 +475,7 @@ test("a storage write's acknowledgement is not refused when the session changed 
   let stored!: () => void;
   const store = provider(() => new Promise<void>((resolve) => (stored = resolve)));
   const { bridge, host, posted } = await mount(context, {
-    delayMs: 50,
+    delayMs: null,
     scriptStorage: store.storage,
   });
   await start(
@@ -484,20 +485,28 @@ test("a storage write's acknowledgement is not refused when the session changed 
   );
   assert.equal((await answer(host, input.intents.choice(null, "button"))).kind, "answered");
   assert.deepEqual(store.writes, ["kept"]);
-  // The host awaits a source `prepare` before the acknowledgement is posted, so the acknowledgement waits behind it in
-  // the host; a facade call then changes the session, half a second later, before the acknowledgement's dispatch.
-  const compiling = bridge.client.request("prepare", {
-    source: { kind: "source", script: "exit" },
-  });
+  // The write settles; its report waits for a task (`setTimeout`), which the test runs once the host awaits a source
+  // `prepare`. So the acknowledgement is posted while the host awaits it, and waits behind it in the host; a facade call
+  // then changes the session's state (Debug's `debugMode`) before the acknowledgement's dispatch.
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  stored();
+  await settle(3);
+  let compiled = false;
+  let queued = false;
   let changed = false;
   posted.on("completeStorageWrite", () => {
+    queued = !compiled;
     const shown = host.session.value!;
-    const observed = facade.observeNow(shown, shown.state.observedSessionTimeMs + 500, []).session;
-    changed = observed.revision !== shown.revision;
+    const set = facade.hatch(shown, (session) => adapter.setPlayerRuntimeDebugMode(session, true));
+    changed = set.outcome.kind === "set" && set.session.revision !== shown.revision;
   });
-  stored();
+  const compiling = bridge.client
+    .request("prepare", { source: { kind: "source", script: "exit" } })
+    .then(() => (compiled = true));
+  context.mock.timers.tick(0);
   await compiling;
-  await wait(200);
+  await settle();
+  assert.equal(queued, true, "the acknowledgement waited behind the host's `prepare`");
   assert.equal(changed, true, "the session changed while the acknowledgement waited");
   assert.equal(posted.ops().filter((op) => op === "completeStorageWrite").length, 1);
   assert.deepEqual(store.writes, ["kept"]);
