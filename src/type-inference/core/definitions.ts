@@ -281,15 +281,6 @@ export function keptParent<K extends Key>(work: WorkLedger, key: TextKey<K>): Ke
   return key.slice(0, end);
 }
 
-/** A key's depth: its path's steps, counted in its text, none made (its prefixes' cuts in `aliasSignature`). */
-function keyDepth<K extends Key>(key: TextKey<K>): number {
-  const bar = barOf(key);
-  if (bar === key.length - 1) return 0;
-  let depth = 1;
-  for (let at = key.indexOf(".", bar + 1); at >= 0; at = key.indexOf(".", at + 1)) depth += 1;
-  return depth;
-}
-
 /** `prefixesOf`, each prefix's text charged before it is made (`keepText`). */
 export function keptPrefixes(work: WorkLedger, key: Key): Key[] {
   const steps = keptPath(work, key);
