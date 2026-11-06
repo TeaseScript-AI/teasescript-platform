@@ -106,6 +106,31 @@ function mixedInherited(
 }
 
 /**
+ * The sentences a case compares, the core's and the checker's; `null` where one names no mixed error of the
+ * whole-number side (outside the candidate slice there, not compared). A pair joined with a second disagreeing side
+ * names both joins in the core and the first in the checker: the sentences naming the whole-number side are compared,
+ * its true-or-false partner read as the text side; one between the text side and its twin says nothing of it.
+ */
+export function mixedCompared(
+  row: MixedDimensions,
+  core: readonly string[],
+  current: readonly string[],
+): { readonly core: readonly string[]; readonly current: readonly string[] } | null {
+  const twin = (sentences: readonly string[]): string[] =>
+    row.position === "joinTwice"
+      ? [
+          ...new Set(
+            sentences
+              .filter((each) => each.includes("integer"))
+              .map((each) => each.replaceAll("boolean", "string")),
+          ),
+        ].sort()
+      : [...sentences];
+  const [mine, theirs] = [twin(core), twin(current)];
+  return mine.length === 0 || theirs.length === 0 ? null : { core: mine, current: theirs };
+}
+
+/**
  * Whether the core's sentences are the checker's, or exactly the checker's under some of the case's inherited classes
  * (each applied to every sentence); the classes that explain the difference, else `null`.
  */
@@ -116,7 +141,7 @@ export function mixedExplained(
   open: readonly string[],
 ): readonly string[] | null {
   const same = (expected: readonly string[]): boolean =>
-    JSON.stringify([...expected].sort()) === JSON.stringify(core);
+    JSON.stringify([...expected].sort()) === JSON.stringify([...core].sort());
   if (same(current)) return [];
   const classes = mixedInherited(row, open);
   for (let subset = 1; subset < 1 << classes.length; subset += 1) {

@@ -4,7 +4,8 @@
 // a `get` default, an `otherwise`'s operand or fallback, a property, a join), or a copy (narrowed, maybe null, held in
 // an inferred one, a typed host value plain, tested by `is` or `!= null` or stored again, an `otherwise` of a copy or
 // of two);
-// the pair as list elements, object properties or the operands of `+`; both orders. A case's name is its dimensions:
+// the pair as list elements, object properties or the operands of `+`, and joined with a second disagreeing side; both
+// orders. A case's name is its dimensions:
 // `d<depth>/n<null layer>/<kind>@<layer>/<position>/<first|later>`, which `tests/type-core-mixed-family.test.ts` samples.
 const CARRIERS = {
   take: (value) => `(${value}).take(9)`,
@@ -45,10 +46,13 @@ const COPIES = {
   }),
 };
 const KINDS = ["plain", ...Object.keys(CARRIERS), ...Object.keys(COPIES)];
+// (the pair as list elements, object properties or `+` operands; and joined with a second disagreeing side, the text
+// side's true-or-false twin, so the first join's operands are asked again, Codex r16)
 const POSITIONS = {
   element: (a, b) => `let xs=[${a},${b}]`,
   property: (a, b) => `let xs=[{f:${a}},{f:${b}}]`,
   join: (a, b) => `let xs=[${a}]+[${b}]`,
+  joinTwice: (a, b, other) => `let xs=[${a}]+[${b}]+[${other}]`,
 };
 
 function side(leaf, depth, nullAt, at, kind, before, block) {
@@ -85,7 +89,8 @@ for (const depth of [2, 3])
             const block = [];
             const a = side("1", depth, nullAt, at, kind, before, block);
             const b = side('"x"', depth, 0, -1, "plain", [], []);
-            const pair = later ? make(b, a) : make(a, b);
+            const other = side("true", depth, 0, -1, "plain", [], []);
+            const pair = later ? make(b, a, other) : make(a, b, other);
             cases.push([
               `d${depth}/n${nullAt}/${kind}@${at}/${position}/${later ? "later" : "first"}`,
               `${before.join("")}${block[0] ?? ""}${pair}\n${block[1] ?? ""}exit\n`,

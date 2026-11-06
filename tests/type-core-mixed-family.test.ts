@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import {
+  mixedCompared,
   mixedDimensions,
   mixedExplained,
   mixedSentences,
@@ -20,10 +21,10 @@ import { inMode, MODES } from "./helpers/type-core-oracles.js";
  *   not, an `otherwise` of a copy);
  * - the pair as elements, properties or `+` operands;
  * - both orders.
- * Here, each carrier (and the plain side) at every position with every relation of its carried layer to the null
- * (`RELATIONS`: an interior carrier with the null below it, the element's with the leaf's, the deepest with none, the
- * null at its layer, the shallow side's two), each copy at every position with three of them, the order turned through
- * them, in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
+ * Here, each kind at every position with every relation of its carried layer to the null (`RELATIONS`: an interior
+ * carrier with the null below it, the element's with the leaf's, the deepest with none, the null at its layer, the
+ * shallow side's two), and joined again with a second disagreeing side at the interior relation, the order turned
+ * through them, in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
  * the inherited classes, each its issue's work:
  * - the later element's leaf `null`, #1790 (#1819, stacked on this);
  * - an element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
@@ -42,11 +43,9 @@ async function family<T>(name: string): Promise<T> {
 // (the issues still open here, each a class of differences `mixedExplained` names exactly)
 const OPEN = ["#1790", "#1843", "#1847"];
 
-// (the sample: each carrier, and the plain side, at every position with every relation of its carried layer to the null
-// (`RELATIONS`); each copy at every position with three: the element's and an interior one with the null at their first
-// nested layer (the copy's term there, Codex r15), and an interior one alone; the
-// order turned through them. The structural combinations of carrier, position and null, not a rotation over their
-// marginals, Codex r14)
+// (the sample: each kind at every position with every relation of its carried layer to the null (`RELATIONS`), the
+// order turned through them; joined again with a second disagreeing side, the interior relation only. The structural
+// combinations of kind, position and null, not a rotation over their marginals, Codex r14–r16)
 const RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])[] = [
   [3, 1, 2],
   [3, 0, 3],
@@ -55,12 +54,6 @@ const RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])
   [2, 0, 1],
   [2, 1, 2],
 ];
-const COPY_RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])[] = [
-  [3, 0, 1],
-  [3, 1, 2],
-  [3, 1, 0],
-];
-const CARRIERS = ["plain", "take", "index", "get", "operand", "fallback", "property", "join"];
 
 function sampled(cases: readonly (readonly [string, string])[]): (readonly [string, string])[] {
   const kinds = [...new Set(cases.map(([name]) => mixedDimensions(name).kind))];
@@ -69,7 +62,9 @@ function sampled(cases: readonly (readonly [string, string])[]): (readonly [stri
   let turn = 0;
   for (const kind of kinds)
     for (const position of positions)
-      for (const [depth, carried, nullAt] of CARRIERS.includes(kind) ? RELATIONS : COPY_RELATIONS) {
+      for (const [depth, carried, nullAt] of position === "joinTwice"
+        ? RELATIONS.slice(0, 1)
+        : RELATIONS) {
         const later = turn++ % 2 === 1;
         const at = kind === "plain" ? -1 : carried;
         const found = cases.find(([name]) => {
@@ -98,10 +93,14 @@ test("a mixed-list error's type text equals the current checker's across the sam
   for (const [name, source] of sampled(cases)) {
     const { current, core } = mixedSentences(source);
     for (const each of core) assert.deepEqual(each, core[0], name);
-    if (core[0]!.length === 0 || current.length === 0) continue;
+    const row = mixedDimensions(name);
+    const pair = mixedCompared(row, core[0]!, current);
+    if (pair === null) continue;
     compared += 1;
-    if (mixedExplained(mixedDimensions(name), core[0]!, current, OPEN) === null)
-      differing.push(`${name}\n  core: ${core[0]!.join(" | ")}\n  checker: ${current.join(" | ")}`);
+    if (mixedExplained(row, pair.core, pair.current, OPEN) === null)
+      differing.push(
+        `${name}\n  core: ${pair.core.join(" | ")}\n  checker: ${pair.current.join(" | ")}`,
+      );
   }
   assert.deepEqual(differing, [], `${compared} compared`);
   assert.ok(compared > 0);
