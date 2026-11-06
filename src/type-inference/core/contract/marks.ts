@@ -1,5 +1,5 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, joinSteps, keptSteps, keptText, pathText, splitPath } from "../budget.js";
+import { joinParts, joinSteps, keptText, pathText, splitPath } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keptKey, keyBelow, keyOf, recordPath, sortCost, type Key } from "../definitions.js";
 import type { Callable } from "../flow-graph.js";
@@ -811,20 +811,14 @@ export function markHolders(contract: Contract): readonly Holder[] {
   return [...(AUTOMATA.get(contract)?.roots.keys() ?? [])];
 }
 
-/** Test-only: the paths of a holder's own prefix trie (its states' steps from its root, epsilon edges not followed). */
-export function markPaths(contract: Contract, holder: Holder): readonly (readonly string[])[] {
+/** Test-only: the states `steps` below a holder's root leave (`walk`): marked, or those pending. */
+export function markResidual(
+  contract: Contract,
+  holder: Holder,
+  steps: readonly string[],
+): MarkResidual {
   const automaton = automatonOf(contract);
-  const found: (readonly string[])[] = [];
-  const open: (readonly [number, readonly string[]])[] = [
-    [compiled(contract, automaton, holder), []],
-  ];
-  while (open.length > 0) {
-    const [id, trail] = open.pop()!;
-    found.push(trail);
-    for (const [step, to] of automaton.states[id]!.next)
-      open.push([to, keptSteps(contract.work, trail, [step])]);
-  }
-  return found;
+  return walk(contract, automaton, compiled(contract, automaton, holder), recordPath(steps));
 }
 
 /**

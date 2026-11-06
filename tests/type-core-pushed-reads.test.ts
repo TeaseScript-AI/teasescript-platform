@@ -8,7 +8,8 @@ import {
   depthOf,
   markAccepts,
   markHolders,
-  markPaths,
+  markResidual,
+  markStep,
   marksAt,
   markStates,
 } from "../src/type-inference/core/contract/marks.js";
@@ -19,6 +20,7 @@ import {
   pushedInvariant,
   withoutPushedReads,
 } from "../src/type-inference/core/contract/frontier.js";
+import { stepsOf } from "../src/type-inference/core/contract/literal-index.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { withTestDemandAllowance, WorkLedger } from "../src/type-inference/core/budget.js";
 import { inMode, MODES, publication, settledAnswers } from "./helpers/type-core-oracles.js";
@@ -119,11 +121,18 @@ function markTruth(contract: Contract): {
   let [asked, positive] = [0, 0];
   const differences: string[] = [];
   collectMarks(contract);
+  // (the paths the pass's arena holds, a few steps deep, each one step further by each step it names and one none
+  // does: never the automaton's own, so a holder compiled without a path is asked there too)
+  const steps = new Set<string>(["zz"]);
+  const found: (readonly string[])[] = [];
+  for (let id = 0; id < contract.pathDepths.length && found.length < 160; id += 1)
+    if (contract.pathDepths[id]! <= 4) {
+      const each = stepsOf(contract, id);
+      found.push(each);
+      for (const step of each) if (steps.size < 12) steps.add(step);
+    }
   for (const holder of [...contract.holders.values(), ...markHolders(contract)]) {
     if (depthOf(contract, holder) === Infinity) continue;
-    const found = markPaths(contract, holder);
-    const steps = new Set<string>(["zz"]);
-    for (const each of found) for (const step of each) steps.add(step);
     for (const each of found)
       for (const tail of [[], ...[...steps].map((step) => [step])]) {
         const asks = [...each, ...tail];
@@ -133,6 +142,25 @@ function markTruth(contract: Contract): {
         if (automaton !== marksAt(contract, holder, asks))
           differences.push(`${holder.id} at ${asks.join(".")}: automaton ${automaton}`);
       }
+    // (two histories' pending states together, one step further: marked iff either history's path marks)
+    const live = found
+      .map((each) => [each, markResidual(contract, holder, each)] as const)
+      .filter(([, residual]) => !residual.marked && residual.states.length > 0)
+      .slice(0, 8);
+    for (const [first, a] of live)
+      for (const [second, b] of live)
+        for (const step of steps) {
+          asked += 1;
+          const union = [...new Set([...a.states, ...b.states])].sort((x, y) => x - y);
+          const joined = markStep(contract, union, step).marked;
+          const either =
+            marksAt(contract, holder, [...first, step]) ||
+            marksAt(contract, holder, [...second, step]);
+          if (joined !== either)
+            differences.push(
+              `${holder.id} at ${first.join(".")} or ${second.join(".")} then ${step}: automaton ${joined}`,
+            );
+        }
   }
   return { asked, marked: positive, differences };
 }
@@ -503,6 +531,8 @@ test("a ring's held marks are one pending set per goal and base node, its automa
             // (the pending states accept what the holders' marks mark, on every real holder's paths)
             for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
             const native = analysed(source, mode, horizon ?? "native");
+            // (where the native reader ends, every pushed slot is its read of the same path, marks included)
+            if (!closed) samePushedSlots(pushed, native, source);
             assert.ok(
               pushed.answers.budget.total <= native.answers.budget.total,
               `${label}: ${pushed.answers.budget.total} > ${native.answers.budget.total}`,
