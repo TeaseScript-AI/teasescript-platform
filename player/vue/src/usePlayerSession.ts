@@ -589,14 +589,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * The publication boundary of work that completes after a bridge reply: input such as the pacing skip, the clock's
    * observations and catch-up, development time's jumps, and the services' sections. `next` shows only while the session
    * that issued the work still owns the UI: `next` is of the shown session's store, no Player error stopped it, and the
-   * Player is mounted. It shows as that store's latest publication, so a reply never brings back an older state. Start,
-   * Continue, Return and the error stop show a new or the stopped session under their own ownership (`activationToken`).
+   * Player is mounted. It shows as that store's latest publication, so a reply never brings back an older state; what
+   * follows a publication, such as a jump's media seek, takes the returned one. Start, Continue, Return and the error
+   * stop show a new or the stopped session under their own ownership (`activationToken`).
    */
-  function publishOwned(next: PlayerSession): boolean {
+  function publishOwned(next: PlayerSession): PlayerSession | null {
     const shown = session.value;
-    if (disposed || stopped.value || shown === null || shown.lineage !== next.lineage) return false;
+    if (disposed || stopped.value || shown === null || shown.lineage !== next.lineage) return null;
     session.value = bridgeOf(next).latest(next) ?? next;
-    return true;
+    return session.value;
   }
   // A late observation catches up on a copy of the session, except while Debug runs: its history and the debug
   // export's replay then follow each observation as it happens.
@@ -2232,9 +2233,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * progress the jumps reported, and the scene clock continues from the new observed time.
    */
   function publishJump(next: PlayerSession) {
-    if (inspecting.value || !publishOwned(next)) return;
-    jumpedRevision.value = next.transcriptRevision;
-    device.jumped(playerRuntimeMedia(next.state).media);
+    const published = inspecting.value ? null : publishOwned(next);
+    if (published === null) return;
+    jumpedRevision.value = published.transcriptRevision;
+    device.jumped(playerRuntimeMedia(published.state).media);
     clock.rebase();
   }
   const permanentButtons = computed(() =>

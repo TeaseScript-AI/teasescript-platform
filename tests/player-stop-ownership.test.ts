@@ -51,6 +51,7 @@ interface StopHost {
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
   readonly debugHistorySpill: () => Promise<null>;
+  readonly resolveAsset?: (path: string) => string | null;
 }) => StopHost;
 let facade: typeof InProcess;
 let compiler: typeof CompileProject;
@@ -73,7 +74,11 @@ const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
 /** A Player on a host that replies after `delayMs`, in a browser surface with event targets and silent audio. */
-async function mount(context: TestContext, delayMs = 50) {
+async function mount(
+  context: TestContext,
+  delayMs = 50,
+  resolveAsset?: (path: string) => string | null,
+) {
   const surface = {
     document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
     window: new EventTarget(),
@@ -96,7 +101,11 @@ async function mount(context: TestContext, delayMs = 50) {
   const bridge = facade.createInProcessBackend(BUILD, { delayMs });
   const scope = effectScope();
   const player = scope.run(() =>
-    usePlayerSession({ bridge: Promise.resolve(bridge), debugHistorySpill: async () => null }),
+    usePlayerSession({
+      bridge: Promise.resolve(bridge),
+      debugHistorySpill: async () => null,
+      ...(resolveAsset === undefined ? {} : { resolveAsset }),
+    }),
   )!;
   context.after(() => {
     scope.stop();
@@ -463,3 +472,61 @@ for (const [completion, issue] of Object.entries(completions))
       assert.deepEqual(changes, [], "an unmounted Player publishes nothing");
       assert.equal(player.session.value, at);
     });
+
+test("a jump another publication overtook seeks media to what shows, not to the jump's older state", async (context) => {
+  const elements: (EventTarget & { src: string; currentTime: number })[] = [];
+  const { bridge, player } = await mount(context, 0, () => "https://fixture/voice.mp3");
+  // Elements that load and seek, as the browser's do.
+  Object.defineProperty(globalThis, "Audio", {
+    configurable: true,
+    value: class extends EventTarget {
+      src = "";
+      preload = "";
+      volume = 1;
+      duration = 30;
+      paused = true;
+      ended = false;
+      currentTime = 0;
+      constructor() {
+        super();
+        elements.push(this);
+      }
+      play = async () => {
+        this.paused = false;
+      };
+      pause() {
+        this.paused = true;
+      }
+      load() {}
+      removeAttribute() {
+        this.src = "";
+      }
+    },
+  });
+  context.mock.method(performance, "now", () => 0);
+  player.prepare(factory('playAudio async "voice.mp3"\nwait 10 s\nexit'));
+  await player.activate();
+  await turn();
+  const audio = elements.find((element) => element.src === "https://fixture/voice.mp3");
+  assert.ok(audio);
+  audio.dispatchEvent(new Event("loadedmetadata"));
+  await turn();
+  const issuer = player.session.value!;
+  await bridge.request(issuer, "stepTime", { targetMs: 1_100 });
+  // The jump's reply arrived, but before the jump publishes, an observation of 2 s of playback overtakes it.
+  const jumped = bridge.latest(issuer)!;
+  const playing = view.playerRuntimeMedia(jumped.state).media[0]!;
+  audio.currentTime = 2;
+  await bridge.request(issuer, "observeTime", {
+    atMs: 2_000,
+    media: [{ mediaId: playing.mediaId, segment: playing.segment, progressMs: 2_000 }],
+  });
+  player.update(bridge.latest(issuer)!);
+  player.publishJump(jumped);
+  const shown = player.session.value!;
+  assert.equal(shown, bridge.latest(issuer), "the newer publication shows");
+  assert.equal(
+    audio.currentTime * 1_000,
+    view.playerRuntimeMedia(shown.state).media[0]!.playheadMs,
+  );
+});
