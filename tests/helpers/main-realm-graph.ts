@@ -66,7 +66,8 @@ function isKey(node: ts.Identifier): boolean {
       ts.isGetAccessorDeclaration(parent) ||
       ts.isSetAccessorDeclaration(parent) ||
       ts.isPropertyDeclaration(parent) ||
-      ts.isNamespaceExport(parent)) &&
+      ts.isNamespaceExport(parent) ||
+      ts.isImportAttribute(parent)) &&
       parent.name === node) ||
     ((ts.isBindingElement(parent) || ts.isImportSpecifier(parent)) && parent.propertyName === node)
   );
