@@ -289,6 +289,8 @@ test("while Debug runs, a late observation is one observation", async (context) 
   const { host, late } = await mount(context, rounds);
   host.setDebugTracing(true);
   late(1_000);
+  // One observation over the bridge, which publishes once its reply arrives.
+  await caughtUp(host, 1_000);
   assert.ok(host.session.value!.state.observedSessionTimeMs >= 1_000);
   replays(host);
 });
@@ -300,6 +302,8 @@ test("while Debug decides random draws, a late observation pauses at the draw wi
     {},
   );
   late(10_000);
+  // One observation over the bridge, which publishes once its reply arrives.
+  await caughtUp(host, 10_000);
   const paused = host.session.value!;
   assert.notEqual(paused.state.randomDraw, null);
   assert.equal(paused.state.currentSessionTimeMs, 1_000);

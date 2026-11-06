@@ -9,7 +9,7 @@ const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 
 /** The in-process backend, as the Player starts it; with `delayMs`, its replies arrive that much later. */
 export function inProcessBridge(delayMs?: number): Promise<PlayerBridge> {
-  return createInProcessBackend(BUILD, delayMs === undefined ? {} : { delayMs });
+  return Promise.resolve(createInProcessBackend(BUILD, delayMs === undefined ? {} : { delayMs }));
 }
 
 /** `session`, an adapter session a test made, as a session the in-process host now holds. */

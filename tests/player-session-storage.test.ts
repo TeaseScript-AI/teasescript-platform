@@ -539,7 +539,7 @@ test("Vue host resolves the player's zone and presentation again at Start and at
   );
 });
 
-test("Vue host's Continue resumes a restored ready session within the activating call", (context) => {
+test("Vue host's Continue resumes a restored ready session from the activation alone", async (context) => {
   const { host } = createHost(context, {
     scope: "test",
     load: async () => [],
@@ -559,8 +559,8 @@ test("Vue host's Continue resumes a restored ready session within the activating
   assert.equal(host.activation.value, "continue");
   assert.equal(beforeActivation, null);
 
-  // No timer, observation, or page lifecycle event is needed after the click.
-  void host.activate();
+  // No timer, observation, or page lifecycle event is needed after the click: Continue resumes from its replies.
+  await host.activate();
   assert.deepEqual(
     host.session.value?.transcriptEntries.map((entry) => entry.text),
     ["Resumed"],

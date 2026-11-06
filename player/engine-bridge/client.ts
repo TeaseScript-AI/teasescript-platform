@@ -98,9 +98,23 @@ export interface BridgeClient {
  * Connects to the Worker behind `port` once it is ready and of the same build. A Worker that fails before `ready`, or
  * says it is another build, is a startup failure; after `ready`, a reported failure or an unreadable message loses it.
  */
-export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<BridgeClient> {
-  return new Promise((resolveClient, rejectClient) => {
-    let ready = false;
+export async function connectBridge(port: ClientPort, build: BuildIdentity): Promise<BridgeClient> {
+  const { client, ready } = openBridge(port, build);
+  await ready;
+  return client;
+}
+
+/**
+ * The client of the Worker behind `port`, at once, and `ready`, which settles as `connectBridge` does. Its requests post
+ * at once too; a port that delivers them only once its Worker runs, as a browser's does, keeps them until then.
+ */
+export function openBridge(
+  port: ClientPort,
+  build: BuildIdentity,
+): { readonly client: BridgeClient; readonly ready: Promise<void> } {
+  let opened!: BridgeClient;
+  const ready = new Promise<void>((resolveClient, rejectClient) => {
+    let announced = false;
     let lost: BridgeLostError | null = null;
     let nextId = 1;
     const pending = new Map<
@@ -123,8 +137,8 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
       for (const listener of lossListeners) listener(lost);
     };
     const fail = (message: string): void => {
-      if (!ready) {
-        ready = true;
+      if (!announced) {
+        announced = true;
         lost = new BridgeLostError(message);
         port.terminate();
         rejectClient(new BridgeStartupError(message));
@@ -142,11 +156,11 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
       const message = readWorkerMessage(data);
       if (message === null) return fail("The engine Worker sent a message the Player cannot read.");
       if (message.kind === "ready") {
-        if (ready) return lose("The engine Worker announced itself twice.");
+        if (announced) return lose("The engine Worker announced itself twice.");
         if (!sameBuild(message.build, build))
           return fail("The engine Worker belongs to another build of the Player.");
-        ready = true;
-        resolveClient(client);
+        announced = true;
+        resolveClient();
         return;
       }
       settle(message);
@@ -232,5 +246,7 @@ export function connectBridge(port: ClientPort, build: BuildIdentity): Promise<B
         else lossListeners.push(listener);
       },
     };
+    opened = client;
   });
+  return { client: opened, ready };
 }

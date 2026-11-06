@@ -9,7 +9,7 @@ import {
 } from "../runtime-adapter.js";
 import type { PlayerSession } from "../runtime-view.js";
 import { PlayerBridge } from "../player-bridge.js";
-import { connectBridge, type ClientPort } from "./client.js";
+import { openBridge, type ClientPort } from "./client.js";
 import { playerBridgeOps, playerOpsContext, type PlayerOpsContext } from "./player-ops.js";
 import type { BuildIdentity } from "./protocol.js";
 import { HeldSession, introduction, type StartOptions } from "./ops/session.js";
@@ -52,13 +52,13 @@ function heldOf(backend: Backend, session: PlayerSession): HeldSession {
 }
 
 /**
- * Starts the in-process backend: the Player's ops served on a port pair in this realm. With `delayMs`, replies arrive
- * after that delay instead of on a microtask (the delayed smoke).
+ * Starts the in-process backend, ready at once: the Player's ops served on a port pair in this realm. With `delayMs`,
+ * replies arrive after that delay instead of on a microtask (the delayed smoke).
  */
-export async function createInProcessBackend(
+export function createInProcessBackend(
   build: BuildIdentity,
   options: { readonly delayMs?: number } = {},
-): Promise<PlayerBridge> {
+): PlayerBridge {
   let toHost: ((data: unknown) => void) | null = null;
   let toClient: ((data: unknown) => void) | null = null;
   const transit: { readonly session: string | null; readonly data: unknown }[] = [];
@@ -95,10 +95,10 @@ export async function createInProcessBackend(
       transit.length = 0;
     },
   };
-  const connecting = connectBridge(clientPort, build);
+  const { client } = openBridge(clientPort, build);
   const context = playerOpsContext();
   const sessions = startBridgeHost(hostPort, playerBridgeOps(context), build);
-  const bridge = new PlayerBridge(await connecting);
+  const bridge = new PlayerBridge(client);
   backends.set(bridge, {
     bridge,
     context,

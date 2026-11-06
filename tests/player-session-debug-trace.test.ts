@@ -115,13 +115,13 @@ const SOURCE = [
   "exit",
 ].join("\n");
 
-test("Start traces from the first statement, off drops the trace, and on again attaches", (context) => {
+test("Start traces from the first statement, off drops the trace, and on again attaches", async (context) => {
   const host = createHost(context);
   host.setDebugTracing(true);
   const trace = host.debugTrace.value;
   assert.ok(trace);
   host.prepare((recording) => adapter.createPlayerRuntimeSession(SOURCE, { ...recording }));
-  host.activate();
+  await host.activate();
   assert.equal(sessionTrace(host.session.value), trace);
   assert.deepEqual([trace.status().origin, trace.status().epoch], ["start", 1]);
   assert.notEqual(
@@ -143,19 +143,19 @@ test("Start traces from the first statement, off drops the trace, and on again a
   assert.equal(again.outputs().length, 1);
 });
 
-test("Continue of a restored session begins a new trace epoch", (context) => {
+test("Continue of a restored session begins a new trace epoch", async (context) => {
   const host = createHost(context);
   host.setDebugTracing(true);
   const trace = host.debugTrace.value!;
   host.prepare((recording) => adapter.createPlayerRuntimeSession(SOURCE, { ...recording }));
-  host.activate();
+  await host.activate();
   const epoch = trace.status().epoch;
   host.prepareRestore(
     adapter.restorePlayerRuntimeSession(
       adapter.createPlayerRuntimeRestorePoint(host.session.value!),
     ),
   );
-  host.activate();
+  await host.activate();
   assert.equal(sessionTrace(host.session.value), trace);
   assert.deepEqual([trace.status().origin, trace.status().epoch], ["restore", epoch + 1]);
   host.update(adapter.submitPlayerRuntimeComposer(host.session.value!, "yes")!.session);

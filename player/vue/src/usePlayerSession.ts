@@ -255,14 +255,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   };
   // The engine's host, which owns the plans, the sessions and the recorder of every session's engine calls from Start,
   // in every build, for a debug export (DEBUGGER.md "Debug export"); in-process until the L5 series activates the Worker.
-  let bridge: PlayerBridge | null = null;
-  const bridgeReady = (options.bridge ?? createInProcessBackend(playerBuildIdentity)).then(
-    (ready) => {
-      bridge = ready;
-      ready.client.onLoss(bridgeLost);
-      return ready;
-    },
-  );
+  // The in-process backend is ready at once, so a Start within the first click needs no wait.
+  let bridge: PlayerBridge | null =
+    options.bridge === undefined ? createInProcessBackend(playerBuildIdentity) : null;
+  const bridgeReady = (options.bridge ?? Promise.resolve(bridge!)).then((ready) => {
+    bridge = ready;
+    return ready;
+  });
+  // Registered once, when the host is reachable; see `bridgeLost`.
+  void bridgeReady.then((ready) => ready.client.onLoss(bridgeLost));
   // The recording up to a Player error, kept for a debug export until the next Start, when Debug's rewind begins the
   // recorder anew at a restored state.
   let failureRecording: DebugRecording | null = null;
@@ -2220,7 +2221,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Shows the explicit Continue control for a restored session; its execution, time and media resume only then.
    * Continue records the wall clock and the player's zone and presentation as they are now.
    */
-  function prepareRestore(restored: PlayerSession, marks?: DebugHistoryMarks) {
+  function prepareRestore(given: PlayerSession | PlayerRuntimeSession, marks?: DebugHistoryMarks) {
+    // A session restored outside the host, such as one an embedding host restored, is registered there first.
+    const restored = "lineage" in given ? given : introduceNow(requireBridge(), () => given);
     activationToken++;
     beginning.value = false;
     camera.release();
@@ -2299,6 +2302,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     captures.reset();
     await startFrom(pending);
   }
+  /** The engine's host, which the in-process backend gives at once; an injected one is ready before any Start. */
+  function requireBridge(): PlayerBridge {
+    if (bridge === null) throw new Error("The engine's host is not ready.");
+    return bridge;
+  }
   /**
    * The session `create` starts: over the bridge (`start`) for a held plan without Debug's trace or random control,
    * which cannot cross yet; otherwise in the host, before its first run (`introduceNow`).
@@ -2311,8 +2319,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       readonly randomControl?: RandomControlOptions;
     },
   ): PlayerSession | Promise<PlayerSession> {
-    const host = bridge;
-    if (host === null) throw new Error("The engine's host is not ready.");
+    const host = requireBridge();
     if (typeof create === "function")
       return introduceNow(host, (made) => create({ ...recording, recorder: made.recorder }));
     const startOptions = { ...create.options(), debugMode: recording.debugMode };
