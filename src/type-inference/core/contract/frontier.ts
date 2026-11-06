@@ -223,13 +223,9 @@ function rootNode(frontier: Frontier, place: PlaceId): number {
     const to: PlaceId[] = [];
     for (const entry of contract.prefixStores(keyOf(at, [])).list) {
       step(frontier);
-      // (#1784: a marking whole copy is an edge into its source's marked nodes, `rules`, never one of the component's)
-      if (
-        entry.key !== undefined &&
-        !isKeyId(entry.key) &&
-        keyPath(entry.key).length === 0 &&
-        plainRead(contract, entry)
-      )
+      // (#1784: a marking whole copy joins the component too: every member then reaches every leaf of it marked, through
+      // that copy's marked edge, `rules`, and a marked item absorbs its unmarked twin in the join)
+      if (entry.key !== undefined && !isKeyId(entry.key) && keyPath(entry.key).length === 0)
         to.push(keyPlace(entry.key));
     }
     index.set(at, index.size);
