@@ -84,7 +84,7 @@ interface Exported {
 function sandboxed(text: string): Exported {
   assert.ok(!/^\s*import\b/m.test(text), "a family generator that imports");
   const context = createContext({});
-  const exported: unknown = runInContext(
+  const made: unknown = runInContext(
     `((names) => {
       const no = (name) => () => { throw new Error("a family generator read " + name); };
       const trap = (name) => new Proxy(function () {}, Object.fromEntries(
@@ -93,20 +93,28 @@ function sandboxed(text: string): Exported {
       Math.random = no("Math.random");
       return ((${OUTSIDE.join(", ")}) => {
         ${text.replace(/^export /gm, "")}
-        return { cases, globals };
+        return JSON.stringify({ cases, globals });
       })(...names.map(trap));
     })(${JSON.stringify(OUTSIDE)})`,
     context,
   );
-  assert.ok(typeof exported === "object" && exported !== null, "a family generator's exports");
-  const cases: unknown = Reflect.get(exported, "cases");
+  assert.ok(typeof made === "string", "a family generator's exports");
+  const exported: unknown = JSON.parse(made);
+  assert.ok(
+    typeof exported === "object" &&
+      exported !== null &&
+      "cases" in exported &&
+      "globals" in exported,
+    "a family generator's exports",
+  );
+  const { cases, globals } = exported;
   assert.ok(Array.isArray(cases), "a family generator's cases");
   return {
     cases: Array.from(cases, (each: unknown): readonly [string, string] => {
       assert.ok(Array.isArray(each) && typeof each[0] === "string" && typeof each[1] === "string");
       return [each[0], each[1]];
     }),
-    globals: Reflect.get(exported, "globals"),
+    globals,
   };
 }
 
