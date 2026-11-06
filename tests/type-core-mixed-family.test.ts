@@ -146,39 +146,48 @@ const REPLACED = [
   "console",
   "WebAssembly",
 ];
-// (run in the new realm before the generator, strict, so a replacement that does not take throws: the globals
-// classified; every method named for the locale, on everything the allowed intrinsics reach, made to throw; the
-// replaced globals made names that throw on any use, and `Math.random`; and a stack pinned to its message, so no
-// frame of the caller outside shows (Codex r21). Each is replaced on the realm itself, so every alias of it
-// (`globalThis`, `Function`, an indirect `eval`) reads the replacement)
+// (run in the new realm before the generator, strict, so a replacement that does not take throws, Codex r20–r22: the
+// globals classified; every method named for the locale, on everything the allowed intrinsics reach, made to throw;
+// the replaced globals and the host's made names that throw on any use, and `Math.random`; and a stack made its message
+// alone, by a formatter of the realm's own, so neither a frame of the caller nor the host's formatter shows. Each is
+// replaced on the realm itself, so every alias of it (`globalThis`, `Function`, an indirect `eval`) reads the
+// replacement; the walk's own values stay in its closure, so no original is left where a generator can reach it)
 const REALM = `"use strict";
-const no = (name) => () => { throw new Error("a family generator read " + name); };
-const trap = (name) => new Proxy(function () {}, Object.fromEntries(
-  ["get", "has", "set", "apply", "construct", "ownKeys", "getPrototypeOf", "defineProperty",
-    "deleteProperty", "getOwnPropertyDescriptor"].map((each) => [each, no(name)])));
-const allowed = ${JSON.stringify(ALLOWED)};
-const replaced = ${JSON.stringify(REPLACED)};
-for (const name of Object.getOwnPropertyNames(globalThis))
-  if (!allowed.includes(name) && !replaced.includes(name))
-    throw new Error("a realm global no list classifies: " + name);
-const seen = new Set();
-const open = allowed.filter((name) => name !== "globalThis").map((name) => globalThis[name]);
-while (open.length > 0) {
-  const at = open.pop();
-  if (at === null || (typeof at !== "object" && typeof at !== "function") || seen.has(at)) continue;
-  seen.add(at);
-  for (const key of Reflect.ownKeys(at)) {
-    const property = Object.getOwnPropertyDescriptor(at, key);
-    if (property === undefined || !("value" in property)) continue;
-    if (typeof key === "string" && /locale/i.test(key) && typeof property.value === "function")
-      Object.defineProperty(at, key, { value: no(key) });
-    else open.push(property.value);
+const trap = (() => {
+  const no = (name) => () => { throw new Error("a family generator read " + name); };
+  const trap = (name) => new Proxy(function () {}, Object.fromEntries(
+    ["get", "has", "set", "apply", "construct", "ownKeys", "getPrototypeOf", "defineProperty",
+      "deleteProperty", "getOwnPropertyDescriptor"].map((each) => [each, no(name)])));
+  const allowed = ${JSON.stringify(ALLOWED)};
+  const replaced = ${JSON.stringify(REPLACED)};
+  for (const name of Object.getOwnPropertyNames(globalThis))
+    if (!allowed.includes(name) && !replaced.includes(name))
+      throw new Error("a realm global no list classifies: " + name);
+  const seen = new Set();
+  const open = allowed.filter((name) => name !== "globalThis").map((name) => globalThis[name]);
+  while (open.length > 0) {
+    const at = open.pop();
+    if (at === null || (typeof at !== "object" && typeof at !== "function") || seen.has(at)) continue;
+    seen.add(at);
+    for (const key of Reflect.ownKeys(at)) {
+      const property = Object.getOwnPropertyDescriptor(at, key);
+      if (property === undefined || !("value" in property)) continue;
+      if (typeof key === "string" && /locale/i.test(key) && typeof property.value === "function")
+        Object.defineProperty(at, key, { value: no(key) });
+      else open.push(property.value);
+    }
+    open.push(Object.getPrototypeOf(at));
   }
-  open.push(Object.getPrototypeOf(at));
-}
-for (const name of replaced) globalThis[name] = trap(name);
-Math.random = no("Math.random");
-Object.defineProperty(Error, "stackTraceLimit", { value: 0, writable: false, configurable: false });
+  for (const name of [...replaced, ...${JSON.stringify(HOST)}]) globalThis[name] = trap(name);
+  Math.random = no("Math.random");
+  Object.defineProperty(Error, "stackTraceLimit", { value: 0, writable: false, configurable: false });
+  Object.defineProperty(Error, "prepareStackTrace", {
+    value: (error) => String(error),
+    writable: false,
+    configurable: false,
+  });
+  return trap;
+})();
 `;
 
 interface Exported {
@@ -197,7 +206,8 @@ function sandboxed(text: string): Exported {
       ${text.replace(/^export /gm, "")}
       return JSON.stringify({ cases, globals });
     })(...names.map(trap)))(${JSON.stringify(HOST)})`,
-    createContext({}),
+    // (a context of no prototype: an inherited name of the global, as `constructor`, is the realm's, not the host's)
+    createContext(Object.create(null)),
   );
   assert.ok(typeof made === "string", "a family generator's exports");
   const exported: unknown = JSON.parse(made);
@@ -297,13 +307,26 @@ async function pure(
       "new Intl.NumberFormat().format(1)",
       "Temporal.Now.timeZoneId()",
       'console.log("")',
+      'globalThis.constructor.constructor("return process.env.REVIEW_DEPTHS")()',
+      '(typeof seen === "undefined" ? Math.random : [...seen].find((each) => each.name === "random"))()',
     ].map((read) => variant(domain, `["depth", () => (${read}, [2, 3])]`)),
   ];
   for (const probe of probes) assert.throws(() => sandboxed(probe), /a family generator read /);
-  // (a stack is its message alone, whoever calls; a global no list names fails before any generator runs)
-  assert.equal(runInContext(`${REALM}new Error("m").stack`, createContext({})), "Error: m");
+  // (a stack is its message alone, whoever calls and whatever the host formats; a global no list names fails before any
+  // generator runs)
+  const formatter = Error.prepareStackTrace;
+  Error.prepareStackTrace = (): string => "the host's";
+  try {
+    assert.equal(
+      runInContext(`${REALM}new Error("m").stack`, createContext(Object.create(null))),
+      "Error: m",
+    );
+  } finally {
+    Error.prepareStackTrace = formatter;
+  }
   assert.throws(
-    () => runInContext(REALM, createContext({ unclassified: 1 })),
+    () =>
+      runInContext(REALM, createContext(Object.assign(Object.create(null), { unclassified: 1 }))),
     /a realm global no list classifies: unclassified/,
   );
   assert.notDeepEqual(changed(keys(sandboxed(variant(inner, swapped))), recorded), []);
