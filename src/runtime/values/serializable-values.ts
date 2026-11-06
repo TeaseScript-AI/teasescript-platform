@@ -18,7 +18,7 @@ import {
   type TimeFields,
 } from "../../temporal.js";
 import { isPlainRecord } from "./plain-data.js";
-import { recordValidationTestWork } from "../../validation-testing.js";
+import { recordValidationTestPeak, recordValidationTestWork } from "../../validation-testing.js";
 
 export type SerializableRuntimeScalar = string | number | boolean | null;
 
@@ -632,6 +632,11 @@ function textHash(text: string): number {
     first = Math.imul(first ^ code, 2654435761);
     second = Math.imul(second ^ code, 1597334677);
   }
+  return finishedHash(first, second);
+}
+
+/** cyrb53's final mix of its two 32-bit lanes into 53 bits. */
+function finishedHash(first: number, second: number): number {
   first = Math.imul(first ^ (first >>> 16), 2246822507);
   first ^= Math.imul(second ^ (second >>> 13), 3266489909);
   second = Math.imul(second ^ (second >>> 16), 2246822507);
@@ -1020,18 +1025,60 @@ function captureAndValidateSerializableValue(
   });
 }
 
+/**
+ * Validates a value without native recursion. A set's members must differ by `==`, which is checked once all of them
+ * are valid. So that nested sets do not key the whole of their members again at every level, each value below a set
+ * that is a list, set, object, or dict, or a part of one below a set, gets a print (`compositePrint`) computed once
+ * from its parts' prints. A set compares its other members by their exact `leafKey`, and its list, set, object, and
+ * dict members by print, and by `valueKey` only within a print they share. The prints live only in this validation's
+ * work: those of the finished parts of each value being validated. On ordinary input the extra work is linear in the
+ * values below sets and their keys' text, with no sorting; members that share a print cost one `valueKey` each.
+ */
 function validateSerializableValueInternal(value: unknown, rootPath: string): string | null {
+  const work: PrintWork = {
+    prints: 0,
+    parts: 0,
+    textUnits: 0,
+    exactKeys: 0,
+    exactKeyLength: 0,
+    retained: 0,
+    retainedPeak: 0,
+  };
+  try {
+    return validateRuntimeValue(value, rootPath, work);
+  } finally {
+    recordPrintWork(work);
+  }
+}
+
+function validateRuntimeValue(
+  value: unknown,
+  rootPath: string,
+  printWork: PrintWork,
+): string | null {
   interface ValuePath {
     readonly parent: ValuePath | null;
     readonly segment: string;
   }
+  /**
+   * Where the prints of the list, set, object, and dict parts of a value go, in order, or `null` where the value
+   * needs none: it is not a set and has no set above it.
+   */
+  type Prints = number[] | null;
   type ValidationWork =
-    | { readonly kind: "value"; readonly value: unknown; readonly path: ValuePath | null }
+    | {
+        readonly kind: "value";
+        readonly value: unknown;
+        readonly path: ValuePath | null;
+        /** The prints of the value holding this one. */
+        readonly into: Prints;
+      }
     | {
         readonly kind: "list";
         readonly values: readonly unknown[];
         readonly index: number;
         readonly path: ValuePath | null;
+        readonly prints: Prints;
       }
     | {
         readonly kind: "object";
@@ -1039,6 +1086,7 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         readonly index: number;
         readonly names: Set<string>;
         readonly path: ValuePath | null;
+        readonly prints: Prints;
       }
     | {
         readonly kind: "dict";
@@ -1046,12 +1094,23 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         readonly index: number;
         readonly keys: Set<string>;
         readonly path: ValuePath | null;
+        readonly prints: Prints;
       }
-    | { readonly kind: "unique"; readonly set: unknown[]; readonly path: ValuePath | null }
-    | { readonly kind: "leave"; readonly value: object };
+    | {
+        readonly kind: "unique";
+        readonly set: unknown[];
+        readonly prints: number[];
+        readonly path: ValuePath | null;
+      }
+    | {
+        readonly kind: "leave";
+        readonly value: object;
+        readonly into: Prints;
+        readonly prints: Prints;
+      };
 
   const active = new Set<object>();
-  const work: ValidationWork[] = [{ kind: "value", value, path: null }];
+  const work: ValidationWork[] = [{ kind: "value", value, path: null, into: null }];
   const nestedPath = (parent: ValuePath | null, segment: string): ValuePath => ({
     parent,
     segment,
@@ -1068,17 +1127,23 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
     const item = work.pop()!;
     if (item.kind === "leave") {
       active.delete(item.value);
+      let print: number | null = null;
+      if (item.into !== null) {
+        // Every list, set, object, or dict below a set keeps its parts' prints.
+        // EVIDENCE: validation: a leave item follows the validation of the list, set, object, or dict it leaves.
+        print = compositePrint(item.value as CompositeValue, item.prints!, printWork);
+      }
+      if (item.prints !== null) retainPrints(printWork, -item.prints.length);
+      if (print !== null) {
+        item.into!.push(print);
+        retainPrints(printWork, 1);
+      }
       continue;
     }
     if (item.kind === "unique") {
-      // The members were validated before this item, so each has a key.
-      const seen = new Set<string>();
-      for (const member of item.set) {
-        // EVIDENCE: validation: every member was validated as a runtime value before this work item.
-        const key = valueKey(member as SerializableRuntimeValue);
-        if (seen.has(key)) return `${formatPath(item.path)}.items contains a duplicate member.`;
-        seen.add(key);
-      }
+      // EVIDENCE: validation: every member was validated as a runtime value before this work item.
+      if (hasEqualMembers(item.set as SerializableRuntimeValue[], item.prints, printWork))
+        return `${formatPath(item.path)}.items contains a duplicate member.`;
       continue;
     }
     if (item.kind === "list") {
@@ -1088,6 +1153,7 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         kind: "value",
         value: item.values[item.index],
         path: nestedPath(item.path, `.items[${item.index}]`),
+        into: item.prints,
       });
       continue;
     }
@@ -1105,7 +1171,12 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
       if (item.keys.has(entry.key)) return `${formatPath(entryPath)}.key is duplicated.`;
       item.keys.add(entry.key);
       work.push({ ...item, index: item.index + 1 });
-      work.push({ kind: "value", value: entry.value, path: nestedPath(entryPath, ".value") });
+      work.push({
+        kind: "value",
+        value: entry.value,
+        path: nestedPath(entryPath, ".value"),
+        into: item.prints,
+      });
       continue;
     }
     if (item.kind === "object") {
@@ -1123,7 +1194,12 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
       if (item.names.has(property.name)) return `${formatPath(propertyPath)}.name is duplicated.`;
       item.names.add(property.name);
       work.push({ ...item, index: item.index + 1 });
-      work.push({ kind: "value", value: property.value, path: nestedPath(propertyPath, ".value") });
+      work.push({
+        kind: "value",
+        value: property.value,
+        path: nestedPath(propertyPath, ".value"),
+        into: item.prints,
+      });
       continue;
     }
 
@@ -1241,24 +1317,27 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         return `${path()} contains a malformed ${current.kind}.`;
       if (!Array.isArray(current.items)) return `${path()}.items must be an array.`;
       active.add(current);
-      work.push({ kind: "leave", value: current });
+      const parts = current.kind === "set" || item.into !== null ? [] : null;
+      work.push({ kind: "leave", value: current, into: item.into, prints: parts });
       // A set's members are unique by `==`, which is checked once all of them are valid.
       if (current.kind === "set")
-        work.push({ kind: "unique", set: current.items, path: item.path });
-      work.push({ kind: "list", values: current.items, index: 0, path: item.path });
+        work.push({ kind: "unique", set: current.items, prints: parts!, path: item.path });
+      work.push({ kind: "list", values: current.items, index: 0, path: item.path, prints: parts });
       continue;
     }
     if (current.kind === "dict") {
       if (!hasOnlyKeys(current, ["kind", "entries"])) return `${path()} contains a malformed dict.`;
       if (!Array.isArray(current.entries)) return `${path()}.entries must be an array.`;
       active.add(current);
-      work.push({ kind: "leave", value: current });
+      const parts = item.into === null ? null : [];
+      work.push({ kind: "leave", value: current, into: item.into, prints: parts });
       work.push({
         kind: "dict",
         entries: current.entries,
         index: 0,
         keys: new Set(),
         path: item.path,
+        prints: parts,
       });
       continue;
     }
@@ -1268,19 +1347,224 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
       }
       if (!Array.isArray(current.properties)) return `${path()}.properties must be an array.`;
       active.add(current);
-      work.push({ kind: "leave", value: current });
+      const parts = item.into === null ? null : [];
+      work.push({ kind: "leave", value: current, into: item.into, prints: parts });
       work.push({
         kind: "object",
         properties: current.properties,
         index: 0,
         names: new Set(),
         path: item.path,
+        prints: parts,
       });
       continue;
     }
     return `${path()}.kind is unsupported.`;
   }
   return null;
+}
+
+/** The work of one validation's prints, which tests read (`recordValidationTestWork`). */
+interface PrintWork {
+  /** The prints of lists, sets, objects, and dicts computed, and the parts they mix. */
+  prints: number;
+  parts: number;
+  /** The UTF-16 units of the leaf keys and labels hashed. */
+  textUnits: number;
+  /** The `valueKey` calls of members that share a print, and their length. */
+  exactKeys: number;
+  exactKeyLength: number;
+  /** The prints held now in the validation's work, and the most held at once. */
+  retained: number;
+  retainedPeak: number;
+}
+
+function retainPrints(work: PrintWork, change: number): void {
+  work.retained += change;
+  if (work.retained > work.retainedPeak) work.retainedPeak = work.retained;
+}
+
+function recordPrintWork(work: PrintWork): void {
+  if (work.prints > 0) {
+    recordValidationTestWork("setValidationPrints", work.prints);
+    recordValidationTestWork("setValidationPrintParts", work.parts);
+    recordValidationTestWork("setValidationPrintTextUnits", work.textUnits);
+  }
+  if (work.exactKeys > 0) {
+    recordValidationTestWork("setValidationExactKeys", work.exactKeys);
+    recordValidationTestWork("setValidationExactKeyLength", work.exactKeyLength);
+  }
+  if (work.retainedPeak > 0)
+    recordValidationTestPeak("setValidationPrintsRetainedPeak", work.retainedPeak);
+}
+
+/** The tags that keep the prints of a list, set, object, dict, and object property or dict entry apart. */
+const LIST_PRINT = 1;
+const SET_PRINT = 2;
+const OBJECT_PRINT = 3;
+const DICT_PRINT = 4;
+const PART_PRINT = 5;
+const UNORDERED_PART_PRINT = 6;
+
+/** Mixes a sequence of prints into one (cyrb53's steps over their 32-bit halves); the sequence starts with its length. */
+class PrintMix {
+  #first: number;
+  #second: number;
+
+  constructor(tag: number, length: number) {
+    this.#first = 0xdeadbeef ^ tag;
+    this.#second = 0x41c6ce57 ^ tag;
+    this.add(length);
+  }
+
+  add(print: number): void {
+    const low = print >>> 0;
+    const high = (print - low) / 4294967296;
+    this.#first = Math.imul(Math.imul(this.#first ^ low, 2654435761) ^ high, 2654435761);
+    this.#second = Math.imul(Math.imul(this.#second ^ low, 1597334677) ^ high, 1597334677);
+  }
+
+  finish(): number {
+    return finishedHash(this.#first, this.#second);
+  }
+}
+
+/** The print of a value that holds no other values: of its `leafKey`, which `valueKey` gives it too. */
+function leafPrint(value: SerializableRuntimeValue, work: PrintWork): number {
+  // EVIDENCE: invariant: leafKey keys every value that is not a list, set, object, or dict.
+  const key = leafKey(value)!;
+  work.textUnits += key.length;
+  return textHash(key);
+}
+
+/**
+ * The print of a validated list, set, object, or dict, from `composites`, the prints of its list, set, object, and dict
+ * parts in order: equal for values equal by `==`, because it is built from the parts `valueKey` uses, in their order
+ * only where `valueKey` keeps it. A list's parts are mixed in order; a set's members, and an object's properties and a
+ * dict's entries, each a print of its name or key and its value, in any order (`UnorderedPrintMix`).
+ */
+function compositePrint(
+  value: CompositeValue,
+  composites: readonly number[],
+  work: PrintWork,
+): number {
+  let next = 0;
+  const partPrint = (part: SerializableRuntimeValue): number => {
+    work.parts += 1;
+    if (typeof part !== "object" || part === null || !isComposite(part))
+      return leafPrint(part, work);
+    // EVIDENCE: invariant: each list, set, object, or dict part added its print to `composites`, in order.
+    return composites[next++]!;
+  };
+  const labelled = (label: string, part: SerializableRuntimeValue): number => {
+    const key = textKey(label);
+    work.textUnits += key.length;
+    const print = new PrintMix(PART_PRINT, 2);
+    print.add(textHash(key));
+    print.add(partPrint(part));
+    return print.finish();
+  };
+  work.prints += 1;
+  switch (value.kind) {
+    case "list": {
+      const print = new PrintMix(LIST_PRINT, value.items.length);
+      for (const item of value.items) print.add(partPrint(item));
+      return print.finish();
+    }
+    case "set": {
+      const print = new UnorderedPrintMix(SET_PRINT);
+      for (const item of value.items) print.add(partPrint(item));
+      return print.finish();
+    }
+    case "object": {
+      const print = new UnorderedPrintMix(OBJECT_PRINT);
+      for (const property of value.properties) print.add(labelled(property.name, property.value));
+      return print.finish();
+    }
+    case "dict": {
+      const print = new UnorderedPrintMix(DICT_PRINT);
+      for (const entry of value.entries) print.add(labelled(entry.key, entry.value));
+      return print.finish();
+    }
+  }
+}
+
+/**
+ * Mixes prints in any order into one: their count, and the sum modulo 2^53 of a mix of each, with no sorting. A sum is
+ * weaker than an ordered mix against crafted collisions; set members whose prints then collide cost one `valueKey` each.
+ */
+class UnorderedPrintMix {
+  readonly #tag: number;
+  #count = 0;
+  /** The sum's low 32 bits and high 21 bits. */
+  #low = 0;
+  #high = 0;
+
+  constructor(tag: number) {
+    this.#tag = tag;
+  }
+
+  add(print: number): void {
+    const part = new PrintMix(UNORDERED_PART_PRINT, 1);
+    part.add(print);
+    const mixed = part.finish();
+    const low = this.#low + (mixed >>> 0);
+    const carry = low >= 4294967296 ? 1 : 0;
+    this.#low = low - carry * 4294967296;
+    this.#high = (this.#high + Math.floor(mixed / 4294967296) + carry) % 2097152;
+    this.#count += 1;
+  }
+
+  finish(): number {
+    const print = new PrintMix(this.#tag, this.#count);
+    print.add(this.#high * 4294967296 + this.#low);
+    return print.finish();
+  }
+}
+
+/**
+ * Whether a set's validated members hold two equal by `==`: by `leafKey` for a value that holds no other values, and
+ * for a list, set, object, or dict by its print in `composites` (in member order), then by `valueKey` among the members
+ * that share it.
+ */
+function hasEqualMembers(
+  members: readonly SerializableRuntimeValue[],
+  composites: readonly number[],
+  work: PrintWork,
+): boolean {
+  const leaves = new Set<string>();
+  /** The one member with a print, or the `valueKey`s of the members that share it. */
+  const printed = new Map<number, SerializableRuntimeValue | Set<string>>();
+  const exactKey = (member: SerializableRuntimeValue): string => {
+    const key = valueKey(member);
+    work.exactKeys += 1;
+    work.exactKeyLength += key.length;
+    return key;
+  };
+  let next = 0;
+  for (const member of members) {
+    if (typeof member !== "object" || member === null || !isComposite(member)) {
+      // EVIDENCE: invariant: leafKey keys every value that is not a list, set, object, or dict.
+      const key = leafKey(member)!;
+      if (leaves.has(key)) return true;
+      leaves.add(key);
+      continue;
+    }
+    // EVIDENCE: invariant: each list, set, object, or dict member added its print to `composites`, in order.
+    const print = composites[next++]!;
+    const known = printed.get(print);
+    if (known === undefined) {
+      printed.set(print, member);
+      continue;
+    }
+    // A validated member is a plain record, never a `Set`.
+    const keys = known instanceof Set ? known : new Set([exactKey(known)]);
+    const key = exactKey(member);
+    if (keys.has(key)) return true;
+    keys.add(key);
+    printed.set(print, keys);
+  }
+  return false;
 }
 
 const TEMPORAL_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
