@@ -28,8 +28,6 @@ import type { VariableSite } from "../semantic/scope.js";
 import type { SpeakerFlowInput } from "../speaker-flow.js";
 import type { KnownValue } from "../static-evaluation.js";
 import type { WayFacts } from "../way-facts.js";
-import type { OperationRelations } from "./adapters/relation.js";
-import type { RegistryView } from "./registry-view.js";
 
 /**
  * The boundary in front of the type analysis of a project (ADR 0021): the compiler hands it the parsed files and what
@@ -58,28 +56,14 @@ export interface TypeAnalysisRequest {
   /** The project's files with their parsed programs, in project order. */
   readonly files: readonly TypeAnalysisFile[];
   readonly options: TypeCheckOptions;
-  /**
-   * What the constraint-based analysis reads instead of keeping lists of its own: the value-kind registry and the
-   * built-in contracts, as views (O4 stage 2). `analyzeTypes` supplies the defaults; the legacy backend reads none.
-   */
-  readonly services?: TypeAnalysisServices;
   /** Hears of each file whose source the analysis enters, so a stack exhaustion is blamed on the right file. */
   readonly onFile?: (file: number) => void;
-}
-
-export interface TypeAnalysisServices {
-  readonly valueKinds: RegistryView;
-  /** The result relations of the built-in contracts, once the adapters exist (O4 stage 2b); absent until then. */
-  readonly operations?: OperationRelations;
 }
 
 export interface TypeAnalysisOutcome {
   /** What the compiler consumes: diagnostics, runtime checks, form shapes, way facts, speaker input, storage plans. */
   readonly checked: TypeCheckResult;
-  /**
-   * The facts the analysis settled on, in a form that two analyses of the same sources can be compared by (the
-   * differential tests of O4); computed when asked for, from the final state of the analysis.
-   */
+  /** The settled analysis facts, in a form that two analyses of the same sources can be compared by. */
   facts(): SolvedTypeFacts;
 }
 

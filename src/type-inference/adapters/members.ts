@@ -23,7 +23,7 @@ import {
 } from "./views.js";
 
 /**
- * The `method` family, and the property reads stage 3 resolves: the member rules of each receiver kind, composed
+ * The `method` family, and property reads (`memberOf`): the member rules of each receiver kind, composed
  * over a receiver that may be of several kinds. Every kind must have the member (ADR 0021 rule 3.5), except a
  * speaker beside kinds that have it, whose case the runtime checks.
  */

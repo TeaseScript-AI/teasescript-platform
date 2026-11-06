@@ -114,9 +114,10 @@ snapshot for comparing two analyses of the same sources.
   - The consumer (`coreCheckResult`, `core/consumer.ts`) walks the source with those answers and makes the
     `TypeCheckResult` that lowering consumes.
 
-  Other O4 foundations include the built-in result relations (`adapters/`), the registry view (`registry-view.ts`)
-  and the interned type table (`solver/types.ts`). The condition-shape recognizer
+  Other O4 foundations include the built-in result relations (`adapters/`, whose operand types the core reads) and
+  the interned type table (`solver/types.ts`). The condition-shape recognizer
   (`narrowing-shapes.ts`) is shared: the visitor's branch rules and the core read the same classification.
+
 - **The switch:** one change makes the constraint backend the compiler's backend in place of the legacy backend, and
   a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's. The
   switch needs the [shadow gate](TESTING.md#the-switchs-shadow-gate) green.
@@ -185,8 +186,7 @@ The technical playground workspace controller lives at `playground/workspace/con
 runtime-to-Player translation and shared action lookup/completion seam lives at `player/runtime-adapter.ts`. The Player
 implementation is under `player/vue/src/`, using the accepted Vue/Tailwind/shadcn-vue/Reka foundation and
 TanStack Vue Virtual for transcript windowing and scroll anchoring. It presents supported interactions and pacing from
-canonical runtime state and events; browser-native CSS owns geometry. The Vue/toolchain boundary is accepted in ADR
-0020. See [`player/README.md`](../player/README.md) for implementation seams, local inspection and the
+canonical runtime state and events; browser-native CSS owns geometry. The Vue/toolchain boundary is accepted in ADR 0020. See [`player/README.md`](../player/README.md) for implementation seams, local inspection and the
 development-preview boundary. Presentation fixtures do not define an engine/Player protocol or the production
 cross-origin host contract.
 
