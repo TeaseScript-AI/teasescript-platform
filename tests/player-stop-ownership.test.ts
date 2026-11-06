@@ -9,6 +9,7 @@ import type { StartOptions } from "../player/engine-bridge/ops/session.js";
 import { startBridgeHost, type HostSession } from "../player/engine-bridge/worker-host.js";
 import { BRIDGE_VERSION } from "../player/engine-bridge/protocol.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
+import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
@@ -56,6 +57,8 @@ let usePlayerSession: (options: {
   readonly debugHistorySpill: () => Promise<null>;
   readonly resolveAsset?: (path: string) => string | null;
   readonly temporalContext?: () => TemporalContext;
+  readonly scriptStorage?: ScriptStorageProvider;
+  readonly capabilities?: { readonly camera: boolean };
 }) => StopHost;
 let facade: typeof InProcess;
 let compiler: typeof CompileProject;
@@ -651,3 +654,111 @@ for (const form of ["a factory", "a held plan"] as const)
     assert.equal(capture.epochMs, 1_793_966_400_000, "the clock of the Start's click");
     assert.deepEqual(capture.context, DEFAULT_TEMPORAL_CONTEXT, "the zone of the Start's click");
   });
+
+for (const camera of [false, true])
+  for (const form of ["a factory", "a held plan"] as const)
+    test(`a Start that reads the stored values records the click's capture, or the camera's answer's (${form}, camera ${camera ? "on" : "off"})`, async (context) => {
+      const gate = () => {
+        let open!: () => void;
+        return { opened: new Promise<void>((resolve) => (open = resolve)), open: () => open() };
+      };
+      const cameraAnswer = gate();
+      const storageRead = gate();
+      const reading = gate();
+      // The browser: event targets, silent audio, and a camera the player denies once `cameraAnswer` opens.
+      const values = {
+        document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
+        window: new EventTarget(),
+        navigator: {
+          mediaDevices: Object.assign(new EventTarget(), {
+            getUserMedia: async () => {
+              await cameraAnswer.opened;
+              throw new DOMException("denied", "NotAllowedError");
+            },
+          }),
+        },
+        Audio: class extends EventTarget {
+          src = "";
+          play = async () => {};
+          pause() {}
+          load() {}
+          removeAttribute() {}
+        },
+      };
+      for (const [name, value] of Object.entries(values)) {
+        const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+        Object.defineProperty(globalThis, name, { configurable: true, value });
+        context.after(() => {
+          if (previous) Object.defineProperty(globalThis, name, previous);
+          else Reflect.deleteProperty(globalThis, name);
+        });
+      }
+      let epoch = 1_793_966_400_000;
+      let temporal = DEFAULT_TEMPORAL_CONTEXT;
+      context.mock.method(Date, "now", () => epoch);
+      // The stored values are read until `storageRead` opens.
+      const storage: ScriptStorageProvider = {
+        scope: "stop-ownership",
+        load: async () => {
+          reading.open();
+          await storageRead.opened;
+          return [];
+        },
+        write: async () => {},
+        replace: async () => {},
+        clear: async () => {},
+      };
+      const bridge = facade.createInProcessBackend(BUILD, {});
+      const scope = effectScope();
+      const player = scope.run(() =>
+        usePlayerSession({
+          bridge: Promise.resolve(bridge),
+          debugHistorySpill: async () => null,
+          scriptStorage: storage,
+          capabilities: { camera },
+          temporalContext: () => temporal,
+        }),
+      )!;
+      context.after(() => {
+        scope.stop();
+        bridge.client.terminate();
+      });
+      await player.bridge;
+      const script = 'showButton "Ready"\nexit';
+      if (form === "a held plan")
+        player.prepare({
+          plan: facade.holdPlan(bridge, compiler.compilePlayerProject(script).plan!),
+          options: () => player.temporalCapture(),
+        });
+      else
+        player.prepare((recording) =>
+          compiler.createPlayerRuntimeSession(script, {
+            ...recording,
+            ...player.temporalCapture(),
+          }),
+        );
+      const starting = player.activate();
+      // The camera answers a second after the click; the read of the stored values then takes 20 seconds more, and the
+      // zone changes meanwhile.
+      epoch += 1_000;
+      cameraAnswer.open();
+      await reading.opened;
+      epoch += 19_000;
+      temporal = {
+        ...DEFAULT_TEMPORAL_CONTEXT,
+        zone: { ...DEFAULT_TEMPORAL_CONTEXT.zone, name: "Etc/UTC" },
+      };
+      storageRead.open();
+      await starting;
+      for (let index = 0; index < 5; index += 1) await turn();
+      assert.equal(player.hostError.value, null);
+      const capture = facade.hatch(player.session.value!, (session) =>
+        adapter.playerRuntimeSnapshot(session).temporalCaptures.at(-1)!,
+      );
+      assert.equal(
+        capture.epochMs,
+        camera ? 1_793_966_401_000 : 1_793_966_400_000,
+        camera ? "the clock of the camera's answer" : "the clock of the click",
+      );
+      assert.deepEqual(capture.context, DEFAULT_TEMPORAL_CONTEXT, "the zone before the read");
+    });

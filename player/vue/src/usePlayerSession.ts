@@ -2448,18 +2448,19 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     device.reset();
     primeAudio();
     beginning.value = true;
+    // What it records of the click (#1886) is sampled now, before anything it waits for; with the camera, as at the fork,
+    // once the camera answered, and still before the stored values are read or another activation is waited for.
+    let sample = withCamera ? null : sampleClick();
     if (!withCamera && !reading) {
       // `takePhoto()` is unconfigured (settled before `open` returns): nothing waits but the host's replies.
       void camera.open(false);
       captures.reset();
-      // What it records of the click is sampled now, before it waits for an activation still beginning.
-      const sample = sampleClick();
       try {
         if (begunInFlight !== null) {
           await begunInFlight;
           if (disposed || token !== activationToken) return;
         }
-        await startFrom(pending, sample);
+        await startFrom(pending, sample ?? sampleClick());
       } finally {
         if (token === activationToken) beginning.value = false;
       }
@@ -2469,6 +2470,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     let failed = true;
     try {
       opened = await camera.open(withCamera);
+      if (opened && !disposed && token === activationToken) sample ??= sampleClick();
       if (opened && reading && !disposed && token === activationToken) await loadScriptStorage();
       failed = false;
     } finally {
@@ -2479,14 +2481,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Replaced, re-prepared, or unmounted while it waited: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
-    // As at the fork, a camera's activation samples once the camera answered, and before it waits for another one.
-    const sample = sampleClick();
     try {
       if (begunInFlight !== null) {
         await begunInFlight;
         if (disposed || token !== activationToken) return;
       }
-      await startFrom(pending, sample);
+      await startFrom(pending, sample ?? sampleClick());
     } finally {
       if (token === activationToken) beginning.value = false;
     }
