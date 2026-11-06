@@ -471,7 +471,8 @@ function provider(settle: (key: string) => Promise<void> = async () => {}) {
 }
 
 test("a storage write's acknowledgement is not refused when the session changed while it waited in the host", async (context) => {
-  const store = provider();
+  let stored!: () => void;
+  const store = provider(() => new Promise<void>((resolve) => (stored = resolve)));
   const { bridge, host, posted } = await mount(context, {
     delayMs: 50,
     scriptStorage: store.storage,
@@ -481,17 +482,26 @@ test("a storage write's acknowledgement is not refused when the session changed 
     'showButton "Go"\nsave 1 as "kept"\nsay "saved", instant\nshowButton "End"\nexit',
     true,
   );
-  // Posted while the host awaits a source `prepare`; a facade call then changes the session before its dispatch.
-  let compiling: Promise<unknown> = Promise.resolve();
-  posted.on("completeStorageWrite", () => {
-    compiling = bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
-  });
   assert.equal((await answer(host, input.intents.choice(null, "button"))).kind, "answered");
-  await wait(200);
+  assert.deepEqual(store.writes, ["kept"]);
+  // The host awaits a source `prepare` before the acknowledgement is posted, so the acknowledgement waits behind it in
+  // the host; a facade call then changes the session, half a second later, before the acknowledgement's dispatch.
+  const compiling = bridge.client.request("prepare", {
+    source: { kind: "source", script: "exit" },
+  });
+  let changed = false;
+  posted.on("completeStorageWrite", () => {
+    const shown = host.session.value!;
+    const observed = facade.observeNow(shown, shown.state.observedSessionTimeMs + 500, []).session;
+    changed = observed.revision !== shown.revision;
+  });
+  stored();
   await compiling;
   await wait(200);
+  assert.equal(changed, true, "the session changed while the acknowledgement waited");
   assert.equal(posted.ops().filter((op) => op === "completeStorageWrite").length, 1);
-  assert.ok(said(host).includes("saved"));
+  assert.deepEqual(store.writes, ["kept"]);
+  assert.ok(said(host).includes("saved"), "the acknowledgement was accepted");
   assert.equal(host.hostError.value, null);
 });
 

@@ -536,6 +536,9 @@ async function complete(
     const ready = props.prepareInput?.() ?? true;
     if (ready !== true && !(await ready)) return;
     if (!props.inputSection) return;
+    // The interaction the composer serves now; its answer's publication may present the next one before the chain
+    // returns, whose own watch then sets the composer.
+    const before = actionId.value;
     const result = await runInput(props.inputSection, presented, targetId, intent);
     // A session that no longer owns the UI, replaced, stopped or unmounted meanwhile, gets no result and no feedback.
     if (result.kind === "retired") return;
@@ -565,8 +568,11 @@ async function complete(
       if (!loadFormEditor(playerRuntimeForm(result.session))) draft.value = "";
       clearFeedback();
     } else if (result.outcome.kind === "completed") {
-      composerOwner = null;
-      draft.value = "";
+      // The answered text goes, unless the next interaction already shows: its prefill or typed text stays.
+      if (actionId.value === before) {
+        composerOwner = null;
+        draft.value = "";
+      }
       clearFeedback();
     } else {
       showFeedback(
