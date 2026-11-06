@@ -7,6 +7,7 @@ import type {
 import { fileType, OCTET_STREAM, storedFileKind } from "../src/runtime/host-data/stored-files.js";
 import type { LockServices, ReadLock } from "./encryption/lock.js";
 import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey, type PublicKey } from "../src/public-keys.js";
+import { answerRecord, dropAnswer, sendAnswer, type AnswerRecord } from "./answer-media.js";
 import { heldMedia } from "./engine-bridge/held-media.js";
 import { refusalCode, type ServiceSection } from "./player-bridge.js";
 import type { PlayerLockAnswer } from "./runtime-adapter.js";
@@ -123,8 +124,11 @@ const ROUND_MARGIN_MS = 2_000;
 export class LockService {
   readonly #host: LockServiceHost;
   readonly #crypto: LockServices;
-  /** The answer being made or delivered, with the step it answers. */
-  #answer: { readonly key: string; readonly promise: Promise<PlayerLockAnswer> } | null = null;
+  /**
+   * The answer being made or delivered, with the step it answers; a locked or opened file in it is this service's until
+   * the runtime takes it (#1882). Set only through `#replace`.
+   */
+  #answer: AnswerRecord<PlayerLockAnswer> | null = null;
   /** What the player typed, by `generation:actionId` of the `ask` step whose dialog they answered. */
   readonly #typed = new Map<string, LockDialogInput>();
   /**
@@ -169,7 +173,7 @@ export class LockService {
   /** Forgets the answer being made, what was typed, the dialog and its preparation, as for a new or stopped session. */
   reset(): void {
     this.#preparing = null;
-    this.#answer = null;
+    this.#replace(null);
     this.#typed.clear();
     this.#followUp = null;
     this.#showDialog(null);
@@ -191,7 +195,7 @@ export class LockService {
       `${this.#host.generation()}:${dialog.actionId}`,
       followUp === null ? input : { ...input, password: followUp.password },
     );
-    this.#answer = { key: dialog.key, promise: Promise.resolve({ kind: "submitted" }) };
+    this.#replace(this.#given(dialog.key, { kind: "submitted" }));
     this.#showDialog(dialog, true);
     this.request();
   }
@@ -200,15 +204,18 @@ export class LockService {
   cancel(): void {
     const dialog = this.#dialog;
     if (dialog?.kind !== "unlock" || this.#answer?.key === dialog.key) return;
-    this.#answer = { key: dialog.key, promise: Promise.resolve({ kind: "cancelled" }) };
+    this.#replace(this.#given(dialog.key, { kind: "cancelled" }));
     this.#showDialog(dialog, true);
     this.request();
   }
 
   async #service(): Promise<void> {
+    if (this.#servicing || this.#stopped) return;
+    // An answer of a session no longer published is never handed off.
+    if (this.#answer !== null && this.#answer.generation !== this.#host.generation())
+      this.#replace(null);
     const current = this.#host.session();
     const action = current && activePlayerRuntimeLock(current.state);
-    if (this.#servicing || this.#stopped) return;
     if (!action) {
       // Also while an expiry block interrupts a dialog: it shows again once the block returns.
       this.#showDialog(null);
@@ -233,13 +240,12 @@ export class LockService {
             ? null
             : (this.#typed.get(`${generation}:${action.dialogActionId}`) ?? undefined);
         this.#typed.clear();
-        this.#answer = { key, promise: this.#work(action, typed) };
+        this.#replace(answerRecord(key, generation, this.#work(action, typed)));
       }
-      const answer = await this.#answer.promise;
-      if (!this.#current(key, generation)) return;
-      await this.#host.section((section) =>
-        this.#deliver(section, key, generation, action, answer),
-      );
+      const record = this.#answer!;
+      const answer = await record.promise;
+      if (!this.#current(record)) return;
+      await this.#host.section((section) => this.#deliver(section, record, action, answer));
     } catch (error) {
       // A refusal changed nothing: a basis another op replaced keeps this answer for the next service, a released
       // session needs none, and a Player error stop already dropped it.
@@ -259,26 +265,28 @@ export class LockService {
    */
   async #deliver(
     section: ServiceSection,
-    key: string,
-    generation: number,
+    record: AnswerRecord<PlayerLockAnswer>,
     action: RuntimeLockActionSnapshot,
     answer: PlayerLockAnswer,
   ): Promise<void> {
+    const { key } = record;
     const observed = await section.observe();
-    if (!this.#current(key, generation)) return;
+    if (!this.#current(record)) return;
     if (!observed || activePlayerRuntimeLock(observed.state)?.actionId !== action.actionId)
       return this.#settled(key);
-    const outcome = await section.send<ActionCompletionOutcome>(
-      "answerLock",
-      {
-        actionId: action.actionId,
-        answer,
-        held: heldMedia(this.#host.media, "file" in answer ? [answer.file] : []),
-      },
-      observed.revision,
+    const outcome = await this.#send(record, () =>
+      section.send<ActionCompletionOutcome>(
+        "answerLock",
+        {
+          actionId: action.actionId,
+          answer,
+          held: heldMedia(this.#host.media, madeLockFiles(answer)),
+        },
+        observed.revision,
+      ),
     );
     // A reply after a stop or a replacement settles and reports nothing here.
-    if (!this.#current(key, generation)) return;
+    if (!this.#current(record)) return;
     // `executionPending`: the same answer is offered again in the next service.
     if (outcome.kind === "executionPending") return;
     if (outcome.kind !== "invalidPayload") return this.#settled(key);
@@ -290,30 +298,60 @@ export class LockService {
       return;
     }
     // The failure is now this step's answer, so a retry offers it, not the lock again.
-    const fallback: PlayerLockAnswer = { kind: "failed", reason: "unavailable" };
-    this.#answer = { key, promise: Promise.resolve(fallback) };
-    await section.send(
-      "answerLock",
-      { actionId: action.actionId, answer: fallback, held: null },
-      observed.revision,
+    const failed: PlayerLockAnswer = { kind: "failed", reason: "unavailable" };
+    const fallback = answerRecord(key, record.generation, Promise.resolve(failed));
+    this.#replace(fallback);
+    await this.#send(fallback, () =>
+      section.send<ActionCompletionOutcome>(
+        "answerLock",
+        { actionId: action.actionId, answer: failed, held: null },
+        observed.revision,
+      ),
     );
-    if (this.#current(key, generation)) this.#settled(key);
+    if (this.#current(fallback)) this.#settled(key);
   }
 
-  /** Whether the answer of `key` is still the one to deliver: not stopped, not reset, the same session. */
-  #current(key: string, generation: number): boolean {
-    return !this.#stopped && this.#answer?.key === key && this.#host.generation() === generation;
+  /** Sends `record`'s answer; see `sendAnswer`. */
+  #send<R extends { readonly kind: string }>(
+    record: AnswerRecord<PlayerLockAnswer>,
+    send: () => Promise<R>,
+  ): Promise<R> {
+    return sendAnswer(
+      record,
+      send,
+      () => this.#answer === record,
+      (dropped) => dropAnswer(dropped, madeLockFiles, this.#host.media),
+    );
+  }
+
+  /** A dialog's answer for the step of `key`, which makes no media. */
+  #given(key: string, answer: PlayerLockAnswer): AnswerRecord<PlayerLockAnswer> {
+    return answerRecord(key, this.#host.generation(), Promise.resolve(answer));
+  }
+
+  /** Makes `next` the answer, letting go of the one before (`dropAnswer`). */
+  #replace(next: AnswerRecord<PlayerLockAnswer> | null): void {
+    const previous = this.#answer;
+    this.#answer = next;
+    if (previous !== next) dropAnswer(previous, madeLockFiles, this.#host.media);
+  }
+
+  /** Whether `record` is still the answer to deliver: not stopped, not reset or replaced, the same session. */
+  #current(record: AnswerRecord<PlayerLockAnswer>): boolean {
+    return (
+      !this.#stopped && this.#answer === record && this.#host.generation() === record.generation
+    );
   }
 
   #settled(key: string): void {
-    if (this.#answer?.key === key) this.#answer = null;
+    if (this.#answer?.key === key) this.#replace(null);
   }
 
   /** Shows the dialog of a step that asks; without WebCrypto it submits at once, so the next step reports it. */
   async #present(action: RuntimeLockActionSnapshot, key: string): Promise<void> {
     if (this.#preparing?.key === key) return;
     if (this.#host.subtle === undefined) {
-      this.#answer = { key, promise: Promise.resolve({ kind: "submitted" }) };
+      this.#replace(this.#given(key, { kind: "submitted" }));
       this.request();
       return;
     }
@@ -347,7 +385,7 @@ export class LockService {
     // A lock that cannot be read any more is tried again, and its step reports why.
     if (read === null || read === "unreadable") {
       this.#preparing = null;
-      this.#answer = { key, promise: Promise.resolve({ kind: "submitted" }) };
+      this.#replace(this.#given(key, { kind: "submitted" }));
       this.request();
       return;
     }
@@ -561,4 +599,9 @@ function publicKeys(texts: readonly string[]): PublicKey[] {
 /** The first bytes of a file, as the one-byte characters that `fileType` reads. */
 function binaryHeader(bytes: Uint8Array): string {
   return String.fromCharCode(...bytes.subarray(0, 2048));
+}
+
+/** The file a lock step's answer made: the locked or the opened one. */
+function madeLockFiles(answer: PlayerLockAnswer): readonly string[] {
+  return "file" in answer ? [answer.file] : [];
 }

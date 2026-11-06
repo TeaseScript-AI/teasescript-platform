@@ -53,6 +53,10 @@ interface StopHost {
   prepare(create: (options: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
+  resolveAsset(path: string): string | null;
+  setRandomControl(
+    control: { readonly filter: { readonly kinds: readonly string[] } } | null,
+  ): void;
 }
 let usePlayerSession: (options: {
   scriptStorage?: ScriptStorageProvider;
@@ -62,6 +66,7 @@ let usePlayerSession: (options: {
 let useDebugRewind: (player: StopHost) => {
   back(index: number): Promise<boolean>;
   resume(): Promise<boolean>;
+  returnToSession(): boolean;
 };
 let useDevelopmentTime: (
   player: StopHost,
@@ -131,8 +136,21 @@ class FakeCanvas {
     };
   }
   async convertToBlob() {
+    encoding.started++;
+    await encoding.held;
     return new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], { type: "image/png" });
   }
+}
+/** The photos being encoded: how many started, and what the next ones wait for (`holdEncoding`). */
+const encoding: { started: number; held: Promise<void> | null } = { started: 0, held: null };
+/** Holds every photo's encoding until the returned function is called. */
+function holdEncoding(): () => void {
+  let release!: () => void;
+  encoding.held = new Promise((resolve) => (release = resolve));
+  return () => {
+    encoding.held = null;
+    release();
+  };
 }
 
 // The browser surface the session, its camera, and a photo capture use; the camera opens at once. The error each test
@@ -647,3 +665,77 @@ test("a debug export offers a photo only the replay saves, also after a Player e
     [[photo, bytes]],
   );
 });
+
+// A photo the session never took is released when Debug's rewind leaves its session, also while a random draw holds
+// that session; the photo it took stays for the state that holds it, Back and Return included (#1882).
+for (const atDraw of [false, true])
+  test(`a photo still encoded when Back ${atDraw ? "leaves a session held at a random draw" : "leaves its session"} is released, and the one the session took stays`, async (context) => {
+    stubBrowser(context);
+    encoding.started = 0;
+    const host = mount(context, () => usePlayerSession({ capabilities: { camera: true } }));
+    const rewind = mount(context, () => useDebugRewind(host));
+    if (atDraw) host.setRandomControl({ filter: { kinds: ["timerRepeat"] } });
+    host.prepare(({ recorder }) =>
+      runtime.createPlayerRuntimeSession(
+        [
+          "let a = takePhoto()",
+          'showButton "Next"',
+          ...(atDraw ? ["let tick = timer(duration: (1..=2) s, async: true, repeat: true)"] : []),
+          "let b = takePhoto()",
+          'showButton "Done"',
+          "exit",
+        ].join("\n"),
+        { recorder },
+      ),
+    );
+    await host.activate();
+    const binding = (name: string) =>
+      runtime
+        .playerRuntimeSnapshot(host.session.value!)
+        .frames[0]!.bindings.find((entry) => entry.name === name)?.value;
+    const until = async (done: () => boolean, message: string) => {
+      for (let turn = 0; !done(); turn++) {
+        assert.ok(turn < 200, message);
+        await settle(10);
+      }
+    };
+    await until(() => typeof binding("a") === "string", "the first photo was not taken");
+    const taken = binding("a");
+    assert.ok(typeof taken === "string" && /:1$/u.test(taken));
+    // The store numbers its photos: the next one taken is the second.
+    const next = taken.replace(/:1$/u, ":2");
+    const release = holdEncoding();
+    const pressed = runtime.activatePlayerRuntimeButton(host.session.value!);
+    assert.ok(pressed);
+    host.update(pressed.session);
+    await until(() => encoding.started === 2, "the second photo was not encoded");
+    if (atDraw) {
+      // The timer repeats, and Debug's random control pauses the session at its next duration's draw.
+      const shown = host.session.value!;
+      host.update(
+        runtime.observePlayerRuntimeTime(shown, shown.state.observedSessionTimeMs + 3_000, [])
+          .session,
+      );
+      await until(() => host.session.value?.state.randomDraw != null, "no draw paused the session");
+    }
+    // Held at the draw, the photo is made but has no session to go to, so it waits for the draw; Back then leaves
+    // that session with no service pass under way. Without the draw, Back comes while the photo is still encoded.
+    if (atDraw) {
+      release();
+      await settle();
+    }
+    assert.equal(await rewind.back(0), true);
+    if (!atDraw) release();
+    await settle();
+    assert.equal(host.resolveAsset(next), null, "the photo the session never took is held");
+    assert.notEqual(host.resolveAsset(taken), null);
+    // Return reinstates the session Back left; its photo is taken anew, and the first stays.
+    assert.equal(rewind.returnToSession(), true);
+    if (atDraw) host.setRandomControl(null);
+    await until(() => typeof binding("b") === "string", "the session's photo was not taken");
+    const retaken = binding("b");
+    assert.ok(typeof retaken === "string" && retaken !== next);
+    assert.notEqual(host.resolveAsset(retaken), null);
+    assert.notEqual(host.resolveAsset(taken), null);
+    assert.equal(host.resolveAsset(next), null);
+  });

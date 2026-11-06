@@ -387,6 +387,7 @@ function serviceHarness(answer: () => Promise<PlayerCaptureAnswer>) {
   };
   const diagnostics: PlayerDiagnostic[] = [];
   const held = new Set<string>();
+  const discarded: string[] = [];
   const service = new CaptureService(answer, {
     session: () => state.session,
     generation: () => state.generation,
@@ -395,7 +396,11 @@ function serviceHarness(answer: () => Promise<PlayerCaptureAnswer>) {
       () => state.session,
       (next) => (state.session = next),
     ),
-    capturedMedia: { holds: (reference, kind) => kind === "image" && held.has(reference) },
+    capturedMedia: {
+      holds: (reference, kind) => kind === "image" && held.has(reference),
+      // The answers here name media no store made; what the service lets go of is only recorded.
+      discard: (reference) => void discarded.push(reference),
+    },
     diagnostic: (diagnostic) => diagnostics.push(diagnostic),
     later: (task) => setImmediate(task),
   });
@@ -403,7 +408,7 @@ function serviceHarness(answer: () => Promise<PlayerCaptureAnswer>) {
     state.generation++;
     state.session = introduced(bridge, createPlayerRuntimeSession(source));
   };
-  return { state, service, diagnostics, held, start };
+  return { state, service, diagnostics, held, discarded, start };
 }
 
 test("a capture is answered once and its photo continues the script", async () => {
@@ -440,6 +445,8 @@ test("a session replaced while its photo is captured gets its own capture servic
   await settle();
   await settle();
   assert.equal(hatch(harness.state.session!, playerRuntimeSnapshot).stageImage, "new photo");
+  // The replaced session's photo was never handed off, so the service let go of it (#1882); the new one was taken.
+  assert.deepEqual(harness.discarded, ["old photo"]);
 });
 
 test("a captured reference the store does not hold never leaves the script waiting", async () => {

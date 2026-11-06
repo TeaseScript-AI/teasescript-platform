@@ -1,8 +1,6 @@
-import type {
-  ActionCompletionOutcome,
-  CapturedMediaAdmission,
-  CaptureUnavailableReason,
-} from "../src/index.js";
+import type { ActionCompletionOutcome, CaptureUnavailableReason } from "../src/index.js";
+import { answerRecord, dropAnswer, sendAnswer, type AnswerRecord } from "./answer-media.js";
+import type { CapturedMediaStore } from "./captured-media.js";
 import type {
   AcquireOutcome,
   CaptureDevice,
@@ -300,7 +298,11 @@ export class SessionCamera<Track extends CaptureTrack> {
     if (live === null || live.readyState === "ended" || live.muted === true)
       return { kind: "unavailable", reason: "revoked" };
     const photo = await this.#device.capturePhoto();
-    if (generation !== this.#generation) return { kind: "unavailable", reason: "revoked" };
+    if (generation !== this.#generation) {
+      // The device stored the photo, but no answer will carry it.
+      if (photo.kind === "photo") this.#device.discardPhoto(photo.media.reference);
+      return { kind: "unavailable", reason: "revoked" };
+    }
     if (photo.kind === "photo") return { kind: "captured", reference: photo.media.reference };
     if (photo.failure.kind === "inactive" || live.readyState !== "live") return "retired";
     this.#markUnavailable(REASONS[photo.failure.kind], "could not capture a photo", photo.failure);
@@ -347,7 +349,8 @@ export interface CaptureServiceHost {
    * session, or once a Player error stopped it.
    */
   section<T>(body: (section: ServiceSection) => Promise<T>): Promise<T | null>;
-  readonly capturedMedia: CapturedMediaAdmission;
+  /** Vouches for the photos it holds, and discards those no answer handed off. */
+  readonly capturedMedia: Pick<CapturedMediaStore, "holds" | "discard">;
   diagnostic(diagnostic: PlayerDiagnostic): void;
   /** Runs `task` later, after the engine had a chance to run. */
   later(task: () => void): void;
@@ -362,8 +365,8 @@ export interface CaptureServiceHost {
 export class CaptureService {
   readonly #answer: () => Promise<PlayerCaptureAnswer>;
   readonly #host: CaptureServiceHost;
-  #key: string | null = null;
-  #pending: Promise<PlayerCaptureAnswer> | null = null;
+  /** The answer being taken or delivered; its photo is this service's until the runtime takes it (#1882). */
+  #record: AnswerRecord<PlayerCaptureAnswer> | null = null;
   #servicing = false;
   #scheduled = false;
   #stopped = false;
@@ -389,32 +392,31 @@ export class CaptureService {
   /** Stops servicing, for example when the Player unmounts; answers still in flight are dropped. */
   stop(): void {
     this.#stopped = true;
-    this.#key = null;
-    this.#pending = null;
+    this.#replace(null);
   }
 
   /** Forgets the answer being taken, as for a new or stopped session; one still in flight is dropped. */
   reset(): void {
-    this.#key = null;
-    this.#pending = null;
+    this.#replace(null);
   }
 
   async #service(): Promise<void> {
+    if (this.#servicing || this.#stopped) return;
+    const generation = this.#host.generation();
+    // An answer of a session no longer published is never handed off.
+    if (this.#record !== null && this.#record.generation !== generation) this.#replace(null);
     const current = this.#host.session();
     const action = current && activePlayerRuntimeCapture(current.state);
-    if (!action || this.#servicing || this.#stopped) return;
+    if (!action) return;
     this.#servicing = true;
-    const generation = this.#host.generation();
     const key = `${generation}:${action.actionId}`;
     try {
-      if (this.#key !== key || this.#pending === null) {
-        this.#key = key;
-        this.#pending = this.#answer();
-      }
-      const answer = await this.#pending;
-      if (!this.#current(key, generation)) return;
+      if (this.#record?.key !== key) this.#replace(answerRecord(key, generation, this.#answer()));
+      const record = this.#record!;
+      const answer = await record.promise;
+      if (!this.#current(record)) return;
       await this.#host.section((section) =>
-        this.#deliver(section, key, generation, action.actionId, answer),
+        this.#deliver(section, record, action.actionId, answer),
       );
     } catch (error) {
       // A refusal changed nothing: a basis another op replaced keeps this answer for the next service, a released
@@ -435,53 +437,75 @@ export class CaptureService {
    */
   async #deliver(
     section: ServiceSection,
-    key: string,
-    generation: number,
+    record: AnswerRecord<PlayerCaptureAnswer>,
     actionId: number,
     answer: PlayerCaptureAnswer,
   ): Promise<void> {
     const observed = await section.observe();
-    if (!this.#current(key, generation)) return;
+    if (!this.#current(record)) return;
     if (!observed || activePlayerRuntimeCapture(observed.state)?.actionId !== actionId)
-      return this.#settled(key);
-    const outcome = await section.send<ActionCompletionOutcome>(
-      "answerCapture",
-      {
-        actionId,
-        answer,
-        held: heldMedia(
-          this.#host.capturedMedia,
-          answer.kind === "captured" ? [answer.reference] : [],
-        ),
-      },
-      observed.revision,
+      return this.#settled(record.key);
+    const outcome = await this.#send(record, () =>
+      section.send<ActionCompletionOutcome>(
+        "answerCapture",
+        { actionId, answer, held: heldMedia(this.#host.capturedMedia, madePhotos(answer)) },
+        observed.revision,
+      ),
     );
     // A reply after a stop or a replacement settles and reports nothing here.
-    if (!this.#current(key, generation)) return;
+    if (!this.#current(record)) return;
     // `executionPending`: the same answer is offered again in the next service.
     if (outcome.kind === "executionPending") return;
-    if (outcome.kind !== "invalidPayload") return this.#settled(key);
+    if (outcome.kind !== "invalidPayload") return this.#settled(record.key);
     this.#host.diagnostic({ code: "capture-rejected", message: outcome.message });
     // Never leave the script waiting: answer this capture as unavailable instead. That is now this capture's answer, so
     // a retry offers it, not the photo again.
-    const fallback: PlayerCaptureAnswer = { kind: "unavailable", reason: "failed" };
-    this.#pending = Promise.resolve(fallback);
-    await section.send(
-      "answerCapture",
-      { actionId, answer: fallback, held: null },
-      observed.revision,
+    const unavailable: PlayerCaptureAnswer = { kind: "unavailable", reason: "failed" };
+    const fallback = answerRecord(record.key, record.generation, Promise.resolve(unavailable));
+    this.#replace(fallback);
+    await this.#send(fallback, () =>
+      section.send<ActionCompletionOutcome>(
+        "answerCapture",
+        { actionId, answer: unavailable, held: null },
+        observed.revision,
+      ),
     );
-    if (this.#current(key, generation)) this.#settled(key);
+    if (this.#current(fallback)) this.#settled(fallback.key);
   }
 
-  /** Whether the answer of `key` is still the one to deliver: not stopped, not reset, the same session. */
-  #current(key: string, generation: number): boolean {
-    return !this.#stopped && this.#key === key && this.#host.generation() === generation;
+  /** Sends `record`'s answer; see `sendAnswer`. */
+  #send<R extends { readonly kind: string }>(
+    record: AnswerRecord<PlayerCaptureAnswer>,
+    send: () => Promise<R>,
+  ): Promise<R> {
+    return sendAnswer(
+      record,
+      send,
+      () => this.#record === record,
+      (dropped) => dropAnswer(dropped, madePhotos, this.#host.capturedMedia),
+    );
+  }
+
+  /** Makes `next` the answer, letting go of the one before (`dropAnswer`). */
+  #replace(next: AnswerRecord<PlayerCaptureAnswer> | null): void {
+    const previous = this.#record;
+    this.#record = next;
+    if (previous !== next) dropAnswer(previous, madePhotos, this.#host.capturedMedia);
+  }
+
+  /** Whether `record` is still the answer to deliver: not stopped, not reset or replaced, the same session. */
+  #current(record: AnswerRecord<PlayerCaptureAnswer>): boolean {
+    return (
+      !this.#stopped && this.#record === record && this.#host.generation() === record.generation
+    );
   }
 
   #settled(key: string): void {
-    if (this.#key !== key) return;
-    this.#key = null;
-    this.#pending = null;
+    if (this.#record?.key === key) this.#replace(null);
   }
+}
+
+/** The photo a capture's answer made: that of a `captured` answer. */
+function madePhotos(answer: PlayerCaptureAnswer): readonly string[] {
+  return answer.kind === "captured" ? [answer.reference] : [];
 }

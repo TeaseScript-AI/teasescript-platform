@@ -717,7 +717,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     later: (task) => setTimeout(task, 0),
   });
   const serviceCapture = () => captures.request();
-  watch(servicedSession, () => void serviceCapture());
+  // A new generation also retires an answer the services hold, while the serviced session stays `null` (#1882).
+  watch([servicedSession, generation], () => void serviceCapture());
   // Stores and reads the files of `fileFromBase64`, `fileToBase64`, `toJson`, and `fromJson` as session media.
   const fileStores = new FileStoreService({
     session: () => servicedSession.value,
@@ -727,7 +728,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     diagnostic: reportDiagnostic,
     later: (task) => setTimeout(task, 0),
   });
-  watch(servicedSession, () => fileStores.request());
+  watch([servicedSession, generation], () => fileStores.request());
   // Locks and opens text and stored files for encryptText, encryptFile, decryptText, and decryptFile, and presents
   // their dialogs; what the player types in them stays in the service's memory.
   const lockDialog = shallowRef<{ readonly dialog: LockDialog; readonly busy: boolean } | null>(
@@ -748,7 +749,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     subtle: globalThis.crypto?.subtle,
     ...(options.lockServices === undefined ? {} : { crypto: options.lockServices }),
   });
-  watch(servicedSession, () => locks.request());
+  watch([servicedSession, generation], () => locks.request());
   // A script that locks or opens loads the lock code while the Player is online, so locking works offline later; one
   // that locks also loads the public keys' code.
   watch(

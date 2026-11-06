@@ -377,6 +377,11 @@ export class CaptureDevice<Track extends CaptureTrack> {
     return { kind: "photo", media };
   }
 
+  /** Discards a photo `capturePhoto` stored that nothing will hand off, as when its camera was released meanwhile. */
+  discardPhoto(reference: string): void {
+    this.#media.discard(reference);
+  }
+
   /** Decodes stored image media for pixel access. */
   async readImage(reference: string): Promise<FrameOutcome> {
     const entry = await this.#media.read(reference);
