@@ -2906,6 +2906,21 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let n:integer[][]?=[[1]]\nlet xs=[[["x"]],(n otherwise null) otherwise [[1],null]]\nexit\n',
       `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
     ],
+    // (known differences, #1838: an `otherwise` inside a default, `load`, property or index keeps, in admission's items,
+    // the null its never-run fallback brings, so the outer `otherwise` counts its own fallback too; the current checker
+    // says `integer[][]`. Admission's to repair, not the message layer's; these turn to `integer[][]` with it)
+    ...[
+      "[].get(0,default: (n otherwise null))",
+      'load("key",default: (n otherwise null))',
+      "{p:(n otherwise null)}.p",
+      "[(n otherwise null)][0]",
+    ].map(
+      (inner) =>
+        [
+          `let n:integer[][]?=[[1]]\nlet xs=[(${inner}) otherwise [[1],null],[["x"]]]\nexit\n`,
+          `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+        ] as const,
+    ),
     // (a join's operand bound to a literal holding null: its place's undecided type, read by its own items; Codex r7)
     [
       'let a=[null]\nlet xs=[a+[[1]],[["x"]]]\nexit\n',
