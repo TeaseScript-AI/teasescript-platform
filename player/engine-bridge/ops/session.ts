@@ -185,6 +185,25 @@ export function sessionOp(
  * L5b's ops: Start, Continue, time (observe, step, catch-up) and pacing skip, and the recording's start. Each wraps
  * the adapter's function of the same work; `basis` is the revision the caller acted on.
  */
+/** A time observation at `atMs`, with the media progress played; a basis an op since replaced refuses it. */
+const observeTime = sessionOp(
+  (args) =>
+    isRecord(args) &&
+    exactly(args, ["atMs", "media"]) &&
+    isTime(args.atMs) &&
+    everyItem(args.media, isMediaReport),
+  (held, args) => {
+    // EVIDENCE: validation: checkArguments accepted these arguments before run.
+    const { atMs, media } = args as {
+      readonly atMs: number;
+      readonly media: readonly MediaProgressReport[];
+    };
+    held.catchUp = null;
+    const result = observePlayerRuntimeTime(held.current, atMs, media);
+    return publishing(held, result.session, result.outcome);
+  },
+);
+
 export function sessionOps(context: PlayerOpsContext): BridgeOps {
   return {
     start: {
@@ -236,23 +255,9 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
         return publishing(held, result.session, result.outcome);
       },
     ),
-    observeTime: sessionOp(
-      (args) =>
-        isRecord(args) &&
-        exactly(args, ["atMs", "media"]) &&
-        isTime(args.atMs) &&
-        everyItem(args.media, isMediaReport),
-      (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { atMs, media } = args as {
-          readonly atMs: number;
-          readonly media: readonly MediaProgressReport[];
-        };
-        held.catchUp = null;
-        const result = observePlayerRuntimeTime(held.current, atMs, media);
-        return publishing(held, result.session, result.outcome);
-      },
-    ),
+    observeTime,
+    // The input chain's observation (L5c), which reads no basis: an input's staleness is its action ID's.
+    observeInput: { ...observeTime, readsBasis: false },
     stepTime: sessionOp(
       (args) => isRecord(args) && exactly(args, ["targetMs"]) && isTime(args.targetMs),
       (held, args) => {
@@ -323,6 +328,8 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
           ? { result: null, view: null }
           : publishing(held, result.session, result.outcome);
       },
+      // Input: its staleness is the gate's action ID, checked above, not a basis (L5c).
+      false,
     ),
     beginRecording: sessionOp(
       (args) => args === null,

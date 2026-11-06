@@ -5,7 +5,6 @@ import { effectScope, nextTick, type Ref } from "vue";
 import {
   submitPlayerRuntimeComposer as rawSubmitPlayerRuntimeComposer,
   observePlayerRuntimeTime as rawObservePlayerRuntimeTime,
-  type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
@@ -25,6 +24,7 @@ import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { InstructionPlan, SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { answerWith, type Intent } from "./helpers/player-input.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
@@ -46,10 +46,7 @@ interface ImageHost {
     discard(reference: string): void;
   };
   /** The presented `askImage` request's steps: a chosen image becomes the preview, which "Use image" answers with. */
-  readonly imageCapture: {
-    choose(reference: string): boolean;
-    use(session: PlayerRuntimeSession): PlayerRuntimeControlResult | null;
-  };
+  readonly imageCapture: { choose(reference: string): boolean; answer(input: "button"): Intent };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
@@ -63,6 +60,7 @@ interface ImageHost {
   ): Promise<DebugExportCandidate>;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
+  readonly inputSection: unknown;
 }
 let usePlayerSession: (options: {
   resolveAsset?: (path: string) => string | null;
@@ -132,13 +130,11 @@ async function chosen(host: ImageHost, name: string) {
 }
 
 /** Makes a chosen image the request's preview and answers with it, as "Use image" does. */
-function answer(host: ImageHost, reference: string) {
-  const session = host.session.value;
-  assert.ok(session);
+async function answer(host: ImageHost, reference: string) {
+  assert.ok(host.session.value);
   assert.equal(host.imageCapture.choose(reference), true);
-  const result = onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(session);
-  assert.equal(result?.outcome.kind, "completed");
-  host.update(result!.session);
+  const result = await answerWith(host, host.imageCapture.answer("button"));
+  assert.equal(result.outcome?.kind, "completed");
 }
 
 test("a chosen image is session media: kept durably only when saved, and released when the Player unmounts", async (context) => {
@@ -182,9 +178,9 @@ test("a chosen image is session media: kept durably only when saved, and release
 
   const first = await chosen(host, "first.png");
   assert.notEqual(host.resolveAsset(first), null, "the chosen image is session media");
-  answer(host, first);
+  await answer(host, first);
   const second = await chosen(host, "second.png");
-  answer(host, second);
+  await answer(host, second);
   await until(() => host.session.value?.state.status === "halted", "the save was not serviced");
 
   // Only the saved image became durable, under the script's storage scope.
@@ -212,7 +208,7 @@ test("a debug export candidate is the state when it was asked for, while play co
     ),
   );
   await host.activate();
-  answer(host, await chosen(host, "used.png"));
+  await answer(host, await chosen(host, "used.png"));
   const asked = host.session.value!;
   // The Player's event and transcript lists grow with play, so the state asked for is their length then.
   const events = [...asked.events];
@@ -277,7 +273,7 @@ test("after a reload, Continue's debug export offers the photo its state holds, 
   const before = await page();
   await before.host.activate();
   const photo = await chosen(before.host, "kept.png");
-  answer(before.host, photo);
+  await answer(before.host, photo);
   await until(
     () => playerRuntimeForeground(before.host.session.value!)?.kind === "show-button",
     "the session did not reach First",
@@ -328,11 +324,9 @@ test("an image that never became the preview can be dropped, and Use image answe
   assert.equal(host.resolveAsset(reference), null);
   // The runtime admits only an image the store holds, also when a dropped one is offered as the preview.
   assert.equal(host.imageCapture.choose(reference), true);
-  const result = onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(
-    host.session.value!,
-  );
-  assert.equal(result?.outcome.kind, "invalidPayload");
-  assert.equal(playerRuntimeForeground(result!.session)?.kind, "ask-image");
+  const result = await answerWith(host, host.imageCapture.answer("button"));
+  assert.equal(result.outcome?.kind, "invalidPayload");
+  assert.equal(playerRuntimeForeground(host.session.value!)?.kind, "ask-image");
 });
 
 test("each image request that allows only the camera is reported as a Player notice while it waits", async (context) => {
@@ -427,13 +421,13 @@ test("media the script refers to but the Player cannot use is a warning, once pe
   for (const notice of host.notices.value) host.dismissNotice(notice.key);
 
   // A captured image is no package file, so neither showing it nor a failure to load it is reported.
-  answer(host, await chosen(host, "photo.png"));
+  await answer(host, await chosen(host, "photo.png"));
   await nextTick();
   host.stageImageFailure(
     host.resolveAsset(playerRuntimeSnapshot(host.session.value!).stageImage!)!,
   );
   // The same missing image shown again in this session is not reported again.
-  answer(host, await chosen(host, "other.png"));
+  await answer(host, await chosen(host, "other.png"));
   await nextTick();
   assert.equal(playerRuntimeSnapshot(host.session.value!).stageImage, "images/missing.png");
   assert.deepEqual(messages(), []);

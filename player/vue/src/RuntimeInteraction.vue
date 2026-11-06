@@ -11,24 +11,6 @@ import type { LockDialog as LockDialogState, LockDialogInput } from "../../lock-
 import { computed, nextTick, onUnmounted, ref, watch, type Ref } from "vue";
 import { useEventListener } from "@vueuse/core";
 import {
-  activatePlayerRuntimeButton,
-  answeredByPlayerInput,
-  closePlayerRuntimeExport,
-  closePlayerRuntimePopup,
-  openPlayerRuntimeUrl,
-  selectPlayerRuntimeChoice,
-  skipPlayerRuntimeImage,
-  cancelPlayerRuntimeForm,
-  clearPlayerRuntimeFormField,
-  dismissPlayerRuntimeFormField,
-  draftPlayerRuntimeForm,
-  stepPlayerRuntimeFormField,
-  submitPlayerRuntimeComposer,
-  submitPlayerRuntimeForm,
-  type PlayerRuntimeControlResult,
-  type PlayerRuntimeSession,
-} from "../../runtime-adapter.js";
-import {
   activePlayerRuntimeInteraction,
   playerRuntimeForm,
   playerRuntimeUrlRequest,
@@ -37,9 +19,6 @@ import {
   playerRuntimeInteractionActionIds,
   type PlayerSession,
 } from "../../runtime-view.js";
-import { hatch } from "../../engine-bridge/in-process.js";
-import { bridgeOf } from "../../player-bridge.js";
-import type { ActionCompletionOutcome } from "../../../src/index.js";
 import { invalidAnswerMessage } from "../../../src/interaction-answers.js";
 import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
@@ -51,8 +30,15 @@ import type {
   PlayerSpeakerPresentation,
 } from "../../model.js";
 import { imagePickerAccept, type ImageFileFilters } from "../../image-file.js";
-import type { DebugAnswerInput } from "../../debug-export.js";
 import { openUrlTab } from "../../url-tab.js";
+import {
+  draftInput,
+  intents,
+  runInput,
+  type InputIntent,
+  type InputSectionHost,
+} from "./runtime-input";
+import { useComposerFields, type ComposerFieldWriter } from "./useComposerFields";
 import type { ImageCapture } from "./useImageCapture";
 
 /** How the host stores an image file the player chose for `askImage`. */
@@ -78,10 +64,10 @@ const props = defineProps<{
   removedRows?: readonly number[];
   transcriptKey: string;
   /**
-   * Brings scene time up to date before input and returns the published session; `null` when the session takes no
-   * input, as once a Player error stopped it.
+   * The section of the shown session that input runs in (`runtime-input.ts`): it observes elapsed time first, and posts
+   * only while the session owns the UI. Without it, the controls answer nothing.
    */
-  observeTime?: () => PlayerSession | null;
+  inputSection?: InputSectionHost;
   /**
    * Readies the session before input is evaluated, such as by adopting a state Debug's rewind restored; input goes
    * ahead when it returns or resolves to `true`.
@@ -192,8 +178,10 @@ function loadFormEditor(current: PlayerFormPresentation | null): boolean {
     return false;
   }
   composerOwner = { actionId: current.actionId, fieldId: current.editor.fieldId };
-  draft.value =
-    typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text;
+  writeField(
+    "input",
+    typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text,
+  );
   return true;
 }
 /** Whether the composer holds the text of the presented form's edited field. */
@@ -230,13 +218,7 @@ const presentedAt = ref(0);
 function activatePreselected() {
   const target = preselected.value;
   if (target === undefined) return;
-  void complete(
-    answer("preselectedKey", (session) =>
-      target === null
-        ? activatePlayerRuntimeButton(session)
-        : selectPlayerRuntimeChoice(session, target),
-    ),
-  );
+  void complete(intents.choice(target, "preselectedKey"));
 }
 // An image request accepts a file through the paperclip or a drop only while it allows files.
 const imageRequest = computed(() =>
@@ -304,10 +286,11 @@ const root = ref<HTMLElement | null>(null);
 // The session's area, which a popup that is not modal centres on, beside the Debug panel.
 const composition = computed(() => root.value?.closest<HTMLElement>(".player-composition") ?? null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
-const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
-const draft = ref("");
-/** The "Repeat password" of a lock's password field, which, like its password, is never kept. */
-const repeated = ref("");
+const composer = ref<
+  ({ focusInput(): void; selectInput(): void; openPicker(): void } & ComposerFieldWriter) | null
+>(null);
+// The composer's text and repeat are read-only here: a text from outside goes through `writeField`.
+const { draft, repeated, writeField, typed: composerTyped } = useComposerFields(composer);
 const feedback = ref("");
 const submitting = ref(false);
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -390,10 +373,11 @@ watch(draft, (text) => {
   draftTimer = setTimeout(() => {
     // A replaced session, such as one Debug's rewind restored, takes no text typed for another.
     if (props.session?.planToken !== plan || props.reset !== reset || submitting.value) return;
-    if (props.holdFormDrafts) return;
+    if (props.holdFormDrafts || !props.inputSection) return;
     // The text reaches only its own action's field; while another is presented it stays typed for the return.
-    const result = hatch(props.session, (current) => draftPlayerRuntimeForm(current, target, text));
-    if (result?.outcome.kind === "updated") emit("update:session", result.session);
+    void draftInput(props.inputSection, target, text).then((drafted) => {
+      if (drafted !== null) emit("update:session", drafted);
+    });
   }, 400);
 });
 onUnmounted(() => clearTimeout(draftTimer));
@@ -434,22 +418,26 @@ watch(
     urlTried.set(session.id, tried);
     if (tried.has(id)) return;
     tried.add(id);
-    // Typically an answer the player just gave presents it, while that answer still holds the controls.
-    if (!playerRuntimeUrlRequest(session)?.atOnce) return;
-    // Host input happens at the observed time; settling must not be refused once the tab is open.
-    const observed = props.observeTime ? props.observeTime() : session;
-    const request = observed ? playerRuntimeUrlRequest(observed) : null;
-    if (!observed || request?.actionId !== id || !request.atOnce || !openUrlTab(request.url))
-      return;
-    const result = hatch(observed, openPlayerRuntimeUrl);
-    if (result) emit("update:session", result.session);
+    // Typically an answer the player just gave presents it, within the activation of that answer's click.
+    if (!playerRuntimeUrlRequest(session)?.atOnce || !props.inputSection) return;
+    // Host input happens at the observed time; the tab opens only for the request still presented there, and the
+    // request is settled only once its tab opened.
+    const atOnce = (current: PlayerSession) => {
+      const request = playerRuntimeUrlRequest(current);
+      return request?.atOnce ? request.actionId : undefined;
+    };
+    void runInput(props.inputSection, id, atOnce, intents.url(openRequestedUrl, null)).then(
+      (result) => {
+        if (result.kind === "answered") emit("update:session", result.session);
+      },
+    );
   },
   { immediate: true },
 );
-/** The player's click on an `openUrl`'s button opens its address in a new tab, then settles it. */
-function openUrl(session: PlayerRuntimeSession) {
+/** Opens the address of the `openUrl` request `session` presents in a new tab; whether one opened. */
+function openRequestedUrl(session: PlayerSession) {
   const request = playerRuntimeUrlRequest(session);
-  return request !== null && openUrlTab(request.url) ? openPlayerRuntimeUrl(session) : null;
+  return request !== null && openUrlTab(request.url);
 }
 function focusInput() {
   composer.value?.focusInput();
@@ -484,11 +472,13 @@ watch(
         ? typedTexts()?.get(typedKey(actionId.value, ""))
         : undefined;
     if (!loadFormEditor(form.value))
-      draft.value =
+      writeField(
+        "input",
         typedHere ??
-        (presentedInput !== null && "prefill" in presentedInput
-          ? (presentedInput.prefill ?? "")
-          : "");
+          (presentedInput !== null && "prefill" in presentedInput
+            ? (presentedInput.prefill ?? "")
+            : ""),
+      );
     clearFeedback();
     await nextTick();
     // Completion releases the disabled guard after publishing the session.
@@ -528,34 +518,8 @@ watch(
   { immediate: true },
 );
 
-// An answer the player gave, whose debug recording keeps how (DEBUGGER.md "Debug export").
-function answer(
-  input: DebugAnswerInput,
-  operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,
-) {
-  return (session: PlayerRuntimeSession) =>
-    answeredByPlayerInput(session, input, () => operation(session));
-}
-
-/** The pacing skip, which `complete` sends to the engine's host as its op (`skipPacing`). */
-const SKIP_PACING = Symbol("skipPacing");
-
-/** Skips the pacing gate `session` presents, over the bridge; `null` when it presents none. */
-async function skipPacingOver(
-  session: PlayerSession,
-): Promise<{ readonly session: PlayerSession; readonly outcome: ActionCompletionOutcome } | null> {
-  const gate = playerRuntimePacingGate(session);
-  if (gate === null) return null;
-  const bridge = bridgeOf(session);
-  const outcome = await bridge.request<ActionCompletionOutcome | null>(session, "skipPacing", {
-    actionId: gate.actionId,
-  });
-  return outcome === null ? null : { session: bridge.latest(session) ?? session, outcome };
-}
-
 async function complete(
-  operation:
-    ((session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null) | typeof SKIP_PACING,
+  intent: InputIntent,
   refocusInput = true,
   target: "interaction" | "pacing" = "interaction",
   // The action the user acted on, when the input began earlier than this call (a held press).
@@ -567,6 +531,9 @@ async function complete(
   restoreChoiceFocus =
     document.documentElement.dataset.playerKeyboardFocus === "true" &&
     !!document.activeElement?.closest("[data-foreground-controls]");
+  // From the click until the answer settles, the composer and the form's controls are read-only (`submitting`): the
+  // answer is the text of the click, and nothing typed meanwhile is lost to the next interaction's text. The composer ends
+  // a composition under way as it turns read-only.
   submitting.value = true;
   try {
     const targetId = (current: PlayerSession) =>
@@ -577,20 +544,20 @@ async function complete(
     // Ordinary input is evaluated at once; a session that must be readied first is evaluated once it is.
     const ready = props.prepareInput?.() ?? true;
     if (ready !== true && !(await ready)) return;
-    const session = props.observeTime ? props.observeTime() : props.session;
-    if (!session) return;
+    if (!props.inputSection) return;
+    // The interaction the composer serves now; its answer's publication may present the next one before the chain
+    // returns, whose own watch then sets the composer.
+    const before = actionId.value;
+    const result = await runInput(props.inputSection, presented, targetId, intent);
+    // A session that no longer owns the UI, replaced, stopped or unmounted meanwhile, gets no result and no feedback.
+    if (result.kind === "retired") return;
     // Elapsed time may have ended or replaced the presented action; input never targets another action.
-    if (targetId(session) !== presented) {
+    if (result.kind === "unavailable") {
       // A skipped message that already finished needs no feedback.
       if (target === "interaction") showFeedback("This interaction is no longer available.");
       return;
     }
-    const result =
-      operation === SKIP_PACING ? await skipPacingOver(session) : hatch(session, operation);
-    // A session that another replaced while the skip's reply was in transit gets neither its result nor feedback; the
-    // Player's publication boundary (`update`) refuses it too, and anything after a stop.
-    if (props.session?.lineage !== session.lineage) return;
-    if (!result) {
+    if (result.kind === "unanswered") {
       showFeedback(
         foreground.value?.kind === "show-button"
           ? "Type the exact button text or activate it above."
@@ -607,11 +574,14 @@ async function complete(
     // the field it edits, if any.
     // The composer gives up its field before its text changes, so the change is never typed text of another one.
     if (result.outcome.kind === "updated" || result.outcome.kind === "unchanged") {
-      if (!loadFormEditor(playerRuntimeForm(result.session))) draft.value = "";
+      if (!loadFormEditor(playerRuntimeForm(result.session))) writeField("input", "");
       clearFeedback();
     } else if (result.outcome.kind === "completed") {
-      composerOwner = null;
-      draft.value = "";
+      // The answered text goes, unless the next interaction already shows: its prefill or typed text stays.
+      if (actionId.value === before) {
+        composerOwner = null;
+        writeField("input", "");
+      }
       clearFeedback();
     } else {
       showFeedback(
@@ -645,7 +615,7 @@ function textSelected() {
 }
 function skipPacing(refocusInput: boolean, actionId?: number) {
   if (!pacing.value || textSelected()) return;
-  void complete(SKIP_PACING, refocusInput, "pacing", actionId);
+  void complete(intents.pacing, refocusInput, "pacing", actionId);
 }
 // A press skips the message whose pacing was presented when it began; a gate that elapses while the button is held
 // is not replaced by the next message's gate.
@@ -790,7 +760,7 @@ async function imageControl(control: ImageControl) {
   const capture = props.capture;
   if (!capture || !props.session || submitting.value || readingImage.value) return;
   if (control === "file") return composer.value?.openPicker();
-  if (control === "use") return complete(answer("button", (session) => capture.use(session)));
+  if (control === "use") return complete(capture.answer("button"));
   const ready = props.prepareInput?.() ?? true;
   if (ready !== true && !(await ready)) return;
   if (control === "camera") capture.openCamera();
@@ -805,10 +775,10 @@ async function imageControl(control: ImageControl) {
 watch(
   () => lockField.value?.key,
   async (key) => {
-    repeated.value = "";
+    writeField("repeat", "");
     // A question or form that came back meanwhile already holds the composer; its text stays.
     if (key !== undefined || actionId.value === undefined) {
-      draft.value = "";
+      writeField("input", "");
       clearFeedback();
     }
     if (key === undefined) return;
@@ -830,7 +800,7 @@ function submit(source: "input" | "button") {
     if (field.busy || draft.value === "") return focusInput();
     // After a mismatch both are typed again: the repeat is emptied, and the password selected, so typing replaces it.
     if (field.repeat && repeated.value !== draft.value) {
-      repeated.value = "";
+      writeField("repeat", "");
       showFeedback(invalidAnswerMessage("passwordMismatch"));
       composer.value?.selectInput();
       return;
@@ -840,9 +810,7 @@ function submit(source: "input" | "button") {
     return;
   }
   void complete(
-    answer(source === "input" ? "enter" : "send", (session) =>
-      submitPlayerRuntimeComposer(session, draft.value),
-    ),
+    intents.composer(draft.value, source === "input" ? "enter" : "send"),
     source === "input",
   );
 }
@@ -868,21 +836,11 @@ function submit(source: "input" | "button") {
               :form="form"
               :accessible-name="foreground.accessibleName"
               :disabled="submitting"
-              @step="
-                (fieldId) =>
-                  complete(
-                    (session) => stepPlayerRuntimeFormField(session, fieldId, formDraft()),
-                    false,
-                  )
-              "
-              @submit="
-                complete(
-                  answer('button', (session) => submitPlayerRuntimeForm(session, formDraft())),
-                )
-              "
-              @cancel="complete(answer('button', cancelPlayerRuntimeForm))"
-              @dismiss="complete(dismissPlayerRuntimeFormField, false)"
-              @clear="complete(clearPlayerRuntimeFormField, false)"
+              @step="(fieldId) => complete(intents.formStep(fieldId, formDraft()), false)"
+              @submit="complete(intents.formSubmit(formDraft(), 'button'))"
+              @cancel="complete(intents.formCancel('button'))"
+              @dismiss="complete(intents.formDismiss, false)"
+              @clear="complete(intents.formClear, false)"
             />
             <ForegroundControls
               v-else
@@ -890,18 +848,9 @@ function submit(source: "input" | "button") {
               :foreground="foreground"
               :disabled="submitting || readingImage"
               :image="imageControls"
-              @activate="
-                (optionId) =>
-                  complete(
-                    answer('button', (session) =>
-                      optionId === null
-                        ? activatePlayerRuntimeButton(session)
-                        : selectPlayerRuntimeChoice(session, optionId),
-                    ),
-                  )
-              "
-              @skip="complete(answer('button', skipPlayerRuntimeImage))"
-              @open="complete(answer('button', openUrl))"
+              @activate="(optionId) => complete(intents.choice(optionId, 'button'))"
+              @skip="complete(intents.imageSkip('button'))"
+              @open="complete(intents.url(openRequestedUrl, 'button'))"
               @image="imageControl"
             />
             <!-- Status text only: it is not announced each second and takes no input. -->
@@ -927,7 +876,7 @@ function submit(source: "input" | "button") {
           :modal="popupModal ?? true"
           :busy="submitting"
           :area="composition"
-          @close="complete(answer('button', closePlayerRuntimePopup))"
+          @close="complete(intents.popupClose('button'))"
         />
         <ExportTextDialog
           v-if="foreground?.kind === 'export-text'"
@@ -938,7 +887,7 @@ function submit(source: "input" | "button") {
           :modal="popupModal ?? true"
           :busy="submitting"
           :area="composition"
-          @close="complete(answer('button', closePlayerRuntimeExport))"
+          @close="complete(intents.exportClose('button'))"
         />
         <LockDialog
           v-if="lock && lockDialog"
@@ -952,7 +901,7 @@ function submit(source: "input" | "button") {
         />
         <Composer
           ref="composer"
-          v-model="draft"
+          :model-value="draft"
           :disabled="
             (!foreground && !pacing && !lockField) ||
             foreground?.kind === 'popup' ||
@@ -985,7 +934,7 @@ function submit(source: "input" | "button") {
           :attach="attach"
           :password="foreground?.kind === 'ask-password' || lockField !== null"
           :repeat="lockField?.repeat ?? false"
-          v-model:repeated="repeated"
+          :repeated="repeated"
           :accessible-name="
             lockField ? 'Password' : (formEditor?.label ?? foreground?.accessibleName ?? 'Response')
           "
@@ -1012,10 +961,12 @@ function submit(source: "input" | "button") {
                       : 'text'
           "
           :feedback="feedback"
+          @update:model-value="composerTyped('input', $event)"
+          @update:repeated="composerTyped('repeat', $event)"
           @submit="submit"
           @skip="skipPacing(true)"
           @activate="activatePreselected"
-          @escape="formEditor && complete(dismissPlayerRuntimeFormField, false)"
+          @escape="formEditor && complete(intents.formDismiss, false)"
           @files="submitImage"
         />
       </template>

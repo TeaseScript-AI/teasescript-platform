@@ -25,6 +25,9 @@ This is a local inspection route, not the production cross-origin Player/host pr
   published state with its transcript, which `session-store.ts` builds from each reply; `player-bridge.ts` sends the
   requests. Until the Worker is activated, the host runs in the page (`engine-bridge/in-process.ts`), whose transition
   facade the families not yet converted use; `engine-bridge/inventory.ts` lists what still moves.
+  The player's input reaches the host from one section of the shown session (`vue/src/runtime-input.ts`): it observes,
+  checks that the session still owns the UI and that the action the player acted on is still presented, then posts the
+  control's op. Input's ops read no basis; an answer to another action is refused by its action ID.
 - `notices.ts` contains the Player notice channel and its fixed wording per condition; see
   [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#player-notices).
 - `script-storage.ts` contains the asynchronous script-storage provider boundary and its browser-local

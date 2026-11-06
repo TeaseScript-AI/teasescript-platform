@@ -31,14 +31,11 @@ import { FileStoreService } from "../../stored-files.js";
 import { LockService, type LockDialog, type LockDialogInput } from "../../lock-service.js";
 import type { LockServices } from "../../encryption/lock.js";
 import {
-  completePlayerRuntimeStorageWrite,
-  applyPlayerRuntimeStorageEdit,
   createPlayerRuntimeRestorePoint,
   playerRuntimeMediaOrigin,
   playerRuntimeSnapshot,
   playerRuntimeSnapshotJson,
   playerRuntimeSnapshotOrNull,
-  pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSessionAt,
   resumePlayerRuntimeRandomDraw,
@@ -67,7 +64,14 @@ import {
   introduceNow,
 } from "../../engine-bridge/in-process.js";
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
-import { bridgeOf, type PlayerBridge, type ServiceSection } from "../../player-bridge.js";
+import {
+  bridgeOf,
+  type PlayerBridge,
+  type ServiceSection,
+  type SessionSection,
+} from "../../player-bridge.js";
+import { BridgeRequestError } from "../../engine-bridge/client.js";
+import { RETIRED, type InputSectionHost } from "./runtime-input";
 import {
   debugPhotoUses,
   type DebugExportCandidate,
@@ -621,34 +625,84 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const current = clock.observe();
     return stopped.value ? null : current;
   };
+  /** A refusal of the host for a stopped session (`halted`), which changed nothing. */
+  const isHalted = (error: unknown) =>
+    error instanceof BridgeRequestError && error.kind === "bridge" && error.code === "halted";
   /**
-   * A service's section of the serviced session, with an observation inside it, as `observeForInput` makes one: the
-   * clock's now and media samples, observed over the bridge, with the stop checked before and after. `null` without a
-   * serviced session, or once a Player error stopped it.
+   * A section of `current`, which runs `body` while `current` owns the UI, as `publishOwned` decides it, with an
+   * observation inside it as `observeForInput` makes one: the clock's now and media samples, observed over the bridge
+   * with `observeOp`, and `null` once `current` no longer owns the UI, before and after. While the clock is paused (an
+   * inspected state, a waiting draw) nothing is observed, as `clock.observe()` observes nothing then. `null` without
+   * `current`, or once a Player error stopped it.
    */
-  function serviceSection<T>(body: (section: ServiceSection) => Promise<T>): Promise<T | null> {
-    const current = servicedSession.value;
+  function ownedSection<T>(
+    current: PlayerSession | null,
+    observeOp: "observeTime" | "observeInput",
+    body: (
+      section: SessionSection,
+      owned: () => boolean,
+      observe: () => Promise<PlayerSession | null>,
+    ) => Promise<T>,
+  ): Promise<T | null> {
     if (current === null || stopped.value) return Promise.resolve(null);
+    const owned = () => !disposed && !stopped.value && session.value?.lineage === current.lineage;
     return bridgeOf(current).section(current, (section) =>
-      body({
-        observe: async () => {
-          if (stopped.value) return null;
-          clock.cancel();
-          const shown = section.session;
-          const outcome = await section.send<TimeObservationOutcome>("observeTime", {
+      body(section, owned, async () => {
+        if (!owned()) return null;
+        if (held.value) return section.session;
+        clock.cancel();
+        const shown = section.session;
+        let outcome: TimeObservationOutcome;
+        try {
+          outcome = await section.send<TimeObservationOutcome>(observeOp, {
             atMs: clock.sceneTimeMs(shown),
             media: device.sample(),
           });
-          if (stopped.value) return null;
-          if (outcome.kind === "observed") publishOwned(section.session);
-          return section.session;
-        },
+        } catch (error) {
+          // Refused as stopped, it changed nothing: the session no longer owns the UI.
+          if (isHalted(error)) return null;
+          throw error;
+        }
+        if (!owned()) return null;
+        if (outcome.kind === "observed" && publishOwned(section.session) === null) return null;
+        return section.session;
+      }),
+    );
+  }
+  /** A service's section of the serviced session (`ownedSection`); `null` without one, or once stopped. */
+  function serviceSection<T>(body: (section: ServiceSection) => Promise<T>): Promise<T | null> {
+    return ownedSection(servicedSession.value, "observeTime", (section, _owned, observe) =>
+      body({
+        observe,
         // What the services send shows as any work completing after a reply does.
         send: (op, args, basis) =>
           section.send(op, args, { basis, publish: (next) => void publishOwned(next) }),
       }),
     );
   }
+  /**
+   * An input section of the shown session (`ownedSection`): its observation and ops read no basis, and an op is posted
+   * only while the session owns the UI. A refusal of the stopped session (`halted`) changed nothing, as one never posted.
+   */
+  const inputSection: InputSectionHost = (body) =>
+    ownedSection(session.value, "observeInput", (section, owned, observe) =>
+      body({
+        observe,
+        owned,
+        send: async (op, args) => {
+          if (!owned()) return RETIRED;
+          try {
+            return await section.send(op, args, { publish: (next) => void publishOwned(next) });
+          } catch (error) {
+            if (isHalted(error)) return RETIRED;
+            throw error;
+          }
+        },
+        get session() {
+          return section.session;
+        },
+      }),
+    );
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.state).stage.image,
   );
@@ -1020,7 +1074,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         setTimeout(() => report(stored), 0);
       }
       function report(stored: boolean) {
-        writesInFlight.delete(flight);
+        // The flight lasts until the acknowledgement applied or retired: a publication that still shows the pending
+        // write meanwhile issues no second provider write.
+        void acknowledge(stored).finally(() => writesInFlight.delete(flight));
+      }
+      async function acknowledge(stored: boolean) {
         // A write that settles after unmount must not continue the session.
         if (disposed) return;
         const latest = session.value;
@@ -1032,9 +1090,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           savedDataRevision.value++;
           for (const stored of scriptWritesStored) stored.set(write!.key, write!.value);
         }
-        session.value = hatch(latest, (current) =>
-          completePlayerRuntimeStorageWrite(current, write!.actionId, stored),
-        ).session;
+        // The provider's write is made; the acknowledgement goes only to the session that still owns the UI, once.
+        await inputSection(async (section) => {
+          if (!section.owned() || generation.value !== sessionGeneration) return;
+          await section.send("completeStorageWrite", { actionId: write!.actionId, stored });
+        });
       }
     },
     { flush: "sync" },
@@ -1157,31 +1217,62 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         return failed("The change could not be saved in this browser. Nothing changed.");
       }
       savedDataRevision.value++;
-      while (
-        !retired() &&
-        !stopped.value &&
-        session.value !== null &&
-        pendingPlayerRuntimeStorageWrite(session.value.state) !== null
-      )
-        await new Promise<void>((resolve) => writeSettledWaiters.add(resolve));
+      // The edit is stored once. It reaches the session once no script write is pending there, also one that became
+      // pending while the edit waited for its section or after it was posted (`storageWritePending`): then it waits
+      // for that write and tries again.
+      for (;;) {
+        while (
+          !retired() &&
+          !stopped.value &&
+          session.value !== null &&
+          pendingPlayerRuntimeStorageWrite(session.value.state) !== null
+        )
+          await new Promise<void>((resolve) => writeSettledWaiters.add(resolve));
+        if (retired() || stopped.value) return { kind: "saved", live: false };
+        if (stored.has(key)) return { kind: "overtaken" };
+        if (!liveSession()) return { kind: "saved", live: false };
+        const decided = await inputSection(async (section) => {
+          // Rechecked at the section's turn: input before it may have published meanwhile.
+          if (!section.owned() || retired()) return { kind: "saved", live: false } as const;
+          if (stored.has(key)) return { kind: "overtaken" } as const;
+          if (!liveSession()) return { kind: "saved", live: false } as const;
+          if (pendingPlayerRuntimeStorageWrite(section.session.state) !== null) return "wait";
+          const latest = section.session;
+          let outcome: { readonly kind: string } | typeof RETIRED;
+          try {
+            outcome = await section.send<{ readonly kind: string }>("applyStorageEdit", {
+              key,
+              value,
+            });
+          } catch (error) {
+            // Stored, the edit settles also when the bridge failed to carry it: what the engine threw is reported.
+            if (error instanceof BridgeRequestError && error.kind === "engine") throw error;
+            return { kind: "saved", live: false } as const;
+          }
+          if (outcome === RETIRED || !section.owned())
+            return { kind: "saved", live: false } as const;
+          if (outcome.kind === "storageWritePending") return "wait";
+          if (outcome.kind !== "applied") return { kind: "saved", live: false } as const;
+          debugEdits.value = {
+            firstEditSceneTimeMs:
+              debugEdits.value?.firstEditSceneTimeMs ?? latest.state.observedSessionTimeMs,
+            editCount: (debugEdits.value?.editCount ?? 0) + 1,
+          };
+          return { kind: "saved", live: true } as const;
+        });
+        if (decided === null) return { kind: "saved", live: false };
+        if (decided !== "wait") return decided;
+        // A write the session issued meanwhile: wait for it outside the section, as above. Until the shown session
+        // shows it, the next publication wakes the wait.
+        if (
+          session.value !== null &&
+          pendingPlayerRuntimeStorageWrite(session.value.state) === null
+        )
+          await new Promise<void>((resolve) => writeSettledWaiters.add(resolve));
+      }
     } finally {
       scriptWritesStored.delete(stored);
     }
-    if (retired() || stopped.value) return { kind: "saved", live: false };
-    if (stored.has(key)) return { kind: "overtaken" };
-    if (!liveSession()) return { kind: "saved", live: false };
-    const latest = session.value!;
-    const edited = hatch(latest, (current) =>
-      applyPlayerRuntimeStorageEdit(current, { key, value }),
-    );
-    if (edited.outcome.kind !== "applied") return { kind: "saved", live: false };
-    session.value = edited.session;
-    debugEdits.value = {
-      firstEditSceneTimeMs:
-        debugEdits.value?.firstEditSceneTimeMs ?? latest.state.observedSessionTimeMs,
-      editCount: (debugEdits.value?.editCount ?? 0) + 1,
-    };
-    return { kind: "saved", live: true };
   }
   const canClearScriptStorage = computed(
     () =>
@@ -2284,12 +2375,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Clicks a permanent button at the observed time, like other input; a click it does not accept changes nothing. */
   async function pressPermanentButton(buttonId: number) {
     if (!(await prepareInput())) return;
-    const current = observeForInput();
-    if (current === null) return;
-    const result = hatch(current, (current) =>
-      pressPlayerRuntimePermanentButton(current, buttonId),
-    );
-    if (result.outcome.kind === "pressed") update(result.session);
+    await inputSection(async (section) => {
+      if ((await section.observe()) === null) return;
+      // Its publication shows as the op's reply applies (`publishOwned`), whatever the press's outcome.
+      await section.send("pressPermanentButton", { buttonId });
+    });
   }
   /**
    * Shows the explicit Start control for a new session; `create` runs only on activation, so no statement executes
@@ -2857,6 +2947,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      * error stopped it, so input and its continuations take none.
      */
     observe: observeForInput,
+    /** A section of the shown session for input (`runtime-input.ts`). */
+    inputSection,
     publishJump,
     start,
     update,

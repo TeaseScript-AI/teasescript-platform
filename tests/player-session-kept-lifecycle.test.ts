@@ -10,7 +10,6 @@ import {
   type KeptSessionStore,
 } from "../player/kept-sessions.js";
 import type {
-  PlayerRuntimeControlResult,
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
@@ -22,7 +21,8 @@ import type { StorageBundle, StorageBundleScript } from "../player/storage-trans
 import type { InstructionPlan } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
-import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+import { answerWith, type Intent } from "./helpers/player-input.js";
+import { loadHostFacade } from "./helpers/host-sessions.js";
 
 // The kept session's lifecycle around its preparation and the saved-data import (#1862, #1863): a preparation that
 // something later replaced shows nothing and puts back no photo, and an import replaces a script's values only once
@@ -49,10 +49,7 @@ interface Host {
       filters: { types: readonly string[] | null; mime: readonly string[] | null },
     ): Promise<{ readonly reference: string } | { readonly message: string }>;
   };
-  readonly imageCapture: {
-    choose(reference: string): boolean;
-    use(session: PlayerRuntimeSession): PlayerRuntimeControlResult | null;
-  };
+  readonly imageCapture: { choose(reference: string): boolean; answer(input: "button"): Intent };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepareScript(
@@ -62,6 +59,7 @@ interface Host {
   prepare(create: () => PlayerRuntimeSession): void;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
+  readonly inputSection: unknown;
   toStartPage(): Promise<void>;
   setDebugMode(enabled: boolean): void;
   resolveAsset(path: string): string | null;
@@ -366,11 +364,8 @@ test("a kept photo read answered after the import is not put back, and one answe
     });
     assert.ok("reference" in stored);
     assert.equal(host.imageCapture.choose(stored.reference), true);
-    const used = onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(
-      host.session.value!,
-    );
-    assert.equal(used?.outcome.kind, "completed");
-    host.update(used!.session);
+    const used = await answerWith(host, host.imageCapture.answer("button"));
+    assert.equal(used.outcome?.kind, "completed");
     await until(
       async () => (await at.innerKept.media.listReferences(SHOWN)).includes(stored.reference),
       "the photo was not kept with the session",

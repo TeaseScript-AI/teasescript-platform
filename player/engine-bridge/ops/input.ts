@@ -1,7 +1,226 @@
+import type { DebugAnswerInput } from "../../debug-export.js";
+import {
+  activatePlayerRuntimeButton,
+  answeredByPlayerInput,
+  answerPlayerRuntimeImage,
+  applyPlayerRuntimeStorageEdit,
+  cancelPlayerRuntimeForm,
+  clearPlayerRuntimeFormField,
+  closePlayerRuntimeExport,
+  closePlayerRuntimePopup,
+  completePlayerRuntimeStorageWrite,
+  dismissPlayerRuntimeFormField,
+  draftPlayerRuntimeForm,
+  openPlayerRuntimeUrl,
+  pressPlayerRuntimePermanentButton,
+  selectPlayerRuntimeChoice,
+  skipPlayerRuntimeImage,
+  stepPlayerRuntimeFormField,
+  submitPlayerRuntimeComposer,
+  submitPlayerRuntimeForm,
+  type PlayerRuntimeSession,
+} from "../../runtime-adapter.js";
+import { activePlayerRuntimeInteraction } from "../../runtime-view.js";
+import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
+import { exactly, isRecord } from "../argument-checks.js";
+import { admissionOf, isHeldMedia, type HeldMedia } from "../held-media.js";
 import type { PlayerOpsContext } from "../player-ops.js";
-import type { BridgeOps } from "../worker-host.js";
+import type { BridgeOps, OpOutcome } from "../worker-host.js";
+import { sessionOp, type HeldSession } from "./session.js";
 
-/** The ops of family L5c (the L5 series), input and storage: none yet; L5c adds them here. */
+/*
+ * The ops of family L5c (the L5 series), input and storage: the player's answers to the presented interaction, the
+ * permanent buttons, and the script's storage writes and Debug's storage edits. None reads a basis: an input's staleness
+ * is its action ID, which the host checks against the presented action as today's target check does, and the engine's
+ * own checks decide the rest at the state the op runs on, as today's synchronous call did.
+ */
+
+// How the player answered, which the recorder keeps (`answeredByPlayerInput`); a kind missing here fails to compile.
+const INPUT_SET = { enter: true, send: true, button: true, preselectedKey: true } satisfies Record<
+  DebugAnswerInput,
+  true
+>;
+const isInput = (value: unknown): value is DebugAnswerInput | null =>
+  value === null || (typeof value === "string" && Object.hasOwn(INPUT_SET, value));
+const isDraft = (value: unknown): value is string | null =>
+  value === null || typeof value === "string";
+
+/** What an adapter op returns: a session and its outcome, or `null` when it answers nothing there. */
+type Answer = { readonly session: PlayerRuntimeSession; readonly outcome: unknown } | null;
+
+/**
+ * Applies an adapter op's result as the facade's `hatch` does: the same session publishes nothing, one that kept its
+ * revision is kept, and a new revision ends a late observation's catch-up and publishes.
+ */
+function answered(held: HeldSession, result: Answer): OpOutcome {
+  if (result === null) return { result: null, view: null };
+  const next = result.session;
+  if (next === held.current) return { result: result.outcome, view: null };
+  if (next.revision === held.revision) {
+    held.keep(next);
+    return { result: result.outcome, view: null };
+  }
+  held.catchUp = null;
+  const view = held.publish(next);
+  return { result: result.outcome, eventsThrough: view.eventsThrough, view };
+}
+
+/**
+ * An answer to the presented interaction `args.actionId`, with the further arguments `fields` checks. Another presented
+ * action is refused as `staleAction` without effect; `input`, when given, is recorded as how the player answered.
+ */
+function interactionOp(
+  fields: readonly string[],
+  checkFields: (args: Record<string, unknown>) => boolean,
+  run: (session: PlayerRuntimeSession, args: Record<string, unknown>) => Answer,
+  answers = true,
+) {
+  const keys = ["actionId", ...fields, ...(answers ? ["input"] : [])];
+  return sessionOp(
+    (args) =>
+      isRecord(args) &&
+      exactly(args, keys) &&
+      typeof args.actionId === "number" &&
+      (!answers || isInput(args.input)) &&
+      checkFields(args),
+    (held, args) => {
+      // EVIDENCE: validation: checkArguments accepted these arguments before run.
+      const checked = args as Record<string, unknown> & {
+        readonly actionId: number;
+        readonly input?: DebugAnswerInput | null;
+      };
+      const { actionId } = checked;
+      if (activePlayerRuntimeInteraction(held.current.state)?.actionId !== actionId)
+        return { result: { kind: "staleAction", actionId }, view: null };
+      const session = held.current;
+      const input = checked.input ?? null;
+      return answered(
+        held,
+        input === null
+          ? run(session, checked)
+          : answeredByPlayerInput(session, input, () => run(session, checked)),
+      );
+    },
+    false,
+  );
+}
+
+const none = () => true;
+
 export function inputOps(_context: PlayerOpsContext): BridgeOps {
-  return {};
+  return {
+    submitComposer: interactionOp(
+      ["text"],
+      (args) => typeof args.text === "string",
+      (session, args) => {
+        // EVIDENCE: validation: checkFields accepted `text` as a string.
+        const { text } = args as { readonly text: string };
+        return submitPlayerRuntimeComposer(session, text);
+      },
+    ),
+    selectChoice: interactionOp(
+      ["optionId"],
+      (args) => typeof args.optionId === "string",
+      (session, args) => {
+        // EVIDENCE: validation: checkFields accepted `optionId` as a string.
+        const { optionId } = args as { readonly optionId: string };
+        return selectPlayerRuntimeChoice(session, optionId);
+      },
+    ),
+    activateButton: interactionOp([], none, (session) => activatePlayerRuntimeButton(session)),
+    stepFormField: interactionOp(
+      ["fieldId", "draft"],
+      (args) => typeof args.fieldId === "string" && isDraft(args.draft),
+      (session, args) => {
+        // EVIDENCE: validation: checkFields accepted `fieldId` as a string and `draft` as a string or null.
+        const { fieldId, draft } = args as {
+          readonly fieldId: string;
+          readonly draft: string | null;
+        };
+        return stepPlayerRuntimeFormField(session, fieldId, draft ?? undefined);
+      },
+      false,
+    ),
+    dismissFormField: interactionOp([], none, dismissPlayerRuntimeFormField, false),
+    clearFormField: interactionOp([], none, clearPlayerRuntimeFormField, false),
+    draftForm: interactionOp(
+      ["fieldId", "text"],
+      (args) => typeof args.fieldId === "string" && typeof args.text === "string",
+      (session, args) => {
+        // EVIDENCE: validation: checkArguments accepted `actionId` as a number, `fieldId` and `text` as strings.
+        const { actionId, fieldId, text } = args as {
+          readonly actionId: number;
+          readonly fieldId: string;
+          readonly text: string;
+        };
+        return draftPlayerRuntimeForm(session, { actionId, fieldId }, text);
+      },
+      false,
+    ),
+    submitForm: interactionOp(
+      ["draft"],
+      (args) => isDraft(args.draft),
+      (session, args) => {
+        // EVIDENCE: validation: checkFields accepted `draft` as a string or null.
+        const { draft } = args as { readonly draft: string | null };
+        return submitPlayerRuntimeForm(session, draft ?? undefined);
+      },
+    ),
+    cancelForm: interactionOp([], none, cancelPlayerRuntimeForm),
+    skipImage: interactionOp([], none, skipPlayerRuntimeImage),
+    answerImage: interactionOp(
+      ["reference", "held"],
+      (args) => typeof args.reference === "string" && isHeldMedia(args.held),
+      (session, args) => {
+        // EVIDENCE: validation: checkFields accepted `reference` as a string and `held` with `isHeldMedia`.
+        const { reference, held } = args as {
+          readonly reference: string;
+          readonly held: HeldMedia;
+        };
+        return answerPlayerRuntimeImage(session, reference, admissionOf(held));
+      },
+    ),
+    openUrl: interactionOp([], none, openPlayerRuntimeUrl),
+    closePopup: interactionOp([], none, closePlayerRuntimePopup),
+    closeExport: interactionOp([], none, closePlayerRuntimeExport),
+    pressPermanentButton: sessionOp(
+      (args) => isRecord(args) && exactly(args, ["buttonId"]) && typeof args.buttonId === "number",
+      (held, args) => {
+        // EVIDENCE: validation: checkArguments accepted `buttonId` as a number.
+        const { buttonId } = args as { readonly buttonId: number };
+        return answered(held, pressPlayerRuntimePermanentButton(held.current, buttonId));
+      },
+      false,
+    ),
+    completeStorageWrite: sessionOp(
+      (args) =>
+        isRecord(args) &&
+        exactly(args, ["actionId", "stored"]) &&
+        typeof args.actionId === "number" &&
+        typeof args.stored === "boolean",
+      (held, args) => {
+        // EVIDENCE: validation: checkArguments accepted these arguments before run.
+        const { actionId, stored } = args as {
+          readonly actionId: number;
+          readonly stored: boolean;
+        };
+        return answered(held, completePlayerRuntimeStorageWrite(held.current, actionId, stored));
+      },
+      false,
+    ),
+    applyStorageEdit: sessionOp(
+      // The engine validates the edit itself (`invalidEdit`), as it does today.
+      (args) =>
+        isRecord(args) &&
+        exactly(args, ["key", "value"]) &&
+        typeof args.key === "string" &&
+        "value" in args,
+      (held, args) => {
+        // EVIDENCE: validation: checkArguments accepted the shape; the engine validates the value.
+        const edit = args as { readonly key: string; readonly value: SerializableRuntimeValue };
+        return answered(held, applyPlayerRuntimeStorageEdit(held.current, edit));
+      },
+      false,
+    ),
+  };
 }

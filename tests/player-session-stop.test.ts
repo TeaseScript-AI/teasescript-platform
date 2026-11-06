@@ -19,7 +19,8 @@ import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
-import { loadHostFacade, onHost, onHostAll } from "./helpers/host-sessions.js";
+import { answerWith, type Intent } from "./helpers/player-input.js";
+import { loadHostFacade, onHostAll } from "./helpers/host-sessions.js";
 
 // A Player error stops the session where it stands (PLAYER-UI "Session end and failure"). Input and the work that
 // continues it take their session from `observe()`, which gives none once stopped; these include continuations that
@@ -33,7 +34,7 @@ interface StopHost {
     readonly view: Readonly<Ref<{ readonly phase: string; readonly ready: boolean } | null>>;
     openCamera(): void;
     takePhoto(): Promise<void>;
-    use(session: PlayerRuntimeSession): RuntimeAdapter.PlayerRuntimeControlResult | null;
+    answer(input: "button"): Intent;
   };
   reportHostError(error: unknown): void;
   observe(): PlayerRuntimeSession | null;
@@ -57,6 +58,7 @@ interface StopHost {
   setRandomControl(
     control: { readonly filter: { readonly kinds: readonly string[] } } | null,
   ): void;
+  readonly inputSection: unknown;
 }
 let usePlayerSession: (options: {
   scriptStorage?: ScriptStorageProvider;
@@ -350,7 +352,7 @@ test("a photo used in the same task as a Player error does not answer", async (c
   assert.equal(host.imageCapture.view.value?.ready, true);
   host.reportHostError(new TypeError("A component failed."));
   const stopped = host.session.value;
-  assert.equal(onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(stopped!), null);
+  assert.equal((await answerWith(host, host.imageCapture.answer("button"))).kind, "retired");
   await nextTick();
   assert.equal(host.session.value, stopped);
   assert.equal(host.imageCapture.view.value, null, "the stopped request's steps close");

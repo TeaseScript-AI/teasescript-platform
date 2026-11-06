@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
 import { playerKeys } from "./playerKeys";
+import type { ComposerField } from "./useComposerFields";
 
 const props = withDefaults(
   defineProps<{
@@ -91,6 +92,10 @@ const value = computed({
   get: () => props.modelValue,
   set: (text: string) => emit("update:modelValue", text),
 });
+const repeatedValue = computed({
+  get: () => props.repeated,
+  set: (text: string) => emit("update:repeated", text),
+});
 const feedbackId = useId();
 const capsLockId = useId();
 useTextareaAutosize({ element: textareaElement, input: value });
@@ -145,9 +150,6 @@ function guardSendKey(event: KeyboardEvent): void {
 function updateFromPicker(event: Event): void {
   if (event.target instanceof HTMLInputElement) value.value = event.target.value;
 }
-function updateRepeated(event: Event): void {
-  if (event.target instanceof HTMLInputElement) emit("update:repeated", event.target.value);
-}
 
 /** Whether one of the composer's fields has focus. */
 function editing(): boolean {
@@ -182,6 +184,8 @@ watch(
 );
 
 function releaseOnBlur(): void {
+  // The blur that ends a composition (`endComposition`) gives the focus back at once, the field's state as it was.
+  if (endingComposition) return;
   capsLock.value = false;
   if (!replacingField) allowSoftwareKeyboard();
 }
@@ -270,11 +274,73 @@ function selectInput(): void {
   });
 }
 
-defineExpose({ focusInput, selectInput, openPicker });
+/** Whether the player composes text in a field of the composer with an input method (IME). */
+const composing = ref(false);
+let endingComposition = false;
+/**
+ * Ends the player's composition, only in `field` when given: the browser ends it, with its `compositionend`, when the
+ * field loses focus, which it gets back in the same task with its state as it was (`releaseOnBlur`). The text and
+ * password fields keep a composition as `v-model` does, neither taking its text nor rendering over it before it ends,
+ * so an answer given meanwhile is the committed text of the click.
+ */
+function endComposition(field?: HTMLElement): void {
+  if (!composing.value) return;
+  const element = document.activeElement;
+  if (
+    !(element instanceof HTMLElement) ||
+    (element !== input.value && element !== repeatInput.value) ||
+    (field !== undefined && element !== field)
+  )
+    return;
+  endingComposition = true;
+  try {
+    element.blur();
+    element.focus({ preventScroll: true });
+  } finally {
+    endingComposition = false;
+  }
+}
+/**
+ * The one path for a text that a field gets from outside, such as a reset or a prefill. The model is its authority: the
+ * text is published at once, also an unchanged one, and never left to a later update. A composition under way in that
+ * field ends first, and a text field that shows another text takes it as typed input does, so the field and the
+ * Textarea's own copy of the model hold it too. A date or time control never composes, and shows the model.
+ */
+function writeField(field: ComposerField, text: string): void {
+  const element = field === "repeat" ? repeatInput.value : input.value;
+  if (element) {
+    if (composing.value && document.activeElement === element) endComposition(element);
+    const holdsText =
+      element instanceof HTMLTextAreaElement ||
+      element.type === "text" ||
+      element.type === "password";
+    if (holdsText && element.value !== text) {
+      element.value = text;
+      element.dispatchEvent(new Event("input"));
+    }
+  }
+  if (field === "repeat") emit("update:repeated", text);
+  else emit("update:modelValue", text);
+}
+// Whatever makes the fields read-only (an answer in flight, an image being read, a lock at work) ends a composition
+// first, so none stays open in a read-only field.
+watch(
+  () => props.submitting,
+  (busy) => {
+    if (busy) endComposition();
+  },
+  { flush: "pre" },
+);
+
+defineExpose({ focusInput, selectInput, openPicker, writeField });
 </script>
 
 <template>
-  <div class="composer-container">
+  <div
+    class="composer-container"
+    @compositionstart.capture="composing = true"
+    @compositionend.capture="composing = false"
+  >
     <p v-if="feedback" :id="feedbackId" class="composer-notice" role="status" aria-live="polite">
       {{ feedback }}
     </p>
@@ -327,7 +393,7 @@ defineExpose({ focusInput, selectInput, openPicker });
               ref="picker"
               data-composer-input
               :type="shown ? 'text' : 'password'"
-              :value="modelValue"
+              v-model="value"
               :placeholder="placeholder"
               :readonly="submitting"
               :enterkeyhint="repeat ? 'next' : undefined"
@@ -340,7 +406,6 @@ defineExpose({ focusInput, selectInput, openPicker });
               autocapitalize="off"
               spellcheck="false"
               class="composer-input composer-picker"
-              @input="updateFromPicker"
               @keydown="
                 readCapsLock($event);
                 handleKeydown($event);
@@ -357,7 +422,10 @@ defineExpose({ focusInput, selectInput, openPicker });
               :title="shown ? 'Hide password' : 'Show password'"
               :disabled="disabled"
               data-composer-password-toggle
-              @click="shown = !shown"
+              @click="
+                endComposition();
+                shown = !shown;
+              "
               @pointerdown="preserveEditingFocus"
               @mousedown="keepMouseEditingFocus"
             >
@@ -370,7 +438,7 @@ defineExpose({ focusInput, selectInput, openPicker });
               ref="repeatInput"
               data-composer-repeat
               :type="repeatShown ? 'text' : 'password'"
-              :value="repeated"
+              v-model="repeatedValue"
               placeholder="Repeat password"
               :readonly="submitting"
               aria-label="Repeat password"
@@ -382,7 +450,6 @@ defineExpose({ focusInput, selectInput, openPicker });
               autocapitalize="off"
               spellcheck="false"
               class="composer-input composer-picker"
-              @input="updateRepeated"
               @keydown="
                 readCapsLock($event);
                 handleKeydown($event);
@@ -399,7 +466,10 @@ defineExpose({ focusInput, selectInput, openPicker });
               :title="repeatShown ? 'Hide repeated password' : 'Show repeated password'"
               :disabled="disabled"
               data-composer-repeat-toggle
-              @click="repeatShown = !repeatShown"
+              @click="
+                endComposition();
+                repeatShown = !repeatShown;
+              "
               @pointerdown="preserveEditingFocus"
               @mousedown="keepMouseEditingFocus"
             >
@@ -424,6 +494,7 @@ defineExpose({ focusInput, selectInput, openPicker });
             :aria-describedby="feedback ? feedbackId : undefined"
             :inputmode="effectiveInputMode"
             :disabled="disabled"
+            :readonly="submitting"
             class="composer-input composer-picker"
             @input="updateFromPicker"
             @keydown="handleKeydown"
@@ -443,6 +514,7 @@ defineExpose({ focusInput, selectInput, openPicker });
           :placeholder="placeholder"
           :inputmode="effectiveInputMode"
           :disabled="disabled"
+          :readonly="submitting"
           variant="embedded"
           class="composer-input"
           @update:model-value="value = String($event)"
