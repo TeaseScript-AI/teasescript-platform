@@ -1556,10 +1556,18 @@ function layersOf(
       else {
         const below = marks.map((mark) => (mark > start ? mark - start : -1));
         const carried = admission.carriersBy(at, markedStrip(admission, steps, below));
+        // (an `otherwise`'s operand where it may hold a value, its fallback where it may be null: a side never taken
+        // brings nothing, Codex r5–r7 on #1814)
         const operand = carried.find(([, , role]) => role === "otherwise/operand")?.[0];
         const falls = operand === undefined || operandNull(admission, operand, from);
+        const taken =
+          operand === undefined ||
+          admission.items(operand, from, []).some((item) => item.tag !== "null");
         parts = carried
-          .filter(([, , role]) => role !== "otherwise/fallback" || falls)
+          .filter(
+            ([, , role]) =>
+              (role !== "otherwise/fallback" || falls) && (role !== "otherwise/operand" || taken),
+          )
           .map(([part, strip]) => [part, from, strip.steps, 0, strip.marks] as const);
         if (carried.length === 0)
           below.forEach((mark, slot) => {

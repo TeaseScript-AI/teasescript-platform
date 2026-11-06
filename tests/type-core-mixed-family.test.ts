@@ -13,8 +13,9 @@ import { inMode, MODES, sentences } from "./helpers/type-core-oracles.js";
  * - its `null` at no layer, at each layer between the element and the leaf, or at the leaf;
  * - at the element or any layer, its value carried: `take`, an index, a `get` default, an `otherwise`'s operand or
  *   fallback, a property, a join, a written copy narrowed by its value or one that may be null, or a narrowed copy held
- *   in an inferred one (`h={p:c}`, read as `h.p`), or a typed host value (its type nullable or not), tested by `is` or
- *   `!= null`, or tested and then stored again;
+ *   in an inferred one (`h={p:c}`, read as `h.p`), a typed host value (its type nullable or not), tested by `is` or
+ *   `!= null`, or tested and then stored again, or an `otherwise` whose operand is such a copy (proved null, maybe null,
+ *   narrowed, host-assigned) and whose fallback is the layer's value or `null`;
  * - the pair as list elements, object properties, or the operands of `+`;
  * - in both orders and four modes.
  * The modes agree on every source. Where both checkers report the error, the first sentences are equal, except the
@@ -24,7 +25,27 @@ import { inMode, MODES, sentences } from "./helpers/type-core-oracles.js";
  * - a typed host value under `!= null`, which leaves no mark on its unknown items, #1847.
  * A source only one checker reports on is outside the candidate slice there and is not compared.
  */
-type Copy = "narrowed" | "maybe" | "held" | "host" | "sure" | "is" | "notNull" | "invalidated";
+type Copy =
+  | "narrowed"
+  | "maybe"
+  | "held"
+  | "host"
+  | "sure"
+  | "is"
+  | "notNull"
+  | "invalidated"
+  | "nullOr"
+  | "maybeOr"
+  | "orNull"
+  | "hostOrNull";
+// (an `otherwise` whose operand is a copy: proved null, maybe null, narrowed or host-assigned, its fallback the layer's
+// value or `null`)
+const OTHERWISE: Readonly<Record<string, (list: string) => readonly [string, string]>> = {
+  nullOr: (list) => ["null", `(c otherwise ${list})`],
+  maybeOr: (list) => [`${list}\nif hostValue == 1 { c=null }`, `(c otherwise ${list})`],
+  orNull: (list) => [list, "(c otherwise null)"],
+  hostOrNull: () => ["hostValue", "(c otherwise null)"],
+};
 const WRAPS: Readonly<Record<string, ((value: string) => string) | Copy>> = {
   take: (value) => `(${value}).take(9)`,
   index: (value) => `[${value}][0]`,
@@ -41,6 +62,10 @@ const WRAPS: Readonly<Record<string, ((value: string) => string) | Copy>> = {
   is: "is",
   notNull: "notNull",
   invalidated: "invalidated",
+  nullOr: "nullOr",
+  maybeOr: "maybeOr",
+  orNull: "orNull",
+  hostOrNull: "hostOrNull",
 };
 const POSITIONS: Readonly<Record<string, (a: string, b: string) => string>> = {
   element: (a, b) => `let xs=[${a},${b}]`,
@@ -85,6 +110,12 @@ function side(
     if (wrapAt !== at) return list;
     const made = WRAPS[wrap]!;
     if (typeof made === "function") return made(list);
+    const tree = OTHERWISE[made];
+    if (tree !== undefined) {
+      const [value, read] = tree(list);
+      declarations.push(`let c:${type(at)}?=${value}\n`);
+      return read;
+    }
     const written = `${type(at)}${made === "sure" ? "" : "?"}`;
     const value = made === "narrowed" || made === "maybe" || made === "held" ? list : "hostValue";
     declarations.push(
@@ -125,7 +156,7 @@ function rows(): Row[] {
 // (the inherited classes: a row whose whole-number side holds null where it is the later element's own value or leaf,
 // or the earliest element's own value)
 function inherited(row: Row): string | null {
-  const own = row.wrapAt === 0 && ["maybe", "host", "invalidated"].includes(row.wrap);
+  const own = row.wrapAt === 0 && ["maybe", "host", "invalidated", "hostOrNull"].includes(row.wrap);
   if (row.later && (row.nullAt === row.depth || own)) return "#1790";
   if (!row.later && own) return "#1843";
   if (row.wrap === "notNull") return "#1847";
