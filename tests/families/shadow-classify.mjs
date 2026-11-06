@@ -158,6 +158,15 @@ const COMPLETED = new Set(["plan", "rejected"]);
  * on current main, so the coverage row asks for a receiving completion here, beside the natural runs' ordinary records.
  */
 const CONTROL = 16;
+/**
+ * The texts a program is declined with where a stop lost a check it requires (#1781, #1526 decision 2, condition 1,
+ * `core/consumer.ts`). They arise only at such a stop, which the control's demand reaches: each is a listed row of the
+ * control's table, not an exclusion, so no pair class names them and a natural pair that has one stays a problem.
+ */
+export const CONTROL_DECLINED = [
+  "a store whose check was lost at the budget",
+  "a store whose required checks could not be established at the budget",
+].map((text) => ({ id: `declined: ${text}`, text, authority: "#1781" }));
 
 /**
  * The route pair's classes. `state`: `pass`, `attributed` (the rule class is known; S11 still owes each source's
@@ -711,10 +720,12 @@ export function classifier(groups = null) {
     r.witnesses.sort((a, b) => a.bytes - b.bytes || (a.key < b.key ? -1 : 1));
     r.witnesses.length = Math.min(r.witnesses.length, 3);
   };
-  // (the control's runs that left the slice, one row a rule of `EXCLUSIONS` as the pair classes match it, and one a text
-  // no rule matches; information only, r4.382)
+  // (the control's runs that left the slice, one row a rule of `EXCLUSIONS` as the pair classes match it, one a text of
+  // `CONTROL_DECLINED`, and one a text no rule matches; information only, r4.382)
   const excluded = PAIR_CLASSES.filter((c) => c.id.startsWith("excluded/"));
-  const controlRows = new Map(excluded.map((c) => [c.id, { runs: 0, witnesses: [] }]));
+  const controlRows = new Map(
+    [...excluded, ...CONTROL_DECLINED].map((c) => [c.id, { runs: 0, witnesses: [] }]),
+  );
   const unlisted = new Map();
   const pairs = [];
   const sharing = [];
@@ -788,7 +799,9 @@ export function classifier(groups = null) {
           if (run.completion) totals.controlCompletionRuns += 1;
           if (run.outcome === "failed") totals.controlFailedRuns += 1;
           if (run.outcome === "outside") {
-            const rule = excluded.find((c) => c.match({ kind: "outside", outside: run.outside }));
+            const rule =
+              excluded.find((c) => c.match({ kind: "outside", outside: run.outside })) ??
+              CONTROL_DECLINED.find((d) => d.text === run.outside);
             if (rule === undefined && !unlisted.has(run.outside))
               unlisted.set(run.outside, { runs: 0, witnesses: [] });
             const r = rule === undefined ? unlisted.get(run.outside) : controlRows.get(rule.id);
@@ -939,7 +952,10 @@ export function classifier(groups = null) {
       controlCompletionRuns: totals.controlCompletionRuns,
       controlFailedRuns: totals.controlFailedRuns,
       controlOutside: [
-        ...excluded.map((c) => ({ rule: c.id, ...controlRows.get(c.id) })),
+        ...[...excluded, ...CONTROL_DECLINED].map((c) => ({
+          rule: c.id,
+          ...controlRows.get(c.id),
+        })),
         ...[...unlisted]
           .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
           .map(([text, r]) => ({ rule: "unlisted", text, ...r })),
@@ -1063,7 +1079,7 @@ function markdown(result) {
     `Information (not gated): sources whose core publication differs across the four modes ${t.fourModeDifferences}.`,
     `Open: ${result.open.join(", ") || "none"}. Problems: ${result.problems.length}.`,
     "",
-    `| Left the slice at the demand control (${result.coverage.control}), by exclusion rule | Runs | Smallest witnesses |`,
+    `| Left the slice at the demand control (${result.coverage.control}), by exclusion rule or listed decline | Runs | Smallest witnesses |`,
     "| --- | ---: | --- |",
     ...control.map(
       (r) =>

@@ -598,12 +598,13 @@ test("the control's runs that left the slice are counted by exclusion rule, from
   );
   const table: { rule: string; text?: string; runs: number; witnesses: { key: string }[] }[] =
     result.coverage.controlOutside;
-  // (every rule of the pair classes' exclusions has its row, in their order, zeros included)
+  // (every rule of the pair classes' exclusions has its row, in their order, zeros included, then each listed decline)
   const classes: { id: string }[] = C.PAIR_CLASSES;
   const rules = classes.map((c) => c.id).filter((id) => id.startsWith("excluded/"));
+  const declined: { id: string; text: string; authority: string }[] = C.CONTROL_DECLINED;
   assert.deepEqual(
     table.filter((r) => r.rule !== "unlisted").map((r) => r.rule),
-    rules,
+    [...rules, ...declined.map((d) => d.id)],
   );
   const runs = (rule: string) => table.find((r) => r.rule === rule)?.runs;
   assert.equal(runs("excluded/this function declaration"), 1);
@@ -642,7 +643,7 @@ test("the control's runs that left the slice are counted by exclusion rule, from
     );
     assert.equal(ran.status, 0, ran.stderr);
     const json = JSON.parse(readFileSync(join(folder, "out", "gate.json"), "utf8"));
-    assert.equal(json.coverage.controlOutside.length, rules.length + 1);
+    assert.equal(json.coverage.controlOutside.length, rules.length + declined.length + 1);
     const md = readFileSync(join(folder, "out", "gate.md"), "utf8").split("\n");
     const at = md.findIndex((l) => l.startsWith("Coverage ("));
     assert.equal(md[at + 1], "Unlisted control texts: 1.");
@@ -1007,4 +1008,71 @@ test("gate.md keeps a witness's | and line breaks inside their cell", async () =
     rmSync(folder, { recursive: true, force: true });
   }
   void C;
+});
+
+test("a program declined where a stop lost a required check is a listed row of the control's table, #1781's, not an unlisted text", async () => {
+  const C = await load();
+  const declined: { id: string; text: string; authority: string }[] = C.CONTROL_DECLINED;
+  assert.deepEqual(
+    declined.map((d) => [d.id, d.authority]),
+    [
+      ["declined: a store whose check was lost at the budget", "#1781"],
+      ["declined: a store whose required checks could not be established at the budget", "#1781"],
+    ],
+  );
+  // (both texts at the control, in two modes each; the record's natural runs plan)
+  const texts = [declined[0]!.text, declined[1]!.text, declined[0]!.text, declined[1]!.text];
+  const outside = {
+    demand: 16,
+    rows: control(16).rows.map((row, i) => ({
+      mode: row.mode,
+      core: {
+        outcome: "outside",
+        outside: texts[i],
+        decisionCounts: { ordinary: [], completion: [] },
+      },
+    })),
+  };
+  const left = { ...record("declined", () => ({})), demands: [outside, control(64)] };
+  const result = C.classifyRecords(entries([left]));
+  const table: { rule: string; runs: number; witnesses: { key: string }[] }[] =
+    result.coverage.controlOutside;
+  assert.deepEqual(
+    table
+      .filter((r) => r.rule.startsWith("declined: "))
+      .map((r) => [r.rule, r.runs, r.witnesses[0]?.key]),
+    declined.map((d) => [d.id, 2, "declined"]),
+  );
+  assert.equal(table.filter((r) => r.rule === "unlisted").length, 0);
+  // (information only: the gate's state is the plain record's)
+  const plain = C.classifyRecords(
+    entries([{ ...record("declined", () => ({})), demands: [control(16), control(64)] }]),
+  );
+  assert.deepEqual(
+    [result.coverage.state, result.verdict, result.open],
+    [plain.coverage.state, plain.verdict, plain.open],
+  );
+  // (published: gate.md says no unlisted text and lists each row)
+  const folder = mkdtempSync(join(tmpdir(), "shadow-declined-"));
+  try {
+    writeFileSync(join(folder, "declined.jsonl"), `${JSON.stringify(left)}\n`);
+    const ran = spawnSync(
+      process.execPath,
+      [tool, join(folder, "declined.jsonl"), "--groups", "none", "--out", join(folder, "out")],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 0, ran.stderr);
+    const md = readFileSync(join(folder, "out", "gate.md"), "utf8").split("\n");
+    assert.equal(
+      md[md.findIndex((l) => l.startsWith("Coverage (")) + 1],
+      "Unlisted control texts: 0.",
+    );
+    for (const d of declined)
+      assert.ok(
+        md.some((l) => l.startsWith(`| ${d.id} | 2 | `)),
+        md.filter((l) => l.startsWith("| declined")).join("\n"),
+      );
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });
