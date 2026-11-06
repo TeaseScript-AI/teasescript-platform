@@ -234,6 +234,32 @@ test("an analysis its own budget stopped is answered whole, so no node is left u
   assert.deepEqual([parts.unanswered, parts.unansweredBy], [0, undefined]);
 });
 
+test("an analysis that finished past the nesting limit leaves its later questions' nodes unanswered as questions, never stopped (#1837, Codex r1 on #1839)", () => {
+  // (a finished analysis with `exhausted: "nesting"` and no stop phase: the oracle's own questions after it stop)
+  const source = `let item = {a: 1, b: "x"}\nlet alias = item\nsay "\${alias.a}"\n${"if hostValue == 1 {\n".repeat(257)}say "\${hostValue}"\n${"}\n".repeat(257)}exit\n`;
+  const files = [{ path: "main.tease", source }];
+  const request = coreRequest(files, GLOBALS);
+  assert.ok(request !== null);
+  const analysis = analyseCore(request);
+  assert.deepEqual([analysis.budget.exhausted, analysis.budget.stoppedIn], ["nesting", null]);
+  const full = withTestAllowance(1e12, () => publicationParts(files, MODES[0]!, GLOBALS));
+  assert.ok(full !== null && full.unanswered === 0);
+  // (the least allowance that answers it all, then one unit below it)
+  const answered = (n: number) =>
+    JSON.stringify(withTestAllowance(n, () => publicationParts(files, MODES[0]!, GLOBALS))) ===
+    JSON.stringify(full);
+  let [low, high] = [analysis.budget.total, analysis.budget.total * 2];
+  while (!answered(high)) high *= 2;
+  while (high - low > 1) {
+    const middle = Math.floor((low + high) / 2);
+    if (answered(middle)) high = middle;
+    else low = middle;
+  }
+  const parts = withTestAllowance(high - 1, () => publicationParts(files, MODES[0]!, GLOBALS));
+  assert.ok(parts !== null && parts.unanswered > 0);
+  assert.equal(parts.unansweredBy?.reason, "questions");
+});
+
 test("jsonText writes plan data as JSON.stringify does, and also past the depth JSON.stringify reaches (#1503)", () => {
   // (an array with a hole at 1)
   const sparse: unknown[] = [1];

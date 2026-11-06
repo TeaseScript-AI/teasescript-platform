@@ -329,6 +329,29 @@ const sayingOf = ({ counts, stalled, runs }) =>
   ]);
 
 /**
+ * Why a record's runs were left unanswered (#1837), the same whatever its order, or `null` for a record of a runner
+ * before it, which names none: a record that names them and one that names none say the same, two that name them do
+ * only where they name the same.
+ */
+const reasonsOf = ({ unanswered }) =>
+  unanswered === undefined
+    ? null
+    : JSON.stringify(
+        unanswered
+          .map(({ mode, check, alike, by }) => [
+            mode,
+            check,
+            alike === true,
+            by?.base ?? null,
+            by?.head ?? null,
+          ])
+          .sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1)),
+      );
+const sayTheSame = (held, entry) =>
+  sayingOf(held) === sayingOf(entry) &&
+  (reasonsOf(held) === null || reasonsOf(entry) === null || reasonsOf(held) === reasonsOf(entry));
+
+/**
  * `entry` (of `file`) into `into`, a map by place: a repeat of a place it holds is that one source where it says the same
  * (`repeats` counted), and refused (exit 2) where it does not. Repeats that say the same may differ in their times only;
  * where the time clause judges one a candidate (`verdictOf`), its runs stand for the source, whatever their order.
@@ -337,9 +360,12 @@ function merge(into, entry, file) {
   const place = placeOf(entry);
   const held = into.get(place);
   if (held === undefined) into.set(place, entry);
-  else if (sayingOf(held) !== sayingOf(entry))
+  else if (!sayTheSame(held, entry))
     refused(`${file} holds a source another record holds otherwise: ${place}`);
   else {
+    // (a record that names why its runs were left unanswered, beside one that names none: the one that names them)
+    if (held.unanswered === undefined && entry.unanswered !== undefined)
+      held.unanswered = entry.unanswered;
     held.repeats = (held.repeats ?? 0) + 1;
     if (verdictOf(entry).verdict === "candidate" && verdictOf(held).verdict !== "candidate")
       held.runs = entry.runs;
@@ -687,13 +713,21 @@ for (const [place, was] of replay) {
       const row = artefacts.get(group);
       row.runs += 1;
       row.sources.add(place);
+      // (the node of a tree whose reason is the group's: the head's where both are, an unknown one's null)
+      const tree = [left.by?.head, left.by?.base].find(
+        (by) =>
+          by != null &&
+          (group === "unansweredAlike" ||
+            group ===
+              `unanswered: ${GROUPS.includes(`unanswered: ${by.reason}`) ? by.reason : "unknown"}`),
+      );
       const witness = {
         area: nameOf(is.area),
         generator: is.generator,
         source: is.source,
         mode: left.mode,
         check: left.check,
-        node: left.by?.head?.node ?? left.by?.base?.node ?? null,
+        node: tree?.node ?? null,
       };
       const text = (w) => `${w.area} ${w.generator}/${w.source} ${w.mode} ${w.check}`;
       if (row.witness === null || text(witness) < text(row.witness)) row.witness = witness;

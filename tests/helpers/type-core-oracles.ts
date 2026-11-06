@@ -279,7 +279,8 @@ export interface UnansweredBy {
  * property-name walk), not the analysis's. That node and every one after it stay unanswered (`unanswered`, their
  * count), never asked again on the stopped answers, whose `unknown` answers would agree wherever both trees stop alike.
  * Why (`unansweredBy`): `questions` where the analysis had finished and its later questions exhausted the allowance,
- * `stopped` where the analysis's own budget had stopped it (`budget.exhausted`), each with the first node unanswered.
+ * `stopped` where the analysis itself stopped in one of its phases (`budget.stoppedIn`, not `questions`), each with the
+ * first node unanswered.
  */
 function answeredOccurrences<Occurrence>(
   answers: Answers,
@@ -298,7 +299,10 @@ function answeredOccurrences<Occurrence>(
       answer = occurrenceAnswer(answers, node, items);
     } catch (error) {
       if (!(error instanceof BudgetExhausted)) throw error;
-      const reason = answers.budget.exhausted === null ? "questions" : "stopped";
+      // (stopped only where the analysis itself stopped in a phase of its own; one that finished, a limit such as
+      // nesting reached or not, has no such phase, and its later questions are the oracle's)
+      const phase = answers.budget.stoppedIn;
+      const reason = phase === null || phase === "questions" ? "questions" : "stopped";
       return {
         occurrences,
         unanswered: nodes.length - index,

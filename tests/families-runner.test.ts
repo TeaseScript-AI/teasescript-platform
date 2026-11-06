@@ -256,6 +256,7 @@ ${
 const reasoned = (
   count: number,
   reason: "questions" | "stopped" | null,
+  node = 7,
 ): string => `import { createHash } from "node:crypto";
 export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
@@ -264,29 +265,36 @@ export const publicationHashes = (files) => {
   const stopped = files[0].source === "stopped";
   const parts = ['"A"', '"R"', '[1,"x"]', '"T"'].map((text) => createHash("sha256").update(text).digest("hex"));
   if (!stopped) return { parts, unanswered: 0 };
-  return { parts, unanswered: ${count}${reason === null ? "" : `, unansweredBy: { reason: "${reason}", node: 7 }`} };
+  return { parts, unanswered: ${count}${reason === null ? "" : `, unansweredBy: { reason: "${reason}", node: ${node} }`} };
 };
 `;
 
 test("the corpus runner records why an oracle left a run unanswered, and the stall index counts each reason as a runner artefact apart from agreement (#1837)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
-    const tree = (name: string, count: number, reason: "questions" | "stopped" | null) => {
+    const tree = (
+      name: string,
+      count: number,
+      reason: "questions" | "stopped" | null,
+      node = 7,
+    ) => {
       const folder = join(directory, name);
       mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
       writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
       writeFileSync(
         join(folder, "dist", "tests", "helpers", "type-core-oracles.js"),
-        reasoned(count, reason),
+        reasoned(count, reason, node),
       );
       return folder;
     };
-    const [questions2, questions3, stopped2, stopped3, older3] = [
+    const [questions2, questions3, stopped2, stopped3, older3, questions101, stopped202] = [
       tree("questions2", 2, "questions"),
       tree("questions3", 3, "questions"),
       tree("stopped2", 2, "stopped"),
       tree("stopped3", 3, "stopped"),
       tree("older3", 3, null),
+      tree("questions101", 2, "questions", 101),
+      tree("stopped202", 3, "stopped", 202),
     ];
     const area = join(directory, "area");
     mkdirSync(area);
@@ -356,6 +364,82 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
     const unknown = u.artefacts.find((r: { group: string }) => r.group === "unanswered: unknown");
     assert.equal(unknown.witness.source, "stopped");
     assert.deepEqual(u.out[0].by.base, { reason: "unknown", node: null });
+    // (two reasons on the two trees: each group counts the run, its witness the node of the tree that gave it, Codex r1)
+    const m = groups(questions101, stopped202, "mixed");
+    const node = (group: string) =>
+      m.artefacts.find((r: { group: string }) => r.group === group).witness.node;
+    assert.deepEqual(
+      [
+        m.rows["unanswered: questions"],
+        m.rows["unanswered: stopped"],
+        node("unanswered: questions"),
+        node("unanswered: stopped"),
+      ],
+      [[4, 1], [4, 1], 101, 202],
+    );
+    // (an unknown reason's witness keeps that tree's null node, not the other tree's)
+    const v = groups(older3, questions101, "unknown-node");
+    assert.equal(
+      v.artefacts.find((r: { group: string }) => r.group === "unanswered: unknown").witness.node,
+      null,
+    );
+    // (repeats say the same only where they name the same reasons, in either order; a record that names none, from a
+    // runner before #1837, says the same as one that names them, whose reasons stand)
+    const work = join(directory, "mixed.work.jsonl");
+    const rewritten = (name: string, edit: (left: unknown[]) => unknown[] | undefined) => {
+      const file = join(directory, name);
+      const text = readFileSync(work, "utf8")
+        .split("\n")
+        .map((line) => {
+          if (line === "") return line;
+          const record = JSON.parse(line);
+          if (record.unanswered === undefined) return line;
+          const left = edit(record.unanswered);
+          if (left === undefined) delete record.unanswered;
+          else record.unanswered = left;
+          return JSON.stringify(record);
+        })
+        .join("\n");
+      writeFileSync(file, text);
+      return file;
+    };
+    const unknown2 = { reason: "unknown", node: null };
+    const other = rewritten("other.work.jsonl", (left) =>
+      left.map((run) => Object.assign({}, run, { by: { base: unknown2, head: unknown2 } })),
+    );
+    const none = rewritten("none.work.jsonl", () => undefined);
+    const judge = (first: string, second: string) =>
+      spawnSync(process.execPath, [stalls, work, "--rerun", first, "--rerun", second], {
+        encoding: "utf8",
+      });
+    for (const [first, second] of [
+      [work, other],
+      [other, work],
+    ] as const) {
+      const judged = judge(first, second);
+      assert.equal(judged.status, 2, judged.stdout);
+      assert.match(
+        judged.stderr,
+        /a source an earlier rerun ran otherwise|another record holds otherwise/,
+      );
+    }
+    for (const [first, second] of [
+      [work, none],
+      [none, work],
+    ] as const) {
+      const judged = judge(first, second);
+      assert.equal(judged.status, 1, judged.stderr);
+      const { artefacts } = lines(judged.stdout).find((line) => line.artefacts !== undefined);
+      assert.deepEqual(
+        artefacts.map((r: { group: string; runs: number }) => [r.group, r.runs]),
+        [
+          ["unanswered: questions", 4],
+          ["unanswered: stopped", 4],
+          ["unanswered: unknown", 0],
+          ["unansweredAlike", 0],
+        ],
+      );
+    }
     // (left alike on both trees: its own row, agreement named apart as before)
     const a = groups(questions2, questions2, "alike");
     assert.deepEqual(a.rows, {
