@@ -131,16 +131,20 @@ For `corpus`, both commands also need `CASES_JSON=<cases.json>` before `node`, a
 `env -u NODE_OPTIONS` keeps the queue's heap flag from overriding each route's `--memory`. `--demands 16` is the
 completion control: nothing stops at the natural allowance on current `main`, so only a demand-allowance run reaches
 a receiving completion. The gate table also counts, as information only, the control's runs that left the slice by
-exclusion rule, every rule a row and a text no rule names apart. `--expect` makes a source without a result count as
+the class that names their text (`declined/lost check` or an exclusion rule), every such class a row and a text no class
+names apart. `--expect` makes a source without a result count as
 `unavailable`.
 
-Each class has one of three states:
+Each class has one of four states:
 
 - `pass`: agreement, or the legacy route's heap exhausted in its analysis while the core finished (legacy behaviour the
   switch resolves);
 - `attributed`: the difference has a known rule class (written copies, absent properties, ingress; the checks or plan
   a lowering reads; wording; a stop that only one sharing mode, or both differently, take), and the switch still owes
   each source its accepted expectation, a stop through the stop oracle's lost-check judgment;
+- `accepted (condition 1; condition 2 list)`: from taxonomy v5, `declined/lost check`, a program the core declines
+  where a stop lost a check it requires (#1781), at the natural allowance and at the control alike. #1526 decision 2's
+  condition 1 accepts it (the legacy compiles); condition 2 re-assesses every such case before the switch;
 - `open`: the gate is not green while such a row has a pair. These rows are every exclusion of the candidate slice,
   the surviving-check, integer-use and stop differences, failed runs other than the legacy heap, exceptions, results
   that are missing or rowless; in the sharing column, a difference where neither mode stops, a mode outside the slice

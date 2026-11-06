@@ -157,6 +157,8 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
     ),
     [
       "differs/plan",
+      // (v5's: the research's records predate #1781; gate run 5's own record is checked with the presence sources)
+      "declined/lost check",
       // (v2's: the presence sources' and the traversal control's own records reach them, checked below)
       "excluded/this return statement",
       "excluded/this show camera statement",
@@ -165,8 +167,6 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
       "excluded/this tag query expression",
       // (v4's: #1775's decline, which no gate source has reached yet)
       "excluded/a typed parse's or load's default that a stop left open",
-      // (v5's: the research's records predate #1781; gate run 5's own record is checked with the presence sources)
-      "declined/lost check",
       "failed/legacy-heap",
       "failed/other",
       "exception",
@@ -534,7 +534,7 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   assert.match(green.stdout, /^gate: green$/m);
   assert.match(
     readFileSync(join(folder, "out", "gate.md"), "utf8"),
-    /^# Shadow gate \(taxonomy v4\): green/,
+    /^# Shadow gate \(taxonomy v5\): green/,
   );
   // (a source the manifest owes without a record: open; the gate's run exits 1, the plain run 0)
   const owed = write("owed.jsonl", [{ key: "fine" }, { key: "missing" }]);
@@ -658,8 +658,13 @@ test("the control's runs that left the slice are counted by exclusion rule, from
       "| unlisted: a text no rule names | 1 | left left (reversed, sharing on) |",
     ])
       assert.ok(md.includes(row), `${row}\n${md.filter((l) => l.includes("| 1 |")).join("\n")}`);
+    // (the control's table only: the pair table above it lists accepted classes at 0 pairs too)
+    const controlTable = md.slice(
+      md.findIndex((l) => l.startsWith("| Left the slice at the demand control")),
+    );
     assert.equal(
-      md.filter((l) => /^\| (excluded\/|declined\/)/.test(l) && l.endsWith(" | 0 |  |")).length,
+      controlTable.filter((l) => /^\| (excluded\/|declined\/)/.test(l) && l.endsWith(" | 0 |  |"))
+        .length,
       rules.length - 2,
     );
   } finally {
