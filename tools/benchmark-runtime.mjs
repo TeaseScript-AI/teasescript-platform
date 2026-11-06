@@ -61,7 +61,7 @@ export const manifestNames = (directory = benchmarkDirectory) =>
  * that is not the next recorded one, or one left unasked, is an error, since the call would then not be the recorded
  * one.
  */
-function recordedMedia(queries = []) {
+export function recordedMedia(queries = []) {
   const left = [...queries];
   return {
     holds(reference, kind) {
