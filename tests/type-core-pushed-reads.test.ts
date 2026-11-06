@@ -371,6 +371,9 @@ test("a ring read through a marked copy reaches its check, and its leaves are re
     // per holder and steps, however often the cycle reaches it (Codex r1 B1)
     guardedRing({ tested: "g.h", leaf: "{g:{h:0}}" }),
     'let x={a:{b:1}}\nif x.a.b is integer { say "x" }\n' + guardedRing(),
+    // the marked copy the ring's only marking route (the projection stores \`p1\`, no other read of \`p0\`): its mark
+    // reaches the ring's members through the component's own copies alone
+    guardedRing().replace("p2.q=p0", "p2.q=p1"),
   ])
     for (const mode of MODES) {
       const pushed = analysed(source, mode);
