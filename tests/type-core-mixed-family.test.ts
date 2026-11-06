@@ -109,7 +109,8 @@ test("a mixed-list error's type text equals the current checker's across the sam
  * #1765's invariant, its work (the lead's family rule): each composition dimension of
  * `tests/families/messages/1765-mixed-growth.mjs` (nest depth, join width, the otherwise chain, index chains, null
  * density, each carrier kind deep, wide and at every depth) at its first doubling, in one mode. The queue runs both
- * doublings in four modes against main, the head's work over main's flat.
+ * doublings in four modes against main, the head's work over main's flat (#1857 names the shapes main itself grows
+ * past their bound on).
  */
 test("a mixed-list error's work grows as its dimensions do (#1765)", async () => {
   const { shapes, sizes } = await family<{
@@ -124,9 +125,9 @@ test("a mixed-list error's work grows as its dimensions do (#1765)", async () =>
     return answers.budget.total;
   };
   for (const [shape, make] of Object.entries(shapes)) {
-    const [small, large] = [sizes[0]!, sizes[1]!].map((size) => total(make(size)));
     // (width and the otherwise chain linear, ×2.5; depth as the errors' paths grow, ×4.5)
     const bound = /^(wide:|join-width:|otherwise-chain)/.test(shape) ? 2.5 : 4.5;
+    const [small, large] = [sizes[0]!, sizes[1]!].map((size) => total(make(size)));
     assert.ok(large! <= bound * small!, `${shape}: ${small}, ${large}`);
   }
 });

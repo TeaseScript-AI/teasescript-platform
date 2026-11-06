@@ -59,8 +59,9 @@ export const shapes = {
     return `let xs=[[${a}].take(1)[0],[${b}].take(1)[0]]\nexit\n`;
   },
   // join width: a wide operand joined size times (Astra r1), and a wide earliest literal (Codex r9)
+  // (four times the size: a join per error read again shows past ×2.5 only from about 64 joins)
   "join-width:take": (size) =>
-    `let xs=[[${Array.from({ length: size }, (_, at) => `[${at}]`).join(",")}].take(${size})]${Array.from({ length: size }, (_, at) => `+[[["s${at}"]]]`).join("")}\nexit\n`,
+    `let xs=[[${Array.from({ length: 4 * size }, (_, at) => `[${at}]`).join(",")}].take(${4 * size})]${Array.from({ length: 4 * size }, (_, at) => `+[[["s${at}"]]]`).join("")}\nexit\n`,
   "join-width:earliest": (size) => wide(size, (value) => value),
   // the left-nested otherwise chain (Codex r11)
   "otherwise-chain": (size) =>
@@ -97,4 +98,12 @@ for (const kind of ["take", "index", "property"])
     const [a, b] = nest((size * 3) / 4, CARRIERS[kind]);
     return `let xs=[${a},${b}]\nexit\n`;
   };
+// (the shapes main itself grows past their bound on, at the second doubling: #1857's, the head's work over main's flat
+// there)
+export const inherited = {
+  "null-density:plain": "#1857",
+  "null-density:take": "#1857",
+  "null-density:take-first": "#1857",
+  "every:take": "#1857",
+};
 export const recorded = { commands: [], sources: 0, sha256: "" };
