@@ -2,7 +2,7 @@ import type { PlaceId } from "../../graph.js";
 import { joinParts } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keyOf, keyPlace, SELECTED_TEXT, SELECTED_VALUE, type Key } from "../definitions.js";
-import { firstWriter, REASON, type Writer } from "../items.js";
+import { firstWriter, type Writer } from "../items.js";
 import { stepName } from "../program.js";
 import type { ProofDemand, Proven, Work } from "../solver.js";
 import { pushedSlot } from "./frontier.js";
@@ -145,8 +145,8 @@ class Gathered {
     if (!this.complete) return;
     const { proof } = yield* this.contract.pass.solver.proven(demand);
     // (none yet: a query of its own component still running, whose least answer starts empty and whose proof reruns
-    // this one when it changes; after a stop, an unfinished one, which declines)
-    if (proof === null && this.contract.pass.program.work.stopped === null) {
+    // this one when it changes; after a stop no query runs, `absentWriterAt` reading none as uncovered)
+    if (proof === null) {
       this.#children.set(demand.key, demand);
       return;
     }
@@ -326,9 +326,9 @@ function* entryObjects(
   rest: readonly string[],
 ): Work<void> {
   contract.pass.program.work.charge("invSteps");
+  // (an opaque or deferred store: its unknown beside a `missing` joins their reasons)
   if (entry.unk !== undefined) {
-    if (entry.unk === REASON.missing) out.writer(entry.w);
-    else out.complete = false;
+    out.complete = false;
     return;
   }
   // F6, F7: an emptiness mark holds no property
