@@ -641,6 +641,52 @@ test("where the native reader ends, a read through a marked route answers what i
   assert.ok(declined.all.some((facts) => (facts.declines.get("marks-native") ?? 0) > 0));
 });
 
+test("a pushed read's mark walk charges no negative work, a reference above the rest included, in four modes (#1784, Astra r1 B2)", () => {
+  // (a projection's holder whose references stand above the rest the walk asks: a shallower path is not below it)
+  const literal = "{h0:{h1:0}}";
+  const source =
+    [
+      `let x={g:${literal}}`,
+      `x={g:${literal}}`,
+      `let saved={g:${literal}}`,
+      "if x.g is object { saved=x }",
+      "let z={z0:{z1:{z2:{z3:0}}}}",
+      'if z.z0.z1.z2.z3 is integer { say "z" }',
+      `let p0=${literal}`,
+      `let p1=${literal}`,
+      `let p2=${literal}`,
+      "p0=x.g",
+      "p2.q=p0",
+      "p2=p1",
+      "p1=p0",
+      "p2=p2.q",
+      'say "${p2.q.h0.h1}"',
+      "exit",
+    ].join("\n") + "\n";
+  const charge = WorkLedger.prototype.charge;
+  const negative: number[] = [];
+  WorkLedger.prototype.charge = function (
+    this: WorkLedger,
+    ...args: Parameters<WorkLedger["charge"]>
+  ) {
+    if ((args[1] ?? 1) < 0) negative.push(args[1]!);
+    charge.apply(this, args);
+  };
+  try {
+    for (const mode of MODES) {
+      const pushed = analysed(source, mode);
+      assert.ok(pushed.facts.reads > 0 && pushed.facts.declines.size === 0, JSON.stringify(mode));
+      assert.ok(
+        pushed.invariants.some(({ held }) => held > 0),
+        JSON.stringify(mode),
+      );
+    }
+  } finally {
+    WorkLedger.prototype.charge = charge;
+  }
+  assert.deepEqual(negative, []);
+});
+
 test("marking a route's leaves before their join is marking their join, except where a late context meets none (#1784 HEAD 1)", () => {
   const scope = itemScope();
   const late = new Set(CONTEXT_WORDS.slice(CONTEXT_WORDS.indexOf("branch") + 1));
