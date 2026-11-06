@@ -1,0 +1,3 @@
+let members = set[{ value: 1 }]
+members.first.value = 9
+exit

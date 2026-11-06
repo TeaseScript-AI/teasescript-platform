@@ -1,0 +1,10 @@
+let root = { child: { value: 0 } }
+function replaceChild {
+    root.child = { value: 2 }
+    wait 1 ms
+    root.child.value = 3
+    return 7
+}
+root.child.value = replaceChild()
+say "wait:${root.child.value}", instant
+exit

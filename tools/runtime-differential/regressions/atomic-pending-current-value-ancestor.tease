@@ -1,0 +1,8 @@
+let rows = [[1], [2]]
+function rewrite {
+    rows[0] = [9]
+    return [[3]]
+}
+rows += rewrite()
+say "current:${rows[0][0]}:${rows[1][0]}:${rows[2][0]}", instant
+exit

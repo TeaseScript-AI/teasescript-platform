@@ -1,0 +1,4 @@
+let values = [3, 1, 2]
+values[0] = ({ changed: values.reverse(), value: 7 }).value
+say "reverse:${values.join(",")}", instant
+exit

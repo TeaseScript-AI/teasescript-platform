@@ -1,0 +1,4 @@
+let rows = [[0]]
+rows[({ grow: rows.add([1]), index: 1 }).index][0] = 7
+say "grow:${rows.length}:${rows[1][0]}", instant
+exit

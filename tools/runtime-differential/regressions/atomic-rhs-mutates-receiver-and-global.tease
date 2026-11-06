@@ -1,0 +1,11 @@
+let values = [10, 20, 30]
+values[0] = values.removeLast()
+let shared = [8, 9]
+function take {
+    let result = { value: 0 }
+    result.value = shared.removeLast()
+    return result.value
+}
+let selected = take()
+say "mutate:${values.join(",")}:${selected}:${shared.length}", instant
+exit

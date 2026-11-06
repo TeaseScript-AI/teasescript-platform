@@ -1,0 +1,105 @@
+// The differential harness's campaign runner (docs/TESTING.md "Differential harness"), after `npm run build`:
+//   node tools/runtime-differential/run.mjs --seed S --count N [--from I] [--route legacy|core] [--shrink]
+// runs generated programs (seed, index from I to I + N - 1) through this build against itself and writes one JSON line
+// per program: seed, index, runtime seed, input and plan digests, the verdict, its first mismatch path, and with
+// `--shrink` the reduced repro of a discrepancy and its signature. Exit 0 when no pair is a discrepancy or a mapping
+// failure, 1 when one is, 2 on a usage or harness error.
+
+import { parseArgs } from "node:util";
+
+import { generate } from "./generate.mjs";
+import { shrink } from "./shrink.mjs";
+
+const dist = new URL("../../dist/tests/helpers/", import.meta.url);
+const { differentialRun } = await import(new URL("runtime-differential.js", dist).href);
+const { canonicalDigest, renderPath } = await import(
+  new URL("runtime-state-comparison.js", dist).href
+);
+
+let options;
+try {
+  ({ values: options } = parseArgs({
+    options: {
+      seed: { type: "string" },
+      count: { type: "string", default: "1" },
+      from: { type: "string", default: "0" },
+      route: { type: "string", default: "legacy" },
+      shrink: { type: "boolean", default: false },
+    },
+  }));
+  if (options.seed === undefined || !["legacy", "core"].includes(options.route))
+    throw new Error("--seed is required, and --route is legacy or core");
+} catch (error) {
+  process.stderr.write(`${error.message}\n`);
+  process.exit(2);
+}
+
+const seed = Number(options.seed);
+const first = Number(options.from);
+const count = Number(options.count);
+const route = options.route;
+
+const input = (program) => ({
+  name: program.id,
+  sources: program.sources,
+  project: program.project === true,
+  fresh: { seed: program.runtimeSeed, ...(program.globals ? { globals: program.globals } : {}) },
+});
+
+/** A verdict's signature: its kind, the route, and its first mismatch path with indices generalized. */
+function signature(report) {
+  const verdict = report.verdict;
+  const path =
+    verdict.kind === "discrepancy"
+      ? renderPath(verdict.mismatches[0]?.path ?? []).replace(/\[\d+\]/g, "[*]")
+      : verdict.kind === "not-compared"
+        ? verdict.because
+        : "";
+  return `${verdict.kind}:${report.route}:${path}`;
+}
+
+let failed = false;
+try {
+  for (let index = first; index < first + count; index += 1) {
+    const program = generate(seed, index);
+    const report = differentialRun(input(program), { route });
+    const verdict = report.verdict;
+    const line = {
+      seed,
+      index,
+      id: program.id,
+      family: program.family,
+      runtimeSeed: program.runtimeSeed,
+      input: canonicalDigest(program.sources),
+      plan: report.plans.left,
+      verdict: verdict.kind,
+      ...(verdict.kind === "not-compared" ? { because: verdict.because, side: verdict.side } : {}),
+      ...(verdict.kind === "discrepancy" || verdict.kind === "mapping-failure"
+        ? { at: verdict.at }
+        : {}),
+      ...(verdict.kind === "discrepancy"
+        ? { path: renderPath(verdict.mismatches[0]?.path ?? []) }
+        : {}),
+      signature: signature(report),
+      steps: report.steps,
+      tailSteps: report.tailSteps,
+      cpuMs: report.cpuMs,
+    };
+    if (verdict.kind === "discrepancy" || verdict.kind === "mapping-failure") {
+      failed = true;
+      if (options.shrink && !program.project) {
+        const wanted = line.signature;
+        const reduced = shrink(program.sources[0].source, (source) => {
+          const candidate = { ...program, sources: [{ path: "main.tease", source }] };
+          return signature(differentialRun(input(candidate), { route })) === wanted;
+        });
+        line.reduced = { ...reduced, signature: wanted };
+      }
+    }
+    process.stdout.write(`${JSON.stringify(line)}\n`);
+  }
+} catch (error) {
+  process.stderr.write(`${error.stack ?? error}\n`);
+  process.exit(2);
+}
+process.exitCode = failed ? 1 : 0;
