@@ -86,6 +86,31 @@ test("full-output mode preserves passing test lines", () => {
   assert.match(result.stdout, /✔ visible passing test/);
 });
 
+test("TEST_FULL_OUTPUT=1 gives full output, and the tests it runs do not inherit it", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  const environment: NodeJS.ProcessEnv = { ...process.env, TEST_FULL_OUTPUT: "1" };
+  delete environment.NODE_TEST_CONTEXT;
+  // (a test that runs the filter itself, as this file does, would otherwise get full output where it expects compact)
+  const fixture = resolve(directory, "inherits.test.mjs");
+  writeFileSync(
+    fixture,
+    `import assert from "node:assert/strict";
+     import test from "node:test";
+     test("visible passing test", () => assert.equal(process.env.TEST_FULL_OUTPUT, undefined));`,
+  );
+  try {
+    const result = spawnSync(process.execPath, [filterPath, fixture], {
+      encoding: "utf8",
+      env: environment,
+    });
+
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /✔ visible passing test/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("filter preserves failures, stacks, the summary, and the exit code", () => {
   const result = runFixtures({
     "mixed.test.mjs": `

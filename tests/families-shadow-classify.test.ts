@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -88,7 +90,10 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
   const rerun = witnesses.filter((r) => r.set === "copies");
   // (#1744's presence sources, recorded by shadow.mjs at main 575c699b9; and Sol's traversal control past a function
   // declaration, `return-controlled.json` of the classifier-group preparation, the return statement's witness)
-  const holes = witnesses.filter((r) => r.set === "holes" || r.set === "return-control");
+  // (and v5's: gate run 5's record of a natural decline by the lost-check gate, #1781, at main 830497aaf)
+  const holes = witnesses.filter(
+    (r) => r.set === "holes" || r.set === "return-control" || r.set === "declined",
+  );
   const result = C.classifyRecords(
     entries(research),
     new Set([...research.map((r) => r.key), ...UNAVAILABLE]),
@@ -152,12 +157,16 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
     ),
     [
       "differs/plan",
+      // (v5's: the research's records predate #1781; gate run 5's own record is checked with the presence sources)
+      "declined/lost check",
       // (v2's: the presence sources' and the traversal control's own records reach them, checked below)
       "excluded/this return statement",
       "excluded/this show camera statement",
       "excluded/this show camera expression",
       "excluded/this hide camera statement",
       "excluded/this tag query expression",
+      // (v4's: #1775's decline, which no gate source has reached yet)
+      "excluded/a typed parse's or load's default that a stop left open",
       "failed/legacy-heap",
       "failed/other",
       "exception",
@@ -478,6 +487,7 @@ test("every pair of a generated grid over the pair rule's axes takes exactly one
     "the name 'x'",
     "the variable 'v', whose lists nest deeper than the slice follows",
     "this return statement",
+    "a typed parse's or load's default that a stop left open",
   ])
     facts.push([{ kind: "outside", outside: text }, "excluded/"]);
   facts.push([{ kind: "outside", outside: "the name x" }, null]);
@@ -505,7 +515,7 @@ test("every pair of a generated grid over the pair rule's axes takes exactly one
     else assert.equal(got.id, expected);
     checked += 1;
   }
-  assert.equal(checked, 8 + 128 * 8 + 6 + 6);
+  assert.equal(checked, 8 + 128 * 8 + 7 + 6);
 });
 
 test("the command: the verdict line, the gate's exit, the files it writes", (t) => {
@@ -524,7 +534,7 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   assert.match(green.stdout, /^gate: green$/m);
   assert.match(
     readFileSync(join(folder, "out", "gate.md"), "utf8"),
-    /^# Shadow gate \(taxonomy v2\): green/,
+    /^# Shadow gate \(taxonomy v5\): green/,
   );
   // (a source the manifest owes without a record: open; the gate's run exits 1, the plain run 0)
   const owed = write("owed.jsonl", [{ key: "fine" }, { key: "missing" }]);
@@ -567,6 +577,99 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   assert.equal(badName.status, 1, badName.stderr);
   assert.match(badName.stdout, /^gate: failed/m);
   assert.match(badName.stderr, /a name that is no text/);
+});
+
+test("the control's runs that left the slice are counted by exclusion rule, from the table itself, zeros included (r4.382)", async () => {
+  const C = await load();
+  // (one run at an exact text, one at a template's, one at a text no rule names; the fourth mode plans)
+  const texts = ["this function declaration", "the name 'f'", "a text no rule names", null];
+  const outside = {
+    demand: 16,
+    rows: control(16).rows.map((row, i) =>
+      texts[i] === null
+        ? row
+        : {
+            mode: row.mode,
+            core: {
+              outcome: "outside",
+              outside: texts[i],
+              decisionCounts: { ordinary: [], completion: [] },
+            },
+          },
+    ),
+  };
+  const result = C.classifyRecords(
+    entries([{ ...record("left", () => ({})), demands: [outside, control(64)] }]),
+  );
+  const table: { rule: string; text?: string; runs: number; witnesses: { key: string }[] }[] =
+    result.coverage.controlOutside;
+  // (every class that names a text, declined/lost check and the exclusions, has its row, in their order, zeros included)
+  const classes: { id: string }[] = C.PAIR_CLASSES;
+  const rules = classes
+    .map((c) => c.id)
+    .filter((id) => id.startsWith("excluded/") || id === "declined/lost check");
+  assert.deepEqual(
+    table.filter((r) => r.rule !== "unlisted").map((r) => r.rule),
+    rules,
+  );
+  const runs = (rule: string) => table.find((r) => r.rule === rule)?.runs;
+  assert.equal(runs("excluded/this function declaration"), 1);
+  // (a template's text: its one row, `excluded/<words>`)
+  assert.deepEqual(
+    table.filter((r) => r.rule !== "unlisted" && r.runs > 0).map((r) => [r.rule, r.runs]),
+    [
+      ["excluded/this function declaration", 1],
+      ["excluded/the name '<a name the slice does not declare>'", 1],
+    ],
+  );
+  assert.equal(rules.filter((rule) => runs(rule) === 0).length, rules.length - 2);
+  // (a text no rule names: its own row, counted and witnessed; information only, the gate's state does not move)
+  assert.deepEqual(
+    table.filter((r) => r.rule === "unlisted").map((r) => [r.text, r.runs, r.witnesses[0]?.key]),
+    [["a text no rule names", 1, "left"]],
+  );
+  const plain = C.classifyRecords(
+    entries([{ ...record("left", () => ({})), demands: [control(16), control(64)] }]),
+  );
+  assert.deepEqual(
+    [result.coverage.state, result.verdict, result.open],
+    [plain.coverage.state, plain.verdict, plain.open],
+  );
+  const quiet: { runs: number }[] = plain.coverage.controlOutside;
+  assert.ok(quiet.every((r) => r.runs === 0));
+  // (published: gate.json's coverage holds the table, gate.md the unlisted line under the coverage line and a row a rule)
+  const folder = mkdtempSync(join(tmpdir(), "shadow-control-"));
+  try {
+    const left = { ...record("left", () => ({})), demands: [outside, control(64)] };
+    writeFileSync(join(folder, "left.jsonl"), `${JSON.stringify(left)}\n`);
+    const ran = spawnSync(
+      process.execPath,
+      [tool, join(folder, "left.jsonl"), "--groups", "none", "--out", join(folder, "out")],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 0, ran.stderr);
+    const json = JSON.parse(readFileSync(join(folder, "out", "gate.json"), "utf8"));
+    assert.equal(json.coverage.controlOutside.length, rules.length + 1);
+    const md = readFileSync(join(folder, "out", "gate.md"), "utf8").split("\n");
+    const at = md.findIndex((l) => l.startsWith("Coverage ("));
+    assert.equal(md[at + 1], "Unlisted control texts: 1.");
+    for (const row of [
+      "| excluded/this function declaration | 1 | left left (source order, sharing on) |",
+      "| unlisted: a text no rule names | 1 | left left (reversed, sharing on) |",
+    ])
+      assert.ok(md.includes(row), `${row}\n${md.filter((l) => l.includes("| 1 |")).join("\n")}`);
+    // (the control's table only: the pair table above it lists accepted classes at 0 pairs too)
+    const controlTable = md.slice(
+      md.findIndex((l) => l.startsWith("| Left the slice at the demand control")),
+    );
+    assert.equal(
+      controlTable.filter((l) => /^\| (excluded\/|declined\/)/.test(l) && l.endsWith(" | 0 |  |"))
+        .length,
+      rules.length - 2,
+    );
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });
 
 test("coverage: the natural runs' ordinary decisions and a receiving completion at the demand control (16)", async () => {
@@ -637,4 +740,362 @@ test("taxonomy v2's return-statement rule takes its text and no other (#1744)", 
     result.problems.map((p: { problem: string; key: string }) => [p.problem, p.key]),
     [["unclassified", "near"]],
   );
+});
+
+test("the group table: its bindings decide a grouped pair's state, by key, mode and guard, never by its signature (v3)", async () => {
+  const C = await load();
+  // (the tree's table: Sol's preparation of gate run 2, 94 leaf groups, 50,548 bindings; every open group names what
+  // closes it)
+  const tree = C.loadGroups(resolve("tests/families/shadow-groups"));
+  const states = [...tree.groups.values()].map((g: { state: string }) => g.state);
+  assert.deepEqual(
+    ["conforms", "defect", "pending"].map((s) => states.filter((x: string) => x === s).length),
+    [81, 10, 3],
+  );
+  assert.equal(tree.bindings.size, 50548);
+  for (const g of tree.groups.values())
+    if (g.state !== "conforms") assert.ok(typeof g.closes === "string" && g.closes !== "", g.id);
+  // (a crafted table: two pairs of one signature bound to two groups, a defect and a pending group)
+  // (a pair differing in every mode by one TSV041 identity: one signature)
+  const differing = (key: string) =>
+    record(key, () => ({
+      core: planned([diagnostic("TSV041", 7)]),
+      delta: { ...SAME, diagnosticIdentity: true, diagnosticText: true },
+    }));
+  const a = differing("a");
+  const b = differing("b");
+  const d = differing("d");
+  const p = differing("p");
+  const changed = differing("changed");
+  const unbound = differing("unbound");
+  const guard = (r: ReturnType<typeof record>) =>
+    C.pairGuard(C.readRecord(r).reading.rows[0]).slice(0, 16);
+  const folder = mkdtempSync(join(tmpdir(), "shadow-groups-"));
+  const table = (bindings: string[]) => {
+    writeFileSync(
+      join(folder, "groups.json"),
+      JSON.stringify({
+        groups: [
+          { id: "G1", state: "conforms", title: "one" },
+          { id: "G2", state: "conforms", title: "two" },
+          { id: "D", state: "defect", title: "a defect", closes: "#1" },
+          { id: "P", state: "pending", title: "a construction", closes: "#2" },
+        ],
+      }),
+    );
+    writeFileSync(join(folder, "bindings.jsonl.gz"), gzipSync(`${bindings.join("\n")}\n`));
+    return C.loadGroups(folder);
+  };
+  const line = (r: ReturnType<typeof record>, group: string, g = guard(r), cls = "differs/rule") =>
+    `${r.key.slice(0, 16)} 0 ${group} ${g} ${cls}`;
+  try {
+    const groups = table([
+      line(a, "G1"),
+      line(b, "G2"),
+      line(d, "D"),
+      line(p, "P"),
+      line(changed, "G1", "0000000000000000"),
+    ]);
+    const result = C.classifyRecords(entries([a, b, d, p, changed, unbound]), null, groups);
+    assert.deepEqual(result.problems, []);
+    const first = (key: string) =>
+      result.perPair.find(
+        (x: { key: string; mode: string }) =>
+          x.key === key && x.mode === "source order, sharing on",
+      );
+    assert.deepEqual(
+      [a, b, d, p, changed, unbound].map((r) => [first(r.key).group, first(r.key).groupState]),
+      [
+        ["G1", "conforms"],
+        ["G2", "conforms"],
+        ["D", "defect"],
+        ["P", "pending"],
+        ["G1", "changed"],
+        [null, "unbound"],
+      ],
+    );
+    // (a binding is its mode's: the same source in another mode is unbound)
+    assert.equal(
+      result.perPair.find(
+        (x: { key: string; mode: string }) =>
+          x.key === "a" && x.mode === "source order, sharing off",
+      ).groupState,
+      "unbound",
+    );
+    // (one signature, two groups: each pair its own binding's)
+    assert.equal(
+      new Set(
+        result.signatures
+          .filter((x: { pairs: number }) => x.pairs >= 2)
+          .map((x: { signature: string }) => x.signature),
+      ).size,
+      1,
+    );
+    // (the open groups, each with what closes it; the conforming ones attributed)
+    assert.deepEqual(
+      result.open.filter((o: string) => o.startsWith("group ")),
+      [
+        "group D (defect: #1)",
+        "group P (pending: #2)",
+        "group changed (changed: re-adjudication: a new table version)",
+        "group unbound (unbound: re-adjudication: a new table version)",
+      ],
+    );
+    // (a binding of another class than the pair's is changed too)
+    const recast = C.classifyRecords(
+      entries([a]),
+      null,
+      table([line(a, "G1", guard(a), "differs/checks")]),
+    );
+    assert.equal(recast.perPair[0].groupState, "changed");
+    // (an open group must name what closes it)
+    writeFileSync(
+      join(folder, "groups.json"),
+      JSON.stringify({ groups: [{ id: "C", state: "defect", title: "no issue" }] }),
+    );
+    assert.throws(() => C.loadGroups(folder), /names nothing that closes it/);
+    // (a malformed table is refused: a pair bound twice, a binding to no group)
+    assert.throws(() => table([line(a, "G1"), line(a, "G2")]), /bound twice/);
+    assert.throws(() => table([line(a, "G9")]), /bound to no group/);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("importing shadow-bind.mjs does nothing, and shadow-groups/ holds no module, as the runner's areas are folders with one", async () => {
+  // (#1771's writer in shadow-groups/ made it an area, whose import read its absent arguments: the baseline seed failed)
+  const groups = resolve("tests/families/shadow-groups");
+  const before = readdirSync(groups).sort();
+  const bind: object = await import(pathToFileURL(resolve("tests/families/shadow-bind.mjs")).href);
+  assert.deepEqual(Object.keys(bind), []);
+  // (imported by a script that is no file: Node's stdin entry, `-`)
+  const piped = spawnSync(process.execPath, ["--input-type=module", "-"], {
+    input: `await import(${JSON.stringify(pathToFileURL(resolve("tests/families/shadow-bind.mjs")).href)});`,
+    encoding: "utf8",
+  });
+  assert.deepEqual([piped.status, piped.stdout, piped.stderr], [0, "", ""]);
+  assert.deepEqual(readdirSync(groups).sort(), before);
+  assert.deepEqual(
+    before.filter((name) => name.endsWith(".mjs")),
+    [],
+  );
+});
+
+test("shadow-bind.mjs joins an adjudication with its run, refusing a pair adjudicated twice or recorded twice with other readings, in either order", () => {
+  const folder = mkdtempSync(join(tmpdir(), "shadow-bind-"));
+  try {
+    const differing = (message: string) =>
+      record("k1", () => ({
+        core: planned([diagnostic("TSV041", 7, message)]),
+        delta: { ...SAME, diagnosticIdentity: true, diagnosticText: true },
+      }));
+    const canon = (x: unknown): string =>
+      JSON.stringify(x, (_, v) =>
+        v && typeof v === "object" && !Array.isArray(v)
+          ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+          : v,
+      );
+    const rawGuard = (r: ReturnType<typeof record>, i: number) =>
+      createHash("sha256")
+        .update(
+          canon(
+            Object.fromEntries(
+              (["legacy", "core"] as const).map((x) => [
+                x,
+                Object.fromEntries(
+                  (["outcome", "diagnostics", "checks", "planHash"] as const).map((f) => [
+                    f,
+                    r.rows[i]![x][f] ?? null,
+                  ]),
+                ),
+              ]),
+            ),
+          ),
+        )
+        .digest("hex");
+    const MODE_NAMES = [
+      "source order, sharing on",
+      "source order, sharing off",
+      "reversed, sharing on",
+      "reversed, sharing off",
+    ];
+    const write = (name: string, text: string) => {
+      writeFileSync(join(folder, name), text);
+      return join(folder, name);
+    };
+    const tableJson = write(
+      "table.json",
+      JSON.stringify({
+        schema: "test",
+        rows: [
+          { id: "G", parent: null, leaf: true, verdict: "conforms", title: "one", witness: null },
+          {
+            id: "D",
+            parent: null,
+            leaf: true,
+            verdict: "defect",
+            title: "a defect",
+            witness: null,
+          },
+        ],
+      }),
+    );
+    const tableMd = write(
+      "table.md",
+      "| G one | 4 / 1 | attributed / conforms |\n| D a defect | 4 / 1 | open / defect / #1 |\n",
+    );
+    const good = differing("one text");
+    const other = differing("another text");
+    const adjudication = (r: ReturnType<typeof record>, groups: string[]) =>
+      groups
+        .map((group, n) =>
+          JSON.stringify({
+            key: r.key,
+            mode: MODE_NAMES[n % 4],
+            group,
+            class: "differs/rule",
+            publicationSHA256: rawGuard(r, n % 4),
+          }),
+        )
+        .join("\n");
+    const run = (bindings: string, records: unknown[]) => {
+      const list = write(
+        "records.txt",
+        write("records.jsonl", records.map((r) => JSON.stringify(r)).join("\n")),
+      );
+      const out = mkdtempSync(join(folder, "out-"));
+      return spawnSync(
+        process.execPath,
+        [
+          resolve("tests/families/shadow-bind.mjs"),
+          tableJson,
+          tableMd,
+          write("pairs.jsonl", bindings),
+          list,
+          out,
+        ],
+        { encoding: "utf8" },
+      );
+    };
+    const four = adjudication(good, ["G", "G", "G", "G"]);
+    assert.equal(run(four, [good]).status, 0, run(four, [good]).stderr);
+    // (the same pair recorded again with another reading: refused, in either order)
+    for (const records of [
+      [good, other],
+      [other, good],
+    ])
+      assert.notEqual(run(four, records).status, 0);
+    // (a pair adjudicated twice, to two groups: refused)
+    const twice = `${four}\n${adjudication(good, ["D"])}`;
+    const refused = run(twice, [good]);
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /adjudicated twice/);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("gate.md keeps a witness's | and line breaks inside their cell", async () => {
+  const C = await load();
+  const named = {
+    ...record("odd", () => ({ core: planned([], "q"), delta: { ...SAME, plan: true } })),
+    origins: [{ set: "x", name: "a | b\nc" }],
+  };
+  const folder = mkdtempSync(join(tmpdir(), "shadow-md-"));
+  try {
+    writeFileSync(join(folder, "odd.jsonl"), `${JSON.stringify(named)}\n`);
+    const ran = spawnSync(
+      process.execPath,
+      [tool, join(folder, "odd.jsonl"), "--groups", "none", "--out", join(folder, "out")],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 0, ran.stderr);
+    const row = readFileSync(join(folder, "out", "gate.md"), "utf8")
+      .split("\n")
+      .find((l) => l.startsWith("| differs/plan "))!;
+    assert.equal(row.split(/(?<!\\)\|/).length, 7, row);
+    assert.ok(row.includes("a \\| b c"), row);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+  void C;
+});
+
+test("taxonomy v5's declined/lost check: a decline by the lost-check gate is its class at the natural allowance and at the control, any other decline text a problem (#1781)", async () => {
+  const C = await load();
+  assert.equal(C.VERSION, 5);
+  const texts = [
+    "a store whose check was lost at the budget",
+    "a store whose required checks could not be established at the budget",
+  ];
+  const at = (text: string | null) => ({
+    outcome: "outside",
+    outside: text,
+    decisionCounts: { ordinary: [], completion: [] },
+  });
+  // (natural: the source-order modes declined, one text each, the reversed ones planned; the control declines them all)
+  const declined = (key: string, natural: (string | null)[]) => ({
+    ...record(key, (i) => (natural[i] ? { core: at(natural[i]), delta: undefined } : {})),
+    demands: [
+      { demand: 16, rows: MODES.map((mode, i) => ({ mode, core: at(texts[i % 2]!) })) },
+      control(64),
+    ],
+  });
+  const lost = declined("lost", [texts[0]!, texts[1]!, null, null]);
+  const other = declined("other", [
+    "a store whose check was dropped at the budget",
+    null,
+    null,
+    null,
+  ]);
+  const result = C.classifyRecords(entries([lost, other]));
+  assert.deepEqual(
+    result.perPair
+      .filter((p: { key: string }) => p.key === "lost")
+      .map((p: { class: string }) => p.class),
+    ["declined/lost check", "declined/lost check", "agree", "agree"],
+  );
+  assert.deepEqual(
+    result.problems.map((p: { problem: string; key: string }) => [p.problem, p.key]),
+    [["unclassified", "other"]],
+  );
+  // (its state is accepted: it never opens the gate)
+  const row = result.pairs.find((r: { id: string }) => r.id === "declined/lost check");
+  assert.deepEqual(
+    [row.state, row.pairs, row.sources],
+    ["accepted (condition 1; condition 2 list)", 2, 1],
+  );
+  assert.ok(!result.open.includes("declined/lost check"));
+  // (the control: its row of the table, both records' runs, and no unlisted text)
+  const table: { rule: string; runs: number }[] = result.coverage.controlOutside;
+  assert.deepEqual(
+    table.filter((r) => r.runs > 0).map((r) => [r.rule, r.runs]),
+    [["declined/lost check", 8]],
+  );
+  // (published: gate.md states the version's change, the class's row and no unlisted text)
+  const folder = mkdtempSync(join(tmpdir(), "shadow-declined-"));
+  try {
+    writeFileSync(join(folder, "lost.jsonl"), `${JSON.stringify(lost)}\n`);
+    const ran = spawnSync(
+      process.execPath,
+      [tool, join(folder, "lost.jsonl"), "--groups", "none", "--out", join(folder, "out")],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 0, ran.stderr);
+    const md = readFileSync(join(folder, "out", "gate.md"), "utf8").split("\n");
+    assert.ok(md[0]!.startsWith("# Shadow gate (taxonomy v5): "), md[0]);
+    assert.equal(md[2], `Taxonomy ${C.VERSION_CHANGE}.`);
+    assert.ok(
+      md.some((l) =>
+        l.startsWith("| declined/lost check | accepted (condition 1; condition 2 list) | 2 | 1 | "),
+      ),
+    );
+    assert.equal(
+      md[md.findIndex((l) => l.startsWith("Coverage (")) + 1],
+      "Unlisted control texts: 0.",
+    );
+    assert.ok(md.some((l) => l.startsWith("| declined/lost check | 4 | ")));
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });

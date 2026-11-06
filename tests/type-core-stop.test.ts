@@ -316,6 +316,9 @@ test("after a stop a typed default's null leaves its level open, as without one 
  * A source's typed loads and parses as its plan reads them (`load` and `expected` lines, `plannedContent`), or how the
  * candidate route ends without one: no plan (its errors), or declined.
  */
+/** The lost-check gate's decline (#1526 decision 2, condition 1). */
+const LOST_CHECK = "a store whose check was lost at the budget";
+
 function readers(source: string): string[] {
   try {
     const { plan, diagnostics } = compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND);
@@ -324,7 +327,7 @@ function readers(source: string): string[] {
       .filter((line) => /^(load|expected) /u.test(line))
       .map((line) => line.replace(/ repair=\w+$/u, ""));
   } catch (error) {
-    if (error instanceof CandidateOutsideSlice) return ["declined"];
+    if (error instanceof CandidateOutsideSlice) return [`declined: ${error.what}`];
     throw error;
   }
 }
@@ -387,12 +390,13 @@ test("a stop does not change what a typed load or parse reads: a record without 
   for (const source of sources)
     for (const mode of HELD_MODES) {
       const unstopped = mode.run(() => readers(source));
-      for (const stop of readerStops(source, mode))
-        assert.deepEqual(
-          mode.run(() => stop(() => readers(source))),
-          unstopped,
-          `${source} (${mode.name})`,
-        );
+      for (const stop of readerStops(source, mode)) {
+        // (or declined where the stop left the load's store without a result: #1526 decision 2, an accepted
+        // over-decline, #1832, no result's reader standing for the natural check)
+        const stopped = mode.run(() => stop(() => readers(source)));
+        if (JSON.stringify(stopped) !== JSON.stringify([`declined: ${LOST_CHECK}`]))
+          assert.deepEqual(stopped, unstopped, `${source} (${mode.name})`);
+      }
     }
   // the unstopped readers the family holds every stop to, by the defaults' own types (V30 §13)
   assert.deepEqual(readers('let seed = load("seed", default: [{n: 1}, {m: 2}])\nexit\n'), [
@@ -496,9 +500,20 @@ test("after a stop a load still takes its default for a stored value its default
     const end = source.indexOf(")\n") + 1;
     for (const mode of HELD_MODES)
       for (const stop of [<T>(make: () => T): T => make(), ...sampled(readerStops(source, mode))]) {
-        const { plan } = mode.run(() =>
-          stop(() => compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND)),
-        );
+        // (a stop that leaves the load's store without a result declines, #1526 decision 2, an accepted over-decline,
+        // #1832; every published plan reads as unstopped)
+        let plan;
+        try {
+          ({ plan } = mode.run(() =>
+            stop(() => compileSourceWithBackend(source, { globals: [] }, CORE_BACKEND)),
+          ));
+        } catch (error) {
+          assert.ok(
+            error instanceof CandidateOutsideSlice && error.what === LOST_CHECK,
+            `${source} (${mode.name})`,
+          );
+          continue;
+        }
         assert.ok(plan !== null, `${source} (${mode.name})`);
         const loaded = (value: SerializableRuntimeValue) => {
           const snapshot = createImmediatePacingRuntimeSnapshot(plan, {
@@ -529,6 +544,211 @@ test("after a stop a load still takes its default for a stored value its default
         );
       }
   }
+});
+
+/**
+ * #1767 (ADR 0021 1.10, #1526 condition 1, the lead's rulings (A′) and (R)): after a stop only literal data proves a
+ * typed parse's or load's default, by its own syntax at every level (#1460), so a default that reads anything else
+ * leaves the slice rather than publish a plan that reads what the natural plan may not: at every stop a plan reads the
+ * natural plan's reader types and runs as the natural one, or the candidate route declines. A default that reads a
+ * variable (directly, below a literal's property or element, below a written `object`, through a load) declines before
+ * admission settles; a literal default and a level its own `null` leaves open never decline. Four modes, each source's sampled program stops and Astra's demand grid on #1755.
+ */
+test("after a stop a typed call's reader type a stop left open declines the plan, never read as every value (#1767)", () => {
+  const cases = [
+    [
+      "variable",
+      'let textHost = hostValue\nlet d = {n: 1.5}\nd.n = 0\nlet result = fromJson(textHost, default: d, files: false)\nsay result.n\nrepeat result.n {}\nsay "after"\nexit\n',
+      '{"n":2}',
+    ],
+    [
+      "below a literal",
+      'let d = {m: 1}\nlet result = fromJson(hostValue, default: {n: d}, files: false)\nsay result.n.m\nsay "after"\nexit\n',
+      '{"n":{"m":2}}',
+    ],
+    // (below a written `object`, whose plan keeps the default's names: Codex r2's B1)
+    [
+      "below a written object",
+      'let d = {n: 0}\nlet result: object = fromJson(hostValue, default: d, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
+    // (a written default below a written `object`: its stopped answer an `object` whose names the stop left out,
+    // Codex r3's B1)
+    [
+      "a written default below a written object",
+      'let d: object = {n: 0}\nlet result: object = fromJson(hostValue, default: d, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
+    // (a written default below a literal's property and element, and below a load's literal: Codex r4's B1 and its
+    // siblings)
+    [
+      "a written default below a literal",
+      'let d: object = {m: 0}\nlet result: object = fromJson(hostValue, default: {n: d}, files: false)\nsay result.n.m\nsay "after"\nexit\n',
+      '{"n":{"m":"bad"}}',
+    ],
+    [
+      "a written default in a literal list",
+      'let d: object = {n: 0}\nlet result: object[] = fromJson(hostValue, default: [d], files: false)\nsay result[0].n\nsay "after"\nexit\n',
+      '[{"n":"bad"}]',
+    ],
+    [
+      "a written default below a load's literal",
+      'let d: object = {m: 0}\nlet result: object = load("k", default: {n: d})\nsay result.n.m\nsay "after"\nexit\n',
+      "{}",
+    ],
+    // (a default read through a nested load of a computed key: Codex r5's B1)
+    [
+      "a default through a computed-key load",
+      'let k = "k"\nlet d: object = {n: 0}\nlet result: object = fromJson(hostValue, default: load(k, default: d), files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
+    // (a computed key's load answers by its literal default: Codex r6's P2)
+    [
+      "literal default through a computed-key load",
+      'let k = "k"\nlet result: object = fromJson(hostValue, default: load(k, default: {n: 0}), files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
+    // (a written scalar destination is the reader type, whatever its default reads: Codex r5's P2)
+    [
+      "literal reader: a written scalar",
+      'let d = 0\nlet result: integer = fromJson(hostValue, default: d, files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    // (a projection the syntax proves: literal data at a literal's property or element, Astra r1's B1, through a
+    // projected part, Codex r8, and at a projected or computed index or through a nested load, Codex r9; an object below
+    // a projection is not, its properties unproven after a stop)
+    [
+      "literal property's scalar",
+      'let result = fromJson(hostValue, default: ({n: 0}).n, files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's scalar",
+      'let result = fromJson(hostValue, default: [0][0], files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's list of scalars",
+      'let result = fromJson(hostValue, default: [[1]][0], files: false)\nsay result[0]\nsay "after"\nexit\n',
+      "[2]",
+    ],
+    [
+      "literal property's projected scalar",
+      'let result = fromJson(hostValue, default: ({p: ({n: 0}).n}).p, files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's scalar at a projected index",
+      'let result = fromJson(hostValue, default: ({p: [0][({i: 0}).i]}).p, files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's scalar of a projected holder",
+      'let result = fromJson(hostValue, default: ({p: ({q: [0]}).q}).p[0], files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal index's scalar at a computed index",
+      'let result = fromJson(hostValue, default: [0][load("i", default: 0)], files: false)\nsay result\nsay "after"\nexit\n',
+      "2",
+    ],
+    [
+      "literal property's list of a load",
+      'let result = fromJson(hostValue, default: ({p: [load("k", default: 0)]}).p, files: false)\nsay result[0]\nsay "after"\nexit\n',
+      "[2]",
+    ],
+    [
+      "a literal's projected load of an object",
+      'let result = fromJson(hostValue, default: ({p: [load("k", default: {n: 0})]}).p, files: false)\nsay result[0].n\nsay "after"\nexit\n',
+      '[{"n":2}]',
+    ],
+    [
+      "a literal's object element",
+      'let result = fromJson(hostValue, default: [{n: 0}][0], files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":2}',
+    ],
+    [
+      "a literal's structured property",
+      'let result = fromJson(hostValue, default: ({p: {n: 0}}).p, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":2}',
+    ],
+    [
+      "literal",
+      'let result = fromJson(hostValue, default: {n: 0}, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":2}',
+    ],
+    [
+      "literal below a written object",
+      'let result: object = fromJson(hostValue, default: {n: 0}, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"bad"}',
+    ],
+    [
+      "null field",
+      'let result = fromJson(hostValue, default: {n: null}, files: false)\nsay result.n\nsay "after"\nexit\n',
+      '{"n":"text"}',
+    ],
+  ] as const;
+  const GRID = [16, 32, 64, 96, 120, 127, 128, 136, 192, 224, 240, 256];
+  const readers = (run: StopRun, source: string) =>
+    run.result.plan === null
+      ? null
+      : plannedContent(run.result.plan, source).filter((line) => /^(load|expected) /u.test(line));
+  let declined = 0;
+  for (const [kind, source, json] of cases) {
+    const c: HeldCase = { name: kind, slice: true, values: [], source };
+    // (a default that reads anything but literal data, at any level)
+    const opens = !kind.startsWith("literal") && kind !== "null field";
+    for (const mode of HELD_MODES) {
+      const natural = heldRun(c, mode);
+      assert.ok(natural.result.plan !== null, kind);
+      const naturalRun = ran(natural.result.plan, json);
+      assert.equal(naturalRun.failure, null, kind);
+      const judged = (stopped: StopRun, at: string) => {
+        if (stopped.result.plan === null) {
+          assert.ok(opens, `${at}: declined`);
+          declined += 1;
+          return;
+        }
+        assert.deepEqual(readers(stopped, source), readers(natural, source), at);
+        assert.deepEqual(ran(stopped.result.plan, json), naturalRun, at);
+      };
+      for (const allowance of [
+        ...sampled(Array.from({ length: natural.answers.budget.total - 1 }, (_, i) => i + 1)),
+        ...testedStops(heldStops(c, mode)).map((stop) => stop.allowance),
+      ]) {
+        const stopped = heldRun(c, mode, allowance);
+        const at = `${kind} (${mode.name}) @${allowance}`;
+        judged(stopped, at);
+        const { stoppedIn, settled } = stopped.answers.budget;
+        if (opens && stoppedIn === "admission" && !settled)
+          assert.equal(stopped.result.plan, null, `${at}: open, so declined`);
+        // (after admission settled every finished answer stands: a published plan reads the natural reader and keeps every
+        // natural check, `judged`; or the candidate declines it with the lost-check text, #1526 decision 2, condition 1:
+        // `variable`'s store of host text a work stop left partial, an accepted over-decline, #1832; #1775's rule (R) is
+        // untouched, it never covered settled stops)
+        if (settled && stoppedIn !== null && stopped.result.plan === null)
+          assert.throws(
+            () =>
+              mode.run(() =>
+                withTestAllowance(allowance, () =>
+                  compileSourceWithBackend(
+                    source,
+                    { globals: ["hostValue", "hostOther"] },
+                    CORE_BACKEND,
+                  ),
+                ),
+              ),
+            (error) =>
+              error instanceof CandidateOutsideSlice &&
+              error.what === "a store whose check was lost at the budget",
+            `${at}: settled: publishes, or declines with the lost-check text`,
+          );
+      }
+      for (const demand of GRID)
+        judged(heldRun(c, mode, undefined, demand), `${kind} (${mode.name}) demand ${demand}`);
+    }
+  }
+  assert.ok(declined > 0, `${declined} declined`);
 });
 
 test("after a stop a typed default's own literal and the call's expected type answer the same in any read order", () => {
@@ -801,9 +1021,21 @@ test("the stop oracle sees every change no mark of the stop names", () => {
   const vessel = stopRun('let vessel = hostValue\nvessel.amount = 4\nsay "AFTER"\nexit\n');
   assert.deepEqual(problems(vessel, vessel), []);
   assert.notDeepEqual(problems(vessel, edited(vessel, withoutGuard)), []);
-  // a walk stop marks the default (r4.100), which excuses its own check and not the guard
-  const source =
+  // a walk stop marks the default (r4.100), which excuses its own check and not the guard; where `vessel` holds a host
+  // value, its lowest walk stop loses the vessel's check, which `{amount: "x"}` passes, and the candidate declines it
+  // (#1526 decision 2), so the oracle is judged on its variant, `vessel` a typed load's, which its reader carries
+  const original =
     'let nums: number?[] = [null,1.25]\nlet pack={nums:nums}\nlet twin=pack\nsay twin.nums.get(4, default:hostValue)\nlet vessel=hostOther\nvessel.amount=4\nsay "AFTER"\nexit\n';
+  assert.throws(
+    () => stopRun(original, walkEnds(original)[0]),
+    (error: unknown) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === "a store whose check was lost at the budget",
+  );
+  const source = original.replace(
+    "let vessel=hostOther",
+    'let vessel=load("v", default: {other: 1})',
+  );
   const unstopped = stopRun(source);
   const stopped = stopRun(source, walkEnds(source)[0]);
   const fallback = source.indexOf("hostValue");
@@ -1850,7 +2082,9 @@ test("the stop oracle refuses a stopped run whose without leaves the run's allow
 /**
  * #1631: a rerun without the run's demand allowance can stop in the same phase, settled, at the same program allowance,
  * yet under another demand allowance none of its decisions stops, so its compile differs. The issue's witness at program
- * allowance 1,886 (2,039 before #1251 made no narrowing index for it) and demand allowance 27: the run's own `without` gives no problem, the uncapped run's is refused.
+ * allowance 1,886 (2,039 before #1251 made no narrowing index for it) and demand allowance 27, whose stopped compile the
+ * candidate now declines (#1832): on its analysis with the reference's plan one text changed, the run's own `without` is
+ * judged, the uncapped run's refused.
  */
 test("the stop oracle refuses a stopped run whose without leaves the run's demand allowance (#1631)", () => {
   const c: HeldCase = {
@@ -1868,9 +2102,53 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
     assert.deepEqual([budget.allowance, budget.stoppedIn, budget.settled], [1886, "walk", true]);
   assert.ok(stopped.answers.budget.decisions.some((d) => d.stopped));
   assert.ok(!uncapped.answers.budget.decisions.some((d) => d.stopped));
+  // (there the candidate may decline the stopped compile, #1526 decision 2, an accepted over-decline, #1832: no completion
+  // tells `root`'s partial check from the natural one; a published plan runs as the natural one)
+  try {
+    const plan = mode.run(() =>
+      withTestDemandAllowance(27, () =>
+        withTestAllowance(1886, () =>
+          compileSourceWithBackend(c.source, { globals: ["hostValue", "hostOther"] }, CORE_BACKEND),
+        ),
+      ),
+    ).plan;
+    const natural = heldRun(c, mode).result.plan!;
+    assert.ok(plan !== null);
+    for (const value of [2, "x", null])
+      assert.deepEqual(
+        runGlobals(plan, { hostValue: value, hostOther: value }),
+        runGlobals(natural, { hostValue: value, hostOther: value }),
+      );
+  } catch (error) {
+    if (error instanceof assert.AssertionError) throw error;
+    assert.ok(error instanceof CandidateOutsideSlice && error.what === LOST_CHECK, String(error));
+  }
+  // (the oracle's scope check, on the stopped analysis with the reference's plan and its `say "BEFORE"` text changed, so
+  // the oracle reruns the stopped run: its own rerun is judged, the uncapped run's refused)
+  // (the reference under demand allowance 27 is declined too, at its decision stop; the natural plan stands for it)
+  const base: StopRun = {
+    ...unstopped,
+    result: { ...unstopped.result, plan: unstopped.result.plan ?? heldRun(c, mode).result.plan },
+  };
+  assert.ok(base.result.plan !== null);
+  const plan = structuredClone(base.result.plan);
+  const pending: unknown[] = [plan];
+  let changed = 0;
+  while (pending.length > 0 && changed === 0) {
+    const node = pending.pop();
+    if (node === null || typeof node !== "object") continue;
+    for (const [key, value] of Object.entries(node))
+      if (value === "BEFORE" && changed === 0) {
+        Reflect.set(node, key, "OTHER");
+        changed += 1;
+      }
+    pending.push(...Object.values(node));
+  }
+  assert.equal(changed, 1);
+  const edited: StopRun = { ...stopped, result: { ...stopped.result, plan } };
   // (a combined stop, judged under its rule: its finishing read answers `first` from its stores' syntax through the copy
   // of `root`, as the natural analysis does, where the demand-only run's read stopped, #1604)
-  const rule = combinedStopRule(c, mode, unstopped, stopped.answers);
+  const rule = combinedStopRule(c, mode, base, stopped.answers);
   const excused = {
     records: new Set([...rule.records.keys(), ...rule.relabelled.records, ...rule.coarse.records]),
     checks: new Set([
@@ -1881,10 +2159,10 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
     ]),
   };
   const judge = (run: StopRun): string[] =>
-    stopProblems({ unstopped, stopped: run, fitting: [], violating: [], excused });
-  assert.deepEqual(judge(stopped), []);
+    stopProblems({ unstopped: base, stopped: run, fitting: [], violating: [], excused });
+  assert.notDeepEqual(judge(edited), []);
   assert.throws(
-    () => judge({ ...stopped, without: uncapped.without }),
+    () => judge({ ...edited, without: uncapped.without }),
     /the demand allowance \d+ at its decision \[\d+,\[[^\]]*\]\], not the run's 27/,
   );
   // (and the reference's rerun without its completion, Codex r1's F1 on #1662: a decision of the reference stopped)
@@ -3375,13 +3653,14 @@ test("a combined stop owes the reference's check in other words, or a boundary's
       each: true,
     },
     // ((a) at a member's presence check by every read its consumer makes: the receiver at the unlisted step `#`, which
-    // the stop left `unknown` and the finishing walk answers from the ring's literals, reversed under demand 41: two
-    // units below its decision's 43 since #1221 charges the event searches by comparison, the stop at 42 past that read)
+    // the stop left `unknown` and the finishing walk answers from the ring's literals, reversed under demand 45: two
+    // units below its decision's 47 (43 since #1221 charges the event searches by comparison, 4 more since #1073 PR 2's
+    // consumers look up a descendant demand's narrowing), the stop at 46 past that read)
     {
       clause: "a",
       modes: [HELD_MODES[1]!],
       c: heldFamily(false).find((c) => c.name === "ring-1-written-plain")!,
-      demand: 41,
+      demand: 45,
     },
     ...[
       "function build {return dict {a: hostValue, b: 4}}",
@@ -4586,17 +4865,25 @@ test("a settled stop decides a typed parse's nested default by its syntax, its c
   ]) {
     const unstopped = stopRun(source);
     const [low, high] = walkEnds(source);
-    for (const allowance of [low, Math.floor((low + high) / 2)])
+    for (const allowance of [low, Math.floor((low + high) / 2)]) {
+      // (or declined: the parse's store has no result at a program stop, and only a complete store check keeps it,
+      // #1526 decision 2, an accepted over-decline, #1832)
+      let stopped: StopRun;
+      try {
+        stopped = stopRun(source, allowance);
+      } catch (error) {
+        assert.ok(
+          error instanceof CandidateOutsideSlice && error.what === LOST_CHECK,
+          `@${allowance}`,
+        );
+        continue;
+      }
       assert.deepEqual(
-        stopProblems({
-          unstopped,
-          stopped: stopRun(source, allowance),
-          fitting: [],
-          violating: [],
-        }),
+        stopProblems({ unstopped, stopped, fitting: [], violating: [] }),
         [],
         `@${allowance}`,
       );
+    }
   }
 });
 
@@ -4716,8 +5003,28 @@ test("a stopped decision stays undecided at every reader, also after a settled p
     );
     for (const allowance of [undefined, first, total - 1]) {
       const where = `reversed: ${reversed}, allowance: ${allowance}`;
-      const run = allowance === undefined ? unstopped : capped(() => stopRun(source, allowance));
-      const { answers } = run;
+      // (at a settled program stop the candidate may decline the compile, #1526 decision 2: an accepted over-decline,
+      // #1832, the store check of `tally`'s host value partial and no completion to tell it from the natural plan's; a
+      // published plan runs as the unstopped one; its analysis is judged either way)
+      if (allowance !== undefined)
+        try {
+          const run = capped(() => stopRun(source, allowance));
+          // (a published plan runs as the unstopped one)
+          assert.ok(run.result.plan !== null, where);
+          for (const value of [2, 2.5, "x"])
+            assert.deepEqual(
+              runGlobals(run.result.plan, host(value)),
+              runGlobals(unstopped.result.plan!, host(value)),
+              where,
+            );
+        } catch (error) {
+          if (error instanceof assert.AssertionError) throw error;
+          assert.ok(error instanceof CandidateOutsideSlice && error.what === LOST_CHECK, where);
+        }
+      const answers: Answers =
+        allowance === undefined
+          ? unstopped.answers
+          : capped(() => withTestAllowance(allowance, () => analyseCore(request)));
       assert.equal(answers.budget.settled, true, where);
       assert.ok(
         answers.budget.decisions.some((d) => d.place === tally && d.stopped),
@@ -4741,14 +5048,6 @@ test("a stopped decision stays undecided at every reader, also after a settled p
         ["unknown/16"],
         where,
       );
-      if (allowance !== undefined)
-        assert.deepEqual(
-          capped(() =>
-            stopProblems({ unstopped, stopped: run, fitting: [host(2)], violating: [host(2.5)] }),
-          ),
-          [],
-          where,
-        );
     }
   }
 });
@@ -4764,43 +5063,86 @@ test("a stopped decision stays undecided at every reader, also after a settled p
  * is no unstopped analysis to compare. A host value fits where the unstopped plan runs it: without sharing, 257 decides
  * the element `regex`, which C9 checks the host value against.
  */
-test("a stop adds no boundary below a stopped decision and keeps toJson's checks (#1437)", () => {
+test("a stop adds no boundary below a stopped decision and keeps toJson's checks, or the program is declined (#1437, #1526)", () => {
   const sources = [
     "let root={value:{a:[hostValue otherwise /r/],b:1}}\nlet first=root\nlet second=first\n" +
       "say toJson(first)\nsay toJson(second)\nsay toJson(root)\nexit\n",
     "let n = 1\nsay toJson({a: [hostValue otherwise /r/], b: n})\nexit\n",
   ];
+  // (#1526 decision 2, condition 1, TABLE r4.390: a settled stop whose plan lost the element's check, which the unstopped
+  // plan makes against a host value, is declined; where the reference run at demand 257 is such a stop, a decision's,
+  // each of its stops is declined too, but an unsettled one, which has no registry: option (a), #1767, #1252)
+  const declines = (error: unknown): boolean =>
+    error instanceof CandidateOutsideSlice &&
+    error.what === "a store whose check was lost at the budget";
   let compared = 0;
+  let declined = 0;
+  let unsettled = 0;
   for (const source of sources)
     for (const demand of [null, 257])
       for (const mode of MODES) {
         const inDemand = <T>(make: () => T): T =>
           inMode(mode, () => (demand === null ? make() : withTestDemandAllowance(demand, make)));
-        const unstopped = stopRunIn(inDemand, source);
+        // (each settled phase's ends, and the last stop before admission settled, whose fresh pass asks nothing)
+        const stopsOf = (): (readonly [string, number])[] => [
+          ...[...inDemand(() => settledEnds(source))].flatMap(([phase, ends]) =>
+            ends.map((allowance) => [phase, allowance] as const),
+          ),
+          ["unsettled", inDemand(() => lastUnsettled(source))],
+        ];
+        let unstopped: StopRun;
+        try {
+          unstopped = stopRunIn(inDemand, source);
+        } catch (error) {
+          assert.ok(declines(error), `${source} demand: ${demand}, ${JSON.stringify(mode)}`);
+          for (const [phase, allowance] of stopsOf()) {
+            const where = `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`;
+            try {
+              const stopped = stopRunIn(inDemand, source, allowance);
+              assert.equal(stopped.answers.budget.settled, false, where);
+              unsettled += 1;
+            } catch (stop) {
+              assert.ok(declines(stop), where);
+              declined += 1;
+            }
+          }
+          continue;
+        }
         if (unstopped.answers.budget.exhausted !== null) continue;
         const inputs = [host(1), host(null)];
         const fits = (globals: Globals): boolean =>
           runGlobals(unstopped.result.plan!, globals).failure === null;
-        // (each settled phase's ends, and the last stop before admission settled, whose fresh pass asks nothing)
-        const stops: (readonly [string, number])[] = [
-          ...inDemand(() => settledEnds(source)),
-        ].flatMap(([phase, ends]) => ends.map((allowance) => [phase, allowance] as const));
-        stops.push(["unsettled", inDemand(() => lastUnsettled(source))]);
-        for (const [phase, allowance] of stops) {
+        for (const [phase, allowance] of stopsOf()) {
           compared += 1;
+          const where = `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`;
+          let stopped: StopRun;
+          try {
+            stopped = stopRunIn(inDemand, source, allowance);
+          } catch (error) {
+            assert.ok(declines(error), where);
+            assert.ok(
+              inputs.some((globals) => !fits(globals)),
+              where,
+            );
+            declined += 1;
+            continue;
+          }
           assert.deepEqual(
             stopProblems({
               unstopped,
-              stopped: stopRunIn(inDemand, source, allowance),
+              stopped,
               fitting: inputs.filter(fits),
               violating: inputs.filter((globals) => !fits(globals)),
             }),
             [],
-            `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`,
+            where,
           );
         }
       }
-  assert.equal(compared, 54);
+  // (54 stops: in source order at demand 257, with and without sharing, the first source's reference run stops `root`'s
+  // decisions and loses the `value.a` element's check; of its five stops each, its two walk ends and two publication ends
+  // are declined, and the last unsettled one is option (a)'s)
+  assert.deepEqual({ compared, declined, unsettled }, { compared: 44, declined: 8, unsettled: 2 });
 });
 
 /**

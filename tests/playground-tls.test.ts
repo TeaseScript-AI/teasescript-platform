@@ -88,7 +88,20 @@ test("with https the playground serves over TLS with its certificate", async (t)
   t.after(() => rm(projectRoot, { recursive: true, force: true }));
   const port = await freePort();
   const server = await startPlaygroundServer({ host: "127.0.0.1", port, https: true, projectRoot });
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  // (unreferenced, and closed on a bounded wait: a failed cleanup hook never leaves the listener running the file, #1844)
+  server.unref();
+  t.after(
+    () =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 5_000);
+        timer.unref();
+        server.closeAllConnections();
+        server.close(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      }),
+  );
   const { status, certificate } = await new Promise<{ status: number; certificate: string }>(
     (resolve, reject) => {
       get(`https://127.0.0.1:${port}/player/`, { rejectUnauthorized: false }, (response) => {

@@ -198,17 +198,66 @@ test("the oracle's own stop leaves the occurrences from it on unanswered, apart 
   assert.ok(stopped.unanswered > 0, "the occurrences' questions stop");
   assert.deepEqual(stopped.occurrences, full.occurrences.slice(0, stopped.occurrences.length));
   assert.ok(stopped.occurrences.length < full.occurrences.length, "an occurrence stays unanswered");
-  // (the count stays apart from the hashes, and the joined text never equals one answered in full)
+  // (why, #1837: the analysis finished, so its later questions exhausted the allowance, from the first node left)
+  const nodes = withTestAllowance(high - 1, () => analyseCore(request).graph.nodes);
+  const first = nodes[nodes.length - stopped.unanswered]!.id;
+  assert.deepEqual(stopped.unansweredBy, { reason: "questions", node: first });
+  assert.equal(full.unansweredBy, undefined);
+  // (the count and why stay apart from the hashes, and the joined text never equals one answered in full)
   withTestAllowance(high - 1, () => {
     assert.deepEqual(publicationHashes(files, MODES[0]!, GLOBALS), {
       parts: [stopped.answers, stopped.record, ...stopped.occurrences, stopped.route].map(sha256),
       unanswered: stopped.unanswered,
+      unansweredBy: { reason: "questions", node: first },
     });
     assert.equal(
       publication(files, MODES[0]!, GLOBALS),
       `[${stopped.answers},${stopped.record},[${stopped.occurrences.join(",")}],${stopped.route},{"unanswered":${stopped.unanswered}}]`,
     );
   });
+});
+
+test("an analysis its own budget stopped is answered whole, so no node is left unanswered and none is stopped (#1837)", () => {
+  const files = main(SMALL[0]!);
+  const request = coreRequest(files, GLOBALS);
+  assert.ok(request !== null);
+  const total = analyseCore(request).budget.total;
+  // (an allowance the analysis itself passes: its own budget stops it; the oracle then answers its stopped answers
+  // without asking again, so only its questions after a finished analysis leave nodes unanswered, as `questions`)
+  const allowance = Math.floor(total / 2);
+  assert.notEqual(
+    withTestAllowance(allowance, () => analyseCore(request).budget.exhausted),
+    null,
+  );
+  const parts = withTestAllowance(allowance, () => publicationParts(files, MODES[0]!, GLOBALS));
+  assert.ok(parts !== null);
+  assert.deepEqual([parts.unanswered, parts.unansweredBy], [0, undefined]);
+});
+
+test("an analysis that finished past the nesting limit leaves its later questions' nodes unanswered as questions, never stopped (#1837, Codex r1 on #1839)", () => {
+  // (a finished analysis with `exhausted: "nesting"` and no stop phase: the oracle's own questions after it stop)
+  const source = `let item = {a: 1, b: "x"}\nlet alias = item\nsay "\${alias.a}"\n${"if hostValue == 1 {\n".repeat(257)}say "\${hostValue}"\n${"}\n".repeat(257)}exit\n`;
+  const files = [{ path: "main.tease", source }];
+  const request = coreRequest(files, GLOBALS);
+  assert.ok(request !== null);
+  const analysis = analyseCore(request);
+  assert.deepEqual([analysis.budget.exhausted, analysis.budget.stoppedIn], ["nesting", null]);
+  const full = withTestAllowance(1e12, () => publicationParts(files, MODES[0]!, GLOBALS));
+  assert.ok(full !== null && full.unanswered === 0);
+  // (the least allowance that answers it all, then one unit below it)
+  const answered = (n: number) =>
+    JSON.stringify(withTestAllowance(n, () => publicationParts(files, MODES[0]!, GLOBALS))) ===
+    JSON.stringify(full);
+  let [low, high] = [analysis.budget.total, analysis.budget.total * 2];
+  while (!answered(high)) high *= 2;
+  while (high - low > 1) {
+    const middle = Math.floor((low + high) / 2);
+    if (answered(middle)) high = middle;
+    else low = middle;
+  }
+  const parts = withTestAllowance(high - 1, () => publicationParts(files, MODES[0]!, GLOBALS));
+  assert.ok(parts !== null && parts.unanswered > 0);
+  assert.equal(parts.unansweredBy?.reason, "questions");
 });
 
 test("jsonText writes plan data as JSON.stringify does, and also past the depth JSON.stringify reaches (#1503)", () => {

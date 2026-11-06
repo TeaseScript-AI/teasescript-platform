@@ -7,8 +7,9 @@ import type { ContractFamily } from "../src/type-inference/graph.js";
 import { request } from "./helpers/type-inference-graph.js";
 
 /**
- * Every operation the collector emits has a relation (work note §4); an injected host builtin's gives a result the
- * compiler cannot know. Every family the collector can emit is listed, so a key the modules forget is seen here.
+ * The relations table has a relation for every operation the collector emits (work note §4); an injected host
+ * builtin's gives a result the compiler cannot know. Every family the collector can emit is listed, so a key the
+ * modules forget is seen here. This checks the table alone: no backend's dispatch reads it.
  */
 const IMPLEMENTED: ReadonlySet<ContractFamily> = new Set([
   "operator",

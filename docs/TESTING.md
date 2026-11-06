@@ -46,7 +46,8 @@ subdirectories, Vue typechecking emits nothing, and the clean-build regression u
 
 `npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or
-specific investigation. Do not run a normal and full-output variant by default
+specific investigation. `npm run check:full-output` runs `npm run check`'s stages with `TEST_FULL_OUTPUT=1`, which
+gives every test run in them full output. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
 distinct task-relevant evidence. To see what the checkout's compiler and
 runtime do with one source or a project, run
@@ -129,15 +130,21 @@ with one `--expect` per set's manifest (the flag takes one file).
 For `corpus`, both commands also need `CASES_JSON=<cases.json>` before `node`, and the job `--data <cases.json>`.
 `env -u NODE_OPTIONS` keeps the queue's heap flag from overriding each route's `--memory`. `--demands 16` is the
 completion control: nothing stops at the natural allowance on current `main`, so only a demand-allowance run reaches
-a receiving completion. `--expect` makes a source without a result count as `unavailable`.
+a receiving completion. The gate table also counts, as information only, the control's runs that left the slice by
+the class that names their text (`declined/lost check` or an exclusion rule), every such class a row and a text no class
+names apart. `--expect` makes a source without a result count as
+`unavailable`.
 
-Each class has one of three states:
+Each class has one of four states:
 
 - `pass`: agreement, or the legacy route's heap exhausted in its analysis while the core finished (legacy behaviour the
   switch resolves);
 - `attributed`: the difference has a known rule class (written copies, absent properties, ingress; the checks or plan
   a lowering reads; wording; a stop that only one sharing mode, or both differently, take), and the switch still owes
   each source its accepted expectation, a stop through the stop oracle's lost-check judgment;
+- `accepted (condition 1; condition 2 list)`: from taxonomy v5, `declined/lost check`, a program the core declines
+  where a stop lost a check it requires (#1781), at the natural allowance and at the control alike. #1526 decision 2's
+  condition 1 accepts it (the legacy compiles); condition 2 re-assesses every such case before the switch;
 - `open`: the gate is not green while such a row has a pair. These rows are every exclusion of the candidate slice,
   the surviving-check, integer-use and stop differences, failed runs other than the legacy heap, exceptions, results
   that are missing or rowless; in the sharing column, a difference where neither mode stops, a mode outside the slice

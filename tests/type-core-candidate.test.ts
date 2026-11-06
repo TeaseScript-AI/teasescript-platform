@@ -337,7 +337,6 @@ test("every positive-list record the candidate route reaches plans and runs as i
   let plans = 0;
   let runs = 0;
   let compared = 0;
-  const unreadDefaults: string[] = [];
   for (const record of readFixture()) {
     if (heldBack(record) !== null) continue;
     positive += 1;
@@ -397,18 +396,11 @@ test("every positive-list record the candidate route reaches plans and runs as i
         const syntax = syntaxOf(source);
         return [syntax, derive(syntax, record.expected)] as const;
       } catch (error) {
-        // (a typed default that reads a variable reads it at the call, F18, which the oracle does not derive: #1760;
-        // `type-core-f18.test.ts` checks its four layers)
-        if (error instanceof Underivable && error.message === "a default that reads a variable") {
-          unreadDefaults.push(record.name);
-          return null;
-        }
         if (error instanceof Underivable)
           throw new Error(`${record.name}: underivable: ${error.message}`);
         throw error;
       }
     })();
-    if (derived === null) continue;
     const [syntax, { stores, discharges, content }] = derived;
     assert.deepEqual(
       plannedContent(result.plan, source),
@@ -549,10 +541,6 @@ test("every positive-list record the candidate route reaches plans and runs as i
       `discharges: ${listed(classes)}; outside the candidate slice (later port steps): ${listed(outside)}`,
   );
   assert.equal(accepted.length + counted, positive);
-  assert.deepEqual(unreadDefaults, [
-    "cp9-cells/s9b/f18-held/named/load/definite-integer",
-    "cp9-cells/s9b/f18-held/named/load/after-call",
-  ]);
   // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
   // each discharge by its kind and site: two at one site are classified each by its own check
   const verdicts: readonly (readonly [string, string, string])[] = [
@@ -3547,6 +3535,42 @@ function sourcesUnder(directory: string): string[] {
     return /\.(ts|mts|js|mjs|vue)$/.test(name) ? [path] : [];
   });
 }
+
+test("a known value under a test reads the branch's narrowing, and a long copy chain's value is still found iteratively (#1073 PR 2 phase 2)", () => {
+  // (a dead branch is no static error: the narrowing admits no kind of the value there; a live one keeps it)
+  for (const [source, plans] of [
+    ["let n = 1.5\nif n is integer { repeat n {} }\nexit\n", true],
+    ["let n = 1\nif n == null { repeat n {} }\nexit\n", true],
+    ["let n = 1.5\nif n is number { repeat n {} }\nexit\n", false],
+    ["let n = 1.5\nlet m = n\nif m is integer { repeat m {} }\nexit\n", true],
+    // (an operand's read too, Codex r2 on #1884: the copy inside the fallback never runs with 1.5)
+    [
+      'let n = 1.5\nlet m = n\nif m is integer { repeat (m otherwise 0) { say "BODY" } }\nsay "AFTER"\nexit\n',
+      true,
+    ],
+  ] as const)
+    assert.equal(inBothOrders(() => candidate(source)).plan !== null, plans, source);
+  // (Codex r1 on #1884: the filter applies after the evaluator's own iterative walk, so 8,192 copies take no native frame
+  // each, and the known count still plans and runs)
+  const chain =
+    Array.from({ length: 8192 }, (_, i) => `let n${i} = ${i === 0 ? "1" : `n${i - 1}`}`).join(
+      "\n",
+    ) + '\nrepeat n8191 { say "AFTER" }\nexit\n';
+  // (a stopped read says nothing of its kinds, `unknown`: its known value stands, and so does its static error)
+  for (const allowance of [1, 4])
+    assert.ok(
+      withTestAllowance(allowance, () => candidate("let n = 1.5\nrepeat n {}\nexit\n"))
+        .diagnostics.map((diagnostic) => diagnostic.code)
+        .includes("TSV011"),
+      `stopped at ${allowance}`,
+    );
+  const compiled = inBothOrders(() => candidate(chain));
+  assert.notEqual(compiled.plan, null);
+  assert.deepEqual(
+    compiled.diagnostics.map((diagnostic) => diagnostic.code),
+    [],
+  );
+});
 
 test("no production code selects the core: only tests reach the candidate entry", () => {
   const root = process.cwd();

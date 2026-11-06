@@ -252,6 +252,208 @@ ${
 }
 `;
 
+/** A tree's oracle whose `stopped` source leaves `count` nodes unanswered for `reason` (none: a library before #1837). */
+const reasoned = (
+  count: number,
+  reason: "questions" | "stopped" | null,
+  node = 7,
+): string => `import { createHash } from "node:crypto";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+export const publicationHashes = (files) => {
+  const stopped = files[0].source === "stopped";
+  const parts = ['"A"', '"R"', '[1,"x"]', '"T"'].map((text) => createHash("sha256").update(text).digest("hex"));
+  if (!stopped) return { parts, unanswered: 0 };
+  return { parts, unanswered: ${count}${reason === null ? "" : `, unansweredBy: { reason: "${reason}", node: ${node} }`} };
+};
+`;
+
+test("the corpus runner records why an oracle left a run unanswered, and the stall index counts each reason as a runner artefact apart from agreement (#1837)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const tree = (
+      name: string,
+      count: number,
+      reason: "questions" | "stopped" | null,
+      node = 7,
+    ) => {
+      const folder = join(directory, name);
+      mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
+      writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(
+        join(folder, "dist", "tests", "helpers", "type-core-oracles.js"),
+        reasoned(count, reason, node),
+      );
+      return folder;
+    };
+    const [questions2, questions3, stopped2, stopped3, older3, questions101, stopped202] = [
+      tree("questions2", 2, "questions"),
+      tree("questions3", 3, "questions"),
+      tree("stopped2", 2, "stopped"),
+      tree("stopped3", 3, "stopped"),
+      tree("older3", 3, null),
+      tree("questions101", 2, "questions", 101),
+      tree("stopped202", 3, "stopped", 202),
+    ];
+    const area = join(directory, "area");
+    mkdirSync(area);
+    writeFileSync(
+      join(area, "stops.mjs"),
+      'export const cases = [["stopped", "stopped"], ["answered", "answered"]];\n',
+    );
+    const lines = (text: string) =>
+      text
+        .trim()
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => JSON.parse(line));
+    const groups = (base: string, head: string, name: string) => {
+      const [out, work] = [join(directory, `${name}.jsonl`), join(directory, `${name}.work.jsonl`)];
+      const ran = spawnSync(
+        process.execPath,
+        [runner, area, base, head, "--out", out, "--work", work],
+        { encoding: "utf8" },
+      );
+      assert.equal(ran.status, base === head ? 0 : 1, ran.stderr);
+      const judged = spawnSync(process.execPath, [stalls, work], { encoding: "utf8" });
+      const said = lines(judged.stdout);
+      const { artefacts } = said.find((line) => line.artefacts !== undefined);
+      const total = said.at(-1);
+      return {
+        rows: Object.fromEntries(
+          artefacts.map((r: { group: string; runs: number; sources: number }) => [
+            r.group,
+            [r.runs, r.sources],
+          ]),
+        ),
+        artefacts,
+        total,
+        out: existsSync(out) ? lines(readFileSync(out, "utf8")) : [],
+      };
+    };
+    // (the oracle's own question budget on both trees, at two counts: four runs of one source, its reason and node)
+    const q = groups(questions2, questions3, "questions");
+    assert.deepEqual(q.rows, {
+      "unanswered: questions": [4, 1],
+      "unanswered: stopped": [0, 0],
+      "unanswered: unknown": [0, 0],
+      unansweredAlike: [0, 0],
+    });
+    const row = q.artefacts.find((r: { group: string }) => r.group === "unanswered: questions");
+    assert.equal(row.issue, "#1837");
+    assert.deepEqual([row.witness.source, row.witness.node], ["stopped", 7]);
+    // (never agreement: the area does not close, and `answered` alone agrees)
+    assert.deepEqual([q.total.agreed, q.total.closed], [1, false]);
+    // (the --out record names why on each tree)
+    assert.deepEqual(q.out[0].by, {
+      base: { reason: "questions", node: 7 },
+      head: { reason: "questions", node: 7 },
+    });
+    // (the analysis's own stop)
+    assert.deepEqual(groups(stopped2, stopped3, "stopped").rows["unanswered: stopped"], [4, 1]);
+    // (a library that names no reason: unknown, its node null, never dropped; the other tree's reason counted too)
+    const u = groups(older3, questions2, "unknown");
+    assert.deepEqual(
+      [u.rows["unanswered: unknown"], u.rows["unanswered: questions"]],
+      [
+        [4, 1],
+        [4, 1],
+      ],
+    );
+    const unknown = u.artefacts.find((r: { group: string }) => r.group === "unanswered: unknown");
+    assert.equal(unknown.witness.source, "stopped");
+    assert.deepEqual(u.out[0].by.base, { reason: "unknown", node: null });
+    // (two reasons on the two trees: each group counts the run, its witness the node of the tree that gave it, Codex r1)
+    const m = groups(questions101, stopped202, "mixed");
+    const node = (group: string) =>
+      m.artefacts.find((r: { group: string }) => r.group === group).witness.node;
+    assert.deepEqual(
+      [
+        m.rows["unanswered: questions"],
+        m.rows["unanswered: stopped"],
+        node("unanswered: questions"),
+        node("unanswered: stopped"),
+      ],
+      [[4, 1], [4, 1], 101, 202],
+    );
+    // (an unknown reason's witness keeps that tree's null node, not the other tree's)
+    const v = groups(older3, questions101, "unknown-node");
+    assert.equal(
+      v.artefacts.find((r: { group: string }) => r.group === "unanswered: unknown").witness.node,
+      null,
+    );
+    // (repeats say the same only where they name the same reasons, in either order; a record that names none, from a
+    // runner before #1837, says the same as one that names them, whose reasons stand)
+    const work = join(directory, "mixed.work.jsonl");
+    const rewritten = (name: string, edit: (left: unknown[]) => unknown[] | undefined) => {
+      const file = join(directory, name);
+      const text = readFileSync(work, "utf8")
+        .split("\n")
+        .map((line) => {
+          if (line === "") return line;
+          const record = JSON.parse(line);
+          if (record.unanswered === undefined) return line;
+          const left = edit(record.unanswered);
+          if (left === undefined) delete record.unanswered;
+          else record.unanswered = left;
+          return JSON.stringify(record);
+        })
+        .join("\n");
+      writeFileSync(file, text);
+      return file;
+    };
+    const unknown2 = { reason: "unknown", node: null };
+    const other = rewritten("other.work.jsonl", (left) =>
+      left.map((run) => Object.assign({}, run, { by: { base: unknown2, head: unknown2 } })),
+    );
+    const none = rewritten("none.work.jsonl", () => undefined);
+    const judge = (first: string, second: string) =>
+      spawnSync(process.execPath, [stalls, work, "--rerun", first, "--rerun", second], {
+        encoding: "utf8",
+      });
+    for (const [first, second] of [
+      [work, other],
+      [other, work],
+    ] as const) {
+      const judged = judge(first, second);
+      assert.equal(judged.status, 2, judged.stdout);
+      assert.match(
+        judged.stderr,
+        /a source an earlier rerun ran otherwise|another record holds otherwise/,
+      );
+    }
+    for (const [first, second] of [
+      [work, none],
+      [none, work],
+    ] as const) {
+      const judged = judge(first, second);
+      assert.equal(judged.status, 1, judged.stderr);
+      const { artefacts } = lines(judged.stdout).find((line) => line.artefacts !== undefined);
+      assert.deepEqual(
+        artefacts.map((r: { group: string; runs: number }) => [r.group, r.runs]),
+        [
+          ["unanswered: questions", 4],
+          ["unanswered: stopped", 4],
+          ["unanswered: unknown", 0],
+          ["unansweredAlike", 0],
+        ],
+      );
+    }
+    // (left alike on both trees: its own row, agreement named apart as before)
+    const a = groups(questions2, questions2, "alike");
+    assert.deepEqual(a.rows, {
+      "unanswered: questions": [0, 0],
+      "unanswered: stopped": [0, 0],
+      "unanswered: unknown": [0, 0],
+      unansweredAlike: [4, 1],
+    });
+    assert.equal(a.total.unansweredAlike, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("the corpus runner and the stall index count a run left unanswered alike on both trees as agreement named apart, any other unanswered run never as agreement (#1499, #1592)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
@@ -2029,7 +2231,8 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
  * A built tree's library whose analyses charge its ledger (allowance 1,000) 300 units a run: `over` 5,000 more on the
  * head, `both` on both trees, `budget` 1,500 more (past its allowance, within 4 times it); `ledgers` 7,001 more on three
  * ledgers of allowances 1,000, 2,000 and 1,000 (within 4 times the largest only); `noisy` on the head writes 1 MiB on
- * stderr, then charges 5,000; `slowall` waits 600 ms each run on each tree, and `hang` 3 s in the head's first. Where
+ * stderr, then charges 5,000; `slowall` waits 1.8 s each run on each tree, and `hang` 6 s in the head's first (#1850: under a 3 s safety net, a margin
+ * of over a second either way). Where
  * `between`, the modes wait 1.5 s before the first: between the source's runs, in none; `grow` charges 90,000 on the
  * head on a ledger of allowance 100,000, within 4 times it; without a `ledger`, it charges
  * a ledger of its own, which no runner counts.
@@ -2060,8 +2263,8 @@ export function publicationHashes(files, mode) {
     process.stderr.write("x".repeat(1 << 20));
     ledger.charge("frames", 5000);
   }
-  if (source === "slowall") wait(600);
-  if (${head} && source === "hang" && mode === modes[0]) wait(3000);
+  if (source === "slowall") wait(1800);
+  if (${head} && source === "hang" && mode === modes[0]) wait(6000);
   return { parts: ["a", "b"], unanswered: 0 };
 }
 `;
@@ -2116,12 +2319,12 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
       printed.slice(1, -2).map(({ source, verdict, uncharged }) => [source, verdict ?? uncharged]);
     const MODES = ["src-on", "src-off", "rev-on", "rev-off"];
 
-    // both trees in one process, a safety net of 1 s a run: `over` stalls in the head's first run at the charge that
+    // both trees in one process, a safety net of 3 s a run: `over` stalls in the head's first run at the charge that
     // passes 4 × 1,000 units, `both` in the base's (the head's not run), `noisy` too though its stderr is backed up;
     // `budget` ends past its allowance, `ledgers` within 4 times the largest allowance it charged; `slowall` ends, each
     // tree's run within the safety net, a run of both trees together past it; `hang` reaches it: uncharged work, no stall
     const paired = join(directory, "paired.work.jsonl");
-    const ran = run(runner, folder, base, head, "--timeout", "1", "--work", paired);
+    const ran = run(runner, folder, base, head, "--timeout", "3", "--work", paired);
     assert.equal(ran.status, 1, ran.stderr);
     const ended = lines(ran.stdout).at(-1);
     assert.deepEqual([ended.stalled, ended.uncharged, ended.units], [3, 1, 4]);
@@ -2154,7 +2357,7 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
     );
     const slowest = record.get("slowall").runs.map(({ ms }: { ms: number[] }) => ms[0]! + ms[1]!);
     assert.ok(
-      record.get("slowall").stalled === undefined && slowest.every((ms: number) => ms > 1000),
+      record.get("slowall").stalled === undefined && slowest.every((ms: number) => ms > 3000),
       String(slowest),
     );
     assert.deepEqual(
@@ -2216,7 +2419,7 @@ test("a run stalls where its charged units pass the unit limit, the same on ever
         "--baseline",
         baseline,
         "--timeout",
-        "1",
+        "3",
         "--work",
         file,
       );
@@ -2672,7 +2875,7 @@ test("every reader of a stored shard accepts or refuses one line alike, none thr
 /**
  * A built tree's library whose analyses charge its ledger (allowance 30,000,000, so the runner's limit is 120,000,000
  * units a run) 3,000 units a run: `throws` throws on both trees, `ends` ends the process there, as each `once…` does
- * where `FIXTURE_ENDS` is set; `busy` waits 200 ms on the base; `lagging` waits 600 ms on the head's first run; `slow`
+ * where `FIXTURE_ENDS` is set; `busy` waits 200 ms on the base; `lagging` waits 3 s on the head's first run; `slow`
  * charges a billion units more on the head at once and waits 150 ms there; `burst` charges 10,000 times 65,536 units on
  * the head, then waits; `changed` publishes its second part otherwise on the head. Its stop sets differ on the head at
  * demand allowance 1 and charge a billion units there at 2. Where `FIXTURE_TRACE` names a file, the head appends a
@@ -2693,7 +2896,7 @@ export function publicationHashes(files, mode) {
   if (${head} && mode === MODES[0] && process.env.FIXTURE_TRACE)
     appendFileSync(process.env.FIXTURE_TRACE, source + "\\n");
   if (!${head} && source === "busy") wait(200);
-  if (${head} && source === "lagging" && mode === MODES[0]) wait(600);
+  if (${head} && source === "lagging" && mode === MODES[0]) wait(3000);
   if (${head} && source === "slow") {
     ledger.charge("frames", 1e9);
     wait(150);
@@ -2899,13 +3102,14 @@ test("the corpus runner records each source's units, allowance and time, a cut r
       ["units", [3000, 3000 + 1832 * 65_536], [30_000_000, 30_000_000], 1],
     );
 
-    // a replay at a half-second safety net: `slow` stalls in the head's first run over the unit limit, before its wait;
-    // `busy` ends, its base's runs each within the safety net; `lagging` reaches it in the head's first run, uncharged
-    // work and no stall; each source's record holds each run's units, allowance and milliseconds on each tree, a cut
+    // a replay at a two-second safety net: `slow` stalls in the head's first run over the unit limit, before its wait;
+    // `busy` ends, its base's runs each within the safety net; `lagging` (3 s) reaches it in the head's first run,
+    // uncharged work and no stall (#1842: a margin of seconds either way, which a loaded worker keeps, where a half-second
+    // net and a 600 ms wait left 100-300 ms); each source's record holds each run's units, allowance and milliseconds on each tree, a cut
     // run's those it had when the runner ended it
     const replay = area("replay", ["fast", "slow", "busy", "lagging"]);
     const work = join(directory, "replay.work.jsonl");
-    const ran = run(runner, replay, base, head, "--timeout", "0.5", "--work", work);
+    const ran = run(runner, replay, base, head, "--timeout", "2", "--work", work);
     assert.equal(ran.status, 1, ran.stderr);
     const [header, fast, slow, busy, lagging, total] = lines(readFileSync(work, "utf8"));
     assert.deepEqual(
@@ -3154,10 +3358,11 @@ test("the corpus runner records each source's units, allowance and time, a cut r
 
     // a replay of other stop allowances (#1564 r1's false-closure witness): its index keeps them, so its rerun runs
     // them again, keeps the difference at allowance 1 and stalls again at 2; a rerun record of other allowances is not
-    // merged
+    // merged. The stall at 2 is by units (the head's `stopSet` charges 1e9 there), the same on every machine; the wall
+    // clock is only the safety net, wide enough that no loaded worker reaches it (#1842: at 0.5 s and 1 s one did)
     const checks = area("checks", ["checked"], ["publication", "stops"]);
     const checked = join(directory, "checks.work.jsonl");
-    run(runner, checks, base, head, "--allowances", "1,2", "--timeout", "0.5", "--work", checked);
+    run(runner, checks, base, head, "--allowances", "1,2", "--timeout", "30", "--work", checked);
     const checkIndex = join(directory, "checks-index.json");
     assert.equal(run(stalls, checked, "--index", checkIndex).status, 1);
     assert.match(
@@ -3167,7 +3372,7 @@ test("the corpus runner records each source's units, allowance and time, a cut r
     );
     const rechecked = join(directory, "rechecked");
     assert.equal(
-      run(stalls, "rerun", checkIndex, base, head, rechecked, "--timeout", "1").status,
+      run(stalls, "rerun", checkIndex, base, head, rechecked, "--timeout", "30").status,
       1,
     );
     const reran = run(stalls, checked, "--rerun", join(rechecked, "checks.work.jsonl"));
@@ -3177,7 +3382,7 @@ test("the corpus runner records each source's units, allowance and time, a cut r
       [1, 1],
     );
     const defaults = join(directory, "defaults.work.jsonl");
-    run(runner, checks, base, head, "--only", checkIndex, "--timeout", "1", "--work", defaults);
+    run(runner, checks, base, head, "--only", checkIndex, "--timeout", "30", "--work", defaults);
     const refusedMerge = run(stalls, checked, "--rerun", defaults);
     assert.equal(refusedMerge.status, 2);
     assert.match(refusedMerge.stderr, /compares otherwise than its replay \(allowances\)/);
@@ -3567,6 +3772,281 @@ test("the stall index decides each stalled source from its record by one rule: t
         .replace('"source":"agreed"', '"source":"another"'),
     );
     assert.equal(run(agreed, "--rerun", other).status, 2);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the corpus runner runs a pool's batch of sources by their places as its shards run them, and refuses a list it cannot run whole (#1826)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const built = (name: string) => {
+      const folder = join(directory, name);
+      mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
+      mkdirSync(join(folder, "dist", "src", "type-inference", "core"), { recursive: true });
+      writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(folder, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
+      writeFileSync(join(folder, "dist", "tests", "helpers", "type-core-oracles.js"), FILLABLE);
+      return folder;
+    };
+    const [base, head] = [built("base"), built("head")];
+    const folder = join(directory, "pooled");
+    mkdirSync(folder);
+    const names = ["a", "b", "dup", "c", "dup"];
+    writeFileSync(
+      join(folder, "g.mjs"),
+      `export const cases = ${JSON.stringify(names.map((name) => [name, name]))};\n`,
+    );
+    const run = (env: Record<string, string>, ...args: string[]) =>
+      spawnSync(process.execPath, args, { encoding: "utf8", env: { ...process.env, ...env } });
+    const items = resolve("tests/families/items.mjs");
+    const write = (name: string, lines: string[]) => {
+      const file = join(directory, name);
+      writeFileSync(file, lines.map((line) => `${line}\n`).join(""));
+      return file;
+    };
+    // the area's sources, a repeated one once
+    const listed = run({}, items, "sources", folder);
+    assert.equal(listed.status, 0, listed.stderr);
+    const places = listed.stdout.trim().split("\n");
+    assert.equal(places.length, 4);
+    // two batches in no shard's order, the second as the queue gives it ($SX_ITEMS, the flag before the trees), judge
+    // as the area's two shards do
+    const [first, second] = [
+      write("first", [places[3]!, places[0]!]),
+      write("second", places.slice(1, 3)),
+    ];
+    const byItems = [join(directory, "i0.work.jsonl"), join(directory, "i1.work.jsonl")];
+    const one = run({}, runner, folder, base, head, "--items", first, "--work", byItems[0]!);
+    assert.equal(one.status, 0, one.stderr);
+    const two = run(
+      { SX_ITEMS: second },
+      runner,
+      folder,
+      "--items-from-env",
+      base,
+      head,
+      "--work",
+      byItems[1]!,
+    );
+    assert.equal(two.status, 0, two.stderr);
+    const byShards = [join(directory, "s0.work.jsonl"), join(directory, "s1.work.jsonl")];
+    for (const [shard, file] of byShards.entries())
+      assert.equal(
+        run({}, runner, folder, base, head, "--shard", `${shard}/2`, "--work", file).status,
+        0,
+      );
+    const judged = (files: string[]) => {
+      const result = run({}, stalls, ...files);
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim().split("\n").at(-1);
+    };
+    assert.equal(judged(byItems), judged(byShards));
+    // (a pool's batches close only together: one alone holds two of the area's four sources)
+    const part = run({}, stalls, byItems[0]!);
+    assert.equal(part.status, 1, part.stdout);
+    assert.match(part.stdout, /"shards":"1 batches, 2 of 4 sources","complete":false/);
+    // (each record names its batch, never a shard another holds)
+    const batch = (file: string) =>
+      JSON.parse(readFileSync(file, "utf8").split("\n")[0]!).work.shard;
+    assert.match(batch(byItems[0]!), /^items [0-9a-f]{16}$/);
+    assert.notEqual(batch(byItems[0]!), batch(byItems[1]!));
+    // a list the runner cannot run whole is refused before any source runs
+    const refusals: [string[], RegExp][] = [
+      [["--items", first, "--shard", "0/2"], /drop --store, --shard and --only/],
+      [["--items", first, "--items-from-env"], /give one/],
+      [["--items", write("unknown", ['["g.mjs","z","0"]'])], /does not hold/],
+      [["--items", write("twice", [places[0]!, places[0]!])], /twice/],
+      [["--items", write("empty", [])], /lists no source/],
+      [["--items", write("bad", ["g.mjs a"])], /no source's place/],
+      [["--items-from-env"], /\$SX_ITEMS names no file/],
+    ];
+    for (const [more, why] of refusals) {
+      const refused = run({ SX_ITEMS: "" }, runner, folder, base, head, ...more);
+      assert.equal(refused.status, 2, `${more.join(" ")}: ${refused.stderr}`);
+      assert.match(refused.stderr, why);
+    }
+    // `items.mjs check --area`: the area's every source once, no other
+    assert.equal(run({}, items, "check", write("whole", places), "--area", folder).status, 0);
+    assert.equal(run({}, items, "check", first, "--area", folder).status, 1);
+    const extra = write("extra", [...places, '["g.mjs","z","0"]']);
+    assert.equal(run({}, items, "check", extra, "--area", folder).status, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a baseline plans copies in 64 shards where it first plans it, keeps a count it recorded, and a head of any shard count compares with it (#1826)", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const built = join(directory, "built");
+    for (const part of [
+      "dist/src",
+      "dist/tests/helpers",
+      "src",
+      "tests/families/area",
+      "tests/families/copies",
+    ])
+      mkdirSync(join(built, part), { recursive: true });
+    writeFileSync(join(built, "src", "a.ts"), "a\n");
+    writeFileSync(join(built, "dist", "src", "a.js"), "compiled\n");
+    mkdirSync(join(built, "dist", "src", "type-inference", "core"), { recursive: true });
+    writeFileSync(join(built, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
+    writeFileSync(join(built, "dist", "tests", "helpers", "type-core-oracles.js"), FILLABLE);
+    writeFileSync(join(built, "package.json"), '{ "type": "module" }\n');
+    writeFileSync(join(built, "package-lock.json"), "{}\n");
+    writeFileSync(join(built, ".sha"), `${"1".repeat(40)}\n`);
+    for (const tool of ["baselines.mjs", "run.mjs", "sources.mjs"])
+      cpSync(join("tests", "families", tool), join(built, "tests", "families", tool));
+    const cases = (names: string[]) =>
+      `export const cases = ${JSON.stringify(names.map((name) => [name, name]))};\n`;
+    writeFileSync(
+      join(built, "tests", "families", "area", "g.mjs"),
+      cases(["p", "q", "r", "s", "t"]),
+    );
+    writeFileSync(join(built, "tests", "families", "copies", "g.mjs"), cases(["x", "y"]));
+    const { identityOf, planOf } = await import(pathToFileURL(baselines).href);
+    const { generatorsOf } = await import(
+      pathToFileURL(resolve("tests/families/sources.mjs")).href
+    );
+    const src: string = identityOf(built).src;
+    const at = (...parts: string[]) => join(directory, ...parts);
+    const tool = (...args: string[]) =>
+      spawnSync(process.execPath, [baselines, ...args], { encoding: "utf8" });
+    const run = (...args: string[]) => spawnSync(process.execPath, args, { encoding: "utf8" });
+    const store = (root: string, area: string, shard: string) =>
+      run(runner, join(built, "tests", "families", area), built, "--store", root, "--shard", shard);
+    const listed = (root: string) =>
+      readFileSync(at(root, "shards.tsv"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => line.split("\t"));
+
+    // a seed plans copies in 64 shards, every other area in 16, and lists each shard to store
+    assert.equal(tool("seed", built, at("seed")).status, 0);
+    const manifest = readFileSync(at("seed", src, "MANIFEST"), "utf8");
+    assert.match(manifest, /^area copies 64 [0-9a-f]{64}$/m);
+    assert.match(manifest, /^area area 16 [0-9a-f]{64}$/m);
+    const counts = (root: string) =>
+      Object.fromEntries(
+        ["area", "copies"].map((area) => {
+          const lines = listed(root).filter(([name]) => name === area);
+          return [area, [lines.length, new Set(lines.map(([, , n]) => n))]];
+        }),
+      );
+    assert.deepEqual(counts("seed"), {
+      area: [16, new Set(["16"])],
+      copies: [64, new Set(["64"])],
+    });
+    // a first store of copies in another count is refused; any other area keeps the first writer's count
+    mkdirSync(at("fresh"));
+    const fresh = store(at("fresh"), "copies", "0/16");
+    assert.equal(fresh.status, 2, fresh.stderr);
+    assert.match(fresh.stderr, /planned in 64 shards where a baseline first plans it/);
+    // a baseline that recorded copies in 16 shards (before #1826) keeps them: its seed lists 16, a store in 64 is
+    // refused, one in 16 stores
+    cpSync(at("seed"), at("old"), { recursive: true });
+    const copies = await generatorsOf(join(built, "tests", "families", "copies"));
+    const old = planOf("copies", copies, 16);
+    const id = createHash("sha256").update(old).digest("hex");
+    writeFileSync(at("old", src, "copies", "PLAN"), old);
+    writeFileSync(
+      at("old", src, "MANIFEST"),
+      manifest.replace(/^area copies 64 [0-9a-f]{64}$/m, `area copies 16 ${id}`),
+    );
+    rmSync(at("old", "shards.tsv"));
+    assert.equal(tool("seed", built, at("old")).status, 0);
+    assert.deepEqual(counts("old"), { area: [16, new Set(["16"])], copies: [16, new Set(["16"])] });
+    assert.match(store(at("old"), "copies", "0/64").stderr, /is planned otherwise/);
+    assert.equal(store(at("old"), "copies", "0/16").status, 0);
+    // a head compares with a baseline whatever the counts: `area` stored in 4 shards, run in 3 and by its sources
+    mkdirSync(at("four"));
+    for (const shard of [0, 1, 2, 3])
+      assert.equal(store(at("four"), "area", `${shard}/4`).status, 0);
+    const against = (...more: string[]) => {
+      const result = run(
+        runner,
+        join(built, "tests", "families", "area"),
+        built,
+        "--baseline",
+        at("four", src, "area"),
+        ...more,
+      );
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+    };
+    const totals = [0, 1, 2].map((shard) => against("--shard", `${shard}/3`));
+    assert.deepEqual(
+      [
+        totals.reduce((sum, t) => sum + t.sources, 0),
+        totals.reduce((sum, t) => sum + t.uncompared, 0),
+      ],
+      [5, 0],
+    );
+    const places = run(
+      resolve("tests/families/items.mjs"),
+      "sources",
+      join(built, "tests", "families", "area"),
+    );
+    writeFileSync(at("area.items"), places.stdout);
+    const byItems = against("--items", at("area.items"));
+    assert.deepEqual([byItems.sources, byItems.uncompared, byItems.differences], [5, 0, 0]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the check and the baselines take one set of areas: each folder of tests/families that holds a generator, never one of data only, and the baselines the corpus fixture beside them (#1865)", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-areas-"));
+  try {
+    const tree = join(directory, "tree");
+    const families = join(tree, "tests", "families");
+    const write = (file: string, text: string) => {
+      mkdirSync(join(file, ".."), { recursive: true });
+      writeFileSync(file, text);
+    };
+    const generator = 'export const cases = [["one", "say 1"]];\n';
+    write(join(tree, "src", "index.js"), "export {};\n");
+    write(join(tree, ".sha"), `${"0".repeat(40)}\n`);
+    write(join(families, "area", "one.mjs"), generator);
+    write(join(families, "data", "table.json"), "{}\n");
+    write(join(families, "loose.mjs"), "export {};\n");
+    mkdirSync(join(families, "empty"));
+    write(join(tree, "tools", "corpus", "fixture", "cells.mjs"), generator);
+    const sources = resolve("tests/families/sources.mjs");
+    const { generatorFolders, holdsGenerators } = await import(pathToFileURL(sources).href);
+    assert.deepEqual(generatorFolders(families), [join(families, "area")]);
+    assert.deepEqual(
+      ["area", "data", "empty"].map((name) => holdsGenerators(join(families, name))),
+      [true, false, false],
+    );
+    assert.deepEqual(generatorFolders(join(tree, "absent")), []);
+    // (the check, copied beside those folders, lists the area's generator alone)
+    cpSync(resolve("tests/families/check.mjs"), join(families, "check.mjs"));
+    cpSync(sources, join(families, "sources.mjs"));
+    const listed = spawnSync(process.execPath, [join(families, "check.mjs"), "--list"], {
+      encoding: "utf8",
+    });
+    assert.equal(listed.stderr, "");
+    const generators = listed.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line).generator)
+      .filter((name) => name !== undefined);
+    assert.deepEqual(generators, ["area/one.mjs"]);
+    // (the baselines' state of that tree: the same area, then the corpus fixture)
+    const root = join(directory, "baselines");
+    mkdirSync(root);
+    const state = spawnSync(process.execPath, [baselines, "state", tree, root, "--read-only"], {
+      encoding: "utf8",
+    });
+    assert.notEqual(state.stdout.trim(), "", state.stderr);
+    const areas = state.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line).area)
+      .filter((name) => name !== undefined);
+    assert.deepEqual(areas, ["area", "fixture"], state.stderr);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

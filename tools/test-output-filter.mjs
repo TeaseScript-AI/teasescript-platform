@@ -38,8 +38,10 @@ const input = standardInput();
 if (input === "data") await refuse(usage);
 
 const arguments_ = process.argv.slice(2);
-const fullOutput = arguments_[0] === "--full-output";
-if (fullOutput) arguments_.shift();
+// `TEST_FULL_OUTPUT=1` asks the same as `--full-output`: `npm run check:full-output` sets it for every test run of the
+// stages it shares with `npm run check`.
+const fullOutput = arguments_[0] === "--full-output" || process.env.TEST_FULL_OUTPUT === "1";
+if (arguments_[0] === "--full-output") arguments_.shift();
 // (`--shard=i/N`: the full suite's shard i of N, as CI's test jobs run it, `tools/test-shards.mjs`)
 let shard = null;
 if (arguments_.some((argument) => argument.startsWith("--shard"))) {
@@ -86,7 +88,10 @@ if (unmatched.length > 0) {
 const nodeArguments = fullSuite
   ? [join(import.meta.dirname, "run-test-files.mjs"), ...testFiles]
   : ["--test", "--test-reporter=spec", ...testFiles];
+// (without `TEST_FULL_OUTPUT`: a test that runs this filter itself chooses its own output)
+const { TEST_FULL_OUTPUT: _, ...environment } = process.env;
 const child = spawn(process.execPath, nodeArguments, {
+  env: environment,
   stdio: fullOutput ? "inherit" : ["inherit", "pipe", "inherit"],
 });
 

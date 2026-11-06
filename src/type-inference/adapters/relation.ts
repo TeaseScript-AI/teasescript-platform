@@ -3,11 +3,11 @@ import type { KnownValue } from "../../static-evaluation.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { ContractRef, DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence } from "../graph.js";
 
-// The contract between the solver and the built-in contracts (O4 stage 2): an operation's result as a relation over
-// what the solver knows of its operands so far. Each contract family has one adapter that reads the owning contract
-// module (`conversions.ts`, `numeric-functions.ts`, `text-operations.ts`, ...) and answers in these terms; the solver
-// never reads a contract itself. Nothing here is implemented in stage 2a: the types are the frozen surface that the
-// adapters of stage 2b fill in and that stage 3 consumes.
+// An operation's result as a relation over what is known of its operands so far (O4 stage 2). Each contract family has
+// one adapter that reads the owning contract module (`conversions.ts`, `numeric-functions.ts`, `text-operations.ts`,
+// ...) and answers in these terms; `operationRelations()` (`index.ts`) serves them, and only the adapter tests read
+// it. The coarse core takes its results from `core/contract/` and `core/method-categories.ts`; of this file it reads
+// the operand types (`OperandView`, `OperationInputs`).
 
 /** A reference to one operand of an operation: its receiver, a positional argument, or a named one. */
 export type OperandRef =

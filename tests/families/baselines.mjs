@@ -69,7 +69,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { generatorsOf, placeOf } from "./sources.mjs";
+import { generatorFolders, generatorsOf, holdsGenerators, placeOf } from "./sources.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 
@@ -81,6 +81,13 @@ const hash = (text) => createHash("sha256").update(text).digest("hex");
  * first two where they are given (`baseline.sh compute` passes its seed PLAN's); the PLAN records them, so a store at
  * other limits than its baseline's is refused. The derivation of `units` and `timeout` is the runner README's.
  */
+/**
+ * The count of shards an area is planned in where a baseline first plans it (#1826): `copies` at 64, for a 60-minute wall
+ * on the slowest worker; every other area at 16. A baseline whose MANIFEST records another count keeps it.
+ */
+const SHARDS = new Map([["copies", 64]]);
+const shardsOf = (area) => SHARDS.get(area) ?? 16;
+
 export const DEFAULTS = {
   units: Math.trunc(Number(process.env.FAMILIES_UNITS)) || 4,
   timeout: Number(process.env.FAMILIES_TIMEOUT) || (process.env.CI === "true" ? 60 : 1800),
@@ -727,13 +734,19 @@ function areaName(area) {
   return area;
 }
 
-export async function planned(baseline, area, plan) {
+export async function planned(baseline, area, plan, first = false) {
   const top = pathOf(baseline, "baseline");
   areaName(area);
   const id = hash(plan);
   const { shards, places } = parsePlan(plan);
   const outcome = await gate(baseline, (text) => {
     const record = recorded(text).get(area);
+    // (a writer that plans an area of the table first, `first`, plans it in the table's count; an adopted seed's PLAN
+    // and every other area keep theirs)
+    if (record === undefined && first && SHARDS.has(area) && shards !== SHARDS.get(area))
+      return {
+        refused: `${top}/${area} is planned in ${SHARDS.get(area)} shards where a baseline first plans it`,
+      };
     if (record === undefined)
       appendFileSync(path.join(top, "MANIFEST"), `area ${area} ${shards} ${id}\n`);
     else if (record.plan !== id)
@@ -900,15 +913,12 @@ export function storedRuns(folder) {
 
 /** A built tree's areas: the folders of tests/families/ with generators, and tools/corpus/fixture/. */
 function areasOf(tree) {
-  const families = path.join(tree, "tests", "families");
+  // (the families' areas as the check finds them, then the corpus fixture, an area outside `tests/families`)
+  const fixture = path.join(tree, "tools", "corpus", "fixture");
   return [
-    ...(existsSync(families) ? readdirSync(families, { withFileTypes: true }) : [])
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(families, entry.name)),
-    path.join(tree, "tools", "corpus", "fixture"),
-  ].filter(
-    (folder) => existsSync(folder) && readdirSync(folder).some((name) => name.endsWith(".mjs")),
-  );
+    ...generatorFolders(path.join(tree, "tests", "families")),
+    ...(holdsGenerators(fixture) ? [fixture] : []),
+  ];
 }
 
 /** Each area's state in the baseline of `tree` (see above), one JSON line each, then the baseline's; the exit status. */
@@ -946,7 +956,8 @@ async function stateOf(tree, root, readOnly) {
     const made = areaRead(own.dir, area, manifest);
     let line;
     if (made.refused !== undefined) return refusal(made.refused);
-    if (record === undefined) line = { area, folder, state: "absent", store: "all" };
+    if (record === undefined)
+      line = { area, folder, state: "absent", shards: shardsOf(area), verified: 0, store: "all" };
     else if (made.area === undefined)
       // (recorded, its PLAN not made yet: the next writer's to finish, in the recorded count)
       line = { area, folder, state: "absent", shards: record.shards, verified: 0, store: "all" };
@@ -1062,7 +1073,7 @@ async function compiledInto(root, tree) {
 
 /**
  * A seed (#1590): the tree's baseline in `root` made or joined as `state` makes it (its commit appended), every area of
- * the tree planned (in the count its MANIFEST records, else 16 shards), no shard stored, and then named by the tree's
+ * the tree planned (in the count its MANIFEST records, else `shardsOf`'s), no shard stored, and then named by the tree's
  * build (`compiledInto`); then `state`'s lines printed and `<root>/shards.tsv` written (a new file), one line per shard to store
  * (`<area>\t<i>\t<N>`), as the hook queues them. Its exit status as `state`'s, but 0 where the baseline is incomplete.
  */
@@ -1075,8 +1086,12 @@ async function seed(tree, root, refuse) {
   const records = recorded(readFileSync(path.join(own.dir, "MANIFEST"), "utf8"));
   for (const folder of areasOf(tree)) {
     const area = path.basename(folder);
-    const plan = planOf(area, await generatorsOf(folder), records.get(area)?.shards ?? 16);
-    const made = await planned(own.baseline, area, plan);
+    const plan = planOf(
+      area,
+      await generatorsOf(folder),
+      records.get(area)?.shards ?? shardsOf(area),
+    );
+    const made = await planned(own.baseline, area, plan, true);
     if (made.refused !== undefined) refuse(made.refused);
   }
   // (its last write: a MANIFEST that names a build records every area of its tree, which `status` reads without one)
@@ -1087,7 +1102,7 @@ async function seed(tree, root, refuse) {
   if (status === 2) return 2;
   const stored = lines
     .filter((line) => line.area !== undefined && line.store !== undefined)
-    .flatMap(({ area, shards = 16, store }) =>
+    .flatMap(({ area, shards, store }) =>
       (store === "all" ? [...Array(shards).keys()] : store).map(
         (shard) => `${area}\t${shard}\t${shards}\n`,
       ),
@@ -1185,7 +1200,8 @@ const allowanceIn = (value) => value === null || (Number.isInteger(value) && val
  * proved before any part of it is read: its place (a
  * generator, a name, a key), its stall (a text) and its exception outside its runs (the runner's text) where it has
  * them, and its runs, each a mode and check (`runName`) with one tree's result: a value (its hash, its parts' hashes or
- * none, its count of unanswered nodes, whether the files did not parse) or the text it threw. Under plan 2 each run also
+ * none, its count of unanswered nodes and, since #1837, why (`unansweredBy`), whether the files did not parse) or the
+ * text it threw. Under plan 2 each run also
  * holds the units it charged (`work`) and its program's allowance (`allowance`), a stall over the unit limit (`units`)
  * the run it cut (`cut`: its name, its units and allowance, a charged ledger's (above 0), the units over `units` times
  * the allowance: the stall's certificate, the same on every machine), and a run that reached the wall-clock safety net
@@ -1219,7 +1235,13 @@ export function sourceFault(line, units = null) {
       (shaped(result, ["thrown", ...charged])
         ? typeof result.thrown === "string"
         : shaped(result, ["value", ...charged]) &&
-          shaped(value, ["hash", "parts", "unanswered", "unparsed"]) &&
+          shaped(value, ["hash", "parts", "unanswered", "unparsed"], ["unansweredBy"]) &&
+          // (why its oracle left nodes unanswered, #1837: only where it left some, a reason with its first node or none)
+          (value.unansweredBy === undefined ||
+            (value.unanswered > 0 &&
+              shaped(value.unansweredBy, ["reason", "node"]) &&
+              ["questions", "stopped", "unknown"].includes(value.unansweredBy.reason) &&
+              (value.unansweredBy.node === null || Number.isInteger(value.unansweredBy.node)))) &&
           hash64(value.hash) &&
           (value.parts === null ||
             (Array.isArray(value.parts) &&

@@ -6,7 +6,7 @@
  */
 
 /** The length of an entrance and of the glide that makes room for it. */
-export const CONVERSATION_ENTRANCE_MS = 200;
+const CONVERSATION_ENTRANCE_MS = 200;
 /** How far an entering element rises while it fades in. */
 const CONVERSATION_ENTRANCE_RISE_PX = 8;
 const EASING = "cubic-bezier(0.2, 0, 0, 1)";

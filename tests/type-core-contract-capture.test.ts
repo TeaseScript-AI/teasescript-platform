@@ -249,9 +249,10 @@ test("host data inside a stored object literal is captured with its whole store 
  * the store's type unknown, and the receiving completion completes its contract; the plan checks that contract at the
  * store. Judged by what the script does under the demand allowance alone, and at sampled settled stops past it (each
  * phase's first, last and two between): a stop always comes before the completion, which runs after everything that can
- * stop, so there no completion runs and the plan is the settled pass's, as without the completion.
+ * stop, so there no completion runs, and the settled pass's plan, which lets the forbidden value through, is declined
+ * (#1526 decision 2, condition 1), as without the completion.
  */
-test("a stopped decision's store is checked against its completed contract; at a stop the plan is the settled pass's (#1526 phase C)", () => {
+test("a stopped decision's store is checked against its completed contract; at a stop the settled pass's plan is declined (#1526 phase C, decision 2)", () => {
   for (const witness of WITNESSES) {
     const { source } = witness;
     const store = spanOf(source, witness.store);
@@ -285,11 +286,23 @@ test("a stopped decision's store is checked against its completed contract; at a
           assert.notEqual(stopped.budget.exhausted, null, at);
           assert.equal(stopped.budget.closure, null, at);
           assert.deepEqual(stopped.receiving, [], at);
-          const without = withoutRecords(
-            { diagnostic: () => false, check: () => false, completion: true },
+          // (#1526 decision 2, condition 1: there the plan is the settled pass's, whose store check lacks the completed
+          // contract, so the forbidden value would pass; the candidate declines it, as without the completion)
+          for (const run of [
             () => compiled(allowance),
-          );
-          assert.deepEqual(compiled(allowance).plan, without.plan, at);
+            () =>
+              withoutRecords(
+                { diagnostic: () => false, check: () => false, completion: true },
+                () => compiled(allowance),
+              ),
+          ])
+            assert.throws(
+              run,
+              (error) =>
+                error instanceof CandidateOutsideSlice &&
+                error.what === "a store whose check was lost at the budget",
+              at,
+            );
         }
       }
   }
@@ -375,7 +388,7 @@ test("a copy of an inferred place gives the capture its natural contract after a
   }
 });
 
-test("a property whose proof a stop cut leaves its later complete sibling checked (Codex r1 on #1606)", () => {
+test("a property whose proof a stop cut leaves its later complete sibling checked, or the store declined (Codex r1 on #1606, #1526 decision 2)", () => {
   // (`g` decided before the capture by its own store, `f` cut: the later sibling's check stands at the store; `a.f`
   // stored from a loop's element, as above, #1604)
   const source =
@@ -393,7 +406,6 @@ test("a property whose proof a stop cut leaves its later complete sibling checke
     const [result] = storeContracts(answers, request).values();
     if (result?.state !== "lost" || !result.required.every((level) => level.path[0] === f))
       continue;
-    witnessed += 1;
     const at = `stop at ${allowance}`;
     const partial = result.partial;
     assert.ok(partial?.kind === "object", at);
@@ -402,9 +414,24 @@ test("a property whose proof a stop cut leaves its later complete sibling checke
       { kind: "integer" },
       at,
     );
-    const { plan } = withTestAllowance(allowance, () =>
-      compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
-    );
+    // (the stop cut `f`'s proof, so the store's check is the partial one and the obligation has no result: the candidate
+    // declines, #1526 decision 2, Astra r1's B1, where the partial plan would let `{f: [["x"]], g: 3}` through; a
+    // published plan keeps the later sibling's check)
+    let plan;
+    try {
+      ({ plan } = withTestAllowance(allowance, () =>
+        compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+      ));
+    } catch (error) {
+      assert.ok(
+        error instanceof CandidateOutsideSlice &&
+          error.what === "a store whose check was lost at the budget",
+        at,
+      );
+      witnessed += 1;
+      if (witnessed === 2) break;
+      continue;
+    }
     assert.deepEqual(
       storeRunProblems(
         plan!,
@@ -415,6 +442,7 @@ test("a property whose proof a stop cut leaves its later complete sibling checke
       [],
       at,
     );
+    witnessed += 1;
     // (two such stops are enough here; every allowance is the PR's queue evidence)
     if (witnessed === 2) break;
   }
@@ -451,8 +479,23 @@ test("the candidate route's decline and the capture's skip read one syntax rule"
   const programs: readonly (readonly [string, boolean])[] = [
     ['let a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nsay "AFTER"\nexit\n', true],
     ['let a = {f: [[1]], g: ["s"]}\nlet b = a\nb = hostValue\nexit\n', true],
+    // (the narrowing's own test is inside since #1073 PR 2 phase 2; another comparison is not)
     [
       'let a = {f: [[1]]}\nlet b = a\nif hostValue is integer {say "x"}\nb.f = hostValue\nexit\n',
+      true,
+    ],
+    ['let a = {f: [[1]]}\nlet b = a\nif hostValue < 1 {say "x"}\nb.f = hostValue\nexit\n', false],
+    // (its operand walked, its written type the slice's, and only `null` the other side of `==` or `!=`)
+    [
+      'let a = {f: [[1]]}\nlet b = a\nif (askBoolean "?") is boolean {say "x"}\nb.f = hostValue\nexit\n',
+      false,
+    ],
+    [
+      'let a = {f: [[1]]}\nlet b = a\nif hostValue is integer | string {say "x"}\nb.f = hostValue\nexit\n',
+      false,
+    ],
+    [
+      'let a = {f: [[1]]}\nlet b = a\nif hostValue < null {say "x"}\nb.f = hostValue\nexit\n',
       false,
     ],
     ['let a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nsay "${hostOther}"\nexit\n', false],
@@ -482,7 +525,7 @@ test("outside the slice's syntax the capture requests nothing and charges nothin
   // (a program the route declines by its syntax: the analysis is main's, no extraction phase at any allowance and no
   // contract, also where a store's value is cyclic, which the capture would follow to the slice's depth)
   const source =
-    'let typed:integer[]=[1]\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\nif hostValue is integer {a=b}\nb=a\nb.q=a\nc=b\nlet out={p:c}\nexit\n';
+    'let typed:integer[]=[1]\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\nif hostValue < 1 {a=b}\nb=a\nb.q=a\nc=b\nlet out={p:c}\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
   assert.notEqual(outsideSyntax(request.files, new Set(GLOBALS)), null);
   for (const mode of HELD_MODES) {
@@ -506,7 +549,9 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   // #1221 charges its event searches by comparison, 34 fewer since #1444 answers a literal's written decider from its
   // groups' summaries, 4 more since #1428's landing reporter (a later call takes one listing: 4 reports, 2 lookup and 2
   // publication units in place of the 4 units of the walk it replaces), 295 fewer since #1251 makes no narrowing index for
-  // it. A regression oracle of this construction. In the first mode alone in CI: each mode walks one cyclic contract of about 23 million
+  // it, 7 more since #1073 PR 2's consumers look up a descendant demand's narrowing, 38 more since #1822 finds a read signature's
+  // prefixes by its charged trie walk (`rdWalk`), 48 more since #1790 asks whether the mixed error's later element may
+  // hold null at its leaf (`c=[a,b][0]`: #1765's walk one depth more). A regression oracle of this construction. In the first mode alone in CI: each mode walks one cyclic contract of about 23 million
   // units, seconds; every mode is #1606's queue evidence)
   const source =
     'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nb.q=a\nc=[a,b][0]\nc=a\nlet out={p:c}\nexit\n';
@@ -515,7 +560,7 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   assert.equal(budget.exhausted, null);
   assert.equal(budget.stoppedIn, null);
   assert.deepEqual(contracts, []);
-  assert.equal(budget.total, 22_962_486);
+  assert.equal(budget.total, 22_962_579);
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {

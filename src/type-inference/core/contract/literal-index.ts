@@ -1,4 +1,5 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
+import { joinParts } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { sortCost, type Definition } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
@@ -742,4 +743,29 @@ export function propertyLack(
   const lack = { writer, at };
   index.lacking.set(path, lack);
   return lack;
+}
+
+/** F11: the first object at the path without the property, once per (path, property): its token, or `null`. */
+export function lackingAt(
+  contract: Contract,
+  index: LiteralIndex,
+  path: number,
+  step: string,
+): Writer | null {
+  const key = joinParts(path, step);
+  const known = index.lacking.get(key);
+  if (known !== undefined) return known;
+  contract.keepText(key.length);
+  const objects = nodeAt(contract, index, path)?.objects ?? null;
+  let token: Writer | null = null;
+  if (objects !== null && (objects.count.get(step) ?? 0) < objects.list.length)
+    for (const object of objects.list) {
+      contract.pass.program.work.charge("invSteps");
+      if (!object.names.has(step)) {
+        token = object.token;
+        break;
+      }
+    }
+  index.lacking.set(key, token);
+  return token;
 }
