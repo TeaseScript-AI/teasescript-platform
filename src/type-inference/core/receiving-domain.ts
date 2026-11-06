@@ -50,6 +50,12 @@ export class ReceivingDomain {
   inheriting = new Set<PlaceId>();
   /** Per unwritten place and path, the written type its own decision copies there (`inheritedAt`), or none. */
   inherited = new Map<CanonicalKey, TypeTerm | null>();
+  /**
+   * #1901: per such path, whether the copy that decides it reads its written type at its own root (a scalar copy
+   * stored at the path) rather than below it (a collection's element). Written beside `inherited`; read only by the
+   * decider (`earliestDecider`'s `own`, in its scan and its groups' summary), which messages ask; no decision reads it.
+   */
+  inheritedOwn = new Map<CanonicalKey, boolean>();
   /** The places and paths whose decisions wait on each other through copies, by cycle (`cut`): a union-find. */
   cycles = new Map<CanonicalKey, CanonicalKey>();
   /** Each cycle's size, by its root (`cycleOf`). */

@@ -21,7 +21,7 @@ import { chooses, live, snapshotOf } from "./links.js";
 import type { Expansion, Inheriting, Part } from "./model.js";
 import { contributionOf } from "./own.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
-import { inheritedInto } from "./waiting.js";
+import { inheritedInto, inheritedOwnAt } from "./waiting.js";
 import { partOf, TYPED_ROLES } from "./walk.js";
 
 // The carriers' transfers (G3 2c): what a stored value's walk answers, over its tasks' recipes (`expand`): each
@@ -1315,8 +1315,9 @@ export function* writtenDecider(
     if (!member.joined && entry.rank > f.copyRank) continue;
     if (!asksType(admission, f.group, entry, rest === at.length)) continue;
     let term: TypeTerm | null;
-    // (whether the copy decides at its own level, no step of the asked path left below it; a call's result never is a
-    // copy read as an occurrence, #1901)
+    // (whether the copy reads its written type at its own level: a written copy's where no step of the asked path is
+    // left below it, an inheriting copy's as the inheritance pass recorded it (`inheritedOwnAt`); a call's result never
+    // is a copy read as an occurrence, #1901)
     let own = false;
     if (entry.call === true) {
       const key = contract.resultKey(entry.task.value);
@@ -1330,8 +1331,8 @@ export function* writtenDecider(
             );
     } else if (entry.task.inherits !== null) {
       const below = restAfter(entry.task.inherits.strip, at, rest);
-      own = below.length === 0;
       term = yield* inheritedInto(admission, entry.task.inherits.from, below, null);
+      own = inheritedOwnAt(admission, entry.task.inherits.from, below);
     } else {
       const below = restAfter(entry.task.stop!.strip, at, rest);
       own = below.length === 0;

@@ -222,6 +222,9 @@ export class Admission {
   get inherited(): ReceivingDomain["inherited"] {
     return this.pass.receivingDomain.inherited;
   }
+  get inheritedOwn(): ReceivingDomain["inheritedOwn"] {
+    return this.pass.receivingDomain.inheritedOwn;
+  }
   get cycles(): ReceivingDomain["cycles"] {
     return this.pass.receivingDomain.cycles;
   }
