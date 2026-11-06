@@ -56,13 +56,17 @@ type FNode =
   | { readonly kind: "native"; readonly value: PlaceId }
   /** #1784: `inner` reached through a marking route: its leaves `marked`. */
   | { readonly kind: "mark"; readonly inner: number }
-  /** #1784: `inner` reached `steps` below an entry whose holder's mark those steps (and the rest) decide. */
-  | {
-      readonly kind: "hold";
-      readonly holder: Holder;
-      readonly inner: number;
-      readonly steps: readonly string[];
-    };
+  /**
+   * #1784: `inner` (neither marked nor held) reached below entries whose holders' marks the rest decides: each holder
+   * with the steps taken since its entry, one per holder and steps, in their names' order.
+   */
+  | { readonly kind: "hold"; readonly inner: number; readonly pending: readonly Pending[] };
+
+/** A holder's mark not decided yet, and the steps taken since its entry (`heldBelow`). */
+interface Pending {
+  readonly holder: Holder;
+  readonly steps: readonly string[];
+}
 
 /** A node one step below another: `Sum(node, step)`, its nodes as found, each passed once to every reader. */
 interface Goal {
@@ -143,6 +147,8 @@ class Frontier {
   tasks: (readonly [(node: number) => void, number])[] = [];
   /** Whether a build runs (`drain`): none starts inside another. */
   draining = false;
+  /** #1784: each mark holder a hold names, by its number in this graph. */
+  readonly holders = new Map<Holder, number>();
 
   public constructor(readonly contract: Contract) {}
 }
@@ -334,28 +340,46 @@ function markNode(frontier: Frontier, inner: number): number {
 }
 
 /**
- * #1784: `inner` reached `steps` below an entry with `holder`: marked once the steps reach the holder's depth and mark
- * there (`marksAt` asks no more of them), unmarked if they do not, else a `hold` node taking the next steps; a holder
- * whose depth no bound holds declines (`marks-depth`).
+ * #1784: `node` reached with holders' marks pending: their union with those it holds already, each once (a mark is
+ * idempotent, so a holder pending twice at one steps is pending once, and a whole-copy cycle adds nothing new). A holder
+ * whose steps reach its depth is decided (`marksAt` asks no more of them): marked makes the node marked, unmarked drops
+ * it; a node with none left pending is its own. A holder whose depth no bound holds declines (`marks-depth`).
  */
+function pendingBelow(frontier: Frontier, node: number, adds: readonly Pending[]): number {
+  const { contract } = frontier;
+  const at = frontier.nodes[node]!;
+  if (at.kind === "mark") return node;
+  const inner = at.kind === "hold" ? at.inner : node;
+  const byName = new Map<string, Pending>();
+  for (const each of [...(at.kind === "hold" ? at.pending : []), ...adds]) {
+    step(frontier);
+    const depth = depthOf(contract, each.holder);
+    if (depth === Infinity) throw new Decline("marks-depth");
+    if (each.steps.length >= depth) {
+      if (marksAt(contract, each.holder, each.steps)) return markNode(frontier, inner);
+      continue;
+    }
+    let holder = frontier.holders.get(each.holder);
+    if (holder === undefined) frontier.holders.set(each.holder, (holder = frontier.holders.size));
+    byName.set(JSON.stringify([holder, each.steps]), each);
+  }
+  if (byName.size === 0) return inner;
+  const names = [...byName.keys()].sort();
+  return nodeId(frontier, JSON.stringify(["H", inner, names]), () => ({
+    kind: "hold",
+    inner,
+    pending: names.map((name) => byName.get(name)!),
+  }));
+}
+
+/** #1784: `inner` reached `steps` below an entry with `holder` (`pendingBelow`). */
 function heldBelow(
   frontier: Frontier,
   holder: Holder,
   inner: number,
   steps: readonly string[],
 ): number {
-  const { contract } = frontier;
-  if (frontier.nodes[inner]!.kind === "mark") return inner;
-  const depth = depthOf(contract, holder);
-  if (depth === Infinity) throw new Decline("marks-depth");
-  if (steps.length >= depth)
-    return marksAt(contract, holder, steps) ? markNode(frontier, inner) : inner;
-  return nodeId(frontier, joinParts("H", holder.id, inner, steps), () => ({
-    kind: "hold",
-    holder,
-    inner,
-    steps,
-  }));
+  return pendingBelow(frontier, inner, [{ holder, steps }]);
 }
 
 /** An entry, or a literal's read: its guard bit, its mark holder and its ingress (`annotated`'s). */
@@ -543,10 +567,12 @@ function rules(frontier: Frontier, goal: Goal): void {
   if (node.kind === "mark")
     return below(frontier, node.inner, [s], 0, (found) => into(markNode(frontier, found)));
   if (node.kind === "hold") {
-    const { holder } = node;
-    const steps = keptSteps(contract.work, node.steps, [s]);
+    const pending = node.pending.map(({ holder, steps }) => ({
+      holder,
+      steps: keptSteps(contract.work, steps, [s]),
+    }));
     return below(frontier, node.inner, [s], 0, (found) =>
-      into(heldBelow(frontier, holder, found, steps)),
+      into(pendingBelow(frontier, found, pending)),
     );
   }
   if (node.kind === "key") {
@@ -790,7 +816,11 @@ function stateOf(frontier: Frontier, start: number, mark: boolean): number {
     if (at.kind === "mark" || at.kind === "hold") step(frontier);
     if (at.kind === "mark") [node, marked] = [at.inner, true];
     else if (at.kind === "hold") {
-      if (!marked && marksAt(frontier.contract, at.holder, at.steps)) marked = true;
+      if (
+        !marked &&
+        at.pending.some(({ holder, steps }) => marksAt(frontier.contract, holder, steps))
+      )
+        marked = true;
       node = at.inner;
     } else return node * 2 + (marked ? 1 : 0);
   }

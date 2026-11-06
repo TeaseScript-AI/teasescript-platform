@@ -367,6 +367,10 @@ test("a ring read through a marked copy reaches its check, and its leaves are re
     guardedRing({ tested: "h" }),
     guardedRing({ read: "q.q.q.g" }),
     guardedRing({ read: "q.q.f" }),
+    // a holder two steps deep in the closed ring, its depth set by its own test or by an unrelated one: one pending mark
+    // per holder and steps, however often the cycle reaches it (Codex r1 B1)
+    guardedRing({ tested: "g.h", leaf: "{g:{h:0}}" }),
+    'let x={a:{b:1}}\nif x.a.b is integer { say "x" }\n' + guardedRing(),
   ])
     for (const mode of MODES) {
       const pushed = analysed(source, mode);
