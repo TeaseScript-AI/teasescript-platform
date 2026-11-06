@@ -23,6 +23,9 @@ import {
   selectPlayerRuntimeChoice,
   skipPlayerRuntimeImage,
   stepPlayerRuntimeFormField,
+  clearPlayerRuntimeFormField,
+  dismissPlayerRuntimeFormField,
+  cancelPlayerRuntimeForm,
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
   type PlayerRuntimeSession,
@@ -66,6 +69,7 @@ const SCRIPT = [
   'let pick = askChoice "A", "B"',
   'showButton "Go"',
   'let answers = askForm fields: { first: { type: "text", text: "First" } }',
+  'let maybe = askForm fields: { on: false }, cancel: "Back"',
   'let skipped = askImage("Skip", allowSkip: true)',
   'let picture = askImage("Picture")',
   'showPopup "Done"',
@@ -114,6 +118,15 @@ const TAPE: readonly (readonly [string, Step])[] = [
       args: { actionId: presented(shown), fieldId: "first", draft: null },
     }),
   ],
+  ["clear", (shown) => ({ op: "clearFormField", args: { actionId: presented(shown) } })],
+  ["dismiss", (shown) => ({ op: "dismissFormField", args: { actionId: presented(shown) } })],
+  [
+    "step again",
+    (shown) => ({
+      op: "stepFormField",
+      args: { actionId: presented(shown), fieldId: "first", draft: null },
+    }),
+  ],
   [
     "draft",
     (shown) => ({
@@ -122,6 +135,7 @@ const TAPE: readonly (readonly [string, Step])[] = [
     }),
   ],
   ["form", answer("submitForm", { draft: "Bo" })],
+  ["cancel", answer("cancelForm")],
   ["skip", answer("skipImage")],
   ["image", answer("answerImage", { reference: "photo-1", held: HELD })],
   ["popup", answer("closePopup")],
@@ -203,8 +217,12 @@ test("L5c's ops give the same replies, publications and events in-process and in
         ["choice", "completed"],
         ["button", "completed"],
         ["step", "updated"],
+        ["clear", "updated"],
+        ["dismiss", "updated"],
+        ["step again", "updated"],
         ["draft", "updated"],
         ["form", "completed"],
+        ["cancel", "completed"],
         ["skip", "completed"],
         ["image", "completed"],
         ["popup", "completed"],
@@ -261,6 +279,12 @@ function direct(session: PlayerRuntimeSession, op: string, args: Record<string, 
         );
       case "stepFormField":
         return stepPlayerRuntimeFormField(session, a.fieldId, a.draft ?? undefined);
+      case "clearFormField":
+        return clearPlayerRuntimeFormField(session);
+      case "dismissFormField":
+        return dismissPlayerRuntimeFormField(session);
+      case "cancelForm":
+        return cancelPlayerRuntimeForm(session);
       case "submitForm":
         return submitPlayerRuntimeForm(session, a.draft ?? undefined);
       case "skipImage":

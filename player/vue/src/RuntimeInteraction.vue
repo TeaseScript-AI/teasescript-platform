@@ -32,6 +32,7 @@ import type {
 import { imagePickerAccept, type ImageFileFilters } from "../../image-file.js";
 import { openUrlTab } from "../../url-tab.js";
 import {
+  carriedText,
   draftInput,
   intents,
   runInput,
@@ -177,9 +178,20 @@ function loadFormEditor(current: PlayerFormPresentation | null): boolean {
     return false;
   }
   composerOwner = { actionId: current.actionId, fieldId: current.editor.fieldId };
-  draft.value =
-    typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text;
+  moveComposer(
+    typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text,
+  );
   return true;
+}
+/**
+ * The composer's text at the click of an answer still in flight, or `null`: keys typed meanwhile go to the text the
+ * composer moves to next (`carriedText`), once.
+ */
+let submittedDraft: string | null = null;
+/** Moves the composer to `next`, keeping what the player typed since an answer in flight was given. */
+function moveComposer(next: string) {
+  draft.value = carriedText(submittedDraft, draft.value, next);
+  submittedDraft = null;
 }
 /** Whether the composer holds the text of the presented form's edited field. */
 function ownsPresentedEditor(): boolean {
@@ -468,11 +480,12 @@ watch(
         ? typedTexts()?.get(typedKey(actionId.value, ""))
         : undefined;
     if (!loadFormEditor(form.value))
-      draft.value =
+      moveComposer(
         typedHere ??
-        (presentedInput !== null && "prefill" in presentedInput
-          ? (presentedInput.prefill ?? "")
-          : "");
+          (presentedInput !== null && "prefill" in presentedInput
+            ? (presentedInput.prefill ?? "")
+            : ""),
+      );
     clearFeedback();
     await nextTick();
     // Completion releases the disabled guard after publishing the session.
@@ -526,6 +539,7 @@ async function complete(
     document.documentElement.dataset.playerKeyboardFocus === "true" &&
     !!document.activeElement?.closest("[data-foreground-controls]");
   submitting.value = true;
+  submittedDraft = draft.value;
   try {
     const targetId = (current: PlayerSession) =>
       target === "pacing"
@@ -565,13 +579,15 @@ async function complete(
     // the field it edits, if any.
     // The composer gives up its field before its text changes, so the change is never typed text of another one.
     if (result.outcome.kind === "updated" || result.outcome.kind === "unchanged") {
-      if (!loadFormEditor(playerRuntimeForm(result.session))) draft.value = "";
+      // A field the composer already moved to, as the form's publication opened it, stays as it is.
+      if (!ownsPresentedEditor() && !loadFormEditor(playerRuntimeForm(result.session)))
+        moveComposer("");
       clearFeedback();
     } else if (result.outcome.kind === "completed") {
       // The answered text goes, unless the next interaction already shows: its prefill or typed text stays.
       if (actionId.value === before) {
         composerOwner = null;
-        draft.value = "";
+        moveComposer("");
       }
       clearFeedback();
     } else {
@@ -588,6 +604,7 @@ async function complete(
     await nextTick();
   } finally {
     submitting.value = false;
+    submittedDraft = null;
     suppressComposerRefocus = false;
   }
 }
@@ -801,7 +818,7 @@ function submit(source: "input" | "button") {
     return;
   }
   void complete(
-    intents.composer(() => draft.value, source === "input" ? "enter" : "send"),
+    intents.composer(draft.value, source === "input" ? "enter" : "send"),
     source === "input",
   );
 }
@@ -827,8 +844,8 @@ function submit(source: "input" | "button") {
               :form="form"
               :accessible-name="foreground.accessibleName"
               :disabled="submitting"
-              @step="(fieldId) => complete(intents.formStep(fieldId, formDraft), false)"
-              @submit="complete(intents.formSubmit(formDraft, 'button'))"
+              @step="(fieldId) => complete(intents.formStep(fieldId, formDraft()), false)"
+              @submit="complete(intents.formSubmit(formDraft(), 'button'))"
               @cancel="complete(intents.formCancel('button'))"
               @dismiss="complete(intents.formDismiss, false)"
               @clear="complete(intents.formClear, false)"

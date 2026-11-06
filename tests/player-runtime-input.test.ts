@@ -227,13 +227,13 @@ test("every control answers with its op and how the player answered, which the r
   const { bridge, host, posted } = await mount(context);
   await start(host, CONTROLS);
   const steps: readonly (readonly [string, () => Intent])[] = [
-    ["composer", () => input.intents.composer(() => "Ann", "enter")],
+    ["composer", () => input.intents.composer("Ann", "enter")],
     ["choice", () => input.intents.choice(options(host.session.value!)[1]!.id, "button")],
     ["button", () => input.intents.choice(null, "preselectedKey")],
-    ["step", () => input.intents.formStep("first", () => undefined)],
+    ["step", () => input.intents.formStep("first", undefined)],
     ["clear", () => input.intents.formClear],
     ["dismiss", () => input.intents.formDismiss],
-    ["step again", () => input.intents.formStep("first", () => undefined)],
+    ["step again", () => input.intents.formStep("first", undefined)],
   ];
   for (const [name, intent] of steps)
     assert.equal((await answer(host, intent())).kind, "answered", name);
@@ -244,7 +244,7 @@ test("every control answers with its op and how the player answered, which the r
   );
   assert.ok(drafted, "the draft updated the form");
   for (const [name, intent] of [
-    ["submit", input.intents.formSubmit(() => "Bo", "button")],
+    ["submit", input.intents.formSubmit("Bo", "button")],
     ["skip", input.intents.imageSkip("button")],
     ["popup", input.intents.popupClose("button")],
     ["export", input.intents.exportClose("button")],
@@ -280,6 +280,31 @@ test("every control answers with its op and how the player answered, which the r
       .operations.flatMap((operation) => (operation.input == null ? [] : [operation.input])),
     ["enter", "button", "preselectedKey", "button", "button", "button", "button", "button"],
   );
+});
+
+test("an answer submits the composer's text of the click; keys typed while it is in flight replace the next text", () => {
+  // Typed after the click, while the answer is in flight: they replace what the composer moves to next.
+  assert.equal(input.carriedText("One", "OneX", "Two"), "X");
+  assert.equal(input.carriedText("One", "OneX", ""), "X");
+  // Nothing typed since the click: the composer moves to the next text as before.
+  assert.equal(input.carriedText("One", "One", "Two"), "Two");
+  assert.equal(input.carriedText(null, "anything", "Two"), "Two");
+  // Text edited rather than appended to is what the player typed, which stands.
+  assert.equal(input.carriedText("One", "Xne", "Two"), "Xne");
+});
+
+test("the composer's text is the one of the click, also when the player types while the observation is in flight", async (context) => {
+  const { host, posted } = await mount(context);
+  await start(
+    host,
+    'let name = askText "Name?"\nsay "hi ${name}", instant\nshowButton "End"\nexit',
+  );
+  let typed = "One";
+  const answering = answer(host, input.intents.composer(typed, "enter"));
+  typed = "OneX";
+  assert.equal((await answering).kind, "answered");
+  assert.equal(posted.posts.find((post) => post.op === "submitComposer")?.args.text, "One");
+  assert.ok(said(host).includes("hi One"));
 });
 
 test("an input to an action no longer presented posts no op", async (context) => {

@@ -67,17 +67,19 @@ const answer = (
 
 /** The op each of the Player's controls answers with; `input` is how the player answered, which the recording keeps. */
 export const intents = {
-  composer: (text: () => string, input: DebugAnswerInput) =>
-    answer("submitComposer", () => ({ text: text() }), input),
+  // The values a control submits are those of the click: what the player types while the answer is in flight is not part
+  // of it (`carriedText`).
+  composer: (text: string, input: DebugAnswerInput) =>
+    answer("submitComposer", () => ({ text }), input),
   /** A choice's option, or the button of `showButton` for `null`. */
   choice: (optionId: string | null, input: DebugAnswerInput) =>
     optionId === null
       ? answer("activateButton", undefined, input)
       : answer("selectChoice", () => ({ optionId }), input),
-  formStep: (fieldId: string, draft: () => string | undefined) =>
-    answer("stepFormField", () => ({ fieldId, draft: draft() ?? null })),
-  formSubmit: (draft: () => string | undefined, input: DebugAnswerInput) =>
-    answer("submitForm", () => ({ draft: draft() ?? null }), input),
+  formStep: (fieldId: string, draft: string | undefined) =>
+    answer("stepFormField", () => ({ fieldId, draft: draft ?? null })),
+  formSubmit: (draft: string | undefined, input: DebugAnswerInput) =>
+    answer("submitForm", () => ({ draft: draft ?? null }), input),
   formCancel: (input: DebugAnswerInput) => answer("cancelForm", undefined, input),
   formDismiss: answer("dismissFormField"),
   formClear: answer("clearFormField"),
@@ -91,6 +93,18 @@ export const intents = {
   /** The pacing gate's skip, which takes no `input`. */
   pacing: answer("skipPacing"),
 } as const;
+
+/**
+ * What the composer shows when it moves to `next` (the next question's prefill, the next field's text, or nothing) while
+ * an answer submitted with the text `submitted` is in flight, the composer showing `current`. The composer opens new
+ * text selected, so keys typed after the submission replace it, as they did when the answer applied in the click: those
+ * keys replace `next`. Without typing since the submission, or without one in flight (`null`), it is `next`.
+ */
+export function carriedText(submitted: string | null, current: string, next: string): string {
+  if (submitted === null || current === submitted) return next;
+  const typed = current.startsWith(submitted) ? current.slice(submitted.length) : current;
+  return typed === "" ? next : typed;
+}
 
 /**
  * Stores `text` as the draft of the form field `target`, as the draft timer does: without an observation, as today's
