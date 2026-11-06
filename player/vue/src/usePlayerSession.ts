@@ -638,7 +638,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           if (outcome.kind === "observed") publishOwned(section.session);
           return section.session;
         },
-        send: (op, args, basis) => section.send(op, args, { basis }),
+        // What the services send shows as any work completing after a reply does.
+        send: (op, args, basis) =>
+          section.send(op, args, { basis, publish: (next) => void publishOwned(next) }),
       }),
     );
   }
@@ -707,8 +709,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const captures = new CaptureService(() => camera.answer(), {
     session: () => servicedSession.value,
     generation: () => generation.value,
-    observe: observeForInput,
-    publish: publishOwned,
     section: serviceSection,
     capturedMedia,
     diagnostic: reportDiagnostic,
@@ -720,8 +720,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const fileStores = new FileStoreService({
     session: () => servicedSession.value,
     generation: () => generation.value,
-    observe: observeForInput,
-    publish: publishOwned,
     section: serviceSection,
     media: capturedMedia,
     diagnostic: reportDiagnostic,
@@ -736,8 +734,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const locks = new LockService({
     session: () => servicedSession.value,
     generation: () => generation.value,
-    observe: observeForInput,
-    publish: publishOwned,
     section: serviceSection,
     media: capturedMedia,
     diagnostic: reportDiagnostic,

@@ -15,6 +15,7 @@ import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
 import type { PlayerSession } from "../player/runtime-view.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
+import { serviceSection } from "./helpers/service-section.js";
 import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../player/session-camera.js";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -389,9 +390,11 @@ function serviceHarness(answer: () => Promise<PlayerCaptureAnswer>) {
   const service = new CaptureService(answer, {
     session: () => state.session,
     generation: () => state.generation,
-    observe: () => state.session,
-    publish: (next) => (state.session = next),
-    section: () => Promise.resolve(null),
+    section: serviceSection(
+      bridge,
+      () => state.session,
+      (next) => (state.session = next),
+    ),
     capturedMedia: { holds: (reference, kind) => kind === "image" && held.has(reference) },
     diagnostic: (diagnostic) => diagnostics.push(diagnostic),
     later: (task) => setImmediate(task),

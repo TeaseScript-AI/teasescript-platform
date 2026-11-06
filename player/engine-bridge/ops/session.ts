@@ -156,13 +156,18 @@ const ended = (_error: unknown, session: HostSession | null): boolean =>
   session instanceof HeldSession && session.broken;
 
 /** A session op that publishes `next` when it differs from the session it ran on. */
-function publishing(held: HeldSession, next: PlayerRuntimeSession, result: unknown): OpOutcome {
+export function publishing(
+  held: HeldSession,
+  next: PlayerRuntimeSession,
+  result: unknown,
+): OpOutcome {
   if (next === held.current) return { result, view: null };
   const view = held.publish(next);
   return { result, eventsThrough: view.eventsThrough, view };
 }
 
-function sessionOp(
+/** An op of an existing session, which reads its basis unless `readsBasis` is false. */
+export function sessionOp(
   checkArguments: (args: unknown) => boolean,
   run: (held: HeldSession, args: unknown) => OpOutcome,
   readsBasis = true,
