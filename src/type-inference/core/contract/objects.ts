@@ -51,7 +51,7 @@ export function objectsAt(
 }
 
 /** `objectsAt` for a key (`contractOf`'s read of it and a property below), once per key. */
-function keyObjects(contract: Contract, asked: Key): ProofDemand<ObjectsProof> {
+export function keyObjects(contract: Contract, asked: Key): ProofDemand<ObjectsProof> {
   const key = canonicalKey(contract, asked);
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   return {
@@ -68,7 +68,7 @@ function keyObjects(contract: Contract, asked: Key): ProofDemand<ObjectsProof> {
  * #1747: the pure `missing` writer of `value`'s contract read at `rest.s` (the earliest, F28), from its objects at
  * `rest` (`objectsAt`): the writers met on the way and, of each object list there, its first object lacking `s`
  * (F11, `lackingAt`); `covered` false where the query declines or `s` is stored or typed below a key it reads, or an
- * entry stands at `s` below a list.
+ * entry stands at `s` below a list. Each support node of the proof once.
  */
 export function* absentWriterAt(
   contract: Contract,
@@ -79,33 +79,52 @@ export function* absentWriterAt(
   const { proof } = yield* contract.pass.solver.proven(objectsAt(contract, value, rest));
   if (proof === null || !proof.complete) return UNCOVERED;
   const { program, definitions, lists } = contract.pass;
-  for (const { key, place, path } of proof.keys) {
-    program.work.charge("invSteps");
-    const stored = definitions.byKey.get(keyBelowIn(contract, key, [step])) ?? [];
-    if (stored.some((d) => lists.live(d))) return UNCOVERED;
-    const written = writtenOf(program.place(place).kind);
-    if (written !== null && termAt(written, [...path, step]) !== null) return UNCOVERED;
-  }
   let writer: Writer | null = null;
-  for (const each of proof.prior) writer = firstWriter(writer, each);
-  for (const { literal, path } of proof.lists) {
+  const seen = new Set<number>([proof.id]);
+  const open: ObjectsProof[] = [proof];
+  while (open.length > 0) {
+    const node = open.pop()!;
     program.work.charge("invSteps");
-    const index = contract.literalIndex(literal);
-    const below = nodeAt(contract, index, path)?.children.get(step);
-    if (below !== undefined && below.reads.length + below.others.length + below.exact.length > 0)
-      return UNCOVERED;
-    writer = firstWriter(writer, lackingAt(contract, index, path, step));
+    for (const { key, place, path } of node.keys) {
+      program.work.charge("invSteps");
+      const stored = definitions.byKey.get(keyBelowIn(contract, key, [step])) ?? [];
+      if (stored.some((d) => lists.live(d))) return UNCOVERED;
+      const written = writtenOf(program.place(place).kind);
+      if (written !== null && termAt(written, [...path, step]) !== null) return UNCOVERED;
+    }
+    for (const each of node.prior) writer = firstWriter(writer, each);
+    for (const { literal, path } of node.lists) {
+      program.work.charge("invSteps");
+      const index = contract.literalIndex(literal);
+      const below = nodeAt(contract, index, path)?.children.get(step);
+      if (below !== undefined && below.reads.length + below.others.length + below.exact.length > 0)
+        return UNCOVERED;
+      writer = firstWriter(writer, lackingAt(contract, index, path, step));
+    }
+    for (const child of node.children)
+      if (!seen.has(child.id)) {
+        seen.add(child.id);
+        open.push(child);
+      }
   }
   return { covered: true, writer };
 }
 
 const UNCOVERED = { covered: false, writer: null } as const;
 
-/** What a query gathers: its sites, writers and keys, each once; declined at the first route it does not follow. */
+/** The support nodes made per pass (a contract's), by their content: equal content, one id. */
+const SUPPORT = new WeakMap<Contract, Map<string, number>>();
+
+/**
+ * What a query gathers: its own sites, writers and keys, and the queries it reads, each once; declined at the first
+ * route it does not follow. A query's proof is a node over its readers' nodes, never a copy of their contents, so a
+ * support shared by k queries (a call's result, a `get`'s receiver) is held once.
+ */
 class Gathered {
   readonly #lists = new Map<string, ObjectSite>();
   readonly #prior = new Map<string, Writer>();
   readonly #keys = new Map<string, ObjectsProof["keys"][number]>();
+  readonly #children = new Map<number, ObjectsProof>();
   complete = true;
 
   public constructor(private readonly contract: Contract) {}
@@ -123,37 +142,51 @@ class Gathered {
     this.#add(this.#keys, joinParts("k", key.key), key);
   }
 
-  /** A query this one reads: its sites and writers united into this one's, or this one declined. */
+  /** A query this one reads: its node among this one's, or this one declined. */
   public *from(demand: ProofDemand<ObjectsProof>): Work<void> {
     if (!this.complete) return;
     const { proof } = yield* this.contract.pass.solver.proven(demand);
+    // (none yet: a query of its own component still running, whose least answer starts empty and whose proof reruns
+    // this one when it changes; after a stop, an unfinished one, which declines)
+    if (proof === null && this.contract.pass.program.work.stopped === null) return;
     if (proof === null || !proof.complete) {
       this.complete = false;
       return;
     }
-    for (const site of proof.lists) this.list(site);
-    for (const writer of proof.prior) this.writer(writer);
-    for (const key of proof.keys) this.key(key);
+    if (this.#children.has(proof.id)) return;
+    this.contract.keep(1);
+    this.#children.set(proof.id, proof);
   }
 
   public proven(): Proven<ObjectsProof> {
     if (!this.complete) return { items: [], proof: DECLINED };
-    const lists = [...this.#lists.values()];
-    const prior = [...this.#prior.values()];
-    const keys = [...this.#keys.values()];
-    // (its parts by their names, sorted: equal for two queries whose sites, writers and keys are equal)
-    const names = [...this.#lists.keys(), ...this.#prior.keys(), ...this.#keys.keys()].sort();
-    const contract = this.contract;
+    const { contract } = this;
+    // (its content by its parts' names and its readers' ids, sorted: one id for equal content, `SUPPORT`)
+    const content = joinParts(
+      ...[...this.#lists.keys(), ...this.#prior.keys(), ...this.#keys.keys()].sort(),
+      "<",
+      ...[...this.#children.keys()].sort((a, b) => a - b),
+    );
+    let ids = SUPPORT.get(contract);
+    if (ids === undefined) SUPPORT.set(contract, (ids = new Map()));
+    let id = ids.get(content);
+    if (id === undefined) {
+      contract.keepText(content.length);
+      ids.set(content, (id = ids.size));
+    }
+    const named = id;
     return {
       items: [],
       proof: {
         complete: true,
-        lists,
-        prior,
-        keys,
+        id: named,
+        lists: [...this.#lists.values()],
+        prior: [...this.#prior.values()],
+        keys: [...this.#keys.values()],
+        children: [...this.#children.values()],
         signature: () => {
-          contract.pass.program.work.charge("sigItems", names.length + 1);
-          return joinParts("objects", ...names);
+          contract.pass.program.work.charge("sigItems");
+          return String(named);
         },
       },
     };
@@ -168,9 +201,11 @@ class Gathered {
 
 const DECLINED: ObjectsProof = {
   complete: false,
+  id: -1,
   lists: [],
   prior: [],
   keys: [],
+  children: [],
   signature: () => "declined",
 };
 
@@ -188,7 +223,10 @@ function* valueObjects(
   const { program } = contract.pass;
   program.work.charge("invSteps");
   const out = new Gathered(contract);
-  if (selecting(rest)) return out.proven();
+  if (selecting(rest)) {
+    out.complete = false;
+    return out.proven();
+  }
   switch (valueRoute(program, value)) {
     case "binding":
       yield* out.from(

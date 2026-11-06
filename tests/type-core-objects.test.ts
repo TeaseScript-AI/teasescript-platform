@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { CorePass } from "../src/type-inference/core/answers.js";
-import { analyseCore } from "../src/type-inference/core/answers.js";
+import { analyseCore, solveDemands } from "../src/type-inference/core/answers.js";
 import { Consumers } from "../src/type-inference/core/consumers.js";
 import { indexPaths, stepsOf } from "../src/type-inference/core/contract/literal-index.js";
-import { absentWriterAt } from "../src/type-inference/core/contract/objects.js";
+import { exportNames } from "../src/type-inference/core/contract/key-ids.js";
+import { absentWriterAt, objectsAt } from "../src/type-inference/core/contract/objects.js";
+import { DemandExhausted } from "../src/type-inference/core/budget.js";
 import { firstWriter, REASON, type Writer } from "../src/type-inference/core/items.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
@@ -95,7 +97,7 @@ function compared(pass: CorePass): {
     }
   }
   for (const value of program.occurrenceOf.keys()) {
-    asks.push([value, []]);
+    asks.push([value, []], [value, ["element"]]);
     for (const name of names) asks.push([value, [name]]);
   }
   let covered = 0;
@@ -150,5 +152,101 @@ test("the objects query covers each family's group members at the path its reads
       [...at].some((each) => member.test(each)),
       `${shape}: ${[...at].join(" ")}`,
     );
+  }
+});
+
+/** Sources beside the families: each route the query follows or declines, at the reads its oracle asks. */
+const CONTROLS = [
+  // F11 at a prefix, a property stored below it, a stored `missing`, a host value beside a literal
+  'let base={a:{},b:1}\nlet w={p:base,h:hostValue}\nbase.a.c=1\nlet y={q:base.zz}\nsay "${w.p.a.c}"\nsay "${y.q.r}"\nexit\n',
+  // several objects in one list, the first lacking of each list, the earliest of the lists
+  'let xs=[{a:1},{b:1},{a:1,b:1}]\nlet o={p:{a:1}}\no.p={b:1}\nlet e=xs.get(hostValue, default:{c:1})\nsay "${e.a}"\nsay "${o.p.c}"\nexit\n',
+  // a fallback, an element added
+  'let f={p:hostValue otherwise {a:1}}\nlet l=[{a:1}]\nl.add({b:2})\nsay "${f.p.zz}"\nexit\n',
+  // a cycle of calls no literal seeds, and one a literal seeds
+  'function f(x:object) { return g(x) }\nfunction g(y:object) { return f(y) }\nlet r=f({a:1})\nsay "${r.a}"\nexit\n',
+  'function f(x:object, n:number) { if n > 0 { return g(x, n) }\nreturn x }\nfunction g(y:object, n:number) { return f(y, n - 1) }\nlet r=f({a:1}, hostValue)\nlet t=f({b:1}, 0)\nsay "${r.zz}"\nexit\n',
+];
+
+test("the objects query names a read's missing writer as the read does on each control route, in four modes (#1747)", () => {
+  for (const source of CONTROLS)
+    for (const mode of MODES) {
+      const label = `${JSON.stringify(mode)}\n${source}`;
+      for (const pass of passesOf(source, mode))
+        assert.deepEqual(inMode(mode, () => compared(pass)).differences, [], label);
+    }
+});
+
+/** A family's member literals: those whose index stands at `p` below their root. */
+function members(pass: CorePass): number[] {
+  return [...pass.program.hasOf.keys()].filter((literal) =>
+    pass.contract.literalIndex(literal).root.children.has("p"),
+  );
+}
+
+test("an objects query a demand stop interrupts leaves no answer, and asked again names the writer a fresh pass does (#1747)", () => {
+  for (const shape of SHAPES) {
+    const source = family(shape, 8, true);
+    const mode = MODES[0]!;
+    const [pass] = passesOf(source, mode);
+    const [fresh] = passesOf(source, mode);
+    const literals = members(pass!);
+    assert.ok(literals.length > 0, shape);
+    inMode(mode, () => {
+      for (const [at, literal] of literals.entries()) {
+        const ask = () => absentWriterAt(pass!.contract, literal, ["p"], "f0");
+        let stopped = false;
+        try {
+          pass!.solver.demand(ask(), 1);
+        } catch (error) {
+          if (!(error instanceof DemandExhausted)) throw error;
+          stopped = true;
+        }
+        assert.ok(stopped, shape);
+        const again = pass!.solver.run(ask());
+        const other = fresh!.solver.run(
+          absentWriterAt(fresh!.contract, members(fresh!)[at]!, ["p"], "f0"),
+        );
+        assert.ok(again.covered && other.covered, shape);
+        assert.equal(text(again.writer), text(other.writer), shape);
+      }
+    });
+  }
+});
+
+test("an objects query's name is asked again in a fresh pass (#1747)", () => {
+  for (const shape of SHAPES) {
+    const source = family(shape, 4, true);
+    const mode = MODES[0]!;
+    const [pass] = passesOf(source, mode);
+    const literal = members(pass!)[0]!;
+    const demand = objectsAt(pass!.contract, literal, ["p"]);
+    inMode(mode, () => pass!.solver.run(pass!.contract.pass.solver.proven(demand)));
+    const names = [demand.key];
+    const exported = exportNames(pass!.contract, names);
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+    const answers = inMode(mode, () =>
+      exported === null
+        ? solveDemands(request, names)
+        : solveDemands(request, exported.names, exported.packet),
+    );
+    assert.deepEqual(answers, [[]], shape);
+  }
+});
+
+test("each family's objects queries at its members' path cost what the family's size does (#1747)", () => {
+  for (const shape of SHAPES) {
+    const units = [8, 16].map((k) => {
+      const mode = MODES[0]!;
+      const [pass] = passesOf(family(shape, k, true), mode);
+      const before = pass!.program.work.total;
+      inMode(mode, () => {
+        for (const literal of members(pass!))
+          pass!.solver.run(pass!.solver.proven(objectsAt(pass!.contract, literal, ["p"])));
+      });
+      return pass!.program.work.total - before;
+    });
+    // (linear: twice the members, at most about twice the work; k² would be four times)
+    assert.ok(units[1]! <= 2.5 * units[0]!, `${shape}: ${units.join(", ")}`);
   }
 });

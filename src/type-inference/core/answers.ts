@@ -34,6 +34,7 @@ import {
   type CanonicalKey,
 } from "./contract/key-ids.js";
 import { labelText } from "./contract/labels.js";
+import { keyObjects, objectsAt } from "./contract/objects.js";
 import { replayLayer } from "./contract/prefix-index.js";
 import { selectLanes } from "./contract/lanes.js";
 import {
@@ -91,7 +92,7 @@ import {
   type WorkPlace,
   type WrittenTypeError,
 } from "./result.js";
-import { Solver, type DemandWork, type Work } from "./solver.js";
+import { Solver, type DemandWork, type Proof, type ProofDemand, type Work } from "./solver.js";
 import { narrowingKey, Values } from "./values.js";
 import { keptVariableName } from "./messages.js";
 import { writtenTypeErrors } from "./written.js";
@@ -811,9 +812,14 @@ export function solveDemands(
 }
 
 /**
- * The computation that demands `key` (`protoLayer|`, `c|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`, `lit|`, `op|`,
+ * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`, `lit|`, `op|`,
  * `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them).
  */
+/** A proof demand asked for its answer alone (`demandWork`). */
+function* asked(demand: ProofDemand<Proof>): Work<readonly Item[]> {
+  return yield demand;
+}
+
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
   const { program, contract, values, exact } = pass;
@@ -823,6 +829,11 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       return replayLayer(contract, parts);
     case "c":
       return contract.contractOf(parts.join("|"));
+    // (#1747's objects queries, by their value and path or their key)
+    case "ob":
+      return asked(objectsAt(contract, Number(parts[0]), splitPath(parts[1] ?? "")));
+    case "obk":
+      return asked(keyObjects(contract, parts.join("|")));
     case "s": {
       const rest = splitPath(parts[2] ?? "");
       return contract.subAt(joinParts(parts[0]!, parts[1] ?? ""), rest);
