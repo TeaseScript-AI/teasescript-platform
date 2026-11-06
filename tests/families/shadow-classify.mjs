@@ -12,6 +12,7 @@
 // summary as one JSON line and a verdict line (`gate: green` only where no row is `open` and nothing failed to
 // classify). Exit 1 for unclassified or ambiguous pairs, invalid input or conflicting duplicates; with `--gate`
 // (the S11 checklist's run, which needs `--expect`) also while any row is `open`.
+// Taxonomy v5 (from v4): the class declined/lost check (#1781), at the natural allowance and at the control alike.
 import { createHash } from "node:crypto";
 import { createReadStream, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -20,7 +21,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 /** The taxonomy's version: a class added, removed or changed in its rule makes the next. */
-export const VERSION = 4;
+export const VERSION = 5;
+/** What the version changed from the one before, as the gate report states it. */
+export const VERSION_CHANGE =
+  "v4 → v5: the class declined/lost check (#1781), a program the core declines where a stop lost a check it requires, at the natural allowance and at the control alike";
 
 const S9B = "S9b #1072 (candidate coverage; retired or deferred syntax is no release requirement)";
 const S10 = "S10 #1073";
@@ -158,10 +162,19 @@ const COMPLETED = new Set(["plan", "rejected"]);
  * on current main, so the coverage row asks for a receiving completion here, beside the natural runs' ordinary records.
  */
 const CONTROL = 16;
+/**
+ * The texts the core declines a program with where a stop lost a check it requires (#1781, #1526 decision 2,
+ * condition 1, `core/consumer.ts`): the class declined/lost check's. Any other decline text stays a problem.
+ */
+const LOST_CHECK = new Set([
+  "a store whose check was lost at the budget",
+  "a store whose required checks could not be established at the budget",
+]);
 
 /**
  * The route pair's classes. `state`: `pass`, `attributed` (the rule class is known; S11 still owes each source's
- * accepted expectation) or `open` (blocks the gate); `witness`: the smallest recorded one (a key's first 12 digits and the
+ * accepted expectation), `accepted (condition 1; condition 2 list)` (v5's declined/lost check: #1526 condition 1
+ * accepts it, condition 2 re-assesses each case before the switch) or `open` (blocks the gate); `witness`: the smallest recorded one (a key's first 12 digits and the
  * source's name, in `tests/fixtures/shadow-classify/witnesses.jsonl`) or the test's synthetic case. `match` reads the
  * pair's facts (`pairFacts`).
  */
@@ -241,6 +254,15 @@ export const PAIR_CLASSES = [
       !f.delta.checks &&
       !f.delta.plan &&
       f.delta.diagnosticText,
+  },
+  {
+    id: "declined/lost check",
+    state: "accepted (condition 1; condition 2 list)",
+    rule: "neither route failed or threw, and the core declined the program because a stop lost a check it requires: it left its slice at 'a store whose check was lost at the budget' or 'a store whose required checks could not be established at the budget'",
+    authority:
+      "#1781 (#1526 decision 2, condition 1: the legacy compiles; condition 2 re-assesses every such case before the switch)",
+    witness: "c0f15845029f 1241-astra-r4-extra.mjs/original-1",
+    match: (f) => f.kind === "outside" && LOST_CHECK.has(f.outside),
   },
   ...EXCLUSIONS.map(([text, owner, witness, words]) => ({
     id: `excluded/${typeof text === "string" ? text : words}`,
@@ -711,9 +733,11 @@ export function classifier(groups = null) {
     r.witnesses.sort((a, b) => a.bytes - b.bytes || (a.key < b.key ? -1 : 1));
     r.witnesses.length = Math.min(r.witnesses.length, 3);
   };
-  // (the control's runs that left the slice, one row a rule of `EXCLUSIONS` as the pair classes match it, and one a text
-  // no rule matches; information only, r4.382)
-  const excluded = PAIR_CLASSES.filter((c) => c.id.startsWith("excluded/"));
+  // (the control's runs that left the slice, one row a class that names a text, declined/lost check and each rule of
+  // `EXCLUSIONS`, as the pair classes match it, and one a text no rule matches; information only, r4.382)
+  const excluded = PAIR_CLASSES.filter(
+    (c) => c.id.startsWith("excluded/") || c.id === "declined/lost check",
+  );
   const controlRows = new Map(excluded.map((c) => [c.id, { runs: 0, witnesses: [] }]));
   const unlisted = new Map();
   const pairs = [];
@@ -1033,6 +1057,8 @@ function markdown(result) {
   return [
     `# Shadow gate (taxonomy v${result.version}): ${result.verdict}`,
     "",
+    `Taxonomy ${VERSION_CHANGE}.`,
+    "",
     "| Route pair class | State | Pairs | Sources | Smallest witnesses |",
     "| --- | --- | ---: | ---: | --- |",
     ...result.pairs.filter((r) => r.pairs > 0 || r.state !== "open").map(line),
@@ -1063,7 +1089,7 @@ function markdown(result) {
     `Information (not gated): sources whose core publication differs across the four modes ${t.fourModeDifferences}.`,
     `Open: ${result.open.join(", ") || "none"}. Problems: ${result.problems.length}.`,
     "",
-    `| Left the slice at the demand control (${result.coverage.control}), by exclusion rule | Runs | Smallest witnesses |`,
+    `| Left the slice at the demand control (${result.coverage.control}), by exclusion rule or decline | Runs | Smallest witnesses |`,
     "| --- | ---: | --- |",
     ...control.map(
       (r) =>

@@ -278,14 +278,15 @@ sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> --
   --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
 ```
 
-`shadow-classify.mjs` (S11's classification, taxonomy version 4) reads the records of a campaign (and the S11 readiness
+`shadow-classify.mjs` (S11's classification, taxonomy version 5) reads the records of a campaign (and the S11 readiness
 research's `results.jsonl`, whose crashed sources have no rows) and gives every route pair (a source in one mode, legacy
 against core) exactly one class, and every source in each order one class of the sharing column, the core with sharing
 on against off (#1711). Each class has its rule in words, a witness and a gate state: `pass`, `attributed` (the rule
-class is known; S11 still owes each source's accepted expectation) or `open`. Pairs: `agree`; `differs/stop`,
+class is known; S11 still owes each source's accepted expectation), `accepted (condition 1; condition 2 list)` or `open`. Pairs: `agree`; `differs/stop`,
 `/surviving`, `/integer`, `/rule` by the codes whose diagnostic identities (path, code, severity, offsets) changed, in
 that precedence, then `/checks`, `/plan`, `/wording` where the identities are equal (the other differing parts are
-columns of the pair); `excluded/<text>`, the research's 53 exclusion texts as 48 rules, and from version 2 `this return statement`, the camera and tag-query texts (#1744) and the open part of a typed default (#1072), and from version 4 a typed default a stop left open (#1775); `failed/ legacy-heap` (the
+columns of the pair); from version 5 `declined/lost check` (accepted: the core declined the program where a stop lost a
+check it requires, #1781; any other decline text is unclassified); `excluded/<text>`, the research's 53 exclusion texts as 48 rules, and from version 2 `this return statement`, the camera and tag-query texts (#1744) and the open part of a typed default (#1072), and from version 4 a typed default a stop left open (#1775); `failed/ legacy-heap` (the
 legacy route's heap in its analysis with the core finished: legacy behaviour the switch resolves, #1075),
 `failed/other`, `exception`, `aborted-record`, `unavailable`. Sharing: `equal`, `one-mode-stop` and `both-stop-differ`
 (attributed, each row for the stop oracle's judgment), `neither-stops-differ`, `outside`, `uncompared`. Every rule is
@@ -296,8 +297,8 @@ record outside `--expect` or a key recorded twice with different readings. The g
 the differing pairs' parts, the research's inventory signatures (`signatures.tsv`), decision coverage (open unless the
 natural runs hold ordinary decision records and at least one run at the demand control, 16, reaches a receiving
 completion) and, as information only, the sources whose core differs across the four modes and the control's runs that
-left the slice, one row a rule of `EXCLUSIONS` (zeros included) and one a text no rule names (`Unlisted control texts`,
-r4.382); the verdict line is `gate:
+left the slice, one row a class that names a text, `declined/lost check` and each rule of `EXCLUSIONS` (zeros
+included), and one a text no class names (`Unlisted control texts`, r4.382); the verdict line is `gate:
 green` only with no `open` row, and `--gate` (S11's final run, with `--expect`) exits 1 otherwise. Over the research's
 records it reproduces its aggregate (`~/work/evidence/1728/`):
 
@@ -350,7 +351,11 @@ export const shapes = { "<shape>": (n) => "<source>" }; // or (n) => [{ path, so
 // or fixed sources: export const cases = [["<name>", "<source>" or [{ path, source }], <globals>?]];
 export const checks = ["publication", "stops"]; // default ["publication"]
 export const globals = ["hostValue"]; // the run's host globals, where they are not the default
-export const recorded = { commands: [["<command>", "<where it is recorded>"]], sources: 0, sha256: "<set key>" };
+export const recorded = {
+  commands: [["<command>", "<where it is recorded>"]],
+  sources: 0,
+  sha256: "<set key>",
+};
 ```
 
 A source runs with the host globals its case gives, else its generator's `globals`, else `hostValue`, `hostOther`,
