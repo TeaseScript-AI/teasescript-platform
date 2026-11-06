@@ -383,7 +383,7 @@ persistent identities.
 - **Owner:** decides product behavior, product scope, and policy; can hold any merge.
 - **Coordinator** (an orchestrator): schedules work, chooses routes, starts pre-research and design rounds, accepts
   plans, briefs the final review, decides how a non-converging review continues
-  ([Review convergence](#review-convergence)), and merges.
+  ([Review convergence](#review-convergence)), and merges. Rules of thumb: [`ORCHESTRATION.md`](ORCHESTRATION.md).
 - **Builder:** plans, implements, starts the plan and code review rounds, repairs, and reports. It never merges.
 - **Round reviewer:** runs pre-research, plan rounds, design rounds, and code review rounds.
 - **Independent final reviewer:** runs the final review, on a different model from the round reviewer.
