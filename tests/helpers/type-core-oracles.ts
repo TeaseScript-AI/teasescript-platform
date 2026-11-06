@@ -265,15 +265,30 @@ function* occurrenceAnswers(
 }
 
 /**
+ * Why a publication's oracle left nodes unanswered (`answeredOccurrences`), and the first node it left: the families
+ * runner counts each reason apart (`tests/families/README.md`); a reason a tree's oracle does not give is `unknown` there.
+ */
+export interface UnansweredBy {
+  readonly reason: "questions" | "stopped";
+  readonly node: number;
+}
+
+/**
  * Every occurrence's answer (`occurrenceAnswer`, its items in their order), each mapped by `each` as it is made, up to
  * the node whose questions pass the analysis's allowance after it finished: the oracle's own stop (#1499 charges its
  * property-name walk), not the analysis's. That node and every one after it stay unanswered (`unanswered`, their
  * count), never asked again on the stopped answers, whose `unknown` answers would agree wherever both trees stop alike.
+ * Why (`unansweredBy`): `questions` where the analysis had finished and its later questions exhausted the allowance,
+ * `stopped` where the analysis's own budget had stopped it (`budget.exhausted`), each with the first node unanswered.
  */
 function answeredOccurrences<Occurrence>(
   answers: Answers,
   each: (text: string) => Occurrence,
-): { readonly occurrences: readonly Occurrence[]; readonly unanswered: number } {
+): {
+  readonly occurrences: readonly Occurrence[];
+  readonly unanswered: number;
+  readonly unansweredBy?: UnansweredBy;
+} {
   const nodes = answers.graph.nodes;
   const items = (list: readonly Item[]): string[] => list.map(itemText);
   const occurrences: Occurrence[] = [];
@@ -283,7 +298,12 @@ function answeredOccurrences<Occurrence>(
       answer = occurrenceAnswer(answers, node, items);
     } catch (error) {
       if (!(error instanceof BudgetExhausted)) throw error;
-      return { occurrences, unanswered: nodes.length - index };
+      const reason = answers.budget.exhausted === null ? "questions" : "stopped";
+      return {
+        occurrences,
+        unanswered: nodes.length - index,
+        unansweredBy: { reason, node: node.id },
+      };
     }
     if (answer !== null) occurrences.push(each(JSON.stringify(answer)));
   }
@@ -579,6 +599,8 @@ export interface PublicationParts {
    * answered all. How the families runner compares a publication with any: `tests/families/README.md`.
    */
   readonly unanswered: number;
+  /** Why, where `unanswered` is not 0 (`answeredOccurrences`). */
+  readonly unansweredBy?: UnansweredBy;
 }
 
 /**
@@ -598,6 +620,7 @@ function publishedElements<Occurrence>(
   readonly occurrences: readonly Occurrence[];
   readonly route: string;
   readonly unanswered: number;
+  readonly unansweredBy?: UnansweredBy;
 } | null {
   const request = coreRequest(files, globals);
   if (request === null) return null;
@@ -608,13 +631,14 @@ function publishedElements<Occurrence>(
     const answers = analyseCore(request);
     const published = publishedAnswers(answers, bindings, request);
     const route = publishedRoute(files, globals);
-    const { occurrences, unanswered } = answeredOccurrences(answers, each);
+    const { occurrences, unanswered, unansweredBy } = answeredOccurrences(answers, each);
     return {
       answers: JSON.stringify(published.text),
       record: JSON.stringify(published.record),
       occurrences,
       route: JSON.stringify(route.text),
       unanswered,
+      ...(unansweredBy === undefined ? {} : { unansweredBy }),
     };
   });
 }
@@ -637,8 +661,9 @@ const sha256 = (text: string): string => createHash("sha256").update(text).diges
 /** A publication's parts by their hashes (`publicationHashes`), with the nodes its oracle left unanswered apart. */
 export interface PublicationHashes {
   readonly parts: readonly string[];
-  /** `PublicationParts`'s `unanswered`. */
+  /** `PublicationParts`'s `unanswered` and `unansweredBy`. */
   readonly unanswered: number;
+  readonly unansweredBy?: UnansweredBy;
 }
 
 /**
@@ -664,6 +689,7 @@ export function publicationHashes(
           sha256(elements.route),
         ],
         unanswered: elements.unanswered,
+        ...(elements.unansweredBy === undefined ? {} : { unansweredBy: elements.unansweredBy }),
       };
 }
 

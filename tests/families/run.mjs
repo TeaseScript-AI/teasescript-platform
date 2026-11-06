@@ -115,19 +115,32 @@ const hash = (text) => createHash("sha256").update(text).digest("hex");
  * (`unanswered`): the tree's `publicationHashes`, which hashes each part as it is made and never holds the whole, as
  * this library writes it or as a library before `unanswered` did (its parts alone), or an older library's
  * `publication` split into the same parts, with the count its fifth element holds where it has one; `null` when the
- * files do not parse or resolve.
+ * files do not parse or resolve. Why the oracle left nodes unanswered (`unansweredBy`: `questions` or `stopped`, with
+ * the first node left) is the library's where it gives one, else `unknown` (#1837's runner artefacts).
  */
 function partHashes(oracle, files, mode, globals) {
   if (typeof oracle.publicationHashes === "function") {
     const hashes = oracle.publicationHashes(files, mode, globals);
-    return Array.isArray(hashes) ? { parts: hashes, unanswered: 0 } : hashes;
+    return Array.isArray(hashes) ? { parts: hashes, unanswered: 0 } : withReason(hashes);
   }
   const whole = oracle.publication(files, mode, globals);
   if (whole === null) return null;
   const [answers, record, occurrences, route, stopped] = JSON.parse(whole);
-  return {
+  return withReason({
     parts: [answers, record, ...occurrences, route].map((part) => hash(JSON.stringify(part))),
     unanswered: stopped?.unanswered ?? 0,
+  });
+}
+
+/** A publication's hashes with why it left nodes unanswered: the oracle's reason, else `unknown` (no node named). */
+function withReason(hashes) {
+  if (hashes === null || !(hashes.unanswered > 0)) return hashes;
+  const by = hashes.unansweredBy;
+  const known =
+    (by?.reason === "questions" || by?.reason === "stopped") && Number.isInteger(by.node);
+  return {
+    ...hashes,
+    unansweredBy: known ? { reason: by.reason, node: by.node } : { reason: "unknown", node: null },
   };
 }
 
@@ -140,8 +153,15 @@ const digest = (value) => ({
   hash: hash(textOf(value?.parts ?? value)),
   parts: value?.parts?.map((part) => part.slice(0, 16)) ?? null,
   unanswered: value?.unanswered ?? 0,
+  ...(value?.unansweredBy === undefined ? {} : { unansweredBy: value.unansweredBy }),
   unparsed: value === null,
 });
+
+/** Why a tree's result left nodes unanswered, or `null` where it left none; a stored run before #1837 says `unknown`. */
+const reasonOf = (value) =>
+  value === undefined || !(value.unanswered > 0)
+    ? null
+    : (value.unansweredBy ?? { reason: "unknown", node: null });
 
 /** Where two publications' parts first differ: the part's index in the whole's order and each one's count of parts. */
 function firstPart(was, is) {
@@ -165,8 +185,14 @@ function judged(was, is) {
     return Array.isArray(was?.value.parts) &&
       was.value.unanswered === is.value.unanswered &&
       was.value.hash === is.value.hash
-      ? { unansweredAlike: is.value.unanswered }
-      : { unanswered: { base: was?.value.unanswered, head: is.value.unanswered } };
+      ? {
+          unansweredAlike: is.value.unanswered,
+          by: { base: reasonOf(was?.value), head: reasonOf(is.value) },
+        }
+      : {
+          unanswered: { base: was?.value.unanswered, head: is.value.unanswered },
+          by: { base: reasonOf(was?.value), head: reasonOf(is.value) },
+        };
   if (was === undefined) return { uncompared: true };
   if (was.value.hash === is.value.hash) return {};
   return {
@@ -803,6 +829,7 @@ if (process.argv[2] === "--child") {
       const kept = line === undefined ? undefined : JSON.parse(line);
       const results = {};
       const uncompared = [];
+      const left = [];
       // the runs that ended count, those of a source that stalls or throws after them included
       row.runs += reply.runs.length;
       for (const [at, { result, ...run }] of reply.runs.entries()) {
@@ -818,16 +845,20 @@ if (process.argv[2] === "--child") {
           thrown: exception,
           unanswered,
           unansweredAlike,
+          by,
           difference,
           uncompared: alone,
           ...where
         } = outcome;
+        // (a run left unanswered: why, on each tree, on the source's record, #1837's runner artefacts)
+        if (by !== undefined)
+          left.push({ ...where, ...(unanswered === undefined ? { alike: true } : {}), by });
         if (exception !== undefined) {
           row.exceptions += 1;
           thrown({ generator: name, source: source.name, ...where, thrown: exception }, source);
         } else if (unanswered !== undefined) {
           row.unanswered += 1;
-          record({ generator: name, source: source.name, ...where, unanswered, ...inputs });
+          record({ generator: name, source: source.name, ...where, unanswered, by, ...inputs });
         } else if (unansweredAlike !== undefined) row.unansweredAlike += 1;
         else if (difference !== undefined) {
           row.differences += 1;
@@ -904,6 +935,7 @@ if (process.argv[2] === "--child") {
           ),
           ...(stalled === undefined ? {} : { stalled }),
           ...(uncharged === undefined ? {} : { uncharged }),
+          ...(left.length === 0 ? {} : { unanswered: left }),
         });
     }
     console.log(JSON.stringify(row));

@@ -252,6 +252,124 @@ ${
 }
 `;
 
+/** A tree's oracle whose `stopped` source leaves `count` nodes unanswered for `reason` (none: a library before #1837). */
+const reasoned = (
+  count: number,
+  reason: "questions" | "stopped" | null,
+): string => `import { createHash } from "node:crypto";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+export const publicationHashes = (files) => {
+  const stopped = files[0].source === "stopped";
+  const parts = ['"A"', '"R"', '[1,"x"]', '"T"'].map((text) => createHash("sha256").update(text).digest("hex"));
+  if (!stopped) return { parts, unanswered: 0 };
+  return { parts, unanswered: ${count}${reason === null ? "" : `, unansweredBy: { reason: "${reason}", node: 7 }`} };
+};
+`;
+
+test("the corpus runner records why an oracle left a run unanswered, and the stall index counts each reason as a runner artefact apart from agreement (#1837)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const tree = (name: string, count: number, reason: "questions" | "stopped" | null) => {
+      const folder = join(directory, name);
+      mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
+      writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(
+        join(folder, "dist", "tests", "helpers", "type-core-oracles.js"),
+        reasoned(count, reason),
+      );
+      return folder;
+    };
+    const [questions2, questions3, stopped2, stopped3, older3] = [
+      tree("questions2", 2, "questions"),
+      tree("questions3", 3, "questions"),
+      tree("stopped2", 2, "stopped"),
+      tree("stopped3", 3, "stopped"),
+      tree("older3", 3, null),
+    ];
+    const area = join(directory, "area");
+    mkdirSync(area);
+    writeFileSync(
+      join(area, "stops.mjs"),
+      'export const cases = [["stopped", "stopped"], ["answered", "answered"]];\n',
+    );
+    const lines = (text: string) =>
+      text
+        .trim()
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => JSON.parse(line));
+    const groups = (base: string, head: string, name: string) => {
+      const [out, work] = [join(directory, `${name}.jsonl`), join(directory, `${name}.work.jsonl`)];
+      const ran = spawnSync(
+        process.execPath,
+        [runner, area, base, head, "--out", out, "--work", work],
+        { encoding: "utf8" },
+      );
+      assert.equal(ran.status, base === head ? 0 : 1, ran.stderr);
+      const judged = spawnSync(process.execPath, [stalls, work], { encoding: "utf8" });
+      const said = lines(judged.stdout);
+      const { artefacts } = said.find((line) => line.artefacts !== undefined);
+      const total = said.at(-1);
+      return {
+        rows: Object.fromEntries(
+          artefacts.map((r: { group: string; runs: number; sources: number }) => [
+            r.group,
+            [r.runs, r.sources],
+          ]),
+        ),
+        artefacts,
+        total,
+        out: existsSync(out) ? lines(readFileSync(out, "utf8")) : [],
+      };
+    };
+    // (the oracle's own question budget on both trees, at two counts: four runs of one source, its reason and node)
+    const q = groups(questions2, questions3, "questions");
+    assert.deepEqual(q.rows, {
+      "unanswered: questions": [4, 1],
+      "unanswered: stopped": [0, 0],
+      "unanswered: unknown": [0, 0],
+      unansweredAlike: [0, 0],
+    });
+    const row = q.artefacts.find((r: { group: string }) => r.group === "unanswered: questions");
+    assert.equal(row.issue, "#1837");
+    assert.deepEqual([row.witness.source, row.witness.node], ["stopped", 7]);
+    // (never agreement: the area does not close, and `answered` alone agrees)
+    assert.deepEqual([q.total.agreed, q.total.closed], [1, false]);
+    // (the --out record names why on each tree)
+    assert.deepEqual(q.out[0].by, {
+      base: { reason: "questions", node: 7 },
+      head: { reason: "questions", node: 7 },
+    });
+    // (the analysis's own stop)
+    assert.deepEqual(groups(stopped2, stopped3, "stopped").rows["unanswered: stopped"], [4, 1]);
+    // (a library that names no reason: unknown, its node null, never dropped; the other tree's reason counted too)
+    const u = groups(older3, questions2, "unknown");
+    assert.deepEqual(
+      [u.rows["unanswered: unknown"], u.rows["unanswered: questions"]],
+      [
+        [4, 1],
+        [4, 1],
+      ],
+    );
+    const unknown = u.artefacts.find((r: { group: string }) => r.group === "unanswered: unknown");
+    assert.equal(unknown.witness.source, "stopped");
+    assert.deepEqual(u.out[0].by.base, { reason: "unknown", node: null });
+    // (left alike on both trees: its own row, agreement named apart as before)
+    const a = groups(questions2, questions2, "alike");
+    assert.deepEqual(a.rows, {
+      "unanswered: questions": [0, 0],
+      "unanswered: stopped": [0, 0],
+      "unanswered: unknown": [0, 0],
+      unansweredAlike: [4, 1],
+    });
+    assert.equal(a.total.unansweredAlike, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("the corpus runner and the stall index count a run left unanswered alike on both trees as agreement named apart, any other unanswered run never as agreement (#1499, #1592)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {

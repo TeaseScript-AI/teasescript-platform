@@ -198,17 +198,40 @@ test("the oracle's own stop leaves the occurrences from it on unanswered, apart 
   assert.ok(stopped.unanswered > 0, "the occurrences' questions stop");
   assert.deepEqual(stopped.occurrences, full.occurrences.slice(0, stopped.occurrences.length));
   assert.ok(stopped.occurrences.length < full.occurrences.length, "an occurrence stays unanswered");
-  // (the count stays apart from the hashes, and the joined text never equals one answered in full)
+  // (why, #1837: the analysis finished, so its later questions exhausted the allowance, from the first node left)
+  const nodes = withTestAllowance(high - 1, () => analyseCore(request).graph.nodes);
+  const first = nodes[nodes.length - stopped.unanswered]!.id;
+  assert.deepEqual(stopped.unansweredBy, { reason: "questions", node: first });
+  assert.equal(full.unansweredBy, undefined);
+  // (the count and why stay apart from the hashes, and the joined text never equals one answered in full)
   withTestAllowance(high - 1, () => {
     assert.deepEqual(publicationHashes(files, MODES[0]!, GLOBALS), {
       parts: [stopped.answers, stopped.record, ...stopped.occurrences, stopped.route].map(sha256),
       unanswered: stopped.unanswered,
+      unansweredBy: { reason: "questions", node: first },
     });
     assert.equal(
       publication(files, MODES[0]!, GLOBALS),
       `[${stopped.answers},${stopped.record},[${stopped.occurrences.join(",")}],${stopped.route},{"unanswered":${stopped.unanswered}}]`,
     );
   });
+});
+
+test("an analysis its own budget stopped is answered whole, so no node is left unanswered and none is stopped (#1837)", () => {
+  const files = main(SMALL[0]!);
+  const request = coreRequest(files, GLOBALS);
+  assert.ok(request !== null);
+  const total = analyseCore(request).budget.total;
+  // (an allowance the analysis itself passes: its own budget stops it; the oracle then answers its stopped answers
+  // without asking again, so only its questions after a finished analysis leave nodes unanswered, as `questions`)
+  const allowance = Math.floor(total / 2);
+  assert.notEqual(
+    withTestAllowance(allowance, () => analyseCore(request).budget.exhausted),
+    null,
+  );
+  const parts = withTestAllowance(allowance, () => publicationParts(files, MODES[0]!, GLOBALS));
+  assert.ok(parts !== null);
+  assert.deepEqual([parts.unanswered, parts.unansweredBy], [0, undefined]);
 });
 
 test("jsonText writes plan data as JSON.stringify does, and also past the depth JSON.stringify reaches (#1503)", () => {

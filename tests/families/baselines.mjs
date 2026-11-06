@@ -1203,7 +1203,8 @@ const allowanceIn = (value) => value === null || (Number.isInteger(value) && val
  * proved before any part of it is read: its place (a
  * generator, a name, a key), its stall (a text) and its exception outside its runs (the runner's text) where it has
  * them, and its runs, each a mode and check (`runName`) with one tree's result: a value (its hash, its parts' hashes or
- * none, its count of unanswered nodes, whether the files did not parse) or the text it threw. Under plan 2 each run also
+ * none, its count of unanswered nodes and, since #1837, why (`unansweredBy`), whether the files did not parse) or the
+ * text it threw. Under plan 2 each run also
  * holds the units it charged (`work`) and its program's allowance (`allowance`), a stall over the unit limit (`units`)
  * the run it cut (`cut`: its name, its units and allowance, a charged ledger's (above 0), the units over `units` times
  * the allowance: the stall's certificate, the same on every machine), and a run that reached the wall-clock safety net
@@ -1237,7 +1238,13 @@ export function sourceFault(line, units = null) {
       (shaped(result, ["thrown", ...charged])
         ? typeof result.thrown === "string"
         : shaped(result, ["value", ...charged]) &&
-          shaped(value, ["hash", "parts", "unanswered", "unparsed"]) &&
+          shaped(value, ["hash", "parts", "unanswered", "unparsed"], ["unansweredBy"]) &&
+          // (why its oracle left nodes unanswered, #1837: only where it left some, a reason with its first node or none)
+          (value.unansweredBy === undefined ||
+            (value.unanswered > 0 &&
+              shaped(value.unansweredBy, ["reason", "node"]) &&
+              ["questions", "stopped", "unknown"].includes(value.unansweredBy.reason) &&
+              (value.unansweredBy.node === null || Number.isInteger(value.unansweredBy.node)))) &&
           hash64(value.hash) &&
           (value.parts === null ||
             (Array.isArray(value.parts) &&

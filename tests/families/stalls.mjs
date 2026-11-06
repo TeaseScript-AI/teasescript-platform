@@ -658,6 +658,60 @@ for (const [area, row] of rows) {
   console.log(JSON.stringify({ area, shards: recorded, complete, ...gaps, ...row }));
   for (const key of Object.keys(total)) total[key] += row[key];
 }
+// the runner artefacts (#1837): each run a tree's oracle left unanswered, by why (`run.mjs`'s `unansweredBy`:
+// `questions`, `stopped`, else `unknown`) or left alike, with its runs, sources and first witness; they stay apart from
+// agreement as before, so that no round classifies them again
+const GROUPS = [
+  "unanswered: questions",
+  "unanswered: stopped",
+  "unanswered: unknown",
+  "unansweredAlike",
+];
+const ISSUES = { "unanswered: questions": "#1837" };
+const artefacts = new Map(
+  GROUPS.map((group) => [group, { runs: 0, sources: new Set(), witness: null }]),
+);
+for (const [place, was] of replay) {
+  const is = rerun.get(place) ?? was;
+  for (const left of is.unanswered ?? []) {
+    const reasons = [left.by?.base, left.by?.head]
+      .filter((by) => by != null)
+      .map((by) => by.reason);
+    const groups = left.alike
+      ? ["unansweredAlike"]
+      : [...new Set(reasons.length === 0 ? ["unknown"] : reasons)].map(
+          (reason) =>
+            `unanswered: ${GROUPS.includes(`unanswered: ${reason}`) ? reason : "unknown"}`,
+        );
+    for (const group of groups) {
+      const row = artefacts.get(group);
+      row.runs += 1;
+      row.sources.add(place);
+      const witness = {
+        area: nameOf(is.area),
+        generator: is.generator,
+        source: is.source,
+        mode: left.mode,
+        check: left.check,
+        node: left.by?.head?.node ?? left.by?.base?.node ?? null,
+      };
+      const text = (w) => `${w.area} ${w.generator}/${w.source} ${w.mode} ${w.check}`;
+      if (row.witness === null || text(witness) < text(row.witness)) row.witness = witness;
+    }
+  }
+}
+const artefactRows = GROUPS.map((group) => {
+  const { runs, sources, witness } = artefacts.get(group);
+  return {
+    group,
+    runs,
+    sources: sources.size,
+    witness,
+    ...(ISSUES[group] ? { issue: ISSUES[group] } : {}),
+  };
+});
+if (artefactRows.some((row) => row.runs > 0))
+  console.log(JSON.stringify({ artefacts: artefactRows }));
 closed &&=
   total.sources > 0 &&
   total.agreed + total.unansweredAlike === total.sources &&
@@ -675,6 +729,7 @@ if (indexFile !== undefined) {
       configurations,
       entries: index,
       unansweredAlike: alike,
+      artefacts: artefactRows,
     });
     writeFileSync(indexFile, `${text}\n`, { flag: "wx" });
   } catch (error) {

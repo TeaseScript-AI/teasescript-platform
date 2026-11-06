@@ -46,7 +46,13 @@ the oracle's own stop: where its questions after a finished analysis pass the al
 unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on either tree agrees only where both trees left
 the same count unanswered and published the same parts up to them (#1592): the allowance is the same on both trees, so
 what it leaves unanswered is too. Such a run is counted apart (`unansweredAlike`); any other is neither agreement nor an
-exception: the runner writes it to `--out` and counts it apart (`unanswered`). It prints one JSON line per generator and
+exception: the runner writes it to `--out` and counts it apart (`unanswered`). Each such run records why on each tree
+(`by`, on `--out` and the source's `--work` line, and on a stored run): `questions` (the analysis finished and the
+oracle's later questions passed the allowance; their cost is #1837's), `stopped` (the analysis's own budget stopped it;
+today's oracle answers a stopped analysis whole, so this does not occur), or `unknown` where the tree's oracle or a run
+stored before this names none. `stalls.mjs` counts them as runner artefacts, one group a reason and `unansweredAlike`,
+each with its runs, sources and first witness, on a line of its own where any group has runs and always in `--index`.
+It prints one JSON line per generator and
 a total (sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, uncharged, modes, runs,
 differences, the unit limit's multiple and the safety net in seconds), and exits 1 when any run differs, throws, leaves
 nodes unanswered other than alike, is uncompared or reaches the safety net, or any source stalls. Run large sizes as one
