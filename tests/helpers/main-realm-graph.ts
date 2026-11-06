@@ -58,86 +58,37 @@ function refersToBinding(node: ts.Identifier): boolean {
   return parent.name !== node && parent.propertyName !== node && parent.label !== node;
 }
 
-/** Whether binding pattern `pattern` binds `name`, also inside a destructuring. */
-function binds(pattern: ts.BindingName, name: string): boolean {
-  if (ts.isIdentifier(pattern)) return pattern.text === name;
-  return pattern.elements.some(
-    (element) => !ts.isOmittedExpression(element) && binds(element.name, name),
-  );
-}
-
-/** Whether `statement`, directly in a block or a module, declares `name` there. */
-function declaresInBlock(statement: ts.Statement, name: string): boolean {
-  if (ts.isImportDeclaration(statement)) {
-    const clause = statement.importClause;
-    const bindings = clause?.namedBindings;
-    return (
-      clause?.name?.text === name ||
-      (bindings !== undefined && ts.isNamespaceImport(bindings) && bindings.name.text === name) ||
-      (bindings !== undefined &&
-        ts.isNamedImports(bindings) &&
-        bindings.elements.some((element) => element.name.text === name))
-    );
-  }
-  if (ts.isVariableStatement(statement))
-    return statement.declarationList.declarations.some((declaration) =>
-      binds(declaration.name, name),
-    );
-  return (
-    (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) &&
-    statement.name?.text === name
-  );
-}
-
-/** Whether a `var` anywhere in `root`, outside its nested functions, declares `name`: it is hoisted to `root`. */
-function hoists(root: ts.Node, name: string): boolean {
-  let found = false;
-  const visit = (node: ts.Node): void => {
-    if (found || ts.isFunctionLike(node)) return;
-    if (
-      ts.isVariableDeclarationList(node) &&
-      (node.flags & ts.NodeFlags.BlockScoped) === 0 &&
-      node.declarations.some((declaration) => binds(declaration.name, name))
-    )
-      found = true;
-    else ts.forEachChild(node, visit);
-  };
-  ts.forEachChild(root, visit);
-  return found;
-}
-
 /**
- * Whether `name` at `node` resolves to a declaration of a scope around it, up to its module: an import, a parameter, a
- * block's `let`, `const`, `class` or function (a module is strict, so a block's function is the block's), a `var`
- * hoisted to its function or module, a catch clause, a loop head, or a function or class expression's own name.
+ * TypeScript's checker over one emitted module alone, with no library or other file: a name it resolves has a declaration
+ * in the module, by the language's own scope rules; a global, such as CommonJS's `require`, resolves to nothing.
  */
-function declaredAround(node: ts.Node, name: string): boolean {
-  for (let scope = node.parent; scope !== undefined; scope = scope.parent) {
-    const statements =
-      ts.isSourceFile(scope) || ts.isBlock(scope) || ts.isModuleBlock(scope)
-        ? scope.statements
-        : ts.isCaseBlock(scope)
-          ? scope.clauses.flatMap((clause) => [...clause.statements])
-          : [];
-    if (statements.some((statement) => declaresInBlock(statement, name))) return true;
-    if (ts.isSourceFile(scope) && hoists(scope, name)) return true;
-    if (ts.isFunctionLike(scope)) {
-      if (scope.parameters.some((parameter) => binds(parameter.name, name))) return true;
-      if (ts.isFunctionExpression(scope) && scope.name?.text === name) return true;
-      if ("body" in scope && scope.body !== undefined && hoists(scope.body, name)) return true;
-    }
-    if (ts.isClassExpression(scope) && scope.name?.text === name) return true;
-    if (ts.isCatchClause(scope) && scope.variableDeclaration !== undefined)
-      if (binds(scope.variableDeclaration.name, name)) return true;
-    if (
-      (ts.isForStatement(scope) || ts.isForInStatement(scope) || ts.isForOfStatement(scope)) &&
-      scope.initializer !== undefined &&
-      ts.isVariableDeclarationList(scope.initializer) &&
-      scope.initializer.declarations.some((declaration) => binds(declaration.name, name))
-    )
-      return true;
-  }
-  return false;
+function moduleChecker(source: ts.SourceFile): ts.TypeChecker {
+  const host: ts.CompilerHost = {
+    getSourceFile: (name) => (name === source.fileName ? source : undefined),
+    getDefaultLibFileName: () => "lib.d.ts",
+    writeFile: () => {},
+    getCurrentDirectory: () => "/",
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    fileExists: (name) => name === source.fileName,
+    readFile: () => undefined,
+  };
+  const options: ts.CompilerOptions = {
+    noLib: true,
+    noResolve: true,
+    types: [],
+    target: ts.ScriptTarget.ESNext,
+  };
+  return ts.createProgram({ rootNames: [source.fileName], options, host }).getTypeChecker();
+}
+
+/** Whether identifier `node` refers to a binding the module declares (`checker` from `moduleChecker`). */
+function declaredInModule(node: ts.Identifier, checker: ts.TypeChecker): boolean {
+  const symbol = ts.isShorthandPropertyAssignment(node.parent)
+    ? checker.getShorthandAssignmentValueSymbol(node.parent)
+    : checker.getSymbolAtLocation(node);
+  return (symbol?.declarations?.length ?? 0) > 0;
 }
 
 /** Whether `node` is `import.meta.<name>`. */
@@ -182,7 +133,14 @@ function valueImports(
   )
     refuse(label, "CommonJS require()");
   const emitted = ts.transpileModule(code, EMIT).outputText;
-  const source = ts.createSourceFile(file, emitted, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const source = ts.createSourceFile(
+    "/module.ts",
+    emitted,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  let checker: ts.TypeChecker | null = null;
   const found: { specifier: string; names: string[] }[] = [];
   const pending: ts.Node[] = [source];
   for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
@@ -219,7 +177,7 @@ function valueImports(
       ts.isIdentifier(node) &&
       node.text === "require" &&
       refersToBinding(node) &&
-      !declaredAround(node, "require")
+      !declaredInModule(node, (checker ??= moduleChecker(source)))
     ) {
       // Any reference to the global `require`, not only a direct call: `(require)(…)`, `require!(…)` and an alias too.
       refuse(label, "CommonJS require()");

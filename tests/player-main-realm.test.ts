@@ -125,6 +125,7 @@ test("the walk refuses each loading form it does not model", () => {
     ],
     ["require.ts", unmodelled("CommonJS require()")],
     ["require-alias.ts", unmodelled("CommonJS require()")],
+    ["require-scope.ts", unmodelled("CommonJS require()")],
     ["url.ts", unmodelled("new URL(…, import.meta.url) outside new Worker(…)")],
     ["computed-import.ts", unmodelled("an import() of a computed specifier")],
   ])
