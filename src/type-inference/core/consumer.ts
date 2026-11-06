@@ -660,15 +660,42 @@ function knownValues(
   index: SliceIndex,
   expected: (call: CallExpression) => TypePlan | undefined,
 ): (expression: Expression) => KnownValue | undefined {
-  const values = new KnownValues((identifier) => {
-    const initializer = answers.initializers.get(
-      siteKey(index.fileOf(identifier), identifier.span),
-    );
-    return initializer === undefined ? undefined : index.expressionAt(initializer);
-  }, expected);
+  const values = new KnownValues(
+    (identifier) => {
+      const initializer = answers.initializers.get(
+        siteKey(index.fileOf(identifier), identifier.span),
+      );
+      return initializer === undefined ? undefined : index.expressionAt(initializer);
+    },
+    expected,
+    // (the branch's narrowing at each read the walk evaluates, an operand's included, #1073 PR 2: where it admits no
+    // kind of the value, as `n` under `if n is integer` with `n = 1.5`, the read never runs with it, so a dead branch is
+    // no static error; constant work per read, inside the walk's own iteration, Codex r1 and r2 on #1884)
+    (identifier, value) => {
+      const node = answers.graph.expressionAt(index.site(identifier));
+      const read = node === undefined ? undefined : answers.at(node);
+      if (read === undefined || read === null) return true;
+      const kinds = withoutEmpty(read.items).map((item) => item.tag);
+      return kinds.includes("unknown") || admitsKnown(kinds, value);
+    },
+  );
   const known = (expression: Expression) => values.known(expression);
   answers.shareKnown(known);
   return known;
+}
+
+/**
+ * Whether a read's kinds admit a known scalar: `null`, text, a boolean, a whole number as an `integer` or a `number`, a
+ * fraction as a `number`.
+ */
+function admitsKnown(kinds: readonly string[], value: KnownValue): boolean {
+  if (value === null) return kinds.includes("null");
+  if (typeof value === "number")
+    return kinds.includes("number") || (Number.isInteger(value) && kinds.includes("integer"));
+  if (typeof value === "string") return kinds.includes("string");
+  if (typeof value === "boolean") return kinds.includes("boolean");
+  // (a structured value: its kinds are not decided here, so it keeps its known value)
+  return true;
 }
 
 /**

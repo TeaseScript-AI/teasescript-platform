@@ -49,7 +49,8 @@ const RELEASED_ADAPTER_RECORDS: ReadonlySet<string> = new Set([
 /**
  * Stage 3b's records the consumers' read of the narrowing completes (#1073 PR 2: every read takes its nearest G, an exact
  * definition answers before the guard mark, a consumer's descendant demand takes its path's G), each proven complete in
- * the four modes before its release.
+ * the four modes before its release; and, with the candidate's activation (#1073 PR 2 phase 2), the three known-literal
+ * records whose dead branch `KnownValues` now reads through the narrowing.
  */
 const RELEASED_S10_CONSUMER_RECORDS: ReadonlySet<string> = new Set([
   "cp9-cells/3b/ad1/e1a/tested",
@@ -93,6 +94,7 @@ const RELEASED_S10_CONSUMER_RECORDS: ReadonlySet<string> = new Set([
   "cp9-cells/3b/numeric/overlap-19",
   "cp9-cells/3b/numeric/overlap-20",
   "cp9-cells/3b/numeric/positive-2.0",
+  "cp9-cells/3b/numeric/positive-2.5",
   "cp9-cells/3b/paths/fixed-index/held",
   "cp9-cells/3b/paths/fixed-key/held",
   "cp9-cells/3b/paths/property/held",
@@ -141,7 +143,9 @@ const RELEASED_S10_CONSUMER_RECORDS: ReadonlySet<string> = new Set([
   "cp9-cells/3b/switch/whole-2.0",
   "cp9-cells/r42/guard/else-branch",
   "cp9-cells/r42/guard/equals-null",
+  "cp9-cells/r42/guard/is-integer",
   "cp9-cells/r42/guard/not-null",
+  "cp9-cells/r42/guard/tested-key-counterpart",
   "cp9-cells/r44/guard/null-member-guarded",
   "cp9-cells/r46/guard/branch-null-eq/guarded",
   "cp9-cells/r46/guard/branch-null-ne/guarded",

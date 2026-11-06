@@ -2448,10 +2448,29 @@ export function evaluate(
         return { v: held ?? null, from: object.from };
       }
       case "binaryExpression": {
+        // (the narrowing's null tests, `x != null` and `x == null`: whether the other side is `null`, #1073 PR 2)
+        if (
+          (expression.operator === "!=" || expression.operator === "==") &&
+          (unwrap(expression.left).kind === "nullLiteral" ||
+            unwrap(expression.right).kind === "nullLiteral")
+        ) {
+          const other = value(
+            unwrap(expression.left).kind === "nullLiteral" ? expression.right : expression.left,
+          );
+          return { v: (other.v === null) === (expression.operator === "=="), from: other.from };
+        }
         if (expression.operator !== "otherwise")
           throw new Underivable(`the operator ${expression.operator}`);
         const left = value(expression.left);
         return left.v !== null ? left : checkedFallback(expression, expression.right);
+      }
+      case "typeTestExpression": {
+        // (`x is T`: whether its value fits T, as a store of it would; `is not` the opposite, #1073 PR 2)
+        const tested = value(expression.value);
+        return {
+          v: fitsType(tested.v, writtenType(expression.type)) !== expression.negated,
+          from: tested.from,
+        };
       }
       case "loadExpression": {
         const key = value(expression.key);
@@ -2856,10 +2875,11 @@ export function evaluate(
         for (let round = 0; round < (fits ? Number(count.v) : 0); round += 1)
           run(statement.body.statements);
       } else if (statement.kind === "ifStatement") {
-        const condition = unwrap(statement.condition);
-        if (condition.kind !== "booleanLiteral")
-          throw new Underivable("an `if` on a value that is not literal");
-        if (condition.value) run(statement.thenBlock.statements);
+        // (a literal, or a test whose value the run knows: a type test, a null test)
+        const condition = value(statement.condition).v;
+        if (typeof condition !== "boolean")
+          throw new Underivable("an `if` on a value that is not a boolean");
+        if (condition) run(statement.thenBlock.statements);
         else if (statement.elseBlock !== null)
           run(
             statement.elseBlock.kind === "ifStatement"

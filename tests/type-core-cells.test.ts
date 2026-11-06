@@ -50,7 +50,7 @@ test("the core gives the expected record for every record of the cells it comple
   }
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 3,
-    "stage 3b's cells (S10)": 553,
+    "stage 3b's cells (S10)": 550,
     "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
     "S9b's F18 copy of a written type as the receiving context (r4.77 (2))": 18,
     "fromJson with files: true outside the slice, and C13's text operand": 2,
@@ -58,7 +58,7 @@ test("the core gives the expected record for every record of the cells it comple
     "a known-value error the record lacks (decision 3 on #1072)": 1,
     "C13's warning of a choice value from outside the script the record lacks (#1437)": 3,
   });
-  assert.equal(asserted.length, 1_431);
+  assert.equal(asserted.length, 1_434);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
