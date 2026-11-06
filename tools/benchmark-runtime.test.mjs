@@ -5,14 +5,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   UsageError,
+  applyTapeEntry,
+  canonicalJson,
   formatBaseline,
+  loadTape,
   main,
+  sha256,
   stateDigest,
   summarizeCpu,
 } from "./benchmark-runtime.mjs";
+import * as references from "../benchmarks/runtime/references.mjs";
 
 // A stub `dist/`: a "source" is the JSON of its steps; `mutation` changes what the runtime does with them.
 const stubRuntime = (mutation) => `const mutation = ${JSON.stringify(mutation)};
@@ -27,7 +32,7 @@ const steps = (plan) => {
   if (mutation.append) list = [...list.slice(0, -1), mutation.append, list.at(-1)];
   return list;
 };
-export const calls = { created: 0 };
+export const calls = { created: 0, runOptions: [] };
 class Session {
   constructor(plan, index, dropped = null) {
     this.plan = plan;
@@ -40,10 +45,14 @@ class Session {
   operate(op) {
     const step = this.steps[++this.index];
     if (step?.op !== op) throw new Error("stub: no " + op + " at " + this.index);
-    return { instructionsExecuted: step.instructions, events: step.events };
+    return { instructionsExecuted: step.instructions, events: step.events,
+      ...(step.outcome ? { outcome: { kind: step.outcome } } : {}) };
   }
   stepToEvent() { return this.operate("step"); }
+  run(...args) { calls.runOptions.push(args); return this.operate("run"); }
   observeTime() { return this.operate("observe"); }
+  completeAction() { return this.operate("complete"); }
+  view() { return { runnable: this.steps[this.index]?.status === "running" }; }
   exportSnapshot() {
     const step = this.steps[this.index] ?? { status: "running", rng: { state: 1 }, state: {} };
     const state = { ...step.state };
@@ -54,6 +63,7 @@ class Session {
   exportCheckpoint() { return { plan: this.plan, index: this.index }; }
 }
 export const compileSource = (source) => ({ plan: JSON.parse(source), diagnostics: [] });
+export const compileProject = (files) => compileSource(files[0].source);
 export const createFreshRuntimeSession = (plan) => {
   calls.created++;
   return new Session(plan, -1);
@@ -119,11 +129,15 @@ const manifest = (extra = {}) => ({
   ],
 });
 
-function setUp(t, { mutations = {}, manifestExtra } = {}) {
+function setUp(t, { mutations = {}, manifestExtra, cases = null, files = {} } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "benchmark-runtime-test-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   fs.writeFileSync(path.join(directory, "work.tease"), source);
-  fs.writeFileSync(path.join(directory, "manifest.json"), JSON.stringify(manifest(manifestExtra)));
+  for (const [file, text] of Object.entries(files))
+    fs.writeFileSync(path.join(directory, file), text);
+  const written = manifest(manifestExtra);
+  if (cases) written.cases = cases;
+  fs.writeFileSync(path.join(directory, "manifest.json"), JSON.stringify(written));
   const dists = {};
   for (const [name, mutation] of Object.entries({ clean: {}, ...mutations })) {
     dists[name] = path.join(directory, `dist-${name}`);
@@ -260,6 +274,257 @@ test("a probe restored from checkpoint JSON at every cut must export the same sn
   assert.match(result.output, /probe: the session restored at cut 1 exports another snapshot/);
   assert.match(result.output, /probe restored at every cut: cut 2 \(step\) stateDigest/);
   assert.doesNotMatch(result.output, /work: the session restored/);
+});
+
+// A host case: the first answer is refused and leaves the session waiting, so the second follows without a drive.
+const hostScript = {
+  steps: [
+    {
+      op: "step",
+      instructions: 4,
+      events: [say("ask")],
+      status: "waiting",
+      rng: { state: 1 },
+      state: { a: 1 },
+    },
+    {
+      op: "complete",
+      instructions: 0,
+      events: [],
+      status: "waiting",
+      rng: { state: 1 },
+      state: { a: 1 },
+      outcome: "invalidPayload",
+    },
+    {
+      op: "complete",
+      instructions: 0,
+      events: [],
+      status: "running",
+      rng: { state: 1 },
+      state: { a: 2 },
+      outcome: "completed",
+    },
+    {
+      op: "step",
+      instructions: 3,
+      events: [say("done")],
+      status: "halted",
+      rng: { state: 1 },
+      state: { a: 3 },
+    },
+  ],
+};
+const answer = (text, unit) => ({
+  kind: "completeAction",
+  args: [{ actionId: 1, payload: { kind: "submittedText", submittedText: text } }],
+  ...(unit ? { unit: true } : {}),
+});
+const hostSetUp = (t, { tape = [answer("x"), answer("1", true)], units = 1, mutations } = {}) =>
+  withBaseline(t, {
+    mutations,
+    cases: [{ name: "host", file: "host.tease", tape: "host.json", units, unit: "answer" }],
+    files: { "host.tease": JSON.stringify(hostScript), "host.json": JSON.stringify(tape) },
+  });
+
+test("a tape's calls are cuts with their outcomes, and a changed outcome or tape fails", async (t) => {
+  const { directory, dists, run } = await hostSetUp(t, {
+    mutations: { stale: { at: 1, set: { outcome: "staleAction" } } },
+  });
+  const entry = JSON.parse(fs.readFileSync(path.join(directory, "baseline.json"), "utf8")).cases
+    .host;
+  assert.deepEqual(
+    entry.cuts.map((cut) => cut.outcome ?? cut.kind),
+    ["step", "invalidPayload", "completed", "step"],
+  );
+  assert.equal(entry.tapeSha256, sha256(JSON.stringify([answer("x"), answer("1", true)])));
+  const stale = await run("--count-only", "--dist", dists.stale);
+  assert.equal(stale.status, 1);
+  assert.match(stale.output, /host: cut 2 \(host\) outcome invalidPayload became staleAction/);
+  fs.writeFileSync(
+    path.join(directory, "host.json"),
+    JSON.stringify([answer("y"), answer("1", true)]),
+  );
+  const changed = await run("--count-only", "--dist", dists.clean);
+  assert.equal(changed.status, 1);
+  assert.match(changed.output, /host: tape sha256 [0-9a-f]{64} became [0-9a-f]{64}/);
+});
+
+test("a tape must be used up exactly when the session ends, and each unit must complete", async (t) => {
+  for (const [options, expected] of [
+    [
+      { tape: [answer("x"), answer("1", true), answer("2")] },
+      /host: the session halted with 1 tape entries left/,
+    ],
+    [
+      { tape: [answer("x")], units: 0 },
+      /host: the tape is used up while the session waits at cut 2/,
+    ],
+    [
+      { mutations: { settled: { at: 2, set: { outcome: "alreadySettled" } } } },
+      /host: tape entry 2, a unit, gave alreadySettled, not completed/,
+    ],
+  ]) {
+    const { dists, run } = setUp(t, {
+      mutations: options.mutations,
+      cases: [
+        {
+          name: "host",
+          file: "host.tease",
+          tape: "host.json",
+          units: options.units ?? 1,
+          unit: "answer",
+        },
+      ],
+      files: {
+        "host.tease": JSON.stringify(hostScript),
+        "host.json": JSON.stringify(options.tape ?? [answer("x"), answer("1", true)]),
+      },
+    });
+    const result = await run("--count-only", "--update", "--dist", dists.settled ?? dists.clean);
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, expected);
+    assert.match(result.output, /baseline not updated/);
+  }
+});
+
+test('budget: "product" drives run without a budget, and a stated failure must hold', async (t) => {
+  const failing = {
+    steps: [
+      {
+        op: "run",
+        instructions: 10,
+        events: [say("x")],
+        status: "failed",
+        rng: { state: 1 },
+        state: { failure: { code: "TSR037" } },
+      },
+    ],
+  };
+  const budgetCase = (instructions) => ({
+    name: "budget",
+    file: "budget.tease",
+    budget: "product",
+    failure: { code: "TSR037", instructions },
+  });
+  const { directory, dists, run } = await withBaseline(t, {
+    cases: [budgetCase(10)],
+    files: { "budget.tease": JSON.stringify(failing) },
+  });
+  const stub = await import(pathToFileURL(path.join(dists.clean, "src", "index.js")).href);
+  assert.ok(stub.calls.runOptions.length > 0);
+  assert.ok(
+    stub.calls.runOptions.every((args) => args.length === 0),
+    "run gets no instruction budget",
+  );
+  const entry = JSON.parse(fs.readFileSync(path.join(directory, "baseline.json"), "utf8")).cases
+    .budget;
+  assert.deepEqual(
+    entry.cuts.map((cut) => cut.kind),
+    ["run"],
+  );
+  const written = JSON.parse(fs.readFileSync(path.join(directory, "manifest.json"), "utf8"));
+  written.cases = [budgetCase(11)];
+  fs.writeFileSync(path.join(directory, "manifest.json"), JSON.stringify(written));
+  const result = await run("--count-only", "--dist", dists.clean);
+  assert.equal(result.status, 1);
+  assert.match(
+    result.output,
+    /budget: ends with \{"code":"TSR037","instructions":10\}, the manifest states \{"code":"TSR037","instructions":11\}/,
+  );
+});
+
+test("a tape's media store answers are given in their recorded order, and all of them", () => {
+  const session = {
+    completeAction: (_request, { capturedMedia }) =>
+      capturedMedia.holds("r1", "file") && capturedMedia.holds("r2", "image"),
+  };
+  const entry = (admissionQueries) => ({ kind: "completeAction", args: [{}], admissionQueries });
+  const both = [
+    { reference: "r1", kind: "file", result: true },
+    { reference: "r2", kind: "image", result: true },
+  ];
+  assert.equal(applyTapeEntry(session, entry(both)), true);
+  assert.throws(
+    () => applyTapeEntry(session, entry([...both].reverse())),
+    /did not record .* file r1/,
+  );
+  assert.throws(
+    () =>
+      applyTapeEntry(session, entry([...both, { reference: "r3", kind: "file", result: true }])),
+    /1 recorded media answers were not asked for/,
+  );
+});
+
+test("malformed tapes, and a tape whose units differ from the manifest's, are usage errors", async (t) => {
+  for (const tape of [
+    {},
+    [{ kind: "run", args: [] }],
+    [{ kind: "completeAction", args: [], extra: 1 }],
+    [{ kind: "completeAction", args: [], unit: false }],
+    [{ kind: "observeTime", args: [1], admissionQueries: [] }],
+  ])
+    assert.throws(() => loadTape(JSON.stringify(tape), "tape"), UsageError, JSON.stringify(tape));
+  const { dists, run } = setUp(t, {
+    cases: [{ name: "host", file: "host.tease", tape: "host.json", units: 2, unit: "answer" }],
+    files: {
+      "host.tease": JSON.stringify(hostScript),
+      "host.json": JSON.stringify([answer("1", true)]),
+    },
+  });
+  await assert.rejects(
+    run("--count-only", "--dist", dists.clean),
+    /the tape marks 1 units, the manifest states 2/,
+  );
+});
+
+// The #1797 workloads' statements against `benchmarks/runtime/references.mjs`, without any runtime: each text is
+// computed from the fixture's own parameter and tape, and the cooperative Battleship's two counts agree.
+test("every workload text the manifest states is its independent reference's", () => {
+  const directory = fileURLToPath(new URL("../benchmarks/runtime/", import.meta.url));
+  const read = (file) => fs.readFileSync(path.join(directory, file), "utf8");
+  const cases = Object.fromEntries(
+    JSON.parse(read("manifest.json")).cases.map((entry) => [entry.name, entry]),
+  );
+  const parameter = (file, name) =>
+    Number(read(file).match(new RegExp(`^let ${name} = (\\d+)$`, "m"))[1]);
+  const tape = (name) => JSON.parse(read(cases[name].tape));
+  const stated = {
+    "helper-input": references.helperInput(tape("helper-input")),
+    "form-completion": references.formCompletion(tape("form-completion")),
+    "storage-commit": references.storage(tape("storage-commit")),
+    "storage-failed": references.storage(tape("storage-failed")),
+    "file-store": references.fileStore(tape("file-store")),
+    "transfer-project": references.transferProject(7),
+    "collection-tail-10000": references.collectionTail(
+      parameter("workloads/collection-tail-10000.tease", "size"),
+    ),
+  };
+  for (const [name, said] of Object.entries(stated)) assert.deepEqual(cases[name].said, said, name);
+  for (const name of ["text-tail-64k", "text-tail-300k"]) {
+    const text = references.textTail(parameter(cases[name].file, "chunks"));
+    assert.equal(cases[name].saidSha256, sha256(canonicalJson(text)), name);
+    assert.equal(cases[name].units, [...text[1]].length, name);
+  }
+  assert.equal(
+    cases["helper-input"].units,
+    tape("helper-input").filter((call) => call.unit).length,
+  );
+  const hub = read("workloads/transfer-project/hub.tease").match(/^if visits > (\d+) \{$/m);
+  assert.equal(Number(hub[1]), 7, "transfer-project's reference takes the hub's last visit");
+  const baseline = JSON.parse(read("baseline.json")).cases;
+  for (const name of ["battleship-cooperative-150"]) {
+    const [, placements, attempts] = baseline[name].said
+      .at(-2)
+      .match(/^placements:(\d+):attempts:(\d+)$/);
+    assert.equal(Number(placements), parameter(cases[name].file, "nTries"), name);
+    assert.equal(Number(placements), cases[name].units, name);
+    assert.equal(
+      baseline[name].cuts.filter((cut) => cut.kind === "observe").length,
+      Math.floor(Number(attempts) / 1000),
+      `${name}: one 10 ms rest per 1,000 placement attempts`,
+    );
+  }
 });
 
 test("--cpu reports interleaved samples and never fails on CPU", async (t) => {

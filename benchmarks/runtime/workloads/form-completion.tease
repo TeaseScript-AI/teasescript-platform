@@ -1,0 +1,11 @@
+// Completed forms (#1797, F-work), after Domme2's `askForm` settings: a toggle, a cycle, a ranged integer and an
+// optional text, edited field by field before each submit; one form keeps a start value. Each submitted form counts.
+let completed = 0
+let summary = []
+repeat 3 {
+  let settings = askForm "Settings?", fields: { sound: false, level: ["Low", "Mid", "High"], rounds: { value: 5, min: 1, max: 20 }, note: { value: "", type: "text", optional: true } }
+  completed += 1
+  summary.add("${settings.sound}/${settings.level}/${settings.rounds}/${settings.note otherwise "-"}")
+}
+say "forms:${completed}:${summary.join("|")}", instant
+exit
