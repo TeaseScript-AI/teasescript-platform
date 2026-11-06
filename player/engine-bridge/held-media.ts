@@ -27,12 +27,18 @@ export function heldMedia(store: CapturedMediaAdmission, references: readonly st
   );
 }
 
-/** The admission the engine gets in the host: what is not in `held` is not held. */
+/**
+ * The admission the engine gets in the host: what is not in `held` is not held. It is indexed once, since the engine asks
+ * once per reference of an answer, which may store many files.
+ */
 export function admissionOf(held: HeldMedia): CapturedMediaAdmission {
-  return {
-    holds: (reference, kind) =>
-      held.some((entry) => entry.reference === reference && entry.kind === kind),
-  };
+  const kinds = new Map<string, Set<StoredFileKind>>();
+  for (const { reference, kind } of held) {
+    const known = kinds.get(reference);
+    if (known === undefined) kinds.set(reference, new Set([kind]));
+    else known.add(kind);
+  }
+  return { holds: (reference, kind) => kinds.get(reference)?.has(kind) === true };
 }
 
 /** Whether `value` is a `HeldMedia` table: a plain array of `{ reference, kind }` with a known kind. */

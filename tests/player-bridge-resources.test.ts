@@ -553,3 +553,55 @@ test("an answer whose basis a hatch call replaced is offered again, and the phot
   assert.deepEqual(camera.sent, ["observeTime", "answerCapture", "observeTime", "answerCapture"]);
   assert.equal(hostSnapshot(camera.state.session!).stageImage, "photo-1");
 });
+
+for (const during of ["observeTime", "answerFileStore"] as const)
+  test(`a file store reset while its ${during === "observeTime" ? "observation" : "refused answer"} is in transit sends and reports nothing more`, async () => {
+    const bridge = await inProcessBridge(50);
+    let current: PlayerSession | null = await bridge.start(
+      await prepared(bridge, `let picture = fileFromBase64("${PNG}", default: "")\nexit`),
+      START,
+      false,
+    );
+    const sent: string[] = [];
+    const diagnostics: PlayerDiagnostic[] = [];
+    // Once reset, as at a Player error stop, the service is offered no session to service again.
+    let reset = false;
+    // The store keeps the file but does not vouch for it, so the answer is refused.
+    const media = new CapturedMediaStore(
+      null,
+      { create: () => "blob:", revoke: () => {} },
+      "files",
+    );
+    media.holds = () => false;
+    const files: FileStoreService = new FileStoreService({
+      session: () => (reset ? null : current),
+      generation: () => 1,
+      section: serviceSection(
+        bridge,
+        () => current,
+        (next) => (current = next),
+        (op) => {
+          sent.push(op);
+          // A reset without a new generation, as the Player error stop makes it.
+          if (op === during)
+            queueMicrotask(() => {
+              reset = true;
+              files.reset();
+            });
+        },
+      ),
+      media,
+      diagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      later: (task) => setImmediate(task),
+    });
+    files.request();
+    await until(() => sent.includes(during));
+    await turns(20);
+    files.stop();
+    // No answer after a reset observation, and no diagnostic or fallback after a reset refusal.
+    assert.deepEqual(
+      sent,
+      during === "observeTime" ? ["observeTime"] : ["observeTime", "answerFileStore"],
+    );
+    assert.deepEqual(diagnostics, []);
+  });
