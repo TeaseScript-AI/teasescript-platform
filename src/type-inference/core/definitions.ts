@@ -45,6 +45,9 @@ export function keyOf(place: PlaceId, path: readonly string[]): Key {
   return `${place}|${path.join(".")}`;
 }
 
+/** The code unit of `.`, which joins a key's steps. */
+const DOT = 46;
+
 /** Where a key's text puts its `|`; a cursor has none, and is refused: its path is the arena's (`key-ids.ts`). */
 function barOf(key: Key): number {
   const bar = key.indexOf("|");
@@ -1105,9 +1108,11 @@ export class DefinitionLists {
    * dominating chain gives the reaching definition at any path below; the node's boundary, loops, liveness, block
    * reachability and whether the source's declaration dominates it (X1, X4, X5, X7, P3); and, in each list X6 reads
    * for any of those keys (the source's own events with its descendants', each prefix's, the call sites), where the
-   * node's subtree begins and ends among its positions, which fixes the events of any span the node ends. The handlers'
-   * facts are the caller's. Without `calls` the call sites are left out: a read's snapshot of a key no other callable
-   * stores (`readSignature`).
+   * node's subtree begins and ends among its positions, which fixes the events of any span the node ends. A prefix's
+   * cut is tagged by its depth and asked only of the prefixes with definitions (G3 3b's walk, #1822): one without has
+   * no event, so its cut is the same for every read of the source, and every caller keys the signature with its
+   * source; no prefix's text is made. The handlers' facts are the caller's. Without `calls` the call sites are left
+   * out: a read's snapshot of a key no other callable stores (`readSignature`).
    */
   public aliasSignature(source: Key, node: FlowNode, calls = true): string {
     const program = this.#program;
@@ -1125,7 +1130,21 @@ export class DefinitionLists {
     const lists = calls
       ? [this.#eventList(source), this.index.sitePositions]
       : [this.#eventList(source)];
-    for (const prefix of prefixesOf(source)) lists.push(this.definitionsOf(prefix).eventPositions);
+    const cuts = lists.map(cut);
+    // (each prefix's depth counted along the source's text, the shallowest first, so the scan goes no further than the
+    // deepest prefix the trie's walk reached, each character once; the cuts in the walk's order, the nearest first)
+    const prefixes = this.index.stored.above(source, false);
+    const bar = barOf(source);
+    const tagged: string[] = [];
+    let [dots, scanned] = [0, bar + 1];
+    for (let index = prefixes.length - 1; index >= 0; index -= 1) {
+      const prefix = prefixes[index]!;
+      for (; scanned < prefix.length; scanned += 1)
+        if (source.charCodeAt(scanned) === DOT) dots += 1;
+      const depth = prefix.length === bar + 1 ? 0 : dots + 1;
+      tagged.push(`${depth}:${cut(this.definitionsOf(prefix).eventPositions)}`);
+    }
+    for (let index = tagged.length - 1; index >= 0; index -= 1) cuts.push(tagged[index]!);
     return [
       reaching === null
         ? "-"
@@ -1137,7 +1156,7 @@ export class DefinitionLists {
       node.loops.map((loop) => loop.id).join(","),
       program.blockReachable(node) ? "b" : "",
       declaration !== undefined && program.dom.dominates(declaration.node, node) ? "p" : "",
-      lists.map(cut).join(";"),
+      cuts.join(";"),
     ].join("|");
   }
 
