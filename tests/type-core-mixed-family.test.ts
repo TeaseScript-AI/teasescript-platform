@@ -19,16 +19,17 @@ import { inMode, MODES } from "./helpers/type-core-oracles.js";
  * - its `null` at no layer, at a layer or at the leaf;
  * - at the element or a layer its value carried, or a copy (narrowed, maybe null, held, typed host values tested or
  *   not, an `otherwise` of a copy);
- * - the pair as elements, properties or `+` operands;
+ * - the pair as elements, properties or `+` operands, joined again with a second disagreeing side, or the whole-number
+ *   side a `+` of two whose nulls are at different layers;
  * - both orders.
- * Here, each kind at every position with every relation of its carried layer to the null (`RELATIONS`: an interior
- * carrier with the null below it, the element's with the leaf's, the deepest with none, the null at its layer, the
- * shallow side's two), and joined again with a second disagreeing side at the interior relation, the order turned
- * through them, in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
+ * Here, each kind at every position with every relation of its carried layer to the null (`RELATIONS`: the null one
+ * and two layers below it, inside and at the leaf, three below at the leaf, at its layer, none), the order turned
+ * through them, and the two joined positions at one relation each (`ONE`) in both orders, in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
  * the inherited classes, each its issue's work:
  * - the later element's leaf `null`, #1790 (#1819, stacked on this);
  * - an element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
- * - a typed host value under `!= null`, which leaves no mark on its unknown items, #1847.
+ * - a typed host value under `!= null`, which leaves no mark on its unknown items, #1847;
+ * - the earliest side's leaf `?` of an `otherwise` of a typed host value with a `null` fallback, #1858.
  * Each class is exactly its issue's change of the checker's sentence (`mixedExplained`, Codex r12 on #1789). A source
  * only one checker reports on is outside the candidate slice there and is not compared.
  */
@@ -41,19 +42,25 @@ async function family<T>(name: string): Promise<T> {
 }
 
 // (the issues still open here, each a class of differences `mixedExplained` names exactly)
-const OPEN = ["#1790", "#1843", "#1847"];
+const OPEN = ["#1790", "#1843", "#1847", "#1858"];
 
-// (the sample: each kind at every position with every relation of its carried layer to the null (`RELATIONS`), the
-// order turned through them; joined again with a second disagreeing side, the interior relation only. The structural
-// combinations of kind, position and null, not a rotation over their marginals, Codex r14–r16)
-const RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])[] = [
+// (the sample: each kind at every position with every relation of its carried layer to the null (`RELATIONS`, the
+// null's distance below it inside a list and at the leaf), the order turned through them; the joined positions at one
+// relation each (`ONE`): a second disagreeing side asks the first join again at the interior relation, and the side
+// joined with its twin, the null at the element's own layer and the twin's below it (Codex r17's witness). The structural combinations of kind, position and null, not a rotation over
+// their marginals, Codex r14–r17)
+type Relation = readonly [depth: number, at: number, nullAt: number];
+const RELATIONS: readonly Relation[] = [
   [3, 1, 2],
+  [3, 0, 2],
   [3, 0, 3],
+  [3, 1, 3],
   [3, 2, 0],
   [3, 1, 1],
   [2, 0, 1],
   [2, 1, 2],
 ];
+const ONE: Readonly<Record<string, Relation>> = { joinTwice: [3, 1, 2], joinNulls: [3, 1, 1] };
 
 function sampled(cases: readonly (readonly [string, string])[]): (readonly [string, string])[] {
   const kinds = [...new Set(cases.map(([name]) => mixedDimensions(name).kind))];
@@ -62,25 +69,23 @@ function sampled(cases: readonly (readonly [string, string])[]): (readonly [stri
   let turn = 0;
   for (const kind of kinds)
     for (const position of positions)
-      for (const [depth, carried, nullAt] of position === "joinTwice"
-        ? RELATIONS.slice(0, 1)
-        : RELATIONS) {
-        const later = turn++ % 2 === 1;
-        const at = kind === "plain" ? -1 : carried;
-        const found = cases.find(([name]) => {
-          const d = mixedDimensions(name);
-          return (
-            d.kind === kind &&
-            d.position === position &&
-            d.later === later &&
-            d.depth === depth &&
-            d.nullAt === nullAt &&
-            d.at === at
-          );
-        });
-        assert.ok(found !== undefined, `${kind} ${position} ${later}`);
-        out.push(found);
-      }
+      for (const [depth, carried, nullAt] of position in ONE ? [ONE[position]!] : RELATIONS)
+        for (const later of position in ONE ? [false, true] : [turn++ % 2 === 1]) {
+          const at = kind === "plain" ? -1 : carried;
+          const found = cases.find(([name]) => {
+            const d = mixedDimensions(name);
+            return (
+              d.kind === kind &&
+              d.position === position &&
+              d.later === later &&
+              d.depth === depth &&
+              d.nullAt === nullAt &&
+              d.at === at
+            );
+          });
+          assert.ok(found !== undefined, `${kind} ${position} ${later}`);
+          out.push(found);
+        }
   return out;
 }
 

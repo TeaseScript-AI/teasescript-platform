@@ -74,7 +74,8 @@ const INTEGER_TYPE = /\(([^()]*integer[^()]*)\)/;
  * checker's sentence: the checker's sentence changed exactly where the issue's defect is, on the whole-number side.
  * - #1790 (#1819): the later element's leaf `null` dropped;
  * - #1843: an element's own `or null` dropped, for a copy at the element that may be null;
- * - #1847: a `!= null` test of a typed host value not seen, its `?` at the tested layer kept.
+ * - #1847: a `!= null` test of a typed host value not seen, its `?` at the tested layer kept;
+ * - #1858: the earliest side's leaf `?` dropped for an `otherwise` of a typed host value with a `null` fallback.
  */
 function mixedInherited(
   row: MixedDimensions,
@@ -89,6 +90,14 @@ function mixedInherited(
     ["maybe", "host", "invalidated", "hostOrNull"].includes(row.kind)
   )
     out.push(["#1843", (sentence) => sentence.replace(/(\([^()]*integer[^()]*\)) or null/, "$1")]);
+  if (
+    open.includes("#1858") &&
+    row.kind === "hostOrNull" &&
+    row.at === 0 &&
+    row.nullAt === row.depth &&
+    !row.later
+  )
+    out.push(["#1858", (sentence) => sentence.replace("integer?", "integer")]);
   if (open.includes("#1847") && row.kind === "notNull" && row.at > 0)
     out.push([
       "#1847",
@@ -108,7 +117,7 @@ function mixedInherited(
 /**
  * The sentences a case compares, the core's and the checker's; `null` where one names no mixed error of the
  * whole-number side (outside the candidate slice there, not compared). A pair joined with a second disagreeing side
- * names both joins in the core and the first in the checker: the sentences naming the whole-number side are compared,
+ * (`joinTwice`, `joinNulls`) names both joins in the core and the first in the checker: the sentences naming the whole-number side are compared,
  * its true-or-false partner read as the text side; one between the text side and its twin says nothing of it.
  */
 export function mixedCompared(
@@ -117,7 +126,7 @@ export function mixedCompared(
   current: readonly string[],
 ): { readonly core: readonly string[]; readonly current: readonly string[] } | null {
   const twin = (sentences: readonly string[]): string[] =>
-    row.position === "joinTwice"
+    row.position === "joinTwice" || row.position === "joinNulls"
       ? [
           ...new Set(
             sentences
