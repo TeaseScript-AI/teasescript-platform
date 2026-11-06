@@ -3356,3 +3356,131 @@ test("a mixed error keeps the later element's null below it (#1790)", () => {
       assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
     }
 });
+/**
+ * #1762: a mixed error names a dict layer of its elements' type as a dict, as the current checker's first sentence does:
+ * a written copy's (one that may be null too), a literal's, below a list, below a property, two deep, and a join's;
+ * each side by its own values where a list and a dict meet. In four modes.
+ */
+test("a mixed element's type names its dict layers as dicts (#1762)", () => {
+  const ONE = "A list holds one type. Use values of one type in it.";
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      'let a:integer?[] dict=dict {}\nlet xs=[a,dict {k: ["x"]}]\nexit\n',
+      `This list mixes a dict (integer?[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+    // (a written copy that may be null: a dict still)
+    [
+      'let a:integer[] dict?=dict {}\nlet xs=[a,dict {k: ["x"]}]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+    // (an `otherwise` whose dict fallback never runs is its operand, a list, both orders; Codex r5 on #1814)
+    [
+      'let xs=[([[1]] otherwise dict {k:[2]}),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[["x"]],([[1]] otherwise dict {k:[2]})]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    // (nor an operand proved null: the fallback is the value; Codex r6 on #1814)
+    [
+      'let a:integer[] dict?=null\nlet xs=[(a otherwise [[1]]),[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict?=null\nlet xs=[[["x"]],(a otherwise [[1]])]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[dict {k: [1]},dict {k: ["x"]}]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict=dict {}\nlet xs=[[a],[dict {k: ["x"]}]]\nexit\n',
+      `This list mixes a list (integer[] dict[]) and a list (string[] dict[]). ${ONE}`,
+    ],
+    [
+      'let xs=[dict {k: dict {j: [1]}},dict {k: dict {j: ["x"]}}]\nexit\n',
+      `This list mixes a dict (integer[] dict dict) and a dict (string[] dict dict). ${ONE}`,
+    ],
+    [
+      'let xs=[{f: dict {k: [1]}},{f: dict {k: ["x"]}}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a dict (integer[] dict) in one and a dict (string[] dict) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (a list and a dict at one path: each side by its own values, Codex r1 on #1814)
+    [
+      'let xs=[[[1]],dict {k:["x"]}]\nexit\n',
+      `This list mixes a list (integer[][]) and a dict (string[] dict). ${ONE}`,
+    ],
+    [
+      'let xs=[dict {k:[1]},[["x"]]]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[a,dict {k:["x"]}]\nexit\n',
+      `This list mixes a list (integer[][]) and a dict (string[] dict). ${ONE}`,
+    ],
+    [
+      'let xs=[{f:[[1]]},{f:dict {k:["x"]}}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer[][]) in one and a dict (string[] dict) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (a host-assigned written dict carried through `otherwise`: its written dict, through the carrier, also below a
+    // property and through an intermediate copy; Astra r1 on #1814)
+    [
+      'let a:integer[] dict?=null\na=hostValue\nlet xs=[(a otherwise dict {}),dict {k:["x"]}]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict?=null\na=hostValue\nlet xs=[{f:(a otherwise dict {})},{f:dict {k:["x"]}}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a dict (integer[] dict) in one and a dict (string[] dict) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[] dict?=null\na=hostValue\nlet b=a otherwise dict {}\nlet xs=[b,dict {k:["x"]}]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+    [
+      'let a:integer[] dict?=null\na=hostValue\nlet xs=[a otherwise dict {k:[1]}]+[dict {k:["x"]}]\nexit\n',
+      "'+' would mix a dict (integer[] dict) and a dict (string[] dict). A list holds one type. Use values of one " +
+        "type in both lists.",
+    ],
+    // (a list of dicts at the leaf: a list, as before)
+    [
+      'let xs=[[dict {k: 1}],[dict {k: "x"}]]\nexit\n',
+      `This list mixes a list (integer dict[]) and a list (string dict[]). ${ONE}`,
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+  // (a dict copy that may hold null there: a dict; the element's own null is #1753's, so only the type's text)
+  for (const mode of MODES) {
+    const [mixed] = inMode(mode, () =>
+      reported(
+        main('let a:integer[] dict?=dict {}\na=hostValue\nlet xs=[a,dict {k: ["x"]}]\nexit\n'),
+      ),
+    ).filter((each) => each.code === "TSV044");
+    assert.match(
+      mixed?.message ?? "",
+      /^This list mixes a dict \(integer\[\] dict\)/u,
+      JSON.stringify(mode),
+    );
+  }
+  // (a join's, its fix as the join's)
+  for (const mode of MODES) {
+    const [mixed] = inMode(mode, () =>
+      reported(main('let xs=[dict {k: [1]}]+[dict {k: ["x"]}]\nexit\n')),
+    ).filter((each) => each.code === "TSV044");
+    assert.match(
+      mixed?.message ?? "",
+      /^'\+' would mix a dict \(integer\[\] dict\) and a dict \(string\[\] dict\)\. /u,
+      JSON.stringify(mode),
+    );
+  }
+});

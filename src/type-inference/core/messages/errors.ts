@@ -431,9 +431,14 @@ function mixedSentence(
   const holds = `A ${collection} holds one type.`;
   // the steps to the property that differs, and the collections below it
   const property = path.findLastIndex((step) => step !== "element" && step !== "entry");
-  const below = path.slice(property + 1);
-  // (each layer between them optional where it may hold null, #1765: `optional`'s flags for the steps after the first)
-  const nested = (types: readonly ItemTag[], optional: readonly boolean[] = []): string => {
+  // (each layer between them optional where it may hold null, #1765: `optional`'s flags for the steps after the first;
+  // each side's own steps where they differ, a dict's layer its `entry`, #1762)
+  const nested = (
+    types: readonly ItemTag[],
+    optional: readonly boolean[] = [],
+    steps: readonly string[] = path,
+  ): string => {
+    const below = steps.slice(property + 1);
     let written = typeText(types);
     for (let at = below.length - 1; at >= 0; at -= 1) {
       written =
@@ -455,12 +460,12 @@ function mixedSentence(
       .map(propertyName)
       .join(".");
     return (
-      `${mixes} objects whose property '${name}' holds ${nested(rule.type, rule.optional?.type)} in one and ` +
-      `${nested(kinds, rule.optional?.kinds)} in another. ${holds} Give '${name}' one type in every ` +
+      `${mixes} objects whose property '${name}' holds ${nested(rule.type, rule.optional?.type, rule.shown?.type)} in one and ` +
+      `${nested(kinds, rule.optional?.kinds, rule.shown?.kinds)} in another. ${holds} Give '${name}' one type in every ` +
       `${collection === "dict" ? "value" : "element"}.`
     );
   }
-  const first = `${mixes} ${nested(rule.type, rule.optional?.type)} and ${nested(kinds, rule.optional?.kinds)}. ${holds}`;
+  const first = `${mixes} ${nested(rule.type, rule.optional?.type, rule.shown?.type)} and ${nested(kinds, rule.optional?.kinds, rule.shown?.kinds)}. ${holds}`;
   if (rule.operator !== undefined) return `${first}${mixedJoinFix(rule, source, diagnosed)}`;
   const both = path.length === 0 ? typeText([...rule.type, ...kinds]) : null;
   if (both === null) return `${first} Use values of one type in it.`;

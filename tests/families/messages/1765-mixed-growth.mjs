@@ -63,6 +63,12 @@ export const shapes = {
   "join-width:take": (size) =>
     `let xs=[[${Array.from({ length: 4 * size }, (_, at) => `[${at}]`).join(",")}].take(${4 * size})]${Array.from({ length: 4 * size }, (_, at) => `+[[["s${at}"]]]`).join("")}\nexit\n`,
   "join-width:earliest": (size) => wide(size, (value) => value),
+  // the same with dict layers, each side's dict layers read by the same walk (#1762: Codex r4 on #1814, a contract
+  // read per join grows past the bound only at about 4k joins; the earliest element's walked once per path)
+  "join-width:dict-take": (size) =>
+    `let xs=[[${Array.from({ length: 4 * size }, () => "dict {k:[1]}").join(",")}].take(${4 * size})]${Array.from({ length: 4 * size }, () => '+[[dict {k:["x"]}]]').join("")}\nexit\n`,
+  "join-width:dict-earliest": (size) =>
+    `let xs=[[${Array.from({ length: size }, (_, at) => `dict {k:[${at}]}`).join(",")}],${Array.from({ length: size }, (_, at) => `[dict {k:["s${at}"]}]`).join(",")}]\nexit\n`,
   // the left-nested otherwise chain (Codex r11)
   "otherwise-chain": (size) =>
     `let n:integer[][]?=[[1]]\nif hostValue == 1 { n=null }\nlet xs=[${"(".repeat(8 * size)}n${") otherwise null".repeat(8 * size)},[["x"]]]\nexit\n`,

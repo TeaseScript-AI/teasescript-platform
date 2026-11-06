@@ -254,6 +254,11 @@ export type DiagnosticRule =
        * types (#1765); absent where none may.
        */
       readonly optional?: { readonly type: readonly boolean[]; readonly kinds: readonly boolean[] };
+      /**
+       * #1762: each side's `path` as its sentence writes it, a dict's layer its `entry` step: the earliest element's
+       * (`type`) and the other's (`kinds`); absent where both are `path`.
+       */
+      readonly shown?: MixedSteps;
     }
   /**
    * V30 §19: an `askChoice` whose buttons return values of more than one type (the diagnostic's kinds), stored in
@@ -301,6 +306,12 @@ export interface StoreRoot {
   readonly name: string;
   /** The declaration as written: a variable's `let` or `global` statement, a parameter with its type and default. */
   readonly site: SourceSite | null;
+}
+
+/** #1762: each side's steps of a mixed rule as its sentence writes them (`shown`). */
+export interface MixedSteps {
+  readonly type: readonly string[];
+  readonly kinds: readonly string[];
 }
 
 /** A step below a store's root: a property by its name, or the collection whose element or dict value comes next. */
