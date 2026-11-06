@@ -163,6 +163,13 @@ test("the objects query covers each family's group members at the path its reads
 
 /** Sources beside the families: each route the query follows or declines, at the reads its oracle asks. */
 const CONTROLS = [
+  // a property stored below a key, its value a `missing` an earlier literal names
+  'let base={}\nlet b2={a:{}}\nb2.a.c=base.zz\nsay "${b2.a.c}"\nexit\n',
+  // a projected copy, and elements added whole
+  'let preset={stats:{a:1}}\nlet s=preset.stats\nsay "${s.zz}"\nexit\n',
+  'let l2=[{a:1}]\nl2.addAll([{b:2}])\nsay "${l2.first.zz}"\nexit\n',
+  // a key with a written type below it
+  "function hd(x:dict) { return x.zz }\nlet vv=hd({a:1})\nexit\n",
   // F11 at a prefix, a property stored below it, a stored `missing`, a host value beside a literal
   'let base={a:{},b:1}\nlet w={p:base,h:hostValue}\nbase.a.c=1\nlet y={q:base.zz}\nlet n={p:{a:base.zz}}\nsay "${w.p.a.c}"\nsay "${y.q.r}"\nsay "${n.p.a}"\nexit\n',
   // several objects in one list, the first lacking of each list, the earliest of the lists
@@ -281,6 +288,28 @@ test("after the analysis stops, an objects query covers no read: its unfinished 
           false,
           shape,
         );
+    });
+  }
+});
+
+test("the objects query covers a cycle of calls a literal seeds, and names its writer as the read does (#1747)", () => {
+  // (the call cycle's result read whole: through both functions' results to the literals passed in)
+  const source = CONTROLS.find((each) => each.includes("return g(x, n)"))!;
+  for (const mode of MODES) {
+    const [pass] = passesOf(source, mode, 30_000_000);
+    inMode(mode, () => {
+      const { program, contract, solver } = pass!;
+      const r = [...program.occurrenceOf.entries()].find(
+        ([, b]) => program.places[b]?.label === "r",
+      )![0];
+      const derived = solver.run(absentWriterAt(contract, r, [], "zz"));
+      assert.ok(derived.covered, JSON.stringify(mode));
+      let writer: Writer | null = null;
+      for (const item of solver.run(contract.contractOfValueAt(r, ["zz"])))
+        if (item.tag === "unknown" && item.reasons === REASON.missing)
+          writer = firstWriter(writer, item.writer);
+      assert.ok(writer !== null);
+      assert.equal(text(derived.writer), text(writer), JSON.stringify(mode));
     });
   }
 });
