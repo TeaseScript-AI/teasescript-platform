@@ -2934,6 +2934,18 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let a:integer[][]?=null\na=hostValue\nlet xs=[[(a otherwise null)],[[["x"]]]]\nexit\n',
       `This list mixes a list (integer[][]?[]) and a list (string[][][]). ${ONE}`,
     ],
+    // (a layer that is a copy's own level, held in an inferred one, as it is read there: `n` holds `[2]`; a copy's term
+    // only where it decides the layer from above; Codex r5 on #1819)
+    [
+      'let n:integer[]?=[2]\nlet h={p:[n]}\nlet xs=[h,{p:[["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'p' holds a list (integer[][]) in one and a list (string[][]) in " +
+        "another. A list holds one type. Give 'p' one type in every element.",
+    ],
+    [
+      'let n:integer[]?=[2]\nlet h={p:[n]}\nlet xs=[{p:[["x"]]},h]\nexit\n',
+      "This list mixes objects whose property 'p' holds a list (string[][]) in one and a list (integer[][]) in " +
+        "another. A list holds one type. Give 'p' one type in every element.",
+    ],
     // (known differences, #1838: an `otherwise` inside a default, `load`, property or index keeps, in admission's items,
     // the null its never-run fallback brings, so the outer `otherwise` counts its own fallback too; the current checker
     // says `integer[][]`. Admission's to repair, not the message layer's; these turn to `integer[][]` with it)

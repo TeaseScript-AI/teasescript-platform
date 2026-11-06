@@ -1,4 +1,4 @@
-import type { PlaceId, SourceSite } from "../../graph.js";
+import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { Strip } from "../carriers.js";
 import type { Admission } from "../admission.js";
 import {
@@ -1347,7 +1347,8 @@ export interface MixedOptional {
  * 3. a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and default,
  *    a method's receiver, a dict's values, a `+` join's admitted operands), by each value it carries, at the path into
  *    it; an `otherwise`'s fallback only where its operand may be null;
- * 4. a written copy, by its term alone, whatever a rejected store put there;
+ * 4. a written copy, by its term alone, whatever a rejected store put there, where it decides the layer from above (its
+ *    parent layer's term is its too); a layer that is a copy's own level, as it is read there;
  * 5. another read or a call's result, by its place's admitted type where admission decides it;
  * 6. any other value (an undecided place's read, an operation's own result), by its own items.
  * Cases 2 and 3 compose: `layersOf` follows them, every layer of a path in one descent. This function answers the
@@ -1369,10 +1370,15 @@ function mayHoldNull(
     return program.opOf.get(at)?.kind === "fallback"
       ? operandNull(admission, at, from)
       : occurrenceNull(admission, at, from);
-  const copied = holdsSource(admission, at)
-    ? (drive(admission, earliestDecider(admission, at, from, steps, null))?.term ?? null)
-    : null;
-  if (copied !== null) return typeTags(copied).includes("null");
+  const term = (path: readonly string[]): TypeTerm | null =>
+    drive(admission, earliestDecider(admission, at, from, path, null))?.term ?? null;
+  const copied = holdsSource(admission, at) ? term(steps) : null;
+  // (a copy's term where the copy decides the layer from above, its parent layer's term too: `b: string?[]` in
+  // `[[1],b]`; one whose own level the layer is, `atom` in `{v:atom}`, as it is read there, narrowed: Codex r1 on #1819)
+  if (copied !== null)
+    return term(keptSlice(admission.work, steps, 0, steps.length - 1)) !== null
+      ? typeTags(copied).includes("null")
+      : occurrenceNull(admission, at, from, steps);
   const key = contract.copiedKey(at) ?? contract.resultKey(at);
   if (key !== null) {
     const path = joinSteps(stepsArray(keyStepsIn(contract, key)), steps);
@@ -1386,18 +1392,23 @@ function mayHoldNull(
 }
 
 /**
- * #1765: whether a value may be null as it is read at its node: its type allows null (its contract's items, which a
+ * #1765: whether a value may be null as it is read at its node (at `steps` below it): its type allows null (its contract's items, which a
  * rejected store does not reach) and its items there, narrowed, hold null or an unknown no test guards (a typed host
  * value, Astra r1's B1 on #1819; under `!= null` its unknown is guarded). A written copy narrowed by its assignment or a
  * test holds none, as the current checker reads it.
  */
-function occurrenceNull(admission: Admission, at: PlaceId, from: FlowNode): boolean {
+function occurrenceNull(
+  admission: Admission,
+  at: PlaceId,
+  from: FlowNode,
+  steps: readonly string[] = [],
+): boolean {
   return (
-    withoutEmpty(admission.run(admission.pass.contract.contractOfValueAt(at, []))).some(
+    withoutEmpty(admission.run(admission.pass.contract.contractOfValueAt(at, steps))).some(
       (item) => item.tag === "null",
     ) &&
     admission
-      .items(at, from, [])
+      .items(at, from, steps)
       .some((item) => item.tag === "null" || (item.tag === "unknown" && item.guarded !== true))
   );
 }
