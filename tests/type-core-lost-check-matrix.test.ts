@@ -153,29 +153,37 @@ test("Codex r5's rows: a stored literal carries its contract by its typed calls'
     }
 });
 
-test("Codex r6's rows: a static part the gate cannot prove declines, an accepted over-decline (#1845)", () => {
+test("Codex r6's rows: a static part the gate cannot prove publishes as the natural plan or declines (#1845)", () => {
   // (a complete receiving result, both typed readers carrying their contracts, and a regex leaf or a collection whose
-  // contract is a union beside them: the literal's structure the gate does not follow, so it declines, the legacy
-  // compiles, #1845)
+  // contract is a union beside them: the literal's structure the gate does not follow, so it may decline, an accepted
+  // over-decline, #1845, the legacy compiles; a published plan runs as the natural one)
   const parsed =
     "n:fromJson(hostValue,default:[[1]],files:false),m:fromJson(hostOther,default:[[1]],files:false)";
+  const globals = { hostValue: '[["x"]]', hostOther: '[["x"]]' };
   for (const middle of [`let b={${parsed},extra:/r/}`, `let b={${parsed},extra:[1]}\nb.extra=null`])
     for (const mode of HELD_MODES) {
       const source = `${middle}\nsay toJson(b.n)\nsay "AFTER"\nexit\n`;
-      assert.throws(
-        () =>
-          mode.run(() =>
-            withTestDemandAllowance(16, () =>
-              compileSourceWithBackend(
-                source,
-                { globals: ["hostValue", "hostOther"] },
-                CORE_BACKEND,
-              ),
-            ),
-          ),
-        (error) =>
+      const compiled = (demand?: number) =>
+        mode.run(() => {
+          const once = () =>
+            compileSourceWithBackend(source, { globals: ["hostValue", "hostOther"] }, CORE_BACKEND);
+          return demand === undefined ? once() : withTestDemandAllowance(demand, once);
+        });
+      let plan;
+      try {
+        plan = compiled(16).plan;
+      } catch (error) {
+        assert.ok(
           error instanceof CandidateOutsideSlice &&
-          error.what === "a store whose check was lost at the budget",
+            error.what === "a store whose check was lost at the budget",
+          `${middle} (${mode.name})`,
+        );
+        continue;
+      }
+      assert.ok(plan !== null, `${middle} (${mode.name})`);
+      assert.deepEqual(
+        runGlobals(plan, globals).said,
+        runGlobals(compiled().plan!, globals).said,
         `${middle} (${mode.name})`,
       );
     }
