@@ -1,4 +1,5 @@
 import {
+  BridgeLostError,
   BridgeRequestError,
   type BridgeClient,
   type BridgeResult,
@@ -29,6 +30,15 @@ function haltedError(): BridgeRequestError {
  */
 export function refusalCode(error: unknown): string | null {
   return error instanceof BridgeRequestError && error.kind === "bridge" ? error.code : null;
+}
+
+/**
+ * Whether a request ended because its session or its Worker can take nothing more: refused as stopped (`halted`), or
+ * lost with the Worker. Its caller then ends quietly: the stop or `bridgeLost` reports it once, and the caller's own
+ * cleanup still runs.
+ */
+export function endsQuietly(error: unknown): boolean {
+  return error instanceof BridgeLostError || refusalCode(error) === "halted";
 }
 
 /**
