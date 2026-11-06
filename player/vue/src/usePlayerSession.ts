@@ -241,14 +241,12 @@ export type PlayerSessionStart =
       /** The Start's data options, read at activation. */
       readonly options: () => StartOptions;
     }
-  | ((
-      recording: {
-        readonly recorder: DebugRecorder;
-        readonly debugTrace?: RuntimeDebugContext;
-        readonly debugMode: boolean;
-        readonly randomControl?: RandomControlOptions;
-      } & TemporalCapture,
-    ) => PlayerRuntimeSession);
+  | ((recording: {
+      readonly recorder: DebugRecorder;
+      readonly debugTrace?: RuntimeDebugContext;
+      readonly debugMode: boolean;
+      readonly randomControl?: RandomControlOptions;
+    }) => PlayerRuntimeSession);
 
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
 // Player state; this host records which session is shown, when presentation must reset, maps
@@ -2511,13 +2509,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     },
   ): PlayerSession | Promise<PlayerSession> {
     const host = requireBridge();
-    // A factory records the click's capture as the Start's options do (`temporalCapture`).
-    if (typeof create === "function") {
-      const capture = temporalCapture();
-      return introduceNow(host, (made) =>
-        create({ ...recording, ...capture, recorder: made.recorder }),
-      );
-    }
+    // A factory, as the Start's options, records the click's capture through `temporalCapture()`, which `begin` binds.
+    if (typeof create === "function")
+      return introduceNow(host, (made) => create({ ...recording, recorder: made.recorder }));
     const startOptions = { ...create.options(), debugMode: recording.debugMode };
     const { debugTrace: trace, randomControl: control } = recording;
     if (trace === undefined && control === undefined)

@@ -132,9 +132,10 @@ function clearSampleNotices() {
 }
 // A scenario's factory, which the engine's host runs until L5i starts it through a source `prepare`.
 type ScenarioStart = Extract<PlayerSessionStart, (recording: never) => unknown>;
-// The zone, presentation and clock are the Start's click's (`recording`).
+// The zone, presentation and clock of the Start's click (`temporalCapture`).
 const startOptions = (recording: Parameters<ScenarioStart>[0]) => ({
   ...recording,
+  ...player.temporalCapture(),
   playerProfile: DEMO_PLAYER_PROFILE,
 });
 // A package is compiled and prepared like in the default build; a scenario is a fixed development script.

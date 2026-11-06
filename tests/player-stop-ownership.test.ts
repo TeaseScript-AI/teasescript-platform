@@ -603,11 +603,7 @@ test("a Continue serialized behind one still beginning records its own click's z
   assert.equal(capture.epochMs, 1_793_966_400_000, "the clock of its own click");
 });
 
-for (const form of [
-  "a factory that asks for the capture",
-  "a factory with its options",
-  "a held plan",
-] as const)
+for (const form of ["a factory", "a held plan"] as const)
   test(`a Start serialized behind a Continue still beginning records its click's zone and clock (${form})`, async (context) => {
     let epoch = 1_793_966_400_000;
     let temporal = DEFAULT_TEMPORAL_CONTEXT;
@@ -634,13 +630,9 @@ for (const form of [
         options: () => player.temporalCapture(),
       });
     else
+      // As `DevelopmentPreview.vue`'s factories ask for it.
       player.prepare((recording) =>
-        compiler.createPlayerRuntimeSession(
-          script,
-          form === "a factory with its options"
-            ? recording
-            : { ...recording, ...player.temporalCapture() },
-        ),
+        compiler.createPlayerRuntimeSession(script, { ...recording, ...player.temporalCapture() }),
       );
     const starting = player.activate();
     // After the click: the clock moves on, and the zone changes.
