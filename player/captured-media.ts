@@ -124,6 +124,8 @@ export class CapturedMediaStore {
   readonly #objectUrls = new Map<string, string>();
   readonly #prefix = `${REFERENCE_PREFIX}${randomUuid()}:`;
   #next = 1;
+  // Raised at each change of the durable storage: what a read finds counts for durability only in its own generation.
+  #generation = 0;
   #closed = false;
   #durableDisabled = false;
 
@@ -162,13 +164,17 @@ export class CapturedMediaStore {
   /**
    * Makes `repository` the durable storage from now on, such as a debug room's (DEBUGGER.md "Debug room"). Media this
    * store holds stays available; of it, only `durable` counts as stored there, and the rest is stored when a save
-   * references it. Call it only while no storage work of the store runs.
+   * references it. Call it only while no write of the store runs; a read under way finds what the earlier storage holds,
+   * which counts as session media, not as stored in the new one.
    */
   useRepository(repository: CapturedMediaRepository | null, durable: ReadonlySet<string>): void {
     this.#repository = repository;
+    this.#generation++;
     for (const reference of this.#durable)
       if (!durable.has(reference)) this.#durable.delete(reference);
     this.#missing.clear();
+    // A read still under way finds what the earlier storage holds; a new request reads the current one.
+    this.#loading.clear();
   }
 
   /** Keeps captures as session media from now on, for example when coordination with other Players failed. */
@@ -218,16 +224,7 @@ export class CapturedMediaStore {
       if (this.#repository === null || this.#durableDisabled)
         throw new CapturedMediaNotStoredError("No durable media storage is available.");
       if (this.#durable.has(reference)) continue;
-      try {
-        await this.#repository.add(record);
-      } catch (error) {
-        // An earlier attempt may have committed it before failing later; insert-only writes never overwrite.
-        const stored = await this.#repository.get(this.#namespace, reference).catch(() => null);
-        if (validCapturedMediaRecord(stored, this.#namespace, reference) === null)
-          throw new CapturedMediaNotStoredError("The captured media could not be stored.", {
-            cause: error,
-          });
-      }
+      await insertOrConfirm(this.#repository, record);
       this.#durable.add(reference);
     }
   }
@@ -321,7 +318,8 @@ export class CapturedMediaStore {
     const repository = this.#repository;
     if (this.#closed || repository === null || !REFERENCE_PATTERN.test(reference))
       return Promise.resolve(null);
-    const loading = repository
+    const generation = this.#generation;
+    const loading: Promise<CapturedMediaRecord | null> = repository
       .get(this.#namespace, reference)
       .then(
         (stored) => validCapturedMediaRecord(stored, this.#namespace, reference),
@@ -329,8 +327,16 @@ export class CapturedMediaStore {
         () => null,
       )
       .then((record) => {
-        this.#loading.delete(reference);
+        // A newer read of the reference, after the storage changed, stays under way.
+        if (this.#loading.get(reference) === loading) this.#loading.delete(reference);
         if (this.#closed) return null;
+        if (generation !== this.#generation) {
+          // Read from storage used before: no evidence for the current one. Its bytes stay session media, which a save
+          // stores there (`promote`).
+          if (record !== null && !this.#records.has(reference))
+            this.#records.set(reference, record);
+          return record;
+        }
         if (record === null) {
           this.#missing.add(reference);
           return null;
@@ -356,6 +362,26 @@ export class CapturedMediaStore {
     if (url === undefined) return;
     this.#objectUrls.delete(reference);
     this.#urls.revoke(url);
+  }
+}
+
+/**
+ * Stores `record` in `repository`, insert-only: when the insert fails, a valid record already stored under its reference
+ * counts as stored, such as one an earlier attempt committed before failing later; nothing is overwritten. Rejects with
+ * `CapturedMediaNotStoredError` otherwise.
+ */
+export async function insertOrConfirm(
+  repository: CapturedMediaRepository,
+  record: CapturedMediaRecord,
+): Promise<void> {
+  try {
+    await repository.add(record);
+  } catch (error) {
+    const stored = await repository.get(record.namespace, record.reference).catch(() => null);
+    if (validCapturedMediaRecord(stored, record.namespace, record.reference) === null)
+      throw new CapturedMediaNotStoredError("The captured media could not be stored.", {
+        cause: error,
+      });
   }
 }
 
