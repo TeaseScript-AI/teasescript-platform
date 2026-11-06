@@ -424,10 +424,7 @@ function* wrapped(
   return {
     copied,
     nullable: typeTags(copied).includes("null") || value.items.some((item) => item.tag === "null"),
-    own:
-      written !== null
-        ? rest.length === 0
-        : inheritedOwnAt(admission, frontier.place, rest),
+    own: written !== null ? rest.length === 0 : inheritedOwnAt(admission, frontier.place, rest),
   };
 }
 
