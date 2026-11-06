@@ -11,8 +11,10 @@ projected audio through `player/media-device.ts` and shows the Stage image; brow
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
 independent action lifecycle.
 
-The Player runs each session on one [runtime session](#runtime-sessions). A `PlayerRuntimeSession` is one publication
-of it: `state` holds the view, projections, active calls, and date and time presentation it shows. The complete state
+The Player's sessions live in the engine's host behind the bridge (`player/engine-bridge/`): the main realm holds a
+`PlayerSession`, the published state with its transcript, which it builds from each reply's publication; until the
+Worker is activated, the host runs in the page. The Player runs each session on one
+[runtime session](#runtime-sessions). A `PlayerRuntimeSession` is one publication of it, as the host holds it: `state` holds the view, projections, active calls, and date and time presentation it shows. The complete state
 is exported only where one is kept: checked for a restore point, a debug export, or a saved-data adoption, such as by
 `playerRuntimeSnapshot`; and as the trusted export (Boundaries below) for the kept session, a rewind point, and the
 debug recorder's anchors, which are checked where they are restored or exported. Continue and a rewind restore with

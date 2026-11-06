@@ -20,6 +20,11 @@ This is a local inspection route, not the production cross-origin Player/host pr
 
 - `runtime-adapter.ts` contains framework-independent runtime-to-Player translation and shared action helpers used by
   the Player and playground workspace controller, including reporting a persisted script-storage write.
+- `engine-bridge/` is the bridge to the engine's host (the L5 series of Runtime 2): its protocol, host, client and ops,
+  which run the adapter's sessions where the host is. The main realm holds a `PlayerSession` (`runtime-view.ts`), the
+  published state with its transcript, which `session-store.ts` builds from each reply; `player-bridge.ts` sends the
+  requests. Until the Worker is activated, the host runs in the page (`engine-bridge/in-process.ts`), whose transition
+  facade the families not yet converted use; `engine-bridge/inventory.ts` lists what still moves.
 - `notices.ts` contains the Player notice channel and its fixed wording per condition; see
   [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#player-notices).
 - `script-storage.ts` contains the asynchronous script-storage provider boundary and its browser-local
