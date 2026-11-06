@@ -388,6 +388,29 @@ test("a tape must be used up exactly when the session ends, and each unit must c
   }
 });
 
+test("--cpu times nothing when a build breaks a tape or a statement", async (t) => {
+  const { directory, dists, run } = setUp(t, {
+    cases: [{ name: "host", file: "host.tease", tape: "host.json", units: 1, unit: "answer" }],
+    files: {
+      "host.tease": JSON.stringify(hostScript),
+      "host.json": JSON.stringify([answer("x"), answer("1", true), answer("2")]),
+    },
+  });
+  const out = path.join(directory, "cpu");
+  const result = await run(
+    "--cpu",
+    "--base",
+    dists.clean,
+    "--candidate",
+    dists.clean,
+    "--out",
+    out,
+  );
+  assert.equal(result.status, 1, result.output);
+  assert.match(result.output, /host: the session halted with 1 tape entries left \(base\)/);
+  assert.equal(fs.readFileSync(path.join(out, "samples.jsonl"), "utf8"), "");
+});
+
 test('budget: "product" drives run without a budget, and a stated failure must hold', async (t) => {
   const failing = {
     steps: [
@@ -509,6 +532,15 @@ test("every workload text the manifest states is its independent reference's", (
   assert.equal(
     cases["helper-input"].units,
     tape("helper-input").filter((call) => call.unit).length,
+  );
+  // The units of the cases without a tape: the items of the list, and the files the project entered.
+  assert.equal(
+    cases["collection-tail-10000"].units,
+    parameter("workloads/collection-tail-10000.tease", "size"),
+  );
+  assert.equal(
+    cases["transfer-project"].units,
+    Number(stated["transfer-project"].at(-1).split(":")[1]),
   );
   const hub = read("workloads/transfer-project/hub.tease").match(/^if visits > (\d+) \{$/m);
   assert.equal(Number(hub[1]), 7, "transfer-project's reference takes the hub's last visit");

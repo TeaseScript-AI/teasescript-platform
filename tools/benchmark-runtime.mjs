@@ -12,8 +12,9 @@
 // and what its manifest entry states. A probe, or a case with `restoreEachCut`, also runs restored from checkpoint
 // JSON at every cut, where it must give the same cuts. `--update` rewrites the baseline entries of the cases it ran.
 // `--cpu` loads both builds in one process, requires the candidate to equal the base at every cut (instruction counts
-// may differ), then times them interleaved, checking every timed run the same way, and writes raw samples and a
-// summary under `--out`. CPU never decides the exit status. Exit 0: equal; 1: a difference; 2: a usage or run failure.
+// may differ) and both to hold the manifest's statements, then times them interleaved, checking every timed run the
+// same way, and writes raw samples and a summary under `--out`. CPU never decides the exit status. Exit 0: equal;
+// 1: a difference; 2: a usage or run failure.
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -444,10 +445,11 @@ export function formatBaseline(baseline) {
 }
 
 /**
- * The base and candidate builds on every case: first equal results at every cut (instruction counts may differ),
- * then `warmups` tagged rounds (negative) and `rounds` measured ones, the builds' order alternating per round, each
- * sample `batch` executions (one for a case whose manifest entry has `cpuBatch`). Every timed execution is recorded
- * too and must equal its build's untimed record. Returns the samples, or the differences: when the builds disagree
+ * The base and candidate builds on every case: first equal results at every cut (instruction counts may differ) and
+ * what the manifest states, tape problems included, for each build; then `warmups` tagged rounds (negative) and
+ * `rounds` measured ones, the builds' order alternating per round, each sample `batch` executions (one for a case
+ * whose manifest entry has `cpuBatch`). Every timed execution is recorded too and must equal its build's untimed
+ * record and the manifest's statements. Returns the samples, or the differences: when a build differs before timing
  * nothing is timed; when a timed execution differs, the measurement stops there.
  */
 export function measureCpu(
@@ -467,6 +469,9 @@ export function measureCpu(
         plan: plans[`${testCase.name}\0${name}`],
       });
       expected[`${testCase.name}\0${name}`] = records[name];
+      problems.push(
+        ...checkStated(testCase, records[name]).map((problem) => `${problem} (${name})`),
+      );
     }
     for (const name of names.slice(1))
       problems.push(
@@ -498,9 +503,14 @@ export function measureCpu(
         let setupCpuUs = 0;
         for (let repeat = 0; repeat < executions; repeat++) {
           const one = recordCase(builds[name], testCase, { plan, timed: true });
-          const differences = compareRecords(expected[`${testCase.name}\0${name}`], one, {
-            label: `${testCase.name} (${name}, timed round ${round})`,
-          });
+          const differences = [
+            ...compareRecords(expected[`${testCase.name}\0${name}`], one, {
+              label: `${testCase.name} (${name}, timed round ${round})`,
+            }),
+            ...checkStated(testCase, one).map(
+              (problem) => `${problem} (${name}, timed round ${round})`,
+            ),
+          ];
           if (differences.length) return { problems: differences, samples };
           instructions += one.instructions;
           timed += one.cpuUs;
