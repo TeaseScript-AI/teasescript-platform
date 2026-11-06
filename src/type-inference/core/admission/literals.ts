@@ -1548,10 +1548,10 @@ interface MarkedStrip extends Strip<MarkedStrip> {
  * carried value's by its parts (the carrier table's; an `otherwise`'s fallback only where its operand may be null, its
  * operand where it may hold a value), as `mayHoldNull` composes one path. Each frame is constant work: the depths stay
  * the asker's (each frame their shift and the first one left), the path a view, each answer written once. A value the
- * asker's own carriers reach, before any literal's step, keeps its answer per pass under its key (`LAYERS`, its parent's
- * key and one step, interned), so a join's growing operands are each read once; below a literal's step no key is asked
- * again, and each answer goes straight to the nearest value that keeps one (Codex r12–r14). A value asked again while
- * its own answer is pending adds nothing.
+ * asker's own carriers reach, before any literal's step, has a key (`LAYERS`, its parent's key and one step, interned);
+ * asked under a key it was asked under before, it keeps its answer per pass, so a join's growing operands are each read
+ * once. Any other value writes each answer straight to the nearest value that keeps one, so no answer is copied along
+ * a chain asked once (Codex r12–r15). A value asked again while its own answer is pending adds nothing.
  */
 function layersOf(
   admission: Admission,
@@ -1565,9 +1565,9 @@ function layersOf(
   if (memo === undefined)
     LAYERS.set(
       admission.pass,
-      (memo = { keys: new Map(), answers: new Map(), count: { value: 0 } }),
+      (memo = { keys: new Map(), answers: new Map(), seen: new Map(), count: { value: 0 } }),
     );
-  const { keys, answers, count } = memo;
+  const { keys, answers, seen, count } = memo;
   const intern = (parent: number | null, step: string): number | null => {
     if (parent === null) return null;
     admission.work.charge("checks");
@@ -1616,10 +1616,15 @@ function layersOf(
     next: number;
   }
   const pending = new Map<PlaceId, Set<number>>();
-  const open = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Set<number>): Frame => {
+  const open = (
+    at: PlaceId,
+    from: FlowNode,
+    here: MarkedStrip,
+    into: Set<number>,
+    kept: boolean,
+  ): Frame => {
     admission.work.charge("checks");
     const literal = program.hasOf.has(at);
-    const kept = !literal && here.key !== null;
     const holds = kept ? new Set<number>() : into;
     let { next } = here;
     // (the depth at its own level, if one is)
@@ -1682,7 +1687,10 @@ function layersOf(
     intern(-1, `${keptText(admission.work, path)}#${depths.join(",")}`),
   );
   const stack: Frame[] = [];
+  // (a value asked under a key it was asked under before keeps its answer, read from then on; asked the first time, it
+  // writes each answer straight to its asker's, so a chain asked once copies no answer, Codex r15)
   const ask = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Set<number>): void => {
+    let kept = false;
     if (here.key !== null && !program.hasOf.has(at)) {
       const answer = answers.get(at)?.get(here.key);
       if (answer !== undefined) {
@@ -1690,8 +1698,12 @@ function layersOf(
         return;
       }
       if (pending.get(at)?.has(here.key) === true) return;
+      let mine = seen.get(at);
+      if (mine === undefined) seen.set(at, (mine = new Set()));
+      kept = mine.has(here.key);
+      mine.add(here.key);
     }
-    stack.push(open(at, from, here, into));
+    stack.push(open(at, from, here, into, kept));
   };
   ask(value, node, root, out);
   while (stack.length > 0) {
@@ -1722,6 +1734,7 @@ const LAYERS = new WeakMap<
   {
     readonly keys: Map<number, Map<string, number>>;
     readonly answers: Map<PlaceId, Map<number, ReadonlySet<number>>>;
+    readonly seen: Map<PlaceId, Set<number>>;
     readonly count: { value: number };
   }
 >();

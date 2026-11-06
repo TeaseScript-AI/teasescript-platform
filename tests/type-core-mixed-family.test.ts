@@ -22,7 +22,7 @@ import { inMode, MODES } from "./helpers/type-core-oracles.js";
  * - both orders.
  * Here, each carrier (and the plain side) at every position with every relation of its carried layer to the null
  * (`RELATIONS`: an interior carrier with the null below it, the element's with the leaf's, the deepest with none, the
- * null at its layer, the shallow side's two), each copy at every position with two of them, the order turned through
+ * null at its layer, the shallow side's two), each copy at every position with three of them, the order turned through
  * them, in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
  * the inherited classes, each its issue's work:
  * - the later element's leaf `null`, #1790 (#1819, stacked on this);
@@ -43,7 +43,8 @@ async function family<T>(name: string): Promise<T> {
 const OPEN = ["#1790", "#1843", "#1847"];
 
 // (the sample: each carrier, and the plain side, at every position with every relation of its carried layer to the null
-// (`RELATIONS`); each copy at every position with two, the element's with a null below it and an interior one alone; the
+// (`RELATIONS`); each copy at every position with three: the element's and an interior one with the null at their first
+// nested layer (the copy's term there, Codex r15), and an interior one alone; the
 // order turned through them. The structural combinations of carrier, position and null, not a rotation over their
 // marginals, Codex r14)
 const RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])[] = [
@@ -55,7 +56,8 @@ const RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])
   [2, 1, 2],
 ];
 const COPY_RELATIONS: readonly (readonly [depth: number, at: number, nullAt: number])[] = [
-  [3, 0, 2],
+  [3, 0, 1],
+  [3, 1, 2],
   [3, 1, 0],
 ];
 const CARRIERS = ["plain", "take", "index", "get", "operand", "fallback", "property", "join"];
