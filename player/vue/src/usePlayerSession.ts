@@ -625,6 +625,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const current = clock.observe();
     return stopped.value ? null : current;
   };
+  /** A refusal of the host for a stopped session (`halted`), which changed nothing. */
+  const isHalted = (error: unknown) =>
+    error instanceof BridgeRequestError && error.kind === "bridge" && error.code === "halted";
   /**
    * A section of `current`, which runs `body` while `current` owns the UI, as `publishOwned` decides it, with an
    * observation inside it as `observeForInput` makes one: the clock's now and media samples, observed over the bridge
@@ -649,10 +652,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (held.value) return section.session;
         clock.cancel();
         const shown = section.session;
-        const outcome = await section.send<TimeObservationOutcome>(observeOp, {
-          atMs: clock.sceneTimeMs(shown),
-          media: device.sample(),
-        });
+        let outcome: TimeObservationOutcome;
+        try {
+          outcome = await section.send<TimeObservationOutcome>(observeOp, {
+            atMs: clock.sceneTimeMs(shown),
+            media: device.sample(),
+          });
+        } catch (error) {
+          // Refused as stopped, it changed nothing: the session no longer owns the UI.
+          if (isHalted(error)) return null;
+          throw error;
+        }
         if (!owned()) return null;
         if (outcome.kind === "observed" && publishOwned(section.session) === null) return null;
         return section.session;
@@ -684,12 +694,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           try {
             return await section.send(op, args, { publish: (next) => void publishOwned(next) });
           } catch (error) {
-            if (
-              error instanceof BridgeRequestError &&
-              error.kind === "bridge" &&
-              error.code === "halted"
-            )
-              return RETIRED;
+            if (isHalted(error)) return RETIRED;
             throw error;
           }
         },
