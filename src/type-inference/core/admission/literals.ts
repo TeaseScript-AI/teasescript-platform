@@ -1610,6 +1610,7 @@ function layersOf(
     private own = false;
     add(slot: number): void {
       if (this.set.has(slot)) return;
+      // EVIDENCE: invariant: `own` is true only after this sink made `set` itself, a `Set` it may change.
       const mine = this.own ? (this.set as Set<number>) : new Set(this.set);
       mine.add(slot);
       this.set = mine;
