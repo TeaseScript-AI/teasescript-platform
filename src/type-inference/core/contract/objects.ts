@@ -1,5 +1,5 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts } from "../budget.js";
+import { joinParts, joinSteps, keptSteps } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keyOf, keyPlace, SELECTED_TEXT, SELECTED_VALUE, type Key } from "../definitions.js";
 import { firstWriter, type Writer } from "../items.js";
@@ -46,6 +46,7 @@ export function objectsAt(
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
     proves: true,
+    // #1668: K, the objects query's own run names provenance, never the read's items
     make: () => valueObjects(contract, value, rest),
   };
 }
@@ -60,6 +61,7 @@ export function keyObjects(contract: Contract, asked: Key): ProofDemand<ObjectsP
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
     proves: true,
+    // #1668: K, the objects query's own run names provenance, never the read's items
     make: () => keyObjectsMade(contract, key),
   };
 }
@@ -82,6 +84,7 @@ export function* absentWriterAt(
   const seen = new Set<string>([first.key]);
   const open: ProofDemand<ObjectsProof>[] = [first];
   while (open.length > 0) {
+    // #1668: K, a query's proof names the writer of a read's `missing`, none of its items
     const { proof: node } = yield* solver.proven(open.pop()!);
     if (node === null || !node.complete) return UNCOVERED;
     program.work.charge("invSteps");
@@ -90,7 +93,7 @@ export function* absentWriterAt(
       const stored = definitions.byKey.get(keyBelowIn(contract, key, [step])) ?? [];
       if (stored.some((d) => lists.live(d))) return UNCOVERED;
       const written = writtenOf(program.place(place).kind);
-      if (written !== null && termAt(written, [...path, step]) !== null) return UNCOVERED;
+      if (written !== null && termAt(written, joinSteps(path, [step])) !== null) return UNCOVERED;
     }
     for (const each of node.prior) writer = firstWriter(writer, each);
     for (const { literal, path } of node.lists) {
@@ -143,6 +146,7 @@ class Gathered {
   /** A query this one reads: its node among this one's, or this one declined. */
   public *from(demand: ProofDemand<ObjectsProof>): Work<void> {
     if (!this.complete) return;
+    // #1668: K, a query this one reads, for its proof alone
     const { proof } = yield* this.contract.pass.solver.proven(demand);
     // (none yet: a query of its own component still running, whose least answer starts empty and whose proof reruns
     // this one when it changes; after a stop no query runs, `absentWriterAt` reading none as uncovered)
@@ -233,7 +237,13 @@ function* valueObjects(
         selectsElement(projection.step)
       )
         break;
-      yield* out.from(objectsAt(contract, projection.owner, [stepName(projection.step), ...rest]));
+      yield* out.from(
+        objectsAt(
+          contract,
+          projection.owner,
+          keptSteps(contract.work, [stepName(projection.step)], rest),
+        ),
+      );
       return out.proven();
     }
     case "call":
@@ -253,8 +263,11 @@ function* valueObjects(
       }
       if (operation.kind !== "get") break;
       // F19a: a receiver that may be a reference has the runtime's `get`
+      // #1668: R, a receiver decision
       if (heldReference(yield* contract.valueReceiver(operation.receiver))) break;
-      yield* out.from(objectsAt(contract, operation.receiver, ["element", ...rest]));
+      yield* out.from(
+        objectsAt(contract, operation.receiver, keptSteps(contract.work, ["element"], rest)),
+      );
       yield* out.from(objectsAt(contract, operation.fallback, rest));
       return out.proven();
     }
@@ -336,7 +349,9 @@ function* entryObjects(
   // F5: an add's element, only below an element step
   if (entry.elem !== undefined) {
     if (rest[0] === "element")
-      yield* out.from(objectsAt(contract, entry.elem, [...(entry.at ?? []), ...rest.slice(1)]));
+      yield* out.from(
+        objectsAt(contract, entry.elem, keptSteps(contract.work, entry.at ?? [], rest.slice(1))),
+      );
     return;
   }
   if (entry.key !== undefined) {
@@ -348,7 +363,9 @@ function* entryObjects(
     yield* out.from(keyObjects(contract, keyBelowIn(contract, entry.key, rest)));
     return;
   }
-  yield* out.from(objectsAt(contract, entry.value!, [...(entry.at ?? []), ...rest]));
+  yield* out.from(
+    objectsAt(contract, entry.value!, keptSteps(contract.work, entry.at ?? [], rest)),
+  );
 }
 
 /**
