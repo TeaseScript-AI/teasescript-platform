@@ -2895,7 +2895,7 @@ export function publicationHashes(files, mode) {
   if (${head} && mode === MODES[0] && process.env.FIXTURE_TRACE)
     appendFileSync(process.env.FIXTURE_TRACE, source + "\\n");
   if (!${head} && source === "busy") wait(200);
-  if (${head} && source === "lagging" && mode === MODES[0]) wait(600);
+  if (${head} && source === "lagging" && mode === MODES[0]) wait(3000);
   if (${head} && source === "slow") {
     ledger.charge("frames", 1e9);
     wait(150);
@@ -3101,13 +3101,14 @@ test("the corpus runner records each source's units, allowance and time, a cut r
       ["units", [3000, 3000 + 1832 * 65_536], [30_000_000, 30_000_000], 1],
     );
 
-    // a replay at a half-second safety net: `slow` stalls in the head's first run over the unit limit, before its wait;
-    // `busy` ends, its base's runs each within the safety net; `lagging` reaches it in the head's first run, uncharged
-    // work and no stall; each source's record holds each run's units, allowance and milliseconds on each tree, a cut
+    // a replay at a two-second safety net: `slow` stalls in the head's first run over the unit limit, before its wait;
+    // `busy` ends, its base's runs each within the safety net; `lagging` (3 s) reaches it in the head's first run,
+    // uncharged work and no stall (#1842: a margin of seconds either way, which a loaded worker keeps, where a half-second
+    // net and a 600 ms wait left 100-300 ms); each source's record holds each run's units, allowance and milliseconds on each tree, a cut
     // run's those it had when the runner ended it
     const replay = area("replay", ["fast", "slow", "busy", "lagging"]);
     const work = join(directory, "replay.work.jsonl");
-    const ran = run(runner, replay, base, head, "--timeout", "0.5", "--work", work);
+    const ran = run(runner, replay, base, head, "--timeout", "2", "--work", work);
     assert.equal(ran.status, 1, ran.stderr);
     const [header, fast, slow, busy, lagging, total] = lines(readFileSync(work, "utf8"));
     assert.deepEqual(
@@ -3356,10 +3357,11 @@ test("the corpus runner records each source's units, allowance and time, a cut r
 
     // a replay of other stop allowances (#1564 r1's false-closure witness): its index keeps them, so its rerun runs
     // them again, keeps the difference at allowance 1 and stalls again at 2; a rerun record of other allowances is not
-    // merged
+    // merged. The stall at 2 is by units (the head's `stopSet` charges 1e9 there), the same on every machine; the wall
+    // clock is only the safety net, wide enough that no loaded worker reaches it (#1842: at 0.5 s and 1 s one did)
     const checks = area("checks", ["checked"], ["publication", "stops"]);
     const checked = join(directory, "checks.work.jsonl");
-    run(runner, checks, base, head, "--allowances", "1,2", "--timeout", "0.5", "--work", checked);
+    run(runner, checks, base, head, "--allowances", "1,2", "--timeout", "30", "--work", checked);
     const checkIndex = join(directory, "checks-index.json");
     assert.equal(run(stalls, checked, "--index", checkIndex).status, 1);
     assert.match(
@@ -3369,7 +3371,7 @@ test("the corpus runner records each source's units, allowance and time, a cut r
     );
     const rechecked = join(directory, "rechecked");
     assert.equal(
-      run(stalls, "rerun", checkIndex, base, head, rechecked, "--timeout", "1").status,
+      run(stalls, "rerun", checkIndex, base, head, rechecked, "--timeout", "30").status,
       1,
     );
     const reran = run(stalls, checked, "--rerun", join(rechecked, "checks.work.jsonl"));
@@ -3379,7 +3381,7 @@ test("the corpus runner records each source's units, allowance and time, a cut r
       [1, 1],
     );
     const defaults = join(directory, "defaults.work.jsonl");
-    run(runner, checks, base, head, "--only", checkIndex, "--timeout", "1", "--work", defaults);
+    run(runner, checks, base, head, "--only", checkIndex, "--timeout", "30", "--work", defaults);
     const refusedMerge = run(stalls, checked, "--rerun", defaults);
     assert.equal(refusedMerge.status, 2);
     assert.match(refusedMerge.stderr, /compares otherwise than its replay \(allowances\)/);
