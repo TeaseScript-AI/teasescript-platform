@@ -6,6 +6,7 @@ import {
   readWorkerMessage,
   sameBuild,
 } from "./protocol.js";
+import { decodeMessage, encodeMessage } from "./transport.js";
 
 /** How the Player side reaches its engine Worker, whatever runs it: a browser Worker, a Node worker or a test port. */
 export interface ClientPort {
@@ -161,7 +162,7 @@ export function openBridge(
       ),
     );
     port.listen((data) => {
-      const message = readWorkerMessage(data);
+      const message = readWorkerMessage(decodeMessage(data));
       if (message === null) return fail("The engine Worker sent a message the Player cannot read.");
       if (message.kind === "ready") {
         if (announced) return lose("The engine Worker announced itself twice.");
@@ -206,7 +207,9 @@ export function openBridge(
       return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject, onReply });
         try {
-          port.post({ v: BRIDGE_VERSION, kind: "request", id, session, basis, op, args });
+          port.post(
+            encodeMessage({ v: BRIDGE_VERSION, kind: "request", id, session, basis, op, args }),
+          );
         } catch (error) {
           // Arguments that cannot cross never reach the Worker; the request fails here, without effect.
           pending.delete(id);

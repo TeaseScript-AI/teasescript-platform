@@ -1,7 +1,7 @@
 /**
  * The versioned bridge between the Player and the engine Worker that owns its plans and sessions. Messages are plain
- * structured-clone data. Each side checks the envelope of every message it receives; the Worker also checks each op's
- * arguments. Reply payloads come from the same build (`ready.build`) and are not checked again.
+ * structured-clone data, which `transport.ts` carries at any depth. Each side checks the envelope of every message it
+ * receives; the Worker also checks each op's arguments. Reply payloads come from the same build (`ready.build`) and are not checked again.
  */
 
 export const BRIDGE_VERSION = 1;

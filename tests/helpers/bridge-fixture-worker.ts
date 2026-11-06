@@ -94,6 +94,24 @@ const ops: BridgeOps = {
     // A function cannot cross: the host answers with the DataCloneError instead.
     run: () => ({ result: () => 1 }),
   },
+  echo: {
+    session: "none",
+    checkArguments: () => true,
+    // Its arguments come back as its result: a message of any shape both ways (`transport.ts`).
+    run: (args) => ({ result: args }),
+  },
+  deepClone: {
+    session: "none",
+    checkArguments: (args) => typeof args === "number",
+    // A function under `args` levels of lists: a deep result that cannot cross.
+    run: (args) => {
+      type Chain = { readonly kind: "list"; readonly items: readonly [Chain] } | (() => number);
+      let value: Chain = () => 1;
+      for (let level = 0; level < (typeof args === "number" ? args : 0); level += 1)
+        value = { kind: "list", items: [value] };
+      return { result: value };
+    },
+  },
 };
 
 const unknownBuild = { commit: null, dirty: null, mode: null, appVersion: null };

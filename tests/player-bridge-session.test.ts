@@ -19,6 +19,8 @@ import type { PlayerSession } from "../player/runtime-view.js";
 import { PublicationGapError, SessionStore } from "../player/session-store.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
+import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
+import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
 
 /*
@@ -435,3 +437,115 @@ test("Start and Continue take a wall clock's moment anywhere in years 0000–999
     worker.client.terminate();
   }
 });
+
+/** A value `levels` engine lists deep, as a stored value. */
+function deepStored(levels: number): SerializableRuntimeValue {
+  let value: SerializableRuntimeValue = 1;
+  for (let level = 0; level < levels; level += 1) value = { kind: "list", items: [value] };
+  return value;
+}
+
+/** How many levels `value` nests through own enumerable keys, iteratively. */
+function nesting(value: unknown): number {
+  let deepest = 0;
+  const work: [unknown, number][] = [[value, 1]];
+  while (work.length > 0) {
+    const [item, depth] = work.pop()!;
+    if (typeof item !== "object" || item === null) continue;
+    deepest = Math.max(deepest, depth);
+    for (const child of Object.values(item)) work.push([child, depth + 1]);
+  }
+  return deepest;
+}
+
+/**
+ * Deep script values (#1877): 10,000 lists in state, in a pending save, in a stored value at Start, and in replies; and
+ * a Debug storage edit 2,000 lists deep.
+ */
+const DEEP = 10_000;
+const DEEP_SCRIPT = [
+  'let open = ""',
+  'let close = ""',
+  `for i in 1..${DEEP} {`,
+  '  open += "["',
+  '  close += "]"',
+  "}",
+  'let deep = fromJson(open + "1" + close, default: null)',
+  "wait 1 s",
+  'save deep as "deep"',
+  "wait 4 s",
+  'let go = askChoice "Go"',
+  "exit",
+].join("\n");
+
+/** L5b's ops on the deep script, each step's result and what the session shows after it. */
+async function playDeepTape(bridge: PlayerBridge): Promise<unknown[]> {
+  const plan = await prepared(bridge, DEEP_SCRIPT);
+  let session = await bridge.start(
+    plan,
+    {
+      wallClockMs: 0,
+      temporalContext: TEMPORAL,
+      scriptStorage: [{ key: "stored", value: deepStored(DEEP) }],
+      persistentScriptStorage: true,
+    },
+    false,
+  );
+  const steps: unknown[] = [shown(session)];
+  const send = async (op: string, args: unknown) => {
+    const result = await bridge.request(session, op, args);
+    session = bridge.latest(session)!;
+    steps.push({ op, result, session: shown(session) });
+  };
+  await send("observeTime", { atMs: 500, media: [] });
+  // Debug's storage edit (L5c's op) with a value 2,000 lists deep, before the script's save is pending.
+  await send("applyStorageEdit", { key: "edited", value: deepStored(2_000) });
+  await send("observeTime", { atMs: 1_000, media: [] });
+  await send("stepTime", { targetMs: 2_000 });
+  await send("beginCatchUp", { targetMs: 6_000 });
+  for (let step = 0; step < 20; step += 1) {
+    const result = await bridge.request(session, "stepCatchUp", { budgetMs: 0 });
+    steps.push({ op: "stepCatchUp", result });
+    if (result !== "more") break;
+  }
+  await send("adoptCatchUp", null);
+  return steps;
+}
+
+test("deep script values give the same replies, publications and events in-process and in a Worker", async () => {
+  const inProcess = await inProcessBridge();
+  const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
+  try {
+    const tape = await playDeepTape(inProcess);
+    assert.equal(cloneGraphDifference(await playDeepTape(worker), tape), null);
+    // Start's request carried the deep stored value; the replies after the save carry the script's pending save.
+    assert.ok(nesting(tape.slice(2)) > 2 * DEEP, "the replies carry the deep save");
+    const edit = tape.find(
+      (step) =>
+        typeof step === "object" && step !== null && "op" in step && step.op === "applyStorageEdit",
+    );
+    const result =
+      typeof edit === "object" && edit !== null && "result" in edit ? edit.result : null;
+    assert.ok(typeof result === "object" && result !== null && "kind" in result);
+    assert.equal(result.kind, "applied", "the deep edit applied");
+  } finally {
+    worker.client.terminate();
+  }
+});
+
+for (const delayMs of [0, 50])
+  test(`a deep reply in transit reaches the store before a stop freezes it (${delayMs} ms)`, async () => {
+    const bridge = await inProcessBridge(delayMs);
+    const plan = await prepared(bridge, DEEP_SCRIPT);
+    const session = await bridge.start(
+      plan,
+      { wallClockMs: 0, temporalContext: TEMPORAL, persistentScriptStorage: true },
+      false,
+    );
+    const ran = bridge.request(session, "observeTime", { atMs: 1_000, media: [] });
+    await bridge.halt(session);
+    await ran;
+    const line = stopLine(bridge, session);
+    assert.deepEqual(line.shown, line.host, "the UI shows what the host ran");
+    assert.equal(line.shown[1], 1_000);
+  });

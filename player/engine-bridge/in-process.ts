@@ -13,6 +13,7 @@ import { openBridge, type ClientPort } from "./client.js";
 import { playerBridgeOps, playerOpsContext, type PlayerOpsContext } from "./player-ops.js";
 import type { BuildIdentity } from "./protocol.js";
 import { HeldSession, introduction, type StartOptions } from "./ops/session.js";
+import { decodeMessage } from "./transport.js";
 import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
 
 /*
@@ -72,7 +73,8 @@ export function createInProcessBackend(
       : setTimeout(deliverOne, options.delayMs);
   const hostPort: HostPort = {
     post: (message) => {
-      const data = structuredClone(message);
+      // Decoded on receipt, so `flush` reads the session of a reply that crossed as a flat form.
+      const data = decodeMessage(structuredClone(message));
       const session =
         typeof data === "object" &&
         data !== null &&

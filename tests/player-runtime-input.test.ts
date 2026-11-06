@@ -654,15 +654,37 @@ test("a stored Debug edit the bridge cannot carry settles as saved, not live, an
   const store = provider();
   const { host } = await mount(context, { delayMs: null, scriptStorage: store.storage });
   await start(host, EDITED, true);
-  // A valid value nested deeper than a structured clone carries (issue #1877).
-  // EVIDENCE: fixture: the JSON text below is a serializable list nested 2000 deep.
-  const deep = JSON.parse(
-    '{"kind":"list","items":['.repeat(2_000) + "1" + "]}".repeat(2_000),
-  ) as SerializableRuntimeValue;
-  const result = await host.editSavedData({ key: "edited", value: deep, expected: undefined });
+  // The in-process port's clone refuses the edit's request, as a port refuses what it cannot clone: the refusal takes
+  // the client's own path (encode and post inside `send`), after the edit is stored.
+  const nativeClone = globalThis.structuredClone;
+  let refusals = 0;
+  // Read inside the clone, asserted after the edit: a throw in the clone would only be taken as the refusal.
+  let storedAtPost: SerializableRuntimeValue | undefined;
+  context.mock.method(
+    globalThis,
+    "structuredClone",
+    (message: unknown, options?: StructuredSerializeOptions) => {
+      if (
+        typeof message === "object" &&
+        message !== null &&
+        "kind" in message &&
+        message.kind === "request" &&
+        "op" in message &&
+        message.op === "applyStorageEdit"
+      ) {
+        refusals += 1;
+        storedAtPost = store.stored.get("edited");
+        throw new DOMException("The value could not be cloned.", "DataCloneError");
+      }
+      return nativeClone(message, options);
+    },
+  );
+  const result = await host.editSavedData({ key: "edited", value: 7, expected: undefined });
   assert.deepEqual(result, { kind: "saved", live: false });
   assert.deepEqual(store.writes, ["edited"]);
   assert.equal(host.hostError.value, null);
+  assert.equal(refusals, 1, "refused once, at the port's clone");
+  assert.equal(storedAtPost, 7, "stored before it is posted");
 });
 
 test("an image answer keeps its image held, also when the capture moved on before the answer settled", async (context) => {
