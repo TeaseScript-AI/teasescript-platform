@@ -90,8 +90,9 @@ test("a mixed-list error's type text equals the current checker's across the sam
 });
 
 /**
- * #1765's invariant, its work: each carrier kind deep (a nest behind it, ×4.5 per doubling, as the nest alone grows) and
- * wide (wrapped elements before as many disagreeing ones, ×2.5), at the first doubling of
+ * #1765's invariant, its work: each carrier kind deep (a nest behind it, or a carrier at every depth of the nest, ×4.5 per
+ * doubling, as the nest alone grows) and wide (wrapped elements before as many disagreeing ones, ×2.5), at the first
+ * doubling of
  * `tests/families/messages/1765-mixed-growth.mjs` (the second runs on the queue). One mode: the four-mode growth tests
  * in `type-core-messages.test.ts` cover the evaluator's other dimensions.
  */
@@ -109,7 +110,7 @@ test("a mixed-list error's layers grow linearly behind every carrier kind (#1765
   };
   for (const [shape, make] of Object.entries(shapes)) {
     const [small, large] = [sizes[0]!, sizes[1]!].map((size) => total(make(size)));
-    const bound = shape.startsWith("deep:") ? 4.5 : 2.5;
+    const bound = shape.startsWith("wide:") ? 2.5 : 4.5;
     assert.ok(large! <= bound * small!, `${shape}: ${small}, ${large}`);
   }
 });
