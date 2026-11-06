@@ -470,7 +470,7 @@ function provider(settle: (key: string) => Promise<void> = async () => {}) {
   return { storage, writes, stored };
 }
 
-test("a storage write is acknowledged once, also when its session was changed or shown again before the acknowledgement applied", async (context) => {
+test("a storage write's acknowledgement is not refused when the session changed while it waited in the host", async (context) => {
   const store = provider();
   const { bridge, host, posted } = await mount(context, {
     delayMs: 50,
@@ -481,21 +481,44 @@ test("a storage write is acknowledged once, also when its session was changed or
     'showButton "Go"\nsave 1 as "kept"\nsay "saved", instant\nshowButton "End"\nexit',
     true,
   );
-  // The host awaits a source `prepare` when the acknowledgement is posted, and a facade call changes the session.
+  // Posted while the host awaits a source `prepare`; a facade call then changes the session before its dispatch.
   let compiling: Promise<unknown> = Promise.resolve();
   posted.on("completeStorageWrite", () => {
     compiling = bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
-    // The pending write shows again meanwhile, which issues no second provider write.
-    host.update({ ...host.session.value! });
   });
   assert.equal((await answer(host, input.intents.choice(null, "button"))).kind, "answered");
   await wait(200);
   await compiling;
   await wait(200);
-  assert.deepEqual(store.writes, ["kept"]);
   assert.equal(posted.ops().filter((op) => op === "completeStorageWrite").length, 1);
   assert.ok(said(host).includes("saved"));
   assert.equal(host.hostError.value, null);
+});
+
+test("a storage write is stored and acknowledged once, also when a publication shows it pending again before its acknowledgement", async (context) => {
+  let stored!: () => void;
+  const store = provider(() => new Promise<void>((resolve) => (stored = resolve)));
+  const { host, posted } = await mount(context, { delayMs: 50, scriptStorage: store.storage });
+  await start(
+    host,
+    'showButton "Go"\nsave 1 as "kept"\nsay "saved", instant\nshowButton "End"\nexit',
+    true,
+  );
+  assert.equal((await answer(host, input.intents.choice(null, "button"))).kind, "answered");
+  assert.deepEqual(store.writes, ["kept"]);
+  // An input's observation, half a second later, holds the session's section when the write is stored: the
+  // acknowledgement waits behind it, and the observation's publication still shows the write pending.
+  const now = performance.now() + 500;
+  context.mock.method(performance, "now", () => now);
+  const before = host.session.value!;
+  const observing = answer(host, input.intents.choice(null, "button"), undefined);
+  stored();
+  await observing;
+  assert.notEqual(host.session.value?.revision, before.revision, "the observation published");
+  await wait(200);
+  assert.deepEqual(store.writes, ["kept"], "one provider write");
+  assert.equal(posted.ops().filter((op) => op === "completeStorageWrite").length, 1);
+  assert.ok(said(host).includes("saved"));
 });
 
 for (const interference of ["a replacement", "a stop", "an unmount"] as const)
@@ -591,8 +614,8 @@ for (const when of ["while it waits for its section", "after it was posted"] as 
       assert.equal(host.hostError.value, null);
     });
 
-test("an image answer keeps its image held, also when the request ended before the answer settled", async (context) => {
-  const { host } = await mount(context);
+test("an image answer keeps its image held, also when the capture moved on before the answer settled", async (context) => {
+  const { host, posted } = await mount(context);
   await start(host, 'let first = askImage("First")\nlet second = askImage("Second")\nexit');
   const choose = async (name: string) => {
     const stored = await host.images.store(new File([PNG], name), { types: null, mime: null });
@@ -600,9 +623,14 @@ test("an image answer keeps its image held, also when the request ended before t
     assert.equal(host.imageCapture.choose(stored.reference), true);
     return stored.reference;
   };
-  // The answer's publication ends the request before the answer settles in the chain: the image stays.
+  // Another image is chosen while the answer is in transit: the answered image stays, as the host admitted it.
   const first = await choose("first.png");
-  assert.equal((await answer(host, host.imageCapture.answer("button"))).kind, "answered");
+  const other = await host.images.store(new File([PNG], "other.png"), { types: null, mime: null });
+  assert.ok("reference" in other);
+  posted.on("answerImage", () => assert.equal(host.imageCapture.choose(other.reference), true));
+  const answered = await answer(host, host.imageCapture.answer("button"));
+  assert.equal(answered.kind, "answered");
+  assert.equal(answered.outcome?.kind, "completed");
   assert.notEqual(host.resolveAsset(first), null, "the answered image stays held");
   // An image the store no longer holds is refused, as the held table says, and the preview returns.
   const second = await choose("second.png");
