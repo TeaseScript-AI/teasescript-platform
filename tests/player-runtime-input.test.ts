@@ -652,14 +652,23 @@ for (const when of ["while it waits for its section", "after it was posted"] as 
 
 test("a stored Debug edit the bridge cannot carry settles as saved, not live, and is stored once", async (context) => {
   const store = provider();
-  const { host } = await mount(context, { delayMs: null, scriptStorage: store.storage });
+  const { bridge, host } = await mount(context, { delayMs: null, scriptStorage: store.storage });
   await start(host, EDITED, true);
-  // A valid value nested deeper than a structured clone carries (issue #1877).
-  // EVIDENCE: fixture: the JSON text below is a serializable list nested 2000 deep.
-  const deep = JSON.parse(
-    '{"kind":"list","items":['.repeat(2_000) + "1" + "]}".repeat(2_000),
-  ) as SerializableRuntimeValue;
-  const result = await host.editSavedData({ key: "edited", value: deep, expected: undefined });
+  // The client refuses the edit's request, as it refuses a value that cannot be cloned; the edit is already stored.
+  const section = bridge.client.section.bind(bridge.client);
+  context.mock.method(
+    bridge.client,
+    "section",
+    (session: string, body: Parameters<typeof section>[1]) =>
+      section(session, (send) =>
+        body((op, args, basis, onReply) =>
+          op === "applyStorageEdit"
+            ? Promise.reject(new DOMException("The value could not be cloned.", "DataCloneError"))
+            : send(op, args, basis, onReply),
+        ),
+      ),
+  );
+  const result = await host.editSavedData({ key: "edited", value: 7, expected: undefined });
   assert.deepEqual(result, { kind: "saved", live: false });
   assert.deepEqual(store.writes, ["edited"]);
   assert.equal(host.hostError.value, null);
