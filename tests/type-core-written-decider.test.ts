@@ -52,7 +52,6 @@ const COLD = [
   "chosenLinks",
   "snapshotLists",
   "joinedLists",
-  "stopDepths",
   "viaClassNames",
   "viaClassParts",
   "viaSignatures",
@@ -62,6 +61,10 @@ const COLD = [
 ] as const;
 const cold = (admission: Admission, d: Definition, path: Asked): Answer => {
   const saved = COLD.map((name) => ({ name, kept: admission[name] }));
+  // (the stops' depths are A4's receiving domain's, the pass's: empty for it too, restored after)
+  const domain = admission.pass.receivingDomain;
+  const depths = domain.stopDepths;
+  domain.stopDepths = new WeakMap();
   for (const { name, kept } of saved)
     Object.defineProperty(admission, name, {
       value: Array.isArray(kept)
@@ -84,6 +87,7 @@ const cold = (admission: Admission, d: Definition, path: Asked): Answer => {
     return scanned(admission, d, path);
   } finally {
     for (const { name, kept } of saved) Object.defineProperty(admission, name, { value: kept });
+    domain.stopDepths = depths;
     Object.defineProperty(admission, "deciderCaches", { value: bundle });
   }
 };

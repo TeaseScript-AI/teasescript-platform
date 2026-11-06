@@ -25,6 +25,7 @@ import { keyLabel } from "./consumers/names.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import { Closure, type ClosureCounts } from "./admission/closure.js";
 import type { ReceivingObligation, ReceivingResult } from "./admission/receiving.js";
+import { ReceivingDomain } from "./receiving-domain.js";
 import {
   compareDemandNames,
   exportNames,
@@ -128,6 +129,8 @@ export interface CorePass {
   readonly contract: Contract;
   readonly values: Values;
   readonly solver: Solver;
+  /** A4's receiving domain state (`ReceivingDomain`, TABLE r4.375): one per pass, made empty with its parts. */
+  readonly receivingDomain: ReceivingDomain;
   /** The receiving closure of a completion pass (#1526 phase C, `Consumers.#completeFor`), absent in any other pass. */
   readonly closure?: Closure | null;
 }
@@ -155,6 +158,7 @@ function createPass(
     handlers: HandlerIndex;
     guards: GuardIndex;
     solver: Solver;
+    receivingDomain: ReceivingDomain;
     closure: Closure | null;
   } = {
     program,
@@ -168,6 +172,7 @@ function createPass(
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
     solver: new Solver(program.scope),
+    receivingDomain: new ReceivingDomain(),
     // (#1526 phase C: a completion pass keeps its cells for the receiving closure from its start, the completion lease)
     closure: completion ? new Closure(program.work) : null,
   };

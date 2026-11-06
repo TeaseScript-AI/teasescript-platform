@@ -697,7 +697,7 @@ function landingSteps(
   readonly copies: ReadonlyMap<string, readonly InheritedCopy[]>;
   readonly deeper: ReadonlySet<string>;
 } {
-  const known = admission.landingSteps.get(place);
+  const known = admission.pass.receivingDomain.landingSteps.get(place);
   if (known !== undefined) return known;
   const work = admission.pass.program.work;
   let whole = false;
@@ -718,7 +718,7 @@ function landingSteps(
   }
   keep(admission.work, 1 + copies.size + deeper.size);
   const found = { whole, copies, deeper };
-  admission.landingSteps.set(place, found);
+  admission.pass.receivingDomain.landingSteps.set(place, found);
   return found;
 }
 
