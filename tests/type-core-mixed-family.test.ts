@@ -69,19 +69,45 @@ const OUTSIDE = [
   "setImmediate",
   "queueMicrotask",
   "Date",
+  "Intl",
 ];
 
-/** A generator's exports, evaluated where the environment, the time, randomness, modules and timers throw. */
-function sandboxed(text: string): unknown {
+interface Exported {
+  readonly cases: readonly (readonly [string, string])[];
+  readonly globals: unknown;
+}
+
+/**
+ * A generator's cases, evaluated in a new realm (no host global there) with each outside input a parameter that throws
+ * on any use: the environment, the time, randomness, the locale, modules and timers.
+ */
+function sandboxed(text: string): Exported {
   assert.ok(!/^\s*import\b/m.test(text), "a family generator that imports");
   const context = createContext({});
-  runInContext(
-    `((outside) => { const no = (what) => () => { throw new Error("a family generator read " + what); };` +
-      ` for (const name of outside) Object.defineProperty(globalThis, name, { get: no(name) });` +
-      ` Math.random = no("Math.random"); })(${JSON.stringify(OUTSIDE)});`,
+  const exported: unknown = runInContext(
+    `((names) => {
+      const no = (name) => () => { throw new Error("a family generator read " + name); };
+      const trap = (name) => new Proxy(function () {}, Object.fromEntries(
+        ["get", "has", "set", "apply", "construct", "ownKeys", "getPrototypeOf", "defineProperty",
+          "deleteProperty", "getOwnPropertyDescriptor"].map((each) => [each, no(name)])));
+      Math.random = no("Math.random");
+      return ((${OUTSIDE.join(", ")}) => {
+        ${text.replace(/^export /gm, "")}
+        return { cases, globals };
+      })(...names.map(trap));
+    })(${JSON.stringify(OUTSIDE)})`,
     context,
   );
-  return runInContext(`${text.replace(/^export /gm, "")}\n;({ cases, globals });\n`, context);
+  assert.ok(typeof exported === "object" && exported !== null, "a family generator's exports");
+  const cases: unknown = Reflect.get(exported, "cases");
+  assert.ok(Array.isArray(cases), "a family generator's cases");
+  return {
+    cases: Array.from(cases, (each: unknown): readonly [string, string] => {
+      assert.ok(Array.isArray(each) && typeof each[0] === "string" && typeof each[1] === "string");
+      return [each[0], each[1]];
+    }),
+    globals: Reflect.get(exported, "globals"),
+  };
 }
 
 /** The names whose source keys differ between two lists of `[name, key]` (at most five), and any count difference. */
@@ -113,11 +139,18 @@ async function pure(
     [],
     "a source made from more than its axes",
   );
+  // (the record's lines, `[name, source key]`: its `recorded.keys` file, written by its second command)
   const recorded = readFileSync(resolve(dirname(file), record.keys), "utf8")
     .trim()
     .split("\n")
-    // EVIDENCE: the record's lines are `[name, source key]` (its `recorded.keys` file, written by its second command).
-    .map((line) => JSON.parse(line) as [string, string]);
+    .map((line): readonly [string, string] => {
+      const entry: unknown = JSON.parse(line);
+      assert.ok(
+        Array.isArray(entry) && typeof entry[0] === "string" && typeof entry[1] === "string",
+        line,
+      );
+      return [entry[0], entry[1]];
+    });
   assert.deepEqual(changed(made, recorded), [], "a source other than the record's");
   assert.equal(
     lib.setKey(recorded.map(([, key]) => key)),
