@@ -1603,14 +1603,36 @@ function layersOf(
     };
     return made;
   };
+  // (where answers go: a set taken whole from the first answer that brings one, shared with it, and copied only where a
+  // second must join it, so an answer kept along a chain is moved, not copied, Codex r16)
+  class Sink {
+    set: ReadonlySet<number> = EMPTY;
+    private own = false;
+    add(slot: number): void {
+      if (this.set.has(slot)) return;
+      const mine = this.own ? (this.set as Set<number>) : new Set(this.set);
+      mine.add(slot);
+      this.set = mine;
+      this.own = true;
+    }
+    take(answer: ReadonlySet<number>): void {
+      if (answer.size === 0 || answer === this.set) return;
+      if (this.set.size === 0) {
+        this.set = answer;
+        this.own = false;
+        return;
+      }
+      for (const slot of answer) this.add(slot);
+    }
+  }
   // (a frame: its value, its path, the answers it keeps (`holds`: its own where it is kept, else those of the value that
   // keeps them), where they go, its parts, the next part)
   type Part = readonly [PlaceId, FlowNode, MarkedStrip];
   interface Frame {
     readonly at: PlaceId;
     readonly kept: boolean;
-    readonly holds: Set<number>;
-    readonly into: Set<number>;
+    readonly holds: Sink;
+    readonly into: Sink;
     readonly strip: MarkedStrip;
     readonly parts: readonly Part[];
     next: number;
@@ -1620,12 +1642,12 @@ function layersOf(
     at: PlaceId,
     from: FlowNode,
     here: MarkedStrip,
-    into: Set<number>,
+    into: Sink,
     kept: boolean,
   ): Frame => {
     admission.work.charge("checks");
     const literal = program.hasOf.has(at);
-    const holds = kept ? new Set<number>() : into;
+    const holds = kept ? new Sink() : into;
     let { next } = here;
     // (the depth at its own level, if one is)
     if (next < depths.length && depths[next]! + here.shift === 0) {
@@ -1679,7 +1701,7 @@ function layersOf(
     }
     return { at, kept, holds, into, strip: here, parts, next: 0 };
   };
-  const out = new Set<number>();
+  const out = new Sink();
   const root = strip(
     { rope: { head: path, tail: null }, start: 0, length: path.length },
     0,
@@ -1689,12 +1711,12 @@ function layersOf(
   const stack: Frame[] = [];
   // (a value asked under a key it was asked under before keeps its answer, read from then on; asked the first time, it
   // writes each answer straight to its asker's, so a chain asked once copies no answer, Codex r15)
-  const ask = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Set<number>): void => {
+  const ask = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Sink): void => {
     let kept = false;
     if (here.key !== null && !program.hasOf.has(at)) {
       const answer = answers.get(at)?.get(here.key);
       if (answer !== undefined) {
-        for (const slot of answer) into.add(slot);
+        into.take(answer);
         return;
       }
       if (pending.get(at)?.has(here.key) === true) return;
@@ -1718,17 +1740,19 @@ function layersOf(
     if (!frame.kept) continue;
     let mine = answers.get(frame.at);
     if (mine === undefined) answers.set(frame.at, (mine = new Map()));
-    mine.set(frame.strip.key!, frame.holds);
+    mine.set(frame.strip.key!, frame.holds.set);
     pending.get(frame.at)!.delete(frame.strip.key!);
-    for (const slot of frame.holds) frame.into.add(slot);
+    frame.into.take(frame.holds.set);
   }
-  return depths.map((_, slot) => out.has(slot));
+  return depths.map((_, slot) => out.set.has(slot));
 }
 
 /**
  * Per pass, `layersOf`'s keys (each a parent's and one step, interned) and the answer of each value the asker's own
  * carriers reach under its key, shared by every literal's and join's error.
  */
+const EMPTY: ReadonlySet<number> = new Set();
+
 const LAYERS = new WeakMap<
   object,
   {
