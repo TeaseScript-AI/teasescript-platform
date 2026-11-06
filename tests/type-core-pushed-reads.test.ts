@@ -677,6 +677,23 @@ test("where the native reader ends, a read through a marked route answers what i
       'say "${p2.q.h}"',
       "exit",
     ].join("\n") + "\n",
+    // two copies marked under tests of different paths: their pending states meet at a node, and only their union
+    // marks both reads below it
+    ...["s1", "t1"].map(
+      (read) =>
+        [
+          "let p0={s0:{s1:0,t1:0}}",
+          "let p1={s0:{s1:1,t1:1}}",
+          "let p2={s0:{s1:2,t1:2}}",
+          "p2.q=p0",
+          "if p1.s0.t1 is integer { p2=p1 }",
+          "if p0.s0.s1 is integer { p1=p0 }",
+          "p2=p2.q",
+          `say "\${p2.q.q.s0.${read}}"`,
+          'say "${p2.q.s0.s1} ${p2.q.s0.t1}"',
+          "exit",
+        ].join("\n") + "\n",
+    ),
     // a marked copy of a literal whose leaf is an operation's (a native value): declined, read natively
     guardedRing({ closing: false, leaf: "{g:hostValue+1}" }),
   ];
