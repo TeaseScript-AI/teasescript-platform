@@ -1339,136 +1339,50 @@ export interface MixedOptional {
 
 /**
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
- * items hold (the lead's ruling (A) on #1789, after Codex r1–r8 and Astra r1):
- * - at its own level (no step left), any value by its own items, but an `otherwise` by its tree, each leaf read narrowed:
- *   its fallback's null where its operand may be null (`1 otherwise null` holds none: its fallback never runs; `null
- *   otherwise m` none where `m` holds `[1]`, Astra r2's B2);
- * - a literal, by its children at the layer's next step, each by this same rule below;
- * - a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and
- *   default, a method's receiver, a dict's values, a `+` join's admitted operands), by each value it carries, at the
- *   path into it; an `otherwise`'s fallback only where its operand may be null;
- * - a written copy, by its term alone, whatever a rejected store put there;
- * - another read or a call's result, by its place's admitted type where admission decides it;
- * - any other value (an undecided place's read, an operation's own result), by its own items.
- * An `otherwise`'s operand may be null where its items at its node hold null, narrowed as it is read there (Codex r3 on
- * #1819: a written copy narrowed by its assignment or a test never runs its fallback, as the current checker reads it);
- * an operand that is itself an `otherwise`, only where its own operand and fallback both may be (Codex r10's B1).
- * A join has no case of its own: the carrier table gives only its admitted operands (`joined`), so a rejected operand
- * brings nothing (ADR 0021 1.1, Astra r1's B1; Codex r9).
- * Each value at each path is asked once per call; a value asked again while its own answer is pending, never. Sharing
- * across errors is `layersOf`'s (`LAYERS`), which keys every value a literal does not hold (Astra r1's B2, r2).
+ * items hold (the lead's ruling (A) on #1789, after Codex r1–r11 and Astra r1–r2):
+ * 1. at its own level (no step left), as it is read at its node (`occurrenceNull`); an `otherwise` by its tree, each leaf
+ *    so read: its fallback's null where its operand may be null (`1 otherwise null` holds none: its fallback never runs;
+ *    `null otherwise m` none where `m` holds `[1]`, Astra r2's B2);
+ * 2. a literal, by its children at the layer's next step, each by this same rule below;
+ * 3. a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and default,
+ *    a method's receiver, a dict's values, a `+` join's admitted operands), by each value it carries, at the path into
+ *    it; an `otherwise`'s fallback only where its operand may be null;
+ * 4. a written copy, by its term alone, whatever a rejected store put there;
+ * 5. another read or a call's result, by its place's admitted type where admission decides it;
+ * 6. any other value (an undecided place's read, an operation's own result), by its own items.
+ * Cases 2 and 3 compose: `layersOf` follows them, every layer of a path in one descent. This function answers the
+ * others, a value at its own level or one neither a literal nor a carrier holds. An `otherwise`'s operand may be null as
+ * `operandNull` reads it. A join has no case of its own: the carrier table gives only its admitted operands (`joined`),
+ * so a rejected operand brings nothing (ADR 0021 1.1, Astra r1's B1; Codex r9).
  */
 function mayHoldNull(
   admission: Admission,
-  value: PlaceId,
-  node: FlowNode,
-  prefix: readonly string[],
+  at: PlaceId,
+  from: FlowNode,
+  steps: readonly string[],
 ): boolean {
   const { program, contract } = admission.pass;
-  const answers = new Map<PlaceId, Map<string, boolean>>();
-  const itemsHold = (at: PlaceId, steps: readonly string[]): boolean =>
-    withoutEmpty(admission.run(contract.contractOfValueAt(at, steps))).some(
-      (item) => item.tag === "null",
-    );
-  type Part = readonly [PlaceId, FlowNode, readonly string[]];
-  // (a value's answer at a path where its form decides it, else the parts whose answers decide it)
-  const expand = (at: PlaceId, from: FlowNode, steps: readonly string[]): boolean | Part[] => {
-    admission.work.charge("checks");
-    if (steps.length === 0) {
-      // (an `otherwise`'s own null is its narrowed tree's: its fallback's, each leaf read narrowed, where its operand
-      // may be null; the operand's null is what the fallback replaces. Codex r3 on #1819, Astra r2's B2 on #1789)
-      if (program.opOf.get(at)?.kind === "fallback") return operandNull(admission, at, from);
-      return occurrenceNull(admission, at, from);
-    }
-    if (program.hasOf.has(at)) {
-      const rest = keptSlice(admission.work, steps, 1);
-      return literalChildren(admission, at, steps[0]!).map(
-        (child) => [child.value!, child.node ?? from, rest] as const,
-      );
-    }
-    const carried = admission.carriersOf(at, steps);
-    if (carried.length > 0) {
-      const operand = carried.find(([, , role]) => role === "otherwise/operand")?.[0];
-      const falls = operand === undefined || operandNull(admission, operand, from);
-      return carried
-        .filter(([, , role]) => role !== "otherwise/fallback" || falls)
-        .map(([part, strip]) => [part, from, strip] as const);
-    }
-    const copied = holdsSource(admission, at)
-      ? (drive(admission, earliestDecider(admission, at, from, steps, null))?.term ?? null)
-      : null;
-    if (copied !== null) return typeTags(copied).includes("null");
-    const key = contract.copiedKey(at) ?? contract.resultKey(at);
-    if (key !== null) {
-      const path = joinSteps(stepsArray(keyStepsIn(contract, key)), steps);
-      const admitted = admission.admitted(keyPlace(key), path);
-      // (no kind, or an unknown, decides nothing: `null` alone settles no type, Codex r5's B3)
-      if (admitted.length > 0 && !admitted.includes("unknown")) return admitted.includes("null");
-    }
-    return itemsHold(at, steps);
-  };
-  const known = (at: PlaceId, text: string): boolean | undefined => answers.get(at)?.get(text);
-  const keep = (at: PlaceId, text: string, holds: boolean): void => {
-    let mine = answers.get(at);
-    if (mine === undefined) answers.set(at, (mine = new Map()));
-    mine.set(text, holds);
-  };
-  interface Frame {
-    readonly at: PlaceId;
-    readonly from: FlowNode;
-    readonly steps: readonly string[];
-    readonly text: string;
-    parts: Part[] | null;
-    next: number;
+  admission.work.charge("checks");
+  if (steps.length === 0)
+    // (an `otherwise`'s own null is its narrowed tree's; the operand's null is what the fallback replaces. Codex r3 on
+    // #1819, Astra r2's B2 on #1789)
+    return program.opOf.get(at)?.kind === "fallback"
+      ? operandNull(admission, at, from)
+      : occurrenceNull(admission, at, from);
+  const copied = holdsSource(admission, at)
+    ? (drive(admission, earliestDecider(admission, at, from, steps, null))?.term ?? null)
+    : null;
+  if (copied !== null) return typeTags(copied).includes("null");
+  const key = contract.copiedKey(at) ?? contract.resultKey(at);
+  if (key !== null) {
+    const path = joinSteps(stepsArray(keyStepsIn(contract, key)), steps);
+    const admitted = admission.admitted(keyPlace(key), path);
+    // (no kind, or an unknown, decides nothing: `null` alone settles no type, Codex r5's B3)
+    if (admitted.length > 0 && !admitted.includes("unknown")) return admitted.includes("null");
   }
-  const pending = new Map<PlaceId, Set<string>>();
-  const open = (at: PlaceId, from: FlowNode, steps: readonly string[], text: string): Frame => {
-    let mine = pending.get(at);
-    if (mine === undefined) pending.set(at, (mine = new Set()));
-    mine.add(text);
-    return { at, from, steps, text, parts: null, next: 0 };
-  };
-  const rootText = keptText(admission.work, prefix);
-  const already = known(value, rootText);
-  if (already !== undefined) return already;
-  const stack: Frame[] = [open(value, node, prefix, rootText)];
-  let last = false;
-  while (stack.length > 0) {
-    const frame = stack.at(-1)!;
-    if (frame.parts === null) {
-      const found = expand(frame.at, frame.from, frame.steps);
-      if (typeof found === "boolean") {
-        keep(frame.at, frame.text, (last = found));
-        pending.get(frame.at)!.delete(frame.text);
-        stack.pop();
-        continue;
-      }
-      frame.parts = found;
-    }
-    let holds = false;
-    let opened = false;
-    while (frame.next < frame.parts.length) {
-      const [at, from, steps] = frame.parts[frame.next]!;
-      const text = keptText(admission.work, steps);
-      const answer = known(at, text);
-      if (answer === true) {
-        holds = true;
-        break;
-      }
-      frame.next += 1;
-      if (answer === false || pending.get(at)?.has(text) === true) continue;
-      // (asked first here: answered before this frame goes on, then read from the memo)
-      frame.next -= 1;
-      stack.push(open(at, from, steps, text));
-      opened = true;
-      break;
-    }
-    if (opened) continue;
-    keep(frame.at, frame.text, (last = holds));
-    pending.get(frame.at)!.delete(frame.text);
-    stack.pop();
-  }
-  return last;
+  return withoutEmpty(admission.run(contract.contractOfValueAt(at, steps))).some(
+    (item) => item.tag === "null",
+  );
 }
 
 /**
