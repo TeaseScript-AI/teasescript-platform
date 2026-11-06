@@ -48,9 +48,12 @@ async function family<T>(name: string): Promise<T> {
 // (the issues still open here, each a class of differences `mixedExplained` names exactly)
 const OPEN = ["#1790", "#1843", "#1847", "#1858"];
 
-// (the family's sources are made from its axes alone, Astra r3's B1 on #1789 and the lead's two guards: the generator
-// evaluated again where every input outside its axes throws gives every source the direct import gives, and the
-// record, each case's source key by name, is what it gives, so a refreshed record shows each changed source by name)
+// (the family's sources held to their record, Astra r3's B1 on #1789 and the lead's rulings after Codex r20–r22. The
+// guarantee is the record, each case's source key by name, which the generator must give and a refresh shows by name,
+// with the queue's run of the family: a generator whose sources change is caught there, whatever it read. In front of
+// it, cheaply, a determinism check: the generator evaluated again in a new realm whose own outside inputs throw gives
+// what the direct import gives. That is no isolation boundary: in-process isolation is closed path by path (`node:vm`
+// "is not a security mechanism"), so the check holds the host's objects out only on the paths its controls test)
 interface FamilySources {
   sourcesOf(generator: unknown): readonly { readonly name: string }[];
   sourceKey(source: unknown): string;
@@ -150,8 +153,8 @@ const REPLACED = [
 // globals classified; every method named for the locale, on everything the allowed intrinsics reach, made to throw;
 // the replaced globals and the host's made names that throw on any use, and `Math.random`; and a stack made its message
 // alone, by a formatter of the realm's own, so neither a frame of the caller nor the host's formatter shows. Each is
-// replaced on the realm itself, so every alias of it (`globalThis`, `Function`, an indirect `eval`) reads the
-// replacement; the walk's own values stay in its closure, so no original is left where a generator can reach it)
+// replaced on the realm itself, so `globalThis`, `Function` and an indirect `eval` read the replacement; the walk's
+// own values stay in its closure, so it leaves no original in reach)
 const REALM = `"use strict";
 const trap = (() => {
   const no = (name) => () => { throw new Error("a family generator read " + name); };

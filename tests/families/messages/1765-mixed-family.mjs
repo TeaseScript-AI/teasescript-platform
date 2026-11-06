@@ -85,9 +85,8 @@ function side(leaf, depth, nullAt, at, kind, before, block) {
 const range = (from, to) => Array.from({ length: to - from + 1 }, (_, at) => from + at);
 // (the family's axes, in order, each with its values given the axes before it: the only values a case varies by. A
 // parameter a case varies by enters here, and so its name and the sampled test's coverage invariant, which asserts a
-// name's axes are these, the lead's ruling on #1789. Nothing outside them enters: the sampled test evaluates this module
-// again where the host and every realm global that reads outside the realm throw, and holds each source to the
-// record's key, `keys`)
+// name's axes are these, the lead's ruling on #1789. A source that changes otherwise is caught by its record, `keys`,
+// and the queue's run; the sampled test also evaluates this module again where the realm's own outside inputs throw)
 export const axes = [
   ["depth", () => [2, 3]],
   ["nullAt", ({ depth }) => range(0, depth)],
