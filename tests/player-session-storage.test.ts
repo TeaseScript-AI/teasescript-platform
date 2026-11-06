@@ -93,6 +93,11 @@ before(async () => {
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
 });
 
+/** The microtasks in which a storage write's acknowledgement reaches the host and its publication applies. */
+async function acknowledged() {
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+}
+
 function deferred() {
   let resolve!: () => void;
   let reject!: (error: Error) => void;
@@ -175,6 +180,8 @@ test("Vue host writes each pending action once and continues only in a later tas
   assert.deepEqual(writes, [{ key: "first", value: 1 }]);
 
   context.mock.timers.tick(0);
+
+  await acknowledged();
   assert.deepEqual(writes, [
     { key: "first", value: 1 },
     { key: "second", value: 2 },
@@ -187,6 +194,7 @@ test("Vue host writes each pending action once and continues only in a later tas
   assert.equal(writes.length, 2);
   assert.equal(host.session.value?.state.status, "waiting");
   context.mock.timers.tick(0);
+  await acknowledged();
   assert.equal(host.session.value?.state.status, "halted");
   assert.deepEqual(playerRuntimeSnapshot(host.session.value!).scriptStorage, [
     { key: "first", value: 1 },
@@ -224,10 +232,12 @@ test("Vue host deduplicates by generation and ignores a replaced session's write
   reports[0]!.resolve();
   await nextTick();
   context.mock.timers.tick(0);
+  await acknowledged();
   assert.deepEqual(host.session.value, restarted);
   reports[1]!.resolve();
   await nextTick();
   context.mock.timers.tick(0);
+  await acknowledged();
   assert.equal(host.session.value?.state.status, "halted");
   assert.deepEqual(playerRuntimeSnapshot(host.session.value!).scriptStorage, [
     { key: "answer", value: 2 },
@@ -251,6 +261,7 @@ test("Vue host reports rejected writes in a later task and preserves the previou
   await nextTick();
   assert.deepEqual(host.session.value, pending);
   context.mock.timers.tick(0);
+  await acknowledged();
   assert.equal(host.session.value?.state.status, "halted");
   assert.deepEqual(playerRuntimeSnapshot(host.session.value!).scriptStorage, [
     { key: "answer", value: "previous" },
@@ -294,6 +305,7 @@ for (const settleBeforeDisposal of [false, true]) {
     if (!settleBeforeDisposal) persistence.resolve();
     await nextTick();
     context.mock.timers.tick(0);
+    await acknowledged();
     assert.deepEqual(host.session.value, pending);
     assert.equal(writes, 1);
   });
@@ -425,12 +437,14 @@ test("Vue host schedules no clock wake-ups while a pending write holds scene tim
   for (let tick = 0; tick < 25; tick++) {
     await nextTick();
     context.mock.timers.tick(0);
+    await acknowledged();
   }
   assert.equal(host.session.value, held);
 
   persistence.resolve();
   await nextTick();
   context.mock.timers.tick(0);
+  await acknowledged();
   // After the acknowledgement both blocks run at their due times and the clock schedules the wait again.
   assert.deepEqual(
     host.session.value?.transcriptEntries.map((entry) => entry.text),
@@ -476,6 +490,7 @@ for (const [name, source, expected] of [
     persistence.resolve();
     await nextTick();
     context.mock.timers.tick(0);
+    await acknowledged();
     assert.deepEqual(
       host.session.value?.transcriptEntries.map((entry) => entry.text),
       expected,
@@ -589,6 +604,7 @@ test("Vue host scopes the write-failure notice to the run it happened in", async
   pendingWrites[1]!.resolve();
   await nextTick();
   context.mock.timers.tick(0);
+  await acknowledged();
   assert.deepEqual(host.notices.value, []);
 
   // A failure in the current run is reported, and a new Start withdraws it.
@@ -596,6 +612,7 @@ test("Vue host scopes the write-failure notice to the run it happened in", async
   pendingWrites[2]!.reject(new Error("Write denied"));
   await nextTick();
   context.mock.timers.tick(0);
+  await acknowledged();
   assert.deepEqual(
     host.notices.value.map(({ key }) => key),
     ["storage-write-failed"],
@@ -768,6 +785,7 @@ test("a saved value too long to write as text is compared without writing it, so
 async function settleTasks(context: TestContext) {
   for (let turn = 0; turn < 5; turn += 1) await nextTick();
   context.mock.timers.tick(0);
+  await acknowledged();
   for (let turn = 0; turn < 5; turn += 1) await nextTick();
 }
 
@@ -982,6 +1000,7 @@ test("Play again starts from the values the previous run saved and deleted", asy
     for (let step = 0; step < 10 && host.session.value?.state.status !== "halted"; step++) {
       await nextTick();
       context.mock.timers.tick(0);
+      await acknowledged();
     }
     assert.equal(host.session.value?.state.status, "halted");
     return host.session.value!.transcriptEntries.at(-1)?.text;

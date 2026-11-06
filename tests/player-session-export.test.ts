@@ -10,7 +10,6 @@ import {
 import {
   activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
   submitPlayerRuntimeComposer as rawSubmitPlayerRuntimeComposer,
-  type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
@@ -31,6 +30,7 @@ import {
 } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { answerWith, type Intent } from "./helpers/player-input.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
@@ -62,10 +62,7 @@ interface TransferHost {
       filters: { types: readonly string[] | null; mime: readonly string[] | null },
     ): Promise<{ readonly reference: string } | { readonly message: string }>;
   };
-  readonly imageCapture: {
-    choose(reference: string): boolean;
-    use(session: PlayerRuntimeSession): PlayerRuntimeControlResult | null;
-  };
+  readonly imageCapture: { choose(reference: string): boolean; answer(input: "button"): Intent };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepareScript(
@@ -74,6 +71,7 @@ interface TransferHost {
   ): Promise<void>;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
+  readonly inputSection: unknown;
 }
 let usePlayerSession: (options: {
   scriptStorage: ScriptStorageProvider;
@@ -176,11 +174,8 @@ async function answerImage(host: TransferHost, name: string): Promise<string> {
   const stored = await host.images.store(new File([PNG], name), { types: null, mime: null });
   assert.ok("reference" in stored, name);
   assert.equal(host.imageCapture.choose(stored.reference), true);
-  const result = onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(
-    host.session.value!,
-  );
-  assert.equal(result?.outcome.kind, "completed");
-  host.update(result!.session);
+  const result = await answerWith(host, host.imageCapture.answer("button"));
+  assert.equal(result.outcome?.kind, "completed");
   return stored.reference;
 }
 
