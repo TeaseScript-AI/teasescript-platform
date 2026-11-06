@@ -1340,8 +1340,9 @@ export interface MixedOptional {
 /**
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
  * items hold (the lead's ruling (A) on #1789, after Codex r1–r8 and Astra r1):
- * - at its own level (no step left), any value by its own items, but an `otherwise` by its fallback, where its operand
- *   may be null (`1 otherwise null` holds none: its fallback never runs);
+ * - at its own level (no step left), any value by its own items, but an `otherwise` by its tree, each leaf read narrowed:
+ *   its fallback's null where its operand may be null (`1 otherwise null` holds none: its fallback never runs; `null
+ *   otherwise m` none where `m` holds `[1]`, Astra r2's B2);
  * - a literal, by its children at the layer's next step, each by this same rule below;
  * - a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and
  *   default, a method's receiver, a dict's values, a `+` join's admitted operands), by each value it carries, at the

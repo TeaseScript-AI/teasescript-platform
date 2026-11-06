@@ -2906,6 +2906,20 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let n:integer[][]?=[[1]]\nlet xs=[[["x"]],(n otherwise null) otherwise [[1],null]]\nexit\n',
       `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
     ],
+    // (a direct `otherwise`'s fallback read narrowed too: `m` holds `[1]` here; a fallback that may be null keeps it,
+    // Astra r2's B2)
+    [
+      'let m:integer[]?=[1]\nlet xs=[[(null otherwise m)],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let m:integer[]?=[1]\nlet xs=[[["x"]],[(null otherwise m)]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      'let m:integer[]?=[1]\nif hostValue == 1 { m=null }\nlet xs=[[(null otherwise m)],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
     // (known differences, #1838: an `otherwise` inside a default, `load`, property or index keeps, in admission's items,
     // the null its never-run fallback brings, so the outer `otherwise` counts its own fallback too; the current checker
     // says `integer[][]`. Admission's to repair, not the message layer's; these turn to `integer[][]` with it)
@@ -3210,26 +3224,37 @@ test("a mixed join's layers read each value at a path once per pass (#1765)", ()
 });
 
 /**
- * #1765: each side's layers are read by one walk down the error's path, not a descent per layer, so a literal whose two
- * elements disagree at every layer of a deep nest of dicts and lists (an error at each ever longer path, each with a
- * layer more between) grows as the errors' paths do (×4 per doubling, as on main), not by a cube, in four modes.
+ * #1765: each side's layers are read by one descent down the error's path, through literals and carriers alike, not a
+ * descent per layer, so a literal whose two elements disagree at every layer of a deep nest of dicts and lists (an error
+ * at each ever longer path, each with a layer more between), alone or behind a carrier, grows as the errors' paths do
+ * (×4 per doubling, as on main), not by a cube, in four modes.
  */
 test("a mixed error's layers are read by one walk down its path (#1765)", () => {
-  for (const mode of MODES) {
-    const work = [24, 48, 96].map((n) => {
-      let first = "[1]";
-      let second = '["x"]';
-      for (let at = 0; at < n; at += 1) {
-        first = `dict {k:[${first}]}`;
-        second = `[dict {k:${second}}]`;
-      }
-      const request = coreRequest(main(`let xs=[${first},${second}]\nexit\n`));
-      assert.ok(request !== null);
-      const answers = inMode(mode, () => analyseCore(request));
-      assert.equal(answers.budget.exhausted, null);
-      return answers.budget.total;
-    });
-    for (let at = 1; at < work.length; at += 1)
-      assert.ok(work[at]! <= 4.5 * work[at - 1]!, `${JSON.stringify(mode)}: ${work.join(", ")}`);
-  }
+  // (the nest itself, behind a carrier (`.take(1)[0]`), and in a literal around a carrier: one descent through both,
+  // Astra r2's B1 on #1789)
+  const shapes = [
+    (first: string, second: string) => `let xs=[${first},${second}]\nexit\n`,
+    (first: string, second: string) =>
+      `let xs=[[${first}].take(1)[0],[${second}].take(1)[0]]\nexit\n`,
+    (first: string, second: string) =>
+      `let xs=[[[${first}].take(1)],[[${second}].take(1)]]\nexit\n`,
+  ];
+  for (const shape of shapes)
+    for (const mode of MODES) {
+      const work = [24, 48, 96].map((n) => {
+        let first = "[1]";
+        let second = '["x"]';
+        for (let at = 0; at < n; at += 1) {
+          first = `dict {k:[${first}]}`;
+          second = `[dict {k:${second}}]`;
+        }
+        const request = coreRequest(main(shape(first, second)));
+        assert.ok(request !== null);
+        const answers = inMode(mode, () => analyseCore(request));
+        assert.equal(answers.budget.exhausted, null);
+        return answers.budget.total;
+      });
+      for (let at = 1; at < work.length; at += 1)
+        assert.ok(work[at]! <= 4.5 * work[at - 1]!, `${JSON.stringify(mode)}: ${work.join(", ")}`);
+    }
 });
