@@ -2920,6 +2920,20 @@ test("a mixed element's type keeps the null of every layer between the element a
       'let m:integer[]?=[1]\nif hostValue == 1 { m=null }\nlet xs=[[(null otherwise m)],[["x"]]]\nexit\n',
       `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
     ],
+    // (a value at a layer's own level as it is read: a written copy narrowed by its value holds none, one host-assigned
+    // may, and so may an `otherwise`'s host-assigned operand, #1840; the current checker's)
+    [
+      'let a:integer[]?=[1]\nlet xs=[[["x"]],[a]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[]?=hostValue\nlet xs=[[a],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[][]?=null\na=hostValue\nlet xs=[[(a otherwise null)],[[["x"]]]]\nexit\n',
+      `This list mixes a list (integer[][]?[]) and a list (string[][][]). ${ONE}`,
+    ],
     // (known differences, #1838: an `otherwise` inside a default, `load`, property or index keeps, in admission's items,
     // the null its never-run fallback brings, so the outer `otherwise` counts its own fallback too; the current checker
     // says `integer[][]`. Admission's to repair, not the message layer's; these turn to `integer[][]` with it)
