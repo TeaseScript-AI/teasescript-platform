@@ -1714,8 +1714,7 @@ test("a read's signature cuts only its source's prefixes with definitions, tagge
         };
         for (const one of calls)
           for (const other of calls) {
-            if (one.source !== other.source || keyPlace(one.source) !== keyPlace(other.source))
-              continue;
+            if (one.source !== other.source) continue;
             assert.equal(
               one.made === other.made,
               today(one) === today(other),
