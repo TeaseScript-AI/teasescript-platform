@@ -312,12 +312,15 @@ export interface ObjectSite {
 }
 
 /**
- * #1747: an objects query's proof (`objectsAt`): the object lists its read reaches at the path, the pure `missing`
- * writers it meets on the way, and the keys whose stores and written type at a property below it the query leaves to
- * its reader (`absentWriterAt`); `complete` false where it declines.
+ * #1747: an objects query's proof (`objectsAt`), a node of a shared support graph: the object lists its read reaches
+ * at the path, the pure `missing` writers it meets on the way, and the keys whose stores and written type at a
+ * property below it the query leaves to its reader (`absentWriterAt`), its own, beside the queries it reads; `complete`
+ * false where it declines.
  */
 export interface ObjectsProof extends Proof {
   readonly complete: boolean;
+  /** Its support node's id in its pass, one per content (its own parts and its readers' ids). */
+  readonly id: number;
   readonly lists: readonly ObjectSite[];
   readonly prior: readonly Writer[];
   readonly keys: readonly {
@@ -325,6 +328,8 @@ export interface ObjectsProof extends Proof {
     readonly place: PlaceId;
     readonly path: readonly string[];
   }[];
+  /** The queries it reads, each a node of its own: its support is theirs and its own parts. */
+  readonly children: readonly ObjectsProof[];
 }
 
 /** A layer summary's proof (`layerDemand`): its support, `null` where the summary declined. */
