@@ -8,6 +8,13 @@ import { pushedFacts, withoutPushedReads } from "../src/type-inference/core/cont
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { withTestDemandAllowance, WorkLedger } from "../src/type-inference/core/budget.js";
 import { inMode, MODES, publication, settledAnswers } from "./helpers/type-core-oracles.js";
+import { marked } from "../src/type-inference/core/guards.js";
+import {
+  CONTEXT_WORDS,
+  makeItem,
+  mergeItems,
+  type Item,
+} from "../src/type-inference/core/items.js";
 
 /*
  * #1655 (TABLE r4.385): a key entry below its place's root in a copy cycle through a projection (`p1 = p1.q` beside the
@@ -320,4 +327,127 @@ test("the producer graph grows with the ring and the projection's depth, each by
         2 * (sizes[1]![field] - sizes[0]![field]),
         `${field}: ${sizes.map((facts) => facts[field]).join(", ")}`,
       );
+});
+
+/*
+ * #1784: a route through a marking entry (a whole copy stored under a test of its source, or one whose holder marks
+ * at the rest below it) reaches the same nodes marked: their leaves `marked`, then joined. HEAD 1: `marked` commutes with
+ * `mergePair`'s join per item unless a non-`unknown` item with a context ranked after `"branch"` meets one without, and
+ * only a native value's item carries such a context; so a native value reached marked declines (`marks-native`).
+ */
+
+/** #1784's ring: the copy of `p0` into `p1` stored under a test of `p0`'s path `g` (`tested`), read `read` below `p2`. */
+function guardedRing({
+  tested = "g",
+  read = "q.q.g",
+  leaf = "{g:0}",
+  closing = true,
+} = {}): string {
+  return (
+    [
+      `let p0=${leaf}`,
+      "let p1={g:1}",
+      "let p2={g:2}",
+      "p2.q=p0",
+      "p2=p1",
+      `if p0.${tested} is integer { p1=p0 }`,
+      ...(closing ? ["p0=p2"] : []),
+      "p2=p2.q",
+      `say "\${p2.${read}}"`,
+      "exit",
+    ].join("\n") + "\n"
+  );
+}
+
+test("a ring read through a marked copy reaches its check, and its leaves are read marked, in four modes (#1784)", () => {
+  // (the issue's source, a second test path, a deeper read, the holder's mark at a rest it does not test)
+  for (const source of [
+    guardedRing(),
+    guardedRing({ tested: "h" }),
+    guardedRing({ read: "q.q.q.g" }),
+    guardedRing({ read: "q.q.f" }),
+  ])
+    for (const mode of MODES) {
+      const pushed = analysed(source, mode);
+      assert.equal(pushed.answers.budget.exhausted, null, source);
+      assert.ok(pushed.facts.reads > 0 && pushed.facts.declines.size === 0, source);
+      // (where the native reader does not end, its approximations from below reach the pushed read's answers)
+      sameSettled(pushed, analysed(source, mode, 8), source);
+      const files = [{ path: "main.tease", source }];
+      assert.equal(
+        publication(files, mode, GLOBALS),
+        withoutPushedReads(() => publication(files, mode, GLOBALS), 8),
+        source,
+      );
+    }
+});
+
+test("where the native reader ends, a read through a marked copy answers what it does, and a marked native value declines (#1784)", () => {
+  const controls = [
+    // the ring without its closing copy: the marked copy's leaves, read at the tested path and beside it
+    guardedRing({ closing: false }),
+    guardedRing({ closing: false, read: "q.q.f" }),
+    guardedRing({ closing: false, tested: "h" }),
+    // a marked copy of a literal whose leaf is an operation's (a native value): declined, read natively
+    guardedRing({ closing: false, leaf: "{g:hostValue+1}" }),
+  ];
+  for (const source of controls)
+    for (const mode of MODES) {
+      const files = [{ path: "main.tease", source }];
+      assert.equal(
+        publication(files, mode, GLOBALS),
+        withoutPushedReads(() => publication(files, mode, GLOBALS)),
+        source,
+      );
+      sameSettled(analysed(source, mode), analysed(source, mode, "native"), source);
+    }
+  const native = analysed(guardedRing({ leaf: "{g:hostValue+1}" }));
+  assert.equal(native.answers.budget.exhausted, null);
+  assert.ok(native.all.some((facts) => (facts.declines.get("marks-native") ?? 0) > 0));
+});
+
+test("marking a route's leaves before their join is marking their join, except where a late context meets none (#1784 HEAD 1)", () => {
+  const scope = { work: new WorkLedger(), ingress: { union: (a: unknown, b: unknown) => a ?? b } };
+  const late = new Set(CONTEXT_WORDS.slice(CONTEXT_WORDS.indexOf("branch") + 1));
+  const variants = (tag: Item["tag"]): Item[] =>
+    [null, ...CONTEXT_WORDS].flatMap((context) =>
+      (["def", "pos"] as const).flatMap((cert) =>
+        [false, true].flatMap((guarded) =>
+          (tag === "null" ? [undefined, "unknown" as const] : [undefined]).map((word) =>
+            makeItem(tag, null, {
+              context,
+              cert,
+              ...(guarded ? { guarded: true as const } : {}),
+              ...(word === undefined ? {} : { word }),
+            }),
+          ),
+        ),
+      ),
+    );
+  const failing: string[] = [];
+  let pairs = 0;
+  for (const tag of ["integer", "string", "null", "unknown"] as const)
+    for (const one of variants(tag))
+      for (const other of variants(tag)) {
+        pairs += 1;
+        const joinedThenMarked = marked(mergeItems([one, other], scope as never));
+        const markedThenJoined = mergeItems(marked([one, other]), scope as never);
+        const condition =
+          tag === "unknown" ||
+          ![one, other].some((item) => item.context !== null && late.has(item.context));
+        if (condition)
+          assert.deepEqual(
+            markedThenJoined,
+            joinedThenMarked,
+            `${tag} ${one.context}/${other.context}`,
+          );
+        else if (JSON.stringify(markedThenJoined) !== JSON.stringify(joinedThenMarked))
+          failing.push(`${tag}:${one.context}/${other.context}`);
+      }
+  assert.ok(pairs > 1000, `${pairs} pairs`);
+  // (HEAD 1's twelve pairs: a null context beside a late one, either order, on a tag that is not `unknown`)
+  for (const tag of ["integer", "null"])
+    for (const word of late)
+      for (const pair of [`${tag}:null/${word}`, `${tag}:${word}/null`])
+        assert.ok(failing.includes(pair), pair);
 });
