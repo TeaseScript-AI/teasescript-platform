@@ -12,7 +12,8 @@ import { inMode, MODES, sentences } from "./helpers/type-core-oracles.js";
  * literal of whole numbers two or three lists deep, the other its text twin. The whole-number side varies:
  * - its `null` at no layer, at each layer between the element and the leaf, or at the leaf;
  * - at the element or any layer, its value carried: `take`, an index, a `get` default, an `otherwise`'s operand or
- *   fallback, a property, a join, or a written copy narrowed by its value or one that may be null;
+ *   fallback, a property, a join, a written copy narrowed by its value or one that may be null, or a narrowed copy held
+ *   in an inferred one (`h={p:c}`, read as `h.p`);
  * - the pair as list elements, object properties, or the operands of `+`;
  * - in both orders and four modes.
  * The modes agree on every source. Where both checkers report the error, the first sentences are equal, except the
@@ -21,17 +22,19 @@ import { inMode, MODES, sentences } from "./helpers/type-core-oracles.js";
  * - the earliest element's own `or null` (a copy that may be null at the element), #1843.
  * A source only one checker reports on is outside the candidate slice there and is not compared.
  */
-const WRAPS: Readonly<Record<string, ((value: string) => string) | "narrowed" | "maybe">> = {
-  take: (value) => `(${value}).take(9)`,
-  index: (value) => `[${value}][0]`,
-  get: (value) => `[].get(0, default: ${value})`,
-  operand: (value) => `(${value} otherwise null)`,
-  fallback: (value) => `(null otherwise ${value})`,
-  property: (value) => `{p:${value}}.p`,
-  join: (value) => `(${value})+[]`,
-  narrowed: "narrowed",
-  maybe: "maybe",
-};
+const WRAPS: Readonly<Record<string, ((value: string) => string) | "narrowed" | "maybe" | "held">> =
+  {
+    take: (value) => `(${value}).take(9)`,
+    index: (value) => `[${value}][0]`,
+    get: (value) => `[].get(0, default: ${value})`,
+    operand: (value) => `(${value} otherwise null)`,
+    fallback: (value) => `(null otherwise ${value})`,
+    property: (value) => `{p:${value}}.p`,
+    join: (value) => `(${value})+[]`,
+    narrowed: "narrowed",
+    maybe: "maybe",
+    held: "held",
+  };
 const POSITIONS: Readonly<Record<string, (a: string, b: string) => string>> = {
   element: (a, b) => `let xs=[${a},${b}]`,
   property: (a, b) => `let xs=[{f:${a}},{f:${b}}]`,
@@ -68,9 +71,9 @@ function side(
     const made = WRAPS[wrap]!;
     if (typeof made === "function") return made(list);
     declarations.push(
-      `let c:${type(at)}?=${list}\n${made === "maybe" ? "if hostValue == 1 { c=null }\n" : ""}`,
+      `let c:${type(at)}?=${list}\n${made === "maybe" ? "if hostValue == 1 { c=null }\n" : ""}${made === "held" ? "let h={p:c}\n" : ""}`,
     );
-    return "c";
+    return made === "held" ? "h.p" : "c";
   };
   return build(0);
 }
