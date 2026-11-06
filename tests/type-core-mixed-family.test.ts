@@ -56,7 +56,8 @@ interface FamilySources {
   sourceKey(source: unknown): string;
   setKey(keys: readonly string[]): string;
 }
-const OUTSIDE = [
+// (the host's globals, absent from a new realm and shadowed there by names that throw on use)
+const HOST = [
   "process",
   "performance",
   "require",
@@ -68,9 +69,24 @@ const OUTSIDE = [
   "setInterval",
   "setImmediate",
   "queueMicrotask",
-  "Date",
-  "Intl",
 ];
+// (a new realm's own inputs from outside it, ECMA-262's and ECMA-402's: the clock and the local time zone (`Date`),
+// randomness, garbage collection's timing (`WeakRef`, `FinalizationRegistry`) and the locale (`Intl`, every
+// `toLocale…`, `localeCompare`), each replaced on the realm itself, so every alias of it (`globalThis`, `Function`,
+// an indirect `eval`) reads the replacement; strict, so a replacement that does not take throws, Codex r20's B1)
+const REALM = `"use strict";
+const no = (name) => () => { throw new Error("a family generator read " + name); };
+const trap = (name) => new Proxy(function () {}, Object.fromEntries(
+  ["get", "has", "set", "apply", "construct", "ownKeys", "getPrototypeOf", "defineProperty",
+    "deleteProperty", "getOwnPropertyDescriptor"].map((each) => [each, no(name)])));
+for (const name of ["Date", "Intl", "WeakRef", "FinalizationRegistry"]) globalThis[name] = trap(name);
+Math.random = no("Math.random");
+const typed = Object.getPrototypeOf(Int8Array.prototype);
+for (const [owner, name] of [[String.prototype, "localeCompare"], [String.prototype, "toLocaleLowerCase"],
+  [String.prototype, "toLocaleUpperCase"], [Number.prototype, "toLocaleString"], [BigInt.prototype, "toLocaleString"],
+  [Array.prototype, "toLocaleString"], [typed, "toLocaleString"], [Object.prototype, "toLocaleString"]])
+  owner[name] = no(name);
+`;
 
 interface Exported {
   readonly cases: readonly (readonly [string, string])[];
@@ -78,25 +94,17 @@ interface Exported {
 }
 
 /**
- * A generator's cases, evaluated in a new realm (no host global there) with each outside input a parameter that throws
- * on any use: the environment, the time, randomness, the locale, modules and timers.
+ * A generator's cases, evaluated in a new realm whose every input from outside it throws on use (`REALM`), with each host
+ * global a name that throws (`HOST`), and no `import`. Its exports come back as JSON.
  */
 function sandboxed(text: string): Exported {
   assert.ok(!/^\s*import\b/m.test(text), "a family generator that imports");
-  const context = createContext({});
   const made: unknown = runInContext(
-    `((names) => {
-      const no = (name) => () => { throw new Error("a family generator read " + name); };
-      const trap = (name) => new Proxy(function () {}, Object.fromEntries(
-        ["get", "has", "set", "apply", "construct", "ownKeys", "getPrototypeOf", "defineProperty",
-          "deleteProperty", "getOwnPropertyDescriptor"].map((each) => [each, no(name)])));
-      Math.random = no("Math.random");
-      return ((${OUTSIDE.join(", ")}) => {
-        ${text.replace(/^export /gm, "")}
-        return JSON.stringify({ cases, globals });
-      })(...names.map(trap));
-    })(${JSON.stringify(OUTSIDE)})`,
-    context,
+    `${REALM}((names) => ((${HOST.join(", ")}) => {
+      ${text.replace(/^export /gm, "")}
+      return JSON.stringify({ cases, globals });
+    })(...names.map(trap)))(${JSON.stringify(HOST)})`,
+    createContext({}),
   );
   assert.ok(typeof made === "string", "a family generator's exports");
   const exported: unknown = JSON.parse(made);
@@ -118,15 +126,20 @@ function sandboxed(text: string): Exported {
   };
 }
 
-/** The names whose source keys differ between two lists of `[name, key]` (at most five), and any count difference. */
+/**
+ * Where two lists of `[name, source key]` differ, in order (at most five): a changed, missing, added or repeated case
+ * each shows, so equal lists are the same cases in the same order (Codex r20's B2).
+ */
 function changed(
   mine: readonly (readonly [string, string])[],
   theirs: readonly (readonly [string, string])[],
 ): string[] {
-  const keyOf = new Map(theirs);
-  const out = mine.flatMap(([name, key]) => (keyOf.get(name) === key ? [] : [name]));
-  if (mine.length !== theirs.length) out.push(`${mine.length} cases against ${theirs.length}`);
-  return out.slice(0, 5);
+  const out: string[] = [];
+  for (let at = 0; at < Math.max(mine.length, theirs.length) && out.length < 5; at += 1) {
+    const [a, b] = [mine[at]?.join(" ") ?? "(none)", theirs[at]?.join(" ") ?? "(none)"];
+    if (a !== b) out.push(`${at}: ${a} | ${b}`);
+  }
+  return out;
 }
 
 async function pure(
@@ -165,27 +178,56 @@ async function pure(
     record.sha256,
     "a record other than the run's",
   );
-  // (negative controls: Astra r3's two probes, an inner order and a depth domain read from the environment, fail the
-  // first guard; the same order changed in the text fails the second)
+  // (negative controls: Astra r3's two probes, an inner order and a depth domain read from the environment, and Codex
+  // r20's, the clock through an alias, randomness through an indirect `eval` and the locale with no name of it, each fail
+  // the first guard; the same order changed in the text fails the second, and a case repeated over another fails both,
+  // in the direct and the sandboxed evaluation alike)
   const variant = (from: string, to: string): string => {
     assert.ok(text.includes(from), from);
     return text.replace(from, to);
   };
   const inner = "(([${one}]).take(9)+([${twin}]).take(9))";
   const swapped = "(([${twin}]).take(9)+([${one}]).take(9))";
+  const domain = '["depth", () => [2, 3]]';
   const probes = [
     variant(
       `\`${inner}\``,
       `(process.env.REVIEW_TWIN_REVERSED === "1" ? \`${swapped}\` : \`${inner}\`)`,
     ),
-    variant(
-      '["depth", () => [2, 3]]',
-      '["depth", () => (process.env.REVIEW_DEPTHS === "4" ? [2, 3, 4] : [2, 3])]',
-    ),
+    ...[
+      'process.env.REVIEW_DEPTHS === "4"',
+      "globalThis.Date.now()",
+      'Function("return Date.now()")()',
+      '(0, eval)("Math.random()")',
+      "(1234.5).toLocaleString()",
+      '"a".localeCompare("b")',
+      "new Intl.NumberFormat().format(1)",
+    ].map((read) => variant(domain, `["depth", () => (${read}, [2, 3])]`)),
   ];
-  for (const probe of probes)
-    assert.throws(() => sandboxed(probe), /a family generator read process/);
+  for (const probe of probes) assert.throws(() => sandboxed(probe), /a family generator read /);
   assert.notDeepEqual(changed(keys(sandboxed(variant(inner, swapped))), recorded), []);
+  const repeated = "export const globals";
+  assert.notDeepEqual(
+    changed(
+      keys(sandboxed(variant(repeated, `cases[cases.length - 1] = cases[0];\n${repeated}`))),
+      recorded,
+    ),
+    [],
+  );
+  assert.notDeepEqual(
+    changed(
+      keys(
+        sandboxed(
+          variant(
+            repeated,
+            `if (typeof process === "function") cases[cases.length - 1] = cases[0];\n${repeated}`,
+          ),
+        ),
+      ),
+      made,
+    ),
+    [],
+  );
 }
 
 // (the sample: each kind at every position with every relation of its carried layer to the null (`RELATIONS`, the
