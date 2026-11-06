@@ -75,6 +75,8 @@ interface Goal {
   readonly value: Set<number>;
   /** Its readers while it is not final; a final goal's nodes are read as they stand. */
   readers: ((node: number) => void)[] | null;
+  /** #1784: per base node it holds held, the union of the pending sets it reached it with (`gain`). */
+  holds?: Map<number, number>;
 }
 
 /** The answer a pushed read takes from the graph: its leaves' items and the values read natively at its end. */
@@ -643,8 +645,28 @@ function below(
   for (const found of goal.value) frontier.tasks.push([next, found]);
 }
 
-function gain(frontier: Frontier, goal: Goal, node: number): void {
+function gain(frontier: Frontier, goal: Goal, found: number): void {
   step(frontier);
+  // #1784: a base node reached held with several pending sets is reached with their union: marked where any marks. A
+  // marked leaf absorbs its unmarked twin in the join (guarded makes it `pos`, `"branch"` beats no context, every other
+  // field equal), so the alternatives together give what their union gives, and a set the union holds adds nothing; so
+  // each base node's held states in a goal form one growing chain, not every combination of its pending marks (Codex
+  // r3 B3).
+  let node = found;
+  const at = frontier.nodes[found]!;
+  if (at.kind === "hold") {
+    goal.holds ??= new Map();
+    const known = goal.holds.get(at.inner);
+    const set = known === undefined ? at.set : unionPending(frontier, known, at.set);
+    if (set === known) return;
+    goal.holds.set(at.inner, set);
+    if (set !== at.set)
+      node = nodeId(frontier, joinParts("H", at.inner, set), () => ({
+        kind: "hold",
+        inner: at.inner,
+        set,
+      }));
+  }
   if (goal.value.has(node)) return;
   goal.value.add(node);
   keep(frontier.contract.work, 1);
