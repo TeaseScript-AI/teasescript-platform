@@ -342,6 +342,11 @@ runner on `main`'s `src/` tree `a5af3a394`: a fill of every area at the runner's
 
 ## A generator
 
+A folder of `tests/families` that holds an `.mjs` file is an area: the check and the baselines find the areas by
+`sources.mjs`'s `generatorFolders`, the baselines adding the corpus fixture (`tools/corpus/fixture`), and the runner,
+the check and the baselines take every module in an area as a generator. A folder of data only is no area; a utility
+module stays outside the area folders, as `shadow-bind.mjs` does (#1786).
+
 A module `tests/families/<area>/<name>.mjs` with no imports beyond `node:` built-ins and no side effects:
 
 ```js

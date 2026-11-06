@@ -69,7 +69,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { generatorsOf, placeOf } from "./sources.mjs";
+import { generatorFolders, generatorsOf, holdsGenerators, placeOf } from "./sources.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 
@@ -913,15 +913,12 @@ export function storedRuns(folder) {
 
 /** A built tree's areas: the folders of tests/families/ with generators, and tools/corpus/fixture/. */
 function areasOf(tree) {
-  const families = path.join(tree, "tests", "families");
+  // (the families' areas as the check finds them, then the corpus fixture, an area outside `tests/families`)
+  const fixture = path.join(tree, "tools", "corpus", "fixture");
   return [
-    ...(existsSync(families) ? readdirSync(families, { withFileTypes: true }) : [])
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(families, entry.name)),
-    path.join(tree, "tools", "corpus", "fixture"),
-  ].filter(
-    (folder) => existsSync(folder) && readdirSync(folder).some((name) => name.endsWith(".mjs")),
-  );
+    ...generatorFolders(path.join(tree, "tests", "families")),
+    ...(holdsGenerators(fixture) ? [fixture] : []),
+  ];
 }
 
 /** Each area's state in the baseline of `tree` (see above), one JSON line each, then the baseline's; the exit status. */

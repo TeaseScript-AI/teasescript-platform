@@ -3995,3 +3995,57 @@ test("a baseline plans copies in 64 shards where it first plans it, keeps a coun
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("the check and the baselines take one set of areas: each folder of tests/families that holds a generator, never one of data only, and the baselines the corpus fixture beside them (#1865)", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-areas-"));
+  try {
+    const tree = join(directory, "tree");
+    const families = join(tree, "tests", "families");
+    const write = (file: string, text: string) => {
+      mkdirSync(join(file, ".."), { recursive: true });
+      writeFileSync(file, text);
+    };
+    const generator = 'export const cases = [["one", "say 1"]];\n';
+    write(join(tree, "src", "index.js"), "export {};\n");
+    write(join(families, "area", "one.mjs"), generator);
+    write(join(families, "data", "table.json"), "{}\n");
+    write(join(families, "loose.mjs"), "export {};\n");
+    mkdirSync(join(families, "empty"));
+    write(join(tree, "tools", "corpus", "fixture", "cells.mjs"), generator);
+    const sources = resolve("tests/families/sources.mjs");
+    const { generatorFolders, holdsGenerators } = await import(pathToFileURL(sources).href);
+    assert.deepEqual(generatorFolders(families), [join(families, "area")]);
+    assert.deepEqual(
+      ["area", "data", "empty"].map((name) => holdsGenerators(join(families, name))),
+      [true, false, false],
+    );
+    assert.deepEqual(generatorFolders(join(tree, "absent")), []);
+    // (the check, copied beside those folders, lists the area's generator alone)
+    cpSync(resolve("tests/families/check.mjs"), join(families, "check.mjs"));
+    cpSync(sources, join(families, "sources.mjs"));
+    const listed = spawnSync(process.execPath, [join(families, "check.mjs"), "--list"], {
+      encoding: "utf8",
+    });
+    assert.equal(listed.stderr, "");
+    const generators = listed.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line).generator)
+      .filter((name) => name !== undefined);
+    assert.deepEqual(generators, ["area/one.mjs"]);
+    // (the baselines' state of that tree: the same area, then the corpus fixture)
+    const root = join(directory, "baselines");
+    mkdirSync(root);
+    const state = spawnSync(process.execPath, [baselines, "state", tree, root, "--read-only"], {
+      encoding: "utf8",
+    });
+    const areas = state.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line).area)
+      .filter((name) => name !== undefined);
+    assert.deepEqual(areas, ["area", "fixture"], state.stderr);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
