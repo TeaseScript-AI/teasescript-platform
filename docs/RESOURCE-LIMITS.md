@@ -182,7 +182,7 @@ and lost checks, (b) and (c) above (#1781, `1ec334b94`); that is no claim that e
 repaired. Condition 2, every remaining case re-assessed before V2 replaces the legacy compiler, is open; its cases open
 at the time of writing (2026-11-06) are #1832, #1845 (with #1846), the unsettled stops of option (a) (#1252; #1767,
 closed), #1838 and #1836, #1772, and #1781's conservative natural-outside declines (128 rows in 8 sources, as reported
-in PR #1781's matrix).
+in PR #1781's work-stop set sweep).
 
 ### Accepted work products under the allowance
 
