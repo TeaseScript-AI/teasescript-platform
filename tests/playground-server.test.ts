@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 import { PLAYGROUND_EXAMPLES } from "../playground/examples.js";
 import { createPlaygroundServer } from "../playground/server.js";
 
-const server = createPlaygroundServer();
+// (unreferenced, as every server here: a failed cleanup hook never leaves a listener running the file, #1844)
+const server = createPlaygroundServer().unref();
 const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
 let port = 0;
 
@@ -29,11 +30,7 @@ before(async () => {
   });
 });
 
-after(async () => {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error === undefined ? resolve() : reject(error)));
-  });
-});
+after(async () => close(server));
 
 test("serves the root playground page", async () => {
   const response = await get("/");
@@ -308,6 +305,7 @@ function api(
 }
 
 function listenAt(target: typeof server, host: string): Promise<number> {
+  target.unref();
   return new Promise((resolve, reject) => {
     target.once("error", reject);
     target.listen(0, host, () => {
@@ -323,6 +321,7 @@ function listenAt(target: typeof server, host: string): Promise<number> {
 }
 
 function listen(target: typeof server): Promise<number> {
+  target.unref();
   return new Promise((resolve, reject) => {
     target.once("error", reject);
     target.listen(0, "127.0.0.1", () => {
@@ -337,8 +336,19 @@ function listen(target: typeof server): Promise<number> {
   });
 }
 
+/**
+ * A server closed on a bounded wait: its connections ended, then at most 5 s (#1844). Every server here is unreferenced
+ * once it listens, so a failed cleanup hook before this one ends the file rather than leaving it running.
+ */
 function close(target: typeof server): Promise<void> {
   return new Promise((resolve, reject) => {
-    target.close((error) => (error === undefined ? resolve() : reject(error)));
+    const timer = setTimeout(resolve, 5_000);
+    timer.unref();
+    target.closeAllConnections();
+    target.close((error) => {
+      clearTimeout(timer);
+      if (error === undefined) resolve();
+      else reject(error);
+    });
   });
 }
