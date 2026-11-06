@@ -149,6 +149,7 @@ test("a store applies publications by revision and requires their events to cont
     from: 0,
     eventsThrough: 0,
     events: [],
+    instructions: {},
     planToken: plan,
     metadata: null,
     liveEventSequence: 0,
@@ -159,6 +160,7 @@ test("a store applies publications by revision and requires their events to cont
     from,
     eventsThrough,
     events: [],
+    instructions: {},
   });
   // An eventless publication still applies: its revision is new.
   assert.equal(store.apply(publication(2, 0, 0)), true);

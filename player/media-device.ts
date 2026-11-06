@@ -372,22 +372,48 @@ export class MediaDevice {
 }
 
 /**
- * Delivers device load reports to the runtime. A load report continues execution, so each delivery first observes the
- * current time, as input does. A report the runtime cannot take yet (`executionPending`) stays queued and is retried
- * after the engine ran again; the host keeps observing while reports are queued.
+ * How a host delivers queued load reports: in order, after an observation of the current time when `observe` asks for
+ * one, calling `acknowledge` for each report the runtime took or refused for good. A report it leaves unacknowledged
+ * (`executionPending`, or one it did not reach) stays queued.
+ */
+export type MediaLoadDelivery = (
+  reports: readonly (readonly [mediaId: number, report: MediaLoadReport])[],
+  observe: boolean,
+  acknowledge: (mediaId: number) => void,
+) => Promise<void>;
+
+/**
+ * Delivers device load reports to the runtime. A load report continues execution, so a delivery of new reports first
+ * observes the current time, as input does. A report the runtime cannot take yet (`executionPending`) stays queued and is
+ * retried after the engine ran again; the host keeps observing while reports are queued. One delivery runs at a time;
+ * requests meanwhile run as one more delivery after it.
  */
 export class MediaLoadQueue {
-  readonly #observe: () => void;
-  readonly #report: (mediaId: number, report: MediaLoadReport) => "pending" | "delivered";
+  readonly #deliver: MediaLoadDelivery;
+  readonly #changed: () => void;
+  readonly #failed: (error: unknown) => void;
   readonly #pending = new Map<number, MediaLoadReport>();
   #scheduled = false;
+  /** Whether a delivery runs, and whether another was requested meanwhile, with an observation. */
+  #delivering = false;
+  #again: { observe: boolean } | null = null;
+  /** Advances at `clear`, so a delivery still under way changes nothing after it. */
+  #generation = 0;
 
+  /**
+   * `changed` runs after each delivery, as the queue's size may have changed. A delivery reports its own errors; one
+   * that still rejects goes to `failed`, which rethrows by default.
+   */
   constructor(
-    observe: () => void,
-    report: (mediaId: number, report: MediaLoadReport) => "pending" | "delivered",
+    deliver: MediaLoadDelivery,
+    changed: () => void = () => {},
+    failed: (error: unknown) => void = (error) => {
+      throw error;
+    },
   ) {
-    this.#observe = observe;
-    this.#report = report;
+    this.#deliver = deliver;
+    this.#changed = changed;
+    this.#failed = failed;
   }
 
   /** Queues a report; delivery happens after the current task, outside device reconciliation. */
@@ -397,17 +423,13 @@ export class MediaLoadQueue {
     this.#scheduled = true;
     queueMicrotask(() => {
       this.#scheduled = false;
-      if (this.#pending.size === 0) return;
-      this.#observe();
-      this.retry();
+      if (this.#pending.size > 0) this.#request(true);
     });
   }
 
   /** Offers queued reports again; call after the session changed. */
   retry(): void {
-    for (const [mediaId, report] of this.#pending) {
-      if (this.#report(mediaId, report) === "delivered") this.#pending.delete(mediaId);
-    }
+    if (this.#pending.size > 0) this.#request(false);
   }
 
   get size(): number {
@@ -415,6 +437,36 @@ export class MediaLoadQueue {
   }
 
   clear(): void {
+    this.#generation++;
     this.#pending.clear();
+  }
+
+  #request(observe: boolean): void {
+    if (this.#delivering) {
+      this.#again = { observe: observe || this.#again?.observe === true };
+      return;
+    }
+    this.#run(observe).catch(this.#failed);
+  }
+
+  async #run(observe: boolean): Promise<void> {
+    this.#delivering = true;
+    const generation = this.#generation;
+    const offered = [...this.#pending];
+    const reports = new Map(offered);
+    try {
+      // A report added whose own request has not come yet is new as well: it is offered only after an observation.
+      await this.#deliver(offered, observe || this.#scheduled, (mediaId) => {
+        // Only the report that was offered: a newer one for the same medium stays, as does everything after a clear.
+        if (generation === this.#generation && this.#pending.get(mediaId) === reports.get(mediaId))
+          this.#pending.delete(mediaId);
+      });
+    } finally {
+      this.#delivering = false;
+      this.#changed();
+      const again = this.#again;
+      this.#again = null;
+      if (again !== null && this.#pending.size > 0) this.#run(again.observe).catch(this.#failed);
+    }
   }
 }

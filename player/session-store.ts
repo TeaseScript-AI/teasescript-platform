@@ -92,6 +92,7 @@ export class SessionStore {
       lineage: this,
       revision: view.revision,
       state: Object.freeze(view.state),
+      instructions: view.instructions,
       liveEventSequence: this.#liveEventSequence,
       events: this.#events,
       transcriptEntries: this.#entries,

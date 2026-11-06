@@ -522,7 +522,14 @@ test("a jump another publication overtook seeks media to what shows, not to the 
   const audio = elements.find((element) => element.src === "https://fixture/voice.mp3");
   assert.ok(audio);
   audio.dispatchEvent(new Event("loadedmetadata"));
-  await turn();
+  // The load report goes over the bridge (L5d): wait until it shows, so the jump below acts on the loaded medium.
+  const loaded = () =>
+    view.playerRuntimeMedia(player.session.value!.state).media[0]?.loaded === true;
+  for (let turns = 0; !loaded(); turns++) {
+    assert.ok(turns < 100, "the load report did not show");
+    // Its replies come on zero-delay timers, which immediate turns do not wait for.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
   const issuer = player.session.value!;
   await bridge.request(issuer, "stepTime", { targetMs: 1_100 });
   // The jump's reply arrived, but before the jump publishes, an observation of 2 s of playback overtakes it.
