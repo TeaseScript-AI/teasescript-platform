@@ -1131,6 +1131,8 @@ export function pushedFacts(contract: Contract): {
   readonly goals: number;
   readonly edges: number;
   readonly sets: number;
+  /** #1784: the marks pending in the interned pending sets, each set's once. */
+  readonly pending: number;
   readonly reads: number;
   readonly declines: ReadonlyMap<string, number>;
 } {
@@ -1147,6 +1149,7 @@ export function pushedFacts(contract: Contract): {
     goals,
     edges,
     sets: frontier?.members.length ?? 0,
+    pending: frontier?.pendingSets.reduce((all, set) => all + set.length, 0) ?? 0,
     reads: [...(frontier?.reads.values() ?? [])].filter((read) => read !== null).length,
     declines: frontier?.declines ?? new Map(),
   };
