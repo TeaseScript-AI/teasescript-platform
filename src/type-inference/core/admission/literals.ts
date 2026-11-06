@@ -1355,8 +1355,8 @@ export interface MixedOptional {
  * an operand that is itself an `otherwise`, only where its own operand and fallback both may be (Codex r10's B1).
  * A join has no case of its own: the carrier table gives only its admitted operands (`joined`), so a rejected operand
  * brings nothing (ADR 0021 1.1, Astra r1's B1; Codex r9).
- * Each value at each path is asked once per pass (`OPTIONAL`), whichever literal's or join's error asks it, so a wide
- * part shared by many joins is walked once (Astra r1's B2); a value asked again while its own answer is pending, never.
+ * Each value at each path is asked once per call; a value asked again while its own answer is pending, never. Sharing
+ * across errors is `layersOf`'s (`LAYERS`), which keys every value a literal does not hold (Astra r1's B2, r2).
  */
 function mayHoldNull(
   admission: Admission,
@@ -1365,9 +1365,7 @@ function mayHoldNull(
   prefix: readonly string[],
 ): boolean {
   const { program, contract } = admission.pass;
-  let memo = OPTIONAL.get(admission.pass);
-  if (memo === undefined) OPTIONAL.set(admission.pass, (memo = new Map()));
-  const answers = memo;
+  const answers = new Map<PlaceId, Map<string, boolean>>();
   const itemsHold = (at: PlaceId, steps: readonly string[]): boolean =>
     withoutEmpty(admission.run(contract.contractOfValueAt(at, steps))).some(
       (item) => item.tag === "null",
@@ -1514,9 +1512,6 @@ function operandNull(admission: Admission, operand: PlaceId, from: FlowNode): bo
 
 /** Per pass and node, whether an `otherwise`'s operand may be null there (`mayHoldNull`'s `operandNull`). */
 const NARROWED = new WeakMap<object, Map<FlowNode, Map<PlaceId, boolean>>>();
-
-/** Per pass, each value's answer at each path (`mayHoldNull`), shared by every literal's and join's error. */
-const OPTIONAL = new WeakMap<object, Map<PlaceId, Map<string, boolean>>>();
 
 /**
  * #1765: the depths of the collection layers strictly between a mixed error's elements (or its path's last property)
