@@ -1,5 +1,5 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, joinSteps, keptText, pathText, splitPath } from "../budget.js";
+import { joinParts, joinSteps, keptSteps, keptText, pathText, splitPath } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keptKey, keyBelow, keyOf, recordPath, sortCost, type Key } from "../definitions.js";
 import type { Callable } from "../flow-graph.js";
@@ -821,7 +821,8 @@ export function markPaths(contract: Contract, holder: Holder): readonly (readonl
   while (open.length > 0) {
     const [id, trail] = open.pop()!;
     found.push(trail);
-    for (const [step, to] of automaton.states[id]!.next) open.push([to, joinSteps(trail, [step])]);
+    for (const [step, to] of automaton.states[id]!.next)
+      open.push([to, keptSteps(contract.work, trail, [step])]);
   }
   return found;
 }
