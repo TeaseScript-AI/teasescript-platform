@@ -453,7 +453,7 @@ function chainFamily(
 test("C10's domain of an otherwise chain is each link's, once per value and path: its work linear (Astra r1 on #1824)", () => {
   // (a chain of nullable lists or dicts descends into the element, where each link's domain at that path was its whole
   // earlier chain's: 4k² + 73k + 2 more units than main; beside it the scalar chain and the known-list control)
-  const families = [
+  const families: readonly WorkFamily[] = [
     chainFamily("c10-chain-scalar", "integer?", () => "hostValue", "0"),
     chainFamily("c10-chain-list", "integer[]?", () => "hostValue", "[0]"),
     chainFamily("c10-chain-dict", "integer dict?", () => "hostValue", 'dict{"a": 0}'),
@@ -461,6 +461,25 @@ test("C10's domain of an otherwise chain is each link's, once per value and path
     // (and nested on the right, `v0 otherwise (v1 otherwise (…))`: the fallback's own kinds a chain too, Codex r4)
     chainFamily("c10-chain-list-right", "integer[]?", () => "hostValue", "[0]", true),
     chainFamily("c10-chain-dict-right", "integer dict?", () => "hostValue", 'dict{"a": 0}', true),
+    // (nested collections on the right, and a chain interleaved with `get` defaults, Codex r5: the contract answers a
+    // fallback's or a `get`'s result at a path once per value and path)
+    chainFamily("c10-chain-rows-right", "integer[][]?", () => "hostValue", "[[0]]", true),
+    {
+      name: "c10-chain-get-interleaved",
+      measures: "C10's domain of a chain interleaved with `get` defaults, below its root",
+      program: (k) => [
+        {
+          path: "main.tease",
+          source: [
+            ...Array.from({ length: k }, (_, i) => `let v${i}: integer[]? = hostValue`),
+            "let outer: integer[]?[] = hostValue",
+            `say ${Array.from({ length: k }, (_, i) => `v${i} otherwise (outer.get(0, default: (`).join("")}[0]${")))".repeat(k)}`,
+            "exit",
+            "",
+          ].join("\n"),
+        },
+      ],
+    },
   ];
   const steep: string[] = [];
   for (const sizes of [

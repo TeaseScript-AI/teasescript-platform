@@ -1,7 +1,7 @@
 import type { PlaceId, SourceSite } from "../../graph.js";
 import { concrete, fits, isExternal, isOpaque, requiredKind } from "../admission.js";
 import { family as oneFamily } from "../admission/kinds.js";
-import { joinParts, joinSteps, keepText, keptParts } from "../budget.js";
+import { joinParts, joinSteps, keepText } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { termAt, typeTags } from "../contract.js";
 import { labelBelow } from "../contract/labels.js";
@@ -80,9 +80,10 @@ export interface Domain {
  * C10's requirement from a domain (r4.150): the kinds the domain of a direct value at `rest` gives its fallback, the
  * join of its non-null members' families, `null` contributing none: what the value retains, its contract's kinds
  * (`quietKinds`: a written variable's, parameter's or call result's type, a copy's of one); `written` where the value
- * has a written type there (`writtenTermOf`). An `otherwise` chain's domain is its operands' joined (`domainKinds`).
- * `null` where it gives none: no written or retained type (an unknown read keeps its runtime check), two families or
- * more (the receiving union decides), or only `null`. One charged step per value and path.
+ * has a written type there (`writtenTermOf`). An `otherwise` chain's contract is its operands' joined at the path, once
+ * per value and path: a link that holds none there (a `null` read's element) contributes nothing to it, an unknown makes
+ * it unknown. `null` where it gives none: no written or retained type (an unknown read keeps its runtime check), none,
+ * two families or more (the receiving union decides), or only `null`. One charged step.
  */
 export function domainFamily(
   walk: Consumers,
@@ -95,57 +96,10 @@ export function domainFamily(
   const term = writtenTermOf(walk, value);
   const written = term !== null && termAt(term, rest) !== null;
   if (!written && !unknown) return null;
-  const kinds = domainKinds(walk, value, rest);
+  walk.pass.program.work.charge("checks");
+  const kinds = quietKinds(walk, value, rest);
   // (its `null` contributes no family: C10 reads a direct value's concrete kinds)
   return kinds === null || !oneFamily(kinds) ? null : { kinds, written };
-}
-
-/** Per walk, `domainKinds`'s answer of a value at a path. */
-const DOMAINS = new WeakMap<Consumers, Map<string, readonly ItemTag[] | null>>();
-
-/**
- * A value's contract's kinds at `rest`, any number of families: `null` where one is unknown, none (`[]`) where it holds
- * none there (a `null` read has no element). An `otherwise` result's are its operands' joined, so none contributes
- * nothing and an unknown makes the join unknown (Codex r4 on #1824); each once per value and path. A chain's contract
- * at a descendant path walks its operands again at each link (Astra r1 on #1824), so a chain's kinds are its links'.
- * Read for a direct value's domain (`domainFamily`) and for the fallback's own quiet kinds, which a chain nested on
- * the right is too (`chainQuietKinds`).
- */
-function domainKinds(
-  walk: Consumers,
-  value: PlaceId,
-  rest: readonly string[],
-): readonly ItemTag[] | null {
-  const { program } = walk.pass;
-  program.work.charge("checks");
-  let memo = DOMAINS.get(walk);
-  if (memo === undefined) DOMAINS.set(walk, (memo = new Map()));
-  const key = keptParts(program.work, value, rest);
-  const known = memo.get(key);
-  if (known !== undefined) return known;
-  const link = program.opOf.get(value);
-  let found: readonly ItemTag[] | null;
-  if (link?.kind === "fallback") {
-    const left = domainKinds(walk, link.left, rest);
-    const right = left === null ? null : domainKinds(walk, link.right, rest);
-    found = left === null || right === null ? null : [...new Set([...left, ...right])];
-  } else {
-    const items = withoutEmpty(walk.run(walk.pass.contract.contractOfValueAt(value, rest)));
-    found = items.some((item) => item.tag === "unknown") ? null : items.map((item) => item.tag);
-  }
-  memo.set(key, found);
-  return found;
-}
-
-/** `quietKinds` of a fallback, a chain's through `domainKinds`: `null` where its kinds are unknown or none. */
-function chainQuietKinds(
-  walk: Consumers,
-  value: PlaceId,
-  rest: readonly string[],
-): ItemTag[] | null {
-  if (walk.pass.program.opOf.get(value)?.kind !== "fallback") return quietKinds(walk, value, rest);
-  const kinds = domainKinds(walk, value, rest);
-  return kinds === null || kinds.length === 0 ? null : [...kinds];
 }
 
 /** C10 at one path of the fallback, its label there made by `label`: whether its elements are checked too. */
@@ -253,7 +207,7 @@ function fallbackFitsAt(
   const joined: ItemTag[] = [...new Set([...own, ...added])];
   const against = kindsInItsOrder(joined, written ? own : undefined);
   // §3.3: a fallback whose contract every kind of fits asks nothing more at this path
-  const quiet = chainQuietKinds(walk, value, rest);
+  const quiet = quietKinds(walk, value, rest);
   const fallback =
     quiet !== null && quiet.every(fitsKind) ? [] : withoutEmpty(walk.valueItems(value, node, rest));
   const off = fallback.filter((item) => item.tag !== "unknown" && !fitsKind(item.tag));
