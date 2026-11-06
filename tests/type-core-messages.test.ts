@@ -3787,3 +3787,70 @@ test("a store's check tests an argument or an index target by its whole receivin
   ])
     assert.deepEqual(errors(followed), [], followed);
 });
+
+/**
+ * #1828: a mixed join names its leaf with the null this occurrence may hold, by #1765's walk one depth more, as the
+ * current checker's first sentence does: not the null its decided domain allows. In four modes.
+ */
+test("a mixed join names its leaf null as the occurrence holds it (#1828)", () => {
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    // (a narrowed nullable scalar names no null, as the current checker's first sentence: both sides, `+` and `+=`, and at the top)
+    [
+      "let n:integer?=1\nlet xs=[{f:false}]+[{f:n}]\nexit\n",
+      "'+' would mix objects whose property 'f' holds true or false (boolean) in one and a whole number (integer) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[{f:n}]+[{f:false}]\nexit\n",
+      "'+' would mix objects whose property 'f' holds a whole number (integer) in one and true or false (boolean) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[{f:false}]\nxs += [{f:n}]\nexit\n",
+      "'+=' would mix objects whose property 'f' holds true or false (boolean) in one and a whole number (integer) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[{f:n}]\nxs += [{f:false}]\nexit\n",
+      "'+=' would mix objects whose property 'f' holds a whole number (integer) in one and true or false (boolean) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[false]+[n]\nexit\n",
+      "'+' would mix true or false (boolean) and a whole number (integer). A list holds one type. To allow both, declare the list as 'let xs: (boolean | integer | null)[] =[false]+[n]'.",
+    ],
+    // (one that may be null keeps its `or null`: a host value, a narrowed value invalidated by a store)
+    [
+      "let n:integer?=hostValue\nlet xs=[{f:false}]+[{f:n}]\nexit\n",
+      "'+' would mix objects whose property 'f' holds true or false (boolean) in one and a whole number (integer) or null in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nif hostValue == 1 { n=null }\nlet xs=[{f:n}]+[{f:false}]\nexit\n",
+      "'+' would mix objects whose property 'f' holds a whole number (integer) or null in one and true or false (boolean) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nif hostValue == 1 { n=null }\nlet xs=[{f:false}]\nxs += [{f:n}]\nexit\n",
+      "'+=' would mix objects whose property 'f' holds true or false (boolean) in one and a whole number (integer) or null in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (a copied whole collection keeps its written leaf, a literal's own leaf is narrowed, and a null at an intermediate layer stays there, with a leaf null beside it)
+    [
+      "let n:integer?[]= [1]\nlet xs=[{f:[false]}]+[{f:n}]\nexit\n",
+      "'+' would mix objects whose property 'f' holds a list (boolean[]) in one and a list (integer?[]) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[[false]]+[[2,n]]\nexit\n",
+      "'+' would mix a list (boolean[]) and a list (integer[]). A list holds one type. To allow both, declare the list as 'let xs: (boolean | integer)[][] =[[false]]+[[2,n]]'.",
+    ],
+    [
+      'let xs=[[[1],null]]+[[["x"]]]\nexit\n',
+      "'+' would mix a list (integer[]?[]) and a list (string[][]). A list holds one type. To allow both, declare the list as 'let xs: ((integer | string)[]?)[][] =[[[1],null]]+[[[\"x\"]]]'.",
+    ],
+    [
+      'let n:integer?=hostValue\nlet xs=[[[1,n],null]]+[[["x"]]]\nexit\n',
+      "'+' would mix a list (integer?[]?[]) and a list (string[][]). A list holds one type. To allow both, declare the list as 'let xs: ((integer | string | null)[]?)[][] =[[[1,n],null]]+[[[\"x\"]]]'.",
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+});
