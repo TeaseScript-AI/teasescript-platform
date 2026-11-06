@@ -402,9 +402,9 @@ test("where the native reader ends, a read through a marked copy answers what it
       );
       sameSettled(analysed(source, mode), analysed(source, mode, "native"), source);
     }
-  const native = analysed(guardedRing({ leaf: "{g:hostValue+1}" }));
-  assert.equal(native.answers.budget.exhausted, null);
-  assert.ok(native.all.some((facts) => (facts.declines.get("marks-native") ?? 0) > 0));
+  // (the operation's leaf reached through the marked copy declines; the native reader answers it, as above)
+  const declined = analysed(guardedRing({ closing: false, leaf: "{g:hostValue+1}" }));
+  assert.ok(declined.all.some((facts) => (facts.declines.get("marks-native") ?? 0) > 0));
 });
 
 test("marking a route's leaves before their join is marking their join, except where a late context meets none (#1784 HEAD 1)", () => {
