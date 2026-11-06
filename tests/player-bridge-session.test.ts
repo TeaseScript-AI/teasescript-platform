@@ -458,7 +458,10 @@ function nesting(value: unknown): number {
   return deepest;
 }
 
-/** Deep script values (#1877): 10,000 lists in state, in a pending save, in a stored value at Start, and in replies. */
+/**
+ * Deep script values (#1877): 10,000 lists in state, in a pending save, in a stored value at Start, and in replies; and
+ * a Debug storage edit 2,000 lists deep.
+ */
 const DEEP = 10_000;
 const DEEP_SCRIPT = [
   'let open = ""',
@@ -495,6 +498,8 @@ async function playDeepTape(bridge: PlayerBridge): Promise<unknown[]> {
     steps.push({ op, result, session: shown(session) });
   };
   await send("observeTime", { atMs: 500, media: [] });
+  // Debug's storage edit (L5c's op) with a value 2,000 lists deep, before the script's save is pending.
+  await send("applyStorageEdit", { key: "edited", value: deepStored(2_000) });
   await send("observeTime", { atMs: 1_000, media: [] });
   await send("stepTime", { targetMs: 2_000 });
   await send("beginCatchUp", { targetMs: 6_000 });
@@ -515,6 +520,14 @@ test("deep script values give the same replies, publications and events in-proce
     assert.equal(cloneGraphDifference(await playDeepTape(worker), tape), null);
     // Start's request carried the deep stored value; the replies after the save carry the script's pending save.
     assert.ok(nesting(tape.slice(2)) > 2 * DEEP, "the replies carry the deep save");
+    const edit = tape.find(
+      (step) =>
+        typeof step === "object" && step !== null && "op" in step && step.op === "applyStorageEdit",
+    );
+    const result =
+      typeof edit === "object" && edit !== null && "result" in edit ? edit.result : null;
+    assert.ok(typeof result === "object" && result !== null && "kind" in result);
+    assert.equal(result.kind, "applied", "the deep edit applied");
   } finally {
     worker.client.terminate();
   }

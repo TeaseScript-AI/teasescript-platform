@@ -26,6 +26,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
+import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { AMSTERDAM, utc } from "./helpers/temporal-fixtures.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
@@ -729,6 +730,23 @@ test("a Debug edit is stored first, and the running session's next load returns 
   });
   host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
   assert.deepEqual(said(host.session.value), ["1 2"]);
+});
+
+test("a Debug edit 2,000 lists deep is stored, crosses the bridge and reaches the running session (#1877)", async (context) => {
+  let deep: SerializableRuntimeValue = 2;
+  for (let level = 0; level < 2_000; level += 1) deep = { kind: "list", items: [deep] };
+  const storage = memoryStorage({ k: 1 });
+  const { host } = createHost(context, storage.provider);
+  await start(host, loadsAroundButton);
+  assert.deepEqual(await host.editSavedData({ key: "k", value: deep, expected: 1 }), {
+    kind: "saved",
+    live: true,
+  });
+  assert.equal(cloneGraphDifference(storage.entries.get("k"), deep), null, "stored");
+  const [entry] = playerRuntimeSnapshot(host.session.value!).scriptStorage;
+  assert.equal(entry?.key, "k");
+  assert.equal(cloneGraphDifference(entry?.value, deep), null, "in the host's session");
+  assert.deepEqual(host.debugEdits.value, { firstEditSceneTimeMs: 0, editCount: 1 });
 });
 
 test("a value changed meanwhile is reported, and an edit that cannot be stored changes nothing", async (context) => {
