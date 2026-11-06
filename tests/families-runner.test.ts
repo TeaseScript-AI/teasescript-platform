@@ -2874,7 +2874,7 @@ test("every reader of a stored shard accepts or refuses one line alike, none thr
 /**
  * A built tree's library whose analyses charge its ledger (allowance 30,000,000, so the runner's limit is 120,000,000
  * units a run) 3,000 units a run: `throws` throws on both trees, `ends` ends the process there, as each `once…` does
- * where `FIXTURE_ENDS` is set; `busy` waits 200 ms on the base; `lagging` waits 600 ms on the head's first run; `slow`
+ * where `FIXTURE_ENDS` is set; `busy` waits 200 ms on the base; `lagging` waits 3 s on the head's first run; `slow`
  * charges a billion units more on the head at once and waits 150 ms there; `burst` charges 10,000 times 65,536 units on
  * the head, then waits; `changed` publishes its second part otherwise on the head. Its stop sets differ on the head at
  * demand allowance 1 and charge a billion units there at 2. Where `FIXTURE_TRACE` names a file, the head appends a
