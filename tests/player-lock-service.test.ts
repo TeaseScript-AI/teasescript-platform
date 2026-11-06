@@ -67,6 +67,14 @@ function relays(down: () => boolean): typeof fetch {
 /** A Player around one session: it services lock steps and records the dialogs it shows. */
 class Harness {
   session: PlayerSession;
+  /** The published session's generation; a test that replaces the session advances it. */
+  generation = 1;
+  /** Runs when the service reads the published session, as it does first in each service. */
+  onSession: (() => void) | null = null;
+  /** Whether the Player holds the session from its services for now, as during a paused random draw. */
+  held = false;
+  /** Starts a new session of the same script under a new generation, as Start or Debug's rewind does. */
+  readonly replace: () => void;
   readonly media: CapturedMediaStore;
   readonly dialogs: ({ readonly dialog: LockDialog; readonly busy: boolean } | null)[] = [];
   readonly diagnostics: PlayerDiagnostic[] = [];
@@ -94,14 +102,20 @@ class Harness {
   ) {
     const host = options.bridge ?? bridge;
     this.media = options.media ?? new CapturedMediaStore(null, urls, "locks");
-    this.session = introduced(
-      host,
-      createPlayerRuntimeSession(source, {
-        wallClockMs: NOW_MS,
-        storedFiles: options.files ?? [],
-        ...(options.recorder ? { recorder: options.recorder } : {}),
-      }),
-    );
+    const start = () =>
+      introduced(
+        host,
+        createPlayerRuntimeSession(source, {
+          wallClockMs: NOW_MS,
+          storedFiles: options.files ?? [],
+          ...(options.recorder ? { recorder: options.recorder } : {}),
+        }),
+      );
+    this.session = start();
+    this.replace = () => {
+      this.generation += 1;
+      this.session = start();
+    };
     const services: LockServices = {
       tlock: loadTlock,
       age: loadAge,
@@ -109,8 +123,11 @@ class Harness {
       nowMs: () => this.nowMs,
     };
     this.service = new LockService({
-      session: () => this.session,
-      generation: () => 1,
+      session: () => {
+        this.onSession?.();
+        return this.held ? null : this.session;
+      },
+      generation: () => this.generation,
       section: serviceSection(
         host,
         () => this.session,
@@ -817,3 +834,136 @@ for (const stops of [false, true])
     );
     if (!stops) assert.equal(player.session.state.status, "failed");
   });
+
+/**
+ * Lets queued service tasks and their microtasks run out: reading a lock and loading its code, once loaded, wait for no
+ * I/O, so a few zero-delay task turns settle them.
+ */
+async function settled(): Promise<void> {
+  for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** A lock that opens with "p" or, 7 days from now, by its time lock, as its Base64 text. */
+async function timedLock(): Promise<string> {
+  const maker = new Harness(
+    'let locked = encryptText("x", password: "p", publicKey: false, timeLock: getAbsoluteDateTime() + 7 days)\nexit',
+  );
+  const { locked } = await maker.ended();
+  maker.stop();
+  return String(locked);
+}
+
+test("a lock's unlock dialog whose preparation was retired never shows, nor waits for its time lock", async () => {
+  // Its unlock dialog shows the time lock's moment and waits for it. Made once; each run below only reads it.
+  const source = `let opened = decryptText("${await timedLock()}", default: "closed")\nexit`;
+  const control = new Harness(source);
+  assert.equal((await control.dialog()).kind, "unlock");
+  assert.equal(control.wakes.length, 1, "the uninterrupted dialog waits for its time lock");
+  control.stop();
+  // Retire the preparation after `hops` microtasks of the service's task: at every await of the preparation in turn.
+  const microtasks = async (hops: number) => {
+    for (let hop = 0; hop < hops; hop++) await Promise.resolve();
+  };
+  for (const retire of ["reset", "stop", "replace"] as const) {
+    let reached = false;
+    for (let hops = 0; hops < 400 && !reached; hops++) {
+      const player = new Harness(source, { start: false });
+      let retired = -1;
+      // Counted from the service's first read of the session at the step's ask, inside the task that prepares its dialog.
+      player.onSession = () => {
+        if (activePlayerRuntimeLock(player.session.state)?.phase !== "ask") return;
+        player.onSession = null;
+        void microtasks(hops).then(() => {
+          // Once the dialog showed before the retirement, later hops only retire a shown dialog, which reset handles.
+          if (player.dialogs.some((shown) => shown !== null)) reached = true;
+          retired = player.dialogs.length;
+          if (retire === "reset") player.service.reset();
+          else if (retire === "stop") player.service.stop();
+          else {
+            // A replacing session, published and serviced as the Player's watch does, without a reset.
+            player.replace();
+            player.service.request();
+          }
+        });
+      };
+      player.service.request();
+      await settled();
+      assert.ok(retired >= 0);
+      // The retired preparation's own dialog, of the step's key before the retirement. A replacement may present its
+      // own dialog, of the new generation's key, as the next service does.
+      const after = player.dialogs
+        .slice(retired)
+        .filter((shown) => shown !== null && shown.dialog.key.startsWith("1:"));
+      if (!reached) {
+        assert.deepEqual(after, [], `${retire} after ${hops} microtasks: no retired dialog`);
+        if (retire === "replace") {
+          // The replacing session's own step presents, and waits for its time lock.
+          const own = player.dialogs
+            .slice(retired)
+            .filter((shown) => shown?.dialog.key.startsWith("2:"));
+          assert.equal(own.length, 1, `replace after ${hops} microtasks: the new session's dialog`);
+          assert.equal(player.wakes.length, 1, `replace after ${hops} microtasks: its wake`);
+        } else assert.equal(player.wakes.length, 0, `${retire} after ${hops} microtasks: no wake`);
+      }
+      player.stop();
+    }
+    assert.ok(reached, `${retire}: the sweep reached the shown dialog`);
+  }
+});
+
+/** A Player whose lock file is read only when the test releases each read made while the step asks. */
+async function heldFileReads(locked: string) {
+  const media = new CapturedMediaStore(null, urls, "locks");
+  const file = media.add("file", new Blob([bytesFromBase64(locked)!])).reference;
+  const reads: (() => void)[] = [];
+  const read = media.read.bind(media);
+  let player: Harness | null = null;
+  media.read = (reference) => {
+    const asking = activePlayerRuntimeLock(player!.session.state)?.phase === "ask";
+    if (!asking) return read(reference);
+    return new Promise((resolve) => reads.push(() => void read(reference).then(resolve)));
+  };
+  player = new Harness(`let opened = decryptFile("${file}", default: null)\nexit`, {
+    media,
+    files: [file],
+  });
+  const dialogs = () => player!.dialogs.filter((shown) => shown !== null && !shown.busy);
+  return { player, reads, dialogs };
+}
+
+test("a retired preparation that finishes after a newer one began neither shows nor clears the newer one", async () => {
+  const { player, reads, dialogs } = await heldFileReads(await timedLock());
+  await player.until(() => reads.length === 1);
+  // The first preparation is retired while its read is pending, and a newer one of the same step starts its own.
+  player.service.reset();
+  player.service.request();
+  await player.until(() => reads.length === 2);
+  reads[0]!();
+  await settled();
+  assert.deepEqual(dialogs(), [], "the retired preparation shows nothing");
+  assert.equal(player.wakes.length, 0);
+  reads[1]!();
+  await player.until(() => dialogs().length > 0);
+  await settled();
+  assert.equal(dialogs().length, 1, "the newer preparation shows its dialog once");
+  assert.equal(player.wakes.length, 1, "and waits for its time lock");
+  player.stop();
+});
+
+test("a session held while its unlock dialog is prepared presents it once published again", async () => {
+  const { player, reads, dialogs } = await heldFileReads(await timedLock());
+  await player.until(() => reads.length === 1);
+  // As during a paused random draw: the same session and step, held from the services, then published again.
+  player.held = true;
+  reads[0]!();
+  await settled();
+  assert.deepEqual(dialogs(), []);
+  player.held = false;
+  player.service.request();
+  await player.until(() => reads.length === 2);
+  reads[1]!();
+  await player.until(() => dialogs().length > 0);
+  assert.equal(dialogs()[0]!.dialog.kind, "unlock");
+  assert.equal(player.wakes.length, 1);
+  player.stop();
+});

@@ -135,7 +135,11 @@ export class LockService {
     null;
   #dialog: LockDialog | null = null;
   #busy = false;
-  #preparing: string | null = null;
+  /**
+   * The unlock dialog being prepared (its lock read and its code loaded), or `null`. Only that preparation may show its
+   * dialog or wait for its time lock; a reset or stop retires it, and a newer one replaces it.
+   */
+  #preparing: { readonly key: string } | null = null;
   #cancelRetry: (() => void) | null = null;
   #servicing = false;
   #scheduled = false;
@@ -162,8 +166,9 @@ export class LockService {
     this.reset();
   }
 
-  /** Forgets the answer being made, what was typed, and the dialog, as for a new or stopped session. */
+  /** Forgets the answer being made, what was typed, the dialog and its preparation, as for a new or stopped session. */
   reset(): void {
+    this.#preparing = null;
     this.#answer = null;
     this.#typed.clear();
     this.#followUp = null;
@@ -306,7 +311,7 @@ export class LockService {
 
   /** Shows the dialog of a step that asks; without WebCrypto it submits at once, so the next step reports it. */
   async #present(action: RuntimeLockActionSnapshot, key: string): Promise<void> {
-    if (this.#preparing === key) return;
+    if (this.#preparing?.key === key) return;
     if (this.#host.subtle === undefined) {
       this.#answer = { key, promise: Promise.resolve({ kind: "submitted" }) };
       this.request();
@@ -335,27 +340,20 @@ export class LockService {
       this.#showDialog(lockDialog(action, key), false);
       return;
     }
-    this.#preparing = key;
+    const preparation = { key };
+    this.#preparing = preparation;
     const read = await this.#readLock(action).catch(() => null);
-    this.#preparing = null;
-    const current = this.#host.session();
-    if (this.#stopped || current === null) return;
-    const active = activePlayerRuntimeLock(current.state);
-    if (
-      active === null ||
-      `${this.#host.generation()}:${active.actionId}:${active.resumes}` !== key ||
-      active.phase !== "ask"
-    ) {
-      this.request();
-      return;
-    }
+    if (!this.#goesOn(preparation)) return;
     // A lock that cannot be read any more is tried again, and its step reports why.
     if (read === null || read === "unreadable") {
+      this.#preparing = null;
       this.#answer = { key, promise: Promise.resolve({ kind: "submitted" }) };
       this.request();
       return;
     }
     const code = await lockCode();
+    if (!this.#goesOn(preparation)) return;
+    this.#preparing = null;
     const moments = code.timeLockMoments(read);
     this.#showDialog(
       {
@@ -382,6 +380,26 @@ export class LockService {
       else this.#cancelRetry = this.#host.after(Math.min(remaining, MAX_WAKE_MS), wake);
     };
     wake();
+  }
+
+  /**
+   * Whether `preparation` goes on after an await: it still owns the preparation (no reset, stop or newer one retired it),
+   * and the published session still asks its step. Otherwise it ends, and only while it still owns the preparation does
+   * it release it: a step that changed is serviced again, and a session held for now is serviced once it is published.
+   */
+  #goesOn(preparation: { readonly key: string }): boolean {
+    if (this.#preparing !== preparation || this.#stopped) return false;
+    const current = this.#host.session();
+    const active = current === null ? null : activePlayerRuntimeLock(current.state);
+    if (
+      active !== null &&
+      `${this.#host.generation()}:${active.actionId}:${active.resumes}` === preparation.key &&
+      active.phase === "ask"
+    )
+      return true;
+    this.#preparing = null;
+    if (current !== null) this.request();
+    return false;
   }
 
   #showDialog(dialog: LockDialog | null, busy = false): void {
