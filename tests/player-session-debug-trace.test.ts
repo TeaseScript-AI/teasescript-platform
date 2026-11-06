@@ -8,6 +8,13 @@ import type * as CompileProject from "../player/compile-project.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHost, onHostAll } from "./helpers/host-sessions.js";
+
+/** The value trace the host's session runs with, as the host holds it. */
+const sessionTrace = (session: PlayerRuntimeSession | null | undefined) =>
+  session === null || session === undefined
+    ? null
+    : onHost((held: PlayerRuntimeSession) => held.debugTrace)(session);
 
 /*
  * The Player host runs Debug's value trace (DEBUGGER.md "Player Debug") while Debug is on: Start traces a new session
@@ -41,6 +48,7 @@ let adapter: {
 >;
 
 before(async () => {
+  await loadHostFacade();
   // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
@@ -60,7 +68,7 @@ before(async () => {
     "playerRuntimeSnapshot",
   ])
     assert.equal(typeof loaded[name], "function");
-  adapter = {
+  adapter = onHostAll({
     // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
     createPlayerRuntimeSession:
       loaded.createPlayerRuntimeSession as typeof CompileProject.createPlayerRuntimeSession,
@@ -75,7 +83,7 @@ before(async () => {
       loaded.submitPlayerRuntimeComposer as typeof Adapter.submitPlayerRuntimeComposer,
     // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
     playerRuntimeSnapshot: loaded.playerRuntimeSnapshot as typeof Adapter.playerRuntimeSnapshot,
-  };
+  });
 });
 
 function traceOf(host: TraceHost): RuntimeDebugContext | null {
@@ -114,7 +122,7 @@ test("Start traces from the first statement, off drops the trace, and on again a
   assert.ok(trace);
   host.prepare((recording) => adapter.createPlayerRuntimeSession(SOURCE, { ...recording }));
   host.activate();
-  assert.equal(host.session.value?.debugTrace, trace);
+  assert.equal(sessionTrace(host.session.value), trace);
   assert.deepEqual([trace.status().origin, trace.status().epoch], ["start", 1]);
   assert.notEqual(
     trace.variableRecord(adapter.playerRuntimeSnapshot(host.session.value!).frames[0]!.id, "mood"),
@@ -123,7 +131,7 @@ test("Start traces from the first statement, off drops the trace, and on again a
 
   host.setDebugTracing(false);
   assert.equal(host.debugTrace.value, null);
-  assert.equal(host.session.value?.debugTrace, null);
+  assert.equal(sessionTrace(host.session.value), null);
 
   host.setDebugTracing(true);
   // Read through a call: the assertion above narrowed the property itself to null.
@@ -148,7 +156,7 @@ test("Continue of a restored session begins a new trace epoch", (context) => {
     ),
   );
   host.activate();
-  assert.equal(host.session.value?.debugTrace, trace);
+  assert.equal(sessionTrace(host.session.value), trace);
   assert.deepEqual([trace.status().origin, trace.status().epoch], ["restore", epoch + 1]);
   host.update(adapter.submitPlayerRuntimeComposer(host.session.value!, "yes")!.session);
   const [output] = trace.outputs();

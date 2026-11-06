@@ -6,6 +6,7 @@ import type * as Adapter from "../player/runtime-adapter.js";
 import type * as CompileProject from "../player/compile-project.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHostAll } from "./helpers/host-sessions.js";
 
 /*
  * The Player speaks messages changed in place from a status region (PLAYER-UI.md "Message presentation and provenance"):
@@ -30,6 +31,7 @@ let adapter: {
 >;
 
 before(async () => {
+  await loadHostFacade();
   // Load the real Vue composables through the existing build tool: their browser-source imports use Vite resolution.
   const host: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
@@ -55,7 +57,7 @@ before(async () => {
     "submitPlayerRuntimeComposer",
   ])
     assert.equal(typeof loaded[name], "function");
-  adapter = {
+  adapter = onHostAll({
     // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
     createPlayerRuntimeSession:
       loaded.createPlayerRuntimeSession as typeof CompileProject.createPlayerRuntimeSession,
@@ -68,7 +70,7 @@ before(async () => {
     // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
     submitPlayerRuntimeComposer:
       loaded.submitPlayerRuntimeComposer as typeof Adapter.submitPlayerRuntimeComposer,
-  };
+  });
 });
 
 function createHost(context: TestContext) {

@@ -7,6 +7,7 @@ import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import type { RandomDrawResolutionOutcome } from "../src/index.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHostAll } from "./helpers/host-sessions.js";
 
 // The Player keeps the screen on while a session plays (PLAYER-UI "Session start and user activation"): from the Start
 // click until the script exits, ends with an error, or a Player error stops it. These tests fake the browser's screen
@@ -35,6 +36,7 @@ let useDevelopmentTime: (
 let runtime: typeof RuntimeAdapter & typeof CompileProject;
 
 before(async () => {
+  await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );
@@ -53,7 +55,7 @@ before(async () => {
   // EVIDENCE: validation: checked as a function above.
   useDevelopmentTime = time.useDevelopmentTime as typeof useDevelopmentTime;
   // EVIDENCE: validation: the source module the compiled one is built from; checked by one export above.
-  runtime = adapter as typeof runtime;
+  runtime = onHostAll(adapter) as typeof runtime;
 });
 
 class FakeSentinel extends EventTarget {

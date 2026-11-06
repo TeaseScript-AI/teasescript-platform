@@ -2273,8 +2273,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       // activating click.
       void camera.open(false);
       captures.reset();
-      startFrom(pending);
-      return;
+      return startFrom(pending);
     }
     // Retire the previous session first: its elements return to the pool before priming, so the new session never
     // receives an element the browser still blocks, and it cannot project media while it waits.
@@ -2293,7 +2292,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Replaced, re-prepared, or unmounted while it waited: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
-    startFrom(pending);
+    await startFrom(pending);
   }
   /**
    * The session `create` starts: over the bridge (`start`) for a held plan without Debug's trace or random control,
@@ -2325,20 +2324,28 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       recording: true,
     });
   }
-  /** Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. */
-  async function startFrom(pending: Activation) {
+  /**
+   * Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. A
+   * session the host starts at once shows within the activating click; one that begins over the bridge shows once its
+   * first publication arrives, unless it was replaced, re-prepared, or unmounted meanwhile.
+   */
+  function startFrom(pending: Activation): Promise<void> | void {
     hostError.value = null;
     failureRecording = null;
     const token = activationToken;
-    let next: PlayerSession;
+    let begun: PlayerSession | Promise<PlayerSession>;
     try {
-      next = await pending.begin();
+      begun = pending.begin();
     } catch (error) {
       reportHostError(error);
       return;
     }
-    // Replaced, re-prepared, or unmounted while it began over the bridge: an obsolete session never starts.
-    if (disposed || token !== activationToken) return;
+    if (!(begun instanceof Promise)) return started(pending, begun);
+    return begun.then((next) => {
+      if (!disposed && token === activationToken) started(pending, next);
+    }, reportHostError);
+  }
+  function started(pending: Activation, next: PlayerSession) {
     start(next);
     // A new session replaces the one kept before.
     if (pending.kind === "start") {

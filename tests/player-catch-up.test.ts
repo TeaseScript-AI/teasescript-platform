@@ -3,13 +3,13 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
 import {
-  activatePlayerRuntimeButton,
-  adoptPlayerRuntimeCatchUp,
-  beginPlayerRuntimeCatchUp,
-  completePlayerRuntimeStorageWrite,
-  observePlayerRuntimeTime,
-  playerRuntimeSnapshot,
-  skipPlayerRuntimePacing,
+  activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
+  adoptPlayerRuntimeCatchUp as rawAdoptPlayerRuntimeCatchUp,
+  beginPlayerRuntimeCatchUp as rawBeginPlayerRuntimeCatchUp,
+  completePlayerRuntimeStorageWrite as rawCompletePlayerRuntimeStorageWrite,
+  observePlayerRuntimeTime as rawObservePlayerRuntimeTime,
+  playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
+  skipPlayerRuntimePacing as rawSkipPlayerRuntimePacing,
   stepPlayerRuntimeCatchUp,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -20,6 +20,16 @@ import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js"
 import { rebuildRecordedSession } from "../player/debug-export.js";
 import type { RandomControlOptions } from "../src/index.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
+const adoptPlayerRuntimeCatchUp = onHost(rawAdoptPlayerRuntimeCatchUp);
+const beginPlayerRuntimeCatchUp = onHost(rawBeginPlayerRuntimeCatchUp);
+const completePlayerRuntimeStorageWrite = onHost(rawCompletePlayerRuntimeStorageWrite);
+const observePlayerRuntimeTime = onHost(rawObservePlayerRuntimeTime);
+const playerRuntimeSnapshot = onHost(rawPlayerRuntimeSnapshot);
+const skipPlayerRuntimePacing = onHost(rawSkipPlayerRuntimePacing);
 
 // The Player catches up a late time observation on a copy of the session, one timed event at a time, so it can give
 // the browser a turn between tasks, and the session adopts the copy in one publication. One observation of the same
@@ -108,6 +118,7 @@ interface SessionHost {
 let usePlayerSession: () => SessionHost;
 
 before(async () => {
+  await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );

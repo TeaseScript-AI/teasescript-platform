@@ -19,6 +19,7 @@ import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHostAll } from "./helpers/host-sessions.js";
 
 // A Player error stops the session where it stands (PLAYER-UI "Session end and failure"). Input and the work that
 // continues it take their session from `observe()`, which gives none once stopped; these include continuations that
@@ -74,6 +75,7 @@ let view: typeof RuntimeView;
 
 // Load the real Vue composables through the existing build tool: their browser-source imports use Vite resolution.
 before(async () => {
+  await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );
@@ -99,7 +101,7 @@ before(async () => {
   // EVIDENCE: validation: checked as a function above.
   useDevelopmentTime = time.useDevelopmentTime as typeof useDevelopmentTime;
   // EVIDENCE: validation: the source module the compiled one is built from; checked by one export above.
-  runtime = adapter as typeof runtime;
+  runtime = onHostAll(adapter) as typeof runtime;
   assert.equal(typeof viewModule.playerRuntimeForeground, "function");
   // EVIDENCE: validation: the source module the compiled one is built from; checked by one export above.
   view = viewModule as typeof view;

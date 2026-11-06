@@ -4,7 +4,9 @@
  * reaches, the imports that still reach Worker-side code, and the exports of `runtime-adapter.ts` and `runtime-view.ts`.
  *
  * `RATCHET` only shrinks: a family's PR removes the entries tagged with its family and adds none (its reviewers check
- * this). Activation requires it empty.
+ * this). The one exception is L5b's: it added the main realm's imports of the transition facade (`in-process.ts`), each
+ * tagged with the family that removes that importer's last use. Activation requires `RATCHET` empty, and the L5 gate
+ * requires `in-process.ts`'s facade gone, not only its entries.
  */
 
 /** The bridge families of the L5 series that move engine work into the Worker. */
@@ -12,7 +14,7 @@ export type BridgeFamily =
   "L5b" | "L5c" | "L5d" | "L5e" | "L5f" | "L5g" | "L5h" | "L5i" | "activation";
 
 /** Families whose PRs have landed: none of their entries may remain in `RATCHET`. */
-export const COMPLETED_FAMILIES: readonly BridgeFamily[] = [];
+export const COMPLETED_FAMILIES: readonly BridgeFamily[] = ["L5b"];
 
 /** The `src/` modules the main realm may load, grouped by why. */
 export const ALLOWED_SOURCE: readonly {
@@ -130,9 +132,12 @@ export const WORKER_MODULES: readonly string[] = [
   "player/script-identity.ts",
   "player/engine-bridge/engine-host.ts",
   "player/engine-bridge/player-ops.ts",
+  "player/compile-project.ts",
+  "player/debug-recorder.ts",
+  "player/engine-bridge/in-process.ts",
 ];
 
-/** Main-realm modules whose imports are not judged until activation removes them: the in-process backend. */
+/** Main-realm modules whose imports are not judged until activation removes them. */
 export const EXEMPT_UNTIL_ACTIVATION: readonly string[] = [];
 
 /** A main-realm import of a value from Worker-side code, and the family that removes it. */
@@ -144,204 +149,12 @@ export interface RatchetEntry {
 }
 
 export const RATCHET: readonly RatchetEntry[] = [
+  // L5c
   {
-    importer: "player/debug-export-assembly.ts",
-    target: "src/index.ts",
-    name: "createCheckpoint",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "applyExternalStorageEdit",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "completeAction",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "createCheckpoint",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "createRuntimeSession",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "observeTime",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "pendingRandomDraw",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "pressPermanentButton",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "recordContinueCapture",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "replayRandomChoices",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "reportMediaLoad",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "restoreCheckpoint",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "resumeRandomDraw",
-    family: "L5i",
-  },
-  { importer: "player/debug-export.ts", target: "src/index.ts", name: "run", family: "L5i" },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "serializeCheckpoint",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "setDebugMode",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-export.ts",
-    target: "src/index.ts",
-    name: "updateInteraction",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug-history.ts",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeSnapshotJson",
-    family: "L5h",
-  },
-  {
-    importer: "player/debug-recorder.ts",
-    target: "src/runtime/random/random-control.ts",
-    name: "RandomDecisionError",
-    family: "L5b",
-  },
-  {
-    importer: "player/lock-service.ts",
-    target: "player/runtime-adapter.ts",
-    name: "answerPlayerRuntimeLock",
-    family: "L5e",
-  },
-  {
-    importer: "player/session-camera.ts",
-    target: "player/runtime-adapter.ts",
-    name: "answerPlayerRuntimeCapture",
-    family: "L5e",
-  },
-  {
-    importer: "player/session-transfer.ts",
-    target: "player/runtime-adapter.ts",
-    name: "restorePlayerRuntimeSession",
-    family: "L5h",
-  },
-  {
-    importer: "player/stored-files.ts",
-    target: "player/runtime-adapter.ts",
-    name: "answerPlayerRuntimeFileStore",
-    family: "L5e",
-  },
-  {
-    importer: "player/vue/src/DebugNow.vue",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeDebugNow",
-    family: "L5f",
-  },
-  {
-    importer: "player/vue/src/DebugVariables.vue",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeDebugVariables",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/DevelopmentPreview.vue",
-    target: "player/runtime-adapter.ts",
-    name: "createPlayerRuntimeSession",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/hostedScript.ts",
-    target: "player/runtime-adapter.ts",
-    name: "compilePlayerProject",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/hostedScript.ts",
-    target: "player/runtime-adapter.ts",
-    name: "createPlayerRuntimeSession",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/hostedScript.ts",
-    target: "player/script-identity.ts",
-    name: "scriptIdentity",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/PlayerApp.vue",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeCalls",
-    family: "L5f",
-  },
-  {
-    importer: "player/vue/src/PlayerApp.vue",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeDebugNow",
-    family: "L5f",
-  },
-  {
-    importer: "player/vue/src/randomDrawPresentation.ts",
-    target: "src/index.ts",
-    name: "classifyTokens",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/randomDrawPresentation.ts",
-    target: "src/index.ts",
-    name: "parse",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/randomDrawPresentation.ts",
-    target: "src/index.ts",
-    name: "sourceEnclosingSpans",
-    family: "L5i",
+    importer: "player/vue/src/RuntimeInteraction.vue",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5c",
   },
   {
     importer: "player/vue/src/RuntimeInteraction.vue",
@@ -400,12 +213,6 @@ export const RATCHET: readonly RatchetEntry[] = [
   {
     importer: "player/vue/src/RuntimeInteraction.vue",
     target: "player/runtime-adapter.ts",
-    name: "playerRuntimeForm",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
     name: "selectPlayerRuntimeChoice",
     family: "L5c",
   },
@@ -414,12 +221,6 @@ export const RATCHET: readonly RatchetEntry[] = [
     target: "player/runtime-adapter.ts",
     name: "skipPlayerRuntimeImage",
     family: "L5c",
-  },
-  {
-    importer: "player/vue/src/RuntimeInteraction.vue",
-    target: "player/runtime-adapter.ts",
-    name: "skipPlayerRuntimePacing",
-    family: "L5b",
   },
   {
     importer: "player/vue/src/RuntimeInteraction.vue",
@@ -440,52 +241,10 @@ export const RATCHET: readonly RatchetEntry[] = [
     family: "L5c",
   },
   {
-    importer: "player/vue/src/useDebugRandom.ts",
-    target: "src/index.ts",
-    name: "listRandomSites",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useDebugRewind.ts",
-    target: "player/runtime-adapter.ts",
-    name: "beginPlayerRuntimeRecording",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/useDebugRewind.ts",
-    target: "player/runtime-adapter.ts",
-    name: "restorePlayerRuntimeSessionAt",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useDebugRewind.ts",
-    target: "player/runtime-adapter.ts",
-    name: "withPlayerRuntimeDebugTrace",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useDevelopmentTime.ts",
-    target: "player/runtime-adapter.ts",
-    name: "advancePlayerRuntimeTime",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/useDevelopmentTime.ts",
-    target: "player/runtime-adapter.ts",
-    name: "stepPlayerRuntimeTime",
-    family: "L5b",
-  },
-  {
     importer: "player/vue/src/useImageCapture.ts",
     target: "player/runtime-adapter.ts",
     name: "answerPlayerRuntimeImage",
     family: "L5c",
-  },
-  {
-    importer: "player/vue/src/usePlayerDebug.ts",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeDebugCountdown",
-    family: "L5f",
   },
   {
     importer: "player/vue/src/usePlayerSession.ts",
@@ -496,32 +255,138 @@ export const RATCHET: readonly RatchetEntry[] = [
   {
     importer: "player/vue/src/usePlayerSession.ts",
     target: "player/runtime-adapter.ts",
-    name: "beginPlayerRuntimeRecording",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
     name: "completePlayerRuntimeStorageWrite",
     family: "L5c",
   },
   {
     importer: "player/vue/src/usePlayerSession.ts",
     target: "player/runtime-adapter.ts",
-    name: "continuePlayerRuntimeSession",
-    family: "L5b",
+    name: "pressPlayerRuntimePermanentButton",
+    family: "L5c",
   },
+  // L5d
   {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "createPlayerRuntimeRestorePoint",
-    family: "L5h",
+    importer: "player/vue/src/PlayerApp.vue",
+    target: "player/engine-bridge/in-process.ts",
+    name: "heldPlan",
+    family: "L5d",
   },
   {
     importer: "player/vue/src/usePlayerSession.ts",
     target: "player/runtime-adapter.ts",
     name: "playerRuntimeMediaOrigin",
     family: "L5d",
+  },
+  {
+    importer: "player/vue/src/usePlayerSession.ts",
+    target: "player/runtime-adapter.ts",
+    name: "reportPlayerRuntimeMediaLoad",
+    family: "L5d",
+  },
+  // L5e
+  {
+    importer: "player/lock-service.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5e",
+  },
+  {
+    importer: "player/lock-service.ts",
+    target: "player/runtime-adapter.ts",
+    name: "answerPlayerRuntimeLock",
+    family: "L5e",
+  },
+  {
+    importer: "player/session-camera.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5e",
+  },
+  {
+    importer: "player/session-camera.ts",
+    target: "player/runtime-adapter.ts",
+    name: "answerPlayerRuntimeCapture",
+    family: "L5e",
+  },
+  {
+    importer: "player/stored-files.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5e",
+  },
+  {
+    importer: "player/stored-files.ts",
+    target: "player/runtime-adapter.ts",
+    name: "answerPlayerRuntimeFileStore",
+    family: "L5e",
+  },
+  // L5f
+  {
+    importer: "player/vue/src/DebugNow.vue",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5f",
+  },
+  {
+    importer: "player/vue/src/DebugNow.vue",
+    target: "player/runtime-adapter.ts",
+    name: "playerRuntimeDebugNow",
+    family: "L5f",
+  },
+  {
+    importer: "player/vue/src/PlayerApp.vue",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5f",
+  },
+  {
+    importer: "player/vue/src/PlayerApp.vue",
+    target: "player/runtime-adapter.ts",
+    name: "playerRuntimeCalls",
+    family: "L5f",
+  },
+  {
+    importer: "player/vue/src/PlayerApp.vue",
+    target: "player/runtime-adapter.ts",
+    name: "playerRuntimeDebugNow",
+    family: "L5f",
+  },
+  {
+    importer: "player/vue/src/usePlayerDebug.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5f",
+  },
+  {
+    importer: "player/vue/src/usePlayerDebug.ts",
+    target: "player/runtime-adapter.ts",
+    name: "playerRuntimeDebugCountdown",
+    family: "L5f",
+  },
+  // L5h
+  {
+    importer: "player/debug-history.ts",
+    target: "player/runtime-adapter.ts",
+    name: "playerRuntimeSnapshotJson",
+    family: "L5h",
+  },
+  {
+    importer: "player/session-transfer.ts",
+    target: "player/runtime-adapter.ts",
+    name: "restorePlayerRuntimeSession",
+    family: "L5h",
+  },
+  {
+    importer: "player/vue/src/usePlayerSession.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "holdPlan",
+    family: "L5h",
+  },
+  {
+    importer: "player/vue/src/usePlayerSession.ts",
+    target: "player/runtime-adapter.ts",
+    name: "createPlayerRuntimeRestorePoint",
+    family: "L5h",
   },
   {
     importer: "player/vue/src/usePlayerSession.ts",
@@ -541,17 +406,217 @@ export const RATCHET: readonly RatchetEntry[] = [
     name: "playerRuntimeSnapshotOrNull",
     family: "L5h",
   },
+  // L5i
   {
-    importer: "player/vue/src/usePlayerSession.ts",
+    importer: "player/debug-export-assembly.ts",
+    target: "src/index.ts",
+    name: "createCheckpoint",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "applyExternalStorageEdit",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "completeAction",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "createCheckpoint",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "createRuntimeSession",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "observeTime",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "pendingRandomDraw",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "pressPermanentButton",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "recordContinueCapture",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "replayRandomChoices",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "reportMediaLoad",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "restoreCheckpoint",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "resumeRandomDraw",
+    family: "L5i",
+  },
+  { importer: "player/debug-export.ts", target: "src/playback.ts", name: "run", family: "L5i" },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "serializeCheckpoint",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "setDebugMode",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-export.ts",
+    target: "src/playback.ts",
+    name: "updateInteraction",
+    family: "L5i",
+  },
+  {
+    importer: "player/debug-history.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/DebugVariables.vue",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/DebugVariables.vue",
+    target: "player/engine-bridge/in-process.ts",
+    name: "heldPlan",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/DebugVariables.vue",
     target: "player/runtime-adapter.ts",
-    name: "pressPlayerRuntimePermanentButton",
-    family: "L5c",
+    name: "playerRuntimeDebugVariables",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/DevelopmentPreview.vue",
+    target: "player/compile-project.ts",
+    name: "createPlayerRuntimeSession",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/randomDrawPresentation.ts",
+    target: "src/index.ts",
+    name: "classifyTokens",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/randomDrawPresentation.ts",
+    target: "src/index.ts",
+    name: "parse",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/randomDrawPresentation.ts",
+    target: "src/index.ts",
+    name: "sourceEnclosingSpans",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/useDebugRandom.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "heldPlan",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/useDebugRandom.ts",
+    target: "src/index.ts",
+    name: "listRandomSites",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/useDebugRewind.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "beginRecordingNow",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/useDebugRewind.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/useDebugRewind.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "heldPlan",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/useDebugRewind.ts",
+    target: "player/runtime-adapter.ts",
+    name: "restorePlayerRuntimeSessionAt",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/useDebugRewind.ts",
+    target: "player/runtime-adapter.ts",
+    name: "withPlayerRuntimeDebugTrace",
+    family: "L5i",
   },
   {
     importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "reportPlayerRuntimeMediaLoad",
-    family: "L5d",
+    target: "player/engine-bridge/in-process.ts",
+    name: "hatch",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/usePlayerSession.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "heldPlan",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/usePlayerSession.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "heldRecording",
+    family: "L5i",
+  },
+  {
+    importer: "player/vue/src/usePlayerSession.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "introduceNow",
+    family: "L5i",
   },
   {
     importer: "player/vue/src/usePlayerSession.ts",
@@ -591,33 +656,16 @@ export const RATCHET: readonly RatchetEntry[] = [
   },
   {
     importer: "player/vue/src/useRuntimeSceneClock.ts",
-    target: "player/runtime-adapter.ts",
-    name: "adoptPlayerRuntimeCatchUp",
-    family: "L5b",
+    target: "player/engine-bridge/in-process.ts",
+    name: "observeNow",
+    family: "L5i",
   },
+  // activation
   {
-    importer: "player/vue/src/useRuntimeSceneClock.ts",
-    target: "player/runtime-adapter.ts",
-    name: "beginPlayerRuntimeCatchUp",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/useRuntimeSceneClock.ts",
-    target: "player/runtime-adapter.ts",
-    name: "dropPlayerRuntimeCatchUp",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/useRuntimeSceneClock.ts",
-    target: "player/runtime-adapter.ts",
-    name: "observePlayerRuntimeTime",
-    family: "L5b",
-  },
-  {
-    importer: "player/vue/src/useRuntimeSceneClock.ts",
-    target: "player/runtime-adapter.ts",
-    name: "stepPlayerRuntimeCatchUp",
-    family: "L5b",
+    importer: "player/vue/src/usePlayerSession.ts",
+    target: "player/engine-bridge/in-process.ts",
+    name: "createInProcessBackend",
+    family: "activation",
   },
 ];
 
@@ -632,7 +680,6 @@ export const ADAPTER_EXPORTS: Readonly<
   >
 > = {
   PlayerRuntimeEngine: { kind: "engine", family: "L5b" },
-  compilePlayerProject: { kind: "op", family: "L5b" },
   createPlayerRuntimeSession: { kind: "op", family: "L5b" },
   createPlayerRuntimeRestorePoint: { kind: "op", family: "L5h" },
   restorePlayerRuntimeSession: { kind: "op", family: "L5h" },
@@ -653,7 +700,6 @@ export const ADAPTER_EXPORTS: Readonly<
   completePlayerRuntimeAction: { kind: "op", family: "L5c" },
   submitPlayerRuntimeComposer: { kind: "op", family: "L5c" },
   answerPlayerRuntimeImage: { kind: "op", family: "L5c" },
-  playerRuntimeForm: { kind: "sessionReader", family: "L5b" },
   stepPlayerRuntimeFormField: { kind: "op", family: "L5c" },
   commitPlayerRuntimeFormField: { kind: "op", family: "L5c" },
   dismissPlayerRuntimeFormField: { kind: "op", family: "L5c" },
@@ -689,6 +735,7 @@ export const ADAPTER_EXPORTS: Readonly<
 /** The exports of `runtime-view.ts`: readers of a published session state, which stay in the main realm. */
 export const VIEW_READERS: readonly string[] = [
   "playerTemporalContext",
+  "playerRuntimeForm",
   "playerRuntimeForeground",
   "playerRuntimeTimers",
   "playerRuntimeDeadlines",

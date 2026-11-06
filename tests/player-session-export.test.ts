@@ -8,8 +8,8 @@ import {
   type KeptSessionStore,
 } from "../player/kept-sessions.js";
 import {
-  activatePlayerRuntimeButton,
-  submitPlayerRuntimeComposer,
+  activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
+  submitPlayerRuntimeComposer as rawSubmitPlayerRuntimeComposer,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -31,6 +31,11 @@ import {
 } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
+const submitPlayerRuntimeComposer = onHost(rawSubmitPlayerRuntimeComposer);
 
 interface SessionExport {
   readonly transfer: SessionTransfer;
@@ -79,6 +84,7 @@ let usePlayerSession: (options: {
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 before(async () => {
+  await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );

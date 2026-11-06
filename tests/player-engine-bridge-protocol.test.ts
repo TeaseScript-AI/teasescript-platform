@@ -309,8 +309,11 @@ test("the browser Worker's host loads no compiler or language-tooling module unt
   // EVIDENCE: fixture: the child script writes the JSON of a list of URLs.
   const loaded = JSON.parse(child.stdout) as string[];
   assert.ok(loaded.some((module) => module.endsWith("/dist/src/plan/load.js")));
+  // The adapter and the recorder run the sessions there, on the playback entry: no compiler comes with them.
+  assert.ok(loaded.some((module) => module.endsWith("/dist/player/runtime-adapter.js")));
+  assert.ok(loaded.some((module) => module.endsWith("/dist/player/debug-recorder.js")));
   const authoring =
-    /\/dist\/src\/(index|compiler|parser|lexer|semantic|type-checker|language-tooling|source-debug-sidecar|static-types|ast-validation)(\.js$|\/)|\/dist\/src\/(type-inference|editor)\/|\/dist\/player\/(runtime-adapter|script-identity)\.js$/;
+    /\/dist\/src\/(index|compiler|parser|lexer|semantic|type-checker|language-tooling|source-debug-sidecar|static-types|ast-validation)(\.js$|\/)|\/dist\/src\/(type-inference|editor)\/|\/dist\/player\/(compile-project|script-identity)\.js$/;
   assert.deepEqual(
     loaded.filter((module) => authoring.test(module)),
     [],
