@@ -401,3 +401,35 @@ test("over a Worker, a stop's acknowledgement follows the replies to what the ho
     worker.client.terminate();
   }
 });
+
+test("Start and Continue take a wall clock's moment anywhere in years 0000–9999, also before 1970", async () => {
+  const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
+  try {
+    for (const bridge of [await inProcessBridge(), worker]) {
+      const plan = await prepared(bridge, "say getAbsoluteDateTime().toISO(), instant\nexit");
+      const before = await bridge.start(
+        plan,
+        { wallClockMs: -1, temporalContext: TEMPORAL },
+        false,
+      );
+      assert.deepEqual(
+        before.transcriptEntries.map((entry) => entry.text),
+        ["1969-12-31T23:59:59.999Z"],
+      );
+      for (const wallClockMs of [Number.MIN_SAFE_INTEGER, 0.5])
+        await assert.rejects(
+          bridge.start(plan, { wallClockMs, temporalContext: TEMPORAL }, false),
+          (error: unknown) => error instanceof BridgeRequestError && error.code === "arguments",
+        );
+    }
+    const bridge = await inProcessBridge();
+    const restored = introduced(bridge, createPlayerRuntimeSession('showButton "Next"\nexit'));
+    await bridge.request(restored, "beginRecording", null);
+    const outcome = await bridge.request<{ readonly kind: string }>(restored, "continue", {
+      capture: { wallClockMs: -62_167_219_200_000, temporalContext: TEMPORAL },
+    });
+    assert.equal(outcome.kind, "recorded");
+  } finally {
+    worker.client.terminate();
+  }
+});

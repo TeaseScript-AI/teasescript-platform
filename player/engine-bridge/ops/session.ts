@@ -19,6 +19,7 @@ import {
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
 import { playerRuntimePacingGate } from "../../runtime-view.js";
+import { isValidEpochMilliseconds } from "../../../src/temporal.js";
 import { everyItem, exactly, isRecord, isStringArray, isTime } from "../argument-checks.js";
 import { planMetadata, type PlanMetadata, type PlayerOpsContext } from "../player-ops.js";
 import type { Introduction, Publication } from "../session-protocol.js";
@@ -117,6 +118,10 @@ const START_OPTIONS = [
   "playerProfile",
 ];
 
+/** A wall clock's moment: whole epoch milliseconds within the engine's years 0000–9999, also before 1970. */
+const isEpochTime = (value: unknown): value is number =>
+  typeof value === "number" && isValidEpochMilliseconds(value);
+
 /** The shape of `start`'s options; the engine validates their content as it starts the session. */
 function isStartOptions(value: unknown): value is StartOptions {
   return (
@@ -126,7 +131,7 @@ function isStartOptions(value: unknown): value is StartOptions {
     (value.persistentScriptStorage === undefined ||
       typeof value.persistentScriptStorage === "boolean") &&
     (value.temporalContext === undefined || isRecord(value.temporalContext)) &&
-    (value.wallClockMs === undefined || isTime(value.wallClockMs)) &&
+    (value.wallClockMs === undefined || isEpochTime(value.wallClockMs)) &&
     (value.debugMode === undefined || typeof value.debugMode === "boolean") &&
     (value.storedFiles === undefined || isStringArray(value.storedFiles)) &&
     (value.playerProfile === undefined || isRecord(value.playerProfile))
@@ -212,7 +217,7 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
         exactly(args, ["capture"]) &&
         isRecord(args.capture) &&
         exactly(args.capture, ["wallClockMs", "temporalContext"]) &&
-        isTime(args.capture.wallClockMs) &&
+        isEpochTime(args.capture.wallClockMs) &&
         isRecord(args.capture.temporalContext),
       (held, args) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
