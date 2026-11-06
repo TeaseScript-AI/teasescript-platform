@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { createContext, runInContext } from "node:vm";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import type { MixedDimensions } from "./helpers/type-core-mixed-family.js";
@@ -45,6 +47,105 @@ async function family<T>(name: string): Promise<T> {
 
 // (the issues still open here, each a class of differences `mixedExplained` names exactly)
 const OPEN = ["#1790", "#1843", "#1847", "#1858"];
+
+// (the family's sources are made from its axes alone, Astra r3's B1 on #1789 and the lead's two guards: the generator
+// evaluated again where every input outside its axes throws gives every source the direct import gives, and the
+// record, each case's source key by name, is what it gives, so a refreshed record shows each changed source by name)
+interface FamilySources {
+  sourcesOf(generator: unknown): readonly { readonly name: string }[];
+  sourceKey(source: unknown): string;
+  setKey(keys: readonly string[]): string;
+}
+const OUTSIDE = [
+  "process",
+  "performance",
+  "require",
+  "module",
+  "Buffer",
+  "fetch",
+  "crypto",
+  "setTimeout",
+  "setInterval",
+  "setImmediate",
+  "queueMicrotask",
+  "Date",
+];
+
+/** A generator's exports, evaluated where the environment, the time, randomness, modules and timers throw. */
+function sandboxed(text: string): unknown {
+  assert.ok(!/^\s*import\b/m.test(text), "a family generator that imports");
+  const context = createContext({});
+  runInContext(
+    `((outside) => { const no = (what) => () => { throw new Error("a family generator read " + what); };` +
+      ` for (const name of outside) Object.defineProperty(globalThis, name, { get: no(name) });` +
+      ` Math.random = no("Math.random"); })(${JSON.stringify(OUTSIDE)});`,
+    context,
+  );
+  return runInContext(`${text.replace(/^export /gm, "")}\n;({ cases, globals });\n`, context);
+}
+
+/** The names whose source keys differ between two lists of `[name, key]` (at most five), and any count difference. */
+function changed(
+  mine: readonly (readonly [string, string])[],
+  theirs: readonly (readonly [string, string])[],
+): string[] {
+  const keyOf = new Map(theirs);
+  const out = mine.flatMap(([name, key]) => (keyOf.get(name) === key ? [] : [name]));
+  if (mine.length !== theirs.length) out.push(`${mine.length} cases against ${theirs.length}`);
+  return out.slice(0, 5);
+}
+
+async function pure(
+  direct: unknown,
+  record: { readonly sha256: string; readonly keys: string },
+): Promise<void> {
+  const file = resolve(process.cwd(), "tests/families/messages/1765-mixed-family.mjs");
+  // EVIDENCE: `tests/families/sources.mjs` exports `sourcesOf`, `sourceKey` and `setKey` (the families' source identity).
+  const lib = (await import(
+    pathToFileURL(resolve(process.cwd(), "tests/families/sources.mjs")).href
+  )) as FamilySources;
+  const keys = (generator: unknown): (readonly [string, string])[] =>
+    Array.from(lib.sourcesOf(generator), (source) => [source.name, lib.sourceKey(source)] as const);
+  const text = readFileSync(file, "utf8");
+  const made = keys(direct);
+  assert.deepEqual(
+    changed(keys(sandboxed(text)), made),
+    [],
+    "a source made from more than its axes",
+  );
+  const recorded = readFileSync(resolve(dirname(file), record.keys), "utf8")
+    .trim()
+    .split("\n")
+    // EVIDENCE: the record's lines are `[name, source key]` (its `recorded.keys` file, written by its second command).
+    .map((line) => JSON.parse(line) as [string, string]);
+  assert.deepEqual(changed(made, recorded), [], "a source other than the record's");
+  assert.equal(
+    lib.setKey(recorded.map(([, key]) => key)),
+    record.sha256,
+    "a record other than the run's",
+  );
+  // (negative controls: Astra r3's two probes, an inner order and a depth domain read from the environment, fail the
+  // first guard; the same order changed in the text fails the second)
+  const variant = (from: string, to: string): string => {
+    assert.ok(text.includes(from), from);
+    return text.replace(from, to);
+  };
+  const inner = "(([${one}]).take(9)+([${twin}]).take(9))";
+  const swapped = "(([${twin}]).take(9)+([${one}]).take(9))";
+  const probes = [
+    variant(
+      `\`${inner}\``,
+      `(process.env.REVIEW_TWIN_REVERSED === "1" ? \`${swapped}\` : \`${inner}\`)`,
+    ),
+    variant(
+      '["depth", () => [2, 3]]',
+      '["depth", () => (process.env.REVIEW_DEPTHS === "4" ? [2, 3, 4] : [2, 3])]',
+    ),
+  ];
+  for (const probe of probes)
+    assert.throws(() => sandboxed(probe), /a family generator read process/);
+  assert.notDeepEqual(changed(keys(sandboxed(variant(inner, swapped))), recorded), []);
+}
 
 // (the sample: each kind at every position with every relation of its carried layer to the null (`RELATIONS`, the
 // null's distance below it inside a list and at the leaf), the order turned through them; the joined positions at one
@@ -135,10 +236,13 @@ function sampled(
 }
 
 test("a mixed-list error's type text equals the current checker's across the sampled family (#1765)", async () => {
-  const { cases, axes } = await family<{
+  const generator = await family<{
     cases: readonly (readonly [string, string])[];
     axes: readonly (readonly [string, unknown])[];
+    recorded: { readonly sha256: string; readonly keys: string };
   }>("1765-mixed-family.mjs");
+  await pure(generator, generator.recorded);
+  const { cases, axes } = generator;
   const differing: string[] = [];
   let compared = 0;
   for (const [name, source] of sampled(

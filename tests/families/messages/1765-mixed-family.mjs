@@ -85,7 +85,8 @@ function side(leaf, depth, nullAt, at, kind, before, block) {
 const range = (from, to) => Array.from({ length: to - from + 1 }, (_, at) => from + at);
 // (the family's axes, in order, each with its values given the axes before it: the only values a case varies by. A
 // parameter a case varies by enters here, and so its name and the sampled test's coverage invariant, which asserts a
-// name's axes are these, the lead's ruling on #1789)
+// name's axes are these, the lead's ruling on #1789. Nothing outside them enters: the sampled test evaluates this module
+// again where the environment, the time and randomness throw, and holds each source to the record's key, `keys`)
 export const axes = [
   ["depth", () => [2, 3]],
   ["nullAt", ({ depth }) => range(0, depth)],
@@ -132,7 +133,15 @@ export const recorded = {
         "desktop:~/work/evidence/1765-family/16c50f63555996c8aa5c5fa745e0f7fdf52a2748/i1765-records-16c50f635/" +
         "shadow-family/out/shadow.jsonl",
     ],
+    [
+      'node --input-type=module -e \'import { sourcesOf, sourceKey } from "./tests/families/sources.mjs"; ' +
+        'import * as g from "./tests/families/messages/1765-mixed-family.mjs"; ' +
+        "for (const s of sourcesOf(g)) console.log(JSON.stringify([s.name, sourceKey(s)]));' " +
+        "> tests/families/messages/1765-mixed-family.keys.jsonl",
+      "each case's source key by name (`keys`), the run's set (its set key is `sha256`), Astra r3's B1 on #1789",
+    ],
   ],
+  keys: "1765-mixed-family.keys.jsonl",
   sources: 3670,
   sha256: "447575b546fa8bede623c9d1570170a43d63b2e545e239400701d42aef29f085",
 };
