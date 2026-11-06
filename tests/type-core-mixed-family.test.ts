@@ -92,8 +92,14 @@ function sampled(
   cases: readonly (readonly [string, string])[],
   axes: readonly string[],
 ): (readonly [string, string])[] {
-  // (each case's name is its values on the generator's axes, so a value a case varies by is one the invariant reads)
-  for (const [name] of cases) assert.deepEqual(Object.keys(mixedDimensions(name)), axes, name);
+  // (each case's name is its values on the generator's axes, so a value a case varies by is one the invariant reads;
+  // and one name is one source, so a value varied outside the axes is a second source under a name, Codex r19)
+  const named = new Map<string, string>();
+  for (const [name, source] of cases) {
+    assert.deepEqual(Object.keys(mixedDimensions(name)), axes, name);
+    assert.equal(named.get(name) ?? source, source, `a second source under ${name}`);
+    named.set(name, source);
+  }
   const kinds = [...new Set(cases.map(([name]) => mixedDimensions(name).kind))];
   const positions = [...new Set(cases.map(([name]) => mixedDimensions(name).position))];
   const out: (readonly [string, string])[] = [];
