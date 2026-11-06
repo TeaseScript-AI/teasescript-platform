@@ -450,7 +450,7 @@ export function* refReceiver(contract: Contract, asked: Key): Work<boolean> {
  * as a record); the read reruns when the prefix gains a kind with a structure (C5 reports a member read the kinds
  * lack).
  */
-function* receiverWalk(
+export function* receiverWalk(
   contract: Contract,
   walk: KeyWalk,
   flow: FlowSink | null = null,
