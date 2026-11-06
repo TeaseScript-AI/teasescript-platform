@@ -1271,7 +1271,20 @@ function lostCheck(
   checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   core: CoreRuntimeChecks,
 ): void {
-  for (const { obligation, result } of answers.gated()) {
+  const gated = answers.gated();
+  // (obligations a settled stop cannot establish: the program is declined at its first store, never read as owing none)
+  if (gated === null) {
+    const first = index.statements.find(
+      (statement): statement is Store =>
+        statement.kind === "letStatement" || statement.kind === "assignmentStatement",
+    );
+    if (first === undefined) return;
+    throw new OutsideContract(
+      first.kind === "letStatement" ? first.initializer : first.value,
+      "a store whose required checks could not be established at the budget",
+    );
+  }
+  for (const { obligation, result } of gated) {
     // (a stopped decision's own marks stand at every store of it, external data or not: the store's own C1 check and
     // its C9 boundary are the checks it owes when the script runs)
     if (obligation.epoch !== answers.epoch || obligation.slot.role === "stopped") continue;

@@ -10,7 +10,7 @@ import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { HELD_MODES } from "./helpers/type-core-held-host.js";
+import { HELD_MODES, heldStops } from "./helpers/type-core-held-host.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 import {
   DECLINES,
@@ -53,7 +53,9 @@ test("over the matrix of destinations, value forms and stops, a stopped plan nev
   for (const kind of [
     "decision stop, completed",
     "decision stop, completion capped",
-    "settled program stop",
+    "settled program stop, extraction",
+    "settled program stop, walk",
+    "settled program stop, publication",
     "unsettled program stop",
   ] satisfies StopKind[])
     assert.ok(kinds.has(kind), kind);
@@ -187,4 +189,41 @@ test("Codex r6's rows: a static part the gate cannot prove publishes as the natu
         `${middle} (${mode.name})`,
       );
     }
+});
+
+test("Astra r1's B1: a settled stop in the capture's extraction is gated, in four modes (#1526 decision 2)", () => {
+  // (the receiving seed is saved before the capture, so a stop inside it still has its obligations: at every settled
+  // extraction stop the plan the stop leaves, `{n: list<any>}` where the natural plan checks both properties, declines,
+  // and no published plan lets `[["BAD"]]` through)
+  const source =
+    'let a={n:[[1]],m:[[1]]}\nlet b=a\nb={n:hostValue}\nsay toJson(b)\nsay "AFTER"\nexit\n';
+  const bad = { hostValue: list([list(["BAD"])]) };
+  for (const mode of HELD_MODES) {
+    const stops = heldStops({ name: "B1", source, slice: true, values: [] }, mode);
+    const extraction = stops.filter((stop) => stop.phase === "extraction");
+    assert.ok(extraction.length > 0, mode.name);
+    let declined = 0;
+    for (const { allowance, phase } of stops) {
+      let plan;
+      try {
+        plan = mode.run(() =>
+          withTestAllowance(allowance, () =>
+            compileSourceWithBackend(source, { globals: ["hostValue", "hostOther"] }, CORE_BACKEND),
+          ),
+        ).plan;
+      } catch (error) {
+        assert.ok(error instanceof CandidateOutsideSlice, `${mode.name} ${phase} @${allowance}`);
+        if (phase === "extraction") declined += 1;
+        continue;
+      }
+      assert.ok(plan !== null);
+      const run = runGlobals(plan, bad);
+      assert.equal(
+        run.said.some((said) => said.text === "AFTER"),
+        false,
+        `${mode.name} ${phase} @${allowance}`,
+      );
+    }
+    assert.ok(declined > 0, mode.name);
+  }
 });

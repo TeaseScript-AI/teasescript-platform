@@ -37,6 +37,9 @@ const DESTINATIONS = {
   written: (value: string) => `let b: integer[][] = [[1]]\nb = ${value}`,
   // (a later store decides the destination's type: the first store's natural check is against it)
   later: (value: string) => `let b = ${value}\nsay toJson(b)\nb = [[1]]`,
+  // (a partial object shape: the value one of the destination's two properties, the other left out)
+  partial: (value: string) =>
+    `let a = {n: [[1]], m: [[1]]}\nlet b = a\nb = {n: ${value}}\nsay toJson(b.n)`,
   // (an object destination, the value one property of a stored object literal)
   object: (value: string) =>
     `let a = {n: [[1]], m: 1}\nlet b = a\nb = {n: ${value}, m: 2}\nsay toJson(b.n)`,
@@ -105,7 +108,7 @@ export type StopKind =
   | "decision stop, completed"
   | "decision stop, completion capped"
   | "decision stop, capped while finding its obligations"
-  | "settled program stop"
+  | `settled program stop, ${string}`
   | "unsettled program stop";
 
 /** How a stopped run ended: published, and which check carries the value; or declined. */
@@ -163,7 +166,8 @@ function stopKind(
   });
   const { budget } = answers;
   if (budget.exhausted !== null)
-    return budget.settled ? "settled program stop" : "unsettled program stop";
+    // (a settled program stop by the phase it stopped in: the capture's extraction, the walk, the publication, …)
+    return budget.settled ? `settled program stop, ${budget.stoppedIn}` : "unsettled program stop";
   if (!budget.decisions.some((d) => d.stopped)) return null;
   if ((budget.closure?.counts.capped ?? 0) > 0)
     return answers.receiving.length === 0

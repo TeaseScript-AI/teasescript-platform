@@ -2102,26 +2102,27 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
     assert.deepEqual([budget.allowance, budget.stoppedIn, budget.settled], [1886, "walk", true]);
   assert.ok(stopped.answers.budget.decisions.some((d) => d.stopped));
   assert.ok(!uncapped.answers.budget.decisions.some((d) => d.stopped));
-  // (there the candidate declines the stopped compile, #1526 decision 2, an accepted over-decline, #1832: no completion
-  // tells `root`'s partial check from the natural one)
-  assert.equal(stopped.result.plan, null);
-  assert.throws(
-    () =>
-      mode.run(() =>
-        withTestDemandAllowance(27, () =>
-          withTestAllowance(1886, () =>
-            compileSourceWithBackend(
-              c.source,
-              { globals: ["hostValue", "hostOther"] },
-              CORE_BACKEND,
-            ),
-          ),
+  // (there the candidate may decline the stopped compile, #1526 decision 2, an accepted over-decline, #1832: no completion
+  // tells `root`'s partial check from the natural one; a published plan runs as the natural one)
+  try {
+    const plan = mode.run(() =>
+      withTestDemandAllowance(27, () =>
+        withTestAllowance(1886, () =>
+          compileSourceWithBackend(c.source, { globals: ["hostValue", "hostOther"] }, CORE_BACKEND),
         ),
       ),
-    (error) =>
-      error instanceof CandidateOutsideSlice &&
-      error.what === "a store whose check was lost at the budget",
-  );
+    ).plan;
+    const natural = heldRun(c, mode).result.plan!;
+    assert.ok(plan !== null);
+    for (const value of [2, "x", null])
+      assert.deepEqual(
+        runGlobals(plan, { hostValue: value, hostOther: value }),
+        runGlobals(natural, { hostValue: value, hostOther: value }),
+      );
+  } catch (error) {
+    if (error instanceof assert.AssertionError) throw error;
+    assert.ok(error instanceof CandidateOutsideSlice && error.what === LOST_CHECK, String(error));
+  }
   // (the oracle's scope check, on the stopped analysis with the reference's plan and its `say "BEFORE"` text changed, so
   // the oracle reruns the stopped run: its own rerun is judged, the uncapped run's refused)
   // (the reference under demand allowance 27 is declined too, at its decision stop; the natural plan stands for it)
@@ -5002,17 +5003,24 @@ test("a stopped decision stays undecided at every reader, also after a settled p
     );
     for (const allowance of [undefined, first, total - 1]) {
       const where = `reversed: ${reversed}, allowance: ${allowance}`;
-      // (at a settled program stop the candidate declines the compile, #1526 decision 2: an accepted over-decline, #1832,
-      // the store check of `tally`'s host value partial and no completion to tell it from the natural plan's; its analysis
-      // is judged alone)
+      // (at a settled program stop the candidate may decline the compile, #1526 decision 2: an accepted over-decline,
+      // #1832, the store check of `tally`'s host value partial and no completion to tell it from the natural plan's; a
+      // published plan runs as the unstopped one; its analysis is judged either way)
       if (allowance !== undefined)
-        assert.throws(
-          () => capped(() => stopRun(source, allowance)),
-          (error) =>
-            error instanceof CandidateOutsideSlice &&
-            error.what === "a store whose check was lost at the budget",
-          where,
-        );
+        try {
+          const run = capped(() => stopRun(source, allowance));
+          // (a published plan runs as the unstopped one)
+          assert.ok(run.result.plan !== null, where);
+          for (const value of [2, 2.5, "x"])
+            assert.deepEqual(
+              runGlobals(run.result.plan, host(value)),
+              runGlobals(unstopped.result.plan!, host(value)),
+              where,
+            );
+        } catch (error) {
+          if (error instanceof assert.AssertionError) throw error;
+          assert.ok(error instanceof CandidateOutsideSlice && error.what === LOST_CHECK, where);
+        }
       const answers: Answers =
         allowance === undefined
           ? unstopped.answers

@@ -704,8 +704,9 @@ export class Consumers {
    * `asked`), so this pass publishes what it would without them.
    */
   #capture(): void {
-    this.#capturePhaseB();
-    // (the receiving seed's store sites: admission's store warnings as they stand when the capture runs, #1526 phase C)
+    // (the receiving seed's store sites: admission's store warnings as they stand when the capture runs, #1526 phase C;
+    // saved before the capture, which can stop, so a settled pass always has its seed and a stop's gate its obligations,
+    // #1526 decision 2: an absent seed is never read as an empty one)
     const storeSites: { site: SourceSite; stopped: boolean }[] = [];
     for (const d of this.diagnostics)
       if (
@@ -715,6 +716,7 @@ export class Consumers {
       )
         storeSites.push({ site: d.site, stopped: d.provenance.context === "budget" });
     this.#storeSites = storeSites;
+    this.#capturePhaseB();
   }
 
   /** The receiving seed's store sites (`#capture`); `null` in a pass whose admission did not settle. */

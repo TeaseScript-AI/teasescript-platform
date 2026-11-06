@@ -388,7 +388,7 @@ test("a copy of an inferred place gives the capture its natural contract after a
   }
 });
 
-test("a property whose proof a stop cut leaves its later complete sibling checked (Codex r1 on #1606)", () => {
+test("a property whose proof a stop cut leaves its later complete sibling checked, or the store declined (Codex r1 on #1606, #1526 decision 2)", () => {
   // (`g` decided before the capture by its own store, `f` cut: the later sibling's check stands at the store; `a.f`
   // stored from a loop's element, as above, #1604)
   const source =
@@ -406,7 +406,6 @@ test("a property whose proof a stop cut leaves its later complete sibling checke
     const [result] = storeContracts(answers, request).values();
     if (result?.state !== "lost" || !result.required.every((level) => level.path[0] === f))
       continue;
-    witnessed += 1;
     const at = `stop at ${allowance}`;
     const partial = result.partial;
     assert.ok(partial?.kind === "object", at);
@@ -415,9 +414,24 @@ test("a property whose proof a stop cut leaves its later complete sibling checke
       { kind: "integer" },
       at,
     );
-    const { plan } = withTestAllowance(allowance, () =>
-      compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
-    );
+    // (the stop cut `f`'s proof, so the store's check is the partial one and the obligation has no result: the candidate
+    // declines, #1526 decision 2, Astra r1's B1, where the partial plan would let `{f: [["x"]], g: 3}` through; a
+    // published plan keeps the later sibling's check)
+    let plan;
+    try {
+      ({ plan } = withTestAllowance(allowance, () =>
+        compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+      ));
+    } catch (error) {
+      assert.ok(
+        error instanceof CandidateOutsideSlice &&
+          error.what === "a store whose check was lost at the budget",
+        at,
+      );
+      witnessed += 1;
+      if (witnessed === 2) break;
+      continue;
+    }
     assert.deepEqual(
       storeRunProblems(
         plan!,
@@ -428,6 +442,7 @@ test("a property whose proof a stop cut leaves its later complete sibling checke
       [],
       at,
     );
+    witnessed += 1;
     // (two such stops are enough here; every allowance is the PR's queue evidence)
     if (witnessed === 2) break;
   }
