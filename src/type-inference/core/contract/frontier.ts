@@ -12,7 +12,7 @@ import { entered, ingressLeafOf } from "./ingress.js";
 import { canonicalKey, isKeyId, keyDepthIn, spanRef, stepsArray, type PathRef } from "./key-ids.js";
 import { hostAt, propertyOnly, unknownItem } from "./kinds.js";
 import { lackingAt, pathAt, pathDepth } from "./literal-index.js";
-import { depthOf, marksAt, marksNothing } from "./marks.js";
+import { canMarkBelow, depthOf, marksAt, marksNothing } from "./marks.js";
 import type { Holder, IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
 
 /*
@@ -115,6 +115,19 @@ export function withoutPushedReads<T>(callback: () => T, depth: number | null = 
   } finally {
     pushing = true;
     horizon = null;
+  }
+}
+
+let pruning = true;
+
+/** Test-only: runs `callback` with every pending mark kept to its holder's depth (`canMarkBelow` not asked). */
+export function withoutMarkPruning<T>(callback: () => T): T {
+  if (!pruning) throw new Error("Mark pruning is already off.");
+  pruning = false;
+  try {
+    return callback();
+  } finally {
+    pruning = true;
   }
 }
 
@@ -403,6 +416,8 @@ function decide(frontier: Frontier, adds: readonly Pending[]): Decision {
         return { marked: true, rest: -1 };
       continue;
     }
+    // (a mark no path at or below this one can hold is decided unmarked now, not kept to depth)
+    if (pruning && !canMarkBelow(contract, each.holder, each.path)) continue;
     rest.set(pendingName(frontier, each), each);
   }
   return { marked: false, rest: internPending(frontier, rest) };

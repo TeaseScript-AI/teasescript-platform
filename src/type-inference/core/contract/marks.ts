@@ -9,7 +9,7 @@ import { stepName } from "../program.js";
 import { ABSENT } from "./kinds.js";
 import type { CanonicalKey, PathSteps, Rest } from "./key-ids.js";
 import { wrapperFacts } from "./wrapper-facts.js";
-import { indexPaths, pathBelow } from "./literal-index.js";
+import { indexPaths, pathBelow, stepsOf } from "./literal-index.js";
 import type { Holder, HolderReference, ReadGroup, ReferencesByStep } from "./model.js";
 import { addSource, unionOf } from "./selections.js";
 
@@ -559,6 +559,101 @@ export function marksAt(contract: Contract, holder: Holder | null, asked: Rest):
     answer = frame.hit;
   }
   return answer!;
+}
+
+/**
+ * #1784: whether a holder's mark at some path at or below `path` (an id) can hold, `marksAt` of any extension: false
+ * only where none does, so a pushed read drops a pending mark that can never mark (`decide`). A walk over the asks
+ * `marksAt` can make, on an explicit stack, each (holder, rest) once: along the rest's literal paths, a guarded path at
+ * or below it, its own reads where a test reads its first step (`testedSteps`, the first steps `testedBelow` keys),
+ * each reference at a prefix (the referenced holder at its shift and the rest below) or below the rest (at its shift),
+ * and the holder at a prefix and `ABSENT` where the next step is one no test reads (`referencesAt`); a rest cut at its
+ * holder's `depthOf`, as `marksAt` asks it. Once per holder and path; a walk that finds none keeps every rest it
+ * visited as none, since what those reach it reached.
+ */
+export function canMarkBelow(contract: Contract, holder: Holder, path: number): boolean {
+  if (marksNothing(contract, holder)) return false;
+  const work = contract.pass.program.work;
+  work.charge("eventSteps");
+  const once = holder.belowAt?.get(path);
+  if (once !== undefined) return once;
+  const answer = marksBelow(contract, holder, path);
+  contract.keep(1);
+  (holder.belowAt ??= new Map()).set(path, answer);
+  return answer;
+}
+
+/** `canMarkBelow`'s walk. */
+function marksBelow(contract: Contract, holder: Holder, path: number): boolean {
+  const work = contract.pass.program.work;
+  const tested = contract.pass.guards.testedSteps();
+  const start = recordPath(stepsOf(contract, path));
+  work.charge("eventSteps", 1 + start.length);
+  const seen = new Map<Holder, Set<string>>();
+  const visited: (readonly [Holder, string])[] = [];
+  const stack: (readonly [Holder, readonly string[]])[] = [[holder, start]];
+  const below = (asked: Holder, rest: readonly string[]): boolean => {
+    for (let at = 0; at < rest.length; at += 1) {
+      work.charge("eventSteps");
+      if (rest[at] !== ABSENT && !tested.has(rest[at]!))
+        stack.push([asked, joinSteps(rest.slice(0, at), [ABSENT])]);
+    }
+    let where = 0;
+    for (let length = 0; ; length += 1) {
+      work.charge("eventSteps");
+      if (asked.guarded.has(where)) return true;
+      for (const reference of asked.refsAt.get(where) ?? []) {
+        work.charge("eventSteps");
+        stack.push([reference.to, joinSteps(reference.shift, rest.slice(length))]);
+      }
+      if (length === rest.length) break;
+      where = pathBelow(contract, where, rest[length]!);
+      if (where < 0) return false;
+    }
+    const depth = contract.pathDepths[where]!;
+    const under = (at: number): boolean => {
+      work.charge("eventSteps", 1 + contract.pathDepths[at]! - depth);
+      while (contract.pathDepths[at]! > depth) at = contract.pathParents[at]!;
+      return at === where;
+    };
+    for (const at of asked.guarded) if (under(at)) return true;
+    for (const [at, references] of asked.refsAt)
+      if (at !== where && under(at))
+        for (const reference of references) {
+          work.charge("eventSteps");
+          stack.push([reference.to, reference.shift]);
+        }
+    return false;
+  };
+  let hit = false;
+  while (!hit && stack.length > 0) {
+    const [asked, asks] = stack.pop()!;
+    work.charge("eventSteps");
+    if (marksNothing(contract, asked)) continue;
+    // (an ask as deep as the holder's depth is one at its first `depthOf` steps, which this walk covers)
+    const depth = depthOf(contract, asked);
+    if (depth === Infinity) hit = true;
+    if (hit) break;
+    const rest = asks.length > depth ? asks.slice(0, depth) : asks;
+    const name = pathText(rest);
+    const known = asked.below?.get(name);
+    if (known === false) continue;
+    if (known === true) hit = true;
+    else {
+      let names = seen.get(asked);
+      if (names === undefined) seen.set(asked, (names = new Set()));
+      if (names.has(name)) continue;
+      names.add(name);
+      contract.keepText(name.length);
+      visited.push([asked, name]);
+      hit =
+        (asked.reads.length > 0 && (rest.length === 0 || tested.has(rest[0]!))) ||
+        below(asked, rest);
+    }
+  }
+  if (hit) return true;
+  for (const [asked, name] of visited) (asked.below ??= new Map()).set(name, false);
+  return false;
 }
 
 /**
