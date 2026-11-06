@@ -82,18 +82,15 @@ const INTEGER_TYPE = /\(([^()]*integer[^()]*)\)/;
 /**
  * Each inherited class a case may be, of the issues still `open` on the tree, with what the core says there given the
  * checker's sentence: the checker's sentence changed exactly where the issue's defect is, on the whole-number side.
- * - #1790 (#1819): the later element's leaf `null` dropped;
  * - #1843: an element's own `or null` dropped, for a copy at the element that may be null;
  * - #1847: a `!= null` test of a typed host value not seen, its `?` at the tested layer kept;
- * - #1858: the earliest side's leaf `?` dropped for an `otherwise` of a typed host value with a `null` fallback.
+ * - #1858: the leaf `?` dropped for an `otherwise` of a typed host value with a `null` fallback, on either side.
  */
 function mixedInherited(
   row: MixedDimensions,
   open: readonly string[],
 ): readonly (readonly [string, (sentence: string) => string])[] {
   const out: (readonly [string, (sentence: string) => string])[] = [];
-  if (open.includes("#1790") && row.later && row.nullAt === row.depth)
-    out.push(["#1790", (sentence) => sentence.replace("integer?", "integer")]);
   if (
     open.includes("#1843") &&
     row.at === 0 &&
@@ -104,8 +101,7 @@ function mixedInherited(
     open.includes("#1858") &&
     row.kind === "hostOrNull" &&
     row.at === 0 &&
-    row.nullAt === row.depth &&
-    !row.later
+    row.nullAt === row.depth
   )
     out.push(["#1858", (sentence) => sentence.replace("integer?", "integer")]);
   if (open.includes("#1847") && row.kind === "notNull" && row.at > 0)

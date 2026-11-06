@@ -30,10 +30,9 @@ import { inMode, MODES } from "./helpers/type-core-oracles.js";
  * through them, and the two joined positions (`ONE`: the twin's join in both orders of its answers) in both orders;
  * then each case that brings a class the sample lacks (`classes`, the coverage invariant); in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
  * the inherited classes, each its issue's work:
- * - the later element's leaf `null`, #1790 (#1819, stacked on this);
  * - an element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
  * - a typed host value under `!= null`, which leaves no mark on its unknown items, #1847;
- * - the earliest side's leaf `?` of an `otherwise` of a typed host value with a `null` fallback, #1858.
+ * - the leaf `?` of an `otherwise` of a typed host value with a `null` fallback, on either side, #1858.
  * Each class is exactly its issue's change of the checker's sentence (`mixedExplained`, Codex r12 on #1789). A source
  * only one checker reports on is outside the candidate slice there and is not compared.
  */
@@ -46,7 +45,7 @@ async function family<T>(name: string): Promise<T> {
 }
 
 // (the issues still open here, each a class of differences `mixedExplained` names exactly)
-const OPEN = ["#1790", "#1843", "#1847", "#1858"];
+const OPEN = ["#1843", "#1847", "#1858"];
 
 // (the family's sources held to their record, Astra r3's B1 on #1789 and the lead's rulings after Codex r20–r22. The
 // guarantee is the record, each case's source key by name, which the generator must give and a refresh shows by name,

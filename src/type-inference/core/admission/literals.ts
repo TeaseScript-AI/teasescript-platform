@@ -401,14 +401,21 @@ export function literalElements(
         layersAt(admission, of.value!, of.node, path, depths);
       const earliest = first.get(at)!;
       earliest.layers ??= layers(earliest.d);
-      const optional = mixedOptional(earliest.layers, layers(d));
+      // (#1790: the later element's kinds its own, as on main, with the null it may hold at the leaf by #1765's rule, read
+      // by the same walk one depth more: a value at its own level as it is read at its node (a narrowed copy holds none,
+      // a typed host value may), a copy below its own level by its term, an `otherwise`'s fallback only where its
+      // operand may be null. Codex r1–r4, Astra r1 on #1819; the null decides nothing, #1753)
+      const later = layersAt(admission, d.value!, d.node, path, [...depths, path.length]);
+      const optional = mixedOptional(earliest.layers, later.slice(0, -1));
+      const own = [...new Set(deciding(admission.valueAt(d, path)).map((item) => item.tag))];
+      const kinds = later.at(-1)! ? [...own, "null" as const] : own;
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,
         cell,
         path,
         decided: first.get(at)!.tags,
         earliest: first.get(at)!.own,
-        kinds: [...new Set(deciding(admission.valueAt(d, path)).map((item) => item.tag))],
+        kinds,
         atCopy: atCopy.has(at),
         ...(optional === undefined ? {} : { optional }),
       });
