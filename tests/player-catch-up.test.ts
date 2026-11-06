@@ -142,6 +142,8 @@ async function mount(context: TestContext, source: string, randomControl?: Rando
       src = "";
       play = async () => {};
       pause() {}
+      load() {}
+      removeAttribute() {}
     },
   };
   for (const [name, value] of Object.entries(surface)) {
