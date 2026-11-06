@@ -70,22 +70,115 @@ const HOST = [
   "setImmediate",
   "queueMicrotask",
 ];
-// (a new realm's own inputs from outside it, ECMA-262's and ECMA-402's: the clock and the local time zone (`Date`),
-// randomness, garbage collection's timing (`WeakRef`, `FinalizationRegistry`) and the locale (`Intl`, every
-// `toLocale…`, `localeCompare`), each replaced on the realm itself, so every alias of it (`globalThis`, `Function`,
-// an indirect `eval`) reads the replacement; strict, so a replacement that does not take throws, Codex r20's B1)
+// (a new realm's globals, each classified, Codex r20–r21: the deterministic intrinsics, and those that read or reach
+// what is outside the realm (the clock, the time zone and the locale: `Date`, `Intl`, `Temporal`; garbage collection's
+// timing: `WeakRef`, `FinalizationRegistry`; other agents: `SharedArrayBuffer`, `Atomics`; the host: `console`,
+// `WebAssembly`). A global neither list names fails, so one an engine adds is classified before a generator reads it)
+const ALLOWED = [
+  "Object",
+  "Function",
+  "Array",
+  "Number",
+  "parseFloat",
+  "parseInt",
+  "Infinity",
+  "NaN",
+  "undefined",
+  "Boolean",
+  "String",
+  "Symbol",
+  "Promise",
+  "RegExp",
+  "Error",
+  "AggregateError",
+  "EvalError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "TypeError",
+  "URIError",
+  "SuppressedError",
+  "globalThis",
+  "JSON",
+  "Math",
+  "ArrayBuffer",
+  "Uint8Array",
+  "Int8Array",
+  "Uint16Array",
+  "Int16Array",
+  "Uint32Array",
+  "Int32Array",
+  "BigUint64Array",
+  "BigInt64Array",
+  "Uint8ClampedArray",
+  "Float32Array",
+  "Float64Array",
+  "Float16Array",
+  "DataView",
+  "Map",
+  "BigInt",
+  "Set",
+  "Iterator",
+  "WeakMap",
+  "WeakSet",
+  "Proxy",
+  "Reflect",
+  "DisposableStack",
+  "AsyncDisposableStack",
+  "decodeURI",
+  "decodeURIComponent",
+  "encodeURI",
+  "encodeURIComponent",
+  "escape",
+  "unescape",
+  "eval",
+  "isFinite",
+  "isNaN",
+];
+const REPLACED = [
+  "Date",
+  "Intl",
+  "Temporal",
+  "WeakRef",
+  "FinalizationRegistry",
+  "SharedArrayBuffer",
+  "Atomics",
+  "console",
+  "WebAssembly",
+];
+// (run in the new realm before the generator, strict, so a replacement that does not take throws: the globals
+// classified; every method named for the locale, on everything the allowed intrinsics reach, made to throw; the
+// replaced globals made names that throw on any use, and `Math.random`; and a stack pinned to its message, so no
+// frame of the caller outside shows (Codex r21). Each is replaced on the realm itself, so every alias of it
+// (`globalThis`, `Function`, an indirect `eval`) reads the replacement)
 const REALM = `"use strict";
 const no = (name) => () => { throw new Error("a family generator read " + name); };
 const trap = (name) => new Proxy(function () {}, Object.fromEntries(
   ["get", "has", "set", "apply", "construct", "ownKeys", "getPrototypeOf", "defineProperty",
     "deleteProperty", "getOwnPropertyDescriptor"].map((each) => [each, no(name)])));
-for (const name of ["Date", "Intl", "WeakRef", "FinalizationRegistry"]) globalThis[name] = trap(name);
+const allowed = ${JSON.stringify(ALLOWED)};
+const replaced = ${JSON.stringify(REPLACED)};
+for (const name of Object.getOwnPropertyNames(globalThis))
+  if (!allowed.includes(name) && !replaced.includes(name))
+    throw new Error("a realm global no list classifies: " + name);
+const seen = new Set();
+const open = allowed.filter((name) => name !== "globalThis").map((name) => globalThis[name]);
+while (open.length > 0) {
+  const at = open.pop();
+  if (at === null || (typeof at !== "object" && typeof at !== "function") || seen.has(at)) continue;
+  seen.add(at);
+  for (const key of Reflect.ownKeys(at)) {
+    const property = Object.getOwnPropertyDescriptor(at, key);
+    if (property === undefined || !("value" in property)) continue;
+    if (typeof key === "string" && /locale/i.test(key) && typeof property.value === "function")
+      Object.defineProperty(at, key, { value: no(key) });
+    else open.push(property.value);
+  }
+  open.push(Object.getPrototypeOf(at));
+}
+for (const name of replaced) globalThis[name] = trap(name);
 Math.random = no("Math.random");
-const typed = Object.getPrototypeOf(Int8Array.prototype);
-for (const [owner, name] of [[String.prototype, "localeCompare"], [String.prototype, "toLocaleLowerCase"],
-  [String.prototype, "toLocaleUpperCase"], [Number.prototype, "toLocaleString"], [BigInt.prototype, "toLocaleString"],
-  [Array.prototype, "toLocaleString"], [typed, "toLocaleString"], [Object.prototype, "toLocaleString"]])
-  owner[name] = no(name);
+Object.defineProperty(Error, "stackTraceLimit", { value: 0, writable: false, configurable: false });
 `;
 
 interface Exported {
@@ -94,8 +187,8 @@ interface Exported {
 }
 
 /**
- * A generator's cases, evaluated in a new realm whose every input from outside it throws on use (`REALM`), with each host
- * global a name that throws (`HOST`), and no `import`. Its exports come back as JSON.
+ * A generator's cases, evaluated in a new realm prepared by `REALM`, with each host global a name that throws (`HOST`),
+ * and no `import`. Its exports come back as JSON.
  */
 function sandboxed(text: string): Exported {
   assert.ok(!/^\s*import\b/m.test(text), "a family generator that imports");
@@ -178,9 +271,9 @@ async function pure(
     record.sha256,
     "a record other than the run's",
   );
-  // (negative controls: Astra r3's two probes, an inner order and a depth domain read from the environment, and Codex
-  // r20's, the clock through an alias, randomness through an indirect `eval` and the locale with no name of it, each fail
-  // the first guard; the same order changed in the text fails the second, and a case repeated over another fails both,
+  // (negative controls: Astra r3's two probes, an inner order and a depth domain read from the environment, Codex
+  // r20's, the clock through an alias, randomness through an indirect `eval` and the locale with no name of it, and
+  // Codex r21's time zone through `Temporal`, each fail the first guard; the same order changed in the text fails the second, and a case repeated over another fails both,
   // in the direct and the sandboxed evaluation alike)
   const variant = (from: string, to: string): string => {
     assert.ok(text.includes(from), from);
@@ -202,9 +295,17 @@ async function pure(
       "(1234.5).toLocaleString()",
       '"a".localeCompare("b")',
       "new Intl.NumberFormat().format(1)",
+      "Temporal.Now.timeZoneId()",
+      'console.log("")',
     ].map((read) => variant(domain, `["depth", () => (${read}, [2, 3])]`)),
   ];
   for (const probe of probes) assert.throws(() => sandboxed(probe), /a family generator read /);
+  // (a stack is its message alone, whoever calls; a global no list names fails before any generator runs)
+  assert.equal(runInContext(`${REALM}new Error("m").stack`, createContext({})), "Error: m");
+  assert.throws(
+    () => runInContext(REALM, createContext({ unclassified: 1 })),
+    /a realm global no list classifies: unclassified/,
+  );
   assert.notDeepEqual(changed(keys(sandboxed(variant(inner, swapped))), recorded), []);
   const repeated = "export const globals";
   assert.notDeepEqual(

@@ -86,7 +86,8 @@ const range = (from, to) => Array.from({ length: to - from + 1 }, (_, at) => fro
 // (the family's axes, in order, each with its values given the axes before it: the only values a case varies by. A
 // parameter a case varies by enters here, and so its name and the sampled test's coverage invariant, which asserts a
 // name's axes are these, the lead's ruling on #1789. Nothing outside them enters: the sampled test evaluates this module
-// again where the host, the clock, randomness and the locale throw, and holds each source to the record's key, `keys`)
+// again where the host and every realm global that reads outside the realm throw, and holds each source to the
+// record's key, `keys`)
 export const axes = [
   ["depth", () => [2, 3]],
   ["nullAt", ({ depth }) => range(0, depth)],
