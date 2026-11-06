@@ -7,6 +7,7 @@ import {
   readRequest,
   refusal,
 } from "./protocol.js";
+import { decodeMessage, encodeMessage } from "./transport.js";
 
 /** How the Worker side sends and receives messages, whatever runs it: a browser Worker, a Node worker or a test port. */
 export interface HostPort {
@@ -158,10 +159,10 @@ export function startBridgeHost(
   const reply = (request: { id: number; session: string | null }, body: ReplyBody): void => {
     const envelope = { v: BRIDGE_VERSION, kind: "reply", id: request.id, session: request.session };
     try {
-      port.post({ ...envelope, ...body });
+      port.post(encodeMessage({ ...envelope, ...body }));
     } catch (error) {
       // A result that cannot cross (a DataCloneError) still answers the request.
-      port.post({ ...envelope, ok: false, error: engineError(error, false) });
+      port.post(encodeMessage({ ...envelope, ok: false, error: engineError(error, false) }));
     }
   };
   const refuse = (request: { id: number; session: string | null }, error: BridgeError): void =>
@@ -334,7 +335,8 @@ export function startBridgeHost(
 
   // Request IDs are admitted in receipt order, so a request waiting behind an awaited op keeps its place, and `halt`,
   // handled at once, follows the same order.
-  port.listen((data) => {
+  port.listen((raw) => {
+    const data = decodeMessage(raw);
     const request = readRequest(data);
     let previous: number | null = null;
     if (typeof request !== "string") {
@@ -352,6 +354,6 @@ export function startBridgeHost(
     if (busy !== null) waiting.push(received);
     else drain(received);
   });
-  port.post({ v: BRIDGE_VERSION, kind: "ready", build });
+  port.post(encodeMessage({ v: BRIDGE_VERSION, kind: "ready", build }));
   return sessions;
 }
