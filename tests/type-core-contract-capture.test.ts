@@ -498,6 +498,17 @@ test("the candidate route's decline and the capture's skip read one syntax rule"
       'let a = {f: [[1]]}\nlet b = a\nif hostValue < null {say "x"}\nb.f = hostValue\nexit\n',
       false,
     ],
+    // (a default written as `null`, and a member of a literal that is no object, are outside by their shape; an object
+    // literal's member, an index and a method stay inside)
+    [
+      'let a = {f: [[1]]}\nlet b = a\nlet v = load("k", default: (null))\nb.f = hostValue\nexit\n',
+      false,
+    ],
+    ["let a = {f: [[1]]}\nlet b = a\nsay [1].first\nb.f = hostValue\nexit\n", false],
+    ['let a = {f: [[1]]}\nlet b = a\nsay ("ab").length\nb.f = hostValue\nexit\n', false],
+    ["let a = {f: [[1]]}\nlet b = a\nsay {g: 1}.g\nb.f = hostValue\nexit\n", true],
+    ["let a = {f: [[1]]}\nlet b = a\nsay [1][0]\nb.f = hostValue\nexit\n", true],
+    ['let a = {f: [[1]]}\nlet b = a\nsay ["a"].join(",")\nb.f = hostValue\nexit\n', true],
     ['let a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nsay "${hostOther}"\nexit\n', false],
     ["let n = 1\nn += hostOther\nlet a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nexit\n", false],
   ];
