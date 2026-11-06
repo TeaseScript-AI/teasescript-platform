@@ -86,6 +86,13 @@ function analysed(source: string, mode = MODES[0]!, oracle: "native" | number | 
   }
 }
 
+/** Each pass's pushed slots and their answers. */
+function pushedSlots(analysis: ReturnType<typeof analysed>): string {
+  return JSON.stringify(
+    analysis.settled.map((answers) => [...answers].filter(([key]) => key.startsWith("pr|"))),
+  );
+}
+
 /** Every slot both analyses settled, pass by pass, answers the same (the pushed slots, the read's own, apart). */
 function sameSettled(
   pushed: ReturnType<typeof analysed>,
@@ -432,10 +439,6 @@ function heldRing(n: number, d: number, m: number, closed: boolean): string {
 
 test("a ring's held marks are one pending set per goal and base node, a mark that cannot mark dropped, in four modes (#1784)", () => {
   // (a sample of the family the queue runs whole: one doubling of the ring, the depth and the marked copies)
-  const pending = (analysis: ReturnType<typeof analysed>): string =>
-    JSON.stringify(
-      analysis.settled.map((answers) => [...answers].filter(([key]) => key.startsWith("pr|"))),
-    );
   for (const n of [3, 6])
     for (const d of [2, 4])
       for (const m of [1, n - 1])
@@ -455,8 +458,8 @@ test("a ring's held marks are one pending set per goal and base node, a mark tha
             }
             // (a dropped mark is one no path below it marks: the marks and the publication as with every one kept)
             assert.equal(
-              pending(pushed),
-              pending(withoutMarkPruning(() => analysed(source, mode))),
+              pushedSlots(pushed),
+              pushedSlots(withoutMarkPruning(() => analysed(source, mode))),
               label,
             );
             const native = analysed(source, mode, horizon ?? "native");
@@ -589,6 +592,26 @@ test("where the native reader ends, a read through a marked route answers what i
     ring(...referred("{h:0}", "h"), "p1=p0", 'say "${p2.q.q.g.h}"'),
     ring(...referred("{h:0}", "h"), "p1=p0", 'let w=p2.q.q.g\nsay "${w.h}"'),
     ring(...referred("{h:{k:0}}", "h.k"), "p1=p0", 'say "${p2.q.q.g.h.k}"'),
+    // a projection's holder marked only through its shifted reference to its base's (Codex r4: no marking entry on
+    // the walk restores it), its depth set by an unrelated deeper test
+    [
+      "let x={g:{h:0}}",
+      "x={g:{h:1}}",
+      "let saved={g:{h:2}}",
+      "if x.g is object { saved=x }",
+      "let z={a:{b:{c:0}}}",
+      'if z.a.b.c is integer { say "z" }',
+      "let p0={h:2}",
+      "let p1={h:3}",
+      "let p2={h:4}",
+      "p0=x.g",
+      "p2.q=p0",
+      "p2=p1",
+      "p1=p0",
+      "p2=p2.q",
+      'say "${p2.q.h}"',
+      "exit",
+    ].join("\n") + "\n",
     // a marked copy of a literal whose leaf is an operation's (a native value): declined, read natively
     guardedRing({ closing: false, leaf: "{g:hostValue+1}" }),
   ];
@@ -604,6 +627,12 @@ test("where the native reader ends, a read through a marked route answers what i
       const [pushed, native] = [analysed(source, mode), analysed(source, mode, "native")];
       sameSettled(pushed, native, source);
       compared += samePushedSlots(pushed, native, source);
+      // (a pending mark dropped is one that cannot mark: the same pushed slots with every one kept to depth)
+      assert.equal(
+        pushedSlots(pushed),
+        pushedSlots(withoutMarkPruning(() => analysed(source, mode))),
+        source,
+      );
     }
     if (!source.includes("hostValue")) assert.ok(compared > 0, source);
   }
