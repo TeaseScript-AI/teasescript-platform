@@ -652,26 +652,36 @@ for (const when of ["while it waits for its section", "after it was posted"] as 
 
 test("a stored Debug edit the bridge cannot carry settles as saved, not live, and is stored once", async (context) => {
   const store = provider();
-  const { bridge, host } = await mount(context, { delayMs: null, scriptStorage: store.storage });
+  const { host } = await mount(context, { delayMs: null, scriptStorage: store.storage });
   await start(host, EDITED, true);
-  // The client refuses the edit's request, as it refuses a value that cannot be cloned; the edit is already stored.
-  const section = bridge.client.section.bind(bridge.client);
+  // The in-process port's clone refuses the edit's request, as a port refuses what it cannot clone: the refusal takes
+  // the client's own path (encode and post inside `send`), after the edit is stored.
+  const nativeClone = globalThis.structuredClone;
+  let refusals = 0;
   context.mock.method(
-    bridge.client,
-    "section",
-    (session: string, body: Parameters<typeof section>[1]) =>
-      section(session, (send) =>
-        body((op, args, basis, onReply) =>
-          op === "applyStorageEdit"
-            ? Promise.reject(new DOMException("The value could not be cloned.", "DataCloneError"))
-            : send(op, args, basis, onReply),
-        ),
-      ),
+    globalThis,
+    "structuredClone",
+    (message: unknown, options?: StructuredSerializeOptions) => {
+      if (
+        typeof message === "object" &&
+        message !== null &&
+        "kind" in message &&
+        message.kind === "request" &&
+        "op" in message &&
+        message.op === "applyStorageEdit"
+      ) {
+        refusals += 1;
+        assert.equal(store.stored.get("edited"), 7, "stored before it is posted");
+        throw new DOMException("The value could not be cloned.", "DataCloneError");
+      }
+      return nativeClone(message, options);
+    },
   );
   const result = await host.editSavedData({ key: "edited", value: 7, expected: undefined });
   assert.deepEqual(result, { kind: "saved", live: false });
   assert.deepEqual(store.writes, ["edited"]);
   assert.equal(host.hostError.value, null);
+  assert.equal(refusals, 1, "refused once, at the port's clone");
 });
 
 test("an image answer keeps its image held, also when the capture moved on before the answer settled", async (context) => {
