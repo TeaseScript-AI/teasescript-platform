@@ -5,6 +5,8 @@ import "./side.js";
 import "./names.js";
 
 export { fromRoot } from "../src/root.js";
+// A namespace export named `require` is a key; it binds nothing.
+export * as require from "../src/allowed.js";
 // Each loads its module though it names no value.
 export { type Typed } from "../src/typed.js";
 export {} from "../src/empty.js";
