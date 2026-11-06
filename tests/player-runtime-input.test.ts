@@ -715,10 +715,11 @@ test("a permanent button is pressed at the observed time, and a replaced session
 });
 
 // The composer keeps an input-method composition as `v-model` does, so a text written into its field from outside wins
-// only through the composer's `writeField`, which ends the composition first, also for an unchanged text. A write to
-// `draft` or `repeated` anywhere else in `RuntimeInteraction.vue`, or the refs escaping to code that could write them,
-// would bypass it.
-test("the interaction writes the composer's text and its repeat only through the composer's writeField", () => {
+// only through `writeField`, which ends the composition and publishes the text at once. `RuntimeInteraction.vue` gets
+// the composer's text and repeat from `useComposerFields` only, as read-only refs, so a write in any form fails its type
+// check; it must not declare or receive them otherwise. The template, which unwraps them, passes them to the composer
+// only, as a write there would not fail the type check.
+test("the interaction gets the composer's text and its repeat only as useComposerFields' read-only refs", () => {
   const source = readFileSync(
     fileURLToPath(new URL("../../player/vue/src/RuntimeInteraction.vue", import.meta.url)),
     "utf8",
@@ -727,58 +728,29 @@ test("the interaction writes the composer's text and its repeat only through the
   const template = /<\/script>\s*<template>([\s\S]*)<\/template>/.exec(source)?.[1];
   assert.ok(script !== undefined && template !== undefined);
   const file = ts.createSourceFile("RuntimeInteraction.ts", script, ts.ScriptTarget.Latest, true);
-  const models = new Set(["draft", "repeated"]);
-  const isWrite = (access: ts.Node): boolean => {
-    const parent = access.parent;
-    return (
-      (ts.isBinaryExpression(parent) &&
-        parent.left === access &&
-        parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
-      ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) &&
-        (parent.operator === ts.SyntaxKind.PlusPlusToken ||
-          parent.operator === ts.SyntaxKind.MinusMinusToken))
-    );
-  };
-  const writes: string[] = [];
-  const bypasses: string[] = [];
-  const visit = (node: ts.Node, inWriteField: boolean): void => {
-    const inside =
-      inWriteField || (ts.isFunctionDeclaration(node) && node.name?.text === "writeField");
-    if (ts.isIdentifier(node) && models.has(node.text)) {
-      const parent = node.parent;
-      const line = `${node.text} at line ${file.getLineAndCharacterOfPosition(node.getStart()).line + 1}`;
-      if (ts.isPropertyAccessExpression(parent) && parent.name === node) {
-        // Another object's property of that name.
-      } else if (ts.isVariableDeclaration(parent) && parent.name === node) {
-        // The ref's declaration.
-      } else if (
-        ts.isPropertyAccessExpression(parent) &&
-        parent.expression === node &&
-        parent.name.text === "value"
-      ) {
-        if (isWrite(parent)) (inside ? writes : bypasses).push(line);
-      } else if (
-        ts.isCallExpression(parent) &&
-        ts.isIdentifier(parent.expression) &&
-        parent.expression.text === "watch" &&
-        parent.arguments[0] === node
-      ) {
-        // A watch reads the ref.
-      } else bypasses.push(`${line} (the ref escapes)`);
+  const bindings: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      (ts.isBindingElement(node) || ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
+      ts.isIdentifier(node.name) &&
+      (node.name.text === "draft" || node.name.text === "repeated")
+    ) {
+      const declaration = ts.isBindingElement(node) ? node.parent.parent : node;
+      const from =
+        ts.isVariableDeclaration(declaration) &&
+        declaration.initializer !== undefined &&
+        ts.isCallExpression(declaration.initializer)
+          ? declaration.initializer.expression.getText(file)
+          : "(another source)";
+      bindings.push(`${node.name.text} from ${from}`);
     }
-    ts.forEachChild(node, (child) => visit(child, inside));
+    ts.forEachChild(node, visit);
   };
-  visit(file, false);
-  assert.deepEqual(bypasses, []);
-  assert.equal(
-    writes.length,
-    2,
-    "writeField writes each model itself while the composer is not mounted",
-  );
-  // The template binds them only as the composer's own `v-model`.
-  assert.deepEqual(
-    [...template.matchAll(/[^\s<>]*\b(?:draft|repeated)\b[^\s<>]*/g)].map((match) => match[0]),
-    ['v-model="draft"', 'v-model:repeated="repeated"'],
-  );
+  visit(file);
+  assert.deepEqual(bindings, ["draft from useComposerFields", "repeated from useComposerFields"]);
+  // Every expression of the template, in an attribute or an interpolation, that names either one.
+  const uses = [...template.matchAll(/([^\s=<>]+)="([^"]*)"|\{\{([\s\S]*?)\}\}/g)]
+    .map((match) => (match[1] === undefined ? `{{${match[3]}}}` : `${match[1]}=${match[2]}`))
+    .filter((use) => /\b(?:draft|repeated)\b/.test(use.slice(use.indexOf("=") + 1)));
+  assert.deepEqual(uses, [":model-value=draft", ":repeated=repeated"]);
 });

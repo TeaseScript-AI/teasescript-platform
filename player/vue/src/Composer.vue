@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
 import { playerKeys } from "./playerKeys";
+import type { ComposerField } from "./useComposerFields";
 
 const props = withDefaults(
   defineProps<{
@@ -300,17 +301,25 @@ function endComposition(field?: HTMLElement): void {
   }
 }
 /**
- * The one path for a text that a field gets from outside, such as a reset or a prefill. A composition under way in that
- * field ends first, and the text is then written as typed input is, so the field, its `v-model` copies and the model
- * all hold it, also when the model already held it. Without a composition, they agree already, and the model takes it.
+ * The one path for a text that a field gets from outside, such as a reset or a prefill. The model is its authority: the
+ * text is published at once, also an unchanged one, and never left to a later update. A composition under way in that
+ * field ends first, and a text field that shows another text takes it as typed input does, so the field and the
+ * Textarea's own copy of the model hold it too. A date or time control never composes, and shows the model.
  */
-function writeField(field: "input" | "repeat", text: string): void {
+function writeField(field: ComposerField, text: string): void {
   const element = field === "repeat" ? repeatInput.value : input.value;
-  if (element && composing.value && document.activeElement === element) {
-    endComposition(element);
-    element.value = text;
-    element.dispatchEvent(new Event("input"));
-  } else if (field === "repeat") emit("update:repeated", text);
+  if (element) {
+    if (composing.value && document.activeElement === element) endComposition(element);
+    const holdsText =
+      element instanceof HTMLTextAreaElement ||
+      element.type === "text" ||
+      element.type === "password";
+    if (holdsText && element.value !== text) {
+      element.value = text;
+      element.dispatchEvent(new Event("input"));
+    }
+  }
+  if (field === "repeat") emit("update:repeated", text);
   else emit("update:modelValue", text);
 }
 // Whatever makes the fields read-only (an answer in flight, an image being read, a lock at work) ends a composition

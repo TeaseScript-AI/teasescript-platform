@@ -38,6 +38,7 @@ import {
   type InputIntent,
   type InputSectionHost,
 } from "./runtime-input";
+import { useComposerFields, type ComposerFieldWriter } from "./useComposerFields";
 import type { ImageCapture } from "./useImageCapture";
 
 /** How the host stores an image file the player chose for `askImage`. */
@@ -285,25 +286,11 @@ const root = ref<HTMLElement | null>(null);
 // The session's area, which a popup that is not modal centres on, beside the Debug panel.
 const composition = computed(() => root.value?.closest<HTMLElement>(".player-composition") ?? null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
-const composer = ref<{
-  focusInput(): void;
-  selectInput(): void;
-  openPicker(): void;
-  writeField(field: "input" | "repeat", text: string): void;
-} | null>(null);
-const draft = ref("");
-/** The "Repeat password" of a lock's password field, which, like its password, is never kept. */
-const repeated = ref("");
-/**
- * The one way this component writes the composer's text (`draft`) or its repeat (`repeated`): through the composer's
- * `writeField`, which ends a composition in that field and then writes the text, also an unchanged one. Only the
- * composer's own `v-model` writes them otherwise; a test checks that no other code here does.
- */
-function writeField(field: "input" | "repeat", text: string): void {
-  if (composer.value) composer.value.writeField(field, text);
-  else if (field === "repeat") repeated.value = text;
-  else draft.value = text;
-}
+const composer = ref<
+  ({ focusInput(): void; selectInput(): void; openPicker(): void } & ComposerFieldWriter) | null
+>(null);
+// The composer's text and repeat are read-only here: a text from outside goes through `writeField`.
+const { draft, repeated, writeField, typed: composerTyped } = useComposerFields(composer);
 const feedback = ref("");
 const submitting = ref(false);
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -914,7 +901,7 @@ function submit(source: "input" | "button") {
         />
         <Composer
           ref="composer"
-          v-model="draft"
+          :model-value="draft"
           :disabled="
             (!foreground && !pacing && !lockField) ||
             foreground?.kind === 'popup' ||
@@ -947,7 +934,7 @@ function submit(source: "input" | "button") {
           :attach="attach"
           :password="foreground?.kind === 'ask-password' || lockField !== null"
           :repeat="lockField?.repeat ?? false"
-          v-model:repeated="repeated"
+          :repeated="repeated"
           :accessible-name="
             lockField ? 'Password' : (formEditor?.label ?? foreground?.accessibleName ?? 'Response')
           "
@@ -974,6 +961,8 @@ function submit(source: "input" | "button") {
                       : 'text'
           "
           :feedback="feedback"
+          @update:model-value="composerTyped('input', $event)"
+          @update:repeated="composerTyped('repeat', $event)"
           @submit="submit"
           @skip="skipPacing(true)"
           @activate="activatePreselected"
