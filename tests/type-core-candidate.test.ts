@@ -3556,6 +3556,14 @@ test("a known value under a test reads the branch's narrowing, and a long copy c
     Array.from({ length: 8192 }, (_, i) => `let n${i} = ${i === 0 ? "1" : `n${i - 1}`}`).join(
       "\n",
     ) + '\nrepeat n8191 { say "AFTER" }\nexit\n';
+  // (a stopped read says nothing of its kinds, `unknown`: its known value stands, and so does its static error)
+  for (const allowance of [1, 4])
+    assert.ok(
+      withTestAllowance(allowance, () => candidate("let n = 1.5\nrepeat n {}\nexit\n"))
+        .diagnostics.map((diagnostic) => diagnostic.code)
+        .includes("TSV011"),
+      `stopped at ${allowance}`,
+    );
   const compiled = inBothOrders(() => candidate(chain));
   assert.notEqual(compiled.plan, null);
   assert.deepEqual(
