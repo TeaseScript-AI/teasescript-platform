@@ -104,9 +104,12 @@ export function domainFamily(
 const DOMAINS = new WeakMap<Consumers, Map<string, readonly ItemTag[] | null>>();
 
 /**
- * A value's domain's kinds at `rest`, any number of families (`domainFamily`'s), `null` where one is unknown: its
- * contract's kinds, and an `otherwise` result's its operands' joined, each once per value and path. The chain's contract
- * at a descendant path walks its operands again at each link (Astra r1 on #1824), so a chain's domain is its links'.
+ * A value's contract's kinds at `rest`, any number of families: `null` where one is unknown, none (`[]`) where it holds
+ * none there (a `null` read has no element). An `otherwise` result's are its operands' joined, so none contributes
+ * nothing and an unknown makes the join unknown (Codex r4 on #1824); each once per value and path. A chain's contract
+ * at a descendant path walks its operands again at each link (Astra r1 on #1824), so a chain's kinds are its links'.
+ * Read for a direct value's domain (`domainFamily`) and for the fallback's own quiet kinds, which a chain nested on
+ * the right is too (`chainQuietKinds`).
  */
 function domainKinds(
   walk: Consumers,
@@ -126,9 +129,23 @@ function domainKinds(
     const left = domainKinds(walk, link.left, rest);
     const right = left === null ? null : domainKinds(walk, link.right, rest);
     found = left === null || right === null ? null : [...new Set([...left, ...right])];
-  } else found = quietKinds(walk, value, rest);
+  } else {
+    const items = withoutEmpty(walk.run(walk.pass.contract.contractOfValueAt(value, rest)));
+    found = items.some((item) => item.tag === "unknown") ? null : items.map((item) => item.tag);
+  }
   memo.set(key, found);
   return found;
+}
+
+/** `quietKinds` of a fallback, a chain's through `domainKinds`: `null` where its kinds are unknown or none. */
+function chainQuietKinds(
+  walk: Consumers,
+  value: PlaceId,
+  rest: readonly string[],
+): ItemTag[] | null {
+  if (walk.pass.program.opOf.get(value)?.kind !== "fallback") return quietKinds(walk, value, rest);
+  const kinds = domainKinds(walk, value, rest);
+  return kinds === null || kinds.length === 0 ? null : [...kinds];
 }
 
 /** C10 at one path of the fallback, its label there made by `label`: whether its elements are checked too. */
@@ -236,7 +253,7 @@ function fallbackFitsAt(
   const joined: ItemTag[] = [...new Set([...own, ...added])];
   const against = kindsInItsOrder(joined, written ? own : undefined);
   // §3.3: a fallback whose contract every kind of fits asks nothing more at this path
-  const quiet = quietKinds(walk, value, rest);
+  const quiet = chainQuietKinds(walk, value, rest);
   const fallback =
     quiet !== null && quiet.every(fitsKind) ? [] : withoutEmpty(walk.valueItems(value, node, rest));
   const off = fallback.filter((item) => item.tag !== "unknown" && !fitsKind(item.tag));

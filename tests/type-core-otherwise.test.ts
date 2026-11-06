@@ -211,6 +211,12 @@ test("C10 takes a fallback's family from its value's domain where the read canno
       'let n: integer? = hostValue\nif n != null { say n otherwise "bad" }',
       "compile-error | written-target@18:W written-target@59:E | copy-type:n[integer,null] copy-typeB:n[integer,null]",
     ],
+    // (a `null` read has no element: it contributes no family, so the list's still decides, Codex r4 on #1824)
+    [
+      "chain/null-read-first",
+      'let a = null\nlet b: integer[]? = hostValue\nsay a otherwise b otherwise ["bad"]',
+      "compile-error | written-target@33:W written-target@33:W written-target@72:E | copy-type:b[list,null] copy-type:b.element[integer] copy-typeB:b[list,null]",
+    ],
     [
       "chain/three",
       'let a: integer? = hostValue\nlet b: integer? = hostValue\nlet c: integer? = hostValue\nlet result = a otherwise b otherwise c otherwise "bad"\nsay result',
@@ -286,6 +292,11 @@ test("C10 takes a fallback's family from its value's domain where the read canno
       "otherwise/call-result-fitting",
       "function f(v): integer? {\n  return v\n}\nlet result = f(hostValue) otherwise 2\nsay result",
       "warning-runtime-check | written-target@35:W | copy-type:f.result[integer,null] copy-typeB:f.v[unknown]",
+    ],
+    [
+      "chain/null-read-first-fitting",
+      "let a = null\nlet b: integer[]? = hostValue\nsay a otherwise b otherwise [2]",
+      "warning-runtime-check | written-target@33:W written-target@33:W | copy-type:b[list,null] copy-type:b.element[integer] copy-typeB:b[list,null]",
     ],
     [
       "chain/unknown-link",
@@ -418,6 +429,7 @@ function chainFamily(
   type: string,
   initial: (i: number) => string,
   last: string,
+  right = false,
 ): WorkFamily {
   return {
     name,
@@ -427,7 +439,9 @@ function chainFamily(
         path: "main.tease",
         source: [
           ...Array.from({ length: k }, (_, i) => `let v${i}: ${type} = ${initial(i)}`),
-          `say ${Array.from({ length: k }, (_, i) => `v${i}`).join(" otherwise ")} otherwise ${last}`,
+          right
+            ? `say ${Array.from({ length: k }, (_, i) => `v${i} otherwise (`).join("")}${last}${")".repeat(k)}`
+            : `say ${Array.from({ length: k }, (_, i) => `v${i}`).join(" otherwise ")} otherwise ${last}`,
           "exit",
           "",
         ].join("\n"),
@@ -444,6 +458,9 @@ test("C10's domain of an otherwise chain is each link's, once per value and path
     chainFamily("c10-chain-list", "integer[]?", () => "hostValue", "[0]"),
     chainFamily("c10-chain-dict", "integer dict?", () => "hostValue", 'dict{"a": 0}'),
     chainFamily("c10-chain-list-known", "integer[]?", (i) => `[${i}]`, "[0]"),
+    // (and nested on the right, `v0 otherwise (v1 otherwise (…))`: the fallback's own kinds a chain too, Codex r4)
+    chainFamily("c10-chain-list-right", "integer[]?", () => "hostValue", "[0]", true),
+    chainFamily("c10-chain-dict-right", "integer dict?", () => "hostValue", 'dict{"a": 0}', true),
   ];
   const steep: string[] = [];
   for (const sizes of [
