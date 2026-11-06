@@ -10,6 +10,7 @@ import {
   isWellFormedCapturedMediaReference,
   type CapturedMediaRecord,
   type CapturedMediaRepository,
+  type StoredCapturedMedia,
 } from "../../captured-media.js";
 import {
   browserCapturedMediaLocks,
@@ -897,6 +898,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
 
   let activationToken = 0;
+  // The kept-session preparation under way (`prepareScript`, `prepareKept`). A later preparation, and every transition
+  // that replaces what it would show, retires it: Start, Continue, a session's end (`supersede`), an import of the shown
+  // script, a room change, unmount. Only the current one shows its Continue or Start and puts its photos back.
+  let preparation = 0;
   // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
   let continuing: PlayerSession | null = null;
   // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
@@ -910,6 +915,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function supersede() {
     activationToken++;
+    preparation++;
     // A pending error stop is retired with the activation it stopped; the replacement's input runs.
     halting.value = false;
     const obsolete = continuing;
@@ -1287,6 +1293,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const ownChosen =
       scriptStorage !== undefined && chosen.has(scriptStorage.scope) && !inDebugRoom;
     importing.value = true;
+    // A Continue or Start still being prepared for the script would offer what the import replaces.
+    if (ownChosen) preparation++;
     const failed: string[] = [];
     // Start keeps saying why the kept session cannot continue while a failed import leaves that session.
     let outdated = ownChosen ? activation.value?.outdated : undefined;
@@ -1302,21 +1310,24 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       for (const script of review.bundle.scripts) {
         if (!chosen.has(script.scope)) continue;
         try {
-          if (script.scope === scriptStorage?.scope && inDebugRoom) {
+          const own = script.scope === scriptStorage?.scope;
+          // Without durable captured media, imported photos would not outlive this page.
+          if (own && capturedMediaPersistence === undefined && usesImages(script))
+            throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
+          // The script's next session loads the imported values: its kept session, with its older view, goes first, and
+          // a script whose kept session stays keeps its saved data.
+          await keptSessions.discard(script.scope);
+          if (own) outdated = undefined;
+          if (own && inDebugRoom) {
             const media = ownStoredMedia(script.scope);
             const storage = withCapturedMedia(options.scriptStorage!, media);
             try {
-              if (capturedMediaPersistence === undefined && usesImages(script))
-                throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
               await replaceScript(storage, media, script, review.images);
             } finally {
               await storage.drain();
               media.close();
             }
-          } else if (script.scope === scriptStorage?.scope) {
-            // Without durable captured media, imported photos would not outlive this page.
-            if (capturedMediaPersistence === undefined && usesImages(script))
-              throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
+          } else if (own) {
             await replaceScript(scriptStorage, capturedMedia, script, review.images);
           } else {
             const { storage, media } = options.savedData!.persistence(script.scope);
@@ -1327,12 +1338,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
               media.close();
             }
           }
-          // The script's next session loads the imported values: a kept session, with its older view, does not go on.
-          const discarded = await keptSessions.discard(script.scope).then(
-            () => true,
-            () => false,
-          );
-          if (discarded && script.scope === scriptStorage?.scope) outdated = undefined;
         } catch (error) {
           failed.push(
             `${script.name ?? script.scope} (${error instanceof CapturedMediaNotStoredError ? "its photos could not be stored" : "it could not be saved, for example because storage is full"})`,
@@ -1631,7 +1636,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     sources?: ReadonlyMap<string, string>,
   ): Promise<void> {
     // The host holds the plan, under the token `prepare` gave it, or as this Player compiled it.
+    // Owned from the call: a later preparation, or a transition that replaces it, while the host gets ready retires it.
+    const owner = ++preparation;
     const host = await bridgeReady;
+    if (disposed || owner !== preparation) return;
     if (typeof plan === "string") scriptPlan = heldPlan(host, plan);
     else {
       holdPlan(host, plan);
@@ -1639,42 +1647,58 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
     lastStart.value = create;
     if (sources !== undefined) scriptSources = sources;
-    await prepareKept();
+    await prepareKept(owner);
   }
   /**
    * Shows Continue when the script keeps a session that can go on, else Start, with the reason when a Player update
-   * changed the format of the kept session.
+   * changed the format of the kept session. Only while the preparation `owner` is current: the kept session restored,
+   * its photos, and its plan's JSON are installed together, or not at all.
    */
-  async function prepareKept(): Promise<void> {
-    const continued = scriptPlan === null ? null : await restoreKept(scriptPlan);
-    if (disposed) return;
-    if (continued !== null && "session" in continued) {
+  async function prepareKept(owner = ++preparation): Promise<void> {
+    const plan = scriptPlan;
+    const found = plan === null ? { planJson: null } : await restoreKept(plan);
+    if (disposed || owner !== preparation) {
+      if ("session" in found) bridgeOf(found.session).release(found.session);
+      return;
+    }
+    if ("session" in found) {
+      dropPreparedPlanJson();
+      for (const [reference, stored] of found.media)
+        capturedMedia.restoreSessionMedia(reference, stored);
       kept = {
         plan: true,
-        count: continued.session.events.length,
-        last: continued.session.events.at(-1) ?? null,
+        count: found.session.events.length,
+        last: found.session.events.at(-1) ?? null,
       };
-      prepareRestore(continued.session, continued.marks);
-    } else if (lastStart.value !== null) prepareStart(lastStart.value, continued?.outdated);
+      prepareRestore(found.session, found.marks);
+      return;
+    }
+    // Unless the session goes on, a new session's first save stores the plan's JSON written here.
+    if (plan !== null && found.planJson !== null) preparePlanJson(plan, found.planJson);
+    if (lastStart.value !== null) prepareStart(lastStart.value, found.outdated);
   }
   /**
-   * The kept session, restored, when it runs `plan` and has not ended; else why it cannot continue when its plan or
-   * state is of another revision than this Player's, or `null`, such as for a changed script, an ended session, or one
-   * that cannot be read. The photos only it uses are its session media again.
+   * The kept session, restored, when it runs `plan` and has not ended, with the stored records of the photos only it
+   * uses; else, for Start, the plan's JSON written to compare it, and why the kept session cannot continue when its plan
+   * or state is of another revision than this Player's. Nothing of this Player changes yet (`prepareKept`); a session
+   * restored but not continued is released in the host.
    */
   async function restoreKept(
     plan: InstructionPlan,
   ): Promise<
-    | { readonly session: PlayerSession; readonly marks: DebugHistoryMarks }
-    | { readonly outdated: Problem }
-    | null
+    | {
+        readonly session: PlayerSession;
+        readonly marks: DebugHistoryMarks;
+        readonly media: readonly (readonly [string, StoredCapturedMedia | null])[];
+      }
+    | { readonly planJson: string | null; readonly outdated?: Problem }
   > {
-    if (keptScope === null) return null;
+    if (keptScope === null) return { planJson: null };
     await storageRoute;
     const store = keptStore();
     const stored = await store.session(keptScope).catch(() => null);
     const found = stored === null ? null : keptSession(stored);
-    if (found === null) return null;
+    if (found === null) return { planJson: null };
     // Not for a session that ended, which only its events can show when its state is of another revision: the engine
     // ends a session with an `exit` or `runtimeFailure` event.
     const explain = !found.events.some(
@@ -1684,14 +1708,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       preparedPlanJson?.plan === plan && preparedPlanJson.json !== null
         ? preparedPlanJson.json
         : serializeValidatedRuntimeJson(plan);
-    // Unless the session goes on, a new session's first save stores the plan's JSON written here.
-    preparePlanJson(plan, planJson);
     if (found.planJson !== planJson) {
       // After a Player update the same script compiles to a plan of another revision; the plan has no runtime error.
       const revisions = explain ? revisionChange(found.planJson, INSTRUCTION_PLAN_VERSION) : null;
       return revisions === null
-        ? null
-        : { outdated: { message: `Unsupported instruction-plan revision. ${revisions}` } };
+        ? { planJson }
+        : {
+            planJson,
+            outdated: { message: `Unsupported instruction-plan revision. ${revisions}` },
+          };
     }
     let restored: PlayerSession;
     try {
@@ -1704,20 +1729,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       const revisions = explain
         ? revisionChange(found.snapshotJson, RUNTIME_SNAPSHOT_VERSION)
         : null;
-      if (revisions === null || !(error instanceof CheckpointError)) return null;
+      if (revisions === null || !(error instanceof CheckpointError)) return { planJson };
       const { code, path, message } = error.info;
-      return { outdated: { code, path, message: `${message} ${revisions}` } };
+      return { planJson, outdated: { code, path, message: `${message} ${revisions}` } };
     }
-    if (restored.state.status === "halted" || restored.state.status === "failed") return null;
-    dropPreparedPlanJson();
+    if (restored.state.status === "halted" || restored.state.status === "failed") {
+      bridgeOf(restored).release(restored);
+      return { planJson };
+    }
     // The debug room reads its photos like its saved ones; a normal session's come back as session media.
+    const media: (readonly [string, StoredCapturedMedia | null])[] = [];
     if (store === keptSessions)
       for (const reference of capturedMediaReferencesIn(found.snapshotJson, found.events))
-        capturedMedia.restoreSessionMedia(
-          reference,
-          await store.media.get(keptScope, reference).catch(() => null),
-        );
-    return { session: restored, marks: found.marks };
+        media.push([reference, await store.media.get(keptScope, reference).catch(() => null)]);
+    return { session: restored, marks: found.marks, media };
   }
   /**
    * Returns to the start page once the session ended by `exit`, which the host does when the player closes the end
@@ -1864,6 +1889,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const scope = keptScope;
     const plan = scriptPlan;
     importing.value = true;
+    // A Continue or Start still being prepared would offer what the import replaces.
+    preparation++;
     let failure: string | null = null;
     try {
       if (sessionInProgress.value || inspecting.value) endSession();
@@ -2030,6 +2057,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (live) await keepSession();
         const making = live || debugRoom.value === null;
         const replacing = live && debugRoom.value !== null;
+        // A Continue or Start still being prepared is the normal room's.
+        preparation++;
         room.value = "debug";
         kept = { plan: false, count: 0, last: null };
         keptPresentation = null;
