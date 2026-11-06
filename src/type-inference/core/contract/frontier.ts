@@ -1178,6 +1178,67 @@ export function pushedFacts(contract: Contract): {
 }
 
 /**
+ * Test-only, #1784: the hold state's invariant over the pass's graph. Every marked or held node's inner node is neither
+ * (nesting depth 1); every pending set holds each (holder, steps) once; and per goal, each base node has one canonical
+ * pending set, the union of every pending set it was reached with, every held state of it the goal holds being a subset
+ * (absorbed). Its violations, the largest pending set, and the held states and base nodes per goal.
+ */
+export function pushedInvariant(contract: Contract): {
+  readonly violations: readonly string[];
+  readonly largest: number;
+  readonly held: number;
+  readonly bases: number;
+} {
+  const frontier = FRONTIERS.get(contract);
+  const violations: string[] = [];
+  if (frontier === undefined) return { violations, largest: 0, held: 0, bases: 0 };
+  const nameOf = (each: Pending): string =>
+    JSON.stringify([frontier.holders.get(each.holder), each.steps]);
+  frontier.nodes.forEach((node, id) => {
+    if (node.kind !== "mark" && node.kind !== "hold") return;
+    const inner = frontier.nodes[node.inner]!.kind;
+    if (inner === "mark" || inner === "hold")
+      violations.push(`node ${id}: ${node.kind} of ${inner}`);
+  });
+  let largest = 0;
+  frontier.pendingSets.forEach((set, id) => {
+    largest = Math.max(largest, set.length);
+    if (new Set(set.map(nameOf)).size !== set.length)
+      violations.push(`pending set ${id}: a mark twice`);
+  });
+  let [held, bases] = [0, 0];
+  for (const bySteps of frontier.goals.values())
+    for (const goal of bySteps.values()) {
+      const canonical = goal.holds ?? new Map<number, number>();
+      const seen = new Set<number>();
+      for (const id of goal.value) {
+        const node = frontier.nodes[id]!;
+        if (node.kind !== "hold") continue;
+        held += 1;
+        seen.add(node.inner);
+        const union = canonical.get(node.inner);
+        const names = new Set(
+          (union === undefined ? [] : frontier.pendingSets[union]!).map(nameOf),
+        );
+        if (frontier.pendingSets[node.set]!.some((each) => !names.has(nameOf(each))))
+          violations.push(
+            `goal ${goal.node}|${goal.step}: a held state of ${node.inner} outside its union`,
+          );
+        if (
+          union !== undefined &&
+          ![...goal.value].some((other) => {
+            const at = frontier.nodes[other]!;
+            return at.kind === "hold" && at.inner === node.inner && at.set === union;
+          })
+        )
+          violations.push(`goal ${goal.node}|${goal.step}: the union of ${node.inner} not held`);
+      }
+      bases += seen.size;
+    }
+  return { violations, largest, held, bases };
+}
+
+/**
  * #1655: the pushed read's slot for a prefix entry read at `ref` (`entryAt`'s key branch), or `null` where the native
  * reader answers: a key entry below its place's root, in a copy cycle through a projection, whose closure the graph
  * models.
