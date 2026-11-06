@@ -289,6 +289,18 @@ test("a lost Worker fails its pending requests and every later one; nothing is r
   assert.equal(losses.length, 1);
 });
 
+test("an intentional terminate fails pending and later requests but reports no loss", async () => {
+  const client = await connectBridge(nodeWorkerPort(FIXTURE_WORKER, BUILD), BUILD);
+  const losses: BridgeLostError[] = [];
+  client.onLoss((error) => losses.push(error));
+  const pending = client.request("slow", 0);
+  client.terminate();
+  await assert.rejects(pending, BridgeLostError);
+  await assert.rejects(client.request("slow", 0), BridgeLostError);
+  client.onLoss((error) => losses.push(error));
+  assert.equal(losses.length, 0);
+});
+
 test("the browser Worker's host loads no compiler or language-tooling module until a source is prepared", () => {
   const url = new URL("../player/engine-bridge/engine-host.js", import.meta.url).href;
   const script = [

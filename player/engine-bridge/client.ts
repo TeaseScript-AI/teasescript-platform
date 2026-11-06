@@ -88,9 +88,9 @@ export interface BridgeClient {
    * receipt too.
    */
   signal(op: string, args: unknown, session: string, onReply?: ReplyHook): Promise<BridgeResult>;
-  /** Ends the Worker: pending requests fail with `BridgeLostError`. */
+  /** Ends the Worker: pending requests fail with `BridgeLostError`. An intentional end is no loss: no `onLoss` call. */
   terminate(): void;
-  /** Calls `listener` once if the Worker is lost. */
+  /** Calls `listener` once if the Worker is lost: it failed or sent what no host sends, not `terminate()`. */
   onLoss(listener: (error: BridgeLostError) => void): void;
 }
 
@@ -128,13 +128,17 @@ export function openBridge(
     const lossListeners: ((error: BridgeLostError) => void)[] = [];
     const locks = new Map<string, Promise<void>>();
 
-    const lose = (message: string): void => {
+    // Whether the Worker ended by `terminate()`, which rejects what is pending but reports no loss.
+    let terminated = false;
+    const lose = (message: string, intentional = false): void => {
       if (lost !== null) return;
       lost = new BridgeLostError(message);
+      terminated = intentional;
       port.terminate();
       for (const entry of pending.values()) entry.reject(lost);
       pending.clear();
-      for (const listener of lossListeners) listener(lost);
+      const listeners = lossListeners.splice(0);
+      if (!intentional) for (const listener of listeners) listener(lost);
     };
     const fail = (message: string): void => {
       if (!announced) {
@@ -244,10 +248,10 @@ export function openBridge(
           body((op, args, basis, onReply) => send(op, args, session, basis, onReply)),
         ),
       signal: (op, args, session, onReply) => send(op, args, session, null, onReply),
-      terminate: () => lose("The engine Worker was terminated."),
+      terminate: () => lose("The engine Worker was terminated.", true),
       onLoss: (listener) => {
-        if (lost !== null) listener(lost);
-        else lossListeners.push(listener);
+        if (lost === null) lossListeners.push(listener);
+        else if (!terminated) listener(lost);
       },
     };
     opened = client;
