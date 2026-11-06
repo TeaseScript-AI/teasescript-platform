@@ -305,6 +305,28 @@ export interface PresenceStep {
   readonly literal: Writer | null;
 }
 
+/** #1747: a literal node's object list a contract read reaches (`objectsAt`), by its literal and path id. */
+export interface ObjectSite {
+  readonly literal: PlaceId;
+  readonly path: number;
+}
+
+/**
+ * #1747: an objects query's proof (`objectsAt`): the object lists its read reaches at the path, the pure `missing`
+ * writers it meets on the way, and the keys whose stores and written type at a property below it the query leaves to
+ * its reader (`absentWriterAt`); `complete` false where it declines.
+ */
+export interface ObjectsProof extends Proof {
+  readonly complete: boolean;
+  readonly lists: readonly ObjectSite[];
+  readonly prior: readonly Writer[];
+  readonly keys: readonly {
+    readonly key: CanonicalKey;
+    readonly place: PlaceId;
+    readonly path: readonly string[];
+  }[];
+}
+
 /** A layer summary's proof (`layerDemand`): its support, `null` where the summary declined. */
 export interface LayerProof extends Proof {
   readonly root: SupportNode | null;
