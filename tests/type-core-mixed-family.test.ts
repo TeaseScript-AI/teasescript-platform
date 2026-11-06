@@ -24,7 +24,8 @@ import { inMode, MODES } from "./helpers/type-core-oracles.js";
  * - both orders.
  * Here, each kind at every position with every relation of its carried layer to the null (`RELATIONS`: the null one
  * and two layers below it, inside and at the leaf, three below at the leaf, at its layer, none), the order turned
- * through them, and the two joined positions at one relation each (`ONE`) in both orders, in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
+ * through them, and the two joined positions (`ONE`: the twin's join in both orders of its answers) in both orders, in
+ * four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
  * the inherited classes, each its issue's work:
  * - the later element's leaf `null`, #1790 (#1819, stacked on this);
  * - an element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
@@ -46,8 +47,9 @@ const OPEN = ["#1790", "#1843", "#1847", "#1858"];
 
 // (the sample: each kind at every position with every relation of its carried layer to the null (`RELATIONS`, the
 // null's distance below it inside a list and at the leaf), the order turned through them; the joined positions at one
-// relation each (`ONE`): a second disagreeing side asks the first join again at the interior relation, and the side
-// joined with its twin, the null at the element's own layer and the twin's below it (Codex r17's witness). The structural combinations of kind, position and null, not a rotation over
+// relation or two (`ONE`): a second disagreeing side asks the first join again at the interior relation, and the side
+// joined with its twin in both orders of their answers, the side's null above the twin's (Codex r17's witness) and
+// below it (a copy two lists in, the twin's at the element's own layer, Codex r18). The structural combinations of kind, position and null, not a rotation over
 // their marginals, Codex r14–r17)
 type Relation = readonly [depth: number, at: number, nullAt: number];
 const RELATIONS: readonly Relation[] = [
@@ -60,7 +62,13 @@ const RELATIONS: readonly Relation[] = [
   [2, 0, 1],
   [2, 1, 2],
 ];
-const ONE: Readonly<Record<string, Relation>> = { joinTwice: [3, 1, 2], joinNulls: [3, 1, 1] };
+const ONE: Readonly<Record<string, readonly Relation[]>> = {
+  joinTwice: [[3, 1, 2]],
+  joinNulls: [
+    [3, 1, 1],
+    [3, 2, 0],
+  ],
+};
 
 function sampled(cases: readonly (readonly [string, string])[]): (readonly [string, string])[] {
   const kinds = [...new Set(cases.map(([name]) => mixedDimensions(name).kind))];
@@ -69,7 +77,7 @@ function sampled(cases: readonly (readonly [string, string])[]): (readonly [stri
   let turn = 0;
   for (const kind of kinds)
     for (const position of positions)
-      for (const [depth, carried, nullAt] of position in ONE ? [ONE[position]!] : RELATIONS)
+      for (const [depth, carried, nullAt] of ONE[position] ?? RELATIONS)
         for (const later of position in ONE ? [false, true] : [turn++ % 2 === 1]) {
           const at = kind === "plain" ? -1 : carried;
           const found = cases.find(([name]) => {
