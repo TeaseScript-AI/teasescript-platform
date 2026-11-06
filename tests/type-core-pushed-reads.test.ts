@@ -106,13 +106,6 @@ function analysed(source: string, mode = MODES[0]!, oracle: "native" | number | 
   }
 }
 
-/** Each pass's pushed slots and their answers. */
-function pushedSlots(analysis: ReturnType<typeof analysed>): string {
-  return JSON.stringify(
-    analysis.settled.map((answers) => [...answers].filter(([key]) => key.startsWith("pr|"))),
-  );
-}
-
 /**
  * #1784: the mark automaton against `marksAt` on a pass's real holders: every path of each compiled holder's own prefix
  * trie, and each one step further by each step the trie names and one none does; the asks, the marked ones and every
