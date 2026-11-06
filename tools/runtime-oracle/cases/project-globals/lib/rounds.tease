@@ -1,0 +1,3 @@
+announce(level * 10)
+showImage "images/cover.png"
+end

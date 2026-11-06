@@ -41,6 +41,22 @@ jobs:
           BUILD_SOURCEMAPS: "0"
           TEST_FILE_SECONDS: ${{ runner.temp }}/test-file-seconds.json
         run: npm test -- --shard=1/2
+      # The runtime oracle (docs/TESTING.md "Runtime pipeline oracle"): a pinned commit's own install and build, kept
+      # between runs by its commit and lockfile, then compared with this build. It is outside the shards, so it runs
+      # here alone, always.
+      - name: Name the runtime oracle's pin
+        id: oracle
+        run: echo "key=runtime-oracle-$(node -p "const m = require('./tools/runtime-oracle/manifest.json'); m.commit + '-' + m.lockfile.sha256")" >> "$GITHUB_OUTPUT"
+      - name: Restore the runtime oracle's root
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/runtime-oracle
+          key: ${{ steps.oracle.outputs.key }}
+      - name: Compare with the runtime oracle
+        env:
+          RUNTIME_ORACLE_HOME: ${{ runner.temp }}/runtime-oracle
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
+        run: npm run oracle:test
       # each test file's seconds, which `tools/measure-test-files.mjs --from-ci` makes the shards' weights from
       - name: Keep each test file's seconds
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

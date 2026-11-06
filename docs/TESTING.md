@@ -783,6 +783,44 @@ accepted product or technical limit separately against its authoritative boundar
 every PR or create permanent benchmark infrastructure for a bounded question; use them when changed scalable code or
 inspection leaves a credible amplification, memory, representation, or native-failure risk unresolved.
 
+## Runtime pipeline oracle
+
+The oracle (engine plan §8 F-oracle) is a frozen build of a pinned commit that a candidate pipeline is compared with.
+`tools/runtime-oracle/manifest.json` pins the commit and its tree, Node, the lockfile, the build command, the formats, the
+import closure of the entries with its build inputs, the built output, the oracle's tooling and case files, and every
+case's result digest.
+
+- **Materialize:** `npm run oracle:materialize` acquires the commit into
+  `$RUNTIME_ORACLE_HOME/<commit>`, by default `~/.cache/teasescript/runtime-oracle/`. It fetches the commit, uses
+  `git archive`, installs with `npm ci` from the commit's own lockfile, and builds with its own `build:typescript`.
+  `--from DIR` adopts a built tree of the same commit, such as `sx-tree`'s. Every use checks the root against the
+  manifest first.
+- **Run:** each root runs in its own process. Its guarantee is **Node-managed module provenance of a trusted
+  pipeline**: the pinned code is the project's own, kept apart from accidental contamination, not from malicious code.
+  - One classifier (`tools/runtime-oracle/admission.mjs`) decides by a file's real path. A file is the root's own when
+    it is inside the root's canonical directory, outside its dependency directory, and under no `node_modules`
+    directory. It is certified when it is the root's own and declared. It is a package's when it lies in the dependency
+    directory and its lockfile key (the chain to its last `node_modules`) is installed at its locked version.
+  - A load (the resolve hook) admits a Node built-in, a certified file or a package's file. Certification, before a
+    cached root is used and at the seal, admits only certified files.
+  - A root's declarations are validated before they count. A discovered closure only proposes them, so an import out of
+    the root never certifies itself.
+  - Provenance is separate: an exact-SHA acquisition, the pin's own install and build, fresh-only seals, and a re-hash
+    of every certified file of a cached root.
+  - Outside the guarantee, because the resolve hook never sees what they run, and the engine uses none of them:
+    Workers, child processes, `vm` sources, a hook the root registers, and addons.
+  - `tests/runtime-oracle-admission.oracle.ts` checks the classifier as a generated family of 200 cases, with an
+    independent oracle and a pair-coverage check.
+- **Check:** `npm run oracle:test`, after a build, materializes the oracle and runs
+  `tests/runtime-pipeline-oracle.oracle.ts`. It is outside the sharded suite, and CI runs it in `check-1` with the root
+  cached by commit and lockfile. `npm run oracle:run` prints the comparison alone. The oracle must reproduce its
+  pinned digests; then this checkout's build must equal it on every case and route
+  (`tools/runtime-oracle/cases.json`), exactly.
+- **Seal:** `node tools/runtime-oracle/materialize.mjs --seal COMMIT --label provisional|final [--seam SHA]` rewrites
+  the manifest from that commit's own run. A changed digest at a new seal needs a reviewed reason in its pull request,
+  and no case is removed. The current seal is provisional and proves reproduction only; the final seal, at the
+  released playroom seam after L5, freezes the semantics and adds the host closure and bridge tapes.
+
 ## Reproducibility requirements
 
 Tests and benchmarks should use:

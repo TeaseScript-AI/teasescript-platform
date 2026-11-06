@@ -3577,6 +3577,9 @@ test("no production code selects the core: only tests reach the candidate entry"
   for (const directory of ["src", "playground", "player", "tools"])
     for (const file of sourcesUnder(join(root, directory))) {
       const relative = file.slice(root.length + 1);
+      // The runtime pipeline oracle is test tooling, never shipped: it runs both routes of a frozen build by design
+      // (docs/TESTING.md "Runtime pipeline oracle").
+      if (relative.startsWith("tools/runtime-oracle/")) continue;
       const text = readFileSync(file, "utf8");
       if (relative !== "src/compiler.ts")
         assert.ok(!/compile(Source|Project)WithBackend\s*\(/.test(text), relative);
