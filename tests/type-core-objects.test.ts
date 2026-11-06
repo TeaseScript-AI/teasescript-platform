@@ -9,6 +9,7 @@ import { exportNames } from "../src/type-inference/core/contract/key-ids.js";
 import { absentWriterAt, objectsAt } from "../src/type-inference/core/contract/objects.js";
 import { DemandExhausted, withTestAllowance } from "../src/type-inference/core/budget.js";
 import { firstWriter, REASON, type Writer } from "../src/type-inference/core/items.js";
+import { stepName } from "../src/type-inference/core/program.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
@@ -90,6 +91,11 @@ function compared(pass: CorePass): {
 } {
   const { contract, program, solver } = pass;
   const names = new Set<string>(["zz"]);
+  // (the properties the source reads, and those its objects hold)
+  for (const projection of program.projOf.values()) {
+    const step = stepName(projection.step);
+    if (/^[A-Za-z_]\w*$/.test(step)) names.add(step);
+  }
   const asks: (readonly [number, readonly string[]])[] = [];
   for (const literal of program.hasOf.keys()) {
     const index = contract.literalIndex(literal);
