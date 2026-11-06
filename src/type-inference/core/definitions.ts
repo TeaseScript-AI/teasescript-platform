@@ -281,6 +281,15 @@ export function keptParent<K extends Key>(work: WorkLedger, key: TextKey<K>): Ke
   return key.slice(0, end);
 }
 
+/** A key's depth: its path's steps, counted in its text, none made (its prefixes' cuts in `aliasSignature`). */
+function keyDepth<K extends Key>(key: TextKey<K>): number {
+  const bar = barOf(key);
+  if (bar === key.length - 1) return 0;
+  let depth = 1;
+  for (let at = key.indexOf(".", bar + 1); at >= 0; at = key.indexOf(".", at + 1)) depth += 1;
+  return depth;
+}
+
 /** `prefixesOf`, each prefix's text charged before it is made (`keepText`). */
 export function keptPrefixes(work: WorkLedger, key: Key): Key[] {
   const steps = keptPath(work, key);
@@ -1105,9 +1114,11 @@ export class DefinitionLists {
    * dominating chain gives the reaching definition at any path below; the node's boundary, loops, liveness, block
    * reachability and whether the source's declaration dominates it (X1, X4, X5, X7, P3); and, in each list X6 reads
    * for any of those keys (the source's own events with its descendants', each prefix's, the call sites), where the
-   * node's subtree begins and ends among its positions, which fixes the events of any span the node ends. The handlers'
-   * facts are the caller's. Without `calls` the call sites are left out: a read's snapshot of a key no other callable
-   * stores (`readSignature`).
+   * node's subtree begins and ends among its positions, which fixes the events of any span the node ends. A prefix's
+   * cut is tagged by its depth and asked only of the prefixes with definitions (G3 3b's walk, #1822): one without has
+   * no event, so its cut is the same for every read of the source, and every caller keys the signature with its
+   * source; no prefix's text is made. The handlers' facts are the caller's. Without `calls` the call sites are left
+   * out: a read's snapshot of a key no other callable stores (`readSignature`).
    */
   public aliasSignature(source: Key, node: FlowNode, calls = true): string {
     const program = this.#program;
@@ -1125,7 +1136,9 @@ export class DefinitionLists {
     const lists = calls
       ? [this.#eventList(source), this.index.sitePositions]
       : [this.#eventList(source)];
-    for (const prefix of prefixesOf(source)) lists.push(this.definitionsOf(prefix).eventPositions);
+    const cuts = lists.map(cut);
+    for (const prefix of this.index.stored.above(source, false))
+      cuts.push(`${keyDepth(prefix)}:${cut(this.definitionsOf(prefix).eventPositions)}`);
     return [
       reaching === null
         ? "-"
@@ -1137,7 +1150,7 @@ export class DefinitionLists {
       node.loops.map((loop) => loop.id).join(","),
       program.blockReachable(node) ? "b" : "",
       declaration !== undefined && program.dom.dominates(declaration.node, node) ? "p" : "",
-      lists.map(cut).join(";"),
+      cuts.join(";"),
     ].join("|");
   }
 
