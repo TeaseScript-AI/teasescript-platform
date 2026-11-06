@@ -658,6 +658,8 @@ test("a stored Debug edit the bridge cannot carry settles as saved, not live, an
   // the client's own path (encode and post inside `send`), after the edit is stored.
   const nativeClone = globalThis.structuredClone;
   let refusals = 0;
+  // Read inside the clone, asserted after the edit: a throw in the clone would only be taken as the refusal.
+  let storedAtPost: SerializableRuntimeValue | undefined;
   context.mock.method(
     globalThis,
     "structuredClone",
@@ -671,7 +673,7 @@ test("a stored Debug edit the bridge cannot carry settles as saved, not live, an
         message.op === "applyStorageEdit"
       ) {
         refusals += 1;
-        assert.equal(store.stored.get("edited"), 7, "stored before it is posted");
+        storedAtPost = store.stored.get("edited");
         throw new DOMException("The value could not be cloned.", "DataCloneError");
       }
       return nativeClone(message, options);
@@ -682,6 +684,7 @@ test("a stored Debug edit the bridge cannot carry settles as saved, not live, an
   assert.deepEqual(store.writes, ["edited"]);
   assert.equal(host.hostError.value, null);
   assert.equal(refusals, 1, "refused once, at the port's clone");
+  assert.equal(storedAtPost, 7, "stored before it is posted");
 });
 
 test("an image answer keeps its image held, also when the capture moved on before the answer settled", async (context) => {
