@@ -3215,3 +3215,144 @@ test("a message's walk and owner index charge their work, to the analysis and no
   for (let at = 1; at < work.length; at += 1)
     assert.ok(work[at]! <= 2.5 * work[at - 1]!, work.join(", "));
 });
+/**
+ * #1790: a mixed error names the later element's leaf type with the `null` it may hold, as the current checker's first
+ * sentence does, by #1765's rule at the leaf: a literal's `null`, a written collection copied whole (also below a
+ * property), a typed host value unless a still-valid test excludes `null`, not a narrowed copy at the layer itself. A
+ * scalar element is its own leaf, so its `or null` is named too (`[false,b[0]]`). In four modes.
+ */
+test("a mixed error keeps the later element's null below it (#1790)", () => {
+  const ONE = "A list holds one type. Use values of one type in it.";
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      'let xs=[[1],["x",null]]\nexit\n',
+      `This list mixes a list (integer[]) and a list (string?[]). ${ONE}`,
+    ],
+    [
+      'let b:string?[]=["x"]\nlet xs=[[1],b]\nexit\n',
+      `This list mixes a list (integer[]) and a list (string?[]). ${ONE}`,
+    ],
+    [
+      'let xs=[[1,null],["x",null]]\nexit\n',
+      `This list mixes a list (integer?[]) and a list (string?[]). ${ONE}`,
+    ],
+    [
+      'let xs=[{f:[1]},{f:["x",null]}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer[]) in one and a list (string?[]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (a narrowed copy at a property's scalar: its occurrence's kinds, no null, as the current checker names it)
+    [
+      "let atom:integer?=61\nlet item={v:atom}\nlet other={v:false}\nlet xs=[other,item]\nexit\n",
+      "This list mixes objects whose property 'v' holds true or false (boolean) in one and a whole number (integer) in " +
+        "another. A list holds one type. Give 'v' one type in every element.",
+    ],
+    // (a written collection copied whole below a property: its elements' null, Codex r2 on #1819)
+    [
+      'let n:string?[]=["s"]\nlet xs=[{f:[1]},{f:n}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer[]) in one and a list (string?[]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (a written copy narrowed as its occurrence is: a type test's kinds, a non-null scalar inside a fresh list; Codex r1
+    // on #1819)
+    [
+      "let n:string | boolean=hostValue\nif n is string { let xs=[1,n] }\nexit\n",
+      "This list mixes a whole number (integer) and text (string). A list holds one type. To allow both, declare it as " +
+        "'let xs: (integer | string)[] =[1,n]'.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[{f:[false]},{f:[n]}]\nexit\n",
+      "This list mixes objects whose property 'f' holds a list (boolean[]) in one and a list (integer[]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (an `otherwise` whose fallback never runs adds no null: a literal, narrowed by assignment or a test, at a property,
+    // deeper and at the element; one whose operand may be null keeps its fallback's; Codex r3 on #1819)
+    [
+      "let xs=[[false],[(1 otherwise null)]]\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer[]). ${ONE}`,
+    ],
+    [
+      "let xs=[{f:[false]},{f:[(1 otherwise null)]}]\nexit\n",
+      "This list mixes objects whose property 'f' holds a list (boolean[]) in one and a list (integer[]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let xs=[[[false]],[[(1 otherwise null)]]]\nexit\n",
+      `This list mixes a list (boolean[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      "let n:integer?=1\nlet xs=[[false],[(n otherwise null)]]\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer[]). ${ONE}`,
+    ],
+    [
+      "let n:integer?=hostValue\nif n is integer { let xs=[[false],[(n otherwise null)]] }\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer[]). ${ONE}`,
+    ],
+    [
+      "let xs=[false,(1 otherwise null)]\nexit\n",
+      "This list mixes true or false (boolean) and a whole number (integer). A list holds one type. To allow both, " +
+        "declare it as 'let xs: (boolean | integer)[] =[false,(1 otherwise null)]'.",
+    ],
+    [
+      "let m=[1,null]\nlet xs=[[false],[(m[0] otherwise null)]]\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer?[]). ${ONE}`,
+    ],
+    // (a known difference, #1838: an inferred copy of an `otherwise` keeps, in admission's items, the null its never-run
+    // fallback brings (#1836 is its binding form); the current checker says `integer[]`. Admission's to repair, not the
+    // message layer's; it turns to `integer[]` with it)
+    [
+      "let n=1 otherwise null\nlet xs=[[false],[n]]\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer?[]). ${ONE}`,
+    ],
+    // (a typed host value at the leaf, directly, as a `get` default and as a method's result: `null` unless a test
+    // excludes it, and again after a later store; Astra r1 on #1819)
+    ...["n", "[].get(0,default:n)", "[n].first"].map(
+      (leaf) =>
+        [
+          `let n:integer?=hostValue\nlet xs=[[false],[2,${leaf}]]\nexit\n`,
+          `This list mixes a list (boolean[]) and a list (integer?[]). ${ONE}`,
+        ] as const,
+    ),
+    [
+      "let n:integer?=hostValue\nif n is integer {\nlet xs=[[false],[2,n]]\n}\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer[]). ${ONE}`,
+    ],
+    [
+      "let n:integer?=hostValue\nif n != null {\nn=hostValue\nlet xs=[[false],[2,n]]\n}\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer?[]). ${ONE}`,
+    ],
+    [
+      "let n:integer=hostValue\nlet xs=[[false],[2,n]]\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer[]). ${ONE}`,
+    ],
+    // (a known difference, #1847: a `!= null` test leaves no mark on a typed host value's unknown items, so its `null`
+    // stays; the current checker says `integer[]`. The value layer's to repair; it turns to `integer[]` with it)
+    [
+      "let n:integer?=hostValue\nif n != null {\nlet xs=[[false],[2,n]]\n}\nexit\n",
+      `This list mixes a list (boolean[]) and a list (integer?[]). ${ONE}`,
+    ],
+    // (a scalar element is its own leaf: its `or null` named, as the checker does)
+    [
+      "let b=[1,null]\nlet xs=[false,b[0]]\nexit\n",
+      "This list mixes true or false (boolean) and a whole number (integer) or null. A list holds one type. To allow " +
+        "both, declare it as 'let xs: (boolean | integer | null)[] =[false,b[0]]'.",
+    ],
+    // (no null: plain)
+    [
+      'let b:string[]=["x"]\nlet xs=[[1],b]\nexit\n',
+      `This list mixes a list (integer[]) and a list (string[]). ${ONE}`,
+    ],
+    [
+      'let b:string?="x"\nlet xs=[1,b]\nexit\n',
+      "This list mixes a whole number (integer) and text (string). A list holds one type. To allow both, declare " +
+        "it as 'let xs: (integer | string)[] =[1,b]'.",
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+});
