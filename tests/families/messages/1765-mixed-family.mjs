@@ -1,0 +1,85 @@
+// #1765's generated mixed-list family, the full product (#1789, the lead's family rule after Codex r9–r11 and Astra r2;
+// the owner's test-cost rule moved it out of CI). A whole-number side two or three lists deep against its text twin:
+// its `null` at no layer, at each layer or at the leaf; at the element or any layer its value carried (`take`, an index,
+// a `get` default, an `otherwise`'s operand or fallback, a property, a join), or a copy (narrowed, maybe null, held in
+// an inferred one, a typed host value plain, tested by `is` or `!= null` or stored again, an `otherwise` of a copy);
+// the pair as list elements, object properties or the operands of `+`; both orders. A case's name is its dimensions:
+// `d<depth>/n<null layer>/<kind>@<layer>/<position>/<first|later>`, which `tests/type-core-mixed-family.test.ts` samples.
+const CARRIERS = {
+  take: (value) => `(${value}).take(9)`,
+  index: (value) => `[${value}][0]`,
+  get: (value) => `[].get(0, default: ${value})`,
+  operand: (value) => `(${value} otherwise null)`,
+  fallback: (value) => `(null otherwise ${value})`,
+  property: (value) => `{p:${value}}.p`,
+  join: (value) => `(${value})+[]`,
+};
+// (a copy: its written type's `?`, its value, any statement after it, the block around the pair, and its read)
+const COPIES = {
+  narrowed: (list) => ({ value: list, read: "c" }),
+  maybe: (list) => ({ value: list, after: "if hostValue == 1 { c=null }\n", read: "c" }),
+  held: (list) => ({ value: list, after: "let h={p:c}\n", read: "h.p" }),
+  host: () => ({ value: "hostValue", read: "c" }),
+  sure: () => ({ value: "hostValue", sure: true, read: "c" }),
+  is: (_, type) => ({ value: "hostValue", block: [`if c is ${type} {\n`, "}\n"], read: "c" }),
+  notNull: () => ({ value: "hostValue", block: ["if c != null {\n", "}\n"], read: "c" }),
+  invalidated: () => ({
+    value: "hostValue",
+    block: ["if c != null {\nc=hostValue\n", "}\n"],
+    read: "c",
+  }),
+  nullOr: (list) => ({ value: "null", read: `(c otherwise ${list})` }),
+  maybeOr: (list) => ({
+    value: list,
+    after: "if hostValue == 1 { c=null }\n",
+    read: `(c otherwise ${list})`,
+  }),
+  orNull: (list) => ({ value: list, read: "(c otherwise null)" }),
+  hostOrNull: () => ({ value: "hostValue", read: "(c otherwise null)" }),
+};
+const KINDS = ["plain", ...Object.keys(CARRIERS), ...Object.keys(COPIES)];
+const POSITIONS = {
+  element: (a, b) => `let xs=[${a},${b}]`,
+  property: (a, b) => `let xs=[{f:${a}},{f:${b}}]`,
+  join: (a, b) => `let xs=[${a}]+[${b}]`,
+};
+
+function side(leaf, depth, nullAt, at, kind, before, block) {
+  const type = (layer) =>
+    layer === depth
+      ? leaf === "1"
+        ? "integer"
+        : "string"
+      : `${type(layer + 1)}${nullAt === layer + 1 ? "?" : ""}[]`;
+  const build = (layer) => {
+    if (layer === depth) return leaf;
+    const list = `[${build(layer + 1)}${nullAt === layer + 1 ? ",null" : ""}]`;
+    if (at !== layer) return list;
+    if (kind in CARRIERS) return CARRIERS[kind](list);
+    const copy = COPIES[kind](list, type(layer));
+    before.push(`let c:${type(layer)}${copy.sure ? "" : "?"}=${copy.value}\n${copy.after ?? ""}`);
+    if (copy.block !== undefined) block.push(...copy.block);
+    return copy.read;
+  };
+  return build(0);
+}
+
+export const cases = [];
+for (const depth of [2, 3])
+  for (let nullAt = 0; nullAt <= depth; nullAt += 1)
+    for (let at = -1; at < depth; at += 1)
+      for (const kind of at < 0 ? ["plain"] : KINDS.slice(1))
+        for (const [position, make] of Object.entries(POSITIONS))
+          for (const later of [false, true]) {
+            const before = [];
+            const block = [];
+            const a = side("1", depth, nullAt, at, kind, before, block);
+            const b = side('"x"', depth, 0, -1, "plain", [], []);
+            const pair = later ? make(b, a) : make(a, b);
+            cases.push([
+              `d${depth}/n${nullAt}/${kind}@${at}/${position}/${later ? "later" : "first"}`,
+              `${before.join("")}${block[0] ?? ""}${pair}\n${block[1] ?? ""}exit\n`,
+            ]);
+          }
+export const globals = ["hostValue"];
+export const recorded = { commands: [], sources: 0, sha256: "" };

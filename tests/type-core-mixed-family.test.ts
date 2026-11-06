@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import { compileProject } from "../src/compiler.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
@@ -7,171 +9,102 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
 import { inMode, MODES, sentences } from "./helpers/type-core-oracles.js";
 
 /**
- * #1765's invariant (the lead's family rule on #1789, after Codex r9–r11 and Astra r2): a mixed-list error's type text
- * equals the current checker's first sentence across a generated family of the sides it composes. One side is a
- * literal of whole numbers two or three lists deep, the other its text twin. The whole-number side varies:
- * - its `null` at no layer, at each layer between the element and the leaf, or at the leaf;
- * - at the element or any layer, its value carried: `take`, an index, a `get` default, an `otherwise`'s operand or
- *   fallback, a property, a join, a written copy narrowed by its value or one that may be null, or a narrowed copy held
- *   in an inferred one (`h={p:c}`, read as `h.p`), a typed host value (its type nullable or not), tested by `is` or
- *   `!= null`, or tested and then stored again, or an `otherwise` whose operand is such a copy (proved null, maybe null,
- *   narrowed, host-assigned) and whose fallback is the layer's value or `null`;
- * - the pair as list elements, object properties, or the operands of `+`;
- * - in both orders and four modes.
- * The modes agree on every source. Where both checkers report the error, the first sentences are equal, except the
- * inherited classes below, each the work of its issue:
- * - the later element's own or leaf `null`, #1790 (#1819, stacked on this);
- * - the earliest element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
+ * #1765's invariant (the lead's family rule on #1789, after Codex r9–r11 and Astra r2), sampled as the owner's
+ * test-cost rule asks. The full product is `tests/families/messages/1765-mixed-family.mjs` (run on the queue):
+ * - a whole-number side two or three lists deep against its text twin;
+ * - its `null` at no layer, at a layer or at the leaf;
+ * - at the element or a layer its value carried, or a copy (narrowed, maybe null, held, typed host values tested or
+ *   not, an `otherwise` of a copy);
+ * - the pair as elements, properties or `+` operands;
+ * - both orders.
+ * Here, one case per carrier kind, position and order, with the depth, the null's layer and the carried layer turned
+ * through their boundaries (the shallow and the deep side, the element and the deepest layer, no null, a layer's, the
+ * leaf's), in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
+ * the inherited classes, each its issue's work:
+ * - the later element's leaf `null`, #1790 (#1819, stacked on this);
+ * - an element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
  * - a typed host value under `!= null`, which leaves no mark on its unknown items, #1847.
  * A source only one checker reports on is outside the candidate slice there and is not compared.
  */
-type Copy =
-  | "narrowed"
-  | "maybe"
-  | "held"
-  | "host"
-  | "sure"
-  | "is"
-  | "notNull"
-  | "invalidated"
-  | "nullOr"
-  | "maybeOr"
-  | "orNull"
-  | "hostOrNull";
-// (an `otherwise` whose operand is a copy: proved null, maybe null, narrowed or host-assigned, its fallback the layer's
-// value or `null`)
-const OTHERWISE: Readonly<Record<string, (list: string) => readonly [string, string]>> = {
-  nullOr: (list) => ["null", `(c otherwise ${list})`],
-  maybeOr: (list) => [`${list}\nif hostValue == 1 { c=null }`, `(c otherwise ${list})`],
-  orNull: (list) => [list, "(c otherwise null)"],
-  hostOrNull: () => ["hostValue", "(c otherwise null)"],
-};
-const WRAPS: Readonly<Record<string, ((value: string) => string) | Copy>> = {
-  take: (value) => `(${value}).take(9)`,
-  index: (value) => `[${value}][0]`,
-  get: (value) => `[].get(0, default: ${value})`,
-  operand: (value) => `(${value} otherwise null)`,
-  fallback: (value) => `(null otherwise ${value})`,
-  property: (value) => `{p:${value}}.p`,
-  join: (value) => `(${value})+[]`,
-  narrowed: "narrowed",
-  maybe: "maybe",
-  held: "held",
-  host: "host",
-  sure: "sure",
-  is: "is",
-  notNull: "notNull",
-  invalidated: "invalidated",
-  nullOr: "nullOr",
-  maybeOr: "maybeOr",
-  orNull: "orNull",
-  hostOrNull: "hostOrNull",
-};
-const POSITIONS: Readonly<Record<string, (a: string, b: string) => string>> = {
-  element: (a, b) => `let xs=[${a},${b}]`,
-  property: (a, b) => `let xs=[{f:${a}},{f:${b}}]`,
-  join: (a, b) => `let xs=[${a}]+[${b}]`,
-};
 
-interface Row {
-  readonly source: string;
+interface Dimensions {
   readonly depth: number;
   readonly nullAt: number;
-  readonly wrapAt: number;
-  readonly wrap: string;
+  readonly kind: string;
+  readonly at: number;
+  readonly position: string;
   readonly later: boolean;
 }
 
-// (a copy's declaration, and the block a test or a later store wraps the pair in)
-const HOSTED: Readonly<Record<string, readonly [string, string]>> = {
-  is: ["if c is T {\n", "}\n"],
-  notNull: ["if c != null {\n", "}\n"],
-  invalidated: ["if c != null {\nc=hostValue\n", "}\n"],
-};
-
-function side(
-  leaf: string,
-  depth: number,
-  nullAt: number,
-  wrapAt: number,
-  wrap: string,
-  declarations: string[],
-  block: string[],
-): string {
-  const type = (at: number): string =>
-    at === depth
-      ? leaf === "1"
-        ? "integer"
-        : "string"
-      : `${type(at + 1)}${nullAt === at + 1 ? "?" : ""}[]`;
-  const build = (at: number): string => {
-    if (at === depth) return leaf;
-    const list = `[${build(at + 1)}${nullAt === at + 1 ? ",null" : ""}]`;
-    if (wrapAt !== at) return list;
-    const made = WRAPS[wrap]!;
-    if (typeof made === "function") return made(list);
-    const tree = OTHERWISE[made];
-    if (tree !== undefined) {
-      const [value, read] = tree(list);
-      declarations.push(`let c:${type(at)}?=${value}\n`);
-      return read;
-    }
-    const written = `${type(at)}${made === "sure" ? "" : "?"}`;
-    const value = made === "narrowed" || made === "maybe" || made === "held" ? list : "hostValue";
-    declarations.push(
-      `let c:${written}=${value}\n${made === "maybe" ? "if hostValue == 1 { c=null }\n" : ""}${made === "held" ? "let h={p:c}\n" : ""}`,
-    );
-    const hosted = HOSTED[made];
-    if (hosted !== undefined) block.push(hosted[0].replace("T", type(at)), hosted[1]);
-    return made === "held" ? "h.p" : "c";
-  };
-  return build(0);
+/** The family modules (the families' module contract), read where the tests run. */
+async function family<T>(name: string): Promise<T> {
+  const file = resolve(process.cwd(), `tests/families/messages/${name}`);
+  // EVIDENCE: the family modules export `cases` (name and source) and `shapes` with `sizes` (the module contract).
+  return (await import(pathToFileURL(file).href)) as T;
 }
 
-function rows(): Row[] {
-  const out: Row[] = [];
-  for (const depth of [2, 3])
-    for (let nullAt = 0; nullAt <= depth; nullAt += 1)
-      for (let wrapAt = -1; wrapAt < depth; wrapAt += 1)
-        for (const wrap of wrapAt < 0 ? [""] : Object.keys(WRAPS))
-          for (const make of Object.values(POSITIONS))
-            for (const later of [false, true]) {
-              const declarations: string[] = [];
-              const block: string[] = [];
-              const a = side("1", depth, nullAt, wrapAt, wrap, declarations, block);
-              const b = side('"x"', depth, 0, -1, "", [], []);
-              const pair = later ? make(b, a) : make(a, b);
-              out.push({
-                source: `${declarations.join("")}${block[0] ?? ""}${pair}\n${block[1] ?? ""}exit\n`,
-                depth,
-                nullAt,
-                wrapAt,
-                wrap,
-                later,
-              });
-            }
+function dimensions(name: string): Dimensions {
+  const [depth, nullAt, carried, position, order] = name.split("/");
+  const [kind, at] = carried!.split("@");
+  return {
+    depth: Number(depth!.slice(1)),
+    nullAt: Number(nullAt!.slice(1)),
+    kind: kind!,
+    at: Number(at),
+    position: position!,
+    later: order === "later",
+  };
+}
+
+// (the sample: for each kind, position and order the case whose depth, null layer and carried layer this turn picks)
+function sampled(cases: readonly (readonly [string, string])[]): (readonly [string, string])[] {
+  const kinds = [...new Set(cases.map(([name]) => dimensions(name).kind))];
+  const positions = [...new Set(cases.map(([name]) => dimensions(name).position))];
+  const out: (readonly [string, string])[] = [];
+  kinds.forEach((kind, k) =>
+    positions.forEach((position, p) =>
+      [false, true].forEach((later, o) => {
+        const depth = [2, 3][(k + p + o) % 2]!;
+        const nullAt = [0, 1, depth][(k + p + 2 * o) % 3]!;
+        const at = kind === "plain" ? -1 : [0, depth - 1][(k + o) % 2]!;
+        const found = cases.find(([name]) => {
+          const d = dimensions(name);
+          return (
+            d.kind === kind &&
+            d.position === position &&
+            d.later === later &&
+            d.depth === depth &&
+            d.nullAt === nullAt &&
+            d.at === at
+          );
+        });
+        assert.ok(found !== undefined, `${kind} ${position} ${later}`);
+        out.push(found);
+      }),
+    ),
+  );
   return out;
 }
 
-// (the inherited classes: a row whose whole-number side holds null where it is the later element's own value or leaf,
-// or the earliest element's own value)
-function inherited(row: Row): string | null {
-  const own = row.wrapAt === 0 && ["maybe", "host", "invalidated", "hostOrNull"].includes(row.wrap);
-  if (row.later && (row.nullAt === row.depth || own)) return "#1790";
-  if (!row.later && own) return "#1843";
-  if (row.wrap === "notNull") return "#1847";
+function inherited(row: Dimensions): string | null {
+  if (row.later && row.nullAt === row.depth) return "#1790";
+  if (row.at === 0 && ["maybe", "host", "invalidated", "hostOrNull"].includes(row.kind))
+    return "#1843";
+  if (row.kind === "notNull") return "#1847";
   return null;
 }
 
 const first = (messages: readonly string[]): string[] =>
   [...new Set(messages.map((message) => sentences(message)[0]!))].sort();
 
-test("a mixed-list error's type text equals the current checker's across the generated family (#1765)", () => {
+test("a mixed-list error's type text equals the current checker's across the sampled family (#1765)", async () => {
+  const { cases } = await family<{ cases: readonly (readonly [string, string])[] }>(
+    "1765-mixed-family.mjs",
+  );
   const differing: string[] = [];
   let compared = 0;
-  let exempt = 0;
-  for (const row of rows()) {
-    const files = [{ path: "main.tease", source: row.source }];
+  for (const [name, source] of sampled(cases)) {
+    const files = [{ path: "main.tease", source }];
     const current = first(
       compileProject(files, { globals: ["hostValue"] })
         .diagnostics.filter((each) => each.code === "TSV044")
@@ -183,7 +116,7 @@ test("a mixed-list error's type text equals the current checker's across the gen
         ? []
         : inMode(mode, () => {
             const { diagnostics } = analyseCore(request);
-            const text = messageSource([row.source], diagnostics);
+            const text = messageSource([source], diagnostics);
             return first(
               diagnostics
                 .filter((each) => each.code === "TSV044")
@@ -191,27 +124,28 @@ test("a mixed-list error's type text equals the current checker's across the gen
             );
           }),
     );
-    for (const each of core) assert.deepEqual(each, core[0], row.source);
+    for (const each of core) assert.deepEqual(each, core[0], name);
     if (core[0]!.length === 0 || current.length === 0) continue;
     compared += 1;
     if (JSON.stringify(core[0]) === JSON.stringify(current)) continue;
-    if (inherited(row) !== null) exempt += 1;
-    else
-      differing.push(
-        `${row.source}\n  core: ${core[0]!.join(" | ")}\n  checker: ${current.join(" | ")}`,
-      );
+    if (inherited(dimensions(name)) === null)
+      differing.push(`${name}\n  core: ${core[0]!.join(" | ")}\n  checker: ${current.join(" | ")}`);
   }
-  assert.deepEqual(differing, [], `${compared} compared, ${exempt} inherited`);
+  assert.deepEqual(differing, [], `${compared} compared`);
   assert.ok(compared > 0);
 });
 
 /**
- * #1765's invariant, its work: each carrier kind of the family, deep (a nest of dicts and lists behind it, errors at ever
- * longer paths, ×4.5 per doubling, as the nest alone grows) and wide (k wrapped elements before k disagreeing ones, ×2.5
- * per doubling), at two doublings. One mode: the four-mode growth tests in `type-core-messages.test.ts` cover the
- * evaluator's other dimensions (joins, `otherwise` chains, the wide earliest literal, the nest behind a carrier).
+ * #1765's invariant, its work: each carrier kind deep (a nest behind it, ×4.5 per doubling, as the nest alone grows) and
+ * wide (wrapped elements before as many disagreeing ones, ×2.5), at the first doubling of
+ * `tests/families/messages/1765-mixed-growth.mjs` (the second runs on the queue). One mode: the four-mode growth tests
+ * in `type-core-messages.test.ts` cover the evaluator's other dimensions.
  */
-test("a mixed-list error's layers grow linearly behind every carrier kind (#1765)", () => {
+test("a mixed-list error's layers grow linearly behind every carrier kind (#1765)", async () => {
+  const { shapes, sizes } = await family<{
+    shapes: Record<string, (size: number) => string>;
+    sizes: readonly number[];
+  }>("1765-mixed-growth.mjs");
   const total = (source: string): number => {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
@@ -219,25 +153,9 @@ test("a mixed-list error's layers grow linearly behind every carrier kind (#1765
     assert.equal(answers.budget.exhausted, null, source);
     return answers.budget.total;
   };
-  for (const [kind, made] of Object.entries(WRAPS)) {
-    if (typeof made !== "function") continue;
-    const deep = [12, 24, 48].map((n) => {
-      let first = "[1]";
-      let second = '["x"]';
-      for (let at = 0; at < n; at += 1) {
-        first = `dict {k:[${first}]}`;
-        second = `[dict {k:${second}}]`;
-      }
-      return total(`let xs=[${made(`[${first}]`)},${made(`[${second}]`)}]\nexit\n`);
-    });
-    const wide = [16, 32, 64].map((k) =>
-      total(
-        `let xs=[[${Array.from({ length: k }, (_, at) => made(`[${at}]`)).join(",")}],${Array.from({ length: k }, (_, at) => `[["s${at}"]]`).join(",")}]\nexit\n`,
-      ),
-    );
-    for (let at = 1; at < 3; at += 1) {
-      assert.ok(deep[at]! <= 4.5 * deep[at - 1]!, `${kind} deep: ${deep.join(", ")}`);
-      assert.ok(wide[at]! <= 2.5 * wide[at - 1]!, `${kind} wide: ${wide.join(", ")}`);
-    }
+  for (const [shape, make] of Object.entries(shapes)) {
+    const [small, large] = [sizes[0]!, sizes[1]!].map((size) => total(make(size)));
+    const bound = shape.startsWith("deep:") ? 4.5 : 2.5;
+    assert.ok(large! <= bound * small!, `${shape}: ${small}, ${large}`);
   }
 });

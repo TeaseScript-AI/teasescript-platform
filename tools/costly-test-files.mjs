@@ -39,6 +39,7 @@ export const costlyTestSeconds = {
   "async-timer-runtime.test.js": 10,
   "type-core-pushed-reads.test.js": 9,
   "type-core-discharge.test.js": 8,
+  "type-core-mixed-family.test.js": 6,
   "type-core-landings.test.js": 6,
   "type-core-object-presence.test.js": 6,
   "type-core-contract-descriptors.test.js": 6,
