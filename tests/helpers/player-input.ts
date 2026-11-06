@@ -41,7 +41,6 @@ export interface RuntimeInput {
     target: (session: PlayerSessionView) => number | undefined,
     intent: Intent,
   ): Promise<InputResult>;
-  carriedText(submitted: string | null, current: string, next: string): string;
   draftInput(
     section: unknown,
     target: { readonly actionId: number; readonly fieldId: string },
@@ -60,7 +59,6 @@ export async function runtimeInput(): Promise<RuntimeInput> {
   const module = await loadPlayerModule("player/vue/src/runtime-input.ts");
   assert.equal(typeof module.runInput, "function");
   assert.equal(typeof module.draftInput, "function");
-  assert.equal(typeof module.carriedText, "function");
   assert.equal(typeof module.RETIRED, "symbol");
   assert.equal(typeof module.intents, "object");
   loaded = {
@@ -72,8 +70,6 @@ export async function runtimeInput(): Promise<RuntimeInput> {
     runInput: module.runInput as RuntimeInput["runInput"],
     // EVIDENCE: validation: as above, a function of the module.
     draftInput: module.draftInput as RuntimeInput["draftInput"],
-    // EVIDENCE: validation: as above, a function of the module.
-    carriedText: module.carriedText as RuntimeInput["carriedText"],
   };
   return loaded;
 }

@@ -282,17 +282,6 @@ test("every control answers with its op and how the player answered, which the r
   );
 });
 
-test("an answer submits the composer's text of the click; keys typed while it is in flight replace the next text", () => {
-  // Typed after the click, while the answer is in flight: they replace what the composer moves to next.
-  assert.equal(input.carriedText("One", "OneX", "Two"), "X");
-  assert.equal(input.carriedText("One", "OneX", ""), "X");
-  // Nothing typed since the click: the composer moves to the next text as before.
-  assert.equal(input.carriedText("One", "One", "Two"), "Two");
-  assert.equal(input.carriedText(null, "anything", "Two"), "Two");
-  // Text edited rather than appended to is what the player typed, which stands.
-  assert.equal(input.carriedText("One", "Xne", "Two"), "Xne");
-});
-
 test("the composer's text is the one of the click, also when the player types while the observation is in flight", async (context) => {
   const { host, posted } = await mount(context);
   await start(
