@@ -11,7 +11,6 @@ import {
 import {
   activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
   submitPlayerRuntimeComposer as rawSubmitPlayerRuntimeComposer,
-  type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
@@ -20,6 +19,7 @@ import { createLocalScriptStorage, type ScriptStorageProvider } from "../player/
 import type { InstructionPlan } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { answerWith, type Intent } from "./helpers/player-input.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
 
 // A kept session or saved value names captured media only once its bytes are in the current destination (#1861): a
@@ -43,10 +43,7 @@ interface Host {
       filters: { types: readonly string[] | null; mime: readonly string[] | null },
     ): Promise<{ readonly reference: string } | { readonly message: string }>;
   };
-  readonly imageCapture: {
-    choose(reference: string): boolean;
-    use(session: PlayerRuntimeSession): PlayerRuntimeControlResult | null;
-  };
+  readonly imageCapture: { choose(reference: string): boolean; answer(input: "button"): Intent };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepareScript(
@@ -55,6 +52,7 @@ interface Host {
   ): Promise<void>;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
+  readonly inputSection: unknown;
   setDebugMode(enabled: boolean): void;
   resolveAsset(path: string): string | null;
   savedPhoto(reference: string): { readonly state: string };
@@ -259,11 +257,8 @@ async function answerImage(host: Host): Promise<string> {
   const stored = await host.images.store(new File([PNG], "photo.png"), { types: null, mime: null });
   assert.ok("reference" in stored);
   assert.equal(host.imageCapture.choose(stored.reference), true);
-  const used = onHost((held: PlayerRuntimeSession) => host.imageCapture.use(held))(
-    host.session.value!,
-  );
-  assert.equal(used?.outcome.kind, "completed");
-  host.update(used!.session);
+  const used = await answerWith(host, host.imageCapture.answer("button"));
+  assert.equal(used.outcome?.kind, "completed");
   return stored.reference;
 }
 
