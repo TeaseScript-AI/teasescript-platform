@@ -128,7 +128,8 @@ test("the objects query names a read's missing writer as the read does, wherever
           const label = `${shape}, k ${k}, absent ${absent}, ${JSON.stringify(mode)}`;
           let covered = 0;
           for (const pass of passesOf(source, mode)) {
-            const result = compared(pass);
+            // (asked in the analysis's own mode: its sharing and order)
+            const result = inMode(mode, () => compared(pass));
             assert.deepEqual(result.differences, [], label);
             covered += result.covered;
           }
@@ -142,7 +143,7 @@ test("the objects query covers each family's group members at the path its reads
   for (const shape of SHAPES) {
     const source = family(shape, 4, true);
     const [pass] = passesOf(source, MODES[0]!);
-    const { at, differences } = compared(pass!);
+    const { at, differences } = inMode(MODES[0]!, () => compared(pass!));
     assert.deepEqual(differences, []);
     const member = shape === "different-steps" ? /:a\.p$|:b\.p$/ : /:p$/;
     assert.ok(
