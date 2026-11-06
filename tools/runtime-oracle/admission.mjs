@@ -1,14 +1,17 @@
-// Which files a runtime-oracle root may load or certify (docs/TESTING.md "Runtime pipeline oracle"). One function,
-// `admit`, decides it by a file's real location, never by the shape of a path it was reached through: the run's resolve
-// hook, the check of a root's built and certified files, and the seal all ask it. A root admits Node's built-ins, its
-// own certified files where they really are inside its canonical directory, and the files of the packages its own
-// lockfile installs.
+// Which files a runtime-oracle root may load or certify (docs/TESTING.md "Runtime pipeline oracle"). One classifier,
+// `classify`, decides by a file's real location, and every site accepts from it: a load (the run's resolve hook)
+// accepts a built-in, a certified file or a locked package's file; certification (a root's check before use, and the
+// seal) accepts only certified files. A root's declarations are validated before they count, so a discovered closure
+// proposes certified files and never authorizes them. Provenance (which bytes) is materialize.mjs's, by exact-SHA
+// acquisition, fresh seals and hashes; no location rule proves it.
 
 import fs from "node:fs";
+import { isBuiltin } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const within = (directory, file) => file.startsWith(directory + path.sep);
+const segments = (relative) => relative.split(/[\\/]/u);
 
 /**
  * The lockfile key of `file`, a real path under `dependencies` (the real path of a root's `node_modules`): the whole
@@ -64,46 +67,66 @@ export function lockedPackages(root) {
 }
 
 /**
- * The inventory of `root`: its canonical directory, the files it certifies (`certified`, paths relative to `root`) where
- * they must really be, and its locked packages. A certified file is admitted only at its place inside the canonical
- * directory, so a file reached through a link to elsewhere is not the root's.
+ * Whether the real path `file` is the root's own: strictly inside its canonical directory, outside its dependency
+ * directory, and with no `node_modules` segment on the way, so that no package directory anywhere in the root (also
+ * one under `dist/`) is the root's own.
  */
-export function inventory(root, certified) {
-  const canonical = fs.realpathSync(root);
-  const files = new Set(certified.map((file) => path.join(canonical, file)));
-  return { root: canonical, files, ...lockedPackages(root) };
+function own(rootInventory, file) {
+  if (!within(rootInventory.root, file)) return false;
+  if (rootInventory.dependencies !== null && within(rootInventory.dependencies, file)) return false;
+  return !segments(path.relative(rootInventory.root, file)).includes("node_modules");
 }
 
 /**
- * Whether a root with `rootInventory` may load or certify the file at `realFile` (a real path): the one decision every
- * check uses. Returns what admits it, or `null`.
+ * The inventory of `root`: its canonical directory, its locked packages, and the files it declares certified
+ * (`declared`, paths relative to `root`). Every declaration is validated before it counts: it is relative and has no
+ * `..`, and its real path is a file of the root's own (`own`), so a link out of the root never counts. Each is bound to
+ * its real path. Throws naming the first that is not, so a declaration can never widen what the root admits.
  */
-export function admit(rootInventory, realFile) {
-  if (rootInventory.files.has(realFile)) return "certified";
-  if (rootInventory.dependencies === null) return null;
-  const owner = ownerKey(realFile, rootInventory.dependencies);
-  return owner !== null && rootInventory.admitted.has(owner) ? `package ${owner}` : null;
+export function inventory(root, declared) {
+  const canonical = fs.realpathSync(root);
+  const base = { root: canonical, ...lockedPackages(root) };
+  const files = new Set();
+  for (const file of declared) {
+    const parts = segments(file);
+    if (path.isAbsolute(file) || parts.includes(".."))
+      throw new Error(`${canonical}: the declared file '${file}' is not a root path`);
+    const at = path.join(canonical, file);
+    let real;
+    try {
+      real = fs.realpathSync(at);
+    } catch {
+      throw new Error(`${canonical}: the declared file '${file}' does not exist`);
+    }
+    if (!own(base, real))
+      throw new Error(
+        `${canonical}: the declared file '${file}' is not a file of the root's own (it is ${real})`,
+      );
+    files.add(real);
+  }
+  return { ...base, files };
 }
 
-/** Whether a module URL resolves to something `rootInventory` admits: a built-in, or an admitted real file. */
+/**
+ * What the file at the real path `realFile` is to a root with `rootInventory`: `"certified"` (one of its own declared
+ * files), `"package <key>"` (a file of a package its lockfile installs), or `null`.
+ */
+export function classify(rootInventory, realFile) {
+  if (rootInventory.dependencies !== null && within(rootInventory.dependencies, realFile)) {
+    const owner = ownerKey(realFile, rootInventory.dependencies);
+    return owner !== null && rootInventory.admitted.has(owner) ? `package ${owner}` : null;
+  }
+  // `files` holds only validated declarations, each a file of the root's own (`inventory`).
+  return rootInventory.files.has(realFile) ? "certified" : null;
+}
+
+/** Whether a load of `url` is admitted: a genuine Node built-in, or a real file that `classify` admits. */
 export function admitsUrl(rootInventory, url) {
-  if (url.startsWith("node:")) return true;
+  if (url.startsWith("node:")) return isBuiltin(url);
   if (!url.startsWith("file:")) return false;
   try {
-    return admit(rootInventory, fs.realpathSync(fileURLToPath(url))) !== null;
+    return classify(rootInventory, fs.realpathSync(fileURLToPath(url))) !== null;
   } catch {
     return false;
-  }
-}
-
-/**
- * Checks that every one of `certified` (relative to `root`) is really where the root says, inside its canonical
- * directory and not reached through a link: throws naming the first that is not.
- */
-export function certifyFiles(rootInventory, certified) {
-  for (const file of certified) {
-    const real = fs.realpathSync(path.join(rootInventory.root, file));
-    if (admit(rootInventory, real) !== "certified")
-      throw new Error(`${rootInventory.root}: ${file} is not inside the root (it is ${real})`);
   }
 }

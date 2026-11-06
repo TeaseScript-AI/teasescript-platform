@@ -18,6 +18,12 @@ export interface OracleReport {
   readonly reproduced: boolean;
   readonly reproduction: readonly { readonly key: string }[];
   readonly restoreAgrees: boolean;
+  /** Each run whose restored transcript disagrees with its uninterrupted one, or threw. */
+  readonly restore: readonly {
+    readonly side: "oracle" | "candidate";
+    readonly key: string;
+    readonly kind: "disagrees" | "restore-threw";
+  }[];
   readonly identical: boolean;
   readonly mismatches: readonly { readonly key: string; readonly path: string }[];
   readonly count: number;

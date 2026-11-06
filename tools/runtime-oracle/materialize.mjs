@@ -17,7 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalJson } from "../benchmark-runtime.mjs";
-import { certifyFiles, inventory } from "./admission.mjs";
+import { inventory } from "./admission.mjs";
 import { closure, ENTRIES, sha256 } from "./closure.mjs";
 
 export const checkout = fileURLToPath(new URL("../..", import.meta.url));
@@ -144,14 +144,23 @@ function toolIdentity(root) {
 }
 
 /**
+ * The closure a seal certifies: discovered from `entries` in the freshly built `root`, and admitted only when every
+ * discovered declaration is the root's own (admission.mjs's `inventory`): discovery proposes, it never authorizes.
+ */
+export function sealedClosure(root, entries) {
+  const found = closure(root, entries);
+  inventory(root, [...Object.keys(found.output), ...Object.keys(found.sources)]);
+  return found;
+}
+
+/**
  * Checks `root` against `manifest`: its closure's sources and build inputs, its built output, and its installed
  * packages. Throws naming the first difference.
  */
 export function verify(root, manifest) {
-  // Every file the manifest certifies must really be inside the root, not reached through a link, before its bytes
-  // count; its locked packages are checked with the same inventory (admission.mjs).
-  const certified = [...Object.keys(manifest.output), ...Object.keys(manifest.closure)];
-  certifyFiles(inventory(root, certified), certified);
+  // Every file the manifest declares must be the root's own, really where it says, before its bytes count; its locked
+  // packages are checked with the same inventory (admission.mjs). Then the root's discovered closure must equal them.
+  inventory(root, [...Object.keys(manifest.output), ...Object.keys(manifest.closure)]);
   const found = closure(root, manifest.entries);
   for (const [kind, expected, actual] of [
     ["closure", manifest.closure, found.sources],
@@ -170,13 +179,22 @@ export function verify(root, manifest) {
 }
 
 /** Acquires and builds `commit` into a new root under `home`; returns its path. */
-function acquire(commit, home, expectedTree) {
-  const root = path.join(home, commit);
+/**
+ * The full SHA of `commit`, fetched first when this checkout does not have it, such as CI's shallow checkout. A commit
+ * to fetch is given by its full SHA, since a remote does not resolve an abbreviated one.
+ */
+function present(commit) {
   try {
     run("git", ["-C", checkout, "cat-file", "-e", `${commit}^{commit}`]);
   } catch {
     run("git", ["-C", checkout, "fetch", "--no-tags", "--depth=1", "origin", commit]);
   }
+  return run("git", ["-C", checkout, "rev-parse", `${commit}^{commit}`]);
+}
+
+function acquire(commit, home, expectedTree) {
+  const root = path.join(home, commit);
+  present(commit);
   const tree = run("git", ["-C", checkout, "rev-parse", `${commit}^{tree}`]);
   if (expectedTree !== null && tree !== expectedTree)
     throw new Error(`${commit} has tree ${tree}, the manifest ${expectedTree}`);
@@ -243,9 +261,9 @@ async function seal({ seal: commit, label, seam, out }) {
   if (label !== "provisional" && label !== "final")
     throw new Error("--label is provisional or final");
   if (label === "final" && seam === null) throw new Error("a final seal names its --seam");
-  const full = run("git", ["-C", checkout, "rev-parse", `${commit}^{commit}`]);
+  const full = present(commit);
   const { root, tree } = acquire(full, oracleHome(), null);
-  const found = closure(root, ENTRIES);
+  const found = sealedClosure(root, ENTRIES);
   const casesFile = path.join(checkout, "tools", "runtime-oracle", "cases.json");
   const lockfile = fs.readFileSync(path.join(root, "package-lock.json"));
   const manifest = {
@@ -265,8 +283,6 @@ async function seal({ seal: commit, label, seam, out }) {
     formats: null,
     results: {},
   };
-  const certified = [...Object.keys(found.output), ...Object.keys(found.sources)];
-  certifyFiles(inventory(root, certified), certified);
   const ran = runRoot(root, Object.keys(found.output), casesFile);
   manifest.formats = ran.formats;
   manifest.results = ran.digests;

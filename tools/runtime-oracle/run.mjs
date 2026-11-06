@@ -105,7 +105,7 @@ function transcript(plan, fresh, restoring) {
   const cut = (kind, result) => {
     instructions += result.instructionsExecuted;
     const snapshot = session.exportSnapshot();
-    cuts.push({
+    const record = {
       kind,
       instructions,
       status: snapshot.status,
@@ -114,11 +114,16 @@ function transcript(plan, fresh, restoring) {
       events: result.events.length,
       eventsDigest: eventsDigest(result.events),
       stateDigest: stateDigest(snapshot),
-    });
+    };
+    cuts.push(record);
     if (restoring) {
       const checkpoint = api.serializeCheckpoint(session.exportCheckpoint());
       checkpoints.push(sha256(checkpoint));
       session = api.deserializeRuntimeSession(checkpoint);
+      // The restored state itself, observed at once, also at the last cut, where nothing runs after it. A restore that
+      // changed it records what it restored, which the uninterrupted transcript never has.
+      const restored = stateDigest(session.exportSnapshot());
+      if (restored !== record.stateDigest) record.restoredStateDigest = restored;
     }
     return snapshot;
   };
@@ -144,7 +149,14 @@ function transcript(plan, fresh, restoring) {
  */
 function record(plan, fresh) {
   const { cuts, end } = transcript(plan, fresh, false);
-  return { cuts, end, restored: transcript(plan, fresh, true) };
+  // A restored run that throws is recorded as such, so the within-build check fails it as its own class.
+  let restored;
+  try {
+    restored = transcript(plan, fresh, true);
+  } catch (error) {
+    restored = { threw: String(error?.message ?? error) };
+  }
+  return { cuts, end, restored };
 }
 
 /** `options.timed` CPU samples of `plan`'s uninterrupted transcript, each checked against `untimed`. */

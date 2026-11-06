@@ -83,20 +83,26 @@ export function compare({
     casesFile,
     { replace: replace.candidate ?? [], only, timed },
   );
-  // Within each build first: every run restored at every cut agrees with the same run uninterrupted.
+  // Within each build first: every run restored at every cut agrees with the same run uninterrupted. A restored run
+  // that threw is a failure of its own class, `restore-threw`; a run whose uninterrupted transcript threw has no
+  // restored run, and its throw is compared across the builds.
   const restore = [];
   for (const [side, report] of [
     ["oracle", oracle],
     ["candidate", candidateRun],
   ])
     for (const [key, value] of Object.entries(report.results))
-      for (const run of value.runs ?? [])
-        if (
-          run.threw === undefined &&
+      for (const run of value.runs ?? []) {
+        if (run.threw !== undefined) continue;
+        const where = { side, key, label: run.label };
+        if (run.restored.threw !== undefined)
+          restore.push({ ...where, kind: "restore-threw", error: run.restored.threw });
+        else if (
           canonicalJson({ cuts: run.cuts, end: run.end }) !==
-            canonicalJson({ cuts: run.restored.cuts, end: run.restored.end })
+          canonicalJson({ cuts: run.restored.cuts, end: run.restored.end })
         )
-          restore.push({ side, key, label: run.label });
+          restore.push({ ...where, kind: "disagrees" });
+      }
   const mismatches = [];
   for (const key of Object.keys({ ...oracle.results, ...candidateRun.results })) {
     if (oracle.digests[key] === candidateRun.digests[key]) continue;
