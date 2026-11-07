@@ -130,7 +130,7 @@ function showSampleNotices() {
 function clearSampleNotices() {
   for (const notice of sampleNotices) player.withdrawNotice(notice.key);
 }
-// A scenario's factory, which the engine's host runs until L5i starts it through a source `prepare`.
+// A scenario's factory, which the engine's host runs; no source `prepare` starts it.
 type ScenarioStart = Extract<PlayerSessionStart, (recording: never) => unknown>;
 // The zone, presentation and clock of the Start's click (`temporalCapture`).
 const startOptions = (recording: Parameters<ScenarioStart>[0]) => ({

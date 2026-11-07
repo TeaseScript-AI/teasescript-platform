@@ -13,8 +13,8 @@ import type { PlayerSessionOptions } from "../usePlayerSession.js";
 
 /*
  * The services that answer a script's requests in service sections, moved from `usePlayerSession` unchanged: photo
- * capture, the file stores, and the locks with their dialog. The lock code's preload stays in the composable until L5i.7
- * replaces its `heldPlan` read.
+ * capture, the file stores, and the locks with their dialog. The lock code's preload stays in the composable, which
+ * reads `heldPlan` for it.
  */
 
 /** What the session services need from the Player's session composable. */
