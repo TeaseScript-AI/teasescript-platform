@@ -28,9 +28,11 @@ export interface PersistenceOwnership {
   /**
    * Checks once, before a synchronous `apply`, then runs it; no rollback. A stale operation ends like `check`, and
    * `apply` does not run. `apply` must not await: what it did after its first await would escape the check. Its type
-   * refuses a thenable result, which also throws at run time.
+   * refuses a result that is or may be a thenable (a union with one included), and a thenable also throws at run time.
    */
-  commit<T>(apply: () => T & (T extends PromiseLike<unknown> ? never : unknown)): T;
+  commit<T>(
+    apply: () => T & ([Extract<T, PromiseLike<unknown>>] extends [never] ? unknown : never),
+  ): T;
   /** Makes `call` while the operation owns them, such as a request to the host; else ends it like `check`. */
   admit<T>(call: () => T): T;
   /** The saved values of `provider`, each call admitted. */

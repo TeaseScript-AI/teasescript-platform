@@ -963,6 +963,8 @@ test("an operation's handles admit each call while it is current, and none once 
   assert.throws(() => ownership.commit(() => later), TypeError);
   // @ts-expect-error -- nor an async one.
   assert.throws(() => ownership.commit(async () => {}), TypeError);
+  // @ts-expect-error -- nor one that may return a thenable.
+  assert.throws(() => ownership.commit(() => (later !== null ? later : 1)), TypeError);
   const reached: string[] = [];
   let finish = () => {};
   const values = ownership.values({
