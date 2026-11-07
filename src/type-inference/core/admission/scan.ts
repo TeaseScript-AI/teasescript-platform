@@ -38,7 +38,7 @@ import type {
 } from "./model.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
 import { transferredDecider, writtenDecider } from "./transfers.js";
-import { inheritedInto, inheritedOwnAt } from "./waiting.js";
+import { inheritedInto } from "./waiting.js";
 import { compareKeys, expand, stopsOf, viaSignature } from "./walk.js";
 
 // A2's scan: the stores a path is decided from, and the earliest contribution in evaluation order that decides it.
@@ -279,7 +279,7 @@ export function* earliestDecider(
   let joinedNull = false;
   const self = admission;
   // (whether the last copy `termOf` answered reads its written type at its own level: a written copy's where no step of
-  // the asked path is left below it, an inheriting copy's as the inheritance pass recorded it, `inheritedOwnAt`, #1901)
+  // the asked path is left below it, an inheriting copy's as the inheritance pass recorded it, `inheritedInto`'s `own`, #1901)
   let ownLevel = false;
   function* termOf(stop: Stop, length: number): Inheriting<TypeTerm | null> {
     // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
@@ -290,11 +290,12 @@ export function* earliestDecider(
       at.kind === "span"
         ? at.from(length).after(stop.strip)
         : stepsAfter(stop.strip, stepsFrom(restSteps(asked), length));
+    const inherited = { value: false };
     const term =
       stop.from === null
         ? permittedAt(stop.term!, rest)
-        : yield* inheritedInto(self, stop.from, rest, into);
-    ownLevel = stop.from === null ? rest.length === 0 : inheritedOwnAt(self, stop.from, rest);
+        : yield* inheritedInto(self, stop.from, rest, into, inherited);
+    ownLevel = stop.from === null ? rest.length === 0 : inherited.value;
     // (a written copy an operation carries decides only where the operation selects it: an operand it never gives is
     // no copy of the place, while a selected copy keeps its whole written type, A4)
     return term !== null && (stop.via === null || selects(self, stop)) ? term : null;

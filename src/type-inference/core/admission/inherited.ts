@@ -23,7 +23,7 @@ import { landed, landedKey, passThrough, passThroughKey } from "./landings.js";
 import type { Frontier, Inheriting, Stop, Stops, Waiting } from "./model.js";
 import { permittedAt, unrestricted } from "./permitted.js";
 import { inputsAt, inputsOf, scanAt } from "./scan.js";
-import { cycleOf, inheritedInto, inheritedOwnAt, join } from "./waiting.js";
+import { cycleOf, inheritedInto, join } from "./waiting.js";
 import { copySources, stopsOf } from "./walk.js";
 import { wholeOf } from "./eligibility.js";
 import { positions } from "../positions.js";
@@ -414,17 +414,18 @@ function* wrapped(
   }
   const rest = contract.pathSteps(frontier.rest);
   const written = writtenOf(program.place(frontier.place).kind);
+  const inherited = { value: false };
   const copied =
     written !== null
       ? permittedAt(written, rest)
       : admission.inheriting.has(frontier.place)
-        ? yield* inheritedInto(admission, frontier.place, rest, key)
+        ? yield* inheritedInto(admission, frontier.place, rest, key, inherited)
         : null;
   if (copied === null) return null;
   return {
     copied,
     nullable: typeTags(copied).includes("null") || value.items.some((item) => item.tag === "null"),
-    own: written !== null ? rest.length === 0 : inheritedOwnAt(admission, frontier.place, rest),
+    own: written !== null ? rest.length === 0 : inherited.value,
   };
 }
 
