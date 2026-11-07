@@ -154,6 +154,39 @@ When something misleads you, or would mislead the next builder:
 - Report it in your next regular message (the plan, READY, a question or a review round), one line each, with what
   you did. A separate message is only for one that blocks you or affects other work.
 
+### Code structure
+
+The code's architecture is right by construction, not repaired after someone notices. It covers:
+
+- **Ownership:** each piece of state or behavior has one owning module, and a module's folder names its owner.
+- **Direction:** dependencies run one way, without cycles.
+- **Granularity:** one job per file. A file that gains a second job is split at that seam.
+- **Folders:** grouped by feature or owner, typically 5 to 20 files, never a folder per file. A new file never lands at
+  the top level of a component that already has a folder for its concern; creating a missing folder is part of the
+  plan.
+- **Surfaces:** what a module exports is a deliberate, small interface.
+- **Names:** a file or folder name says what it owns, and no two names differ by a letter.
+
+The plan names where new code goes: its module and its folder. A change that brings a new responsibility gets its
+own module, or folder, from the start.
+
+These signals each ask, in the plan or the review, for the seam or for the reason there is none. They are not limits:
+
+- a file over 1,000 lines;
+- a pull request adding over 300 lines to one file;
+- a function over 150 lines;
+- a folder over 20 files, or a component's top level over 12.
+
+`node tools/structure-report.mjs` lists them, with `--diff <base>` for what a change adds.
+
+Moving or splitting files is its own pull request on the light route. It changes no behavior, and its build output
+is byte-identical where the build allows it. The coordinator schedules it between packages, so that no open pull
+request's hunks collide. A feature pull request never moves files another open pull request changes.
+
+Report a structure concern as you report confusing code: one line in your next regular message, with what you did.
+Each pull request can be reasonable while the whole drifts, so the coordinator also checks the whole
+([`ORCHESTRATION.md`](../ORCHESTRATION.md#structure)).
+
 ## Self-review and assigned review
 
 Before handoff, the implementer reviews the exact final diff. For each assigned review or re-review,
@@ -174,7 +207,8 @@ native failure. On changes that encode a language rule or predict runtime behavi
 lens above. On everything the change adds or touches, apply the [clarity lens](#code-that-does-not-mislead): a
 name, type, comment or document that promises a guarantee the code does not give, or hides one it needs, is a
 finding even when today's callers are correct. It blocks only when a caller is wrong today; otherwise it is fixed in
-the pull request when small, or filed. Escalate uncertainty that cannot be bounded through a separately assigned
+the pull request when small, or filed. Apply the [structure lens](#code-structure) the same way: new code in the
+module and folder its owner names, and each signal it raises answered. Escalate uncertainty that cannot be bounded through a separately assigned
 [`AUDIT.md`](AUDIT.md).
 
 - **Requirements and paths:** accepted behavior, scope, failures, indirect effects, and real
@@ -234,6 +268,7 @@ Non-authoritative memory aid; mark `N/A` only after considering the item.
 - [ ] Language rules reused from their one home; analyses that predict runtime behavior derive it from
   the plan or shared helpers and are tested against the runtime.
 - [ ] Nothing the change adds or touches misleads; confusing code met on the way is fixed or filed.
+- [ ] New code sits in the module and folder its owner names; each structure signal is answered.
 - [ ] Supported behavior and failures proved through real paths.
 - [ ] Tests and oracles are sound and worth their run time; negative probes used when warranted.
 - [ ] Documentation is canonical, current, consolidated, and token-efficient without semantic loss.
