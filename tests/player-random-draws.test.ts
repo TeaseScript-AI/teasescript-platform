@@ -376,6 +376,8 @@ test("a restored state waits at its draw for the picker only once input adopts i
   await settle(context);
   assert.notEqual(host.session.value?.state.randomDraw, null, "an inspected state stays as it was");
   assert.equal(await host.prepareInput(), true);
+  // The host resolves it, one reply later.
+  await settle(context);
   assert.equal(host.session.value?.state.randomDraw, null);
   assert.equal(said(host).length, 2);
 });
