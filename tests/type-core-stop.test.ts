@@ -6961,7 +6961,7 @@ test("a stopped iterable or repeat-count check stands for a lost null check only
     problems
       .filter((p) => /^(lost|standing) check /.test(p))
       .map((p) => `${p.split(" ")[0]} ${named(p.slice(p.indexOf("{")).split(" by ")[0]!)}`),
-    ["lost null-check n 40-41"],
+    ["lost null-check n 46-47"],
   );
 });
 
