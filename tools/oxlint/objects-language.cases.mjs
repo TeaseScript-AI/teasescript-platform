@@ -549,4 +549,10 @@ export const CASES = [
       "import { type WorkLedger } from '../budget.js';\nexport function f(work: WorkLedger): void { work.charge('objectSteps'); nothing.m(); }\n",
     expect: ["any", "any", "any", "retained-unresolved", "unresolved"],
   },
+  {
+    name: "v3/mixedShapes",
+    source:
+      "import { type WorkLedger } from '../budget.js';\nexport function f(work: WorkLedger): number { work.charge('objectSteps'); const xs: ({ readonly a: number } | { readonly b: string })[] = []; return xs.length; }\n",
+    expect: ["mixed-elements"],
+  },
 ];
