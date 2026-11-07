@@ -96,12 +96,23 @@ changed, that rebase changes the second item's delta, so its affected evidence r
 the changed part ([Pull requests and rebases](DEVELOPMENT-WORKFLOW.md#pull-requests-and-rebases)). This is not a stack
 and not an identity rebase. While a pull request waits on a design round, its lane builds its next item.
 
-## Structure
+## Structure and friction
 
 You own the structure of the whole: each pull request can be reasonable while the whole drifts. After each merged
 package, or at each milestone, run `node tools/structure-report.mjs --json` and compare it with the last report kept
 in the evidence (`--compare`). When a signal shows a clear seam, plan the split or the folder move as its own pull
-request, scheduled between packages, and act on the structure concerns lanes report.
+request, scheduled between packages.
+
+Triage each [friction](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#report-what-cost-a-wrong-turn) line at the end of
+the package it arrived in, or at once when it blocks a lane or keeps wasting compute:
+
+- **fixed:** the line is its record;
+- **filed:** an issue, as [`FRICTION.md`](FRICTION.md) describes;
+- **a rule:** proposed like any other rule.
+
+Your own wrong turns are lines too. Keep the triage with your state. At each structure check, add the friction
+counts: lines per class since the last check, with their dispositions, and open issues per class, against the last
+check's counts.
 
 ## Facts that cross lanes
 
