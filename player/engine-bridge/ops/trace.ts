@@ -8,6 +8,7 @@ import {
   type TracingIntent,
 } from "../player-ops.js";
 import type { BridgeOps } from "../worker-host.js";
+import { heldSession } from "./persistence.js";
 import { publishing, sessionOp } from "./session.js";
 
 /*
@@ -92,22 +93,25 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
       },
       false,
     ),
-    // A trace view of the session's latest publication, with the connection's trace. It changes and publishes nothing,
-    // so a session the Player stopped is still shown in Debug as the stop froze it.
+    // A trace view of the session's latest publication, with the connection's trace: a read (`ops/persistence.ts`),
+    // which names its session and changes and publishes nothing, so a session the Player stopped is still shown in
+    // Debug as the stop froze it.
     debugView: {
-      ...sessionOp(
-        (args) => isRecord(args) && exactly(args, ["request"]) && isViewRequest(args.request),
-        (held, args) => {
-          // EVIDENCE: validation: checkArguments accepted `request` as a view request.
-          const { request } = args as { readonly request: DebugViewRequest };
-          return {
-            result: debugViewOf(held.current, context.trace, context.traceId, request),
-            view: null,
-          };
-        },
-        false,
-      ),
-      afterStop: true,
+      session: "none",
+      checkArguments: (args) =>
+        isRecord(args) &&
+        exactly(args, ["session", "request"]) &&
+        typeof args.session === "string" &&
+        isViewRequest(args.request),
+      run: (args, sessions) => {
+        // EVIDENCE: validation: checkArguments accepted `session` as an ID and `request` as a view request.
+        const { session, request } = args as {
+          readonly session: string;
+          readonly request: DebugViewRequest;
+        };
+        const held = heldSession(sessions, session);
+        return { result: debugViewOf(held.current, context.trace, context.traceId, request) };
+      },
     },
   };
 }

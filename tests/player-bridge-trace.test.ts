@@ -110,10 +110,10 @@ async function playTape(
   const record = async (op: string) => {
     let view: DebugView | null = null;
     if (traced) {
-      const first = await bridge.view<DebugView>(session, "debugView", {
+      const first = await bridge.read<DebugView>(session, "debugView", {
         request: everything(0, null),
       });
-      view = await bridge.view<DebugView>(session, "debugView", {
+      view = await bridge.read<DebugView>(session, "debugView", {
         request: everything(first.status!.epoch, newestSay(session)),
       });
       check?.(session, view);
@@ -257,7 +257,7 @@ test("a view opens the rows the player chose and shows more pages, and its copy 
   const bridge = await inProcessBridge();
   const { session } = await playTape(bridge, true);
   const ask = (trees: DebugViewRequest["trees"], openNewest = false) =>
-    bridge.view<DebugView>(session, "debugView", {
+    bridge.read<DebugView>(session, "debugView", {
       request: { ...everything(0, null), messages: { limit: 20, openNewest }, trees },
     });
   const closed = await ask({});
@@ -281,11 +281,11 @@ test("a stopped session is still viewed as its stop froze it, and other requests
   await onBoth(async (bridge, name) => {
     await bridge.client.request("debugTracing", { on: true, intent: 1 });
     const session = await bridge.start(await prepared(bridge), START, false);
-    const before = await bridge.view<DebugView>(session, "debugView", {
+    const before = await bridge.read<DebugView>(session, "debugView", {
       request: everything(0, null),
     });
     await bridge.halt(session);
-    const after = await bridge.view<DebugView>(session, "debugView", {
+    const after = await bridge.read<DebugView>(session, "debugView", {
       request: everything(0, null),
     });
     assert.deepEqual(after, before, name);
@@ -311,7 +311,7 @@ test("tracing off drops the trace, on makes a new one, and Debug mode is the scr
     );
     let session = await bridge.start(await prepared(bridge), START, false);
     assert.equal(
-      (await bridge.view<DebugView>(session, "debugView", { request: everything(0, null) }))
+      (await bridge.read<DebugView>(session, "debugView", { request: everything(0, null) }))
         .traceId,
       1,
     );
@@ -320,7 +320,7 @@ test("tracing off drops the trace, on makes a new one, and Debug mode is the scr
       { traceId: null },
     );
     assert.equal(
-      (await bridge.view<DebugView>(session, "debugView", { request: everything(0, null) })).status,
+      (await bridge.read<DebugView>(session, "debugView", { request: everything(0, null) })).status,
       null,
     );
     assert.deepEqual(
@@ -334,7 +334,7 @@ test("tracing off drops the trace, on makes a new one, and Debug mode is the scr
     assert.equal(set.kind, "set", name);
     assert.equal(session.state.debugMode, true);
     // The new trace attached at that operation.
-    const view = await bridge.view<DebugView>(session, "debugView", {
+    const view = await bridge.read<DebugView>(session, "debugView", {
       request: everything(0, null),
     });
     assert.equal(view.status?.origin, "attach", name);
@@ -370,10 +370,37 @@ test("malformed trace arguments are refused before anything runs", async () => {
     { ...good, more: 1 },
   ])
     await assert.rejects(
-      bridge.view(session, "debugView", { request }),
+      bridge.read(session, "debugView", { request }),
       refusedAs("arguments"),
       JSON.stringify(request),
     );
+  for (const args of [{ request: good }, { session: 1, request: good }])
+    await assert.rejects(bridge.client.request("debugView", args), refusedAs("arguments"));
+});
+
+// The view is a read (`PlayerBridge.read`): after a Player error stop it shows the stop line, byte for byte as before
+// the stop, which the session's own ops cannot pass.
+test("a view after a Player error stop is the stop line's, byte for byte", async () => {
+  await onBoth(async (bridge, name) => {
+    await bridge.client.request("debugTracing", { on: true, intent: 1 });
+    const session = await bridge.start(await prepared(bridge), START, false);
+    await bridge.request(session, "observeTime", { atMs: 1_000, media: [] });
+    const shown = bridge.latest(session)!;
+    const before = JSON.stringify(
+      await bridge.read<DebugView>(shown, "debugView", { request: everything(1, null) }),
+    );
+    await bridge.halt(session);
+    const after = JSON.stringify(
+      await bridge.read<DebugView>(shown, "debugView", { request: everything(1, null) }),
+    );
+    assert.equal(after, before, name);
+    assert.notEqual(JSON.parse(after).status, null, `${name}: the stop line's trace shows`);
+    await assert.rejects(
+      bridge.request(shown, "observeTime", { atMs: 2_000, media: [] }),
+      refusedAs("halted"),
+      name,
+    );
+  });
 });
 
 test("the views in a Worker are the ones in-process", async () => {

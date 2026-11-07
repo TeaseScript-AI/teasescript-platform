@@ -425,14 +425,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const current = session.value;
     if (current === null || !debugTracing.value) return Promise.resolve(null);
     return bridgeOf(current)
-      .view<DebugView>(current, "debugView", { request })
+      .read<DebugView>(current, "debugView", { request })
       .then(
         (view) => (session.value?.lineage === current.lineage ? view : null),
         (error: unknown) => {
-          // Any other failure is the Player's error stop, as an op's failure is.
+          // A session the host released meanwhile has nothing to read; any other failure is the Player's error stop,
+          // as an op's failure is.
+          const gone = error instanceof BridgeRequestError && error.name === "SessionGoneError";
           if (
             !endsQuietly(error) &&
-            refusalCode(error) !== "session" &&
+            !gone &&
             !disposed &&
             !stopped.value &&
             session.value?.lineage === current.lineage

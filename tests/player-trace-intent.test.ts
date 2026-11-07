@@ -160,7 +160,7 @@ async function play(bridge: PlayerBridge, each: Case) {
   }
   // The trace as the newest intent says.
   const newest = intents.length - 1;
-  const view = await bridge.view<DebugView>(held, "debugView", { request: recent });
+  const view = await bridge.read<DebugView>(held, "debugView", { request: recent });
   assert.equal(
     view.status !== null,
     intents[newest]!.on,
