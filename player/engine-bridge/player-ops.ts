@@ -143,8 +143,9 @@ export interface PlayerOpsContext {
 }
 
 /**
- * One tracing change of the Player: on or off, with its serial, which the Player counts up with each change. Every op
- * that sets the connection's trace carries one, through whichever channel it arrives.
+ * One tracing change a live Player sent: on or off, with its serial, which the connection counts up across the Players
+ * that use it (`PlayerBridge.nextTracingIntent`). Every op that sets the connection's trace carries one, through
+ * whichever channel it arrives.
  */
 export interface TracingIntent {
   readonly on: boolean;

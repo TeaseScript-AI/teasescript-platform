@@ -61,6 +61,7 @@ import {
 } from "../../engine-bridge/in-process.js";
 import type { CheckpointCapture } from "../../engine-bridge/ops/persistence.js";
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
+import type { TracingIntent } from "../../engine-bridge/player-ops.js";
 import {
   bridgeOf,
   endsQuietly,
@@ -159,7 +160,10 @@ const SILENCE = silence(50);
 const MEDIA_SAMPLE_MS = 100;
 
 export interface PlayerSessionOptions {
-  /** The engine's host; the in-process backend by default, until the L5 series activates the Worker. */
+  /**
+   * The engine's host; the in-process backend by default, until the L5 series activates the Worker. One live Player per
+   * bridge, which a later Player may reuse once that one ended; while another holds it, this Player never becomes ready.
+   */
   bridge?: Promise<PlayerBridge>;
   /**
    * Trusted host resolution of authored, package-relative media references (for example `sounds/bell.mp3`) to
@@ -268,16 +272,24 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The in-process backend is ready at once, so a Start within the first click needs no wait.
   let bridge: PlayerBridge | null =
     options.bridge === undefined ? createInProcessBackend(playerBuildIdentity) : null;
+  // This Player's hold on its bridge (`PlayerBridge.claim`): one live Player per bridge.
+  const claim = Symbol("Player");
+  // Once the host is reachable, and only while this Player lives: it takes the bridge, observes its loss (see
+  // `bridgeLost`), and sends its tracing setting before any Start that waits for it. A host that never became reachable,
+  // or one another Player holds, is the `bridge` promise's failure, which its own callers handle.
   const bridgeReady = (options.bridge ?? Promise.resolve(bridge!)).then((ready) => {
+    if (disposed) return ready;
+    ready.claim(claim);
     bridge = ready;
+    ready.client.onLoss(bridgeLost);
+    // An injected bridge another Player traced on; this one could send nothing to it before now.
+    if (options.bridge !== undefined && ready.traced) pendingTracing = true;
+    flushTracing(ready);
     return ready;
   });
-  // Registered once, when the host is reachable; see `bridgeLost`. A host that never became reachable is the `bridge`
-  // promise's failure, which its own callers handle.
-  bridgeReady.then(
-    (ready) => ready.client.onLoss(bridgeLost),
-    () => {},
-  );
+  bridgeReady.catch(() => {
+    pendingTracing = false;
+  });
   // The recording up to a Player error, kept for a debug export until the next Start, when Debug's rewind begins the
   // recorder anew at a restored state.
   let failureRecording: DebugRecording | null = null;
@@ -359,6 +371,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * recovered, the error stop. An intentional `terminate()` is no loss and never reaches it.
    */
   function bridgeLost(error: Error) {
+    if (disposed) return;
+    // The host's trace went with it.
+    pendingTracing = false;
+    traceId.value = null;
     reportHostError(error);
   }
   // Debug's value trace (DEBUGGER.md "Player Debug"), while Debug runs: the host holds it, as the connection's state
@@ -368,17 +384,36 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const traceId = shallowRef<number | null>(null);
   // Counts this Player's tracing changes, so a reply of an older one sets no `traceId`.
   let tracingToggles = 0;
-  // The serial of this Player's newest tracing change, from its connection (`nextTracingIntent`), which every op that
-  // sets the host's trace carries (`TracingIntent`): the host applies only the newest, whichever channel brings it.
-  let lastIntent: number | undefined;
-  /** This Player's newest tracing intent, or `undefined` before any change: the host's trace is then off. */
-  const tracingIntent = () =>
-    lastIntent === undefined ? undefined : { on: debugTracing.value, intent: lastIntent };
-  /** Asks the host for tracing `on`, with the connection's next serial. */
-  function askTracing(host: PlayerBridge, on: boolean) {
-    const intent = host.nextTracingIntent();
-    lastIntent = intent;
-    return host.client.request("debugTracing", { on, intent });
+  // Whether `debugTracing` waits to be sent, until the host is reachable. Only the latest setting goes, and only while
+  // this Player lives. A bridge a Player traced on before may still hold that Player's work in its queue: the setting
+  // then goes in any case, so that this Player's Starts carry it ahead of that work.
+  let pendingTracing = false;
+  // This Player's newest tracing intent sent, with its serial from the connection (`nextTracingIntent`), which every op
+  // that sets the host's trace carries (`TracingIntent`): the host applies only the newest, whichever channel brings it.
+  let lastIssued: TracingIntent | undefined;
+  /** This Player's newest tracing intent sent, or `undefined` before any: the host's trace is then off. */
+  const tracingIntent = () => lastIssued;
+  /** Sends tracing `on`, with the connection's next serial. */
+  function issueTracing(host: PlayerBridge, on: boolean) {
+    const intent = { on, intent: host.nextTracingIntent() };
+    lastIssued = intent;
+    return host.client.request("debugTracing", intent);
+  }
+  /** Sends the pending tracing setting, while this Player lives; its reply names the host's trace. */
+  function flushTracing(host: PlayerBridge) {
+    if (!pendingTracing || disposed) return;
+    pendingTracing = false;
+    const toggle = tracingToggles;
+    issueTracing(host, debugTracing.value).then(
+      (reply) => {
+        // EVIDENCE: validation: `debugTracing` replies from the same build with the trace it holds now.
+        const now = (reply.result as { readonly traceId: number | null }).traceId;
+        if (toggle === tracingToggles && !disposed) traceId.value = now;
+      },
+      (error: unknown) => {
+        if (!endsQuietly(error) && !disposed) reportHostError(error);
+      },
+    );
   }
   /**
    * A view of Debug's value trace for the shown session, made in the host (`debugView`, `debug-view.ts`): the reply
@@ -1117,10 +1152,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let scriptSources: ReadonlyMap<string, string> = new Map();
   let disposed = false;
   tryOnScopeDispose(() => {
-    disposed = true;
     // The trace was this Player's: it ends with it, as when the trace lived in the page, and a Player that uses the
-    // connection next begins with it off. A connection already lost takes nothing.
-    if (debugTracing.value && bridge !== null) askTracing(bridge, false).catch(() => {});
+    // connection next begins with it off. A setting not yet sent goes nowhere; a connection already lost takes nothing.
+    pendingTracing = false;
+    if (lastIssued?.on && bridge !== null) issueTracing(bridge, false).catch(() => {});
+    lastIssued = undefined;
+    bridge?.unclaim(claim);
+    disposed = true;
     supersede();
     dropPreparedPlanJson();
     unsavedPlanJson = null;
@@ -2650,12 +2688,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // before what follows (a draw's resume, Debug mode, Continue).
         await host.request(restored, "beginRecording", null);
         owned();
-        if (debugTracing.value)
-          void host
-            .request(restored, "restartTrace", { tracing: tracingIntent() })
-            .catch((error: unknown) => {
-              if (!endsQuietly(error) && !disposed && !stopped.value) reportHostError(error);
-            });
+        const tracing = tracingIntent();
+        if (tracing?.on)
+          void host.request(restored, "restartTrace", { tracing }).catch((error: unknown) => {
+            if (!endsQuietly(error) && !disposed && !stopped.value) reportHostError(error);
+          });
         let continued: PlayerSession = host.latest(restored) ?? restored;
         // A session kept while paused at a random draw goes on with its natural outcome first: until then, the engine
         // takes no other input.
@@ -3034,23 +3071,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /**
      * Turns Debug's value trace on or off, in the host. A new trace attaches to a running session at its next
      * operation, so earlier values read as not recorded; Start and Continue begin a new epoch; off drops the trace and
-     * all its history. Asked at once when the host is reachable, so a Start asked after it runs with it.
+     * all its history. Sent at once when the host is reachable, else once it is, before a Start that waits for it; an
+     * unmounted Player changes nothing.
      */
     setDebugTracing(on: boolean) {
-      if (on === debugTracing.value) return;
+      if (disposed || on === debugTracing.value) return;
       debugTracing.value = on;
       traceId.value = null;
-      const toggle = ++tracingToggles;
-      const ask = (host: PlayerBridge) =>
-        askTracing(host, on).then((reply) => {
-          // EVIDENCE: validation: `debugTracing` replies from the same build with the trace it holds now.
-          const now = (reply.result as { readonly traceId: number | null }).traceId;
-          if (toggle === tracingToggles && !disposed) traceId.value = now;
-        });
-      const answered = bridge !== null ? ask(bridge) : bridgeReady.then(ask);
-      answered.catch((error: unknown) => {
-        if (!endsQuietly(error) && !disposed) reportHostError(error);
-      });
+      tracingToggles += 1;
+      pendingTracing = true;
+      if (bridge !== null) flushTracing(bridge);
     },
     debugView,
     loadScriptStorage,

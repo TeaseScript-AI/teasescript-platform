@@ -89,6 +89,27 @@ export class PlayerBridge {
     this.#tracingIntents += 1;
     return this.#tracingIntents;
   }
+  /** Whether a Player sent a tracing change on this connection: its work may still wait in the connection's queue. */
+  get traced(): boolean {
+    return this.#tracingIntents > 0;
+  }
+  #player: symbol | null = null;
+
+  /**
+   * Takes the bridge for the live Player that `player` names (`PlayerSessionOptions.bridge`): one live Player per bridge, as the
+   * connection's one trace serves one Debug. Throws while another Player holds it.
+   */
+  claim(player: symbol): void {
+    if (this.#player !== null && this.#player !== player)
+      throw new Error(
+        "One live Player per engine bridge: this bridge already serves a Player. Reuse it once that Player ended.",
+      );
+    this.#player = player;
+  }
+  /** Gives the bridge up for the next Player, when `player` holds it. */
+  unclaim(player: symbol): void {
+    if (this.#player === player) this.#player = null;
+  }
   readonly #collected = new FinalizationRegistry<string>((id) => {
     if (this.#stores.get(id)?.deref() !== undefined) return;
     this.#stores.delete(id);

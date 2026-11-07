@@ -12,6 +12,7 @@ import type { PlayerSession } from "../player/runtime-view.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
+import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
 /*
@@ -76,35 +77,36 @@ const CASES: readonly Case[] = BACKENDS.flatMap((backend) =>
   }),
 );
 
-test("the family covers every axis value and every pair of them", () => {
+/** A case's coordinates: its backend and sequence, each position's carrier, and the position delivered first. */
+const coordinates = (each: Case): Coordinates => ({
+  backend: each.backend,
+  sequence: each.sequence,
+  ...Object.fromEntries(each.carriers.map((carrier, position) => [`carrier ${position}`, carrier])),
+  first: String(each.order[0]),
+});
+/** The feasible coordinates, enumerated apart from `CASES`: a Worker has no facade. */
+const FEASIBLE = BACKENDS.flatMap((backend) =>
+  SEQUENCE_NAMES.flatMap((sequence) => {
+    const positions = [...Array(SEQUENCES[sequence].length).keys()];
+    const carriers = CARRIERS.filter((carrier) => backend !== "worker" || carrier !== "facade");
+    return product({
+      ...Object.fromEntries(positions.map((position) => [`carrier ${position}`, [...carriers]])),
+      first: positions.map(String),
+    }).map((tuple) => ({ backend, sequence, ...tuple }));
+  }),
+);
+
+test("the family covers every feasible pair of its axes", () => {
   const names = new Set(CASES.map((each) => each.name));
   assert.equal(names.size, CASES.length, "names are unique");
-  // Pairs, derived from the names' parts: backend × sequence, and for each sequence the carrier of each position ×
-  // the position delivered first.
-  for (const backend of BACKENDS)
-    for (const sequence of SEQUENCE_NAMES)
-      assert.ok(
-        [...names].some((name) => name.startsWith(`${backend} ${sequence} `)),
-        `${backend} × ${sequence}`,
-      );
-  for (const each of CASES) {
-    const length = SEQUENCES[each.sequence].length;
-    const carriers = each.backend === "worker" ? CARRIERS.filter((c) => c !== "facade") : CARRIERS;
-    for (let position = 0; position < length; position += 1)
-      for (const carrier of carriers)
-        for (let first = 0; first < length; first += 1)
-          assert.ok(
-            CASES.some(
-              (other) =>
-                other.backend === each.backend &&
-                other.sequence === each.sequence &&
-                other.carriers[position] === carrier &&
-                other.order[0] === first,
-            ),
-            `${each.backend} ${each.sequence}: carrier ${carrier} at ${position} × first ${first}`,
-          );
-  }
+  const observed = CASES.map(coordinates);
+  assert.deepEqual(coverageGaps(FEASIBLE, observed, { tuples: true }), []);
   assert.equal(CASES.length, 3 + 18 + 162 + 2 + 8 + 48);
+  // The check fails a family that lacks a slice of carrier × first delivery.
+  const lacking = observed.filter(
+    (tuple) => !(tuple["carrier 0"] === "facade" && tuple.first === "0"),
+  );
+  assert.ok(coverageGaps(FEASIBLE, lacking).some((gap) => gap.startsWith("missing pair")));
 });
 
 async function prepared(bridge: PlayerBridge): Promise<string> {
