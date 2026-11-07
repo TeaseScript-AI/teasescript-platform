@@ -50,6 +50,17 @@ export interface TraceEntry {
   readonly through: number;
   readonly events: readonly unknown[];
   readonly state: unknown;
+  /**
+   * What the store holds once it applied the publication: its session's state, and every event it accumulated since the
+   * cut, by value. A store that applies a publication otherwise than it arrived differs here.
+   */
+  readonly held: ConsumerValue | null;
+}
+
+/** What a consumer of publications holds at one of them: the state, and the events since the cut, by value. */
+export interface ConsumerValue {
+  readonly state: unknown;
+  readonly events: readonly unknown[];
 }
 
 /** A tap on one session's store: the publications it applied from the cut, and the fields it did not expect. */
@@ -64,6 +75,7 @@ export interface PublicationTap {
 /** What the tap reads of a session's publication: its revision and the events its store holds. */
 export interface TappedSession {
   readonly revision: number;
+  readonly state: unknown;
   readonly events: readonly unknown[];
 }
 
@@ -98,7 +110,8 @@ export function tapPublications<S extends TappedSession>(
       for (const key of declared) if (!keys.includes(key)) undeclared.push(`missing '${key}'`);
     }
     const applied = apply(view, publish);
-    if (view !== null)
+    if (view !== null) {
+      const held = applied ? bridge.latest(session) : null;
       entries.push({
         applied,
         revision: view.revision - r0,
@@ -106,7 +119,15 @@ export function tapPublications<S extends TappedSession>(
         through: view.eventsThrough - c0,
         events: structuredClone(view.events),
         state: structuredClone(view.state),
+        held:
+          held === null
+            ? null
+            : {
+                state: structuredClone(held.state),
+                events: structuredClone(held.events.slice(c0)),
+              },
       });
+    }
     return applied;
   };
   return {
@@ -311,6 +332,7 @@ export function adapterReplay(
       through: next.events.length - e0,
       events: structuredClone(next.events.slice(cursor)),
       state: structuredClone(state),
+      held: { state: structuredClone(state), events: structuredClone(next.events.slice(e0)) },
     });
     cursor = next.events.length;
     session = next;
@@ -387,6 +409,13 @@ export interface HostEffects {
   readonly captures: number;
 }
 
+/** One session the composable showed: its revision, state and every event it held, by value, as it showed them. */
+export interface ShownSession {
+  readonly revision: number;
+  readonly state: unknown;
+  readonly events: readonly unknown[];
+}
+
 /** A composable that lives while `body` runs, and what the harness gives `body` of it. */
 export interface LiveHost {
   readonly player: LiveComposable;
@@ -398,8 +427,8 @@ export interface LiveHost {
   settle(): Promise<void>;
   /** The effects so far. */
   effects(): HostEffects;
-  /** Every revision the composable showed, in order, from the start. */
-  readonly observed: readonly number[];
+  /** Every session the composable showed, by value, in order, from the start. */
+  readonly observed: readonly ShownSession[];
   /** The media elements the composable made. */
   readonly elements: readonly (EventTarget & { src: string })[];
   /** Runs a judgment, only while the composable lives. */
@@ -479,12 +508,17 @@ export async function withLiveHost<T>(
         },
       }),
     )!;
-    const observed: number[] = [];
+    const observed: ShownSession[] = [];
     scope.run(() =>
       watch(
         player.session,
         (next) => {
-          if (next !== null) observed.push(next.revision);
+          if (next !== null)
+            observed.push({
+              revision: next.revision,
+              state: structuredClone(next.state),
+              events: structuredClone(next.events),
+            });
         },
         { flush: "sync" },
       ),

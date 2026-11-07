@@ -527,15 +527,16 @@ uses it for the replay family: successful replay, frozen failure replay and live
 Worker, and in the composable on its in-process engine. It has three parts:
 
 - **`tapPublications`:** the complete trace of the publications a session's store is given after a cut, by value, from
-  the cut's revision and event cursor. Every publication must apply, its cursors must continue, and it may carry only
-  the fields `PUBLICATION_FIELDS` declares. A new publication field is declared there, with whether the trace compares
-  it.
+  the cut's revision and event cursor, with what the store holds once it applied each: its state and every event since
+  the cut. Every publication must apply, its cursors must continue, and it may carry only the fields
+  `PUBLICATION_FIELDS` declares. A new publication field is declared there, with whether the trace compares it.
 - **`adapterReplay`:** the oracle, the adapter restored at the publication before the cut and given the live run's
   requests after it (`trackRequests`), the test's steps and the composable's own observations alike, in the order the
   host applied them. The trace is then compared exactly.
 - **`withLiveHost`:** the real composable. Each publication is handed to it in the tick its store applies it, and the
-  next step waits until it has settled. Its storage writes, media and capture answers are sampled after every step.
-  Every judgment runs while the composable lives.
+  next step waits until it has settled. Every session it shows is recorded by value and must equal the oracle's, each
+  publication once, in order. Its storage writes, media and capture answers are sampled after every step and once more
+  after the judgments, and must not grow. Every judgment runs while the composable lives.
 
 The cut and the run's end are quiescent (`quiesce`): no request in flight, every reply delivered, and nothing more
 published.

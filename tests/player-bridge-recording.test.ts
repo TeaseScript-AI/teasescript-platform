@@ -54,11 +54,13 @@ import {
   type LiveComposable,
   type LiveHost,
   type LiveHostModules,
+  type ShownSession,
   type LoggedRequest,
   type PublicationTap,
   type RequestTracker,
   type ReplayStep,
 } from "./helpers/replay-harness.js";
+import { compareStructures, renderPath } from "./helpers/runtime-state-comparison.js";
 import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type { RuntimeSnapshot } from "../src/index.js";
 
@@ -534,8 +536,11 @@ interface ReplayRun {
   readonly trace: PublicationTap;
   /** The composable's effects at the cut and after each step since; `null` without the composable. */
   readonly effects: readonly HostEffects[] | null;
-  /** The revisions the composable showed after the cut, relative to the cut's; `null` without the composable. */
-  readonly observed: readonly number[] | null;
+  /**
+   * What the composable showed after the cut, each by value: its revision relative to the cut's, its state, and every
+   * event it held since the cut; `null` without the composable.
+   */
+  readonly observed: readonly ShownSession[] | null;
 }
 
 /**
@@ -636,7 +641,7 @@ async function bridgeRun(inProcess: boolean): Promise<JudgedRun> {
     const cut = await cutAndRecover(bridge, session, tracker, null);
     const frozen = await recordingOf(bridge, inProcess);
     const requests = await cut.recover();
-    return judged(
+    return await judged(
       {
         before,
         atCut,
@@ -721,13 +726,19 @@ const JUDGE: Record<Kind, (run: ReplayRun) => void> = {
     assertTrace(run.trace, oracle.entries);
     if (run.suffix.snapshot !== null)
       assert.deepEqual(plainOf(run.suffix.snapshot), plainOf(oracle.snapshot));
-    // The live host showed every one of them, in order, each once.
-    if (run.observed !== null)
-      assert.deepEqual(
-        run.observed,
-        run.trace.entries.map((entry) => entry.revision),
-        "the composable showed every publication after the cut",
+    // The live host showed every one of them, in order, each once, as the oracle has it: its state and every event since
+    // the cut, by value.
+    if (run.observed !== null) {
+      const expected = oracle.entries.map((entry) => ({ revision: entry.revision, ...entry.held }));
+      const comparison = compareStructures(expected, run.observed);
+      const first = comparison.mismatches[0];
+      assert.ok(
+        comparison.equal,
+        first === undefined
+          ? "the composable showed otherwise than the oracle"
+          : `the composable showed otherwise than the oracle at ${renderPath(first.path)}: oracle ${first.oracle}, shown ${first.candidate}`,
       );
+    }
   },
 };
 
@@ -739,9 +750,14 @@ interface JudgedRun {
 
 /**
  * Judges every kind on `run` through `judge`, which runs a judgment only while the host lives. A kind not judged, as
- * when the run failed first, stays failed.
+ * when the run failed first, stays failed. With `last`, the host's effects are sampled once more after the judgments,
+ * their work settled, while it still lives: no sample after the cut, that one included, may differ from the cut's.
  */
-function judged(run: ReplayRun, judge: (judgment: () => void) => void): JudgedRun {
+async function judged(
+  run: ReplayRun,
+  judge: (judgment: () => void) => void,
+  last?: () => Promise<HostEffects>,
+): Promise<JudgedRun> {
   const verdicts: Record<Kind, unknown> = {
     "successful replay": new Error("successful replay was not judged"),
     "frozen failure replay": new Error("frozen failure replay was not judged"),
@@ -749,20 +765,27 @@ function judged(run: ReplayRun, judge: (judgment: () => void) => void): JudgedRu
   };
   for (const kind of KINDS)
     try {
-      judge(() => {
-        JUDGE[kind](run);
-        // Replay and recovery made no main-side effect: the composable's counts stayed at their value before the cut.
-        if (run.effects !== null)
-          assert.deepEqual(
-            run.effects,
-            run.effects.map(() => run.effects![0]),
-            "the composable's effects grew after the cut",
-          );
-      });
+      judge(() => JUDGE[kind](run));
       verdicts[kind] = null;
     } catch (error) {
       verdicts[kind] = error;
     }
+  if (run.effects !== null) {
+    // Replay and recovery made no main-side effect: the composable's counts stayed at their value before the cut, also
+    // after everything it did since, the judgments included.
+    let effects: unknown = null;
+    try {
+      const samples = last === undefined ? run.effects : [...run.effects, await last()];
+      assert.deepEqual(
+        samples,
+        samples.map(() => samples[0]),
+        "the composable's effects grew after the cut",
+      );
+    } catch (error) {
+      effects = error;
+    }
+    for (const kind of KINDS) verdicts[kind] ??= effects;
+  }
   return { run, verdicts };
 }
 
@@ -796,7 +819,7 @@ for (const { kind, backend, name } of REPLAY_CASES)
   });
 
 test("the publication tap names a field it does not declare, and the harness file that declares them", () => {
-  const shown = { revision: 3, events: [] };
+  const shown = { revision: 3, state: {}, events: [] };
   const store = { apply: (_view: unknown) => true };
   const tap = tapPublications({ store: () => store, latest: () => shown }, shown);
   // A publication with one field more and one less than declared, as a later package might send.
@@ -888,6 +911,7 @@ async function composableRun(): Promise<JudgedRun> {
         "the composable shows the cut",
       );
       const cutRevision = session.revision;
+      const cutEvents = session.events.length;
       const before = facade.hatch(session, adapter.playerRuntimeSnapshot);
       const atCut = plainRecording(player.debugRecording());
       assert.ok(atCut !== null);
@@ -901,7 +925,7 @@ async function composableRun(): Promise<JudgedRun> {
         counted.writes >= 1 && counted.elements >= 1 && counted.captures >= 1,
         JSON.stringify(counted),
       );
-      return judged(
+      return await judged(
         {
           before,
           atCut,
@@ -913,10 +937,18 @@ async function composableRun(): Promise<JudgedRun> {
           trace: cut.trace,
           effects: cut.effects,
           observed: host.observed
-            .filter((revision) => revision > cutRevision)
-            .map((revision) => revision - cutRevision),
+            .filter((shown) => shown.revision > cutRevision)
+            .map((shown) => ({
+              revision: shown.revision - cutRevision,
+              state: shown.state,
+              events: shown.events.slice(cutEvents),
+            })),
         },
         host.judge,
+        async () => {
+          await quiesce(bridge, session, tracker, host.settle);
+          return host.judge(() => host.effects());
+        },
       );
     });
   } finally {
