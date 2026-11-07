@@ -261,9 +261,12 @@ test("SIGTERM stops structure-report, removes the temporary folder and exits 143
     stdio: "ignore",
   });
   const exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
-  // The tool creates its folder just before it starts structure-report, which takes a second to load its parser.
+  // The tool creates its folder just before it starts structure-report, which takes over half a second to load its
+  // parser alone, so an exit within 300 ms means the report was stopped, not waited for.
   while (readdirSync(temporary).length === 0) await new Promise((r) => setTimeout(r, 10));
+  const sent = Date.now();
   child.kill("SIGTERM");
   assert.equal(await exited, 143);
+  assert.ok(Date.now() - sent < 300, `exited ${Date.now() - sent} ms after the signal`);
   assert.deepEqual(readdirSync(temporary), []);
 });
