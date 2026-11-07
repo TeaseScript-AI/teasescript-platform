@@ -84,7 +84,7 @@ export interface PipelineAdapter {
 }
 
 /** This build, in this process. */
-export function thisBuild(label: string): PipelineAdapter {
+function thisBuild(label: string): PipelineAdapter {
   return {
     label,
     compile(input, route) {
@@ -138,16 +138,27 @@ export type SideOutcome =
   | { readonly kind: "compile-rejected"; readonly diagnostics: unknown }
   | { readonly kind: "unsupported-route"; readonly reason: string }
   | { readonly kind: "admission-rejected"; readonly error: string }
-  | { readonly kind: "serializer-failure"; readonly stage: Stage; readonly error: string }
-  | { readonly kind: "harness-failure"; readonly stage: Stage; readonly error: string }
+  | {
+      readonly kind: "serializer-failure";
+      readonly stage: Stage;
+      readonly method: string | null;
+      readonly error: string;
+    }
+  | {
+      readonly kind: "harness-failure";
+      readonly stage: Stage;
+      readonly method: string | null;
+      readonly error: string;
+    }
   | { readonly kind: "censored"; readonly reason: string };
 
 /**
- * Where in a pair's life a side's harness failure came from: its compilation, the left side's run that places the cut
- * points, its host's `next`, a step, the capture of a restore point, the setup of a restore route around the public
- * restore call, or the writing of a record.
+ * The driver's stage, which a side's harness failure names with the call that threw: compilation, the left side's run
+ * that places the cut points, the setup of the uninterrupted run, its opening records, its steps, the capture of
+ * restore points, the restore routes, and the writing of records.
  */
-export type Stage = "compile" | "probe" | "host" | "step" | "capture" | "restore" | "write";
+export type Stage =
+  "compile" | "probe" | "setup" | "opening" | "step" | "capture" | "restore" | "write";
 
 /** Each restore route, independent: never one rebuilt from another. */
 const RESTORE_TAILS = [
@@ -258,6 +269,12 @@ export interface DifferentialOptions {
    * admission is replayed from the questions and answers its uninterrupted call recorded.
    */
   readonly host?: (side: "left" | "right") => HostDriver;
+  /** Test only: a fault the side's guard throws in place of the call at each point it returns `true` for. */
+  readonly fault?: (point: CallPoint) => boolean;
+  /** Test only: told each call the harness makes into a side, in order. */
+  readonly calls?: (point: CallPoint) => void;
+  /** Test only: no guard, every call made directly, to show the guard changes no record. */
+  readonly unguarded?: boolean;
 }
 
 /** A host of one side's run. */
@@ -308,10 +325,7 @@ function detached<T>(call: T): T {
   return JSON.parse(canonicalText(call)) as T;
 }
 
-/**
- * Applies `call`, recorded detached, with its captured-media admission's questions and answers recorded; returns
- * both.
- */
+/** Applies `call`, already detached, with its captured-media admission's questions and answers recorded. */
 function recordedHost(
   session: RuntimeSession,
   call: HostCall,
@@ -320,12 +334,9 @@ function recordedHost(
   readonly result: RuntimeSessionResult & { readonly outcome?: unknown };
   readonly record: HostCallRecord;
 } {
-  if (call.kind !== "completeAction") {
-    const record = detached(call);
-    return { result: applyHost(session, record, debugTrace), record };
-  }
-  const { capturedMedia, ...given } = call;
-  const rest = detached(given);
+  if (call.kind !== "completeAction")
+    return { result: applyHost(session, call, debugTrace), record: call };
+  const { capturedMedia, ...rest } = call;
   if (capturedMedia === undefined)
     return {
       result: applyHost(session, rest, debugTrace),
@@ -411,11 +422,167 @@ function deadlineHost(timedWork: typeof runtimeTimedWork): HostSource {
   };
 }
 
+/** A host call with its plain data detached, so that a host that reuses its objects cannot change a recorded call. */
+function detachedCall(call: HostCall): HostCall {
+  if (call.kind !== "completeAction") return detached(call);
+  const { capturedMedia, ...rest } = call;
+  return capturedMedia === undefined ? detached(rest) : { ...detached(rest), capturedMedia };
+}
+
 const DEFAULT_MAX_CUTS = 32;
 const DEFAULT_MAX_STEPS = 5_000;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+/**
+ * A call from the harness into a side: the side, the driver's stage when it was made, the method (such as
+ * `RuntimeSession.executeInstruction` or `host.next`), and its ordinal among the side's calls of that stage and method.
+ */
+export interface CallPoint {
+  readonly side: "left" | "right";
+  readonly stage: Stage;
+  readonly method: string;
+  readonly ordinal: number;
+}
+
+/** The public calls whose exceptions are the engine's own behaviour: an admission, or a restore that threw. */
+const ENGINE_CALLS: ReadonlySet<string> = new Set([
+  "createFreshRuntimeSession",
+  "createRuntimeSession",
+  "createTaggedRuntimeSession",
+  "restoreRuntimeSession",
+  "deserializeRuntimeSession",
+  "RuntimeSession.fork",
+]);
+
+/** A side's own failure, at the call that threw: the pair ends `not-compared` with it. */
+class SideFault extends Error {
+  public constructor(
+    readonly side: "left" | "right",
+    readonly stage: Stage,
+    readonly method: string,
+    readonly fault: unknown,
+  ) {
+    super(`${side} ${stage}/${method}: ${errorText(fault)}`);
+  }
+}
+
+/**
+ * The one boundary between the harness and a side: every call the harness makes into a side's adapter, its sessions,
+ * its debug contexts and its host passes through `call`, so that a side's exception is classified alike wherever it
+ * happens, and a call site added later is covered by construction. It wraps only the harness's own calls: what the
+ * engine receives (plans, snapshots, options, debug contexts, observers) is the side's own value, unchanged.
+ */
+class SideGuard {
+  readonly #counts = new Map<string, number>();
+
+  public constructor(
+    readonly side: "left" | "right",
+    private readonly phase: { stage: Stage },
+    private readonly options: Pick<DifferentialOptions, "fault" | "calls" | "unguarded">,
+  ) {}
+
+  /** Runs one call into the side. An engine call's exception passes through as it is; any other is a `SideFault`. */
+  public call<T>(method: string, run: () => T): T {
+    if (this.options.unguarded === true) return run();
+    const stage = this.phase.stage;
+    const key = `${stage} ${method}`;
+    const ordinal = this.#counts.get(key) ?? 0;
+    this.#counts.set(key, ordinal + 1);
+    const point: CallPoint = { side: this.side, stage, method, ordinal };
+    this.options.calls?.(point);
+    try {
+      if (this.options.fault?.(point) === true)
+        throw new Error(`test-only fault at ${stage} ${method} #${ordinal}`);
+      return run();
+    } catch (error) {
+      if (ENGINE_CALLS.has(method) || error instanceof SideFault || error instanceof Stop)
+        throw error;
+      throw new SideFault(this.side, stage, method, error);
+    }
+  }
+
+  /**
+   * A view of `target` for the harness's own calls: each method call passes through `call`, bound to `target` itself,
+   * so its private state, identity and order of effects are the target's. A method that returns a session returns its
+   * view in turn. The harness never hands such a view to the engine.
+   */
+  public view<T extends object>(target: T, name: string): T {
+    if (this.options.unguarded === true) return target;
+    return new Proxy(target, {
+      get: (object, key) => {
+        // EVIDENCE: validation: a property read of the side's own object, which the proxy only forwards.
+        const value: unknown = (object as Record<string | symbol, unknown>)[key];
+        if (typeof value !== "function") return value;
+        const method = `${name}.${String(key)}`;
+        return (...args: unknown[]) => {
+          const result: unknown = this.call(method, () => value.apply(object, args));
+          return method === "RuntimeSession.fork" && typeof result === "object" && result !== null
+            ? this.view(result, name)
+            : result;
+        };
+      },
+    });
+  }
+
+  /** The side's adapter, every function of it a call through this guard, every session it makes a view. */
+  public adapter(adapter: PipelineAdapter): GuardedAdapter {
+    const sessions = adapter.sessions;
+    const session = (method: string, make: () => RuntimeSession) =>
+      this.view(this.call(method, make), "RuntimeSession");
+    return {
+      compile: (input, route) => this.call("compile", () => adapter.compile(input, route)),
+      createFreshRuntimeSession: (plan, fresh, options) =>
+        session("createFreshRuntimeSession", () =>
+          sessions.createFreshRuntimeSession(plan, fresh, options),
+        ),
+      createRuntimeSession: (plan, snapshot, options) =>
+        session("createRuntimeSession", () =>
+          sessions.createRuntimeSession(plan, snapshot, options),
+        ),
+      createTaggedRuntimeSession: (plan, tagged, options) =>
+        session("createTaggedRuntimeSession", () =>
+          sessions.createTaggedRuntimeSession(plan, tagged, options),
+        ),
+      restoreRuntimeSession: (checkpoint, options) =>
+        session("restoreRuntimeSession", () => sessions.restoreRuntimeSession(checkpoint, options)),
+      deserializeRuntimeSession: (json, options) =>
+        session("deserializeRuntimeSession", () =>
+          sessions.deserializeRuntimeSession(json, options),
+        ),
+      serializeCheckpoint: (checkpoint) =>
+        this.call("serializeCheckpoint", () => sessions.serializeCheckpoint(checkpoint)),
+      runtimeTimedWork: (view) =>
+        this.call("runtimeTimedWork", () => sessions.runtimeTimedWork(view)),
+      debugContext: () => {
+        const context = this.call(
+          "RuntimeDebugContext.constructor",
+          () => new sessions.RuntimeDebugContext(),
+        );
+        return { context, calls: this.view(context, "RuntimeDebugContext") };
+      },
+    };
+  }
+}
+
+/** A side's adapter as the driver calls it: through its guard. */
+interface GuardedAdapter {
+  compile(input: DifferentialInput, route: Route): Compiled;
+  createFreshRuntimeSession(...args: Parameters<typeof createFreshRuntimeSession>): RuntimeSession;
+  createRuntimeSession(...args: Parameters<typeof createRuntimeSession>): RuntimeSession;
+  createTaggedRuntimeSession(
+    ...args: Parameters<typeof createTaggedRuntimeSession>
+  ): RuntimeSession;
+  restoreRuntimeSession(...args: Parameters<typeof restoreRuntimeSession>): RuntimeSession;
+  deserializeRuntimeSession(...args: Parameters<typeof deserializeRuntimeSession>): RuntimeSession;
+  serializeCheckpoint(...args: Parameters<typeof serializeCheckpoint>): string;
+  runtimeTimedWork(
+    ...args: Parameters<typeof runtimeTimedWork>
+  ): ReturnType<typeof runtimeTimedWork>;
+  /** A new debug context: the side's own, which the engine receives, and the harness's view of it. */
+  debugContext(): { readonly context: RuntimeDebugContext; readonly calls: RuntimeDebugContext };
 }
 
 /** The harness's decision callback, which logs each draw it is asked about. */
@@ -449,12 +616,7 @@ type Operation =
   | { readonly kind: "end"; readonly outcome: SideOutcome };
 
 /** What a side does next at `state` from `view`: resume a paused draw, execute, make its host's call, or end. */
-function nextOperation(
-  side: "left" | "right",
-  view: RuntimeSessionView,
-  state: number,
-  host: HostSource,
-): Operation {
+function nextOperation(view: RuntimeSessionView, state: number, host: HostSource): Operation {
   if (view.status === "halted") return { kind: "end", outcome: { kind: "completed" } };
   if (view.status === "failed") {
     const failure = view.failure!;
@@ -471,24 +633,21 @@ function nextOperation(
   }
   if (view.randomDraw !== null) return { kind: "resume", drawId: view.randomDraw.drawId };
   if (view.runnable) return { kind: "execute" };
-  const call = classified(side, "host", () => host(state, view));
+  const call = host(state, view);
   return call === null ? { kind: "end", outcome: { kind: "waiting" } } : { kind: "host", call };
 }
 
-type Step =
-  | { readonly kind: "record"; readonly record: SideRecord }
-  | { readonly kind: "end"; readonly outcome: SideOutcome };
-
 /** One side's session, stepped one instruction or settlement at a time, with its own debug context and logs. */
 class Side {
+  /** The side's debug context, which the engine receives, and the harness's view of it. */
   private readonly debug: RuntimeDebugContext;
+  private readonly debugCalls: RuntimeDebugContext;
   private nextRecord: number;
   /** The host calls this run made, as their records, by the state index each was made at. */
   public readonly calls = new Map<number, HostCallRecord>();
 
   public constructor(
-    private readonly name: "left" | "right",
-    adapter: PipelineAdapter,
+    adapter: GuardedAdapter,
     public readonly session: RuntimeSession,
     private readonly decisions: DecisionLog,
     origin: "start" | "restore",
@@ -496,9 +655,9 @@ class Side {
     /** The state index the run is at. */
     private state: number,
   ) {
-    this.debug = new adapter.sessions.RuntimeDebugContext();
-    this.debug.reset(origin);
-    this.nextRecord = this.debug.status().nextRecord;
+    ({ context: this.debug, calls: this.debugCalls } = adapter.debugContext());
+    this.debugCalls.reset(origin);
+    this.nextRecord = this.debugCalls.status().nextRecord;
   }
 
   /** The record of the state the side starts the run at. */
@@ -506,9 +665,13 @@ class Side {
     return this.record(operation, null, null, [], null);
   }
 
-  public step(): Step {
-    const next = nextOperation(this.name, this.session.view(), this.state, this.host);
-    if (next.kind === "end") return next;
+  /** What the side does next, decided without doing it. */
+  public next(): Operation {
+    return nextOperation(this.session.view(), this.state, this.host);
+  }
+
+  /** Does `next`, an operation `next()` decided. */
+  public apply(next: Exclude<Operation, { readonly kind: "end" }>): SideRecord {
     const observer: unknown[] = [];
     // A passive observer: it never returns `true`, so it never ends an operation.
     const traced = {
@@ -543,10 +706,7 @@ class Side {
       this.calls.set(this.state, call);
     }
     this.state += 1;
-    return {
-      kind: "record",
-      record: this.record(operation, call, result, observer, result.instructionTrace ?? null),
-    };
+    return this.record(operation, call, result, observer, result.instructionTrace ?? null);
   }
 
   private record(
@@ -556,10 +716,10 @@ class Side {
     observer: readonly unknown[],
     instructionTrace: unknown,
   ): SideRecord {
-    const status = this.debug.status();
+    const status = this.debugCalls.status();
     const records: unknown[] = [];
     for (let id = this.nextRecord; id < status.nextRecord; id += 1)
-      records.push(this.debug.record(id));
+      records.push(this.debugCalls.record(id));
     this.nextRecord = status.nextRecord;
     return {
       state: {
@@ -618,22 +778,6 @@ function write(record: SideRecord): Written {
 }
 
 /**
- * Runs one stage of one side: the boundary every stage of a pair passes through, so that a side's failure is
- * classified alike wherever it happens. A writing failure is `serializer-failure` and any other exception
- * `harness-failure`, each naming the stage and the side; a verdict already reached, and a mapping failure, pass through.
- */
-function classified<T>(side: "left" | "right", stage: Stage, run: () => T): T {
-  try {
-    return run();
-  } catch (error) {
-    if (error instanceof Stop || error instanceof MappingFailure) throw error;
-    if (error instanceof SerializerFailure)
-      throw notCompared(side, { kind: "serializer-failure", stage, error: error.message });
-    throw notCompared(side, { kind: "harness-failure", stage, error: errorText(error) });
-  }
-}
-
-/**
  * The cut points of a run of `steps` steps; cut `c` restores the state after step `c`. First the mandatory cuts: the
  * fresh state, the state before a fault, the first and last waits, and the states before the first and last
  * event-emitting steps. Then, up to `cap` in all, the other waits and event steps at evenly spaced positions, then
@@ -677,7 +821,9 @@ function cutPoints(
 
 /** A state's restore material, one per route, taken when the uninterrupted run is at that state. */
 interface RestorePoint {
-  readonly fork: { readonly session: RuntimeSession; readonly log: DecisionLog };
+  /** The fork, or what its public call threw: a restore that threw, compared like any other route. */
+  readonly fork:
+    { readonly session: RuntimeSession; readonly log: DecisionLog } | { readonly thrown: string };
   readonly "checked-snapshot": RuntimeSnapshot;
   readonly "trusted-snapshot": RuntimeSnapshot;
   readonly "tagged-snapshot": TaggedRuntimeSnapshot;
@@ -685,18 +831,32 @@ interface RestorePoint {
   readonly "checkpoint-json": string;
 }
 
+/** What a public restore call threw, as the restored route's own state, which disagrees with the uninterrupted run. */
+function thrownRecord(thrown: string): SideRecord {
+  return {
+    state: { operation: "restore", host: null, result: { thrown }, decisions: [], snapshot: null },
+    traces: { observer: [], instructionTrace: null, debug: null },
+  };
+}
+
 /**
  * Runs `input` through two pipelines on one route and compares them completely: the compile results, then every state
  * of the uninterrupted run, then every restore route from every cut point to its end, each state against the other
- * side's same run and against its own side's uninterrupted run.
+ * side's same run and against its own side's uninterrupted run. Every call into a side passes through its `SideGuard`,
+ * so a side's own exception at any stage ends the pair `not-compared` with that side's classified outcome.
  */
 export function differentialRun(
   input: DifferentialInput,
   options: DifferentialOptions = {},
 ): DifferentialReport {
+  const phase: { stage: Stage } = { stage: "compile" };
+  const guards = {
+    left: new SideGuard("left", phase, options),
+    right: new SideGuard("right", phase, options),
+  };
   const adapters = {
-    left: options.left ?? thisBuild("left"),
-    right: options.right ?? thisBuild("right"),
+    left: guards.left.adapter(options.left ?? thisBuild("left")),
+    right: guards.right.adapter(options.right ?? thisBuild("right")),
   };
   const route = options.route ?? "legacy";
   const correspondence = options.correspondence ?? IDENTITY;
@@ -745,15 +905,46 @@ export function differentialRun(
       return;
     compareData(oracle.record, candidate.record, at);
   };
-  /** A side's record, injected into when the options say so, and written: the write stage. */
-  const written = (side: "left" | "right", record: SideRecord, at: Omit<InjectionSite, "side">) =>
-    classified(side, "write", () => write(options.inject?.(record, { ...at, side }) ?? record));
+  /**
+   * A side's record, injected into when the options say so, and written. Writing is the harness's own work, not a call
+   * into a side: a record it cannot write is that side's `serializer-failure`, and a throwing injection its
+   * `harness-failure`, both at the write stage.
+   */
+  const written = (
+    side: "left" | "right",
+    record: () => SideRecord,
+    at: Omit<InjectionSite, "side">,
+  ): Written => {
+    const made = record();
+    let injected: SideRecord;
+    try {
+      injected = options.inject?.(made, { ...at, side }) ?? made;
+    } catch (error) {
+      throw notCompared(side, {
+        kind: "harness-failure",
+        stage: "write",
+        method: "inject",
+        error: errorText(error),
+      });
+    }
+    try {
+      return write(injected);
+    } catch (error) {
+      if (!(error instanceof SerializerFailure)) throw error;
+      throw notCompared(side, {
+        kind: "serializer-failure",
+        stage: "write",
+        method: null,
+        error: error.message,
+      });
+    }
+  };
 
   try {
     // Compile on both sides: equal rejections are equivalent, compared as diagnostics.
     const compiled = {
-      left: classified("left", "compile", () => adapters.left.compile(input, route)),
-      right: classified("right", "compile", () => adapters.right.compile(input, route)),
+      left: adapters.left.compile(input, route),
+      right: adapters.right.compile(input, route),
     };
     const compileSite: ComparisonSite = {
       tail: "compile",
@@ -785,33 +976,44 @@ export function differentialRun(
     compareData(left.diagnostics, right.diagnostics, compileSite);
     const plans = { left: left.plan, right: right.plan };
     planDigests = { left: canonicalDigest(left.plan), right: canonicalDigest(right.plan) };
+    /** A fresh session: what its public call throws is the side's admission refusing the input. */
     const fresh = (side: "left" | "right", log: DecisionLog) => {
       try {
-        return adapters[side].sessions.createFreshRuntimeSession(
+        return adapters[side].createFreshRuntimeSession(
           plans[side],
           input.fresh ?? {},
           log.options(),
         );
       } catch (error) {
+        if (error instanceof SideFault) throw error;
         throw notCompared(side, { kind: "admission-rejected", error: errorText(error) });
       }
     };
-
     /** A new host for one side's run from the start: the caller's, or the driver's own. */
     const newHost = (side: "left" | "right"): HostSource => {
-      if (options.host === undefined) return deadlineHost(adapters[side].sessions.runtimeTimedWork);
-      const driver = options.host(side);
-      return (_, view) => driver.next(view);
+      const guard = guards[side];
+      if (options.host === undefined) {
+        const own = deadlineHost((view) => adapters[side].runtimeTimedWork(view));
+        return (state, view) => guard.call("host.next", () => own(state, view));
+      }
+      const make = options.host;
+      const driver = guard.call("host", () => make(side));
+      return (_, view) =>
+        guard.call("host.next", () => {
+          const call = driver.next(view);
+          return call === null ? null : detachedCall(call);
+        });
     };
 
     // Where the cuts are, from the left side's uninterrupted run without records; a host call is a wait.
-    classified("left", "probe", () => {
+    phase.stage = "probe";
+    {
       const probe = fresh("left", new DecisionLog(input.random));
       const host = newHost("left");
       const waits: number[] = [];
       const emitting: number[] = [];
       let steps = 0;
-      let next = nextOperation("left", probe.view(), steps, host);
+      let next = nextOperation(probe.view(), steps, host);
       while (next.kind !== "end" && steps < maxSteps) {
         const result =
           next.kind === "resume"
@@ -821,7 +1023,7 @@ export function differentialRun(
               : applyHost(probe, next.call, null);
         steps += 1;
         if (result.events.length > 0) emitting.push(steps);
-        next = nextOperation("left", probe.view(), steps, host);
+        next = nextOperation(probe.view(), steps, host);
         if (next.kind === "host") waits.push(steps);
       }
       const faulted = next.kind === "end" && next.outcome.kind === "structured-fault";
@@ -834,79 +1036,72 @@ export function differentialRun(
       );
       progress.cuts = cutInfo.cuts;
       progress.overCap = cutInfo.overCap;
-    });
+    }
     const cuts = new Set(progress.cuts);
 
     // The uninterrupted run, both sides in lockstep, keeping each side's state texts and its restore points.
+    phase.stage = "setup";
     const logs = { left: new DecisionLog(input.random), right: new DecisionLog(input.random) };
-    const sides = {
-      left: new Side(
-        "left",
-        adapters.left,
-        fresh("left", logs.left),
-        logs.left,
-        "start",
-        newHost("left"),
-        0,
-      ),
-      right: new Side(
-        "right",
-        adapters.right,
-        fresh("right", logs.right),
-        logs.right,
-        "start",
-        newHost("right"),
-        0,
-      ),
-    };
+    const start = (side: "left" | "right") =>
+      new Side(adapters[side], fresh(side, logs[side]), logs[side], "start", newHost(side), 0);
+    const sides = { left: start("left"), right: start("right") };
     const states: { readonly left: string[]; readonly right: string[] } = { left: [], right: [] };
     const points = {
       left: new Map<number, RestorePoint>(),
       right: new Map<number, RestorePoint>(),
     };
-    const capture = (side: "left" | "right", state: number) =>
-      classified(side, "capture", () => {
-        const session = sides[side].session;
-        const log = new DecisionLog(input.random);
-        const checkpoint = session.exportCheckpoint();
-        points[side].set(state, {
-          fork: { session: session.fork(log.options()), log },
-          "checked-snapshot": session.exportSnapshot(),
-          "trusted-snapshot": session.exportTrustedSnapshot(),
-          "tagged-snapshot": session.exportTaggedSnapshot(),
-          checkpoint,
-          "checkpoint-json": adapters[side].sessions.serializeCheckpoint(checkpoint),
-        });
+    const capture = (side: "left" | "right", state: number) => {
+      const session = sides[side].session;
+      const log = new DecisionLog(input.random);
+      let fork: RestorePoint["fork"];
+      try {
+        fork = { session: session.fork(log.options()), log };
+      } catch (error) {
+        // The guard passes an engine call's own exception through; any other is the side's.
+        if (error instanceof SideFault) throw error;
+        fork = { thrown: errorText(error) };
+      }
+      const checkpoint = session.exportCheckpoint();
+      points[side].set(state, {
+        fork,
+        "checked-snapshot": session.exportSnapshot(),
+        "trusted-snapshot": session.exportTrustedSnapshot(),
+        "tagged-snapshot": session.exportTaggedSnapshot(),
+        checkpoint,
+        "checkpoint-json": adapters[side].serializeCheckpoint(checkpoint),
       });
-    const step = (side: "left" | "right", run: Side): Step =>
-      classified(side, "step", () => run.step());
+    };
     let ended: { readonly left: SideOutcome; readonly right: SideOutcome };
     {
       let state = 0;
       const at = () => ({ tail: "uninterrupted" as const, cut: null, state });
+      phase.stage = "opening";
       let records = {
-        left: written("left", sides.left.opening("start"), at()),
-        right: written("right", sides.right.opening("start"), at()),
+        left: written("left", () => sides.left.opening("start"), at()),
+        right: written("right", () => sides.right.opening("start"), at()),
       };
+      phase.stage = "step";
       for (;;) {
         compare(records.left, records.right, { ...at(), against: "other-side" });
         states.left.push(records.left.state);
         states.right.push(records.right.state);
         if (cuts.has(state)) {
+          phase.stage = "capture";
           capture("left", state);
           capture("right", state);
+          phase.stage = "step";
         }
-        const leftStep = step("left", sides.left);
-        const rightStep = step("right", sides.right);
-        if (leftStep.kind === "end" || rightStep.kind === "end") {
+        const leftNext = sides.left.next();
+        const rightNext = sides.right.next();
+        if (leftNext.kind === "end" || rightNext.kind === "end") {
           const unfinished = { kind: "censored", reason: "the other side ended first" } as const;
           ended = {
-            left: leftStep.kind === "end" ? leftStep.outcome : unfinished,
-            right: rightStep.kind === "end" ? rightStep.outcome : unfinished,
+            left: leftNext.kind === "end" ? leftNext.outcome : unfinished,
+            right: rightNext.kind === "end" ? rightNext.outcome : unfinished,
           };
           break;
         }
-        // A run that would take a step past the limit is censored; one that ends at the limit is not.
+        // A run that would take a step past the limit is censored before it takes it; one that ends at the limit is not.
         if (state >= maxSteps) {
           const censored = { kind: "censored", reason: `${maxSteps} steps` } as const;
           outcomes = { left: censored, right: censored };
@@ -915,16 +1110,12 @@ export function differentialRun(
         state += 1;
         progress.steps = state;
         records = {
-          left: written("left", leftStep.record, at()),
-          right: written("right", rightStep.record, at()),
+          left: written("left", () => sides.left.apply(leftNext), at()),
+          right: written("right", () => sides.right.apply(rightNext), at()),
         };
       }
-      progress.steps = state;
     }
     outcomes = ended;
-    for (const side of ["left", "right"] as const)
-      if (ended[side].kind === "harness-failure")
-        throw new Stop({ kind: "not-compared", side, because: "harness-failure" });
     compareData(ended.left, ended.right, {
       tail: "uninterrupted",
       cut: null,
@@ -933,61 +1124,52 @@ export function differentialRun(
     });
 
     // Every restore route from every cut, both sides in lockstep, to the end.
+    phase.stage = "restore";
     for (const cut of progress.cuts)
       for (const tail of RESTORE_TAILS) {
-        const restore = (side: "left" | "right"): Side | SideRecord =>
-          classified(side, "restore", () => {
-            const point = points[side].get(cut)!;
-            const api = adapters[side].sessions;
-            const log = tail === "fork" ? point.fork.log : new DecisionLog(input.random);
-            let session: RuntimeSession;
-            try {
-              // Only the public restore call itself: what it throws is engine behaviour, compared below.
-              if (tail === "fork") session = point.fork.session;
-              else if (tail === "checked-snapshot" || tail === "trusted-snapshot")
-                session = api.createRuntimeSession(plans[side], point[tail], log.options());
-              else if (tail === "tagged-snapshot")
-                session = api.createTaggedRuntimeSession(plans[side], point[tail], log.options());
-              else if (tail === "checkpoint")
-                session = api.restoreRuntimeSession(point[tail], log.options());
-              else session = api.deserializeRuntimeSession(point[tail], log.options());
-            } catch (error) {
-              // A route that does not restore is a state of its own, which disagrees with the uninterrupted run.
-              return {
-                state: {
-                  operation: "restore",
-                  host: null,
-                  result: { thrown: errorText(error) },
-                  decisions: [],
-                  snapshot: null,
-                },
-                traces: { observer: [], instructionTrace: null, debug: null },
-              };
-            }
-            // The side's uninterrupted host calls, replayed by state index.
-            const calls = sides[side].calls;
-            const run = new Side(
-              side,
-              adapters[side],
-              session,
-              log,
-              "restore",
-              (state) => {
-                const recorded = calls.get(state);
-                return recorded === undefined ? null : replayed(recorded);
-              },
-              cut,
-            );
-            return run;
-          });
+        const restore = (side: "left" | "right"): Side | SideRecord => {
+          const point = points[side].get(cut)!;
+          const api = adapters[side];
+          const log = new DecisionLog(input.random);
+          let session: RuntimeSession;
+          let runLog = log;
+          // Only the public restore call itself: what it throws is engine behaviour, compared below.
+          try {
+            if (tail === "fork") {
+              if ("thrown" in point.fork) return thrownRecord(point.fork.thrown);
+              session = point.fork.session;
+              runLog = point.fork.log;
+            } else if (tail === "checked-snapshot" || tail === "trusted-snapshot")
+              session = api.createRuntimeSession(plans[side], point[tail], log.options());
+            else if (tail === "tagged-snapshot")
+              session = api.createTaggedRuntimeSession(plans[side], point[tail], log.options());
+            else if (tail === "checkpoint")
+              session = api.restoreRuntimeSession(point[tail], log.options());
+            else session = api.deserializeRuntimeSession(point[tail], log.options());
+          } catch (error) {
+            if (error instanceof SideFault) throw error;
+            return thrownRecord(errorText(error));
+          }
+          // The side's uninterrupted host calls, replayed by state index.
+          const calls = sides[side].calls;
+          return new Side(
+            api,
+            session,
+            runLog,
+            "restore",
+            (state) => {
+              const recorded = calls.get(state);
+              return recorded === undefined ? null : replayed(recorded);
+            },
+            cut,
+          );
+        };
         const runs = { left: restore("left"), right: restore("right") };
         let state = cut;
         const at = () => ({ tail, cut, state });
-        const opening = (side: "left" | "right") => {
+        const opening = (side: "left" | "right") => () => {
           const run = runs[side];
-          return run instanceof Side
-            ? classified(side, "restore", () => run.opening("restore"))
-            : run;
+          return run instanceof Side ? run.opening("restore") : run;
         };
         let records = {
           left: written("left", opening("left"), at()),
@@ -1018,11 +1200,13 @@ export function differentialRun(
                 mismatches: within.mismatches,
               });
           }
-          if (!(runs.left instanceof Side) || !(runs.right instanceof Side)) break;
-          const leftStep = step("left", runs.left);
-          const rightStep = step("right", runs.right);
-          const leftEnd = leftStep.kind === "end" ? leftStep.outcome : null;
-          const rightEnd = rightStep.kind === "end" ? rightStep.outcome : null;
+          const leftRun = runs.left;
+          const rightRun = runs.right;
+          if (!(leftRun instanceof Side) || !(rightRun instanceof Side)) break;
+          const leftNext = leftRun.next();
+          const rightNext = rightRun.next();
+          const leftEnd = leftNext.kind === "end" ? leftNext.outcome : null;
+          const rightEnd = rightNext.kind === "end" ? rightNext.outcome : null;
           // Each side's restored run ends as, and where, its uninterrupted run ended.
           const ends = compareStructures(
             state === progress.steps
@@ -1037,17 +1221,35 @@ export function differentialRun(
               at: { ...at(), against: "uninterrupted" },
               mismatches: ends.mismatches,
             });
-          if (leftStep.kind === "end" || rightStep.kind === "end") break;
+          if (leftNext.kind === "end" || rightNext.kind === "end") break;
           state += 1;
           progress.tailSteps += 1;
           records = {
-            left: written("left", leftStep.record, at()),
-            right: written("right", rightStep.record, at()),
+            left: written("left", () => leftRun.apply(leftNext), at()),
+            right: written("right", () => rightRun.apply(rightNext), at()),
           };
         }
       }
     return report({ kind: "equivalent" });
   } catch (error) {
+    if (error instanceof SideFault) {
+      const outcome: SideOutcome =
+        error.fault instanceof SerializerFailure
+          ? {
+              kind: "serializer-failure",
+              stage: error.stage,
+              method: error.method,
+              error: error.fault.message,
+            }
+          : {
+              kind: "harness-failure",
+              stage: error.stage,
+              method: error.method,
+              error: errorText(error.fault),
+            };
+      outcomes = { ...outcomes, [error.side]: outcome };
+      return report({ kind: "not-compared", side: error.side, because: outcome.kind });
+    }
     if (!(error instanceof Stop)) throw error;
     if (error.outcome !== null)
       outcomes = { ...outcomes, [error.outcome.side]: error.outcome.outcome };

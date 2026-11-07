@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
@@ -17,9 +18,8 @@ import {
 } from "../src/index.js";
 import {
   differentialRun,
-  thisBuild,
-  type PipelineAdapter,
-  type Stage,
+  type CallPoint,
+  type DifferentialOptions,
   type DifferentialInput,
   type DifferentialReport,
   type HostDriver,
@@ -97,6 +97,13 @@ const regressions = JSON.parse(
 
 const ROUTES: readonly Route[] = ["legacy", "core"];
 
+/** The regressions of the guard's transparency sample, at their first seed: a fault, defaults, and random draws. */
+const TRANSPARENCY = new Set([
+  "atomic-invalid-target-before-rhs",
+  "lazy-default",
+  "atomic-rng-index-and-rhs",
+]);
+
 /**
  * Cut points per run: in CI 8 (the mandatory cuts first, then evenly spaced ones), with `TEASESCRIPT_SWEEP=full` the
  * driver's 32. Every input, seed and restore route runs either way; only the non-mandatory cuts are fewer.
@@ -137,6 +144,42 @@ function saidAndStatus(input: DifferentialInput): { said: string[]; status: stri
 
 const reports: DifferentialReport[] = [];
 
+/**
+ * One pair as the suite runs it. A pair of the transparency sample (`witness`), and with `TEASESCRIPT_SWEEP=full` every
+ * legacy pair, runs once more without the guard between the harness and each side: both runs must give the same records
+ * and the same report, so the guard changes nothing the engine sees or the harness records. The sample covers every
+ * restore route (each pair runs all of them) with a fault, a wait, a project, random choices, a host, captured media and
+ * the deep host list.
+ */
+function pair(
+  input: DifferentialInput,
+  options: DifferentialOptions = {},
+  witness = false,
+): DifferentialReport {
+  const run = (unguarded: boolean) => {
+    const records: string[] = [];
+    const report = differentialRun(input, {
+      ...CUTS,
+      ...options,
+      unguarded,
+      inject: (record, at) => {
+        records.push(canonicalDigest({ at, record }));
+        return record;
+      },
+    });
+    const { cpuMs: _cpu, ...rest } = report;
+    return { report, records, summary: canonicalDigest(rest) };
+  };
+  const guarded = run(false);
+  if ((options.route ?? "legacy") === "legacy" && (witness || SWEEP)) {
+    const direct = run(true);
+    assert.deepEqual(direct.records, guarded.records, `${input.name}: the guard changes no record`);
+    assert.equal(direct.summary, guarded.summary, `${input.name}: the guard changes no report`);
+  }
+  reports.push(guarded.report);
+  return guarded.report;
+}
+
 test("every retained regression is equivalent on both routes and keeps its independent expectation", () => {
   for (const entry of regressions.entries) {
     const source = fs.readFileSync(path.join(tools, "regressions", `${entry.name}.tease`), "utf8");
@@ -146,9 +189,9 @@ test("every retained regression is equivalent on both routes and keeps its indep
         ...(entry.globals ? { globals: entry.globals } : {}),
       });
       for (const route of ROUTES) {
-        const report = differentialRun(input, { ...CUTS, route });
-        reports.push(report);
-        assertEquivalent(report);
+        assertEquivalent(
+          pair(input, { route }, seed === regressions.seeds[0] && TRANSPARENCY.has(entry.name)),
+        );
       }
       const expect = entry.expect;
       if (expect?.diagnostic !== undefined) {
@@ -181,14 +224,24 @@ test("a bounded seeded sample of generated programs is equivalent on both routes
   );
   for (const tag of everyTag) assert.ok(tags.has(tag), `the sample covers ${tag}`);
   assert.ok(tags.has("project"), "the sample has a project");
-  let randomPrograms = 0;
-  for (const program of programs) {
-    // Random programs alternate between the harness's two decision modes, whose logs and receipts are compared.
-    const random = program.tags.includes("rng")
-      ? (randomPrograms += 1) % 2 === 0
+  // The transparency sample's generated programs: the first project, the first chosen-random and the first waiting one.
+  const randomMode = (program: GeneratedProgram) =>
+    program.tags.includes("rng")
+      ? programs.filter((item) => item.tags.includes("rng")).indexOf(program) % 2 === 1
         ? "choose"
         : "natural"
       : undefined;
+  const witnesses = new Set(
+    [
+      programs.find((program) => program.project === true),
+      programs.find((program) => randomMode(program) === "choose"),
+      programs.find((program) => program.tags.includes("waits")),
+    ].filter((program) => program !== undefined),
+  );
+  assert.equal(witnesses.size, 3);
+  for (const program of programs) {
+    // Random programs alternate between the harness's two decision modes, whose logs and receipts are compared.
+    const random = randomMode(program);
     const input: DifferentialInput = {
       name: program.id,
       sources: program.sources,
@@ -200,10 +253,8 @@ test("a bounded seeded sample of generated programs is equivalent on both routes
       },
     };
     for (const route of ROUTES) {
-      const report = differentialRun(input, { ...CUTS, route });
-      reports.push(report);
       // A generated program the compiler rejects is classified, not patched in: both sides reject it alike.
-      assertEquivalent(report);
+      assertEquivalent(pair(input, { route }, witnesses.has(program)));
     }
   }
 });
@@ -230,8 +281,7 @@ test("a 10,000-level host list runs, restores and compares on the supported path
     seed: 1,
     globals: { hostValue: deepList(DEPTH) },
   });
-  const report = differentialRun(input, CUTS);
-  reports.push(report);
+  const report = pair(input, {}, true);
   assert.deepEqual(report.verdict, { kind: "equivalent" });
   assert.deepEqual(report.outcomes.left, { kind: "completed" });
   assert.ok(report.cuts.length > 0 && report.tailSteps > 0);
@@ -306,8 +356,7 @@ function choosingHost(option: number): HostDriver {
 
 test("a host drives both sides through interactions, and both must make the same host calls", () => {
   const input = single("choices", CHOICES, { seed: 3 });
-  const hosted = differentialRun(input, { ...CUTS, host: () => choosingHost(1) });
-  reports.push(hosted);
+  const hosted = pair(input, { host: () => choosingHost(1) }, true);
   assert.deepEqual(hosted.verdict, { kind: "equivalent" });
   assert.deepEqual(hosted.outcomes.left, { kind: "completed" });
   assert.ok(hosted.tailSteps > 0);
@@ -374,8 +423,7 @@ function storingHost(vouches = true): HostDriver {
 
 test("a captured-media admission is replayed on every restore route from what it answered, not reused", () => {
   const input = single("stores", STORES, { seed: 3 });
-  const stored = differentialRun(input, { ...CUTS, host: () => storingHost() });
-  reports.push(stored);
+  const stored = pair(input, { host: () => storingHost() }, true);
   assert.deepEqual(stored.verdict, { kind: "equivalent" });
   assert.deepEqual(stored.outcomes.left, { kind: "completed" });
   assert.ok(stored.tailSteps > 0);
@@ -588,117 +636,147 @@ test("the shrinker reduces every positive integer literal above 1, also one that
   assert.equal(reduced.source, "say 1, instant\nexit\n");
 });
 
-/** This build with one session method of each fresh session throwing: a harness's own failure at that step. */
-function throwingIn(method: "executeInstruction" | "exportTaggedSnapshot"): PipelineAdapter {
-  const build = thisBuild("faulty");
-  const fault = () => {
-    throw new Error(`test-only ${method} fault`);
-  };
-  const fresh: typeof build.sessions.createFreshRuntimeSession = (...args) => {
-    const session = build.sessions.createFreshRuntimeSession(...args);
-    if (method === "executeInstruction") session.executeInstruction = fault;
-    else session.exportTaggedSnapshot = fault;
-    return session;
-  };
-  return { ...build, sessions: { ...build.sessions, createFreshRuntimeSession: fresh } };
-}
-
-/** This build whose debug context cannot start a restored epoch: a failure in a restore route's setup. */
-function restoreSetupFault(): PipelineAdapter {
-  const build = thisBuild("faulty");
-  class Context extends build.sessions.RuntimeDebugContext {
-    public override reset(origin: "start" | "restore"): void {
-      if (origin === "restore") throw new Error("test-only restore setup fault");
-      super.reset(origin);
-    }
-  }
-  return { ...build, sessions: { ...build.sessions, RuntimeDebugContext: Context } };
-}
+/** A host that observes each delay's deadline, so that the clean run makes host calls to fault. */
+const deadlineDriver = (): HostDriver => ({
+  next(view) {
+    const work = runtimeTimedWork(view);
+    return work.length === 0
+      ? null
+      : { kind: "observeTime", nowMs: Math.min(...work.map((item) => item.deadlineMs)) };
+  },
+});
 
 /**
- * Each stage's own fault, with the side it is on and the class it must have: every stage passes through one boundary,
- * so its failure is reported as that stage's and that side's, never escapes, and never counts as a discrepancy.
+ * The injected-fault family: every call the harness makes into a side in a clean run of the sensitivity source, each
+ * point recorded by the guard, so that a call site added later joins by construction. Each (side, stage, method) is
+ * faulted at its first and its last call.
  */
-const STAGE_FAULTS: readonly {
-  readonly stage: Stage;
-  readonly side: "left" | "right";
-  readonly options: () => Parameters<typeof differentialRun>[1];
-}[] = [
-  {
-    stage: "compile",
-    side: "right",
-    options: () => ({
-      right: {
-        ...thisBuild("faulty"),
-        compile: () => {
-          throw new Error("test-only compile fault");
-        },
-      },
-    }),
-  },
-  { stage: "probe", side: "left", options: () => ({ left: throwingIn("executeInstruction") }) },
-  {
-    stage: "host",
-    side: "right",
-    options: () => ({
-      host: (side) => ({
-        next: (view) => {
-          if (side === "right") throw new Error("test-only host fault");
-          const work = runtimeTimedWork(view);
-          return work.length === 0
-            ? null
-            : { kind: "observeTime", nowMs: Math.min(...work.map((item) => item.deadlineMs)) };
-        },
-      }),
-    }),
-  },
-  { stage: "step", side: "right", options: () => ({ right: throwingIn("executeInstruction") }) },
-  {
-    stage: "capture",
-    side: "right",
-    options: () => ({ right: throwingIn("exportTaggedSnapshot") }),
-  },
-  { stage: "restore", side: "right", options: () => ({ right: restoreSetupFault() }) },
-  {
-    stage: "write",
-    side: "right",
-    options: () => ({
-      inject: (record, at) => {
-        if (at.side === "right" && at.state === 1) throw new Error("test-only write fault");
-        return record;
-      },
-    }),
-  },
-];
+const FAULT_INPUT = single("sensitivity", SENSITIVE, { seed: 5 });
+const CLEAN_CALLS: CallPoint[] = [];
+assert.deepEqual(
+  differentialRun(FAULT_INPUT, {
+    ...CUTS,
+    host: deadlineDriver,
+    calls: (point) => CLEAN_CALLS.push(point),
+  }).verdict,
+  { kind: "equivalent" },
+);
+const FAULT_POINTS = (() => {
+  const last = new Map<string, CallPoint>();
+  const first = new Map<string, CallPoint>();
+  for (const point of CLEAN_CALLS) {
+    const key = `${point.side} ${point.stage} ${point.method}`;
+    if (!first.has(key)) first.set(key, point);
+    last.set(key, point);
+  }
+  return [...first.keys()].flatMap((key) =>
+    first.get(key)!.ordinal === last.get(key)!.ordinal
+      ? [first.get(key)!]
+      : [first.get(key)!, last.get(key)!],
+  );
+})();
 
-for (const { stage, side, options } of STAGE_FAULTS)
-  test(`a fault at the ${stage} stage is that side's harness failure, never an escape or a discrepancy`, () => {
-    const report = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
+/** The restore routes each public restore call serves; its own exception is that route's restored state. */
+const RESTORE_CALL_ROUTES: Readonly<Record<string, readonly string[]>> = {
+  "RuntimeSession.fork": ["fork"],
+  createRuntimeSession: ["checked-snapshot", "trusted-snapshot"],
+  createTaggedRuntimeSession: ["tagged-snapshot"],
+  restoreRuntimeSession: ["checkpoint"],
+  deserializeRuntimeSession: ["checkpoint-json"],
+};
+
+/**
+ * The independent oracle, from the point alone: a public restore call's exception is a discrepancy on a route it
+ * serves; a fresh session's is that side's admission refusing the input; any other is that side's harness failure at
+ * that stage and method.
+ */
+function faultExpectation(point: CallPoint) {
+  const routes = RESTORE_CALL_ROUTES[point.method];
+  if (routes !== undefined) return { kind: "discrepancy" as const, routes };
+  if (point.method === "createFreshRuntimeSession")
+    return { kind: "admission-rejected" as const, side: point.side };
+  return {
+    kind: "harness-failure" as const,
+    side: point.side,
+    stage: point.stage,
+    method: point.method,
+  };
+}
+
+test("the injected-fault family covers every stage that calls into each side", () => {
+  // The driver forks only to take a restore point.
+  assert.ok(
+    FAULT_POINTS.filter((point) => point.method === "RuntimeSession.fork").every(
+      (point) => point.stage === "capture",
+    ),
+  );
+  const covered = new Set(FAULT_POINTS.map((point) => `${point.side} ${point.stage}`));
+  for (const side of ["left", "right"] as const)
+    for (const stage of ["compile", "setup", "opening", "step", "capture", "restore"] as const)
+      assert.ok(covered.has(`${side} ${stage}`), `${side} ${stage}`);
+  assert.ok(covered.has("left probe"), "left probe");
+  // Each public restore call, `fork` at a restore point included, is faulted, its oracle a discrepancy on its route.
+  for (const method of [
+    "host",
+    "host.next",
+    "RuntimeDebugContext.reset",
+    ...Object.keys(RESTORE_CALL_ROUTES),
+  ])
+    assert.ok(
+      FAULT_POINTS.some((point) => point.method === method),
+      `the family faults ${method}`,
+    );
+});
+
+for (const point of FAULT_POINTS)
+  test(`fault/side=${point.side}/stage=${point.stage}/method=${point.method}/ordinal=${point.ordinal}`, () => {
+    const report = differentialRun(FAULT_INPUT, {
       ...CUTS,
-      ...options(),
+      host: deadlineDriver,
+      fault: (at) =>
+        at.side === point.side &&
+        at.stage === point.stage &&
+        at.method === point.method &&
+        at.ordinal === point.ordinal,
     });
-    assert.deepEqual(report.verdict, { kind: "not-compared", side, because: "harness-failure" });
-    const outcome = report.outcomes[side];
-    assert.equal(outcome?.kind === "harness-failure" ? outcome.stage : outcome?.kind, stage);
+    const expected = faultExpectation(point);
+    const verdict = report.verdict;
+    if (expected.kind === "discrepancy") {
+      assert.equal(verdict.kind, "discrepancy", JSON.stringify(verdict));
+      if (verdict.kind === "discrepancy")
+        assert.ok(expected.routes.includes(verdict.at.tail), verdict.at.tail);
+      return;
+    }
+    assert.deepEqual(verdict, {
+      kind: "not-compared",
+      side: expected.side,
+      because: expected.kind,
+    });
+    const outcome = report.outcomes[expected.side];
+    if (expected.kind === "harness-failure")
+      assert.deepEqual(
+        outcome?.kind === "harness-failure"
+          ? { kind: outcome.kind, stage: outcome.stage, method: outcome.method }
+          : outcome,
+        { kind: "harness-failure", stage: expected.stage, method: expected.method },
+      );
   });
 
-test("a public restore call that throws is the engine's own behaviour, a discrepancy on that route", () => {
-  const build = thisBuild("faulty");
-  const report = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
+test("a throwing injection, the harness's own write stage, is that side's harness failure", () => {
+  const report = differentialRun(FAULT_INPUT, {
     ...CUTS,
-    right: {
-      ...build,
-      sessions: {
-        ...build.sessions,
-        deserializeRuntimeSession: () => {
-          throw new Error("test-only restore refusal");
-        },
-      },
+    inject: (record, at) => {
+      if (at.side === "right" && at.state === 1) throw new Error("test-only write fault");
+      return record;
     },
   });
-  assert.equal(report.verdict.kind, "discrepancy");
-  if (report.verdict.kind === "discrepancy")
-    assert.equal(report.verdict.at.tail, "checkpoint-json");
+  assert.deepEqual(report.verdict, {
+    kind: "not-compared",
+    side: "right",
+    because: "harness-failure",
+  });
+  const outcome = report.outcomes.right;
+  assert.equal(outcome?.kind === "harness-failure" ? outcome.stage : outcome?.kind, "write");
 });
 
 /** The restore routes, listed here independently of the driver's own list. */
@@ -756,8 +834,24 @@ test("the campaign CLI exits 0 identical, 1 differences, 2 usage or harness fail
   assert.equal(exitStatus([verdict("mapping-failure")]), 1);
   assert.equal(exitStatus([verdict("discrepancy"), verdict("not-compared", "harness-failure")]), 2);
   assert.equal(exitStatus([verdict("not-compared", "serializer-failure")]), 2);
-  const cli = (...args: string[]) =>
-    spawnSync(process.execPath, [path.join(tools, "run.mjs"), ...args], { encoding: "utf8" });
+  // `RUNTIME_DIFFERENTIAL_DIST`, test only, points the CLI at another build: here an empty one.
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "runtime-differential-"));
+  const cli = (args: readonly string[], env: Record<string, string> = {}) =>
+    spawnSync(process.execPath, [path.join(tools, "run.mjs"), ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
+  const noBuild = { RUNTIME_DIFFERENTIAL_DIST: empty };
+  try {
+    // The arguments are validated before anything loads, and a build that does not load is a harness failure.
+    for (const [args, env] of [
+      [["--seed", "1", "--count", "nonsense"], noBuild],
+      [["--seed", "1", "--count", "1"], noBuild],
+    ] as const)
+      assert.equal(cli(args, env).status, 2, args.join(" "));
+  } finally {
+    fs.rmSync(empty, { recursive: true, force: true });
+  }
   for (const args of [
     ["--count", "1"],
     ["--seed", "1", "--count", "nonsense"],
@@ -765,8 +859,8 @@ test("the campaign CLI exits 0 identical, 1 differences, 2 usage or harness fail
     ["--seed", "1", "--count", "0"],
     ["--seed", "1", "--route", "other"],
   ])
-    assert.equal(cli(...args).status, 2, args.join(" "));
-  const ran = cli("--seed", "3", "--count", "1");
+    assert.equal(cli(args).status, 2, args.join(" "));
+  const ran = cli(["--seed", "3", "--count", "1"]);
   assert.equal(ran.status, 0, ran.stderr);
   assert.equal(ran.stdout.trim().split("\n").length, 1);
 });
@@ -800,11 +894,25 @@ test("a writing failure and an unanswered correspondence stay harness classifica
   });
   assert.deepEqual(atLimit.outcomes.left, { kind: "completed" });
   assert.equal(atLimit.steps, unlimited.steps);
+  const executed: CallPoint[] = [];
   const below = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
     ...CUTS,
     maxSteps: unlimited.steps - 1,
+    calls: (point) => {
+      if (
+        point.stage === "step" &&
+        point.side === "right" &&
+        point.method.startsWith("RuntimeSession.") &&
+        ["executeInstruction", "observeTime", "resumeRandomDraw"].some((name) =>
+          point.method.endsWith(name),
+        )
+      )
+        executed.push(point);
+    },
   });
   assert.equal(below.outcomes.left?.kind, "censored");
+  // No operation runs past the limit: the right side applied exactly the steps it was allowed.
+  assert.equal(executed.length, unlimited.steps - 1);
 
   const unknown = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
     ...CUTS,
