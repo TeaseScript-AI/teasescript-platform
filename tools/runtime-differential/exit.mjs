@@ -23,12 +23,22 @@ export function exitStatus(reports) {
   return status;
 }
 
-/** How many reports of each verdict, `not-compared` ones by their reason, for the run's summary. */
+/**
+ * How many reports of each verdict, for the run's summary: `not-compared` ones by their reason, an unsupported route
+ * also by the side its verdict names (the first that refused: `left` also when both did), so that a refusal on the right
+ * alone, the candidate's against the oracle, shows apart.
+ */
 export function verdictCounts(reports) {
   const counts = {};
   for (const report of reports) {
     const kind = report?.verdict?.kind;
-    const key = kind === "not-compared" ? `not-compared:${report.verdict.because}` : String(kind);
+    const because = kind === "not-compared" ? report.verdict.because : undefined;
+    const key =
+      because === "unsupported-route"
+        ? `not-compared:${because}:${report.verdict.side}`
+        : because !== undefined
+          ? `not-compared:${because}`
+          : String(kind);
     counts[key] = (counts[key] ?? 0) + 1;
   }
   return counts;

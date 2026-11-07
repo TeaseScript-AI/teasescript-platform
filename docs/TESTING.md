@@ -487,7 +487,7 @@ verdict:
 
 - a writing failure is `serializer-failure`;
 - a correspondence that cannot map a position is `mapping-failure`;
-- a core refusal is `unsupported-route`, counted rather than failed.
+- a core refusal, on either side or both, is `unsupported-route`, counted rather than failed.
 
 No exception gives a false `equivalent` or a `discrepancy`. Any exception the driver did not raise itself becomes a
 side's `harness-failure` (or `serializer-failure`), naming the stage and the member the driver was operating on. Only
