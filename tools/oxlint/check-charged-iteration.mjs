@@ -543,8 +543,13 @@ export function chargedIterationDiagnostics(program, root, rules) {
                 `\`${name}\` is not in OUTSIDE (tools/oxlint/check-charged-iteration.mjs): list it with why a call ` +
                   "walks nothing uncharged, or walk through narrowing-iteration.ts.",
               );
-            // (in objects.ts an allowed function is only called, so the rule below sees each call's arguments)
-            else if (file === OBJECTS_FILE && callAt(node) === undefined)
+            // (in objects.ts an allowed function is only called, so the rule below sees each call's arguments; a getter
+            // is read, not handed on)
+            else if (
+              file === OBJECTS_FILE &&
+              callAt(node) === undefined &&
+              !ts.isGetAccessor(target.declaration)
+            )
               report(
                 node,
                 `\`${name}\` is used as a value, so its calls' arguments escape this check: call it directly, ` +
