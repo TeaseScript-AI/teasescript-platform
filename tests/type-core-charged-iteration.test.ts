@@ -30,7 +30,8 @@ function ledger(): { readonly work: WorkLedger; units(): number } {
 }
 
 test("each charged helper charges every item it takes, a repeated one too, and no more", () => {
-  const cases: readonly (readonly [string, (work: WorkLedger) => unknown, unknown, number])[] = [
+  type Taken = readonly number[] | string | boolean;
+  const cases: readonly (readonly [string, (work: WorkLedger) => Taken, Taken, number])[] = [
     ["each", (work) => [...each(work, C, [3, 1, 2])], [3, 1, 2], 3],
     ["each, repeated items", (work) => [...each(work, C, [3, 3, 3])], [3, 3, 3], 3],
     ["copied", (work) => copied(work, C, [3, 1, 2]), [3, 1, 2], 3],
