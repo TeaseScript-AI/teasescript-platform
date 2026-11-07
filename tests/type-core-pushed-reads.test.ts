@@ -1022,8 +1022,8 @@ test("a marked read below a receiver with no structure declines as the native re
               (all, facts) => all + (facts.declines.get("marks-floor") ?? 0),
               0,
             );
-            // (unmarked rings never decline there; a mark one step below its test's own depth does not cross a floor)
-            if (!marked || depth === 1) assert.equal(floors, 0, label);
+            // (unmarked rings never decline there; Codex r7's witness does, its `p2.q.q` a floor)
+            if (!marked) assert.equal(floors, 0, label);
             if (marked && depth === 2 && !nested) assert.ok(floors > 0, label);
           }
         }
