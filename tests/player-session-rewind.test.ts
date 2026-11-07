@@ -74,6 +74,7 @@ interface RewindHost {
   }): Promise<ImportReview>;
   importSavedData(review: ImportReview, chosen: ReadonlySet<string>): Promise<void>;
   readonly bridge: Promise<PlayerBridge>;
+  reportHostError(error: unknown): void;
   editSavedData(edit: {
     key: string;
     value: SerializableRuntimeValue;
@@ -841,3 +842,79 @@ test("the call view follows the shown session through Back and Return while a de
   scope.stop();
   assert.deepEqual(sent.at(-1), { lineage: tip.lineage, on: false });
 });
+
+/*
+ * The async exits of Back's and an adoption's reads in the host (L5h.3a): each read held while the page moves on as each
+ * end does it, then let go. Back parks nothing and shows no restored state, but a Player error stop leaves the shown
+ * session to go back from, as Debug's rewind allows after a stop; an adoption writes no saved value, but one Debug's end
+ * waits for, which completes (DEBUGGER.md "Rewind"). The read's own failure is the step's failure, with an adoption's
+ * notice. Unmounting ends Debug's features and the Player together.
+ */
+const READS = { back: "captureKeep", adopt: "captureStorage" } as const;
+const ENDS = ["replaced", "debugOff", "stopped", "disposed", "readFails"] as const;
+
+/** Holds the first request of `op` on `bridge` until `release()`, or rejects it when `fails`. */
+function holdRead(context: TestContext, bridge: PlayerBridge, op: string, fails: boolean) {
+  let reached!: () => void;
+  const arrived = new Promise<void>((resolve) => (reached = resolve));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const request = bridge.client.request.bind(bridge.client);
+  let first = true;
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    if (args[0] !== op || !first) return request(...args);
+    first = false;
+    reached();
+    return gate.then(() =>
+      fails ? Promise.reject(new Error("The read failed.")) : request(...args),
+    );
+  });
+  return { arrived, release: () => release() };
+}
+
+// EVIDENCE: invariant: the keys of `READS`, declared literally above.
+for (const read of Object.keys(READS) as (keyof typeof READS)[])
+  for (const end of ENDS)
+    test(`${read === "back" ? "Back" : "an adoption"}'s read in the host, then the page ${end}`, async (context) => {
+      const storage = memoryStorage();
+      const made = createHost(context, storage.provider);
+      const { host, rewind } = made;
+      await start(context, host);
+      await choose(context, host, "One");
+      if (read === "adopt") assert.equal(await rewind.back(0), true);
+      const shownBefore = host.session.value;
+      const callsBefore = storage.calls.length;
+      const held = holdRead(context, await host.bridge, READS[read], end === "readFails");
+      const step = read === "back" ? rewind.back(0) : rewind.resume();
+      await held.arrived;
+      if (end === "replaced") {
+        host.prepare((recording) =>
+          createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
+        );
+        host.activate();
+      } else if (end === "debugOff") made.debug.stop();
+      else if (end === "stopped") host.reportHostError(new Error("A Player error."));
+      else if (end === "disposed") {
+        made.debug.stop();
+        made.scope.stop();
+      }
+      held.release();
+      const done = await step;
+      await settle(context);
+      const wrote = storage.calls.slice(callsBefore).includes("replace");
+      const notice = host.notices.value.some((one) => one.key === "rewind-not-adopted");
+      if (read === "back") {
+        // Nothing was parked, but after a stop: no state shows for inspection.
+        const parks = end === "stopped";
+        assert.equal(done, parks, "Back's result");
+        assert.equal(host.rewind.inspecting.value, parks, "a state shown for inspection");
+        if (end === "readFails") assert.equal(host.session.value, shownBefore);
+        assert.equal(wrote, false);
+        return;
+      }
+      // An adoption Debug's end waits for completes; any other end writes nothing.
+      const completes = end === "debugOff";
+      assert.equal(done, completes, "the adoption's result");
+      assert.equal(wrote, completes, "the saved values written");
+      assert.equal(notice, end === "readFails", "the notice");
+    });
