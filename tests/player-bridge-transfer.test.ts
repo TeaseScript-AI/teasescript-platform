@@ -28,6 +28,7 @@ import {
 import { readPlayerTransferText, restoreSessionTransfer } from "../player/session-transfer-read.js";
 import { storageTransferFile, type StorageBundle } from "../player/storage-transfer.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
+import { malformedArguments, type ArgumentForm } from "./helpers/argument-forms.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
@@ -209,6 +210,8 @@ interface Committed {
 interface Row {
   readonly op: TransferOp;
   readonly outcome: string;
+  /** A malformed row's argument form, as `malformedArguments` names it. */
+  readonly form?: string;
   /** Makes the row's requests on `bridge`; its answer is the last one's. */
   readonly run: (bridge: PlayerBridge) => Promise<Answer>;
   readonly expected: Answer;
@@ -646,70 +649,22 @@ async function transferRows(): Promise<Row[]> {
   ];
 }
 
-/** The classes of a transfer op's argument values, each with values of other classes, which no op accepts for it. */
-const WRONG_VALUES = {
-  string: [1, null, true, {}, [], new Uint8Array([1])],
-  bytes: ["text", null, 1, [1, 2], {}],
-} as const satisfies Record<string, readonly unknown[]>;
-type ValueClass = keyof typeof WRONG_VALUES;
-/** A value of each class, as a valid argument holds it. */
-const VALID_VALUES: Readonly<Record<ValueClass, unknown>> = {
-  string: "t1",
-  bytes: new Uint8Array([1]),
-};
-
 /** Each transfer op's argument forms: one or more alternatives, each its fields with their value classes. */
 const ARGUMENTS = {
-  readTransfer: [{ text: "string" }, { bytes: "bytes" }],
-  reviewTransfer: [{ ticket: "string", scope: "string", plan: "string" }],
-  transferCommit: [{ ticket: "string" }],
-  releaseTransfer: [{ ticket: "string" }],
-} as const satisfies Record<TransferOp, readonly Readonly<Record<string, ValueClass>>[]>;
-
-/**
- * Every malformed argument of each op, from its forms: no record; each form with a field missing, an extra field, or a
- * field of another class; two forms' fields together. Each must be refused before the op runs.
- */
-function malformedArguments(op: TransferOp): { readonly what: string; readonly args: unknown }[] {
-  const forms: readonly Readonly<Record<string, ValueClass>>[] = ARGUMENTS[op];
-  const valid = (form: Readonly<Record<string, ValueClass>>) =>
-    Object.fromEntries(Object.entries(form).map(([field, kind]) => [field, VALID_VALUES[kind]]));
-  const found: { what: string; args: unknown }[] = [
-    { what: "null", args: null },
-    { what: "a string", args: "t1" },
-    { what: "a list", args: [] },
-  ];
-  forms.forEach((form, index) => {
-    const whole = valid(form);
-    found.push({ what: `form ${index + 1} with an extra field`, args: { ...whole, extra: 1 } });
-    for (const [field, kind] of Object.entries(form)) {
-      const { [field]: _left, ...without } = whole;
-      found.push({ what: `form ${index + 1} without ${field}`, args: without });
-      for (const wrong of WRONG_VALUES[kind])
-        found.push({
-          what: `form ${index + 1} with ${field} as ${JSON.stringify(wrong) ?? String(wrong)}`,
-          args: { ...whole, [field]: wrong },
-        });
-    }
-    forms
-      .slice(index + 1)
-      .forEach((other, offset) =>
-        found.push({
-          what: `forms ${index + 1} and ${index + offset + 2} together`,
-          args: { ...whole, ...valid(other) },
-        }),
-      );
-  });
-  return found;
-}
+  readTransfer: [{ required: { text: "string" } }, { required: { bytes: "bytes" } }],
+  reviewTransfer: [{ required: { ticket: "string", scope: "string", plan: "string" } }],
+  transferCommit: [{ required: { ticket: "string" } }],
+  releaseTransfer: [{ required: { ticket: "string" } }],
+} as const satisfies Record<TransferOp, readonly ArgumentForm[]>;
 
 /** The malformed rows of every op. */
 function malformedRows(): Row[] {
   // EVIDENCE: invariant: the keys of `ARGUMENTS`, declared literally above.
   return (Object.keys(ARGUMENTS) as TransferOp[]).flatMap((op) =>
-    malformedArguments(op).map(({ args }) => ({
+    malformedArguments(ARGUMENTS[op]).map(({ id, args }) => ({
       op,
       outcome: "malformed",
+      form: id,
       run: (bridge: PlayerBridge) => answerOf(bridge.client.request(op, args)),
       expected: MALFORMED(op),
     })),
@@ -726,7 +681,7 @@ test("every transfer op's argument forms, outcomes and refusals answer as writte
   assert.deepEqual(remote, inProcess);
   const named = (answers: readonly Answer[]) =>
     answers.map((answer, index) => ({
-      row: `${rows[index]!.op} ${rows[index]!.outcome} #${index + 1}`,
+      row: `${rows[index]!.op} ${rows[index]!.outcome} ${rows[index]!.form ?? `#${index + 1}`}`,
       ...answer,
     }));
   assert.deepEqual(named(inProcess), named(rows.map(({ expected }) => expected)));
@@ -787,6 +742,14 @@ test("the transfer family covers every op, outcome and refusal of the reader", a
     assert.ok(
       OUTCOMES[row.op].some((outcome) => outcome === row.outcome),
       `${row.op} declares ${row.outcome}`,
+    );
+  // Every malformed argument the forms give runs, under its own id.
+  // EVIDENCE: invariant: the keys of `ARGUMENTS`, declared literally above.
+  for (const op of Object.keys(ARGUMENTS) as TransferOp[])
+    assert.deepEqual(
+      rows.filter((row) => row.op === op && row.outcome === "malformed").map(({ form }) => form),
+      malformedArguments(ARGUMENTS[op]).map(({ id }) => id),
+      `${op}'s malformed forms`,
     );
   const messages = rows.flatMap(({ expected }) =>
     "message" in expected ? [expected.message] : [],
