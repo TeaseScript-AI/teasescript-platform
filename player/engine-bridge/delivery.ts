@@ -74,8 +74,8 @@ function undoAll(undos: readonly (() => void)[]): void {
 /**
  * The one deciding function: advances `owner` by `event` on `delivery` (`null` for `close`, and for `begin`, which
  * returns the new delivery). An unknown, foreign or ended delivery is refused for `own` and `posted`, and is nothing to
- * abort. A closed owner admits no `begin` and no `own`: closing also ends every open delivery, so an `own` after it
- * would be refused as one of an ended delivery in any case; the check states the default. `close` is idempotent.
+ * abort. A closed owner admits no `begin`, and as closing ended every open delivery, an `own` after it names an ended
+ * one and is refused as such. `close` is idempotent.
  */
 export function advanceDelivery(
   owner: DeliveryOwner,
@@ -93,7 +93,6 @@ export function advanceDelivery(
       return begun;
     }
     case "own":
-      if (state.closed) throw new DeliveryRefusedError("The connection is closed.");
       if (at < 0) throw new DeliveryRefusedError("No open delivery owns this allocation.");
       state.open[at]!.undos.push(event.undo);
       return delivery;
