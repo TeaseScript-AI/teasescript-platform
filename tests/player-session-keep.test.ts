@@ -979,6 +979,53 @@ interface RecordedCall {
   readonly by: string | undefined;
   readonly write: boolean;
   settled: "resolved" | "rejected" | null;
+  /** For a publication of a kept session, where its events begin: 0 for a first save. */
+  readonly eventsFrom?: number;
+}
+
+/** The contexts a call of these runs may have: the operation's, the move's, or none for the page's lifecycle. */
+const CONTEXTS = new Set<string | undefined>([OPERATION, MOVE, undefined]);
+
+/** Each call no recognized context owns: an unknown label, or none outside the page's lifecycle. */
+function unowned(calls: readonly RecordedCall[]): string[] {
+  return calls
+    .filter(
+      (made) =>
+        !CONTEXTS.has(made.by) || (made.by === undefined && !Object.hasOwn(LIFECYCLE, made.name)),
+    )
+    .map((made) => `${made.by ?? "none"}:${made.name}`);
+}
+
+/**
+ * Where the kept-store writes `writes`, made in one context, are not the keeps of a session: in each store, a room's
+ * creation first, then keeps one after another, each a discard, its photos and a first save, or its photos and a later
+ * save. A write besides, such as a discard after the last save, is one no keep made.
+ */
+function strayKeepWrites(writes: readonly RecordedCall[]): string[] {
+  const stray: string[] = [];
+  for (const store of ["kept.", "rooms."]) {
+    let discarded = false;
+    let first = true;
+    for (const made of writes.filter((write) => write.name.startsWith(store))) {
+      const method = made.name.slice(store.length);
+      // A room's creation comes first; a keep's photos come anywhere within it.
+      const opening = method === "create" && first;
+      first = false;
+      if (opening || method === "media.add") continue;
+      if (method === "discard" || method === "discardSession") {
+        if (discarded) stray.push(`${made.name}, a second discard`);
+        discarded = true;
+      } else if (method === "publish") {
+        if ((made.eventsFrom === 0) !== discarded)
+          stray.push(
+            `${made.name} from ${made.eventsFrom}, ${discarded ? "after" : "without"} a discard`,
+          );
+        discarded = false;
+      } else stray.push(`${made.name}, no keep's write`);
+    }
+    if (discarded) stray.push(`${store}discard, no save after it`);
+  }
+  return stray;
 }
 
 /** The class of `key` of a store recorded as `surface`; a method no class names fails the run. */
@@ -1018,13 +1065,20 @@ function recorder(context: TestContext, at: FamilyBrowser) {
     reached();
     return gate;
   };
-  const record = (name: string, write: boolean): RecordedCall => {
+  const record = (name: string, write: boolean, args: readonly unknown[] = []): RecordedCall => {
+    const update: unknown = name.endsWith(".publish") ? args[1] : undefined;
     const made: RecordedCall = {
       name,
       destination: name.slice(0, name.lastIndexOf(".")),
       by: contexts.getStore(),
       write,
       settled: null,
+      ...(typeof update === "object" &&
+      update !== null &&
+      "eventsFrom" in update &&
+      typeof update.eventsFrom === "number"
+        ? { eventsFrom: update.eventsFrom }
+        : {}),
     };
     calls.push(made);
     return made;
@@ -1060,7 +1114,7 @@ function recorder(context: TestContext, at: FamilyBrowser) {
         assert.ok(typeof value === "function", `${surface}.${key} is a method`);
         const name = `${surface}.${key}`;
         return (...args: unknown[]) => {
-          const made = record(name, kind === "write");
+          const made = record(name, kind === "write", args);
           const run = () => {
             const result: unknown = value.apply(object, args);
             // A debug room's saved values are a provider of their own.
@@ -1556,6 +1610,8 @@ async function ownershipRun(
   name: VariantName,
   at: { readonly index: number; readonly name: string; readonly skip: number } | null,
   move: Move | null,
+  // A control's own work once the run settled, before its checks: they must catch it.
+  intrude?: (at: FamilyBrowser) => Promise<void>,
 ) {
   const unhandled: unknown[] = [];
   const onUnhandled = (reason: unknown) => unhandled.push(reason);
@@ -1626,16 +1682,11 @@ async function ownershipRun(
   recorded.release();
   const outcome = await done;
   for (let turn = 0; turn < 6; turn++) await tasks();
+  await intrude?.(browserAt);
   const after = log.snapshot();
   const since = recorded.calls.slice(callsAtStart);
   // Every call from the operation's start is the operation's, the move's, or the page's lifecycle, which reaches no store.
-  assert.deepEqual(
-    since
-      .filter((made) => made.by === undefined && !Object.hasOwn(LIFECYCLE, made.name))
-      .map((made) => made.name),
-    [],
-    "a call no context owns",
-  );
+  assert.deepEqual(unowned(since), [], "a call no context owns");
   const own = (calls: readonly RecordedCall[]) =>
     calls.filter((made) => made.by === OPERATION).map((made) => made.name);
   assert.deepEqual(unhandled, [], "a rejection went unhandled");
@@ -1671,6 +1722,12 @@ async function ownershipRun(
         .map((made) => made.name),
       [],
       "the move wrote what it does not make itself",
+    );
+    // And its kept-store writes are the keeps of the session it started, one after another, nothing besides.
+    assert.deepEqual(
+      strayKeepWrites(since.filter((made) => made.by === MOVE && made.write)),
+      [],
+      "the move's kept-store writes are not its keeps",
     );
   }
   const late = own(recorded.calls.slice(callsAtMark));
@@ -1762,6 +1819,60 @@ for (const name of Object.keys(VARIANTS) as VariantName[]) {
       });
     }
 }
+
+// The checks' own controls: a discard of the moved-on page's kept session, made once the run settled, fails the row
+// whatever context it carries; the unchanged row passes.
+for (const label of [MOVE, "foreign", OPERATION, undefined])
+  test(`continuation ownership's checks catch a stray discard in context ${label ?? "none"}`, async (context) => {
+    const point = { index: 3, name: "kept.media.get", skip: 0 };
+    await assert.rejects(
+      ownershipRun(context, "restoreKept captured sessionPhoto", point, "otherPlan", async (at) => {
+        assert.ok((await at.kept.session(SCOPE)) !== null, "the moved-on session is kept");
+        await (label === undefined
+          ? at.kept.discard(SCOPE)
+          : contexts.run(label, () => at.kept.discard(SCOPE)));
+      }),
+      assert.AssertionError,
+    );
+  });
+test("continuation ownership's checks of a move's keeps", () => {
+  const write = (name: string, eventsFrom?: number): RecordedCall => ({
+    name,
+    destination: name.slice(0, name.lastIndexOf(".")),
+    by: MOVE,
+    write: true,
+    settled: "resolved",
+    ...(eventsFrom === undefined ? {} : { eventsFrom }),
+  });
+  const keep = [write("kept.discard"), write("kept.media.add"), write("kept.publish", 0)];
+  assert.deepEqual(strayKeepWrites([...keep, write("kept.publish", 3)]), []);
+  assert.deepEqual(
+    strayKeepWrites([
+      write("rooms.create"),
+      write("rooms.discardSession"),
+      write("rooms.publish", 0),
+    ]),
+    [],
+  );
+  assert.notDeepEqual(
+    strayKeepWrites([...keep, write("kept.discard")]),
+    [],
+    "a discard after the save",
+  );
+  assert.notDeepEqual(
+    strayKeepWrites([write("kept.publish", 0)]),
+    [],
+    "a first save without a discard",
+  );
+  assert.notDeepEqual(
+    strayKeepWrites([write("kept.discard"), write("kept.publish", 2)]),
+    [],
+    "a later save after one",
+  );
+  assert.deepEqual(unowned([{ ...write("kept.discard"), by: "foreign" }]), [
+    "foreign:kept.discard",
+  ]);
+});
 
 // An import queued behind saved-values work issued before it, and retired while it waits: when the queue reaches it,
 // none of its calls is admitted.
