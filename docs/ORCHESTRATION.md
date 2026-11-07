@@ -17,7 +17,9 @@ Messages follow events, as [Builder messages and READY](DEVELOPMENT-WORKFLOW.md#
 for the builder.
 
 - One message carries one complete ruling.
-- No duplicate summaries: once an event has been sent explicitly, the turn's final message is only the one-line status.
+- Report each event once. Where the harness delivers a turn's final message to the coordinator, the report is that
+  final message and nothing is sent besides it. Otherwise it is one sent message, and the final message is only the
+  one-line status. Never both: two copies cost two writes, two wakes and two reads.
 - When a builder's turn must end without an event, its final message is one `WAITING: <what>` line, and the
   coordinator takes no action on it. It is the harness's required final output, not a progress note.
 - Do not wake an idle builder for something it need not act on now; put it in the next real message.
