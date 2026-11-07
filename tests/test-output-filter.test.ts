@@ -214,7 +214,8 @@ test("the full suite's runner refuses a test runner option given to its Node ins
     const environment = { ...process.env };
     delete environment.NODE_TEST_CONTEXT;
     // Representative test runner options (concurrency, selection, a boolean, an experimental one, the switch itself),
-    // each in every spelling Node reads: `-` or `_` in its name, its value after `=` or as the next argument, negated.
+    // each in representative spellings Node reads: all `-` or all `_` in its name, its value after `=` or as the next
+    // argument, and negated with `--no-`.
     const options: [name: string, value: string | null][] = [
       ["test-concurrency", "1"],
       ["test-name-pattern", "NO_MATCH"],
