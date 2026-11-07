@@ -8,15 +8,23 @@
 // fail, turn any failure in a phase, any output-stream error, any uncaught exception or unhandled rejection, and SIGPIPE
 // into exit 2. The decision (`exit.mjs`: 0 identity, an unsupported route, or censored at the step limit; 1 a decided
 // difference, a one-sided rejection included; 2 a harness failure or an unknown verdict) is final only once stdout and
-// standard error (its verdict summary, censored pairs counted) have finished, and only through `process.exitCode`.
-// The accepted residual: a module in this process that calls `process.exit(1)` or sets `process.exitCode` itself
-// bypasses the decision. The engine never does; a fatal abort exits 134.
+// standard error (its verdict summary, censored pairs counted) have finished, and only through `process.exitCode`,
+// which is 2 until then, so that a run that ends without deciding fails closed.
+//
+// The bar: the exit status covers the run, its decision and the delivery of both output streams. A signal or event
+// raised after both streams have finished and the loop is idle is outside the bar: it cannot change delivered output.
+// The boundary case is a SIGPIPE raised as the summary finishes, which Node never delivers before it exits. This joins
+// the accepted residual of a module calling `process.exit` or setting `exitCode` itself. The engine does neither; a
+// fatal abort exits 134.
 
 import { parseArgs } from "node:util";
 
-import { exitStatus, verdictCounts, wholeNumber } from "./exit.mjs";
-import { generate } from "./generate.mjs";
-import { shrink } from "./shrink.mjs";
+// Until the decision, the exit status is 2: a run that ends without deciding, also one whose own modules fail to load
+// (they are loaded below, after this), fails closed.
+process.exitCode = 2;
+
+// The CLI's own modules, loaded once the default and the handlers below are in place.
+let exitStatus, verdictCounts, wholeNumber, generate, shrink;
 
 /** Ends the process with 2, once, writing a fixed diagnostic if it can. */
 function fail(what) {
@@ -41,6 +49,13 @@ process.on("unhandledRejection", (error) => fail(`unhandled rejection: ${describ
 process.on("SIGPIPE", () => fail("SIGPIPE"));
 process.stdout.on("error", (error) => fail(`standard output: ${describe(error)}`));
 process.stderr.on("error", () => process.exit(2));
+
+/** The CLI's own modules: its decision, the generator and the shrinker. */
+async function tools() {
+  ({ exitStatus, verdictCounts, wholeNumber } = await import("./exit.mjs"));
+  ({ generate } = await import("./generate.mjs"));
+  ({ shrink } = await import("./shrink.mjs"));
+}
 
 /** The arguments, validated before anything else loads or runs. */
 function usage(argv) {
@@ -156,6 +171,7 @@ async function output(stream, lines) {
 }
 
 async function main() {
+  await tools();
   const options = usage(process.argv.slice(2));
   const harness = await load();
   const { reports, lines } = run(options, harness);

@@ -1029,6 +1029,20 @@ export function differentialRun(
    * `equivalent`, a discrepancy, a mapping failure, censoring or an admission alike.
    */
   const report = (given: PairVerdict): DifferentialReport => {
+    // Every field that can run code is read first, so that the latch is checked last, right before the verdict
+    // leaves: a callback failure swallowed while a field is read still takes priority.
+    const name = input.name;
+    const used = process.cpuUsage(started);
+    const fields = {
+      name,
+      route,
+      plans: planDigests,
+      steps: progress.steps,
+      cuts: progress.cuts,
+      cutsOverCap: progress.overCap,
+      tailSteps: progress.tailSteps,
+      cpuMs: Math.round((used.user + used.system) / 1000),
+    };
     let verdict = given;
     const latched = attribution.pending();
     if (latched !== null) {
@@ -1036,18 +1050,18 @@ export function differentialRun(
       outcomes = { ...outcomes, [latched.side]: outcome };
       verdict = { kind: "not-compared", side: latched.side, because: outcome.kind };
     }
-    const used = process.cpuUsage(started);
+    // The report's own field order, unchanged.
     return {
-      name: input.name,
-      route,
+      name: fields.name,
+      route: fields.route,
       outcomes,
       verdict,
-      plans: planDigests,
-      steps: progress.steps,
-      cuts: progress.cuts,
-      cutsOverCap: progress.overCap,
-      tailSteps: progress.tailSteps,
-      cpuMs: Math.round((used.user + used.system) / 1000),
+      plans: fields.plans,
+      steps: fields.steps,
+      cuts: fields.cuts,
+      cutsOverCap: fields.cutsOverCap,
+      tailSteps: fields.tailSteps,
+      cpuMs: fields.cpuMs,
     };
   };
 

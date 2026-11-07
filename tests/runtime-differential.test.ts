@@ -1289,6 +1289,55 @@ test("a callback failure in the last restore of a run is the side's harness fail
   );
 });
 
+test("a callback failure swallowed while the report itself is built takes priority over its verdict", () => {
+  // The input's name, which only the report reads, swallows a failure of the right side's decision callback.
+  let decide: Decide | null = null;
+  const build = thisBuild("right");
+  const right: PipelineAdapter = {
+    ...build,
+    sessions: {
+      ...build.sessions,
+      createFreshRuntimeSession: (plan, fresh, options) => {
+        decide = options?.randomControl?.decide ?? null;
+        return build.sessions.createFreshRuntimeSession(plan, fresh, options);
+      },
+    },
+  };
+  const named = (): DifferentialInput => ({
+    ...single("exit", "exit\n", { seed: 5 }),
+    random: "natural",
+    get name() {
+      if (decide !== null) swallow(decide);
+      return "exit";
+    },
+  });
+  // Both an equal pair and one that differs (through an injection) report the swallowed failure instead.
+  for (const inject of [
+    undefined,
+    (record: SideRecord, at: InjectionSite) =>
+      at.side === "right" && at.state === 0
+        ? changed(record, (copy) => (snapshotOf(copy).rng ^= 1))
+        : record,
+  ]) {
+    decide = null;
+    const report = differentialRun(named(), {
+      ...CUTS,
+      right,
+      ...(inject === undefined ? {} : { inject }),
+    });
+    assert.deepEqual(report.verdict, {
+      kind: "not-compared",
+      side: "right",
+      because: "harness-failure",
+    });
+    const outcome = report.outcomes.right;
+    assert.equal(
+      outcome?.kind === "harness-failure" ? outcome.member : outcome?.kind,
+      "decision.decide",
+    );
+  }
+});
+
 test("a throwing injection is that side's harness failure at the injection", () => {
   const report = differentialRun(FAULT_INPUT, {
     ...CUTS,
@@ -1395,6 +1444,9 @@ export function differentialRun(input, options) {
   if (mode === "finish") process.stdout.once("finish", () => Promise.reject(new Error("test-only rejection at finish")));
   if (mode === "stderr-finish") process.stderr.once("finish", () => Promise.reject(new Error("test-only rejection at the summary's finish")));
   if (mode === "before-exit") process.once("beforeExit", () => { throw new Error("test-only throw before exit"); });
+  // A stream whose end never completes: the run never reaches its decision.
+  if (mode === "stdout-incomplete") process.stdout.end = function () { return this; };
+  if (mode === "stderr-incomplete") process.stderr.end = function () { return this; };
   return { name: input.name, route: options.route, outcomes: { left: null, right: null }, verdict: verdicts[mode] ?? verdicts.identity, plans: { left: null, right: null }, steps: 0, cuts: [], cutsOverCap: false, tailSteps: 0, cpuMs: 0 };
 }
 `;
@@ -1477,6 +1529,9 @@ test("the campaign CLI runs its phases in order, and any phase's failure exits 2
       "a rejection raised when the summary finishes",
     );
     assert.equal(cli("before-exit", args).status, 2, "a throw as the process is about to exit");
+    // A stream that never finishes: the run ends without a decision, which fails closed.
+    for (const mode of ["stdout-incomplete", "stderr-incomplete"])
+      assert.equal(cli(mode, args).status, 2, mode);
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
