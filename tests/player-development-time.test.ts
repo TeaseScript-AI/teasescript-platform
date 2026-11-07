@@ -302,7 +302,7 @@ interface SessionHost {
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
   update(next: PlayerRuntimeSession): void;
-  observe(): PlayerRuntimeSession | null;
+  observe(): Promise<PlayerRuntimeSession | null>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
 }
@@ -483,7 +483,7 @@ test("a jump logs only the scene time it advanced, not real time observed while 
   for (let waited = 0; player.session.value!.state.observedSessionTimeMs < targetMs; waited += 10) {
     assert.ok(waited < 5_000, "real time was not observed");
     await new Promise((resolve) => setTimeout(resolve, 10));
-    player.observe();
+    await player.observe();
   }
   answer();
   await jumped;

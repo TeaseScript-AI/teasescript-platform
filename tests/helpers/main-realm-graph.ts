@@ -35,8 +35,6 @@ export interface MainRealmGraphOptions {
   readonly allowedSource: ReadonlySet<string>;
   /** The Player modules that run in the engine Worker. */
   readonly workerModules: ReadonlySet<string>;
-  /** Main-realm modules whose imports are not judged. */
-  readonly exempt: ReadonlySet<string>;
 }
 
 /** Stops the walk at a loading form it does not model, rather than letting that load pass unseen. */
@@ -325,7 +323,6 @@ export function mainRealmGraph(options: MainRealmGraphOptions): {
     if (visited.has(file)) continue;
     visited.add(file);
     const importer = name(file);
-    if (options.exempt.has(importer)) continue;
     for (const code of scripts(file, importer))
       for (const { specifier, names } of valueImports(code, file, importer)) {
         const resolved = resolveSpecifier(file, specifier, aliasRoot, importer, name);

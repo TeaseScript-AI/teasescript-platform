@@ -6,7 +6,6 @@ import {
   ADAPTER_EXPORTS,
   ALLOWED_SOURCE,
   COMPLETED_FAMILIES,
-  EXEMPT_UNTIL_ACTIVATION,
   RATCHET,
   VIEW_READERS,
   WORKER_MODULES,
@@ -15,8 +14,8 @@ import { mainRealmGraph, type MainRealmOffender } from "./helpers/main-realm-gra
 
 /*
  * The engine's ownership rule for the Player (the L5 series): the main realm loads only the `src/` modules in
- * `ALLOWED_SOURCE`, never Worker-side code; until each bridge family lands, its remaining imports are listed in
- * `RATCHET`. Every list in `player/engine-bridge/inventory.ts` is checked against the source here.
+ * `ALLOWED_SOURCE`, never Worker-side code; the imports a bridge family still has are listed in `RATCHET`. Every list
+ * in `player/engine-bridge/inventory.ts` is checked against the source here.
  */
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -29,7 +28,6 @@ const graph = mainRealmGraph({
   aliasRoot: "player/vue/src",
   allowedSource: new Set(allowed),
   workerModules: new Set(WORKER_MODULES),
-  exempt: new Set(EXEMPT_UNTIL_ACTIVATION),
 });
 
 test("the main realm reaches Worker-side code only through the imports RATCHET lists", () => {
@@ -81,7 +79,6 @@ const fixtureGraph = (entry: string) =>
     aliasRoot: "player/alias",
     allowedSource: new Set(["src/allowed.ts"]),
     workerModules: new Set(["player/worker-module.ts"]),
-    exempt: new Set(),
   });
 
 test("the walk reads every import form once and stops at Worker-side code", () => {

@@ -39,7 +39,7 @@ interface StopHost {
     answer(input: "button"): Intent;
   };
   reportHostError(error: unknown): void;
-  observe(): PlayerRuntimeSession | null;
+  observe(): Promise<PlayerRuntimeSession | null>;
   demandCallView(): { release(): void };
   pressPermanentButton(buttonId: number): Promise<void>;
   editSavedData(edit: {
@@ -253,7 +253,7 @@ test("a Player error stops the session where it stands, and late writes do not c
   await settle(250);
   assert.deepEqual(said(host), ["first"]);
   assert.equal(host.session.value?.state.status, "waiting");
-  assert.equal(host.observe(), null);
+  assert.equal(await host.observe(), null);
 
   // A save written before the stop does not continue the session when it settles.
   host.prepare(() =>

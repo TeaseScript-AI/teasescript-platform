@@ -97,8 +97,9 @@ export function useDevelopmentTime(
       if (!(await player.prepareInput())) return;
       if (disposed || player.generation.value !== generation) return;
       // Time that really elapsed is observed first, with the media progress actually played; a stopped session gives
-      // nothing to jump.
-      const start = player.observe();
+      // nothing to jump. The jump's own observation, not the clock's policy (`before`): it needs the observed session.
+      const start = await player.observe();
+      if (disposed || player.generation.value !== generation) return;
       const targetMs = start === null ? null : target(start);
       if (start === null || targetMs === null) return;
       let current = start;
@@ -152,9 +153,11 @@ export function useDevelopmentTime(
 
   /** Skips events for one task, then publishes them as one jump. */
   async function autoSkipTask() {
-    const start = player.observe();
-    if (start === null || !autoSkippable(start.state)) return;
     const generation = player.generation.value;
+    // Its own observation, as a jump's.
+    const start = await player.observe();
+    if (start === null || disposed || player.generation.value !== generation) return;
+    if (!autoSkippable(start.state)) return;
     let current = start;
     const until = performance.now() + JUMP_TASK_MS;
     try {

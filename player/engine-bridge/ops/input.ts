@@ -49,20 +49,19 @@ const isDraft = (value: unknown): value is string | null =>
 type Answer = { readonly session: PlayerRuntimeSession; readonly outcome: unknown } | null;
 
 /**
- * Applies an adapter op's result as the facade's `hatch` does: the same session publishes nothing, one that kept its
- * revision is kept, and a new revision ends a late observation's catch-up and publishes.
+ * Applies an adapter op's result (`HeldSession.adoptResult`): no answer adopts nothing, and a new revision also ends a
+ * late observation's catch-up, as input moves the session on.
  */
 function answered(held: HeldSession, result: Answer): OpOutcome {
   if (result === null) return { result: null, view: null };
-  const next = result.session;
-  if (next === held.sessionForOperation()) return { result: result.outcome, view: null };
-  if (next.revision === held.revision) {
-    held.keep(next);
-    return { result: result.outcome, view: null };
-  }
+  const adoption = held.adoptResult(result.session);
+  if (adoption.kind !== "published") return { result: result.outcome, view: null };
   held.endCatchUp();
-  const view = held.publish(next);
-  return { result: result.outcome, eventsThrough: view.eventsThrough, view };
+  return {
+    result: result.outcome,
+    eventsThrough: adoption.view.eventsThrough,
+    view: adoption.view,
+  };
 }
 
 /**

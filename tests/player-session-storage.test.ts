@@ -44,7 +44,7 @@ interface StorageHost {
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   readonly notices: Readonly<Ref<readonly { readonly key: string; readonly level: string }[]>>;
   clearScriptStorage(): Promise<boolean>;
-  observe(): PlayerRuntimeSession | null;
+  observe(): Promise<PlayerRuntimeSession | null>;
   publishNotice(notice: {
     readonly key: string;
     readonly level: "info" | "warning" | "error";
@@ -431,7 +431,7 @@ test("Vue host schedules no clock wake-ups while a pending write holds scene tim
     'timer async 10 ms { say "one", instant }\ntimer async 20 ms { say "two", instant }\nsave 1 as "k"\nwait 100 ms\nexit',
   );
   now = 100;
-  host.observe();
+  await host.observe();
   // Catch-up holds at the first block's due time behind the write; an overdue deadline must not spin the clock.
   assert.equal(host.session.value?.state.currentSessionTimeMs, 10);
   const held = host.session.value;

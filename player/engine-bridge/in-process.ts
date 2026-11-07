@@ -1,8 +1,7 @@
-import type { InstructionPlan, MediaProgressReport } from "../../src/playback.js";
+import type { InstructionPlan } from "../../src/playback.js";
 import type { DebugRecording } from "../debug-recorder.js";
 import {
   createPlayerRuntimeSession,
-  observePlayerRuntimeTime,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../runtime-adapter.js";
@@ -174,15 +173,6 @@ export function hatch<R>(
     return { ...result, session: adopt(result.session) } as Hatched<R>;
   // EVIDENCE: validation: a result with no adapter session is what `Hatched` leaves as it is.
   return result as Hatched<R>;
-}
-
-/** **Facade.** An ordinary observation of scene time, synchronously, for an observing chain not yet converted. */
-export function observeNow(
-  session: PlayerSession,
-  atMs: number,
-  media: readonly MediaProgressReport[],
-): Hatched<ReturnType<typeof observePlayerRuntimeTime>> {
-  return hatch(session, (current) => observePlayerRuntimeTime(current, atMs, media));
 }
 
 /** What a transitional session factory receives from the host. */

@@ -79,7 +79,7 @@ interface RewindHost {
     value: SerializableRuntimeValue;
     expected: SerializableRuntimeValue | undefined;
   }): Promise<{ readonly kind: string }>;
-  observe(): PlayerRuntimeSession | null;
+  observe(): Promise<PlayerRuntimeSession | null>;
   demandCallView(): { release(): void };
   debugRecording(): {
     readonly anchorSnapshot: RuntimeSnapshot;
@@ -332,7 +332,7 @@ test("Back shows an earlier state paused, and Forward and Return restore the sta
   assert.equal(playerRuntimeForeground(host.session.value!)?.kind, "choose");
   // Nothing runs on its own while inspecting: no time is observed, and saved data stay as they were.
   const inspected = host.session.value;
-  assert.equal(host.observe(), inspected);
+  assert.equal(await host.observe(), inspected);
   assert.deepEqual(storage.saved(), { k: 1, pick: "One" });
   // The restored state is a diagnostic fork, and its recording begins at it.
   assert.deepEqual((await host.debugExportCandidate({})).rewoundWhileDebugging, {
