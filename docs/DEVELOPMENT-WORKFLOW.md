@@ -701,6 +701,8 @@ the changed behavior does not reach that layer.
 
 Every pull request runs its relevant configured checks and reports exact commands and results. Use the exact
 Node.js version declared in `.nvmrc` and confirm the effective environment before installing dependencies.
+The code targets ES2025 (`tsconfig.json`'s `target`, the Player's `lib` in `player/vue/tsconfig.json` and its Vite
+`build.target`), which Node 26 and current browsers implement; older browsers are not supported (owner, 2026-11-07).
 Missing NVM is not itself a verification failure when another supported mechanism activated the required
 version. Reuse earlier verification while the tested source/content and every relevant input, toolchain,
 transformation or transport boundary, and mutable state on which the evidence depends are proven equivalent. Revalidate
