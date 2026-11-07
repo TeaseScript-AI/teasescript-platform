@@ -60,7 +60,7 @@ export function tokensOf(text) {
  * `git worktree add <dir> <base commit>`, while a report's own values stand inline.
  */
 export function placeholdersOf(text) {
-  const prose = text.replace(/^```[^\n]*\n[\s\S]*?^```[^\n]*$/gmu, "");
+  const prose = text.replace(/^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gmu, "");
   return [
     ...new Set(PLACEHOLDERS.flatMap((pattern) => [...prose.matchAll(pattern)].map((m) => m[0]))),
   ];

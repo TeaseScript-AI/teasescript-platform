@@ -139,6 +139,8 @@ test("an unfilled placeholder fails", { timeout: 30_000 }, () => {
     }
     // A fenced block shows a command's form, not a value.
     assert.equal(check("```sh\nsx-job submit --checkout <sha>\n```\n", [directory]).status, 0);
+    // (also inside a list item, indented)
+    assert.equal(check("- run\n\n  ```\n  git log <sha>\n  ```\n", [directory]).status, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
