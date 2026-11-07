@@ -659,3 +659,28 @@ for (const [method, call] of Object.entries(FOREIGN_CALLS))
     assert.equal(a.frozen(own), false);
     assert.equal(b.frozen(foreign), false);
   });
+
+test("start's options are a plain record: a Date or a Map is refused, in-process and in a Worker", async () => {
+  const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
+  try {
+    for (const bridge of [await inProcessBridge(), worker]) {
+      const plan = await prepared(bridge, SCRIPT);
+      const start = (options: unknown) =>
+        bridge.client.request("start", { plan, options, recording: false });
+      // A Date or a Map has no option of its own, but it is no options record: before, each passed as empty options.
+      for (const options of [new Date(0), new Map()])
+        await assert.rejects(
+          start(options),
+          (error: unknown) =>
+            error instanceof BridgeRequestError &&
+            error.message === "Malformed arguments for 'start'.",
+          String(options),
+        );
+      // A plain record, also one with no prototype, starts the session.
+      for (const options of [{ wallClockMs: 0, temporalContext: TEMPORAL }, Object.create(null)])
+        assert.equal(typeof (await start(options)).result, "object");
+    }
+  } finally {
+    worker.client.terminate();
+  }
+});
