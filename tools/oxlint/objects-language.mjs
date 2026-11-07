@@ -103,16 +103,23 @@ export function objectsLanguage({
     if (name === "Map" || name === "ReadonlyMap" || name === "WeakMap") return args[1];
     return undefined;
   };
-  /** Whether a type is a collection whose element is a union of an array or an object beside another kind. */
+  /**
+   * Whether a type is a collection whose element is a union of unlike kinds: a primitive beside an array or an object,
+   * or two array or object types (where a widening alias can carry another value in). One type beside `null` or
+   * `undefined` is one kind.
+   */
   const mixedElements = (type) => {
     const parts = type.isUnion() ? type.types : [type];
     return parts.some((part) => {
       const element = elementOf(part);
       if (element === undefined) return false;
-      const kinds = new Set((element.isUnion() ? element.types : [element]).map(kind));
-      kinds.delete("none");
+      const members = (element.isUnion() ? element.types : [element]).filter(
+        (member) => kind(member) !== "none",
+      );
+      const kinds = members.map(kind);
       return (
-        kinds.has("unknown") || (kinds.size > 1 && (kinds.has("array") || kinds.has("object")))
+        kinds.includes("unknown") ||
+        (members.length > 1 && (kinds.includes("array") || kinds.includes("object")))
       );
     });
   };
