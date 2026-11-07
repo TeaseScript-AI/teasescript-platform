@@ -21,13 +21,14 @@ import { receiverWalk } from "./key-contract.js";
 import {
   canonicalKey,
   keyBelowIn,
+  keptKeyBelowIn,
   keyWalk,
   memberStepOf,
   restRef,
   isPathSteps,
   stepsRest,
 } from "./key-ids.js";
-import { ABSENT, heldReference } from "./kinds.js";
+import { ABSENT, HELD_REFERENCE } from "./kinds.js";
 import { lackingAt, nodeAt, pathAt } from "./literal-index.js";
 import { measuresLength, selectsElement } from "../method-categories.js";
 import type { ObjectsProof, ObjectSite, PrefixEntry } from "./model.js";
@@ -290,7 +291,7 @@ function* valueObjects(
       yield* out.from(
         keyObjects(
           contract,
-          keyBelowIn(contract, keyOf(program.occurrenceOf.get(value)!, []), rest),
+          keptKeyBelowIn(contract, keyOf(program.occurrenceOf.get(value)!, []), rest),
         ),
       );
       return out.proven();
@@ -316,7 +317,7 @@ function* valueObjects(
     }
     case "call":
       yield* out.from(
-        keyObjects(contract, keyBelowIn(contract, keyOf(resultOf(contract, value), []), rest)),
+        keyObjects(contract, keptKeyBelowIn(contract, keyOf(resultOf(contract, value), []), rest)),
       );
       return out.proven();
     case "literal":
@@ -332,7 +333,8 @@ function* valueObjects(
       if (operation.kind !== "get") break;
       // F19a: a receiver that may be a reference has the runtime's `get`
       // #1668: R, a receiver decision
-      if (heldReference(yield* contract.valueReceiver(operation.receiver))) break;
+      const receiver = yield* contract.valueReceiver(operation.receiver);
+      if (some(contract.work, "objectSteps", receiver, (item) => item === HELD_REFERENCE)) break;
       yield* out.from(
         objectsAt(
           contract,
@@ -469,7 +471,7 @@ function* entryObjects(
       out.complete = false;
       return;
     }
-    yield* out.from(keyObjects(contract, keyBelowIn(contract, entry.key, rest)));
+    yield* out.from(keyObjects(contract, keptKeyBelowIn(contract, entry.key, rest)));
     return;
   }
   yield* out.from(
