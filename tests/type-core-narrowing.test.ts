@@ -711,8 +711,9 @@ test("N2's events: a mutator, a helper holding one, a block holding one, never a
         [xs, `if xs[0] != null { xs.${call}\n repeat xs[0] {} }`],
         read,
         7,
-        // (a collection's invalidation names the element read, `member`, #1073 PR 4's U5)
-        "non-null: member",
+        // (a reordering invalidates the element read, `member`; an add or a removal stores the key, `branch`: #1073
+        // PR 4's U5, as the fixture's `invalidation/*/changed` records name them)
+        ["reverse()", "sort()", "shuffle()"].includes(call) ? "non-null: member" : "non-null: branch",
       ]),
       [
         "helper",
@@ -1417,14 +1418,12 @@ test("a read below a selection takes its narrowing, each selected owner's own se
   assert.equal(tested(rows, "rows.first.last", "rows.first.last"), "valid");
   assert.equal(tested(rs, "rs.first.f", "rs.last.f"), untested(rs, "rs.last.f"));
   assert.equal(tested(rs, "rs.random.f", "rs.random.f"), untested(rs, "rs.random.f"));
-  assert.equal(
-    tested(rows, "rows.random.first", "rows.random.first"),
-    untested(rows, "rows.random.first"),
-  );
-  assert.equal(
-    tested(rows, "rows.first.random", "rows.first.random"),
-    untested(rows, "rows.first.random"),
-  );
+  // (a selection through `.random` is read anew: its test is a check the compiler cannot keep, the warning; with none,
+  // its `null` is the route rule's error, AD-1)
+  for (const read of ["rows.random.first", "rows.first.random"]) {
+    assert.match(tested(rows, read, read), /^warning-runtime-check/, read);
+    assert.match(untested(rows, read), /^compile-error/, read);
+  }
   // an empty list passes every element test: C6 still asks each selection's element of its owner; a property an
   // element lacks stays a member read
   const checks = (...lines: readonly string[]): string[] =>
@@ -2300,7 +2299,7 @@ test("a deep path's events are its prefixes' and collections' that hold one, whe
         [lists, "if m is integer[][] { m[0].reverse()\n repeat m[0][0] {} }"],
         "repeat m[0][0]",
         7,
-        "is integer element: branch",
+        "is integer element: member",
       ],
     ],
     at,

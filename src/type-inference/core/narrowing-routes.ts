@@ -202,12 +202,16 @@ export class NarrowingRoutes {
     const site = program.places[value]?.site ?? null;
     if (site === null) return null;
     const node = program.exprAt(site);
-    // (a value whose node reads no expression is no read: a call's, a `get`'s or a parse's result, its own producer)
-    if (node === null || node.expression === undefined)
-      return (node === null || program.live(node)) &&
+    // (a value whose node reads no expression, a call's, a `get`'s or a `load`'s result, is its own producer; any other,
+    // a compound assignment's operand among them, keeps its warning)
+    if (node === null || node.expression === undefined) {
+      const c = program.opOf.get(value)?.kind;
+      return (c === "call" || c === "get" || c === "load" || c === "fallback") &&
+        (node === null || program.live(node)) &&
         (yield* this.#valueProduces(value, node, [], tag))
         ? site
         : null;
+    }
     const expression = node.expression;
     if (!program.live(node)) return null;
     const path = stablePath(program, node.file, expression);
@@ -320,6 +324,8 @@ export class NarrowingRoutes {
     const last = found.chain.at(-1)!;
     const statement = last.index < 0 ? undefined : last.block.statements[last.index];
     if (statement !== undefined && statement.start <= at && at < statement.end) return null;
+    const stored = found.def.value === undefined ? null : program.places[found.def.value]?.site;
+    if (stored !== undefined && stored !== null && stored.start <= at && at < stored.end) return null;
     return this.#open(key, tag, found, chain, node) ? found : null;
   }
 

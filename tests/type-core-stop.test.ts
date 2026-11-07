@@ -6838,16 +6838,16 @@ test("a stopped iterable or repeat-count check stands for a lost null check only
   const duplicates = (value: string) =>
     `let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:${value},nest:{n:${value},keep:1},spare:1}\nlet a=[root,root,other,root]\nlet b=[root,other,root,root]\nlet out=[a,b]\nrepeat out[0][0].n {}\nexit\n`;
   const witnesses: readonly (readonly [string, string, string])[] = [
-    // (a `null` another callable stores: its null-check a warning, never the route rule's error, AD-1 and X6)
+    // (a `null` a handler may store: its null-check a warning, never the route rule's error, AD-1 and X7)
     [
       "iterable",
-      "let l = [1]\nfunction clear { l = null }\nclear()\nfor x in l { say x }\nexit\n",
-      "operand l 57-58",
+      "let l = [1]\ntimer async 1 s { l = null }\nfor x in l { say x }\nexit\n",
+      "operand l 50-51",
     ],
     [
       "count",
-      "let n = 2\nfunction clear { n = null }\nclear()\nrepeat n {}\nexit\n",
-      "integer-check n 53-54",
+      "let n = 2\ntimer async 1 s { n = null }\nrepeat n {}\nexit\n",
+      "integer-check n 46-47",
     ],
     ["duplicates/8", duplicates("8"), "integer-check out.element.element.n 182-193"],
     ['duplicates/"bad"', duplicates('"bad"'), "integer-check out.element.element.n 190-201"],
@@ -7358,6 +7358,9 @@ test("the sentence table and the derived record name every site that words or de
     "result.ts:coreRecord:provenance",
     "warnings.ts:memberWarningFix:present",
     // (the warning's own: `fits` by the kinds that fit, `besides` none, `provenance` by the item read)
+    // (the route rule's error: the fix of the warning it stands in for, its `fits` and `provenance` as `warning`'s)
+    "warnings.ts:required:fits",
+    "warnings.ts:required:provenance",
     "warnings.ts:warning:besides",
     "warnings.ts:warning:fits",
     "warnings.ts:warning:provenance",
