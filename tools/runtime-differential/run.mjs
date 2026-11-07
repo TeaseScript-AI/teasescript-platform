@@ -1,8 +1,12 @@
 // The differential harness's campaign runner (docs/TESTING.md "Differential harness"), after `npm run build`:
 //   node tools/runtime-differential/run.mjs --seed S --count N [--from I] [--route legacy|core] [--shrink]
+//     [--oracle [--manifest FILE] [--replace REL=FILE ...]]
 // runs generated programs (seed, index from I to I + N - 1) through this build against itself and writes one JSON line
 // per program: seed, index, runtime seed, input and plan digests, the verdict, its first mismatch path, and with
-// `--shrink` the reduced repro of a discrepancy and its signature.
+// `--shrink` the reduced repro of a discrepancy and its signature. With `--oracle`, the left side is the pinned oracle
+// root (`materialize(manifest)`, the checkout's `tools/runtime-oracle/manifest.json` by default) and the right side this
+// checkout's build, each in a root's runner (`run-root.mjs`); every line also names the oracle's commit and the
+// candidate's closure digest. `--replace` (tests only) loads FILE in place of the candidate's REL and marks the lines.
 //
 // It runs in ordered phases: usage, load, run, output, decide. Terminal handlers, installed before anything that can
 // fail, turn any failure in a phase, any output-stream error, any uncaught exception or unhandled rejection, and SIGPIPE
@@ -17,8 +21,13 @@
 // own process itself. A real broken pipe reaches the process as an `EPIPE` error on the stream, which the bar covers.
 // The boundary cases are signals raised with `process.kill(process.pid, "SIGPIPE")`: as the summary finishes, at
 // stderr's `prefinish`, and during the decision; Node may not deliver them before it exits. The engine does none of
-// these; a fatal abort exits 134.
+// these; a fatal abort exits 134. With `--oracle`, a runner that exits, closes its pipe or writes a malformed line is its
+// side's harness failure (exit 2); a runner that never answers, or fails before it opens its pipes, blocks until the
+// job's deadline, which bounds it.
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { parseArgs } from "node:util";
 
 // Until the decision, the exit status is 2: a run that ends without deciding, also one whose own modules fail to load
@@ -28,12 +37,26 @@ process.exitCode = 2;
 // The CLI's own modules, loaded once the default and the handlers below are in place.
 let exitStatus, verdictCounts, wholeNumber, generate, shrink;
 
+/** Runners and scratch to end when the run ends, whatever its outcome (`--oracle`). */
+const owned = { runners: [], scratch: null };
+
+function release() {
+  for (const runner of owned.runners.splice(0)) runner.close();
+  if (owned.scratch !== null) fs.rmSync(owned.scratch, { recursive: true, force: true });
+  owned.scratch = null;
+}
+
 /** Ends the process with 2, once, writing a fixed diagnostic if it can. */
 function fail(what) {
   try {
     process.stderr.write(`runtime differential: ${what}\n`);
   } catch {
     // The diagnostic is best effort; the exit status decides.
+  }
+  try {
+    release();
+  } catch {
+    // A runner's pipes close with this process, which ends it; the scratch is best effort.
   }
   process.exit(2);
 }
@@ -69,30 +92,70 @@ function usage(argv) {
       from: { type: "string", default: "0" },
       route: { type: "string", default: "legacy" },
       shrink: { type: "boolean", default: false },
+      oracle: { type: "boolean", default: false },
+      manifest: { type: "string" },
+      replace: { type: "string", multiple: true, default: [] },
     },
   });
   if (values.seed === undefined) throw new Error("--seed is required");
   if (!["legacy", "core"].includes(values.route)) throw new Error("--route is legacy or core");
+  if (!values.oracle && (values.manifest !== undefined || values.replace.length > 0))
+    throw new Error("--manifest and --replace need --oracle");
+  for (const item of values.replace)
+    if (!/^[^=]+=[^=]+$/u.test(item)) throw new Error(`--replace is REL=FILE, not '${item}'`);
   return {
     seed: wholeNumber(values.seed, "--seed", 0),
     first: wholeNumber(values.from, "--from", 0),
     count: wholeNumber(values.count, "--count", 1),
     route: values.route,
     shrink: values.shrink,
+    oracle: values.oracle,
+    manifest: values.manifest,
+    replace: values.replace,
   };
 }
 
-/** The compiled harness, from this checkout's build (a test may point at another directory). */
-async function load() {
+/**
+ * The compiled harness, from this checkout's build (a test may point at another directory); with `--oracle`, the two
+ * roots' runners, the pinned oracle's verified first.
+ */
+async function load({ oracle, manifest, replace }) {
   const directory = process.env.RUNTIME_DIFFERENTIAL_DIST;
   const dist = directory
     ? new URL(`file://${directory.replace(/\/?$/u, "/")}`)
     : new URL("../../dist/tests/helpers/", import.meta.url);
-  const { differentialRun } = await import(new URL("runtime-differential.js", dist).href);
   const { canonicalDigest, renderPath } = await import(
     new URL("runtime-state-comparison.js", dist).href
   );
-  return { differentialRun, canonicalDigest, renderPath };
+  if (!oracle) {
+    const { differentialRun } = await import(new URL("runtime-differential.js", dist).href);
+    return { differentialRun, canonicalDigest, renderPath, marks: {} };
+  }
+  const { checkout, defaultManifest, materialize } =
+    await import("../runtime-oracle/materialize.mjs");
+  const { closure } = await import("../runtime-oracle/closure.mjs");
+  const { remoteDifferentialRun, Runner } = await import(
+    new URL("runtime-differential-remote.js", dist).href
+  );
+  const pinned = JSON.parse(fs.readFileSync(manifest ?? defaultManifest, "utf8"));
+  const oracleRoot = materialize(pinned);
+  const candidate = closure(checkout).output;
+  owned.scratch = fs.mkdtempSync(path.join(os.tmpdir(), "runtime-differential-"));
+  const runners = {
+    left: new Runner("oracle", oracleRoot, Object.keys(pinned.output), owned.scratch),
+    right: new Runner("candidate", checkout, Object.keys(candidate), owned.scratch, replace),
+  };
+  owned.runners.push(runners.left, runners.right);
+  return {
+    differentialRun: (input, options) => remoteDifferentialRun(runners, input, options),
+    canonicalDigest,
+    renderPath,
+    marks: {
+      oracle: pinned.commit,
+      candidate: canonicalDigest(candidate),
+      ...(replace.length > 0 ? { replaced: true } : {}),
+    },
+  };
 }
 
 const input = (program) => ({
@@ -104,7 +167,7 @@ const input = (program) => ({
 
 /** Runs the campaign: its reports, and the lines it will write. */
 function run({ seed, first, count, route, shrink: shrinking }, harness) {
-  const { differentialRun, canonicalDigest, renderPath } = harness;
+  const { differentialRun, canonicalDigest, renderPath, marks } = harness;
   /** A verdict's signature: its kind, the route, and its first mismatch path with indices generalized. */
   const signature = (report) => {
     const verdict = report.verdict;
@@ -128,6 +191,7 @@ function run({ seed, first, count, route, shrink: shrinking }, harness) {
       index,
       id: program.id,
       family: program.family,
+      ...marks,
       runtimeSeed: program.runtimeSeed,
       input: canonicalDigest(program.sources),
       plan: report.plans.left,
@@ -175,8 +239,13 @@ async function output(stream, lines) {
 async function main() {
   await tools();
   const options = usage(process.argv.slice(2));
-  const harness = await load();
-  const { reports, lines } = run(options, harness);
+  let ran;
+  try {
+    ran = run(options, await load(options));
+  } finally {
+    release();
+  }
+  const { reports, lines } = ran;
   await output(process.stdout, lines);
   await output(process.stderr, [`${JSON.stringify({ summary: verdictCounts(reports) })}\n`]);
   return exitStatus(reports);
