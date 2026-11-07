@@ -17,10 +17,10 @@ import { Solver, withSolverSeam } from "../../src/type-inference/core/solver.js"
 import { Values } from "../../src/type-inference/core/values.js";
 
 /**
- * Stage 3b's narrowing index asked as its consumers will ask it (TABLE §13; S10's second part wires them): a pass made
- * as `analyseCore`'s first pass makes one, without its consumers, and each read's narrowing (N2, with N5's preserving
- * stores) and route (N3) asked, so a test sees the index's answers and a work family its construction and every visit,
- * charged to the pass's ledger.
+ * Stage 3b's narrowing index asked as its consumers ask it (TABLE §13; the route rule's `required`, #1073 PR 4): a
+ * pass made as `analyseCore`'s first pass makes one, without its consumers, and each read's narrowing (N2, with N5's
+ * preserving stores) and route (N3) asked, so a test sees the index's answers and a work family its construction and
+ * every visit, charged to the pass's ledger.
  */
 
 /** A pass of the analysis of `request`, its indexes built and nothing asked. */
