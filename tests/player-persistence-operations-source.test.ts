@@ -110,6 +110,8 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     issueTracing: SESSION,
     applyDebugMode: SESSION,
     debugView: SESSION,
+    sendRandomRequest: SESSION,
+    randomTried: SESSION,
     ownedSection: SESSION,
     settlePlanJson: SESSION,
     loadScriptStorage: READ,
@@ -200,7 +202,8 @@ const MEDIA_HELPERS: Readonly<Record<string, string>> = {
  */
 const BRIDGE = {
   nextTracingIntent: "local",
-  traced: "local",
+  hasAllocatedTracingIntent: "local",
+  nextRandomIntent: "local",
   claim: "refused",
   unclaim: "refused",
   client: "local",

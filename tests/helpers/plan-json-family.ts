@@ -34,6 +34,7 @@ const SESSION_OP =
   "a held session's step, input or view: the session holds its plan, whose JSON it never writes";
 const SERVICE_OP = "a held session's answer from a service of the page: no plan";
 const DEBUG_SOURCE_OP = "Debug's source view of a held plan, from its sources, not its JSON";
+const RANDOM_OP = "Debug's random control and history on the connection: draws and sites, no plan";
 
 /** Every other op of the composed host (`playerBridgeOps`), and why it touches no plan JSON a reader could keep. */
 export const NOT_PRODUCERS = {
@@ -84,6 +85,11 @@ export const NOT_PRODUCERS = {
   answerLock: SERVICE_OP,
   drawCode: DEBUG_SOURCE_OP,
   codeLines: DEBUG_SOURCE_OP,
+  randomControl: RANDOM_OP,
+  adoptRandom: RANDOM_OP,
+  releaseRandom: RANDOM_OP,
+  resolveDraw: RANDOM_OP,
+  randomTried: RANDOM_OP,
 } as const;
 
 /** Where the page's plan stands when the producer's reply arrives: still current, replaced by another, or closed. */
