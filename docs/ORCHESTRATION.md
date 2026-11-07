@@ -23,14 +23,33 @@ for the builder.
 - Do not wake an idle builder for something it need not act on now; put it in the next real message.
 - A question a lane repeats after you answered means its turns predate the answer: steer the running turn once with
   the same ruling; never re-decide.
+- When two of your rulings cross a lane's turns, the later one names what the earlier one said and what to undo, in
+  one message.
+- Relay a review verdict only after reading the review comment itself: a builder's summary of its own round omits the
+  findings it has already repaired.
+- A builder that waits on a job ends its turn with the wait that wakes it, never with the job alone. Treat a silent or
+  empty completion as a harness event until the thread's own items show otherwise: verify it there, then wake the lane
+  again with the job's state.
 
 ## Briefs
 
 A brief is a file the assignment points to. What it asks for follows the workflow's requirements for
 [the plan](DEVELOPMENT-WORKFLOW.md#the-plan), [READY](DEVELOPMENT-WORKFLOW.md#builder-messages-and-ready), and
-[the final-review brief](DEVELOPMENT-WORKFLOW.md#the-final-review). A final-review brief is also bounded: named cases,
-campaigns of a stated size, and evidence the reviewer samples rather than every run. The final reviewer's only write
-stays one comment on the pull request.
+[the final-review brief](DEVELOPMENT-WORKFLOW.md#the-final-review).
+
+- Ask for every finding within the scope, ranked, with a coverage statement of what was read in full, in part, or
+  skipped. Never ask for a fixed number of findings ("the top 10"): the agent stops when it reaches it. Bound the cost
+  by the scope and the job limits instead; a fixed number of cases to construct is a different thing and stays allowed.
+- Before sending, read the brief as its receiver would. Would it stop early, miss part of the scope (the code, its
+  documentation, similar names), or not know what "done" means? Fix the brief rather than following up.
+- A final-review brief is also bounded: named cases, campaigns of a stated size, and evidence the reviewer samples
+  rather than every run. The final reviewer's only write stays one comment on the pull request.
+- To complete a deliverable an agent left incomplete, continue that same session: it has read the material and knows
+  its unreported candidates. A fresh session is for an independent check.
+- A design-round record states every code fact as read, probed or unverified, and a conditional acceptance lists its
+  conditions in the record itself.
+- Research starts only with an early visible deliverable and a stop criterion. [Pre-research](DEVELOPMENT-WORKFLOW.md#the-plan)
+  pays most when it can refute a construction before anything is built.
 
 ## Pacing
 
@@ -43,14 +62,22 @@ stays one comment on the pull request.
   is stale, restart it as a fresh agent from its plan instead: the plan file on the full route, or the pull-request
   description on the light route. A long-running lane that resumes correctly from its plan keeps its worktree and queue
   ownership.
+- A lane parked on another lane's merge gets bounded preparatory work in the meantime (its next item's plan, its body
+  draft, a probe), never an empty wake; its wake signal for the real work stays the merge.
+- When a reviewer finds a sibling in every part of a construction, the next step is your reassessment of the class, not
+  another repair: a narrower claim stated truthfully beats a wider one that review keeps refuting.
 - An observation is not an instruction: weigh it, or ask, before changing work because of it.
 
 ## Merge
 
 Encode the [merge checklist](DEVELOPMENT-WORKFLOW.md#merge) as a script whose guards refuse: the records script
-compiles, the evidence manifest verifies, the base is unchanged since READY, and the head is clean. Let it write the
-records (the table row, the plan row, the tracker row) in the same step as the merge. Prepare those rows at READY, with
-one placeholder for the final verdict.
+compiles with no placeholder left, the evidence manifest verifies, the base is unchanged since READY, the head is clean,
+and the diff holds no generated file, debug line or secret. Let it write the records (the table row, the plan row, the
+tracker row) in the same step as the merge. Prepare those rows before READY where the facts are known, with
+placeholders the guards refuse to run with (the final head, the final verdict).
+
+Evidence gathered at an earlier head carries to the final head only by a file-level diff that touches nothing the
+result depends on, recorded with the evidence per result; otherwise it reruns.
 
 ## Parallel lanes
 
@@ -60,10 +87,11 @@ changed, that rebase changes the second item's delta, so its affected evidence r
 the changed part ([Pull requests and rebases](DEVELOPMENT-WORKFLOW.md#pull-requests-and-rebases)). This is not a stack
 and not an identity rebase. While a pull request waits on a design round, its lane builds its next item.
 
-## Cost
+## Facts that cross lanes
 
-- Start research only with an early visible deliverable and a stop criterion.
-- [Pre-research](DEVELOPMENT-WORKFLOW.md#the-plan) pays most when it can refute a construction before anything is built.
+A measurement one lane makes that changes a rule another lane runs under (a runner's cap, a baseline's limit, a shared
+source that stalls on the main branch) reaches every lane in the same turn, and the rule it corrects is corrected in the
+shared rules file, not only in the lane's thread.
 
 ## Measurement
 
@@ -75,7 +103,9 @@ premise, correct it in the open.
 
 - Keep messages short, with the owner's action first.
 - Never present your own conclusion as the owner's.
-- Appearance and other product choices, and policy, are the owner's ([Roles](DEVELOPMENT-WORKFLOW.md#roles)).
+- Appearance and other product choices, and policy, are the owner's ([Roles](DEVELOPMENT-WORKFLOW.md#roles)). A choice
+  that keeps today's behavior is the coordinator's; a builder labelling it an owner decision is corrected, not
+  forwarded.
 - Show the exact wording of any persistent change.
 - Put questions for the owner on the issue tracker.
 
@@ -83,4 +113,4 @@ premise, correct it in the open.
 
 - Agree the interfaces between your lanes and theirs explicitly.
 - Tell the other coordinator when you change a file both of you depend on.
-- The compute queue and the model budget are shared.
+- Say when a campaign of yours will take more than its share of the queue or the model budget, before it starts.
