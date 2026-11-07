@@ -143,16 +143,34 @@ const FILED = [
 
 const OUTSIDE = new Set([...CONSTANT, ...CHARGING, ...STEP, ...FILED]);
 
-/** Fixed lookups, lazy iterators and existing charged core boundaries used by objects.ts. */
+/**
+ * objects.ts's own allowlist, the whole of what it may call outside the charged helpers: none of the narrowing modules'
+ * entries apply to it. A call here that is handed a collection of any size must be in `OBJECTS_COLLECTIONS`.
+ */
 const OBJECTS_OUTSIDE = new Set([
-  // Fixed work or lazy handles, consumed by a checked loop.
-  "lib:Map.keys",
+  // Fixed work: a lookup, a store of a value whole, a charge, a key's own text, a step's name.
+  ...[
+    "Array.pop",
+    "Array.push",
+    "Map",
+    "Map.get",
+    "Map.has",
+    "Map.keys",
+    "Map.set",
+    "Map.values",
+    "Set",
+    "Set.add",
+    "Set.has",
+    "WeakMap.get",
+  ].map((name) => `lib:${name}`),
+  ...core("type-inference/core/budget.ts", ["WorkLedger.charge", "joinParts", "keptArray"]),
   ...core("type-inference/core/contract.ts", [
     "Contract.work",
     "Contract.keyStopped",
     "Contract.keep",
     "Contract.keepText",
   ]),
+  ...core("type-inference/core/definitions.ts", ["keyOf", "keyPlace", "DefinitionLists.live"]),
   ...core("type-inference/core/program.ts", [
     "CoreProgram.place",
     "CoreProgram.isHost",
@@ -161,11 +179,10 @@ const OBJECTS_OUTSIDE = new Set([
   ...core("type-inference/core/contract/terms.ts", ["writtenOf"]),
   ...core("type-inference/core/items.ts", ["firstWriter"]),
   ...core("type-inference/core/contract/value-kinds.ts", ["valueRoute", "resultOf"]),
-  ...core("type-inference/core/method-categories.ts", ["measuresLength"]),
-  ...core("type-inference/core/contract/kinds.ts", ["heldReference"]),
+  ...core("type-inference/core/method-categories.ts", ["measuresLength", "selectsElement"]),
   ...core("type-inference/core/contract/literal-index.ts", ["nodeAt", "pathAt"]),
   ...core("type-inference/core/contract/key-ids.ts", ["isPathSteps", "restRef", "stepsRest"]),
-  // Solver/index/receiver boundaries and inherited key/type bridges; the report names their accounting exceptions.
+  // Solver, index and receiver boundaries, charged as they build, and the inherited key and type bridges.
   ...core("type-inference/core/solver.ts", ["Solver.proven"]),
   ...core("type-inference/core/contract.ts", [
     "Contract.literalIndex",
@@ -180,10 +197,31 @@ const OBJECTS_OUTSIDE = new Set([
   ...core("type-inference/core/contract/key-ids.ts", [
     "canonicalKey",
     "keyBelowIn",
+    "keptKeyBelowIn",
     "keyWalk",
     "KeyWalk.prefix",
     "memberStepOf",
   ]),
+]);
+
+/**
+ * The calls objects.ts may hand a collection of any size (an array, an iterable, an unknown type; not a literal one),
+ * each with what it does with it. Any other allowed call handed one fails: it could walk it for one charge.
+ */
+const OBJECTS_COLLECTIONS = new Set([
+  // no walk: an instanceof test, a record's rest or the array itself, a lazy view of the steps
+  ...core("type-inference/core/contract/key-ids.ts", ["isPathSteps", "stepsRest", "restRef"]),
+  // charged as they build: each entry of a list once (`invSteps`), the list's groups kept per list
+  ...core("type-inference/core/contract/others.ts", ["readGroupsAt", "othersAt"]),
+  // charged by the text it scans (`invSteps`)
+  ...core("type-inference/core/contract/key-ids.ts", ["memberStepOf"]),
+  // the pushed slot's text charged as kept (`keptParts`)
+  ...core("type-inference/core/contract/frontier.ts", ["pushedSlot"]),
+  // the made key's text charged as kept; an array rest's text per call is the inherited key/path bridge's accounting,
+  // as `KeyWalk.prefix`'s is
+  ...core("type-inference/core/contract/key-ids.ts", ["keptKeyBelowIn"]),
+  // inherited: the written type's walk (`writtenTypeSteps`, #1194)
+  ...core("type-inference/core/contract/terms.ts", ["termAt"]),
 ]);
 
 /** The conversions to text, constant only for a primitive. */
@@ -302,6 +340,30 @@ export function chargedIterationDiagnostics(program, root, rules) {
             ts.TypeFlags.EnumLike)) !==
         0;
   const converts = (expression) => !primitive(checker.getTypeAtLocation(expression));
+  /** Whether a value of a type may be a collection of any size: an array, an iterable, or a type not known. */
+  const collection = (type) => {
+    if ((type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !== 0)
+      return true;
+    if (type.isUnion()) return type.types.some(collection);
+    // (a branded primitive is a primitive)
+    if (type.isIntersection()) return !type.types.some(primitive) && type.types.some(collection);
+    if (primitive(type)) return false;
+    return (
+      checker.isArrayLikeType(type) ||
+      type
+        .getProperties()
+        .some((property) => String(property.escapedName).startsWith("__@iterator"))
+    );
+  };
+  /** The call a name stands at the callee of, if any. */
+  const callAt = (node) => {
+    const at =
+      ts.isPropertyAccessExpression(node.parent) && node.parent.name === node ? node.parent : node;
+    return (ts.isCallExpression(at.parent) || ts.isNewExpression(at.parent)) &&
+      at.parent.expression === at
+      ? at.parent
+      : undefined;
+  };
   const calls = (expression, file, names) => {
     if (!ts.isCallExpression(expression)) return false;
     const target = declarationOf(
@@ -342,8 +404,7 @@ export function chargedIterationDiagnostics(program, root, rules) {
   for (const file of rules.files) {
     const sourceFile = program.getSourceFile(resolve(root, file));
     if (sourceFile === undefined) throw new Error(`${file} is not in the program.`);
-    const outside =
-      file === OBJECTS_FILE ? new Set([...rules.outside, ...OBJECTS_OUTSIDE]) : rules.outside;
+    const outside = file === OBJECTS_FILE ? OBJECTS_OUTSIDE : rules.outside;
     const visit = (node) => {
       // Unresolved/opaque calls could hide a native copy (including an any-cast method).
       if (file === OBJECTS_FILE && ts.isCallExpression(node)) {
@@ -364,22 +425,6 @@ export function chargedIterationDiagnostics(program, root, rules) {
         )
           report(node, "An opaque local callable has no checked body. Name its charged function.");
       }
-      // `joinParts` names a path part by walking it: in objects.ts only scalar parts, a path through `joined`.
-      if (
-        file === OBJECTS_FILE &&
-        calls(node, "src/type-inference/core/budget.ts", new Set(["joinParts"])) &&
-        node.arguments.some((argument) => {
-          const type = checker.getTypeAtLocation(argument);
-          return (
-            checker.isArrayLikeType(type) ||
-            (type.isUnion() && type.types.some((part) => checker.isArrayLikeType(part))) ||
-            (type.flags &
-              (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !==
-              0
-          );
-        })
-      )
-        report(node, "`joinParts` walks an array part uncharged. Join it through `joined`.");
       if (file === OBJECTS_FILE && ts.isClassLike(node) && (node.heritageClauses?.length ?? 0) > 0)
         report(
           node,
@@ -490,6 +535,20 @@ export function chargedIterationDiagnostics(program, root, rules) {
                 node,
                 `\`${name}\` is not in OUTSIDE (tools/oxlint/check-charged-iteration.mjs): list it with why a call ` +
                   "walks nothing uncharged, or walk through narrowing-iteration.ts.",
+              );
+            else if (
+              file === OBJECTS_FILE &&
+              !OBJECTS_COLLECTIONS.has(name) &&
+              (callAt(node)?.arguments ?? []).some(
+                (argument) =>
+                  !ts.isArrayLiteralExpression(argument) &&
+                  collection(checker.getTypeAtLocation(argument)),
+              )
+            )
+              report(
+                node,
+                `\`${name}\` is handed a collection of any size, which it may walk for one charge: walk it ` +
+                  "through narrowing-iteration.ts, or list the call in OBJECTS_COLLECTIONS with what it does with it.",
               );
             else if (CONVERSIONS.has(name) && called(node) && node.parent.arguments.some(converts))
               report(node, `\`${symbolText(node)}(…)\` converts an object to text uncharged.`);
