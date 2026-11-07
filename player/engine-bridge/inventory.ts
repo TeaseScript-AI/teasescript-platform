@@ -160,18 +160,18 @@ export interface RatchetEntry {
 export const RATCHET: readonly RatchetEntry[] = [
   // L5h
   {
-    importer: "player/debug-history.ts",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeSnapshotJson",
-    family: "L5h",
-  },
-  {
     importer: "player/vue/src/usePlayerSession.ts",
     target: "player/runtime-adapter.ts",
     name: "playerRuntimeSnapshotOrNull",
     family: "L5h",
   },
-  // L5i
+  // L5i (the history's points with its host core, L5i.6: #1981)
+  {
+    importer: "player/debug-history.ts",
+    target: "player/runtime-adapter.ts",
+    name: "playerRuntimeSnapshotJson",
+    family: "L5i",
+  },
   {
     importer: "player/debug-export-assembly.ts",
     target: "src/index.ts",
