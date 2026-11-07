@@ -4,6 +4,8 @@
  * receives; the Worker also checks each op's arguments. Reply payloads come from the same build (`ready.build`) and are not checked again.
  */
 
+import { isPlainRecord } from "./argument-checks.js";
+
 export const BRIDGE_VERSION = 1;
 
 /** Which build a side belongs to; every field is `null` where it is unknown, such as in tests. */
@@ -89,12 +91,6 @@ const REPLY_OK_KEYS = [
 ] as const;
 const REPLY_ERROR_KEYS = ["v", "kind", "id", "session", "ok", "error"] as const;
 const BUILD_KEYS = ["commit", "dirty", "mode", "appVersion"] as const;
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
 
 /** Whether `value` has exactly `required` own keys, plus any of `optional`. */
 function hasKeys(

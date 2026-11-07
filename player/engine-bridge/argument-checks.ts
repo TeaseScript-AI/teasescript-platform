@@ -1,8 +1,19 @@
-// Shape checks of op arguments, which the host runs before an op: plain records with exactly their keys, and arrays
-// read by index. The engine still validates the host data inside them, as it always does.
+// Shape checks of op arguments, which the host runs before an op: records with exactly their keys, and arrays read by
+// index. The engine still validates the host data inside them, as it always does.
 
+/**
+ * Whether `value` is an object and no array. It admits any prototype, such as a `Date` or a `Map`; where an argument must
+ * be a plain record, `isPlainRecord` checks that.
+ */
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Whether `value` is a plain record: an object whose prototype is `Object.prototype` or `null`. */
+export function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
 
 /** Whether `value` has every key of `required` and no key besides those and `optional`. */
 export const exactly = (
