@@ -3871,10 +3871,10 @@ test("the tested-producer rule admits its closed set of forms over every axis, a
   assert.equal(covered.size, expected);
 });
 
-test("a use whose callable or witness chain holds an arm its entry narrowing leaves no kind does not promote, and keeps the warning (AD-1, #1938)", () => {
-  // (Sol's F2 on #1937 and the lead's callable default: the expected outcome from the rule's own table, never the
+test("in a program holding an arm its entry narrowing leaves no kind no route promotes, and the use keeps the warning (AD-1, #1938)", () => {
+  // (Sol's F2 on #1937 and the lead's default (Codex r6, r7): the expected outcome from the rule's own table, never the
   // engine's. A writer of a possible null; an `if` whose one arm overwrites the key; its test of `other` gives an arm no
-  // run enters where `other` holds no kind that arm's entry narrowing keeps, and then the callable keeps the warning,
+  // run enters where `other` holds no kind that arm's entry narrowing keeps, and then the program keeps the warning,
   // whichever arm the route takes. Unknown forms count as runs)
   const FEASIBILITY = {
     // (`other` may be an object, null or text: every arm of every form is entered on some run)
@@ -3924,8 +3924,8 @@ test("a use whose callable or witness chain holds an arm its entry narrowing lea
             wrong.push(`${routeArmDead ? "warning" : "error"} expected: ${source}`);
           covered.add([feasibility, test, negated, killIn].join(" | "));
         }
-  // (the guard's siblings, each the warning: a whole copy, nesting, `else if`, a loop's body, a second callable; and a
-  // second callable whose arms are all entered keeps the error)
+  // (the default's siblings, each the warning: a whole copy, nesting, `else if`, a loop's body, a second callable, a
+  // callable reached through another; and a program whose arms are all entered keeps the error)
   const writer = 'let c = askBoolean "c"\nlet n = 1\nif c { n = null }\nlet other = {k: 1}\n';
   const SIBLINGS: readonly (readonly [string, string, boolean])[] = [
     [
@@ -3952,6 +3952,32 @@ test("a use whose callable or witness chain holds an arm its entry narrowing lea
     [
       "a second callable",
       "function g {\n  let o = {k: 1}\n  let r = null\n  if o != null { r = 1 }\n  return r\n}\nlet n = g()\nrepeat n {}\nexit\n",
+      false,
+    ],
+    // (Codex r7: a callable whose result or default reaches the use through another callable)
+    [
+      "two callees",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+      false,
+    ],
+    [
+      "two callees through a store",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nlet n=h()\nrepeat n {}\nexit\n",
+      false,
+    ],
+    [
+      "two callees through a fallback",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return null otherwise g() }\nrepeat h() {}\nexit\n",
+      false,
+    ],
+    [
+      "a field copied from a callee",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nlet a={n:g()}\nlet b=a\nrepeat b.n {}\nexit\n",
+      false,
+    ],
+    [
+      "a default through two callees",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nfunction f(n=h()) { repeat n {} }\nf()\nf(1)\nexit\n",
       false,
     ],
     [

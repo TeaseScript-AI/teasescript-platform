@@ -249,10 +249,10 @@ export class NarrowingRoutes {
   readonly #own = new Map<TreeStatement, Map<string, OwnGuards>>();
   /** The blocks that end and the labels (`#ends`), made on the first query. */
   #endings: Endings | null = null;
-  /** Per callable's body, its `if`s whose conditions hold a test (`#testing`). */
-  readonly #ifs = new Map<TreeBlock, TreeStatement[]>();
-  /** Per callable's body, whether it holds an `if` arm infeasible by entry narrowing (`#holdsInfeasible`). */
-  readonly #infeasibleBodies = new Map<TreeBlock, boolean>();
+  /** The program's `if`s whose conditions hold a test (`#testing`). */
+  readonly #ifs: TreeStatement[] = [];
+  /** Whether the program holds an `if` arm infeasible by entry narrowing (`#holdsInfeasible`), made on the first query. */
+  #holds: boolean | null = null;
   /** Per arm, whether its entry's narrowing leaves a tested read no kind (`#infeasible`). */
   readonly #infeasibleArms = new Map<TreeBlock, boolean>();
   /** Per `if` or `while`, its condition's tests as facts (`#conditionFacts`). */
@@ -285,8 +285,8 @@ export class NarrowingRoutes {
     const site = program.places[value]?.site ?? null;
     if (site === null) return null;
     const node = program.exprAt(site);
-    // (the callable default: a use whose callable holds an infeasible arm keeps the warning, #1938)
-    if (yield* this.#holdsInfeasibleAt(site)) return null;
+    // (the default: no error in a program that holds an infeasible arm, the use keeps the warning, #1938)
+    if (yield* this.#holdsInfeasible()) return null;
     // (a value whose node reads no expression, a call's, a `get`'s or a `load`'s result, is its own producer; any other,
     // a compound assignment's operand among them, keeps its warning)
     if (node === null || node.expression === undefined) {
@@ -494,18 +494,12 @@ export class NarrowingRoutes {
     if (this.#tested !== null) return this.#tested;
     const work = this.#work;
     const made = new Map<string, TreeStatement[]>();
-    const bodies = new Map<TreeBlock, TreeBlock>();
     for (const block of each(work, "indexSteps", this.tree.blocks)) {
-      const body = block.owner === null ? block : (bodies.get(block.owner.block) ?? block);
-      bodies.set(block, body);
       for (const statement of each(work, "indexSteps", block.statements)) {
         const facts = this.#conditionFacts(statement);
         if (facts === null) continue;
-        if (statement.statement.kind === "ifStatement" && facts.list.length > 0) {
-          const ifs = this.#ifs.get(body);
-          if (ifs === undefined) this.#ifs.set(body, [statement]);
-          else ifs.push(statement);
-        }
+        if (statement.statement.kind === "ifStatement" && facts.list.length > 0)
+          this.#ifs.push(statement);
         for (const [text] of each(work, "indexSteps", facts.byText)) {
           const list = made.get(text);
           if (list === undefined) made.set(text, [statement]);
@@ -650,29 +644,24 @@ export class NarrowingRoutes {
     const stored = found.def.value === undefined ? null : program.places[found.def.value]?.site;
     if (stored !== undefined && stored !== null && stored.start <= at && at < stored.end)
       return null;
-    if (!this.#open(key, tag, found, chain, node)) return null;
-    // (the callable default: a link whose read's or candidate's callable holds an infeasible arm keeps the warning)
-    return (yield* this.#holdsInfeasible(body)) ||
-      (yield* this.#holdsInfeasible(found.chain[0]!.block))
-      ? null
-      : found;
+    return this.#open(key, tag, found, chain, node) ? found : null;
   }
 
   /**
-   * The route rule's callable default (Sol's F2 on #1937, the lead's ruling; #1938 designs the precise rule): the
-   * certificate promotes to an error only where the use's callable, and every callable on its witness chain, holds no
-   * `if` arm infeasible by entry narrowing (N1's forms over the core's items, `#infeasible`); otherwise the use keeps
-   * main's warning. An arm the guard does not prove counts as feasible: a constant condition, a loop's exit, a `switch`
-   * case, another location's test, an element location. One answer per body, from its `if`s found once (`#testing`).
+   * The route rule's default (Sol's F2 on #1937, then Codex r6 and r7; the lead's ruling; #1938 designs the precise
+   * rule): the certificate promotes to an error only where no callable of the program holds an `if` arm infeasible by
+   * entry narrowing (N1's forms over the core's items, `#infeasible`), so none on the use's witness chain or among the
+   * callables whose results or defaults reach it does; otherwise the use keeps main's warning. An arm it does not prove
+   * counts as feasible: a constant condition, a loop's exit, a `switch` case, another location's test, an element
+   * location. One answer per program, from the `if`s `#testing` finds once.
    */
-  *#holdsInfeasible(body: TreeBlock): Work<boolean> {
+  *#holdsInfeasible(): Work<boolean> {
     this.#work.charge("eventSteps");
-    const known = this.#infeasibleBodies.get(body);
-    if (known !== undefined) return known;
+    if (this.#holds !== null) return this.#holds;
     const work = this.#work;
     this.#testing();
     let holds = false;
-    for (const statement of each(work, "eventSteps", this.#ifs.get(body) ?? [])) {
+    for (const statement of each(work, "eventSteps", this.#ifs)) {
       for (const arm of each(work, "eventSteps", statement.arms))
         if (arm.live && (yield* this.#infeasible(arm))) {
           holds = true;
@@ -680,28 +669,8 @@ export class NarrowingRoutes {
         }
       if (holds) break;
     }
-    this.#infeasibleBodies.set(body, holds);
+    this.#holds = holds;
     return holds;
-  }
-
-  /** The callable default at a site: whether its callable's body holds an infeasible arm, or `true` outside the bodies. */
-  *#holdsInfeasibleAt(site: SourceSite): Work<boolean> {
-    this.#work.charge("eventSteps");
-    let statement = this.tree.statementAt(site.file, site.start);
-    if (statement === null) return true;
-    for (const _ of steps(this.#work, "eventSteps", () => statement!.block.owner !== null))
-      statement = statement!.block.owner!;
-    return yield* this.#holdsInfeasible(statement.block);
-  }
-
-  /** The callable default for a called function's result: whether the callee's body holds an infeasible arm. */
-  *#calleeHolds(value: PlaceId): Work<boolean> {
-    this.#work.charge("eventSteps");
-    const c = this.pass.program.opOf.get(value);
-    if (c?.kind !== "call") return false;
-    const region = this.pass.program.functionRegion(c.fn);
-    const body = region === undefined ? undefined : this.tree.root(region.id);
-    return body === undefined ? false : yield* this.#holdsInfeasible(body);
   }
 
   /**
@@ -953,10 +922,7 @@ export class NarrowingRoutes {
     this.#work.charge("exactQueries");
     const program = this.pass.program;
     if (path.length > 0)
-      return (
-        !(yield* this.#calleeHolds(value)) &&
-        produces(program.work, yield* this.pass.values.valueItems(value, node, path), tag)
-      );
+      return produces(program.work, yield* this.pass.values.valueItems(value, node, path), tag);
     // (the fallbacks from the outermost in, down to the first left side that is none)
     const rights: PlaceId[] = [];
     let left = value;
@@ -974,8 +940,6 @@ export class NarrowingRoutes {
       program.work.charge("exactQueries");
       const literal = literalTag(program, at);
       if (literal !== null) return literal === kind;
-      // (a called function's result whose callee holds an infeasible arm produces nothing the route rule promotes)
-      if (yield* routes.#calleeHolds(at)) return false;
       return produces(program.work, yield* routes.pass.values.valueItems(at, node, []), kind);
     };
     // from the innermost out: whether the value so far can be null, and whether it produced the kind
