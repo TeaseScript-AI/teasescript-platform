@@ -3555,6 +3555,32 @@ test("a mixed element's type names its set layers as sets (#1825)", () => {
 });
 
 /**
+ * #1825: a growing join's every sentence names its set layers as sets: the set walk's answers are kept apart from the
+ * dict walk's, which a later join over the same operands would otherwise read (Codex r1 on #2017). Every TSV044's
+ * description is checked; their count is not pinned (the checker reports the first join only). In four modes.
+ */
+test("a growing join names its set layers as sets in every sentence (#1825)", () => {
+  for (const [source, sides] of [
+    [
+      'let a=[set[1]]\nlet b=[set["x"]]\nlet xs=a+b+b\nexit\n',
+      "a set (integer set) and a set (string set)",
+    ],
+    [
+      'let a=[set[[1]]]\nlet b=[set[["x"]]]\nlet xs=a+b+b\nexit\n',
+      "a set (integer[] set) and a set (string[] set)",
+    ],
+  ] as const)
+    for (const mode of MODES) {
+      const sentences = inMode(mode, () => reported(main(source)))
+        .filter((each) => each.code === "TSV044")
+        .map((each) => each.message.split(". ")[0]!);
+      assert.ok(sentences.length > 0, `${JSON.stringify(mode)} ${source}`);
+      for (const sentence of sentences)
+        assert.equal(sentence, `'+' would mix ${sides}`, `${JSON.stringify(mode)} ${source}`);
+    }
+});
+
+/**
  * #1762: a mixed error names a dict layer of its elements' type as a dict, as the current checker's first sentence does:
  * a written copy's (one that may be null too), a literal's, below a list, below a property, two deep, and a join's;
  * each side by its own values where a list and a dict meet. In four modes.
