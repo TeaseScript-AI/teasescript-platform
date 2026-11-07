@@ -827,8 +827,10 @@ test("every place of the host that reaches a store or the host is an operation, 
 
 /**
  * Each read of an adoption's saved values (`captureStorage`) in `source`, and whether it settles only through
- * `settleAdoption`: a `.then` whose reply and rejection callbacks each call it and nothing else. With the problems of
- * `settleAdoption` itself: its first statement must return unless `ownsShown(...)` holds.
+ * `settleAdoption`: a `.then` whose reply and rejection callbacks each call it and nothing else, awaited as it is, with
+ * nothing chained after it. `settleAdoption` is referenced nowhere else, and the adoption's failure notice
+ * (`playerNotices.rewindNotAdopted()`) is published only inside it. With the problems of `settleAdoption` itself: its
+ * first statement must return unless `ownsShown(...)` holds.
  */
 function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: string[] } {
   const problems: string[] = [];
@@ -841,7 +843,28 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
     ts.isCallExpression(callback.body) &&
     ts.isIdentifier(callback.body.expression) &&
     callback.body.expression.text === "settleAdoption";
+  // The `settleAdoption` references the admitted reads' callbacks make; any other is a second settlement.
+  const admitted = new Set<ts.Node>();
+  let inSettlement = false;
   const visit = (node: ts.Node) => {
+    if (
+      ts.isIdentifier(node) &&
+      node.text === "settleAdoption" &&
+      !(ts.isFunctionDeclaration(node.parent) && node.parent.name === node) &&
+      !admitted.has(node)
+    )
+      problems.push(
+        `${line(node)}: settleAdoption is reached outside the adoption read's settlement`,
+      );
+    if (
+      !inSettlement &&
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "rewindNotAdopted"
+    )
+      problems.push(
+        `${line(node)}: the adoption's failure notice is published outside settleAdoption`,
+      );
     if (ts.isStringLiteralLike(node) && node.text === "captureStorage") {
       const read = node.parent;
       const access = read.parent;
@@ -856,10 +879,14 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
         ts.isCallExpression(then) &&
         then.arguments.length === 2 &&
         settles(then.arguments[0]) &&
-        settles(then.arguments[1])
-      )
+        settles(then.arguments[1]) &&
+        ts.isAwaitExpression(then.parent)
+      ) {
         reads += 1;
-      else
+        for (const callback of then.arguments)
+          if (ts.isArrowFunction(callback) && ts.isCallExpression(callback.body))
+            admitted.add(callback.body.expression);
+      } else
         problems.push(
           `${line(node)}: a captureStorage read that does not settle only through settleAdoption`,
         );
@@ -876,6 +903,10 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
         ts.isReturnStatement(first.thenStatement);
       if (!guarded)
         problems.push(`${line(node)}: settleAdoption does not begin with its ownership check`);
+      inSettlement = true;
+      ts.forEachChild(node, visit);
+      inSettlement = false;
+      return;
     }
     ts.forEachChild(node, visit);
   };
@@ -897,14 +928,38 @@ test("an adoption's read settles, by reply and by rejection, only through settle
   const of = (text: string) =>
     adoptionSettlements(ts.createSourceFile("a.ts", text, ts.ScriptTarget.Latest, true)).problems;
   // A rejection that skips it, a read awaited on its own, and an unguarded settlement are each found.
-  assert.equal(
+  assert.deepEqual(
     of(
       'host.read(s, "captureStorage").then((c) => settleAdoption(o, s, { capture: c }), () => false);',
-    ).length,
-    1,
+    ),
+    [
+      "1: a captureStorage read that does not settle only through settleAdoption",
+      "1: settleAdoption is reached outside the adoption read's settlement",
+    ],
   );
   assert.equal(of('const c = await host.read(s, "captureStorage");').length, 1);
   assert.equal(of("async function settleAdoption() { await write(); }").length, 1);
+  // A second settlement chained after the read's: a further caller of settleAdoption, or the failure notice outside it.
+  const read =
+    'await host.read(s, "captureStorage").then((c) => settleAdoption(o, s, { capture: c }), (e) => settleAdoption(o, s, { error: e }))';
+  assert.deepEqual(of(`async function f() { ${read}; }`), []);
+  assert.deepEqual(
+    of(
+      `async function f() { ${read.replace("await ", "await (")}).then((a) => a ? settleAdoption(o, s, { capture: c }) : false); }`,
+    ),
+    [
+      "1: a captureStorage read that does not settle only through settleAdoption",
+      "1: settleAdoption is reached outside the adoption read's settlement",
+      "1: settleAdoption is reached outside the adoption read's settlement",
+      "1: settleAdoption is reached outside the adoption read's settlement",
+    ],
+  );
+  assert.deepEqual(
+    of(
+      `async function f() { const w = ${read}; if (!w && !disposed) notices.publish(playerNotices.rewindNotAdopted()); }`,
+    ),
+    ["1: the adoption's failure notice is published outside settleAdoption"],
+  );
 });
 
 test("every binding of the host made from a raw resource is one, the media store, or classified", () => {
