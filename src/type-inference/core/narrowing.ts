@@ -83,7 +83,7 @@ function readsElement(step: PathStep, work: WorkLedger): boolean {
 }
 
 /** An expression without the parentheses around it, each one walked charged (they nest as deep as written). */
-function peel(expression: Expression, work: WorkLedger): Expression {
+export function peel(expression: Expression, work: WorkLedger): Expression {
   work.charge("eventSteps");
   let current = expression;
   for (const _ of steps(work, "eventSteps", () => current.kind === "parenthesizedExpression"))

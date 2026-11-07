@@ -3024,8 +3024,6 @@ test("a program outside the slice throws at its first construct outside it", () 
     ["let total = 0\nwhile false {\n  total = 1\n}\nexit\n", 14],
     // another consumer: a condition that is no boolean (C3)
     ['if 1 {\n  say "never"\n}\nexit\n', 3],
-    // a possible null, whose required check comes with narrowing (S10)
-    ["let flag = true\nlet n: integer? = null\nif flag {\n  n = 2\n}\nrepeat n {}\nexit\n", 66],
     // lists nested as deep as the facts' walk (256 levels), inferred or written
     [
       `let a = ${"[".repeat(256)}1${"]".repeat(256)}\na = ${"[".repeat(256)}"bad"${"]".repeat(256)}\nexit\n`,

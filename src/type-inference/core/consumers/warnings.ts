@@ -2,13 +2,14 @@ import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import { concrete, isExternal, requiredKind } from "../admission.js";
 import { keptSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
-import { REFERENCE, termAt, typeTags } from "../contract.js";
+import { REFERENCE, termAt, typeTags, writtenOf } from "../contract.js";
 import { keptKey, keyOf, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { kindsInOrder, type ContextWord, type Item, type ItemTag } from "../items.js";
+import { kindsInOrder, REASON, type ContextWord, type Item, type ItemTag } from "../items.js";
 import { codeOf, pathPhrase } from "../messages.js";
 import { measuresLength } from "../method-categories.js";
+import { stablePath } from "../narrowing.js";
 import { propertyName, propertyStep, siteKey, stepName } from "../program.js";
 import { propertyNames, type PropertyNamesTask } from "../property-names.js";
 import {
@@ -51,6 +52,7 @@ export function warning(
   receiver: ContextDetail["receiver"] = null,
   read?: PlaceId,
 ): boolean {
+  if (required(walk, kind, site, item, obligation, rule, fits, receiver, read)) return true;
   const diagnostic: Extract<CoreDiagnostic, { obligation: unknown }> = {
     class: "warning-runtime-check",
     kind,
@@ -70,6 +72,100 @@ export function warning(
   (walk.finishing ? walk.deferred : walk.diagnostics).push(diagnostic);
   walk.rules.set(diagnostic, walk.rule);
   return true;
+}
+
+/**
+ * The route rule's one required-check decision (AD-1, TABLE r4.52; V30 §13, "a use that needs a check has three
+ * outcomes"), asked of every warning before it is made, after the quiet path, the exact answers and G (§13.2): a
+ * possible `null` owing its null-check, or a member of the read's written union that the use does not take (r4.118
+ * (1): the written domain proves it), brought to the use by a route without a check (`NarrowingRoutes.required`), is a
+ * compile error with N10's payload in place of that warning and its obligation; every other warning and check at the
+ * site stays. No route proved, the warning stays: a check on every route that the compiler cannot keep, a stopped or an
+ * external value, a member a receiver may lack. Whether the error was made.
+ */
+function required(
+  walk: Consumers,
+  kind: DiagnosticKind,
+  site: SourceSite,
+  item: Item,
+  obligation: Obligation,
+  rule: DiagnosticRule,
+  fits: readonly Item[],
+  receiver: ContextDetail["receiver"],
+  read: PlaceId | undefined,
+): boolean {
+  if (
+    walk.finishing ||
+    item.guarded === true ||
+    item.tested === true ||
+    (item.reasons & REASON.budget) !== 0 ||
+    item.tag === "unknown" ||
+    item.tag === "empty"
+  )
+    return false;
+  const { program } = walk.pass;
+  const value = read ?? program.placeBySite.get(siteKey(site));
+  const at = value === undefined ? null : (program.places[value]?.site ?? null);
+  if (value === undefined || at === null) return false;
+  const text = program.textAt(at);
+  let tests: readonly string[];
+  if (item.tag === "null") {
+    // (a null owes its null-check, or at a store its destination's check: C1's and C10's)
+    if (
+      obligation.kind !== "null-check" &&
+      !(kind === "written-target" && obligation.kind === "copy-type")
+    )
+      return false;
+    tests = [`if ${text} != null`, "otherwise"];
+  } else {
+    // (a reference's members are the runtime's, F19a: never the route rule's)
+    const members = REFERENCE.has(item.tag) ? null : writtenMembers(walk, value);
+    if (members === null || !members.includes(item.tag)) return false;
+    const taken = members.filter((tag) => fits.some((fit) => fit.tag === tag));
+    if (taken.length === 0) return false;
+    tests = [`if ${text} is ${taken.join(" | ")}`];
+  }
+  program.work.charge("checks");
+  // (a member of the written union that no store makes, only the declaration allows: its declaration certifies it)
+  const writer = walk.solve(
+    walk.pass.guards
+      .narrowings(walk.pass)
+      .routes.required(value, item.tag, item.tag !== "null" && item.writer === null),
+  );
+  if (writer === null) return false;
+  const diagnostic: CoreDiagnostic = {
+    class: "compile-error",
+    kind,
+    code: codeOf(rule),
+    site: siteOf(site),
+    rule,
+    kinds: [item.tag],
+    requiredCheck: {
+      rule: "N3",
+      writer,
+      missingTests: tests,
+      subject: text,
+      fits: kindsInOrder(new Set(fits.filter(concrete).map((found) => found.tag))),
+      provenance: provenanceOf(item, detail(walk, item, site, rule, receiver, read)),
+    },
+  };
+  walk.diagnostics.push(diagnostic);
+  walk.rules.set(diagnostic, walk.rule);
+  return true;
+}
+
+/** The members of the written union a read's variable declares, at the variable itself, or `null` (r4.118 (1)). */
+function writtenMembers(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
+  const { program } = walk.pass;
+  const at = program.places[value]?.site ?? null;
+  const node = at === null ? null : program.exprAt(at);
+  const expression = node?.expression;
+  if (node === null || expression === undefined) return null;
+  const path = stablePath(program, node.file, expression);
+  if (path === null || path.steps.length > 0) return null;
+  const written = writtenOf(program.place(path.root).kind);
+  if (written?.kind !== "union") return null;
+  return typeTags(written);
 }
 
 /**

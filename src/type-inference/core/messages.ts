@@ -43,7 +43,7 @@ import {
 } from "./messages/site.js";
 import { isLiteral, setsProperty } from "./messages/words.js";
 import { inWords, type Diagnosed } from "./messages/code-forms.js";
-import { errorSentence, writtenTypeMessage } from "./messages/errors.js";
+import { errorSentence, requiredSentence, writtenTypeMessage } from "./messages/errors.js";
 import { budgetMessage, warningFix, warningSentence } from "./messages/warnings.js";
 import { contextSentence, originSentence } from "./messages/causes.js";
 import { unusedFallbackMessage } from "./consumers/otherwise.js";
@@ -494,6 +494,28 @@ export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource
           ? { keeps: "unproved" as const }
           : {}),
   };
+  // (the route rule's error: its first sentence, and the fix of the warning it stands in for)
+  if (diagnostic.class === "compile-error" && diagnostic.requiredCheck !== undefined) {
+    const { fits, provenance } = diagnostic.requiredCheck;
+    return [
+      requiredSentence(kinds, diagnostic.requiredCheck, source),
+      warningFix(
+        rule,
+        text,
+        kinds,
+        fits,
+        [],
+        provenance.detail,
+        provenance.context,
+        source,
+        diagnostic.site,
+        diagnostic.expects,
+        diagnosed,
+      ),
+    ]
+      .filter((sentence) => sentence !== "")
+      .join(" ");
+  }
   if (diagnostic.class === "compile-error")
     return errorSentence(rule, text, kinds, source, diagnostic.site, diagnostic.expects, diagnosed);
   const { context, detail } = diagnostic.provenance;
