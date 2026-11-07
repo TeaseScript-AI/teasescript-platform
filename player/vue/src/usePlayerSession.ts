@@ -3570,7 +3570,11 @@ async function replaceScript(
   }
 }
 
-/** `request`'s answer; a refusal the host gave as a `StorageTransferError` is one here too, with its words. */
+/**
+ * `request`'s answer; a refusal the host gave as a `StorageTransferError` is one here too, with its words. The bridge
+ * carries an error's name and message, not its class (`BridgeRequestError` copies the name onto itself), so a caller
+ * that tests `instanceof StorageTransferError` needs the error rebuilt here.
+ */
 async function asTransferError<T>(request: Promise<T>): Promise<T> {
   try {
     return await request;

@@ -923,9 +923,12 @@ test("an operation's handles admit each call while it is current, and none once 
     ownership.commit(() => 1),
     1,
   );
-  // An apply that awaits would go on after the commit's check.
+  // An apply that awaits would go on after the commit's check: the type refuses one, and so does the run.
   const later = Promise.resolve();
+  // @ts-expect-error -- `commit` takes no thenable apply.
   assert.throws(() => ownership.commit(() => later), TypeError);
+  // @ts-expect-error -- nor an async one.
+  assert.throws(() => ownership.commit(async () => {}), TypeError);
   const reached: string[] = [];
   let finish = () => {};
   const values = ownership.values({
