@@ -3845,6 +3845,16 @@ test("a mixed join names its leaf null as the occurrence holds it (#1828)", () =
       'let n:integer?=hostValue\nlet xs=[[[1,n],null]]+[[["x"]]]\nexit\n',
       "'+' would mix a list (integer?[]?[]) and a list (string[][]). A list holds one type. To allow both, declare the list as 'let xs: ((integer | string | null)[]?)[][] =[[[1,n],null]]+[[[\"x\"]]]'.",
     ],
+    // (a compound assignment's target read through a property, whose occurrence says nothing at the leaf: its place's
+    // admitted null, a literal's and a written copy's, as the current checker names it; the joins area)
+    [
+      'let box = {first: {items: [1, null]}}\nbox.first.items += ["x"]\nexit\n',
+      "'+=' would mix a whole number (integer) or null and text (string). A list holds one type. To allow both, declare the list with the type '(integer | string | null)[]'.",
+    ],
+    [
+      'let typed: (integer | boolean | null)[] = [1]\nlet box = {first: {items: typed}}\nbox.first.items += ["x"]\nexit\n',
+      "'+=' would mix a whole number (integer), true or false (boolean), or null and text (string). A list holds one type. To allow both, declare the list with the type '(integer | boolean | string | null)[]'.",
+    ],
   ];
   for (const mode of MODES)
     for (const [source, message] of cases) {

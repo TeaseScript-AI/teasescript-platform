@@ -1276,7 +1276,23 @@ export function joinElements(
             joinNode === null
               ? depths.map(() => false)
               : layersAt(admission, side, joinNode, below, depths);
-          const [leftLayers, rightLayers] = [layers(left), layers(right)];
+          // (an operand whose occurrence says nothing at the leaf, as a compound assignment's target read through a
+          // property, names its place's admitted null there, as the sentence did before: the walk has nothing to read)
+          const leafOf = (side: PlaceId, walked: boolean[]): boolean[] => {
+            if (walked.at(-1)! || joinNode === null) return walked;
+            const read = placeOf(side);
+            if (
+              read === null ||
+              !admission.items(side, joinNode, below).every((item) => item.tag === "unknown") ||
+              !admission.admitted(read.place, joinSteps(read.path, below)).includes("null")
+            )
+              return walked;
+            return [...walked.slice(0, -1), true];
+          };
+          const [leftLayers, rightLayers] = [
+            leafOf(left, layers(left)),
+            leafOf(right, layers(right)),
+          ];
           const optional = mixedOptional(leftLayers.slice(0, -1), rightLayers.slice(0, -1));
           // (#1762: each operand's layers are a dict's by the same walk below its elements, its contract's items, Astra
           // r1 on #1814)
