@@ -5,6 +5,7 @@ import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { inputOps } from "../player/engine-bridge/ops/input.js";
 import { HeldSession, publishing } from "../player/engine-bridge/ops/session.js";
 import { playerOpsContext } from "../player/engine-bridge/player-ops.js";
+import type { Publication } from "../player/engine-bridge/session-protocol.js";
 import type { HostSessions } from "../player/engine-bridge/worker-host.js";
 import {
   beginPlayerRuntimeCatchUp,
@@ -62,20 +63,38 @@ test("a same-revision trace wrapper is kept without publishing: no view, the cur
   assert.deepEqual(session.adoptResult(again), { kind: "kept" });
 });
 
-test("a new revision is published once with its events; publishing leaves the catch-up to its op", () => {
+/** The publication's cursor and events, against the events the host had handed out before it. */
+function assertDelta(view: unknown, from: number, events: readonly unknown[]) {
+  assert.ok(typeof view === "object" && view !== null, "a publication");
+  // EVIDENCE: validation: a session op's view is its publication (`OpOutcome`), checked as an object above.
+  const publication = view as Publication;
+  assert.equal(publication.from, from, "it starts at the cursor");
+  assert.equal(publication.eventsThrough, events.length);
+  assert.deepEqual(
+    publication.events,
+    events.slice(from),
+    "its events are the ones after the cursor",
+  );
+  assert.ok(publication.events.length > 0, "the new revision has events to deliver");
+}
+
+test("a new revision is published once with its events; publishing leaves the catch-up to its op", (context) => {
   const { raw, session, catchUp } = held();
+  const publish = context.mock.method(session, "publish");
+  const from = session.delivered;
   const next = observePlayerRuntimeTime(raw, 2_000).session;
   assert.notEqual(next.revision, raw.revision);
   const outcome = publishing(session, next, "observed");
   assert.equal(outcome.result, "observed");
-  assert.ok(outcome.view !== null && outcome.view !== undefined, "one publication");
+  assert.equal(publish.mock.callCount(), 1, "one publication");
+  assertDelta(outcome.view, from, next.events);
   assert.equal(outcome.eventsThrough, next.events.length);
   assert.equal(session.delivered, next.events.length);
   assert.equal(session.publication, next);
   assert.equal(session.catchUp, catchUp, "publishing does not end the catch-up");
 });
 
-test("an answer adopts through the same decision: a new revision ends the catch-up, no answer adopts nothing", async () => {
+test("an answer adopts through the same decision: a new revision ends the catch-up, no answer adopts nothing", async (context) => {
   const ops = inputOps(playerOpsContext());
   // An input op reads only the session it is given, as the host gives it.
   const none: HostSessions = {
@@ -100,11 +119,13 @@ test("an answer adopts through the same decision: a new revision ends the catch-
   // A new revision: the button's activation publishes once, with its events, and ends the catch-up.
   {
     const { raw, session } = held();
+    const publish = context.mock.method(session, "publish");
+    const from = session.delivered;
     const actionId = activePlayerRuntimeInteraction(raw.state)!.actionId;
     const outcome = await run("activateButton", session, { actionId, input: null });
-    assert.ok(outcome.view !== null && outcome.view !== undefined);
+    assert.equal(publish.mock.callCount(), 1, "one publication");
     assert.notEqual(session.publication.revision, raw.revision);
-    assert.equal(outcome.eventsThrough, session.publication.events.length);
+    assertDelta(outcome.view, from, session.publication.events);
     assert.equal(session.catchUp, null, "an answer ends the catch-up");
   }
 });

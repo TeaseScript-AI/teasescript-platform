@@ -479,7 +479,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "clock scheduling",
     ["BridgeClient.request", "BridgeClient.section"],
   ],
-  "player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > requestObservation > catch:callback":
+  "player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > requestObservation > observing:callback":
     ["clock scheduling", ["BridgeClient.request"]],
   "player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > step > inNextTask:callback": [
     "clock scheduling",
@@ -832,7 +832,8 @@ test("every host path that adopts an op's result is classified (item 15)", () =>
 const OBSERVATION_USES: readonly string[] = [
   "observe <- player/vue/src/usePlayerSession.ts usePlayerSession > observeForInput [awaited]",
   "observe <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > observe [exposed]",
-  "observe <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > requestObservation [handled]",
+  "observing <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > observe [returned]",
+  "observing <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > requestObservation [voided]",
   "observeForInput <- player/vue/src/useDevelopmentTime.ts useDevelopmentTime > autoSkipTask [awaited]",
   "observeForInput <- player/vue/src/useDevelopmentTime.ts useDevelopmentTime > jump [awaited]",
   "observeForInput <- player/vue/src/usePlayerSession.ts usePlayerSession > observe [exposed]",
@@ -852,6 +853,7 @@ const OBSERVATION_USES: readonly string[] = [
 test("every use of the observation API is awaited, returned, handled or exposed (R2)", () => {
   const targets = [
     { file: CLOCK, path: "useRuntimeSceneClock > observe", name: "observe" },
+    { file: CLOCK, path: "useRuntimeSceneClock > observing", name: "observing" },
     { file: CLOCK, path: "useRuntimeSceneClock > requestObservation", name: "requestObservation" },
     { file: CLOCK, path: "useRuntimeSceneClock > before", name: "before" },
     { file: SESSION, path: "usePlayerSession > observeForInput", name: "observeForInput" },
@@ -866,7 +868,12 @@ test("every use of the observation API is awaited, returned, handled or exposed 
     .uses(targets)
     .map((each) => `${named.get(each.target)} <- ${each.file} ${each.path} [${each.use}]`);
   assert.deepEqual([...new Set(found)].sort(), [...OBSERVATION_USES].sort());
-  // What returns a promise is never left unawaited.
-  for (const use of found.filter((each) => /^observe(ForInput)? </u.test(each)))
-    assert.match(use, /\[(awaited|returned|handled|exposed)\]$/u, use);
+  // What returns a promise is never left unawaited; `observing` is voided only where a recovery is passed in, which it
+  // decides every failure with, so it does not reject.
+  for (const use of found.filter((each) => /^observ(e|eForInput|ing) </u.test(each)))
+    assert.match(
+      use,
+      /\[(awaited|returned|handled|exposed)\]$|^observing <- .* requestObservation \[voided\]$/u,
+      use,
+    );
 });

@@ -91,8 +91,9 @@ export function createSessionWorkCensus(root) {
     /**
      * Every use in `player/` of each target `{ file, path }`: the declaration at `path` in `file`, as the census names
      * places (`useRuntimeSceneClock > observe`). Each use is `{ file, path, use }`, `use` being how the value is used:
-     * `awaited`, `returned`, `handled` (its promise's rejection handled at once), `exposed` (an object literal's
-     * property, followed), or what else it is (`unawaited` for a call whose promise nobody takes).
+     * `awaited`, `returned`, `handled` (its promise's rejection handled at once), `voided` (discarded with `void`),
+     * `exposed` (an object literal's property, followed), or what else it is (`unawaited` for a call whose result
+     * nobody takes).
      */
     uses(targets) {
       const program = service.getProgram();
@@ -160,6 +161,7 @@ function useOf(node) {
   while (outer !== undefined && ts.isParenthesizedExpression(outer)) outer = outer.parent;
   if (outer === undefined) return "unawaited";
   if (ts.isAwaitExpression(outer)) return "awaited";
+  if (ts.isVoidExpression(outer)) return "voided";
   if (ts.isReturnStatement(outer) || (ts.isArrowFunction(outer) && outer.body === call))
     return "returned";
   if (

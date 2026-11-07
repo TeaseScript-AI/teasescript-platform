@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test, { before, type TestContext } from "node:test";
-import { effectScope, type Ref } from "vue";
+import ts from "typescript";
+import { effectScope, ref, shallowRef, type Ref, type ShallowRef } from "vue";
 
 import { compilePlayerProject } from "../player/compile-project.js";
 import type { BridgeClient } from "../player/engine-bridge/client.js";
@@ -93,7 +95,12 @@ const OWN_OP: Readonly<Record<Work, string | null>> = {
   audioEnded: null,
 };
 
-/** The ops the host receives from the work's trigger on, up to its own op, as the oracle derives them. */
+/**
+ * The clock's ops (`dropCatchUp`, `observeTime`) and the work's own op the host receives from the work's trigger on,
+ * exactly, in order, as the oracle derives them. The oracle checks nothing else the trigger causes: turning Debug mode
+ * on in the normal room also keeps the session for its debug-room copy (`captureKeep`), which is the debug room's work,
+ * not the clock's.
+ */
 function expected(work: Work, state: State): string[] {
   const own = OWN_OP[work] === null ? [] : [OWN_OP[work]];
   // Held (a waiting draw), nothing is observed; and Debug mode reaches a session only while it runs or waits for
@@ -113,7 +120,29 @@ const CASES = WORK.flatMap((work) =>
   STATES.map((state) => ({ work, state, name: `${work}; ${state}` })),
 );
 
+/** The kinds of work the clock's own type declares (`ClockWork` in `useRuntimeSceneClock.ts`). */
+function declaredWork(): string[] {
+  const path = new URL("../../player/vue/src/useRuntimeSceneClock.ts", import.meta.url);
+  const file = ts.createSourceFile(
+    "clock.ts",
+    readFileSync(path, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const declaration = file.statements.find(
+    (statement): statement is ts.TypeAliasDeclaration =>
+      ts.isTypeAliasDeclaration(statement) && statement.name.text === "ClockWork",
+  );
+  assert.ok(declaration && ts.isUnionTypeNode(declaration.type), "ClockWork is a union of names");
+  return declaration.type.types.map((member) => {
+    assert.ok(ts.isLiteralTypeNode(member) && ts.isStringLiteral(member.literal));
+    return member.literal.text;
+  });
+}
+
 test("the clock-work family covers every kind of work in every state of the clock", () => {
+  // The axis is the clock's own domain: a kind of work the clock gains needs its row here.
+  assert.deepEqual([...WORK].sort(), declaredWork().sort());
   const feasible = product({ work: [...WORK], state: [...STATES] });
   const observed = CASES.map(({ work, state }) => ({ work, state }));
   assert.deepEqual(coverageGaps(feasible, observed, { tuples: true }), []);
@@ -131,6 +160,8 @@ interface Gate {
   hold(op: string, count?: number): void;
   /** Lets the held replies through, or rejects them with `error`. */
   release(error?: Error): void;
+  /** Lets the oldest held reply through, and keeps the others held. */
+  releaseFirst(): void;
   refuse(op: string, count: number, code: string): void;
 }
 
@@ -150,8 +181,8 @@ function track(context: TestContext, bridge: PlayerBridge) {
   const attempts: string[] = [];
   const held = new Map<string, number>();
   const refused = new Map<string, { left: number; code: string }>();
-  let release!: (error: Error | null) => void;
-  let released = new Promise<Error | null>((resolve) => (release = resolve));
+  // Each held reply waits for its own release, oldest first.
+  const waiting: ((error: Error | null) => void)[] = [];
   const shown: { session: PlayerRuntimeSession | null } = { session: null };
   const observedMs = () => {
     const current = shown.session;
@@ -185,7 +216,9 @@ function track(context: TestContext, bridge: PlayerBridge) {
     const left = held.get(op) ?? 0;
     if (left === 0) return reply;
     held.set(op, left - 1);
-    return released.then((error) => (error === null ? reply : Promise.reject(error)));
+    return new Promise<Error | null>((resolve) => waiting.push(resolve)).then((error) =>
+      error === null ? reply : Promise.reject(error),
+    );
   };
   const client: BridgeClient = bridge.client;
   const request = client.request.bind(client);
@@ -213,10 +246,10 @@ function track(context: TestContext, bridge: PlayerBridge) {
     hold: (op, count = 1) => void held.set(op, count),
     refuse: (op, count, code) => void refused.set(op, { left: count, code }),
     release: (error) => {
-      release(error ?? null);
-      released = new Promise<Error | null>((resolve) => (release = resolve));
+      for (const resolve of waiting.splice(0)) resolve(error ?? null);
       held.clear();
     },
+    releaseFirst: () => waiting.shift()?.(null),
   };
   return { posts, attempts, gate, shown, observedMs };
 }
@@ -392,17 +425,14 @@ for (const { work, state, name } of CASES)
     player.gate.release();
     await settle(40);
     const own = OWN_OP[work];
-    // Of what the host receives, the clock's ops and the work's own: other work the trigger causes, such as the debug
-    // room's keep when Debug mode turns on, is no part of the clock's policy.
+    // What `expected` counts, and only that (see there).
     const counted = new Set(["dropCatchUp", "observeTime", ...(own === null ? [] : [own])]);
     const after = player.posts
       .slice(from)
       .map((post) => post.op)
       .filter((op) => counted.has(op));
+    assert.deepEqual(after, expected(work, state), name);
     const want = expected(work, state);
-    // What the work needs comes first, then its own op; what follows is no part of it.
-    const upTo = own === null ? want.length : after.indexOf(own) + 1;
-    assert.deepEqual(after.slice(0, upTo), want, `${name}: ${after.join(", ")}`);
     // The work sees the observed time: with an observation before it, its op goes out after the observation applied.
     if (own !== null && want.includes("observeTime")) {
       const post = player.posts.slice(from).find((each) => each.op === own)!;
@@ -527,4 +557,136 @@ test("an unmount or a replacement with an observation in flight publishes nothin
       assert.equal(player.host.session.value, shown);
     });
   }
+});
+
+test("a kind of work the clock's table does not hold throws, whatever the clock's state", async (context) => {
+  const player = await mount(context, false);
+  const module: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/useRuntimeSceneClock.ts",
+  );
+  assert.equal(typeof module.useRuntimeSceneClock, "function");
+  // EVIDENCE: validation: the bundle's clock, checked callable above; `before` is its policy entry.
+  const useClock = module.useRuntimeSceneClock as (
+    session: ShallowRef<PlayerRuntimeSession | null>,
+    reports: () => readonly [],
+    paused: Ref<boolean>,
+  ) => { before(work: string): void };
+  for (const paused of [false, true])
+    for (const shown of [null, player.host.session.value]) {
+      const scope = effectScope();
+      const clock = scope.run(() => useClock(shallowRef(shown), () => [], ref(paused)))!;
+      try {
+        // An inherited name is no member either.
+        for (const work of ["nope", "toString"])
+          assert.throws(() => clock.before(work), /No clock work/u, `${work}, paused ${paused}`);
+      } finally {
+        scope.stop();
+      }
+    }
+});
+
+// The barrier: a retired observation still sends at its turn, so the work queued behind it follows an observation.
+test("a later observation does not take the hidden page's observation from the keep queued behind it", async (context) => {
+  const player = await mount(context, false);
+  const bridge = await player.host.bridge;
+  const shown = player.host.session.value!;
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => (open = resolve));
+  // EVIDENCE: fixture: the shown session is a publication of this bridge.
+  const earlier = bridge.section(shown as never, () => opened);
+  const from = player.posts.length;
+  player.hide();
+  // The keep's capture is queued behind the hidden page's observation; then another observation retires that one.
+  await settle();
+  const later = player.host.observe();
+  open();
+  await earlier;
+  await later;
+  await settle(40);
+  const ops = player.posts
+    .slice(from)
+    .map((post) => post.op)
+    .filter((op) => op === "observeTime" || op === "captureKeep");
+  assert.deepEqual(ops, ["observeTime", "captureKeep", "observeTime"]);
+  const kept = player.posts.slice(from).find((post) => post.op === "captureKeep")!;
+  assert.ok(
+    (kept.atMs ?? 0) > shown.state.observedSessionTimeMs,
+    "the keep captures the visible time",
+  );
+});
+
+test("a retired observation's reply publishes nothing, while the next one's waits", async (context) => {
+  const player = await mount(context, false);
+  player.gate.hold("observeTime", 2);
+  const first = player.host.observe();
+  await settle();
+  const second = player.host.observe();
+  await settle();
+  const shown = player.host.session.value;
+  player.gate.releaseFirst();
+  await first;
+  await settle();
+  assert.equal(player.host.session.value, shown, "the retired one publishes nothing");
+  player.gate.release();
+  assert.notEqual(await second, null);
+  assert.notEqual(player.host.session.value, shown, "the live one publishes");
+});
+
+test("an old observation's rejection after a replacement arms no timer", async (context) => {
+  const player = await mount(context, false);
+  player.gate.hold("observeTime");
+  window.dispatchEvent(new Event("pagehide"));
+  await settle();
+  await player.start(false);
+  await settle();
+  const armed = player.timeouts.armed;
+  player.gate.release(new Error("The reply failed."));
+  await settle();
+  assert.equal(player.timeouts.armed, armed);
+});
+
+test("every completion effect of an observation goes through its one lifetime decision", () => {
+  const path = new URL("../../player/vue/src/useRuntimeSceneClock.ts", import.meta.url);
+  const text = readFileSync(path, "utf8");
+  const file = ts.createSourceFile("clock.ts", text, ts.ScriptTarget.Latest, true);
+  let observing: ts.FunctionDeclaration | undefined;
+  const generations: string[] = [];
+  file.forEachChild(function visit(node): void {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === "observing") observing = node;
+    if (ts.isPropertyAccessExpression(node) && node.getText(file) === "observation.generation") {
+      let at: ts.Node | undefined = node;
+      while (at !== undefined && !(ts.isFunctionDeclaration(at) && at.name !== undefined))
+        at = at.parent;
+      generations.push(
+        at !== undefined && ts.isFunctionDeclaration(at) ? (at.name?.text ?? "") : "(none)",
+      );
+    }
+    node.forEachChild(visit);
+  });
+  assert.ok(observing?.body, "the clock has its observation");
+  assert.deepEqual(generations, ["whileLive"], "only the decision reads an observation's lifetime");
+  const effects: string[] = [];
+  observing.body.forEachChild(function visit(node): void {
+    if (
+      ts.isCallExpression(node) &&
+      ["publishLater", "recover", "scheduleWakeUp"].includes(node.expression.getText(file))
+    ) {
+      let inside = false;
+      for (
+        let at: ts.Node | undefined = node.parent;
+        at !== undefined && at !== observing;
+        at = at.parent
+      )
+        if (
+          (ts.isArrowFunction(at) || ts.isFunctionExpression(at)) &&
+          ts.isCallExpression(at.parent) &&
+          at.parent.expression.getText(file) === "whileLive" &&
+          at.parent.arguments[1] === at
+        )
+          inside = true;
+      effects.push(`${node.expression.getText(file)}: ${inside ? "decided" : "undecided"}`);
+    }
+    node.forEachChild(visit);
+  });
+  assert.deepEqual(effects.sort(), ["publishLater: decided", "recover: decided"]);
 });

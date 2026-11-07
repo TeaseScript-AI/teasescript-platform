@@ -65,7 +65,8 @@ export function useRuntimeSceneClock(
   const displayTimeMs = ref(0);
   // The late observation being caught up on a copy of the session in the host, which goes on in its own tasks. Each
   // one has its generation: `cancel`, disposal and a new session advance it, so a late continuation does nothing. An
-  // observation has its generation too: a later observation (which cancels), `cancel` and disposal retire it.
+  // observation has its generation too (`whileLive`): a later observation (which cancels), `cancel` and disposal retire
+  // it.
   let pending: { readonly generation: number; readonly session: PlayerSession } | null = null;
   let generation = 0;
   let nextTask: MessagePort | null = null;
@@ -110,6 +111,25 @@ export function useRuntimeSceneClock(
     return !disposed && session.value?.lineage === shown.lineage ? session.value : null;
   }
 
+  /** An observation the clock admitted: the generation it was made in, and the session it observes. */
+  interface Observation {
+    readonly generation: number;
+    readonly session: PlayerSession;
+  }
+
+  /**
+   * Runs `effect`, what the completion of `observation` does (publish, schedule, recover), only while the observation
+   * is live: not retired by a later observation, `cancel` or disposal, and its session still shown; else gives
+   * `otherwise`. The one lifetime decision: every completion of an observation, success or failure, goes through it.
+   */
+  function whileLive<T>(observation: Observation, effect: () => T, otherwise: T): T {
+    const live =
+      !disposed &&
+      observation.generation === generation &&
+      session.value?.lineage === observation.session.lineage;
+    return live ? effect() : otherwise;
+  }
+
   /**
    * Observes the clock's now and media samples in the shown session, inside a section of it, so its basis is read at
    * its own queue turn: it follows whatever the session's queue holds before it. A catch-up under way is dropped: this
@@ -117,23 +137,39 @@ export function useRuntimeSceneClock(
    * still owns the UI, else `null`; a refusal of the basis at its turn is retried once from the store's latest
    * revision, and a second one is no observation (`null`), with nothing published or scheduled. A stopped or lost
    * session gives `null`. While the clock is paused (an inspected state, a waiting draw), nothing is observed and the
-   * shown session is the result. A later observation, `cancel`, a new session or disposal retires it: a retired one
-   * publishes nothing. What the reply applies reaches the session's store; it shows only while the session owns the UI
-   * (`publishLater`), so a caller rechecks that after it awaits.
+   * shown session is the result. What the reply applies reaches the session's store; it shows only while the session
+   * owns the UI (`publishLater`), so a caller rechecks that after it awaits.
    */
-  async function observe(): Promise<PlayerSession | null> {
+  function observe(): Promise<PlayerSession | null> {
+    return observing(null);
+  }
+
+  /**
+   * Observes as `observe` does, for a caller that needs no result: a failure of a live observation is recovered from
+   * here, as a late observation's is, and the clock goes on from the latest session.
+   */
+  function requestObservation(): void {
+    void observing(() => scheduleWakeUp(session.value));
+  }
+
+  /**
+   * An observation, with `recover` for its failure, or `null` to reject with it. A later observation, `cancel`, a new
+   * session or disposal retires it, which withdraws its effects (`whileLive`) but never its barrier: once admitted, it
+   * sends at its turn unless the Player was disposed, the clock holds, or its session is no longer shown, so the work
+   * queued behind it (as the keep's capture behind the hidden page's observation) follows an observation.
+   */
+  async function observing(recover: (() => void) | null): Promise<PlayerSession | null> {
     const shown = session.value;
     if (!shown || disposed) return null;
     if (paused.value) return shown;
     cancel();
-    const own = generation;
-    const retired = () => disposed || own !== generation;
-    const args = { atMs: sceneTimeMs(shown), media: mediaReports() };
+    const observation: Observation = { generation, session: shown };
     let outcome: TimeObservationOutcome | "skipped" | null;
+    // With `recover`, nothing below rejects: every failure, the media samples' too, is decided here.
     try {
+      const args = { atMs: sceneTimeMs(shown), media: mediaReports() };
       outcome = await bridgeOf(shown).section(shown, async (section) => {
-        // At its turn: retired, paused or no longer shown meanwhile, it observes nothing.
-        if (retired() || paused.value || owned(shown) === null) return "skipped";
+        if (disposed || paused.value || owned(shown) === null) return "skipped";
         try {
           return await section.send<TimeObservationOutcome>("observeTime", args);
         } catch (error) {
@@ -149,19 +185,19 @@ export function useRuntimeSceneClock(
       });
     } catch (error) {
       if (endsQuietly(error)) return null;
-      throw error;
+      return whileLive(
+        observation,
+        () => {
+          if (recover === null) throw error;
+          recover();
+          return null;
+        },
+        null,
+      );
     }
     if (outcome === null) return null;
-    if (outcome === "skipped" || retired() || outcome.kind !== "observed") return owned(shown);
-    return publishLater(shown);
-  }
-
-  /**
-   * Observes as `observe` does, for a caller that needs no result: a failure is handled here, as a late observation's
-   * is, and the clock goes on from the latest session.
-   */
-  function requestObservation(): void {
-    observe().catch(() => scheduleWakeUp(session.value));
+    if (outcome === "skipped" || outcome.kind !== "observed") return owned(shown);
+    return whileLive(observation, () => publishLater(shown), owned(shown));
   }
 
   /**
