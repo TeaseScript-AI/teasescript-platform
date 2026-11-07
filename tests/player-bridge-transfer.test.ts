@@ -168,10 +168,11 @@ test("saved data comes back whole from the host, as the main realm's reader give
 });
 
 /*
- * The transfer ops' family: each op of `transferOps`, each of its argument forms and outcomes, and each refusal the
- * reader and the review make (`player/session-transfer-read.ts`), one row each, with its expected answer written here,
- * not taken from the reader. Every row runs in-process and over a Node Worker. The coverage check compares the rows with
- * the ops, their declared outcomes, and each `StorageTransferError` the reader's source raises.
+ * The transfer ops' family: each op of `transferOps` with each of its declared outcomes, some malformed arguments of
+ * each, and each refusal the reader and the review make (`player/session-transfer-read.ts`). Refusal messages are
+ * written here; commit contents are compared with a direct-reader result. Every row runs in-process and over a Node
+ * Worker. The coverage check compares the rows with the ops, their declared outcomes, and each `StorageTransferError`
+ * the reader's source raises.
  */
 
 /** Each transfer op's outcomes; a row names one, and each is some row's. */

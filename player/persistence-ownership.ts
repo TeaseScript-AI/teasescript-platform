@@ -4,9 +4,9 @@ import type { ScriptStorageProvider } from "./script-storage.js";
 
 /*
  * The ownership of one persistence operation of the Player's session host (`vue/src/usePlayerSession.ts`): a keep, the
- * kept session's restore for Continue, a session import (L5h.1). The host makes one when an operation begins; `current`
- * is the one rule that says whether the operation still owns its room, store, plan tenure and preparation, and once it
- * is false it stays false (`retireIfStale`).
+ * kept session's restore for Continue, a session import (L5h.1), a saved-data import (L5h.2). The host makes one when an
+ * operation begins; `current` is the one rule that says whether the operation still owns its room, store, plan tenure
+ * and preparation, and once it is false it stays false (`retireIfStale`).
  *
  * The operation reaches its stores only through the ownership's handles, also inside the helpers it calls, such as
  * the captured-media wrapper of the saved values. A handle admits each call of a store method only while the operation
