@@ -247,12 +247,12 @@ export class NarrowingRoutes {
   readonly #own = new Map<TreeStatement, Map<string, OwnGuards>>();
   /** The blocks that end and the labels (`#ends`), made on the first query. */
   #endings: Endings | null = null;
-  /** Per block, the indexes (sorted) of its `if`s whose conditions hold a test (`#testing`). */
-  readonly #ifs = new Map<number, number[]>();
+  /** Per callable's body, its `if`s whose conditions hold a test (`#testing`). */
+  readonly #ifs = new Map<TreeBlock, TreeStatement[]>();
+  /** Per callable's body, whether it holds an `if` arm infeasible by entry narrowing (`#holdsInfeasible`). */
+  readonly #infeasibleBodies = new Map<TreeBlock, boolean>();
   /** Per arm, whether its entry's narrowing leaves a tested read no kind (`#infeasible`). */
   readonly #infeasibleArms = new Map<TreeBlock, boolean>();
-  /** Per (key, offending kind, block), the indexes (sorted) of the block's `if`s no route of the key passes (`#blocked`). */
-  readonly #blocking = new Map<string, number[]>();
   /** Per `if` or `while`, its condition's tests as facts (`#conditionFacts`). */
   readonly #conditions = new Map<TreeStatement, ConditionFacts | null>();
 
@@ -283,6 +283,8 @@ export class NarrowingRoutes {
     const site = program.places[value]?.site ?? null;
     if (site === null) return null;
     const node = program.exprAt(site);
+    // (the callable default: a use whose callable holds an infeasible arm keeps the warning, #1938)
+    if (yield* this.#holdsInfeasibleAt(site)) return null;
     // (a value whose node reads no expression, a call's, a `get`'s or a `load`'s result, is its own producer; any other,
     // a compound assignment's operand among them, keeps its warning)
     if (node === null || node.expression === undefined) {
@@ -490,14 +492,17 @@ export class NarrowingRoutes {
     if (this.#tested !== null) return this.#tested;
     const work = this.#work;
     const made = new Map<string, TreeStatement[]>();
-    for (const block of each(work, "indexSteps", this.tree.blocks))
+    const bodies = new Map<TreeBlock, TreeBlock>();
+    for (const block of each(work, "indexSteps", this.tree.blocks)) {
+      const body = block.owner === null ? block : (bodies.get(block.owner.block) ?? block);
+      bodies.set(block, body);
       for (const statement of each(work, "indexSteps", block.statements)) {
         const facts = this.#conditionFacts(statement);
         if (facts === null) continue;
         if (statement.statement.kind === "ifStatement" && facts.list.length > 0) {
-          const ifs = this.#ifs.get(block.id);
-          if (ifs === undefined) this.#ifs.set(block.id, [statement.index]);
-          else ifs.push(statement.index);
+          const ifs = this.#ifs.get(body);
+          if (ifs === undefined) this.#ifs.set(body, [statement]);
+          else ifs.push(statement);
         }
         for (const [text] of each(work, "indexSteps", facts.byText)) {
           const list = made.get(text);
@@ -505,6 +510,7 @@ export class NarrowingRoutes {
           else list.push(statement);
         }
       }
+    }
     this.#tested = made;
     return made;
   }
@@ -643,125 +649,57 @@ export class NarrowingRoutes {
     if (stored !== undefined && stored !== null && stored.start <= at && at < stored.end)
       return null;
     if (!this.#open(key, tag, found, chain, node)) return null;
-    return (yield* this.#feasible(key, tag, found, chain)) ? found : null;
+    // (the callable default: a link whose read's or candidate's callable holds an infeasible arm keeps the warning)
+    return (yield* this.#holdsInfeasible(body)) ||
+      (yield* this.#holdsInfeasible(found.chain[0]!.block))
+      ? null
+      : found;
   }
 
   /**
-   * The route rule's guard on a corridor `#open` accepts (Sol's F2 on #1937, held under #1938): the route does not
-   * promote, and the use keeps the warning, where it runs through an `if`'s arm whose entry narrowing leaves the tested
-   * read no kind (`#infeasible`). That is an arm the writer or the read stands in, or every live arm of an `if` between
-   * them that the key's layers do not close. Any other arm counts as a run: a constant condition, an exit, or another
-   * form (#1938's residual).
+   * The route rule's callable default (Sol's F2 on #1937, the lead's ruling; #1938 designs the precise rule): the
+   * certificate promotes to an error only where the use's callable, and every callable on its witness chain, holds no
+   * `if` arm infeasible by entry narrowing (N1's forms over the core's items, `#infeasible`); otherwise the use keeps
+   * main's warning. An arm the guard does not prove counts as feasible: a constant condition, a loop's exit, a `switch`
+   * case, another location's test, an element location. One answer per body, from its `if`s found once (`#testing`).
    */
-  *#feasible(key: Key, tag: ItemTag, found: Candidate, chain: readonly Place[]): Work<boolean> {
+  *#holdsInfeasible(body: TreeBlock): Work<boolean> {
     this.#work.charge("eventSteps");
+    const known = this.#infeasibleBodies.get(body);
+    if (known !== undefined) return known;
     const work = this.#work;
-    const writer = found.chain;
-    for (const place of each(work, "eventSteps", writer))
-      if (yield* this.#infeasible(place.block)) return false;
-    for (const place of each(work, "eventSteps", chain))
-      if (yield* this.#infeasible(place.block)) return false;
-    let level = 0;
-    for (const _ of steps(
-      work,
-      "eventSteps",
-      () =>
-        level < writer.length &&
-        level < chain.length &&
-        writer[level]!.block === chain[level]!.block &&
-        writer[level]!.index === chain[level]!.index,
-    ))
-      level += 1;
-    if (level >= writer.length || level >= chain.length) return true;
-    const layer = this.#testLayer(key, tag);
-    const location = this.#location(key);
-    // (the writer side, the statements between in the shared block, and each entered block's statements before the read)
-    let up = writer.length;
-    for (const _ of steps(work, "eventSteps", () => up - 1 > level)) {
-      up -= 1;
-      const { block, index } = writer[up]!;
-      if (
-        yield* this.#blocked(key, block, index + 1, block.statements.length, layer, location, tag)
-      )
-        return false;
-    }
-    const shared = writer[level]!.block;
-    if (
-      yield* this.#blocked(
-        key,
-        shared,
-        writer[level]!.index + 1,
-        chain[level]!.index,
-        layer,
-        location,
-        tag,
-      )
-    )
-      return false;
-    let down = level + 1;
-    for (const _ of steps(work, "eventSteps", () => down < chain.length)) {
-      const { block, index } = chain[down]!;
-      if (yield* this.#blocked(key, block, 0, index, layer, location, tag)) return false;
-      down += 1;
-    }
-    return true;
-  }
-
-  /**
-   * Whether an `if` of a block's statements `low` to `high` exclusive has every live arm closed for the key (`layer`,
-   * or its entry's narrowing of `location` removing `tag`) or infeasible, one of them infeasible: no route passes it.
-   * The block's such `if`s are found once per (key, kind), then one binary search per segment.
-   */
-  *#blocked(
-    key: Key,
-    block: TreeBlock,
-    low: number,
-    high: number,
-    layer: Layer,
-    location: string | null,
-    tag: ItemTag,
-  ): Work<boolean> {
-    this.#work.charge("eventSteps");
-    const work = this.#work;
-    if (low >= high) return false;
     this.#testing();
-    const memo = joinParts(key, tag, block.id);
-    let blocked = this.#blocking.get(memo);
-    if (blocked === undefined) {
-      blocked = [];
-      for (const index of each(work, "eventSteps", this.#ifs.get(block.id) ?? [])) {
-        let infeasible = false;
-        let open = false;
-        for (const arm of each(work, "eventSteps", block.statements[index]!.arms)) {
-          if (!arm.live || this.#armClosed(arm, layer, location, tag)) continue;
-          if (yield* this.#infeasible(arm)) infeasible = true;
-          else open = true;
+    let holds = false;
+    for (const statement of each(work, "eventSteps", this.#ifs.get(body) ?? [])) {
+      for (const arm of each(work, "eventSteps", statement.arms))
+        if (arm.live && (yield* this.#infeasible(arm))) {
+          holds = true;
+          break;
         }
-        if (infeasible && !open) blocked.push(index);
-      }
-      keepText(work, memo.length);
-      this.#blocking.set(memo, blocked);
+      if (holds) break;
     }
-    return countIn(work, blocked, low, high) > 0;
+    this.#infeasibleBodies.set(body, holds);
+    return holds;
   }
 
-  /** Whether the shared layer or a layer of the key's closes an arm, or its entry's narrowing removes `tag` there. */
-  #armClosed(arm: TreeBlock, layer: Layer, location: string | null, tag: ItemTag): boolean {
+  /** The callable default at a site: whether its callable's body holds an infeasible arm, or `true` outside the bodies. */
+  *#holdsInfeasibleAt(site: SourceSite): Work<boolean> {
     this.#work.charge("eventSteps");
-    const work = this.#work;
-    if ((layer.calls ? arm.calls : arm.leaves).length > 0) return true;
-    let at: Layer | null = layer;
-    for (const _ of steps(work, "eventSteps", () => at !== null)) {
-      if ((at!.counts.get(arm.id) ?? 0) > 0) return true;
-      at = at!.parent;
-    }
-    return (
-      arm.entry !== null &&
-      location !== null &&
-      some(work, "eventSteps", this.index.atEntry(arm.entry, location), (g) =>
-        removes(g.form, tag, work),
-      )
-    );
+    let statement = this.tree.statementAt(site.file, site.start);
+    if (statement === null) return true;
+    for (const _ of steps(this.#work, "eventSteps", () => statement!.block.owner !== null))
+      statement = statement!.block.owner!;
+    return yield* this.#holdsInfeasible(statement.block);
+  }
+
+  /** The callable default for a called function's result: whether the callee's body holds an infeasible arm. */
+  *#calleeHolds(value: PlaceId): Work<boolean> {
+    this.#work.charge("eventSteps");
+    const c = this.pass.program.opOf.get(value);
+    if (c?.kind !== "call") return false;
+    const region = this.pass.program.functionRegion(c.fn);
+    const body = region === undefined ? undefined : this.tree.root(region.id);
+    return body === undefined ? false : yield* this.#holdsInfeasible(body);
   }
 
   /**
@@ -777,9 +715,12 @@ export class NarrowingRoutes {
     const owner = arm.owner;
     let dead = false;
     const facts = owner?.statement.kind === "ifStatement" ? this.#conditionFacts(owner) : null;
+    // (each location's narrowings at the entry once: a condition may test one location many times)
+    const seen = new Set<string>();
     if (arm.entry !== null && facts !== null)
       for (const fact of each(work, "eventSteps", facts.list)) {
-        if (fact.location === null) continue;
+        if (fact.location === null || seen.has(fact.location)) continue;
+        seen.add(fact.location);
         for (const g of each(work, "eventSteps", this.index.atEntry(arm.entry, fact.location))) {
           const items = yield* this.pass.values.keyItems(g.key, g.input);
           if (
@@ -1010,7 +951,10 @@ export class NarrowingRoutes {
     this.#work.charge("exactQueries");
     const program = this.pass.program;
     if (path.length > 0)
-      return produces(program.work, yield* this.pass.values.valueItems(value, node, path), tag);
+      return (
+        !(yield* this.#calleeHolds(value)) &&
+        produces(program.work, yield* this.pass.values.valueItems(value, node, path), tag)
+      );
     // (the fallbacks from the outermost in, down to the first left side that is none)
     const rights: PlaceId[] = [];
     let left = value;
@@ -1028,6 +972,8 @@ export class NarrowingRoutes {
       program.work.charge("exactQueries");
       const literal = literalTag(program, at);
       if (literal !== null) return literal === kind;
+      // (a called function's result whose callee holds an infeasible arm produces nothing the route rule promotes)
+      if (yield* routes.#calleeHolds(at)) return false;
       return produces(program.work, yield* routes.pass.values.valueItems(at, node, []), kind);
     };
     // from the innermost out: whether the value so far can be null, and whether it produced the kind

@@ -3871,10 +3871,11 @@ test("the tested-producer rule admits its closed set of forms over every axis, a
   assert.equal(covered.size, expected);
 });
 
-test("a route through an arm its entry narrowing leaves no kind does not promote, and keeps the warning (AD-1, #1938)", () => {
-  // (Sol's F2 on #1937: the expected outcome from the guard's own table, never the engine's. A writer of a possible
-  // null; an `if` whose one arm overwrites the key and whose other arm is the route; its test of `other` makes the
-  // route's arm infeasible only where `other` holds no kind its entry's narrowing keeps. Unknown forms count as runs)
+test("a use whose callable or witness chain holds an arm its entry narrowing leaves no kind does not promote, and keeps the warning (AD-1, #1938)", () => {
+  // (Sol's F2 on #1937 and the lead's callable default: the expected outcome from the rule's own table, never the
+  // engine's. A writer of a possible null; an `if` whose one arm overwrites the key; its test of `other` gives an arm no
+  // run enters where `other` holds no kind that arm's entry narrowing keeps, and then the callable keeps the warning,
+  // whichever arm the route takes. Unknown forms count as runs)
   const FEASIBILITY = {
     // (`other` may be an object, null or text: every arm of every form is entered on some run)
     feasible:
@@ -3908,12 +3909,8 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
             declare +
             statement +
             "\nrepeat n {}\nexit\n";
-          // (the route runs through the arm without the overwrite: its truth's arm where the else arm overwrites)
-          const truth = negated ? fails : holds;
-          const falsity = negated ? holds : fails;
-          const routeArmDead =
-            feasibility === "infeasible by entry narrowing" &&
-            (killIn === "then" ? falsity : truth);
+          // (an object leaves one of the arms no kind where either side of the form removes it: `not` swaps the sides)
+          const routeArmDead = feasibility === "infeasible by entry narrowing" && (holds || fails);
           const request = coreRequest([{ path: "main.tease", source }]);
           assert.ok(request !== null, source);
           const [error, warning] = inBothOrders(() => {
@@ -3927,9 +3924,62 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
             wrong.push(`${routeArmDead ? "warning" : "error"} expected: ${source}`);
           covered.add([feasibility, test, negated, killIn].join(" | "));
         }
+  // (the guard's siblings, each the warning: a whole copy, nesting, `else if`, a loop's body, a second callable; and a
+  // second callable whose arms are all entered keeps the error)
+  const writer = 'let c = askBoolean "c"\nlet n = 1\nif c { n = null }\nlet other = {k: 1}\n';
+  const SIBLINGS: readonly (readonly [string, string, boolean])[] = [
+    [
+      "a whole copy",
+      "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:8,nest:{n:8,keep:1},spare:1}\n" +
+        "let a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n",
+      false,
+    ],
+    [
+      "a nested if",
+      `${writer}if other != null { if other != null { n = 1 } }\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "an else if",
+      `${writer}if askBoolean("e") { n = 1 } else if other != null { n = 1 }\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "a loop's body",
+      `${writer}repeat 2 { if other != null { n = 1 } }\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "a second callable",
+      "function g {\n  let o = {k: 1}\n  let r = null\n  if o != null { r = 1 }\n  return r\n}\nlet n = g()\nrepeat n {}\nexit\n",
+      false,
+    ],
+    [
+      "a second callable whose arms are entered",
+      'function g {\n  if askBoolean("g") { return null }\n  return 1\n}\nlet n = g()\nrepeat n {}\nexit\n',
+      true,
+    ],
+  ];
+  for (const [name, source, expected] of SIBLINGS) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const [error, warning] = inBothOrders(() => {
+      const diagnostics = analyseCore(request).diagnostics;
+      return [
+        diagnostics.some((d) => d.class === "compile-error"),
+        diagnostics.some((d) => d.class === "warning-runtime-check"),
+      ] as const;
+    });
+    if (error !== expected || (!expected && !warning))
+      wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
+    covered.add(`sibling | ${name}`);
+  }
   assert.deepEqual(wrong, []);
-  // (the coverage check: every feasibility, form, polarity and position, each once)
-  assert.equal(covered.size, Object.keys(FEASIBILITY).length * FORMS.length * 2 * 2);
+  // (the coverage check: every feasibility, form, polarity and position, and every sibling, each once)
+  assert.equal(
+    covered.size,
+    Object.keys(FEASIBILITY).length * FORMS.length * 2 * 2 + SIBLINGS.length,
+  );
 });
 
 test("no production code selects the core: only tests reach the candidate entry", () => {
