@@ -10,6 +10,7 @@ import { PlayerBridge } from "../player-bridge.js";
 import { openBridge, type ClientPort } from "./client.js";
 import {
   alignTrace,
+  closeConnection,
   playerBridgeOps,
   playerOpsContext,
   type PlayerOpsContext,
@@ -84,8 +85,12 @@ export function createInProcessBackend(
     options.delayMs === undefined
       ? queueMicrotask(deliverOne)
       : setTimeout(deliverOne, options.delayMs);
+  // Once the client ended, the host's posts fail: a reply of work still running then has no one to reach, and its
+  // delivery is undone as the reply fails (`worker-host.ts`).
+  let ended = false;
   const hostPort: HostPort = {
     post: (message) => {
+      if (ended) throw new Error("The client of this in-process host ended.");
       // Decoded on receipt, so `flush` reads the session of a reply that crossed as a flat form.
       const data = decodeMessage(structuredClone(message));
       const session =
@@ -104,15 +109,19 @@ export function createInProcessBackend(
     post: (message) => toHost?.(structuredClone(message)),
     listen: (listener) => void (toClient = listener),
     onFailure: () => {},
+    // The client ends, by a loss or `terminate()`, and terminates its port first (`client.ts`), so the host here, which
+    // outlives it, closes the connection directly: nothing goes through the ended client.
     terminate: () => {
+      ended = true;
       toHost = null;
       toClient = null;
       transit.length = 0;
+      closeConnection(context, sessions);
     },
   };
   const { client } = openBridge(clientPort, build);
   const context = playerOpsContext();
-  const sessions = startBridgeHost(hostPort, playerBridgeOps(context), build);
+  const sessions = startBridgeHost(hostPort, playerBridgeOps(context), build, context.delivery);
   const bridge = new PlayerBridge(client);
   const flush = (session: string) => {
     for (let index = 0; index < transit.length;) {
@@ -193,6 +202,10 @@ export interface HostFactoryInput {
  * DevelopmentPreview's Start. A session that brought a plan of its own gets a new plan token. `{ plan, options }`
  * starts a held plan instead. Either runs with the connection's value trace; a Start (`random`) also with its Player's
  * random control. A restore begins without ownership, until an explicit adoption (`adoptRandom`).
+ *
+ * Its plan and session are owned by a delivery of the facade's own (`delivery.ts`) until the bridge took the session: a
+ * fault before that undoes them, and a closed connection admits neither. It never borrows an op's delivery, also not one
+ * still running.
  */
 export function introduceNow(
   bridge: PlayerBridge,
@@ -204,6 +217,25 @@ export function introduceNow(
 ): PlayerSession {
   const backend = backendOf(bridge);
   const { context } = backend;
+  const delivery = context.delivery.begin();
+  try {
+    const opened = introduceIn(backend, make, tracing, random);
+    context.delivery.commit(delivery);
+    return opened;
+  } catch (error) {
+    context.delivery.rollback(delivery);
+    throw error;
+  }
+}
+
+/** `introduceNow`'s body, inside its delivery. */
+function introduceIn(
+  backend: Backend,
+  make: Parameters<typeof introduceNow>[1],
+  tracing: TracingIntent | undefined,
+  random: StartRandom | undefined,
+): PlayerSession {
+  const { bridge, context } = backend;
   // The Player's newest tracing and random intents hold before the session begins, also while their requests wait.
   if (tracing !== undefined) alignTrace(context, tracing);
   const control = startRandom(context, random);

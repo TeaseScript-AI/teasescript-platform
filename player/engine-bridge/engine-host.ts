@@ -1,5 +1,5 @@
 import { playerBuildIdentity } from "../build-identity.js";
-import { playerBridgeOps } from "./player-ops.js";
+import { playerBridgeOps, playerOpsContext } from "./player-ops.js";
 import { startBridgeHost } from "./worker-host.js";
 
 // The engine Worker's host in a browser, which `engine.worker.ts` loads. Its static imports are the playback entry's:
@@ -25,11 +25,14 @@ function isWorkerScope(value: unknown): value is WorkerScope {
 const scope: unknown = globalThis;
 if (!isWorkerScope(scope))
   throw new Error("The engine Worker entry runs only as a dedicated Worker.");
+// The ops' context and the host share the connection's deliveries (`delivery.ts`).
+const context = playerOpsContext();
 startBridgeHost(
   {
     post: (message) => scope.postMessage(message),
     listen: (listener) => scope.addEventListener("message", (event) => listener(event.data)),
   },
-  playerBridgeOps(),
+  playerBridgeOps(context),
   playerBuildIdentity,
+  context.delivery,
 );

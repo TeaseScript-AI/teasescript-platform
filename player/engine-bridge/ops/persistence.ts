@@ -8,6 +8,7 @@ import {
 } from "../../runtime-adapter.js";
 import { everyItem, exactly, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
+import { ownNow } from "../delivery.js";
 import type { BridgeOps, HostSessions } from "../worker-host.js";
 import { HeldSession, introduction } from "./session.js";
 
@@ -120,6 +121,11 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
         planOf(plan);
         if (slots.has(plan)) return { result: null };
         const slot: PlanTextSlot = { json: null, timer: null };
+        ownNow(context.delivery, () => {
+          if (slots.get(plan) !== slot) return;
+          if (slot.timer !== null) clearTimeout(slot.timer);
+          slots.delete(plan);
+        });
         slot.timer = setTimeout(() => {
           slot.timer = null;
           // A slot released or replaced meanwhile is no longer the plan's.

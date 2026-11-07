@@ -18,6 +18,7 @@ import type {
 } from "../../src/runtime/random/random-control.js";
 import { decideDraw, RandomHistory, type RandomNext } from "../random-decisions.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
+import { type DeliveryOwner, deliveryOwner, ownNow } from "./delivery.js";
 import { SourceViewCaches, sourceViewOps } from "./ops/source-views.js";
 import { historyOps } from "./ops/history.js";
 import { inputOps } from "./ops/input.js";
@@ -28,7 +29,7 @@ import { transferOps, type TransferTicket } from "./ops/transfer.js";
 import { resourceOps } from "./ops/resources.js";
 import { sessionOps } from "./ops/session.js";
 import { traceOps } from "./ops/trace.js";
-import type { BridgeOps } from "./worker-host.js";
+import type { BridgeOps, HostSessions } from "./worker-host.js";
 
 /** What the Player reads from a plan the Worker holds, sent with the plan's token instead of the plan. */
 export interface PlanMetadata {
@@ -131,8 +132,13 @@ export function planMetadata(plan: InstructionPlan): PlanMetadata {
  * recorder.
  */
 export interface PlayerOpsContext {
+  /**
+   * The connection's deliveries (`delivery.ts`): its host runs every op in one, and every allocation of these registries
+   * registers its undo with the open one first. Its host must be started with it (`startBridgeHost`).
+   */
+  readonly delivery: DeliveryOwner;
   readonly plans: Map<string, InstructionPlan>;
-  /** Keeps `plan` under a new token, which it returns. */
+  /** Keeps `plan` under a new token, which it returns; owned by the open delivery until it is posted. */
   hold(plan: InstructionPlan): string;
   /** Records the connection's sessions for a debug export; see `DebugRecorder`. */
   readonly recorder: DebugRecorder;
@@ -295,11 +301,16 @@ export function alignTrace(
 
 export function playerOpsContext(): PlayerOpsContext {
   const plans = new Map<string, InstructionPlan>();
+  const delivery = deliveryOwner();
   let nextPlan = 1;
   return {
+    delivery,
     plans,
     hold: (plan) => {
       const token = `p${nextPlan++}`;
+      ownNow(delivery, () => {
+        if (plans.get(token) === plan) plans.delete(token);
+      });
       plans.set(token, plan);
       return token;
     },
@@ -356,10 +367,12 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     if (compilation.plan === null)
       return { kind: "notCompiled", diagnostics: compilation.diagnostics, identity };
     const plan = hold(compilation.plan);
-    context.sources.set(
-      plan,
-      typeof script === "string" ? [{ path: MAIN_FILE_PATH, source: script }] : script.files,
-    );
+    const files =
+      typeof script === "string" ? [{ path: MAIN_FILE_PATH, source: script }] : script.files;
+    ownNow(context.delivery, () => {
+      if (context.sources.get(plan) === files) context.sources.delete(plan);
+    });
+    context.sources.set(plan, files);
     return {
       kind: "prepared",
       plan,
@@ -392,21 +405,12 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
         return { result: plan === undefined ? null : planMetadata(plan) };
       },
     },
-    // Lets go of the connection's sessions and of everything held for its plans: the plans, their sources and Debug's
-    // caches of them, their JSON, and the sessions read for an import. The debug recorder and the value trace stay as
-    // they are, the last diagnostics of the connection; this is no reset of the whole context.
+    // Lets go of what the connection holds (`releaseConnection`); the connection stays open for more work.
     teardown: {
       session: "none",
       checkArguments: (args) => args === null,
       run: (_args, sessions) => {
-        plans.clear();
-        context.sources.clear();
-        context.sourceViews.clear();
-        for (const slot of context.planTexts.values())
-          if (slot.timer !== null) clearTimeout(slot.timer);
-        context.planTexts.clear();
-        context.transfers.clear();
-        sessions.clear();
+        releaseConnection(context, sessions);
         return { result: null };
       },
     },
@@ -421,4 +425,30 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     ...traceOps(context),
     ...randomOps(context),
   };
+}
+
+/**
+ * Lets go of the connection's sessions and of everything held for its plans: the plans, their sources and Debug's caches
+ * of them, their JSON, and the sessions read for an import. The debug recorder and the value trace stay as they are, the
+ * last diagnostics of the connection; this is no reset of the whole context. The `teardown` op runs it on a connection
+ * that stays open; `closeConnection` runs it as the connection ends.
+ */
+export function releaseConnection(context: PlayerOpsContext, sessions: HostSessions): void {
+  context.plans.clear();
+  context.sources.clear();
+  context.sourceViews.clear();
+  for (const slot of context.planTexts.values()) if (slot.timer !== null) clearTimeout(slot.timer);
+  context.planTexts.clear();
+  context.transfers.clear();
+  sessions.clear();
+}
+
+/**
+ * Ends the connection for good, as its transport ends: its deliveries are closed first, so work still running can
+ * allocate nothing more, then what it holds is let go of (`releaseConnection`). Called directly by the backend whose
+ * host outlives its client, never through that client.
+ */
+export function closeConnection(context: PlayerOpsContext, sessions: HostSessions): void {
+  context.delivery.close();
+  releaseConnection(context, sessions);
 }

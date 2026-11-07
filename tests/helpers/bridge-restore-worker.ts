@@ -70,4 +70,5 @@ startBridgeHost(
     },
   },
   isBuildIdentity(workerData?.build) ? workerData.build : unknownBuild,
+  context.delivery,
 );

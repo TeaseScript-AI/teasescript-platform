@@ -20,6 +20,7 @@ import type { PlayerSession } from "../player/runtime-view.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
+import { deliveryOwner } from "../player/engine-bridge/delivery.js";
 
 /*
  * At a Player error stop, what is shown is what the host ran, which its export and recording hold, and nothing shows
@@ -386,6 +387,7 @@ test("a session op still awaited does not delay the halt fence: a request behind
   let settle!: () => void;
   let ran = 0;
   const session: HostSession = { revision: 0, accepts: () => true };
+  const owner = deliveryOwner();
   const sessions = startBridgeHost(
     { post: (reply) => replies.push(reply), listen: (listener) => (listen = listener) },
     {
@@ -404,8 +406,12 @@ test("a session op still awaited does not delay the halt fence: a request behind
       },
     },
     BUILD,
+    owner,
   );
+  // A session the host holds is registered inside a delivery, as an op does.
+  const delivery = owner.begin();
   const id = sessions.add(session);
+  owner.commit(delivery);
   const send = (requestId: number, op: string) =>
     listen({
       v: BRIDGE_VERSION,

@@ -8,6 +8,7 @@ import type { FileCode } from "../../random-draw-code.js";
 import type { DrawCode } from "../../vue/src/randomDrawPresentation.js";
 import { exactly, isRecord, isStringArray } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
+import { ownNow } from "../delivery.js";
 import type { BridgeOps } from "../worker-host.js";
 
 /**
@@ -42,11 +43,15 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
     if (files === undefined || plan === undefined) return null;
     let text = caches.texts.get(token);
     if (text === undefined) {
-      text = import("../../../src/index.js").then(
+      const made = import("../../../src/index.js").then(
         ({ createSourceDebugSidecar }) => createSourceDebugSidecar(files, plan),
         () => null,
       );
-      caches.texts.set(token, text);
+      ownNow(context.delivery, () => {
+        if (caches.texts.get(token) === made) caches.texts.delete(token);
+      });
+      caches.texts.set(token, made);
+      text = made;
     }
     return text;
   };
@@ -68,7 +73,11 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
       if (text === null) continue;
       const load = loadSourceDebugSidecar(text, plan);
       if (load.kind !== "valid") continue;
-      caches.sidecars.set(token, load.sidecar);
+      const { sidecar } = load;
+      ownNow(context.delivery, () => {
+        if (caches.sidecars.get(token) === sidecar) caches.sidecars.delete(token);
+      });
+      caches.sidecars.set(token, sidecar);
       return load.sidecar;
     }
     return null;
@@ -96,7 +105,14 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
         const { drawCode, fileCode } = await import("../../random-draw-code.js");
         // A teardown during the import leaves nothing to keep.
         if (context.plans.get(plan) !== held) return { result: null };
-        if (caches.latestFile?.file !== file) caches.latestFile = fileCode(file);
+        if (caches.latestFile?.file !== file) {
+          const before = caches.latestFile;
+          const latest = fileCode(file);
+          ownNow(context.delivery, () => {
+            if (caches.latestFile === latest) caches.latestFile = before;
+          });
+          caches.latestFile = latest;
+        }
         const code: DrawCode | null = drawCode(caches.latestFile, site);
         return { result: code };
       },

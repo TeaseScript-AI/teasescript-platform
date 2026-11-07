@@ -35,6 +35,7 @@ import {
 } from "./helpers/argument-forms.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
+import { deliveredRun } from "./helpers/delivered-run.js";
 
 /*
  * The reading of an exported file or text in the engine host (`ops/transfer.ts`, L5h.2): the parse, the validation and
@@ -786,7 +787,7 @@ function connection() {
     delete: () => {},
     clear: () => {},
   };
-  const run = async (op: string, args: unknown) => ops[op]!.run(args, sessions, null);
+  const run = deliveredRun(context, ops, sessions);
   return { context, run };
 }
 
