@@ -19,46 +19,64 @@ const REPRESENTATIVES = {
   unknown: [".github/workflows/ci.yml", Object.keys(PROJECTS)],
 };
 
-test("each changed path needs its project's checks, documentation none, and an unknown path every project's", () => {
-  // Every project has a representative, so a new project cannot go unchecked here.
-  for (const name of Object.keys(PROJECTS))
-    assert.ok(name in REPRESENTATIVES, `${name} has a representative`);
-  const kinds = Object.entries(REPRESENTATIVES);
-  for (const [kind, [path, expected]] of kinds)
-    assert.deepEqual([...projectsFor([path])].sort(), [...expected].sort(), kind);
-  // Each pair of kinds needs the union of what each needs alone.
-  for (const [first, [firstPath, firstExpected]] of kinds)
-    for (const [second, [secondPath, secondExpected]] of kinds)
-      assert.deepEqual(
-        [...projectsFor([firstPath, secondPath])].sort(),
-        [...new Set([...firstExpected, ...secondExpected])].sort(),
-        `${first} with ${second}`,
-      );
-  assert.deepEqual([...projectsFor([])], []);
-  // `player/` outside `player/vue/` belongs to the TypeScript project, and `player/vue/` only to the Player's.
-  assert.deepEqual([...projectsFor(["player/runtime-adapter.ts"])], ["typescript"]);
-  assert.deepEqual([...projectsFor(["player/vue/src/usePlayerSession.ts"])], ["player-vue"]);
-});
+test(
+  "each changed path needs its project's checks, documentation none, and an unknown path every project's",
+  { timeout: 30_000 },
+  () => {
+    // Every project has a representative, so a new project cannot go unchecked here.
+    for (const name of Object.keys(PROJECTS))
+      assert.ok(name in REPRESENTATIVES, `${name} has a representative`);
+    const kinds = Object.entries(REPRESENTATIVES);
+    for (const [kind, [path, expected]] of kinds)
+      assert.deepEqual([...projectsFor([path])].sort(), [...expected].sort(), kind);
+    // Each pair of kinds needs the union of what each needs alone.
+    for (const [first, [firstPath, firstExpected]] of kinds)
+      for (const [second, [secondPath, secondExpected]] of kinds)
+        assert.deepEqual(
+          [...projectsFor([firstPath, secondPath])].sort(),
+          [...new Set([...firstExpected, ...secondExpected])].sort(),
+          `${first} with ${second}`,
+        );
+    assert.deepEqual([...projectsFor([])], []);
+    // `player/` outside `player/vue/` belongs to the TypeScript project, and `player/vue/` only to the Player's.
+    assert.deepEqual([...projectsFor(["player/runtime-adapter.ts"])], ["typescript"]);
+    assert.deepEqual([...projectsFor(["player/vue/src/usePlayerSession.ts"])], ["player-vue"]);
+  },
+);
 
-test("without node_modules it runs no check, names the fix and exits 2", () => {
-  const directory = mkdtempSync(join(tmpdir(), "check-changed-"));
-  try {
-    const run = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
-    run("init", "-q");
-    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base");
-    writeFileSync(join(directory, "a.mjs"), "export const a = 1;\n");
-    const tool = fileURLToPath(new URL("./check-changed.mjs", import.meta.url));
-    const result = spawnSync(process.execPath, [tool, "--base", "HEAD"], {
-      cwd: directory,
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 2, result.stderr);
-    assert.match(result.stderr, /no node_modules: (?:link|link it)/u);
-    assert.doesNotMatch(result.stdout, /PASS|FAIL/u);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
+test(
+  "without node_modules it runs no check, names the fix and exits 2",
+  { timeout: 30_000 },
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "check-changed-"));
+    try {
+      const run = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
+      run("init", "-q");
+      run(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "base",
+      );
+      writeFileSync(join(directory, "a.mjs"), "export const a = 1;\n");
+      const tool = fileURLToPath(new URL("./check-changed.mjs", import.meta.url));
+      const result = spawnSync(process.execPath, [tool, "--base", "HEAD"], {
+        cwd: directory,
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 2, result.stderr);
+      assert.match(result.stderr, /no node_modules: (?:link|link it)/u);
+      assert.doesNotMatch(result.stdout, /PASS|FAIL/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 /** A repository with a base branch `main` and a branch `feature` off it, each changing `a.mjs` as `edit` says. */
 function repository({ conflict = false, slowOxlint = false } = {}) {
@@ -98,25 +116,29 @@ const environment = { ...process.env, PATH: dirname(process.execPath) + ":/usr/b
 const leftovers = () =>
   readdirSync(tmpdir()).filter((name) => name.startsWith("check-changed-merged-"));
 
-test("--merged checks the merge in a temporary worktree and removes it", () => {
-  const { directory, worktrees } = repository();
-  const before = leftovers();
-  try {
-    const result = spawnSync(process.execPath, [tool, "--merged", "--base", "main"], {
-      cwd: directory,
-      encoding: "utf8",
-      env: environment,
-    });
-    assert.match(result.stdout, /the merge of HEAD \(\w+\) into main/u, result.stderr);
-    assert.match(result.stdout, /1 changed files/u);
-    assert.equal(worktrees(), 1, "only the repository's own worktree is left");
-    assert.deepEqual(leftovers(), before);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
+test(
+  "--merged checks the merge in a temporary worktree and removes it",
+  { timeout: 30_000 },
+  () => {
+    const { directory, worktrees } = repository();
+    const before = leftovers();
+    try {
+      const result = spawnSync(process.execPath, [tool, "--merged", "--base", "main"], {
+        cwd: directory,
+        encoding: "utf8",
+        env: environment,
+      });
+      assert.match(result.stdout, /the merge of HEAD \(\w+\) into main/u, result.stderr);
+      assert.match(result.stdout, /1 changed files/u);
+      assert.equal(worktrees(), 1, "only the repository's own worktree is left");
+      assert.deepEqual(leftovers(), before);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
 
-test("--merged names a conflict, exits 2 and leaves no worktree", () => {
+test("--merged names a conflict, exits 2 and leaves no worktree", { timeout: 30_000 }, () => {
   const { directory, worktrees } = repository({ conflict: true });
   try {
     const result = spawnSync(process.execPath, [tool, "--merged", "--base", "main"], {
@@ -133,40 +155,52 @@ test("--merged names a conflict, exits 2 and leaves no worktree", () => {
   }
 });
 
-test("a signal during --merged stops the checks and removes the worktree", async () => {
-  const { directory, worktrees } = repository({ slowOxlint: true });
-  try {
-    const child = spawn(process.execPath, [tool, "--merged", "--base", "main"], {
-      cwd: directory,
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let output = "";
-    child.stdout.on("data", (chunk) => (output += chunk));
-    // (the worktree exists once the merge line is out)
-    while (!output.includes("the merge of HEAD")) await new Promise((wait) => setTimeout(wait, 50));
-    const [code] = await Promise.all([
-      new Promise((done) => child.on("close", (exit) => done(exit))),
-      Promise.resolve(child.kill("SIGTERM")),
-    ]);
-    assert.equal(code, 143);
-    assert.equal(worktrees(), 1);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("only a registered temporary worktree of check-changed is ever removed", () => {
-  const { directory } = repository();
-  const elsewhere = mkdtempSync(join(tmpdir(), "not-check-changed-"));
-  const unregistered = mkdtempSync(join(tmpdir(), "check-changed-merged-"));
-  try {
-    for (const path of [elsewhere, unregistered, `${unregistered}/../${basename(elsewhere)}`]) {
-      assert.match(removeTemporaryWorktree(path, directory), /is not a/u, path);
-      assert.ok(existsSync(path), `${path} was left`);
+test(
+  "a signal during --merged stops the checks and removes the worktree",
+  { timeout: 30_000 },
+  async () => {
+    const { directory, worktrees } = repository({ slowOxlint: true });
+    try {
+      const child = spawn(process.execPath, [tool, "--merged", "--base", "main"], {
+        cwd: directory,
+        env: environment,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let output = "";
+      child.stdout.on("data", (chunk) => (output += chunk));
+      // (the worktree exists once the merge line is out)
+      let ended = false;
+      child.on("close", () => (ended = true));
+      while (!output.includes("the merge of HEAD") && !ended)
+        await new Promise((wait) => setTimeout(wait, 50));
+      assert.ok(!ended, "the tool reached its checks");
+      const [code] = await Promise.all([
+        new Promise((done) => child.on("close", (exit) => done(exit))),
+        Promise.resolve(child.kill("SIGTERM")),
+      ]);
+      assert.equal(code, 143);
+      assert.equal(worktrees(), 1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
-  } finally {
-    for (const path of [directory, elsewhere, unregistered])
-      rmSync(path, { recursive: true, force: true });
-  }
-});
+  },
+);
+
+test(
+  "only a registered temporary worktree of check-changed is ever removed",
+  { timeout: 30_000 },
+  () => {
+    const { directory } = repository();
+    const elsewhere = mkdtempSync(join(tmpdir(), "not-check-changed-"));
+    const unregistered = mkdtempSync(join(tmpdir(), "check-changed-merged-"));
+    try {
+      for (const path of [elsewhere, unregistered, `${unregistered}/../${basename(elsewhere)}`]) {
+        assert.match(removeTemporaryWorktree(path, directory), /is not a/u, path);
+        assert.ok(existsSync(path), `${path} was left`);
+      }
+    } finally {
+      for (const path of [directory, elsewhere, unregistered])
+        rmSync(path, { recursive: true, force: true });
+    }
+  },
+);

@@ -185,9 +185,11 @@ function enterMerge(ref, cleanups) {
     }
   });
   git("worktree", "add", "--quiet", "--detach", directory, baseCommit);
+  // (git asks a merge for a committer even with `--no-commit`, and a CI runner or a fresh worker has none)
+  const identity = ["-c", "user.name=check-changed", "-c", "user.email=check-changed@localhost"];
   const merge = spawnSync(
     "git",
-    ["-C", directory, "merge", "--quiet", "--no-commit", "--no-ff", head],
+    ["-C", directory, ...identity, "merge", "--quiet", "--no-commit", "--no-ff", head],
     { encoding: "utf8" },
   );
   if (merge.status !== 0) {
