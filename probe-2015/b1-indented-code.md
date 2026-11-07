@@ -1,0 +1,3 @@
+Text.
+
+    [bad](missing.md)

@@ -1,0 +1,4 @@
+> Quoted
+> ---
+
+[x](#quoted)
