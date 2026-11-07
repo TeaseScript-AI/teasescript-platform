@@ -205,16 +205,50 @@ export class GuardIndex {
    * node, and the regions holding that one, never each tested key in turn (Codex r21 B1).
    */
   public guardedBelow(key: Key, node: FlowNode): readonly string[] {
+    return this.#below(key, node, null)!;
+  }
+
+  /**
+   * `guardedBelow`, or `null` where `asked` holds this read's group already: the reads it answers alike, the key's
+   * tested record and per laminar nest of it (a callable's branches, a file's operands) the innermost region holding
+   * the node, whose chain is the answer. So a holder's compilation asks one answer once per group of its reads, n
+   * copies under n tests n paths, not n² (Astra r2 B3); a read in a nest that is not laminar is asked by itself.
+   */
+  public guardedBelowOnce(key: Key, node: FlowNode, asked: Set<string>): readonly string[] | null {
+    return this.#below(key, node, asked);
+  }
+
+  #below(key: Key, node: FlowNode, asked: Set<string> | null): readonly string[] | null {
     const program = this.program;
     if (!program.reached(node)) return [];
-    const nests = this.#nestsBelow(recordKey(key));
+    const record = recordKey(key);
+    const nests = this.#nestsBelow(record);
     if (nests === null) return [];
     const held = new Set<string>();
     const branches = nests.branches.get(program.callableAt(node));
-    if (branches !== undefined) this.#holding(branches, program.position(node), held);
     const operands = node.span === null ? undefined : nests.operands.get(node.file);
+    const regions: [Nest, number][] = [];
+    if (branches !== undefined) regions.push([branches, program.position(node)]);
     if (operands !== undefined && node.span !== null)
-      this.#holding(operands, node.span.start.offset, held);
+      regions.push([operands, node.span.start.offset]);
+    if (asked !== null && regions.every(([nest]) => nest.laminar)) {
+      // (the innermost region of each nest, found as `#holding` finds it: the group, then its chains)
+      const innermost = regions.map(([nest, at]) =>
+        this.#innermost(nest, at, this.#startsBy(nest, at)),
+      );
+      const group = [
+        record,
+        ...regions.map(([nest], at) => `${this.#nestId(nest)}:${innermost[at]}`),
+      ].join(" ");
+      if (asked.has(group)) return null;
+      asked.add(group);
+      regions.forEach(([nest], at) => {
+        for (let index = innermost[at]!; index >= 0; index = nest.parents[index]!) {
+          program.work.charge("eventSteps");
+          held.add(nest.labels[index]!);
+        }
+      });
+    } else for (const [nest, at] of regions) this.#holding(nest, at, held);
     const out: string[] = [];
     for (const path of held) {
       let shorter = false;
@@ -226,33 +260,6 @@ export class GuardIndex {
     }
     program.work.charge("eventSteps", sortCost(out.length));
     return out.sort();
-  }
-
-  /**
-   * Which reads `guardedBelow(key, node)` answers alike: the key's tested record, and per laminar nest of it (a
-   * callable's branches, a file's operands) the innermost region holding the node, whose chain is the answer's; `null`
-   * where a nest is not laminar (each such read is asked by itself). So a holder's compilation asks one answer once
-   * for every read of one group (Astra r2 B3).
-   */
-  public guardedBelowGroup(key: Key, node: FlowNode): string | null {
-    const program = this.program;
-    program.work.charge("eventSteps");
-    if (!program.reached(node)) return "unreached";
-    const record = recordKey(key);
-    const nests = this.#nestsBelow(record);
-    if (nests === null) return "none";
-    const branches = nests.branches.get(program.callableAt(node));
-    const operands = node.span === null ? undefined : nests.operands.get(node.file);
-    if (branches?.laminar === false || operands?.laminar === false) return null;
-    const at = (nest: Nest | undefined, offset: number): string =>
-      nest === undefined
-        ? "-"
-        : `${this.#nestId(nest)}:${this.#innermost(nest, offset, this.#startsBy(nest, offset))}`;
-    return [
-      record,
-      at(branches, program.position(node)),
-      node.span === null ? "-" : at(operands, node.span.start.offset),
-    ].join(" ");
   }
 
   readonly #nestIds = new WeakMap<Nest, number>();

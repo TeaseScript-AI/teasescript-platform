@@ -790,12 +790,7 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
     const node = program.occNode.get(current);
     if (binding === undefined || node === undefined || node === null) continue;
     const base = keyOf(binding, joinSteps(steps.reverse(), read.path));
-    const group = guards.guardedBelowGroup(base, node);
-    if (group !== null) {
-      if (asked.has(group)) continue;
-      asked.add(group);
-    }
-    for (const text of guards.guardedBelow(base, node)) {
+    for (const text of guards.guardedBelowOnce(base, node, asked) ?? []) {
       program.work.charge("eventSteps", 1 + text.length);
       automaton.prefixVisits += 1;
       automaton.states[stateAt(contract, automaton, root, splitPath(text))]!.accepting = true;
