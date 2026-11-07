@@ -40,26 +40,20 @@ import {
 } from "./admission/literals.js";
 import type {
   Alias,
-  ByPath,
   ChainEnd,
   CopyForest,
   Decided,
   DecidedAt,
   Decision,
   Expansion,
-  Frontier,
   HeldOwn,
   IngressStop,
   Inheritance,
-  InheritedCopy,
   Join,
   KeyStops,
   LandingIndex,
   Level,
-  Listing,
-  ListingNode,
   LiveGroup,
-  OpenStep,
   OwnStructure,
   Stop,
   Stops,
@@ -75,6 +69,7 @@ import type { DeciderCaches, DeciderGroup, HeldInput } from "./admission/transfe
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
 import { joinSteps, keptSteps, type WorkLedger } from "./budget.js";
+import type { ReceivingDomain } from "./receiving-domain.js";
 import {
   arrayStrip,
   carried,
@@ -188,18 +183,20 @@ export class Admission {
   readonly rejectedKeys = new Set<Key>();
   /** The previous pass's rejected stores by the place and path each was rejected at (A6). */
   readonly retaken = new Map<Key, Definition[]>();
-  readonly a4Keys = new Set<Key>();
-  /** The places `a4Keys` lands copies in, each with `openAbove`'s walk down its paths from its root. */
-  readonly a4Places = new Map<PlaceId, OpenStep | null>();
-  /** Per place, each cursor's path's step of `openAbove`'s walk (`openAboveKey`, G3 stage 1). */
-  readonly openSteps = new Map<PlaceId, Map<number, OpenStep>>();
+  get a4Keys(): ReceivingDomain["a4Keys"] {
+    return this.pass.receivingDomain.a4Keys;
+  }
+  get a4Places(): ReceivingDomain["a4Places"] {
+    return this.pass.receivingDomain.a4Places;
+  }
+  get openSteps(): ReceivingDomain["openSteps"] {
+    return this.pass.receivingDomain.openSteps;
+  }
   /** The parameters with a default (ADR 0021 1.5). */
   readonly #defaulted = new Set<PlaceId>();
-  readonly a4Copies: {
-    readonly place: PlaceId;
-    readonly path: readonly string[];
-    readonly term: TypeTerm;
-  }[] = [];
+  get a4Copies(): ReceivingDomain["a4Copies"] {
+    return this.pass.receivingDomain.a4Copies;
+  }
   /** Whether each decision admits `null` (a copy of a written type without one does not, A4). */
   readonly nullable = new Map<CanonicalKey, boolean>();
   /**
@@ -213,63 +210,54 @@ export class Admission {
   readonly unrestricted = new Set<CanonicalKey>();
   /** The site of the contribution each decision took (S3 §1's admitted answer), `null` for a written type. */
   readonly deciderSites = new Map<CanonicalKey, SourceSite | null>();
-  readonly copies = new Map<
-    PlaceId,
-    readonly {
-      readonly path: readonly string[];
-      readonly binding: PlaceId;
-      readonly strip: readonly string[];
-      readonly cellsLive: boolean;
-    }[]
-  >();
-  /** The copies of places that may inherit a written type (`inheriting`), where they land. */
-  readonly a4Inherits: InheritedCopy[] = [];
-  /** A4 through copies (`copyGraph`): the unwritten places a copy of a written binding reaches, copy by copy. */
-  readonly inheriting = new Set<PlaceId>();
-  /** Per unwritten place and path, the written type its own decision copies there (`inheritedAt`), or none. */
-  readonly inherited = new Map<CanonicalKey, TypeTerm | null>();
-  /** The places and paths whose decisions wait on each other through copies, by cycle (`cut`): a union-find. */
-  readonly cycles = new Map<CanonicalKey, CanonicalKey>();
-  /** Each cycle's size, by its root (`cycleOf`). */
-  readonly cycleSizes = new Map<CanonicalKey, number>();
-  /**
-   * The deepest path a written type can reach through copies (`inheritedAt`): the written copies' landing paths with
-   * their types' element levels, and every copy of an inheriting place's own landing path beside them.
-   */
-  reach = 0;
-  /** Per written type, its element levels (`levelsOf`). */
-  readonly termLevels = new Map<TypeTerm, readonly TypeTerm[]>();
-  resolving = false;
+  get copies(): ReceivingDomain["copies"] {
+    return this.pass.receivingDomain.copies;
+  }
+  get a4Inherits(): ReceivingDomain["a4Inherits"] {
+    return this.pass.receivingDomain.a4Inherits;
+  }
+  get inheriting(): ReceivingDomain["inheriting"] {
+    return this.pass.receivingDomain.inheriting;
+  }
+  get inherited(): ReceivingDomain["inherited"] {
+    return this.pass.receivingDomain.inherited;
+  }
+  get cycles(): ReceivingDomain["cycles"] {
+    return this.pass.receivingDomain.cycles;
+  }
+  get cycleSizes(): ReceivingDomain["cycleSizes"] {
+    return this.pass.receivingDomain.cycleSizes;
+  }
+  get reach(): number {
+    return this.pass.receivingDomain.reach;
+  }
+  set reach(value: number) {
+    this.pass.receivingDomain.reach = value;
+  }
+  get termLevels(): ReceivingDomain["termLevels"] {
+    return this.pass.receivingDomain.termLevels;
+  }
+  get resolving(): boolean {
+    return this.pass.receivingDomain.resolving;
+  }
+  set resolving(value: boolean) {
+    this.pass.receivingDomain.resolving = value;
+  }
   readonly whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly stops = new Map<PlaceId, Stops>();
-  /** G3 3a: per place and path id, where it lands past wrappers (`landedFrontier`); per place and step, its wrapper's. */
-  readonly landedFrontiers = new Map<string, { readonly place: PlaceId; readonly rest: number }>();
-  readonly landingHops = new Map<string, PlaceId | null>();
-  /** Per place, its landings by first step (`landingSteps`); per walk, its stops by first step (`stopSteps`). */
-  readonly landingSteps = new Map<
-    PlaceId,
-    {
-      readonly whole: boolean;
-      readonly copies: ReadonlyMap<string, readonly InheritedCopy[]>;
-      readonly deeper: ReadonlySet<string>;
-    }
-  >();
-  readonly stopSteps = new WeakMap<
-    Stops,
-    { readonly root: boolean; readonly deeper: ReadonlySet<string> }
-  >();
-  /** G3 3a: per place and path id, its frontier past wrappers (`wrappedFrontier`); per place and step, its wrapper's step. */
-  readonly frontiers = new Map<string, Frontier>();
-  readonly scanHops = new Map<
-    string,
-    { readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null
-  >();
-  /** Per walk, the deepest path its stops stand at (`earliestDecider`). */
-  readonly stopDepths = new WeakMap<
-    Stops,
-    { readonly written: number; readonly values: number; readonly literals: number }
-  >();
+  get landedFrontiers(): ReceivingDomain["landedFrontiers"] {
+    return this.pass.receivingDomain.landedFrontiers;
+  }
+  get landingHops(): ReceivingDomain["landingHops"] {
+    return this.pass.receivingDomain.landingHops;
+  }
+  get frontiers(): ReceivingDomain["frontiers"] {
+    return this.pass.receivingDomain.frontiers;
+  }
+  get scanHops(): ReceivingDomain["scanHops"] {
+    return this.pass.receivingDomain.scanHops;
+  }
   /** The keys `isClean` and `inputsOf` ask along a path (`dirty`, `stored`). */
   #dirty: KeyTrie | null = null;
   #stored: KeyTrie | null = null;
@@ -390,31 +378,47 @@ export class Admission {
   readonly decisionPacket: KeyPacketMaking = keyPacket();
   /** Per decided cursor, its label's recipe (`labelOfKey`). */
   readonly keyLabels = new Map<KeyId, Label>();
-  /** A4 through copies' landings (`inheritance`), and per place and path whether its copies land it (`landed`). */
-  inherits: Inheritance | null = null;
-  readonly landedPaths = new Map<string, boolean>();
-  /**
-   * Per place and prefix, the paths copies land there as an earlier `landedBelow` call of this pass brought them
-   * (#1428, #1547): each a pair of ranges of that call's tape, which charged emits and reports made.
-   */
-  readonly listings = new Map<PlaceId, ListingNode>();
-  /** Per place, the calls' results asked of it not yet kept in `listings` (`trieOf` keeps them at the first look). */
-  readonly pendingListings = new Map<PlaceId, Listing[]>();
+  get inherits(): Inheritance | null {
+    return this.pass.receivingDomain.inherits;
+  }
+  set inherits(value: Inheritance | null) {
+    this.pass.receivingDomain.inherits = value;
+  }
+  get landedPaths(): ReceivingDomain["landedPaths"] {
+    return this.pass.receivingDomain.landedPaths;
+  }
+  get listings(): ReceivingDomain["listings"] {
+    return this.pass.receivingDomain.listings;
+  }
+  get pendingListings(): ReceivingDomain["pendingListings"] {
+    return this.pass.receivingDomain.pendingListings;
+  }
   /** Per place copies land in, the landed paths whose contents may not fit (`hotSets`). */
   hots: ReadonlyMap<PlaceId, readonly (readonly string[])[]> | null = null;
-  /** The copies places answer through (`passThrough`), once per pass. */
-  forest: CopyForest | null = null;
+  get forest(): CopyForest | null {
+    return this.pass.receivingDomain.forest;
+  }
+  set forest(value: CopyForest | null) {
+    this.pass.receivingDomain.forest = value;
+  }
   /** Per class, its eligible member per tested key asked while the groups are made (`eligibleAt`). */
   readonly eligibleWhileGrouping = new Map<Definition, Map<string, Definition | null>>();
   readonly owns = new Map<PlaceId, OwnStructure | null>();
-  readonly copyIndexes = new Map<
-    PlaceId,
-    { readonly list: readonly InheritedCopy[]; readonly index: ByPath<number> }
-  >();
-  readonly cycleLandings = new WeakMap<ReadonlySet<string>, ByPath<readonly string[]>>();
-  cycleMembers: Map<number, PlaceId[]> | null = null;
-  /** Per place, its seeds' paths at or below each prefix (`seedsUnder`), and its stores taken again (`#retakenOf`). */
-  readonly seedIndex = new Map<PlaceId, Map<string, string[]>>();
+  get copyIndexes(): ReceivingDomain["copyIndexes"] {
+    return this.pass.receivingDomain.copyIndexes;
+  }
+  get cycleLandings(): ReceivingDomain["cycleLandings"] {
+    return this.pass.receivingDomain.cycleLandings;
+  }
+  get cycleMembers(): Map<number, PlaceId[]> | null {
+    return this.pass.receivingDomain.cycleMembers;
+  }
+  set cycleMembers(value: Map<number, PlaceId[]> | null) {
+    this.pass.receivingDomain.cycleMembers = value;
+  }
+  get seedIndex(): ReceivingDomain["seedIndex"] {
+    return this.pass.receivingDomain.seedIndex;
+  }
   /** Per key, its decision before it is recorded (`decided`); the keys `decide` took (`lazily`). */
   readonly decisions = new Map<CanonicalKey, Decided | null>();
   readonly attempted = new Set<CanonicalKey>();
@@ -423,8 +427,9 @@ export class Admission {
   touches: Touches | null = null;
   readonly touchPlaces = new Map<PlaceId, TouchPlace>();
   readonly touching = new Set<PlaceId>();
-  /** The copies a live store makes, by place, path, source and strip (Astra's B2). */
-  readonly liveCopies = new Set<string>();
+  get liveCopies(): ReceivingDomain["liveCopies"] {
+    return this.pass.receivingDomain.liveCopies;
+  }
   /** Each place's own contributions from its live stores (Astra's B2). */
   readonly liveOwns = new Map<PlaceId, HeldOwn | null>();
   /** Per place, what its live stores definitely hold (`heldOf`, A2). */
@@ -452,6 +457,8 @@ export class Admission {
     readonly rejected: ReadonlyMap<number, ReadonlySet<Key>>,
     readonly cycling: ReadonlySet<number>,
   ) {
+    // (A4's state is the pass's, made afresh for this admission: TABLE r4.375)
+    pass.receivingDomain.reset();
     const { definitions, program } = pass;
     this.deciderCaches = {
       deciders: this.deciders,

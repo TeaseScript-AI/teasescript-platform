@@ -353,7 +353,7 @@ function stopSteps(
   admission: Admission,
   stops: Stops,
 ): { readonly root: boolean; readonly deeper: ReadonlySet<string> } {
-  const known = admission.stopSteps.get(stops);
+  const known = admission.pass.receivingDomain.stopSteps.get(stops);
   if (known !== undefined) return known;
   let root = false;
   const deeper = new Set<string>();
@@ -365,7 +365,7 @@ function stopSteps(
     }
   keep(admission.work, 1 + deeper.size);
   const found = { root, deeper };
-  admission.stopSteps.set(stops, found);
+  admission.pass.receivingDomain.stopSteps.set(stops, found);
   return found;
 }
 

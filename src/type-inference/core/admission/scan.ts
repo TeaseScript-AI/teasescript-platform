@@ -414,7 +414,7 @@ function stopDepths(
   admission: Admission,
   stops: Stops,
 ): { readonly written: number; readonly values: number; readonly literals: number } {
-  let known = admission.stopDepths.get(stops);
+  let known = admission.pass.receivingDomain.stopDepths.get(stops);
   if (known === undefined) {
     const deepest = (map: ReadonlyMap<string, readonly Stop[]>): number => {
       let depth = 0;
@@ -429,7 +429,7 @@ function stopDepths(
       values: deepest(stops.values),
       literals: deepest(stops.literals),
     };
-    admission.stopDepths.set(stops, known);
+    admission.pass.receivingDomain.stopDepths.set(stops, known);
   }
   return known;
 }
