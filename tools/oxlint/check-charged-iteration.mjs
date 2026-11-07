@@ -364,6 +364,22 @@ export function chargedIterationDiagnostics(program, root, rules) {
         )
           report(node, "An opaque local callable has no checked body. Name its charged function.");
       }
+      // `joinParts` names a path part by walking it: in objects.ts only scalar parts, a path through `joined`.
+      if (
+        file === OBJECTS_FILE &&
+        calls(node, "src/type-inference/core/budget.ts", new Set(["joinParts"])) &&
+        node.arguments.some((argument) => {
+          const type = checker.getTypeAtLocation(argument);
+          return (
+            checker.isArrayLikeType(type) ||
+            (type.isUnion() && type.types.some((part) => checker.isArrayLikeType(part))) ||
+            (type.flags &
+              (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !==
+              0
+          );
+        })
+      )
+        report(node, "`joinParts` walks an array part uncharged. Join it through `joined`.");
       if (file === OBJECTS_FILE && ts.isClassLike(node) && (node.heritageClauses?.length ?? 0) > 0)
         report(
           node,
@@ -431,8 +447,10 @@ export function chargedIterationDiagnostics(program, root, rules) {
       else if (ts.isParameter(node) && node.dotDotDotToken !== undefined)
         report(node, "A rest parameter copies uncharged.");
       else if (ts.isSpreadAssignment(node)) {
+        // (in objects.ts any object spread: an `object`-typed operand may be an array)
         const type = checker.getTypeAtLocation(node.expression);
         if (
+          file === OBJECTS_FILE ||
           type.getStringIndexType() !== undefined ||
           type.getNumberIndexType() !== undefined ||
           checker.isArrayLikeType(type)

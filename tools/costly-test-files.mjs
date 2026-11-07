@@ -68,6 +68,7 @@ export const costlyTestSeconds = {
   "type-core-records.test.js": 1,
   "type-core-result.test.js": 1,
   "type-core-method-categories.test.js": 1,
+  "type-core-charged-iteration.test.js": 1,
 };
 
 /** The seconds of every other test file in the same runs, their mean (265 files). */

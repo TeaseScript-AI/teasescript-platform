@@ -415,7 +415,65 @@ test("an objects query charges each writer it meets and each edge it reads, a se
   assert.ok(d >= c + 96, `${c}, ${d}`);
 });
 
-test("a declined objects query charges each entry it visits, and stops at the first decline (#1747, Codex r3)", () => {
+/**
+ * The declined query of the first array literal in `source` at `element.zz`, its element warmed: its groups at the
+ * element, the work it takes, and the entries it takes from them (each group's iterator counting them).
+ */
+function declinedWalk(source: string): {
+  readonly groups: number;
+  readonly mixed: number;
+  readonly units: number;
+  readonly visits: number;
+} {
+  const pass = passesOf(source, MODES[0]!, 30_000_000).at(-1)!;
+  const { program, contract, solver } = pass;
+  const array = [...program.hasOf.keys()].find((literal) =>
+    contract.literalIndex(literal).root.children.has("element"),
+  )!;
+  return inMode(MODES[0]!, () => {
+    solver.run(solver.proven(objectsAt(contract, array, ["element"])));
+    const node = contract.literalIndex(array).root.children.get("element")!;
+    const others = othersAt(contract, node.others, false);
+    const groups = [
+      ...readGroupsAt(contract, node.reads, false),
+      ...(contract.othersBelowOf.get(others) ?? others),
+    ];
+    let visits = 0;
+    const restore: (() => void)[] = [];
+    for (const group of groups) {
+      if (group === null) continue;
+      // (the group's own list, its iterator counting each entry taken, put back after)
+      const read: { [Symbol.iterator]: () => Iterator<unknown> } & ArrayLike<unknown> = group.read;
+      const prior = Object.getOwnPropertyDescriptor(read, Symbol.iterator);
+      Object.defineProperty(read, Symbol.iterator, {
+        configurable: true,
+        value: function* (this: ArrayLike<unknown>) {
+          for (let at = 0; at < this.length; at += 1) {
+            visits += 1;
+            yield this[at];
+          }
+        },
+      });
+      restore.push(() => {
+        if (prior === undefined) Reflect.deleteProperty(read, Symbol.iterator);
+        else Object.defineProperty(read, Symbol.iterator, prior);
+      });
+    }
+    try {
+      const before = program.work.total;
+      const { proof } = solver.run(solver.proven(objectsAt(contract, array, ["element", "zz"])));
+      assert.equal(proof?.complete, false, source);
+      const mixed = groups.filter(
+        (group) => group !== null && group.rest.length > 0 && group.mixed !== 0,
+      ).length;
+      return { groups: groups.length, mixed, units: program.work.total - before, visits };
+    } finally {
+      for (const undo of restore) undo();
+    }
+  });
+}
+
+test("a declined objects query charges each entry it visits, and stops at the first decline (#1747, Codex r3, r5)", () => {
   // (n bindings into one array after a host value, read as they are or computed: the host's query declines, the rest
   // is not read for it)
   for (const [kind, element] of [
@@ -426,53 +484,7 @@ test("a declined objects query charges each entry it visits, and stops at the fi
       const rows = Array.from({ length: n }, (_, i) => `let b${i}={p${i}:1}`);
       const elements = ["hostValue", ...Array.from({ length: n }, (_, i) => `b${i}`)].map(element);
       rows.push(`let xs=[${elements.join(",")}]`, "exit");
-      const pass = passesOf(rows.join("\n") + "\n", MODES[0]!, 30_000_000).at(-1)!;
-      const { program, contract, solver } = pass;
-      const array = [...program.hasOf.keys()].find((literal) =>
-        contract.literalIndex(literal).root.children.has("element"),
-      )!;
-      return inMode(MODES[0]!, () => {
-        solver.run(solver.proven(objectsAt(contract, array, ["element"])));
-        // (each group's entries counted as the walk takes them: the visits themselves, not only their charge)
-        const node = contract.literalIndex(array).root.children.get("element")!;
-        const others = othersAt(contract, node.others, false);
-        const groups = [
-          ...readGroupsAt(contract, node.reads, false),
-          ...(contract.othersBelowOf.get(others) ?? others),
-        ];
-        let visits = 0;
-        const restore: (() => void)[] = [];
-        for (const group of groups) {
-          if (group === null) continue;
-          // (the group's own list, its iterator counting each entry taken, put back after)
-          const read: { [Symbol.iterator]: () => Iterator<unknown> } & ArrayLike<unknown> =
-            group.read;
-          const prior = Object.getOwnPropertyDescriptor(read, Symbol.iterator);
-          Object.defineProperty(read, Symbol.iterator, {
-            configurable: true,
-            value: function* (this: ArrayLike<unknown>) {
-              for (let at = 0; at < this.length; at += 1) {
-                visits += 1;
-                yield this[at];
-              }
-            },
-          });
-          restore.push(() => {
-            if (prior === undefined) Reflect.deleteProperty(read, Symbol.iterator);
-            else Object.defineProperty(read, Symbol.iterator, prior);
-          });
-        }
-        try {
-          const before = program.work.total;
-          const { proof } = solver.run(
-            solver.proven(objectsAt(contract, array, ["element", "zz"])),
-          );
-          assert.equal(proof?.complete, false, kind);
-          return { groups: groups.length, units: program.work.total - before, visits };
-        } finally {
-          for (const undo of restore) undo();
-        }
-      });
+      return declinedWalk(rows.join("\n") + "\n");
     });
     // (it stops at the first decline: one entry visited of n + 1 groups, and the work not growing with those after it)
     for (const [at, n] of [4, 64].entries()) {
@@ -481,6 +493,12 @@ test("a declined objects query charges each entry it visits, and stops at the fi
     }
     assert.ok(units[1]!.units <= units[0]!.units + 8, `${kind}: ${JSON.stringify(units)}`);
   }
+  // (a mixed class's answer depends on the property: it declines before any of its entries is taken)
+  const mixed = declinedWalk(
+    "let a=hostValue otherwise {a:1}\nlet b=hostValue otherwise {a:1}\nlet xs=[a,b]\nexit\n",
+  );
+  assert.equal(mixed.mixed, 1, JSON.stringify(mixed));
+  assert.equal(mixed.visits, 0, JSON.stringify(mixed));
 });
 
 /**
