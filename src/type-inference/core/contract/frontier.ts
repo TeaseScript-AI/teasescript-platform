@@ -30,8 +30,8 @@ import type { Holder, IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
  *
  * #1784: a route through a marking entry or literal read (its guard bit, or its holder's mark at the rest below it,
  * §3.2) reaches `mark` nodes: the same nodes, their leaves `marked`. A holder's mark depends on the rest's first
- * `depthOf` steps, so its route is a `hold` node carrying the steps taken since it until they decide it (or the path
- * ends). Marking each leaf and then joining is native's join of marked answers exactly where no native-value leaf is
+ * `depthOf` steps, so its route is a `hold` node carrying the residual states of the mark automaton those steps leave,
+ * until they decide it (or the path ends). Marking each leaf and then joining is native's join of marked answers exactly where no native-value leaf is
  * reached marked (HEAD 1: `marked` commutes with `mergePair` per item unless a context ranked after `"branch"` meets a
  * null one, and only a native value carries one): such a leaf declines (`marks-native`).
  */
