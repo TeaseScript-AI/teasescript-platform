@@ -16,9 +16,10 @@
 //   comment counts once.
 // - Skipped and todo tests are node:test sites, in three forms: a call `test.skip(…)` (or `it`, `describe`, `suite`);
 //   a `skip` property whose value is not `false` in an object literal passed to a call of one of those four names or a
-//   member of one, such as `test.only`; and `.skip(…)` on a test's context, the first parameter of a function passed to
-//   such a call, the last argument, inside that function's body unless a nested function or block declares the same
-//   name. Todo is the same with `todo`. Not counted: an aliased import of `test`, and a context's subtests.
+//   member of one, such as `test.only`; and `X.skip(…)` where TypeScript's binder resolves the name X to a test's
+//   context: the first parameter of a function passed to such a call as its last argument. So a closer binding of the
+//   same name hides the context, as it does when the code runs, and a name with no declaration is no context. Todo is
+//   the same with `todo`. Not counted: an aliased import of `test`, and a context's subtests.
 // - The lists count their entries: the `files` of every `.oxlintrc.json` override, the items of
 //   tools/oxlint/comment-forecasts-allowed.json, comment-declarations-waiting.json and comment-external-names.json
 //   (a list that may grow), and the sum of the counts in comment-citations.json. A list whose file does not exist is
@@ -89,37 +90,6 @@ function commentRanges(source) {
   return [...ranges.values()].filter((r) => !jsxText.some((t) => r.pos >= t.pos && r.pos < t.end));
 }
 
-/** The test-site kinds ("skip", "todo") a call is, given the test-context names in scope. */
-function testSiteKinds(call, contexts) {
-  const kinds = [];
-  const callee = call.expression;
-  if (
-    ts.isPropertyAccessExpression(callee) &&
-    (callee.name.text === "skip" || callee.name.text === "todo") &&
-    ts.isIdentifier(callee.expression) &&
-    (TEST_NAMES.has(callee.expression.text) || contexts.includes(callee.expression.text))
-  )
-    kinds.push(callee.name.text);
-  if (isTestCall(call))
-    for (const argument of call.arguments) {
-      if (!ts.isObjectLiteralExpression(argument)) continue;
-      for (const property of argument.properties) {
-        const name =
-          property.name && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
-            ? property.name.text
-            : null;
-        if (name !== "skip" && name !== "todo") continue;
-        if (
-          ts.isPropertyAssignment(property) &&
-          property.initializer.kind === ts.SyntaxKind.FalseKeyword
-        )
-          continue;
-        kinds.push(name);
-      }
-    }
-  return kinds;
-}
-
 /** A call of `test`, `it`, `describe` or `suite`, or of a member of one (`test.only`). */
 function isTestCall(call) {
   const callee = call.expression;
@@ -127,55 +97,84 @@ function isTestCall(call) {
   return ts.isIdentifier(base) && TEST_NAMES.has(base.text);
 }
 
-/** The names a binding (a parameter or variable, destructured or not) declares. */
-function boundNames(name) {
-  if (ts.isIdentifier(name)) return [name.text];
-  return name.elements.flatMap((e) => (ts.isOmittedExpression(e) ? [] : boundNames(e.name)));
+/** Whether a declaration is a test's context: the first parameter of a function passed as a test call's last argument. */
+function isTestContext(declaration) {
+  if (!declaration || !ts.isParameter(declaration) || !ts.isIdentifier(declaration.name))
+    return false;
+  const fn = declaration.parent;
+  const call = fn.parent;
+  return (
+    fn.parameters[0] === declaration &&
+    ts.isCallExpression(call) &&
+    isTestCall(call) &&
+    call.arguments.at(-1) === fn
+  );
 }
 
-/** The names a block's own statements declare, which hide a test context of the same name inside it. */
-function blockNames(block) {
-  return block.statements.flatMap((st) =>
-    ts.isVariableStatement(st)
-      ? st.declarationList.declarations.flatMap((d) => boundNames(d.name))
-      : (ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st)) && st.name
-        ? [st.name.text]
-        : [],
-  );
+/** The skip-or-todo kinds of a test call's options: each `skip` or `todo` property whose value is not `false`. */
+function optionKinds(call) {
+  const kinds = [];
+  for (const argument of call.arguments) {
+    if (!ts.isObjectLiteralExpression(argument)) continue;
+    for (const property of argument.properties) {
+      const name =
+        property.name && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
+          ? property.name.text
+          : null;
+      if (name !== "skip" && name !== "todo") continue;
+      if (
+        ts.isPropertyAssignment(property) &&
+        property.initializer.kind === ts.SyntaxKind.FalseKeyword
+      )
+        continue;
+      kinds.push(name);
+    }
+  }
+  return kinds;
+}
+
+/** The binder of one parsed file alone: no library and no imports, which a test context, a parameter, never needs. */
+function checkerOf(source) {
+  const host = {
+    getSourceFile: (name) => (name === source.fileName ? source : undefined),
+    getDefaultLibFileName: () => "lib.d.ts",
+    writeFile: () => {},
+    getCurrentDirectory: () => "",
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    fileExists: (name) => name === source.fileName,
+    readFile: () => undefined,
+  };
+  const options = { noLib: true, noResolve: true, allowJs: true, noEmit: true, types: [] };
+  return ts.createProgram({ rootNames: [source.fileName], options, host }).getTypeChecker();
 }
 
 /** The skip and todo sites of a parsed file, each as [kind, the position of its call]. */
 function testSites(source) {
   const sites = [];
-  const without = (contexts, names) => contexts.filter((c) => !names.includes(c));
-  const visitFunction = (fn, contexts, own) => {
-    const params = fn.parameters.flatMap((p) => boundNames(p.name));
-    const inner = [...without(contexts, params), ...own];
-    ts.forEachChild(fn, (child) => visit(child, inner));
-  };
-  const visit = (node, contexts) => {
+  const receivers = []; // [kind, call, name] of each `X.skip(…)` or `X.todo(…)` whose X may be a context
+  const visit = (node) => {
     if (ts.isCallExpression(node)) {
-      for (const kind of testSiteKinds(node, contexts)) sites.push([kind, node.getStart(source)]);
-      const last = node.arguments.at(-1);
-      if (isTestCall(node) && last && ts.isFunctionLike(last)) {
-        // The test function's first parameter is its context, inside that function only.
-        const first = last.parameters[0];
-        const own = first && ts.isIdentifier(first.name) ? [first.name.text] : [];
-        ts.forEachChild(node, (child) =>
-          child === last ? visitFunction(last, contexts, own) : visit(child, contexts),
-        );
-        return;
+      const callee = node.expression;
+      const kind = ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
+      if ((kind === "skip" || kind === "todo") && ts.isIdentifier(callee.expression)) {
+        if (TEST_NAMES.has(callee.expression.text)) sites.push([kind, node.getStart(source)]);
+        else receivers.push([kind, node, callee.expression]);
       }
+      if (isTestCall(node))
+        for (const option of optionKinds(node)) sites.push([option, node.getStart(source)]);
     }
-    if (ts.isFunctionLike(node)) return visitFunction(node, contexts, []);
-    const inner =
-      ts.isBlock(node) || ts.isSourceFile(node) || ts.isModuleBlock(node)
-        ? without(contexts, blockNames(node))
-        : contexts;
-    ts.forEachChild(node, (child) => visit(child, inner));
+    ts.forEachChild(node, visit);
   };
-  visit(source, []);
-  return sites;
+  visit(source);
+  if (receivers.length > 0) {
+    const checker = checkerOf(source);
+    for (const [kind, call, name] of receivers)
+      if (isTestContext(checker.getSymbolAtLocation(name)?.valueDeclaration))
+        sites.push([kind, call.getStart(source)]);
+  }
+  return sites.sort((a, b) => a[1] - b[1]);
 }
 
 /** The parsed pieces of a code file: the whole file, or each script block of a .vue file with the lines before it. */
