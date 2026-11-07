@@ -19,8 +19,9 @@ issued it still owns the UI, and the player's input is posted only then. The Pla
 is exported only where one is kept: checked for a restore point, a debug export, or a saved-data adoption, such as by
 `playerRuntimeSnapshot`; and as the trusted export (Boundaries below) for the kept session, a rewind point, and the
 debug recorder's anchors, which are checked where they are restored or exported. The host writes the kept session's state, a
-session export's checkpoint and the plan's JSON a first save stores, and restores the kept session Continue offers; the
-main realm stores and posts them as text. The host holds the plan's JSON for the page's current plan while the page is
+session export's checkpoint and the plan's JSON a first save stores, restores the kept session Continue offers, and reads
+an exported file of saved data or a session, whose checkpoint it restores and keeps for the import; the main realm stores
+and posts them as text. The host holds the plan's JSON for the page's current plan while the page is
 open (`player/plan-json-lease.ts`). Continue and a rewind restore with
 `restoreRuntimeSession`, a restore point with `deserializeRuntimeSession`, each checking the state once (Boundaries
 below). An operation goes through a publication that shows the current state; once an operation changed the state, one

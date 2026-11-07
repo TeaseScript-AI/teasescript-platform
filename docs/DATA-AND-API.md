@@ -205,7 +205,7 @@ later.
 
 A player moves the session they play by hand and offline to another browser or device, where Continue goes on with it
 as after a reload, through Player Settings ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/session-transfer.ts`
-owns the format. The session travels as its canonical checkpoint, which the runtime exports and restores
+owns the format, and the engine host reads it (`player/session-transfer-read.ts`). The session travels as its canonical checkpoint, which the runtime exports and restores
 (`createPlayerRuntimeRestorePoint` and `restorePlayerRuntimeSession`), not in a second save format. The document is
 UTF-8 JSON with exactly these fields:
 
