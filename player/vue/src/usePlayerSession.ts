@@ -1998,8 +1998,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       ? ctx.rooms(debugRooms).discardSession(keptScope!)
       : ctx.kept(keptSessions).discard(keptScope!);
   }
-  /** Keeps the shown session as it is now and waits until it is kept. */
-  async function keepSession(): Promise<void> {
+  /**
+   * Asks to keep the shown session as it is now and waits until the keep work under way settles. Keeping is best effort:
+   * it settles also when the session is not kept, as when it cannot be written, the store refuses it, or the page
+   * moved on; nothing here proves that the session was kept.
+   */
+  async function settleKeepAttempt(): Promise<void> {
     keepSessionLater();
     while (keeping !== null) await keeping;
   }
@@ -2179,7 +2183,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   async function toStartPage(): Promise<void> {
     if (session.value?.state.status !== "halted") return;
-    await keepSession();
+    await settleKeepAttempt();
     if (disposed || session.value?.state.status !== "halted") return;
     endSession();
     await prepareKept();
@@ -2628,7 +2632,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         const live = sessionLive.value;
         // The normal room keeps its session as it is now, which a later visit continues; one that ended is kept as it
         // ended, by the keep still under way.
-        if (live) await keepSession();
+        if (live) await settleKeepAttempt();
         else while (keeping !== null) await keeping;
         const making = live || debugRoom.value === null;
         const replacing = live && debugRoom.value !== null;
