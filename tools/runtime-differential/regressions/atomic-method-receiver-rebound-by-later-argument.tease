@@ -1,0 +1,12 @@
+let rows = [[1]]
+function replace {
+    rows = [[9]]
+    return 2
+}
+function mutate {
+    rows[0].add(replace())
+    return [[3]]
+}
+rows += mutate()
+say "rearg:${rows[0].length}:${rows[0][0]}:${rows[1][0]}", instant
+exit

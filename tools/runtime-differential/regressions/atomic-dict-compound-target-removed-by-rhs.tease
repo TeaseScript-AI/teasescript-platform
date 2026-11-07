@@ -1,0 +1,4 @@
+let table = dict{ "k": 3 }
+table["k"] += table.remove("k")
+say "compound:${table["k"]}:${table.length}", instant
+exit

@@ -1,0 +1,8 @@
+let rows = [{ value: 0 }, { value: 1 }]
+function shift {
+    rows.removeFirst()
+    return 9
+}
+rows[1].value = shift()
+say "shift:${rows[0].value}", instant
+exit

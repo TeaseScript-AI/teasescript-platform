@@ -465,6 +465,43 @@ The canonical self-contained checkpoint guarantee uses the serialized runtime RN
 
 JSON-safe runtime state at every instruction boundary does not mean production execution must persist after every instruction.
 
+## Differential harness
+
+`tests/helpers/runtime-differential.ts` runs one input through two pipelines (#1797's F-depth harness). Each side
+compiles the input on the legacy or the core route, then steps one instruction or delay settlement at a time. At every
+state it compares the complete record of both sides:
+
+- the trusted snapshot;
+- the operation's result, events and random choices;
+- the harness's random-decision log;
+- the observer log, the instruction trace, and the side's own debug trace.
+
+It does so for the uninterrupted run, and along each restore route to the end from a bounded set of cut points: the
+mandatory cuts first, then evenly spaced ones, up to 8 in CI and 32 with `TEASESCRIPT_SWEEP=full` or in the campaign
+CLI. The routes are a fork, the checked, trusted and tagged snapshots, the checkpoint, and its JSON. A restored state
+must also equal its side's uninterrupted state at the same index.
+
+Comparison (`compareStructures`) and the harness's writing and digests (`canonicalText`, which writes `-0` as `-0`) are
+iterative, so a 10,000-level value is never the harness's own failure. A side's end is classified apart from the pair's
+verdict:
+
+- a writing failure is `serializer-failure`;
+- a correspondence that cannot map a position is `mapping-failure`;
+- a core refusal is `unsupported-route`, counted rather than failed.
+
+No exception gives a false `equivalent` or a `discrepancy`. Any exception the driver did not raise itself becomes a
+side's `harness-failure` (or `serializer-failure`), naming the stage and the member the driver was operating on. Only
+the engine's own public calls are engine behaviour: a fresh session refusing the input, and a restore that threw. The
+attribution is best effort for synchronous adapters (#1923). The campaign CLI exits once its output has been written: 0
+for identity, an unsupported route, or a pair censored at the step limit; 1 for a decided difference, a one-sided
+rejection included; 2 for a harness failure or an unknown verdict.
+
+`tests/runtime-differential.test.ts` runs this build against itself over the regressions in
+`tools/runtime-differential/regressions/` (with their independent expectations) and a seeded sample covering every
+generator tag. It also runs a 10,000-level host list and the sensitivity controls, each a `discrepancy` at its own
+path. `node tools/runtime-differential/run.mjs --seed S --count N [--route core] [--shrink]` runs larger campaigns
+after `npm run build`; run them as background jobs.
+
 ## Implemented Phase 1 deterministic property harness
 
 The repository keeps one small deterministic campaign around the current public

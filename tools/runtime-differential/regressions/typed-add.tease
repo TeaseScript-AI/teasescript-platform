@@ -1,0 +1,3 @@
+let xs: integer[] = [1]
+xs.add(incoming)
+exit

@@ -1,0 +1,8 @@
+let root = { child: { value: 0 } }
+function replaceChild {
+    root.child = { value: 2 }
+    return 7
+}
+root.child.value = replaceChild()
+say "child:${root.child.value}", instant
+exit

@@ -1,0 +1,5 @@
+let values = [0]
+let bad = randomInteger(2..3)
+let rhs = [90]
+values[bad] = rhs.removeFirst() + randomInteger(1..4)
+exit

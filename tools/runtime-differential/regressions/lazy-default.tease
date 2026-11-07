@@ -1,0 +1,4 @@
+function value { return 1 }
+let xs = [1]
+let out = xs.get(2, default: value())
+exit

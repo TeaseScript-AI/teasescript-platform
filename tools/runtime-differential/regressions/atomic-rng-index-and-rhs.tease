@@ -1,0 +1,9 @@
+let values = [0, 0, 0]
+let table = dict{ "a": 1 }
+let keys = ["a", "b", "c"]
+repeat 6 {
+    values[randomInteger(0..3)] += randomInteger(1..4)
+    table[keys.random] = randomInteger(1..10)
+}
+say "rng:${values.join(",")}:${table.keys.join(",")}:${table.values.join(",")}", instant
+exit
