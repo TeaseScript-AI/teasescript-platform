@@ -5,7 +5,7 @@
  */
 
 /** The classes of argument values, each with values of other classes, which no op accepts for it. */
-export const WRONG_VALUES = {
+const WRONG_VALUES = {
   string: [1, null, true, {}, [], new Uint8Array([1])],
   bytes: ["text", null, 1, [1, 2], {}],
 } as const satisfies Record<string, readonly unknown[]>;
