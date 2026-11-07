@@ -409,7 +409,7 @@ export function literalElements(
         readonly written: boolean;
         readonly own: readonly ItemTag[];
         readonly d: Definition;
-        // (#1765: its layers at this path and its leaf, `layersAt`'s, once asked, #1901; #1762: its dict layers too)
+        // (#1765: its layers at this path, `layersAt`'s, once asked; #1762: its dict layers too)
         layers?: boolean[];
         dicts?: boolean[];
       }
@@ -441,20 +441,17 @@ export function literalElements(
       // `mayHoldNull`, Codex r6's B3, Astra r1's B2)
       // (the earliest element's walked once per path, whichever later element offends there: a wide earliest literal
       // is otherwise walked once per conflict, Codex r9's B1)
-      // (#1901, Astra r1 on #1908: the earliest element's walked one depth more too, its leaf by the same rule as the
-      // later element's: a copy's own level as it is read, narrowed, a layer below it by the copied term)
       const depths = intermediateDepths(path);
+      const layers = (of: Definition): boolean[] =>
+        layersAt(admission, of.value!, of.node, path, depths);
       const earliest = first.get(at)!;
-      earliest.layers ??= layersAt(admission, earliest.d.value!, earliest.d.node, path, [
-        ...depths,
-        path.length,
-      ]);
+      earliest.layers ??= layers(earliest.d);
       // (#1790: the later element's kinds its own, as on main, with the null it may hold at the leaf by #1765's rule, read
       // by the same walk one depth more: a value at its own level as it is read at its node (a narrowed copy holds none,
       // a typed host value may), a copy below its own level by its term, an `otherwise`'s fallback only where its
       // operand may be null. Codex r1–r4, Astra r1 on #1819; the null decides nothing, #1753)
       const later = layersAt(admission, d.value!, d.node, path, [...depths, path.length]);
-      const optional = mixedOptional(earliest.layers.slice(0, -1), later.slice(0, -1));
+      const optional = mixedOptional(earliest.layers, later.slice(0, -1));
       const own = [...new Set(deciding(admission.valueAt(d, path)).map((item) => item.tag))];
       const kinds = later.at(-1)! ? [...own, "null" as const] : own;
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
@@ -462,12 +459,7 @@ export function literalElements(
         cell,
         path,
         decided: first.get(at)!.tags,
-        earliest:
-          earliest.written && path.length > 0
-            ? earliest.layers.at(-1)!
-              ? [...earliest.tags, "null"]
-              : earliest.tags
-            : earliest.own,
+        earliest: first.get(at)!.own,
         kinds,
         atCopy: atCopy.has(at),
         ...(optional === undefined ? {} : { optional }),
@@ -512,11 +504,11 @@ export function literalElements(
           // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
           // decider on the path; an element whose structure holds no source holds no copy (#1106: k literals nested
           // in each other asked each other's stops)
-          const copied =
+          const decider =
             identity === null
               ? null
-              : (drive(admission, earliestDecider(admission, d.value, d.node, path, null))?.term ??
-                null);
+              : drive(admission, earliestDecider(admission, d.value, d.node, path, null));
+          const copied = decider?.term ?? null;
           const kinds = [...new Set(own.map(family))];
           // (the kinds its error names: below the element, with any null the earliest may hold there, as its written
           // type is described; the null decides nothing, #1753)
@@ -524,7 +516,19 @@ export function literalElements(
           if (copied !== null) {
             const written = typeTags(copied);
             const tags = written.filter((tag) => tag !== "null");
-            first.set(at, { tags, written: true, own: below ? written : tags, d });
+            // (its leaf's null by the form rule's copy case, as the later element's (`mayHoldNull`): at the deciding
+            // copy's own level as it is read, narrowed, below it by the copied term. #1901, Astra r1's B1 on #1908; from
+            // the decider already asked, so no walk down the element, Codex r3)
+            const leafNull =
+              decider!.own === true
+                ? occurrenceNull(admission, d.value, d.node, path)
+                : written.includes("null");
+            first.set(at, {
+              tags,
+              written: true,
+              own: below && leafNull ? [...tags, "null"] : tags,
+              d,
+            });
           } else if (kinds.length === 1) {
             const nulls = below && items.some((item) => item.tag === "null");
             first.set(at, { tags: kinds, written: false, own: nulls ? [...own, "null"] : own, d });
