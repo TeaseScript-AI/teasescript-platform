@@ -176,10 +176,17 @@ export class NarrowingRoutes {
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
   /** The program's ledger. */
   readonly #work: WorkLedger;
+  /** Per block, its `while` loops by the texts their exits prove not null (`#loopExits`). */
+  readonly #exits = new Map<TreeBlock, ReadonlyMap<string, readonly number[]>>();
   /** Per `if` or `while`, its condition's tests of the needed form (`#conditionTests`). */
   readonly #conditions = new Map<
     TreeStatement,
-    { readonly holding: ReadonlyMap<string, number>; readonly failing: ReadonlyMap<string, number> } | null
+    {
+        readonly holding: ReadonlyMap<string, number>;
+        readonly failing: ReadonlyMap<string, number>;
+        readonly failed: readonly string[];
+      }
+    | null
   >();
 
   public constructor(
@@ -234,7 +241,50 @@ export class NarrowingRoutes {
       return null;
     const d = yield* this.witness(pathKey(path, program.work), tag, node, others);
     const writer = d?.value === undefined ? null : (program.places[d.value]?.site ?? null);
+    // (a `while` between the writer and the use whose exit proves the needed form, `while n == null { … }`: the check
+    // on that route the compiler cannot keep, the warning; Codex r1 F1 on #1937)
+    if (writer === null || (tag === "null" && this.#exitTested(node, this.#text(site), writer.start)))
+      return null;
     return writer;
+  }
+
+  /**
+   * Whether a `while` loop that stands before the read in one of the blocks holding it, after `from`, proves on its exit
+   * that the text `text` is not null (`while x == null`, a disjunct of an `or`). One binary search per block.
+   */
+  #exitTested(node: FlowNode, text: string, from: number): boolean {
+    this.#work.charge("exactQueries");
+    const chain = this.#chainOf(node);
+    if (chain === null) return false;
+    for (const place of each(this.#work, "exactQueries", chain)) {
+      if (place.index < 0) continue;
+      const before = place.block.statements[place.index]!.start;
+      const starts = this.#loopExits(place.block, node.file).get(text);
+      if (starts === undefined) continue;
+      const at = lowerBound(this.#work, starts, from + 1);
+      if (at < starts.length && starts[at]! < before) return true;
+    }
+    return false;
+  }
+
+  /** A block's `while` loops by the texts their exits prove not null, each list sorted by the loop's start. */
+  #loopExits(block: TreeBlock, file: number): ReadonlyMap<string, readonly number[]> {
+    this.#work.charge("exactQueries");
+    const known = this.#exits.get(block);
+    if (known !== undefined) return known;
+    const made = new Map<string, number[]>();
+    for (const statement of each(this.#work, "exactQueries", block.statements)) {
+      if (statement.statement.kind !== "whileStatement") continue;
+      const tests = this.#conditionTests(statement, file);
+      if (tests === null) continue;
+      for (const text of each(this.#work, "exactQueries", tests.failed)) {
+        const list = made.get(text);
+        if (list === undefined) made.set(text, [statement.start]);
+        else list.push(statement.start);
+      }
+    }
+    this.#exits.set(block, made);
+    return made;
   }
 
   /**
@@ -462,7 +512,12 @@ export class NarrowingRoutes {
   #conditionTests(
     statement: TreeStatement,
     file: number,
-  ): { readonly holding: ReadonlyMap<string, number>; readonly failing: ReadonlyMap<string, number> } | null {
+  ): {
+        readonly holding: ReadonlyMap<string, number>;
+        readonly failing: ReadonlyMap<string, number>;
+        readonly failed: readonly string[];
+      }
+    | null {
     this.#work.charge("exactQueries");
     const known = this.#conditions.get(statement);
     if (known !== undefined) return known;
@@ -473,10 +528,13 @@ export class NarrowingRoutes {
     }
     const holding = new Map<string, number>();
     const failing = new Map<string, number>();
+    const failed: string[] = [];
     const add = (into: Map<string, number>, tested: Expression, end: number): void => {
       this.#work.charge("exactQueries");
       const text = this.#text({ file, start: tested.span.start.offset, end: tested.span.end.offset });
-      if (!into.has(text)) into.set(text, end);
+      if (into.has(text)) return;
+      into.set(text, end);
+      if (into === failing) failed.push(text);
     };
     // (the conjuncts of the condition hold where it holds, its disjuncts fail where it fails)
     const walk = (root: Expression, into: Map<string, number>, joined: string, positive: boolean): void => {
@@ -498,7 +556,7 @@ export class NarrowingRoutes {
     };
     walk(ast.condition, holding, "and", true);
     walk(ast.condition, failing, "or", false);
-    const made = { holding, failing };
+    const made = { holding, failing, failed };
     this.#conditions.set(statement, made);
     return made;
   }
