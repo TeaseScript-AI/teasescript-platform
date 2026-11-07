@@ -309,5 +309,5 @@ export function charged(): number {
     .filter(({ fileName }) => fileName.endsWith("/objects.ts"))
     .map(({ line }) => line);
   // (the raw loop's line, and nothing in the charged function)
-  assert.deepEqual(lines, [10]);
+  assert.deepEqual(lines, [9]);
 });

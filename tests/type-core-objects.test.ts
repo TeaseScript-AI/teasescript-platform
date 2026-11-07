@@ -547,21 +547,24 @@ test("an objects query's construction copies no path suffix and reads each input
       (value) => program.places[value]?.site?.start === source.indexOf("{"),
     )!;
     return inMode(MODES[0]!, () => {
-      const rest: string[] = Array<string>(n).fill("p");
-      solver.run(contract.contractOfValueAt(literal, [...rest, "zz"]));
+      solver.run(contract.contractOfValueAt(literal, [...Array<string>(n).fill("p"), "zz"]));
+      // (the path's own positions, each a getter counting its reads; and its native slices counted)
       let [slices, reads] = [0, 0];
-      Object.defineProperty(rest, "slice", {
+      const observed: string[] = [];
+      for (let at = 0; at < n; at += 1)
+        Object.defineProperty(observed, at, {
+          enumerable: true,
+          get: () => {
+            reads += 1;
+            return "p";
+          },
+        });
+      Object.defineProperty(observed, "slice", {
         value: function (this: string[], start?: number, end?: number) {
           slices += 1;
           return Array.prototype.slice.call(this, start, end);
         },
         configurable: true,
-      });
-      const observed = new Proxy(rest, {
-        get(target, key, receiver) {
-          if (typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key)) reads += 1;
-          return Reflect.get(target, key, receiver);
-        },
       });
       const before = program.work.counts().get("objectSteps") ?? 0;
       const { proof } = solver.run(solver.proven(objectsAt(contract, literal, observed)));
