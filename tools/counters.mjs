@@ -8,8 +8,8 @@
 // ROOT, by default the current directory, is the top folder of a Git checkout. Its working tree is read: for the
 // directives and tests only the files Git tracks, as structure-report reads them.
 //
-// - Directives are comments in code files (.ts .tsx .mts .cts .js .jsx .mjs .cjs, and the <script> blocks of .vue
-//   files), found with TypeScript's parser, so text in a string, template literal, regular expression or JSX text is
+// - Directives are comments in code files (.ts .tsx .mts .cts .js .jsx .mjs .cjs, and the script blocks of .vue
+//   files as Vue's SFC parser finds them), found with TypeScript's parser, so text in a string, template literal, regular expression or JSX text is
 //   never a comment. A lint disable is a comment whose text after `//` or `/*` and any spaces begins with the word
 //   `oxlint-disable` or `eslint-disable`, bare or with `-line` or `-next-line`. A `@ts-` directive is one whose text
 //   after `//`, `///` or `/*`, any further `*`, and any spaces begins with `@ts-expect-error` or `@ts-ignore`. Each
@@ -17,28 +17,32 @@
 // - Skipped and todo tests are node:test sites, in three forms: a call `test.skip(…)` (or `it`, `describe`, `suite`);
 //   a `skip` property whose value is not `false` in an object literal passed to a call of one of those four names or a
 //   member of one, such as `test.only`; and `.skip(…)` on a test's context, the first parameter of a function passed to
-//   such a call. Todo is the same with `todo`. Not counted: an aliased import of `test`, and a context's subtests.
+//   such a call, the last argument, inside that function's body unless a nested function or block declares the same
+//   name. Todo is the same with `todo`. Not counted: an aliased import of `test`, and a context's subtests.
 // - The lists count their entries: the `files` of every `.oxlintrc.json` override, the items of
 //   tools/oxlint/comment-forecasts-allowed.json, comment-declarations-waiting.json and comment-external-names.json
 //   (a list that may grow), and the sum of the counts in comment-citations.json. A list whose file does not exist is
-//   null, printed "absent".
+//   null, printed "absent"; an `overrides` or `files` field left out counts 0, and one of another type is malformed.
 // - The structure signals are this checkout's tools/structure-report.mjs run in ROOT, so one definition measures any
-//   ROOT: its counts of large files, broad folders and long functions, and the largest file and longest function.
+//   ROOT: its counts of large files, broad folders and long functions, and the largest of the files and the longest of
+//   the functions it lists, each null when none passes its threshold.
 //
 // --json prints {root, commit, counters, sites}: `commit` is ROOT's HEAD (null before the first commit), `counters`
 // the values above, and `sites` the `file:line` of every directive and test site.
 // Exit status: 0 when printed, 2 when it cannot run: ROOT is no checkout's top folder, a list file is not JSON of the
-// shape named above, or structure-report fails.
-import { spawnSync } from "node:child_process";
+// shape named above, a .vue file does not parse, or structure-report fails. On SIGINT or SIGTERM it stops
+// structure-report, removes its temporary folder and exits 130 or 143.
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
+import { parse as parseVue } from "vue/compiler-sfc";
 
 const CODE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|vue)$/u;
 const LINT_DISABLE = /^(?:\/\/|\/\*)\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?(?![\w-])/u;
-const TS_DIRECTIVE = /^(?:\/\/\/?|\/\*[*/]*)\s*@ts-(?:expect-error|ignore)/u;
+const TS_DIRECTIVE = /^(?:\/\/\/?|\/\*\**)\s*@ts-(?:expect-error|ignore)/u;
 const TEST_NAMES = new Set(["test", "it", "describe", "suite"]);
 const LISTS = {
   forecastsAllowed: "tools/oxlint/comment-forecasts-allowed.json",
@@ -48,6 +52,12 @@ const LISTS = {
 const CITATIONS = "tools/oxlint/comment-citations.json";
 
 class CannotRun extends Error {}
+class Stopped extends Error {
+  constructor(signal) {
+    super(signal);
+    this.code = 128 + (signal === "SIGINT" ? 2 : 15);
+  }
+}
 
 const git = (root, args) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
 
@@ -117,26 +127,70 @@ function isTestCall(call) {
   return ts.isIdentifier(base) && TEST_NAMES.has(base.text);
 }
 
-/** The test-context names a test call brings into scope: each function argument's first parameter. */
-function contextsOf(call) {
-  if (!isTestCall(call)) return [];
-  return call.arguments
-    .filter((a) => ts.isFunctionLike(a) && a.parameters[0] && ts.isIdentifier(a.parameters[0].name))
-    .map((a) => a.parameters[0].name.text);
+/** The names a binding (a parameter or variable, destructured or not) declares. */
+function boundNames(name) {
+  if (ts.isIdentifier(name)) return [name.text];
+  return name.elements.flatMap((e) => (ts.isOmittedExpression(e) ? [] : boundNames(e.name)));
 }
 
-/** The parsed pieces of a code file: the whole file, or each <script> block of a .vue file with its first line. */
+/** The names a block's own statements declare, which hide a test context of the same name inside it. */
+function blockNames(block) {
+  return block.statements.flatMap((st) =>
+    ts.isVariableStatement(st)
+      ? st.declarationList.declarations.flatMap((d) => boundNames(d.name))
+      : (ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st)) && st.name
+        ? [st.name.text]
+        : [],
+  );
+}
+
+/** The skip and todo sites of a parsed file, each as [kind, the position of its call]. */
+function testSites(source) {
+  const sites = [];
+  const without = (contexts, names) => contexts.filter((c) => !names.includes(c));
+  const visitFunction = (fn, contexts, own) => {
+    const params = fn.parameters.flatMap((p) => boundNames(p.name));
+    const inner = [...without(contexts, params), ...own];
+    ts.forEachChild(fn, (child) => visit(child, inner));
+  };
+  const visit = (node, contexts) => {
+    if (ts.isCallExpression(node)) {
+      for (const kind of testSiteKinds(node, contexts)) sites.push([kind, node.getStart(source)]);
+      const last = node.arguments.at(-1);
+      if (isTestCall(node) && last && ts.isFunctionLike(last)) {
+        // The test function's first parameter is its context, inside that function only.
+        const first = last.parameters[0];
+        const own = first && ts.isIdentifier(first.name) ? [first.name.text] : [];
+        ts.forEachChild(node, (child) =>
+          child === last ? visitFunction(last, contexts, own) : visit(child, contexts),
+        );
+        return;
+      }
+    }
+    if (ts.isFunctionLike(node)) return visitFunction(node, contexts, []);
+    const inner =
+      ts.isBlock(node) || ts.isSourceFile(node) || ts.isModuleBlock(node)
+        ? without(contexts, blockNames(node))
+        : contexts;
+    ts.forEachChild(node, (child) => visit(child, inner));
+  };
+  visit(source, []);
+  return sites;
+}
+
+/** The parsed pieces of a code file: the whole file, or each script block of a .vue file with the lines before it. */
 function piecesOf(file, text) {
   if (!file.endsWith(".vue")) return [{ name: file, text, line: 0 }];
-  return [...text.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gu)].map((m) => {
-    const lang = /\blang\s*=\s*["']([a-z]+)["']/u.exec(m[1])?.[1] ?? "js";
-    const start = m.index + m[0].indexOf(">") + 1;
-    return {
-      name: `${file}.${lang}`,
-      text: m[2],
-      line: text.slice(0, start).split("\n").length - 1,
-    };
-  });
+  const { descriptor, errors } = parseVue(text, { filename: file });
+  if (errors.length > 0)
+    throw new CannotRun(`${file} does not parse as a Vue file: ${errors[0].message}`);
+  return [descriptor.script, descriptor.scriptSetup]
+    .filter(Boolean)
+    .map((block) => ({
+      name: `${file}.${block.lang ?? "js"}`,
+      text: block.content,
+      line: block.loc.start.line - 1,
+    }));
 }
 
 function directivesAndTests(root) {
@@ -156,20 +210,8 @@ function directivesAndTests(root) {
         const kind = directiveOf(piece.text.slice(range.pos, range.end));
         if (kind) sites[kind].push(at(range.pos));
       }
-      const contexts = [];
-      const visit = (node) => {
-        let added = 0;
-        if (ts.isCallExpression(node)) {
-          for (const kind of testSiteKinds(node, contexts))
-            sites[kind === "skip" ? "skippedTests" : "todoTests"].push(at(node.getStart(source)));
-          const own = contextsOf(node);
-          contexts.push(...own);
-          added = own.length;
-        }
-        ts.forEachChild(node, visit);
-        contexts.length -= added;
-      };
-      visit(source);
+      for (const [kind, pos] of testSites(source))
+        sites[kind === "skip" ? "skippedTests" : "todoTests"].push(at(pos));
     }
   }
   return sites;
@@ -195,16 +237,16 @@ function lists(root) {
   const config = readJson(root, ".oxlintrc.json");
   if (config === undefined) counts.oxlintOverrideFiles = null;
   else {
-    const overrides = isObject(config) ? (config.overrides ?? []) : null;
+    const overrides = !isObject(config)
+      ? null
+      : config.overrides === undefined
+        ? []
+        : config.overrides;
     shape(".oxlintrc.json", Array.isArray(overrides), "an object whose `overrides` is an array");
     counts.oxlintOverrideFiles = 0;
     for (const override of overrides) {
-      const files = override?.files ?? [];
-      shape(
-        ".oxlintrc.json",
-        isObject(override) && Array.isArray(files),
-        "overrides with `files` arrays",
-      );
+      const files = !isObject(override) ? null : override.files === undefined ? [] : override.files;
+      shape(".oxlintrc.json", Array.isArray(files), "overrides with `files` arrays");
       counts.oxlintOverrideFiles += files.length;
     }
   }
@@ -228,21 +270,32 @@ function lists(root) {
   return counts;
 }
 
-function structure(root) {
+/** Runs structure-report in ROOT and reads its JSON from a temporary folder this run owns and always removes. */
+async function structure(root) {
   const report = fileURLToPath(new URL("./structure-report.mjs", import.meta.url));
-  const folder = mkdtempSync(path.join(tmpdir(), "counters-"));
-  const remove = () => rmSync(folder, { recursive: true, force: true });
+  let child = null;
+  let stopped = null;
+  // A signal stops the report; the run then ends below once the report has exited, after `finally` cleans up. The
+  // handlers come first, so no signal finds the folder without them; they run only once the report is spawned.
   const stop = (signal) => {
-    remove();
-    process.exit(128 + (signal === "SIGINT" ? 2 : 15));
+    stopped = signal;
+    child?.kill(signal);
   };
-  process.once("SIGINT", stop).once("SIGTERM", stop);
+  process.on("SIGINT", stop).on("SIGTERM", stop);
+  const folder = mkdtempSync(path.join(tmpdir(), "counters-"));
   try {
     const out = path.join(folder, "structure.json");
-    const run = spawnSync(process.execPath, [report, "--json", out], {
-      cwd: root,
-      encoding: "utf8",
+    const run = await new Promise((resolve, reject) => {
+      child = spawn(process.execPath, [report, "--json", out], {
+        cwd: root,
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      let stderr = "";
+      child.stderr.on("data", (chunk) => (stderr += chunk));
+      child.on("error", reject);
+      child.on("close", (status) => resolve({ status, stderr }));
     });
+    if (stopped) throw new Stopped(stopped);
     if (run.status !== 0)
       throw new CannotRun(`structure-report failed in ${root}: ${run.stderr.trim()}`);
     const r = JSON.parse(readFileSync(out, "utf8"));
@@ -262,7 +315,7 @@ function structure(root) {
     };
   } finally {
     process.off("SIGINT", stop).off("SIGTERM", stop);
-    remove();
+    rmSync(folder, { recursive: true, force: true });
   }
 }
 
@@ -274,7 +327,7 @@ function checkoutTop(root) {
   return head.status === 0 ? head.stdout.trim() : null;
 }
 
-function main(argv) {
+async function main(argv) {
   const json = argv.includes("--json");
   const rest = argv.filter((a) => a !== "--json");
   if (rest.length > 1 || rest.some((a) => a.startsWith("-")))
@@ -284,7 +337,7 @@ function main(argv) {
   const commit = checkoutTop(root);
   const sites = directivesAndTests(root);
   const listCounts = lists(root);
-  const { signals, counters: structureCounts } = structure(root);
+  const { signals, counters: structureCounts } = await structure(root);
   const counters = {
     ...Object.fromEntries(Object.entries(sites).map(([key, list]) => [key, list.length])),
     ...listCounts,
@@ -319,9 +372,11 @@ function main(argv) {
 }
 
 try {
-  main(process.argv.slice(2));
+  await main(process.argv.slice(2));
 } catch (error) {
-  if (!(error instanceof CannotRun)) throw error;
-  console.error(`counters: ${error.message}`);
-  process.exitCode = 2;
+  if (error instanceof Stopped) process.exitCode = error.code;
+  else if (error instanceof CannotRun) {
+    console.error(`counters: ${error.message}`);
+    process.exitCode = 2;
+  } else throw error;
 }
