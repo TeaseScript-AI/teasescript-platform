@@ -16,7 +16,6 @@ import type {
 } from "../player/runtime-adapter.js";
 import type * as RuntimeView from "../player/runtime-view.js";
 import type { PlayerSession } from "../player/runtime-view.js";
-import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
@@ -31,7 +30,6 @@ interface StopHost {
   readonly hostError: Readonly<Ref<string | null>>;
   readonly stopped: Readonly<Ref<boolean>>;
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugTrace: Readonly<Ref<RuntimeDebugContext | null>>;
   prepare(
     create:
       | { readonly plan: string; readonly options: () => StartOptions }
@@ -227,13 +225,13 @@ test("a Start queued behind prepare that a factory Start replaced leaves the rec
 });
 
 test("a Continue a Start replaced while its reply was in transit leaves the replacement's trace as it is", async (context) => {
-  const { player } = await mount(context);
+  const { player, bridge } = await mount(context);
   player.setDebugTracing(true);
   player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
   const continuing = player.activate();
   player.prepare(factory('let fresh = 123\nsay "fresh ${fresh}", instant\nshowButton "New"\nexit'));
   await player.activate();
-  const trace = player.debugTrace.value!;
+  const trace = facade.heldTrace(bridge)!;
   const before = trace.status();
   assert.ok(before.records > 0);
   await continuing;
@@ -248,6 +246,66 @@ test("a Continue a Start replaced while its reply was in transit leaves the repl
     ["fresh 123"],
   );
 });
+
+/** Calls `then` once `bridge` posts `op`, as the host runs it at once in-process; its reply then is in transit. */
+function onceAsked(bridge: PlayerBridge, op: string, then: () => void) {
+  const request = bridge.request.bind(bridge);
+  let done = false;
+  bridge.request = <R>(...args: Parameters<PlayerBridge["request"]>) => {
+    const reply = request<R>(...args);
+    if (args[1] === op && !done) {
+      done = true;
+      then();
+    }
+    return reply;
+  };
+}
+
+// L5i.3 moved the trace into the host: a Continue's new epoch is asked for only once the Continue owns the UI, as it
+// began before, so one whose recording began in the host but that a Start replaced or a stop ended leaves the trace.
+for (const ending of ["replaced", "stopped"] as const)
+  test(`a Continue ${ending} after its recording began in the host leaves the trace as it was`, async (context) => {
+    const { player, bridge } = await mount(context);
+    player.setDebugTracing(true);
+    player.prepare(factory('let first = 1\nsay "first ${first}", instant\nshowButton "Go"\nexit'));
+    await player.activate();
+    const trace = facade.heldTrace(bridge)!;
+    const before = trace.status();
+    assert.ok(before.records > 0);
+    let ended = false;
+    onceAsked(bridge, "beginRecording", () => {
+      ended = true;
+      if (ending === "stopped") player.reportHostError(new TypeError("A component failed."));
+    });
+    player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
+    const continuing = player.activate();
+    for (let index = 0; index < 5 && !ended; index += 1) await turn();
+    assert.ok(ended, "the Continue's recording began in the host");
+    if (ending === "replaced") {
+      // A Start replaces it while that reply is in transit; it begins its own epoch.
+      player.prepare(
+        factory('let fresh = 2\nsay "fresh ${fresh}", instant\nshowButton "New"\nexit'),
+      );
+      await player.activate();
+    }
+    await continuing.catch(() => {});
+    for (let index = 0; index < 10; index += 1) await turn();
+    const after = trace.status();
+    if (ending === "stopped")
+      assert.deepEqual(
+        [after.epoch, after.origin, after.records],
+        [before.epoch, before.origin, before.records],
+        "the stopped session's history stays",
+      );
+    else {
+      // Only the replacing Start's epoch: one more than before, from Start, as without the Continue.
+      assert.deepEqual([after.epoch, after.origin], [before.epoch + 1, "start"]);
+      assert.deepEqual(
+        player.session.value!.transcriptEntries.map((entry) => entry.text),
+        ["fresh 2"],
+      );
+    }
+  });
 
 test("a session op still awaited does not delay the halt fence: a request behind it is refused", async () => {
   const replies: unknown[] = [];
@@ -360,7 +418,7 @@ for (const kind of [
     for (let index = 0; index < 10; index += 1) await turn();
     const shown = player.session.value;
     const recordingAtStop = facade.heldRecording(bridge)?.operations.length ?? null;
-    const traceAtStop = player.debugTrace.value?.status() ?? null;
+    const traceAtStop = facade.heldTrace(bridge)?.status() ?? null;
     for (let index = 0; index < 10; index += 1) await turn();
     assert.deepEqual(afterStop, [], "nothing shows after the stop line");
     assert.equal(player.hostError.value, "TypeError");
@@ -375,7 +433,7 @@ for (const kind of [
     }
     // Nothing of the activation runs after the stop: the recording and trace stay as they stood.
     assert.equal(facade.heldRecording(bridge)?.operations.length ?? null, recordingAtStop);
-    assert.deepEqual(player.debugTrace.value?.status() ?? null, traceAtStop);
+    assert.deepEqual(facade.heldTrace(bridge)?.status() ?? null, traceAtStop);
   });
 
 test("a Start that replaces an error stop pending on a Start the host rejects runs unstopped", async (context) => {

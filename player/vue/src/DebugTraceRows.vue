@@ -1,67 +1,47 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { reactive, ref } from "vue";
 import { ArrowUp, ChevronDown, ChevronRight } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import type { RuntimeDebugContext } from "../../../src/index.js";
-import {
-  playerDebugTraceRows,
-  type PlayerDebugLiveValue,
-  type PlayerDebugTraceRow,
-} from "../../debug-variables.js";
+import type { PlayerDebugTraceRow } from "../../debug-variables.js";
+import type { DebugTreeState } from "../../debug-view.js";
 
 // Rows of Debug's derivation trees (DEBUGGER.md "Player Debug"): each root with its immediate causes, and further levels
 // as the player opens them, one row at a time. A record shown again in the same tree is a link to its first row. Every
 // text in a row wraps within the width its indentation leaves, so tags and text actions are plain elements that wrap,
 // not single-line Badges or Buttons.
+// The rows come from the host (`debugView`), made with this tree's state, which the component changes through
+// `update:state`: the player's choices of open rows and the pages of causes shown.
 const props = defineProps<{
-  trace: RuntimeDebugContext;
-  roots: readonly number[];
-  /** Changes whenever the trace may have new records: the published session. */
-  revision: unknown;
-  live: PlayerDebugLiveValue | null;
+  rows: readonly PlayerDebugTraceRow[];
+  state: DebugTreeState;
   /** The root open by default until the player opens or closes a root, or `null`. */
   defaultOpen?: number | null;
   /** A label for the list, for assistive technology. */
   label: string;
 }>();
-const emit = defineEmits<{ chose: [] }>();
+const emit = defineEmits<{ chose: []; "update:state": [state: DebugTreeState] }>();
 
-const choices = reactive(new Map<string, boolean>());
-const pages = reactive(new Map<string, number>());
 const fullValues = reactive(new Set<string>());
 const list = ref<HTMLElement | null>(null);
 
-const rows = computed(() => {
-  void props.revision;
-  return playerDebugTraceRows(
-    props.trace,
-    props.roots,
-    {
-      // Messages show their values, also through variables and parameters that pass a value on unchanged; a value's
-      // own causes open on request.
-      expanded: (key, record, depth, carried) =>
-        choices.get(key) ??
-        (depth === 0
-          ? record.id === props.defaultOpen
-          : record.kind === "interpolation" || carried),
-      pages: (key) => pages.get(key) ?? 1,
-    },
-    props.live,
-  );
-});
-
 function toggle(row: Extract<PlayerDebugTraceRow, { kind: "record" }>) {
+  const choices = { ...props.state.choices };
   // The first choice keeps the default-open root open, so opening another message does not close it.
   if (props.defaultOpen !== null && props.defaultOpen !== undefined) {
     const key = String(props.defaultOpen);
-    if (!choices.has(key)) choices.set(key, true);
+    if (!Object.hasOwn(choices, key)) choices[key] = true;
   }
-  choices.set(row.key, !row.expanded);
+  choices[row.key] = !row.expanded;
+  emit("update:state", { choices, pages: props.state.pages });
   if (row.depth === 0) emit("chose");
 }
 
 function showMore(row: Extract<PlayerDebugTraceRow, { kind: "more" }>) {
-  pages.set(row.parent, (pages.get(row.parent) ?? 1) + 1);
+  const shown = Object.hasOwn(props.state.pages, row.parent) ? props.state.pages[row.parent]! : 1;
+  emit("update:state", {
+    choices: props.state.choices,
+    pages: { ...props.state.pages, [row.parent]: shown + 1 },
+  });
 }
 
 /** Moves focus to the row a reference names. */

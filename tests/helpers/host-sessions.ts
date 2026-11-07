@@ -1,4 +1,6 @@
+import type { PlayerBridge } from "../../player/player-bridge.js";
 import type { PlayerRuntimeSession } from "../../player/runtime-adapter.js";
+import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import { loadPlayerModule } from "./player-modules.js";
 
 /*
@@ -19,6 +21,7 @@ type Hatch = (
 ) => AdapterResult;
 
 let hatch: Hatch | null = null;
+let heldTrace: ((bridge: PlayerBridge) => RuntimeDebugContext | null) | null = null;
 
 /** Loads the facade of the bundle the composables run in; call it in `before`, before any `onHost` call runs. */
 export async function loadHostFacade(): Promise<void> {
@@ -26,6 +29,15 @@ export async function loadHostFacade(): Promise<void> {
   if (typeof facade.hatch !== "function") throw new Error("The bundle has no facade.");
   // EVIDENCE: validation: checked as a function above; it is the bundle facade's `hatch`.
   hatch = facade.hatch as Hatch;
+  if (typeof facade.heldTrace !== "function") throw new Error("The bundle's facade has no trace.");
+  // EVIDENCE: validation: checked as a function above; it is the bundle facade's `heldTrace`.
+  heldTrace = facade.heldTrace as typeof heldTrace;
+}
+
+/** The value trace a composable's in-process host holds on `bridge` (L5i.3), or `null` while Debug does not run. */
+export function hostTrace(bridge: PlayerBridge): RuntimeDebugContext | null {
+  if (heldTrace === null) throw new Error("Call loadHostFacade first.");
+  return heldTrace(bridge);
 }
 
 /** Whether `value` is a session a composable's host holds (a `PlayerSession`), not an adapter session. */

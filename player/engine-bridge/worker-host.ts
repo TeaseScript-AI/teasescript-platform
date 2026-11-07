@@ -53,6 +53,11 @@ export interface BridgeOp {
   readonly session: "none" | "existing";
   /** Whether a session op acts on what its caller saw, and so needs a basis the session accepts; yes by default. */
   readonly readsBasis?: boolean;
+  /**
+   * Whether a session op only reads its session, changing nothing and publishing nothing, so it runs also on a session
+   * the Player stopped (`halt`): what it reads is what the stop froze. No by default.
+   */
+  readonly afterStop?: boolean;
   readonly checkArguments: (args: unknown) => boolean;
   readonly run: (
     args: unknown,
@@ -227,7 +232,7 @@ export function startBridgeHost(
           request,
           refusal("session", "The request names no session the Worker holds."),
         );
-      if (halted.has(request.session!) && request.op !== "release")
+      if (halted.has(request.session!) && request.op !== "release" && op.afterStop !== true)
         return refuse(request, refusal("halted", "The Player stopped this session."));
       if (op.readsBasis !== false && !value.accepts(request.basis))
         return refuse(

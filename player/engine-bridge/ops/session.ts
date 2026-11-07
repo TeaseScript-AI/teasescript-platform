@@ -15,6 +15,7 @@ import {
   skipPlayerRuntimePacing,
   stepPlayerRuntimeCatchUp,
   stepPlayerRuntimeTime,
+  withPlayerRuntimeDebugTrace,
   type PlayerRuntimeCatchUp,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
@@ -33,6 +34,7 @@ import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host
 export class HeldSession implements HostSession {
   #current: PlayerRuntimeSession;
   #delivered = 0;
+  readonly #connection: Pick<PlayerOpsContext, "trace">;
   /** The late observation being caught up on a copy of the runner, or `null`. */
   catchUp: PlayerRuntimeCatchUp | null = null;
   /** Whether the main side views the session's calls (`viewCalls`): its publications then carry the call view. */
@@ -41,11 +43,20 @@ export class HeldSession implements HostSession {
   constructor(
     session: PlayerRuntimeSession,
     readonly planToken: string,
+    connection: Pick<PlayerOpsContext, "trace">,
   ) {
     this.#current = session;
+    this.#connection = connection;
   }
 
+  /**
+   * The session at its latest publication, with the connection's value trace: a trace turned on or off since reaches
+   * the session here, before the next operation reads it, as a keep that publishes nothing.
+   */
   get current(): PlayerRuntimeSession {
+    const trace = this.#connection.trace;
+    if (this.#current.debugTrace !== trace)
+      this.#current = withPlayerRuntimeDebugTrace(this.#current, trace);
     return this.#current;
   }
 
@@ -115,7 +126,7 @@ export class HeldSession implements HostSession {
   /** The session's first publication, from cursor 0, with its fixed fields; nothing was handed out before it. */
   introduce(metadata: PlanMetadata | null): Introduction {
     this.#delivered = 0;
-    const publication = this.publish(this.#current);
+    const publication = this.publish(this.current);
     return Object.freeze({
       ...publication,
       from: 0,
@@ -256,8 +267,10 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
           createPlayerRuntimeSession(instructions, {
             ...options,
             ...(recording ? { recorder: context.recorder } : {}),
+            ...(context.trace === null ? {} : { debugTrace: context.trace }),
           }),
           plan,
+          context,
         );
         const id = sessions.add(held);
         const view = held.introduce(null);
@@ -375,14 +388,18 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
     beginRecording: sessionOp(
       (args) => args === null,
       (held) => {
-        // The connection's recorder records the session from its state now, as Continue attaches it today.
-        const attached = Object.freeze({ ...held.current, recorder: context.recorder });
-        beginPlayerRuntimeRecording(attached, context.recorder);
-        held.keep(attached);
+        beginRecordingAt(held, context);
         return { result: null, view: null };
       },
     ),
   };
+}
+
+/** Begins the connection's recording at `held` as it stands, as Continue and Debug's Return do. */
+export function beginRecordingAt(held: HeldSession, context: PlayerOpsContext): void {
+  const attached = Object.freeze({ ...held.current, recorder: context.recorder });
+  beginPlayerRuntimeRecording(attached, context.recorder);
+  held.keep(attached);
 }
 
 /** A held session's introduction, with its plan's metadata when the plan is its own. */

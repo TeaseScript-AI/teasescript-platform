@@ -1,7 +1,6 @@
 import type { InstructionPlan, MediaProgressReport } from "../../src/playback.js";
 import type { DebugRecording } from "../debug-recorder.js";
 import {
-  beginPlayerRuntimeRecording,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   type PlayerRuntimeSession,
@@ -12,7 +11,8 @@ import { PlayerBridge } from "../player-bridge.js";
 import { openBridge, type ClientPort } from "./client.js";
 import { playerBridgeOps, playerOpsContext, type PlayerOpsContext } from "./player-ops.js";
 import type { BuildIdentity } from "./protocol.js";
-import { HeldSession, introduction, type StartOptions } from "./ops/session.js";
+import { beginRecordingAt, HeldSession, introduction, type StartOptions } from "./ops/session.js";
+import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import { decodeMessage } from "./transport.js";
 import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
 
@@ -175,6 +175,8 @@ export function observeNow(
 export interface HostFactoryInput {
   /** The connection's debug recorder. */
   readonly recorder: PlayerRuntimeSessionOptions["recorder"] & object;
+  /** Debug's value trace on the connection, which the session runs with, or `null` while Debug does not run. */
+  readonly debugTrace: RuntimeDebugContext | null;
   /** The plan the host holds under `token`. */
   plan(token: string): InstructionPlan;
 }
@@ -183,7 +185,8 @@ export interface HostFactoryInput {
  * **Facade.** Registers the session `make` creates in the host, under a new bridge session, and returns its first
  * publication. `make` is a transitional factory: a Start with Debug's trace or random control, a restore, a transfer,
  * DevelopmentPreview's Start. A session that brought a plan of its own gets a new plan token. `{ plan, options }`
- * starts a held plan instead, with `extras` (trace, random control) attached before its first run.
+ * starts a held plan instead, with `extras` (random control) attached before its first run. Either runs with the
+ * connection's value trace.
  */
 export function introduceNow(
   bridge: PlayerBridge,
@@ -192,7 +195,7 @@ export function introduceNow(
     | {
         readonly plan: string;
         readonly options: StartOptions;
-        readonly extras?: Pick<PlayerRuntimeSessionOptions, "debugTrace" | "randomControl">;
+        readonly extras?: Pick<PlayerRuntimeSessionOptions, "randomControl">;
         readonly recording: boolean;
       },
 ): PlayerSession {
@@ -205,29 +208,33 @@ export function introduceNow(
   };
   const created =
     typeof make === "function"
-      ? make({ recorder: context.recorder, plan })
+      ? make({ recorder: context.recorder, debugTrace: context.trace, plan })
       : createPlayerRuntimeSession(plan(make.plan), {
           ...make.options,
           ...make.extras,
           ...(make.recording ? { recorder: context.recorder } : {}),
+          ...(context.trace === null ? {} : { debugTrace: context.trace }),
         });
   const known = [...context.plans].find(([, held]) => held === created.plan)?.[0];
   const token = known ?? context.hold(created.plan);
-  const held = new HeldSession(created, token);
+  const held = new HeldSession(created, token, context);
   const id = backend.sessions.add(held);
   return bridge.open(id, introduction(held, context, known === undefined));
 }
 
 /**
- * **Facade.** Begins the connection's recording at `session` synchronously, as a parked rewind session does inside its
- * guard; the `beginRecording` op does the same over the bridge.
+ * **Facade.** Begins the connection's recording at `session` synchronously, with a new epoch of its value trace, as a
+ * parked rewind session does inside its guard; the `beginRecording` op does the same over the bridge.
  */
 export function beginRecordingNow(session: PlayerSession): void {
   const backend = backendOf(session.connection);
-  const held = heldOf(backend, session);
-  const attached = Object.freeze({ ...held.current, recorder: backend.context.recorder });
-  beginPlayerRuntimeRecording(attached, backend.context.recorder);
-  held.keep(attached);
+  beginRecordingAt(heldOf(backend, session), backend.context);
+  backend.context.trace?.reset("restore");
+}
+
+/** **Facade, for tests.** The connection's value trace, as its host holds it, or `null` while Debug does not run. */
+export function heldTrace(bridge: PlayerBridge): RuntimeDebugContext | null {
+  return backendOf(bridge).context.trace;
 }
 
 /** **Facade.** Holds `plan`, which the main realm compiled, in the host; returns its token, the one it has if held. */

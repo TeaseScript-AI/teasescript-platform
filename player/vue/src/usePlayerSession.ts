@@ -36,9 +36,7 @@ import {
   playerRuntimeSnapshotOrNull,
   restorePlayerRuntimeSessionAt,
   resumePlayerRuntimeRandomDraw,
-  setPlayerRuntimeDebugMode,
   setPlayerRuntimeRandomControl,
-  withPlayerRuntimeDebugTrace,
   type PlayerRuntimeRestorePoint,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -95,7 +93,8 @@ import {
   type KeptRoomStore,
   type KeptSessionStore,
 } from "../../kept-sessions.js";
-import { RuntimeDebugContext } from "../../../src/index.js";
+import type { RuntimeDebugContext } from "../../../src/index.js";
+import type { DebugView, DebugViewRequest } from "../../debug-view.js";
 import {
   CheckpointError,
   serializeValidatedRuntimeJson,
@@ -362,8 +361,39 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function bridgeLost(error: Error) {
     reportHostError(error);
   }
-  // Debug's value trace (DEBUGGER.md "Player Debug"), while Debug runs: every session operation records into it.
-  const debugTrace = shallowRef<RuntimeDebugContext | null>(null);
+  // Debug's value trace (DEBUGGER.md "Player Debug"), while Debug runs: the host holds it, as the connection's state
+  // (`debugTracing`), and every session operation there records into it. `traceId` names the host's trace now, once
+  // the host answered.
+  const debugTracing = ref(false);
+  const traceId = shallowRef<number | null>(null);
+  let tracingToggles = 0;
+  /**
+   * A view of Debug's value trace for the shown session, made in the host (`debugView`, `debug-view.ts`): the reply
+   * names the revision and trace it shows, which its caller compares with what shows when it arrives. `null` without a
+   * shown session or a trace, and for a session that no longer shows or that the host no longer holds; it never
+   * rejects.
+   */
+  function debugView(request: DebugViewRequest): Promise<DebugView | null> {
+    const current = session.value;
+    if (current === null || !debugTracing.value) return Promise.resolve(null);
+    return bridgeOf(current)
+      .view<DebugView>(current, "debugView", { request })
+      .then(
+        (view) => (session.value?.lineage === current.lineage ? view : null),
+        (error: unknown) => {
+          // Any other failure is the Player's error stop, as an op's failure is.
+          if (
+            !endsQuietly(error) &&
+            refusalCode(error) !== "session" &&
+            !disposed &&
+            !stopped.value &&
+            session.value?.lineage === current.lineage
+          )
+            reportHostError(error);
+          return null;
+        },
+      );
+  }
   // Bumped when a stored photo finished loading, so presentation resolves its reference again.
   const mediaRevision = ref(0);
   const capturedMedia = new CapturedMediaStore(
@@ -648,7 +678,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session,
     () => device.sample(),
     held,
-    () => debugTrace.value === null && randomControl === null,
+    () => !debugTracing.value && randomControl === null,
     publishOwned,
   );
   // Input and the work that continues it take their session from here when they run: a session a Player error stopped
@@ -2160,10 +2190,25 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       current.state.debugMode === debugMode
     )
       return;
-    const result = hatch(current, (current) => setPlayerRuntimeDebugMode(current, debugMode));
-    if (result.outcome.kind !== "set") return;
-    session.value = result.session;
-    keepSessionLater();
+    // In the host (`setDebugMode`); the session shows the change while it still owns the UI.
+    void bridgeOf(current)
+      .request<{ readonly kind: string }>(
+        current,
+        "setDebugMode",
+        { on: debugMode },
+        { publish: (next) => void publishOwned(next) },
+      )
+      .then(
+        (outcome) => {
+          if (outcome.kind === "set" && session.value?.lineage === current.lineage)
+            keepSessionLater();
+        },
+        (error: unknown) => {
+          if (endsQuietly(error)) return;
+          if (!disposed && !stopped.value && session.value?.lineage === current.lineage)
+            reportHostError(error);
+        },
+      );
   }
   /**
    * Gives every session from now on Debug's random control, or none. Without one, a draw the session is paused at goes
@@ -2492,11 +2537,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     activation.value = {
       kind: "start",
       begin: () =>
-        startedSession(create, {
-          debugMode,
-          ...(debugTrace.value === null ? {} : { debugTrace: debugTrace.value }),
-          ...(randomControl === null ? {} : { randomControl }),
-        }),
+        startedSession(create, { debugMode, ...(randomControl === null ? {} : { randomControl }) }),
       ...(outdated === undefined ? {} : { outdated }),
     };
     prepareActivation("start");
@@ -2577,13 +2618,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         } catch (error) {
           taken = { error };
         }
-        // The recording of a restored session starts from the state it continues, and so does a new trace epoch.
+        // The recording of a restored session starts from the state it continues, and so does a new epoch of the
+        // host's value trace, once the Continue owns the UI. The epoch's request is not awaited: the host runs it
+        // before what follows (a draw's resume, Debug mode, Continue).
         await host.request(restored, "beginRecording", null);
         owned();
-        debugTrace.value?.reset("restore");
-        let continued: PlayerSession = hatch(host.latest(restored) ?? restored, (held) =>
-          withPlayerRuntimeDebugTrace(held, debugTrace.value),
-        );
+        if (debugTracing.value)
+          void host.request(restored, "restartTrace", null).catch((error: unknown) => {
+            if (!endsQuietly(error) && !disposed && !stopped.value) reportHostError(error);
+          });
+        let continued: PlayerSession = host.latest(restored) ?? restored;
         // A session kept while paused at a random draw goes on with its natural outcome first: until then, the engine
         // takes no other input.
         const draw = continued.state.randomDraw;
@@ -2592,10 +2636,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             resumePlayerRuntimeRandomDraw(held, { drawId: draw.drawId, outcome: "natural" }),
           ).session;
         // The script reads whether Debug is on now.
-        if (continued.state.debugMode !== debugMode)
-          continued = hatch(continued, (held) =>
-            setPlayerRuntimeDebugMode(held, debugMode),
-          ).session;
+        if (continued.state.debugMode !== debugMode) {
+          await host.request(continued, "setDebugMode", { on: debugMode });
+          owned();
+          continued = host.latest(continued) ?? continued;
+        }
         applyRandomControl(continued);
         if (!("capture" in taken)) throw taken.error;
         await host.request(continued, "continue", { capture: taken.capture });
@@ -2680,32 +2725,30 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     return bridge;
   }
   /**
-   * The session `create` starts: over the bridge (`start`) for a held plan without Debug's trace or random control,
-   * which cannot cross yet; otherwise in the host, before its first run (`introduceNow`).
+   * The session `create` starts: over the bridge (`start`) for a held plan without Debug's random control, which cannot
+   * cross yet; otherwise in the host, before its first run (`introduceNow`). Either runs with the host's value trace.
    */
   function startedSession(
     create: PlayerSessionStart,
-    recording: {
-      readonly debugMode: boolean;
-      readonly debugTrace?: RuntimeDebugContext;
-      readonly randomControl?: RandomControlOptions;
-    },
+    recording: { readonly debugMode: boolean; readonly randomControl?: RandomControlOptions },
   ): PlayerSession | Promise<PlayerSession> {
     const host = requireBridge();
     // A factory, as the Start's options, records the click's capture through `temporalCapture()`, which `begin` binds.
     if (typeof create === "function")
-      return introduceNow(host, (made) => create({ ...recording, recorder: made.recorder }));
+      return introduceNow(host, (made) =>
+        create({
+          ...recording,
+          recorder: made.recorder,
+          ...(made.debugTrace === null ? {} : { debugTrace: made.debugTrace }),
+        }),
+      );
     const startOptions = { ...create.options(), debugMode: recording.debugMode };
-    const { debugTrace: trace, randomControl: control } = recording;
-    if (trace === undefined && control === undefined)
-      return host.start(create.plan, startOptions, true);
+    const control = recording.randomControl;
+    if (control === undefined) return host.start(create.plan, startOptions, true);
     return introduceNow(host, {
       plan: create.plan,
       options: startOptions,
-      extras: {
-        ...(trace === undefined ? {} : { debugTrace: trace }),
-        ...(control === undefined ? {} : { randomControl: control }),
-      },
+      extras: { randomControl: control },
       recording: true,
     });
   }
@@ -2948,20 +2991,32 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       }
       return { ...frozen, photos };
     },
-    /** Debug's value trace while Debug runs, else `null`; it changes in place, with each published session. */
-    debugTrace: computed(() => debugTrace.value),
+    /** Whether Debug's value trace runs: the host keeps it, and every session operation there records into it. */
+    debugTracing: computed(() => debugTracing.value),
+    /** Which of the host's traces runs, once the host answered `setDebugTracing`; `null` without one. */
+    traceId: computed(() => traceId.value),
     /**
-     * Turns Debug's value trace on or off. A new trace attaches to a running session at its next operation, so earlier
-     * values read as not recorded; Start and Continue begin a new epoch; off drops the trace and all its history.
+     * Turns Debug's value trace on or off, in the host. A new trace attaches to a running session at its next
+     * operation, so earlier values read as not recorded; Start and Continue begin a new epoch; off drops the trace and
+     * all its history. Asked at once when the host is reachable, so a Start asked after it runs with it.
      */
     setDebugTracing(on: boolean) {
-      if (on === (debugTrace.value !== null)) return;
-      debugTrace.value = on ? new RuntimeDebugContext() : null;
-      if (session.value !== null)
-        session.value = hatch(session.value, (current) =>
-          withPlayerRuntimeDebugTrace(current, debugTrace.value),
-        );
+      if (on === debugTracing.value) return;
+      debugTracing.value = on;
+      traceId.value = null;
+      const toggle = ++tracingToggles;
+      const ask = (host: PlayerBridge) =>
+        host.client.request("debugTracing", { on }).then((reply) => {
+          // EVIDENCE: validation: `debugTracing` replies from the same build with the trace it holds now.
+          const now = (reply.result as { readonly traceId: number | null }).traceId;
+          if (toggle === tracingToggles && !disposed) traceId.value = now;
+        });
+      const answered = bridge !== null ? ask(bridge) : bridgeReady.then(ask);
+      answered.catch((error: unknown) => {
+        if (!endsQuietly(error) && !disposed) reportHostError(error);
+      });
     },
+    debugView,
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,

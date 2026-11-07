@@ -187,13 +187,16 @@ the provider first, then applies it with the recorded `applyPlayerRuntimeStorage
 while a script write waits for the host; a script write issued meanwhile settles first, and the session then follows
 the value the provider kept (`overtaken` when that is the script's). `debugEdits` holds the Edited-while-debugging mark,
 which `debugExportCandidate` passes to the debug export's `editedWhileDebugging`. While Debug runs, `usePlayerDebug`
-turns the session host's value trace on (`setDebugTracing`), which every session operation then records into; the
-Variables tab (`DebugVariables.vue`,
-`DebugTraceRows.vue`) projects it with `player/debug-variables.ts`: `playerDebugVariables` groups live variables, and
-`playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened. `PlayerApp`
+turns the value trace on (`setDebugTracing`): the engine's host keeps it as the connection's state (`debugTracing`),
+and every session operation there records into it. The Variables tab (`DebugVariables.vue`, `DebugTraceRows.vue`) and
+the Now tab's Stage image origin show views the host makes from its session and trace (`debugView`,
+`player/debug-view.ts`), with `player/debug-variables.ts`: `playerDebugVariables` groups live variables, and
+`playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened. The tabs keep
+the selection, the opened rows, the pages and the filter, send them with each request (`useDebugView.ts`), and show a
+reply only while it is of the shown publication and trace, from the first reply on. `PlayerApp`
 provides Explain values (`explainValues.ts`) to the transcript: a message offers it while Debug runs if
 `playerRuntimeTranscriptEventSequence` reads a runtime event sequence from its entry ID, and choosing it stores the
-selection in `usePlayerDebug` with the trace and epoch it belongs to, selects the Variables tab, and opens the panel
+selection in `usePlayerDebug` with the host's trace and epoch it belongs to (`traceId`, `epoch`), selects the Variables tab, and opens the panel
 through `PlayerToolsShell`'s exposed `showTool`. The tab finds the selected message with
 `playerRuntimeTranscriptMessage` in each published session and explains its `contentSequence`, the event whose content
 it shows; `playerDebugMessageOrigin` gives that event's output record or why there is none, from the trace status's

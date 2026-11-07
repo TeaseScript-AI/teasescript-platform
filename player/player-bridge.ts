@@ -185,6 +185,19 @@ export class PlayerBridge {
     return merged;
   }
 
+  /**
+   * Reads `session` with `op`, an op that changes and publishes nothing (`afterStop`), also once the Player stopped it;
+   * resolves with its result. Nothing reaches the store.
+   */
+  async view<R>(session: PlayerSession, op: string, args: unknown): Promise<R> {
+    const reply = await this.#client.request(op, args, {
+      session: session.id,
+      basis: this.latest(session)?.revision ?? session.revision,
+    });
+    // EVIDENCE: validation: the op's result comes from the same build as its caller expects it.
+    return reply.result as R;
+  }
+
   /** Runs `body` as one exclusive section of `session`; see `SessionSection`. */
   section<T>(session: PlayerSession, body: (section: SessionSection) => Promise<T>): Promise<T> {
     return this.#client.section(session.id, (send: SectionSend) => {
