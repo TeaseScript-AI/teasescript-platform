@@ -202,11 +202,12 @@ export class CapturedMediaStore {
   }
 
   /**
-   * Of `candidates`, the references of media this store holds or has stored durably: one read of the stored references,
-   * none of their media. Text that only has the shape of a reference is not among them. For a persistence operation,
-   * `owner` admits the read (`persistence-ownership.ts`).
+   * Of `candidates`, the references this store knows: held here, session-only records included, or listed by its
+   * repository. One read of the repository's references, none of their media; it proves neither that a record's bytes
+   * are valid nor that it is durable. Text that only has the shape of a reference is not among them. For a persistence
+   * operation, `owner` admits the read (`persistence-ownership.ts`).
    */
-  async storedReferences(
+  async knownReferences(
     candidates: Iterable<string>,
     owner?: PersistenceOwnership,
   ): Promise<Set<string>> {

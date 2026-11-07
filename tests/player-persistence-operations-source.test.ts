@@ -178,7 +178,7 @@ const MEDIA = {
   sessionRecords: "memory",
   restoreSessionMedia: "memory",
   size: "memory",
-  storedReferences: "owned",
+  knownReferences: "owned",
   promote: "owned",
   read: "refused",
   readDurable: "refused",

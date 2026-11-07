@@ -1194,7 +1194,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     try {
       const entries = await values.load();
       const storedFiles = await capturedMedia
-        .storedReferences(storedValueReferences(entries), owner)
+        .knownReferences(storedValueReferences(entries), owner)
         .catch(rejectedUnlessStale(new Set<string>()));
       return { entries, storedFiles };
     } catch (error) {
