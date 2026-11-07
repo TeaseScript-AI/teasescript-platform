@@ -506,7 +506,7 @@ test("a covered objects query charges exactly the visits its proof graph holds, 
   // (the lead's invariant after three uncharged loops: the module's own counter against an independent count, so a
   // fourth loop cannot pass by a bound)
   const sources = [...SHAPES.map((shape) => family(shape, 8, true)), ...CONTROLS];
-  let checked = 0;
+  const checked = { empty: 0, deeper: 0 };
   for (const source of sources) {
     const pass = passesOf(source, MODES[0]!, 30_000_000).at(-1)!;
     const { program, contract, solver } = pass;
@@ -527,13 +527,13 @@ test("a covered objects query charges exactly the visits its proof graph holds, 
               queryVisits(pass, objectsAt(contract, literal, rest), rest, step),
               `${rest.join(".")}.${step}: ${source}`,
             );
-            checked += rest.length === 0 ? 1 : 100;
+            checked[rest.length === 0 ? "empty" : "deeper"] += 1;
           }
       }
     });
   }
   // (asks on both paths: some empty, some not)
-  assert.ok(checked % 100 > 20 && checked >= 100, String(checked));
+  assert.ok(checked.empty > 20 && checked.deeper > 0, JSON.stringify(checked));
 });
 
 test("an objects query's construction copies no path suffix and reads each input step a constant number of times, however deep (#1747, charging round)", () => {
