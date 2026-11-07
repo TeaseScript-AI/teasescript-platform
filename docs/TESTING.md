@@ -487,7 +487,7 @@ verdict:
 
 - a writing failure is `serializer-failure`;
 - a correspondence that cannot map a position is `mapping-failure`;
-- a core refusal is `unsupported-route`, counted rather than failed.
+- a core refusal, on either side or both, is `unsupported-route`, counted rather than failed.
 
 No exception gives a false `equivalent` or a `discrepancy`. Any exception the driver did not raise itself becomes a
 side's `harness-failure` (or `serializer-failure`), naming the stage and the member the driver was operating on. Only
@@ -501,6 +501,24 @@ rejection included; 2 for a harness failure or an unknown verdict.
 generator tag. It also runs a 10,000-level host list and the sensitivity controls, each a `discrepancy` at its own
 path. `node tools/runtime-differential/run.mjs --seed S --count N [--route core] [--shrink]` runs larger campaigns
 after `npm run build`; run them as background jobs.
+
+Each side sits behind a port (`tests/helpers/runtime-differential-side.ts`): this build in this process, or a root's
+runner (`tools/runtime-differential/run-root.mjs`) in its own process, called synchronously over a pair of named pipes.
+One lockstep loop decides for both. `tests/runtime-differential-oracle.oracle.ts` (in `npm run oracle:test`) runs the
+pinned oracle root of the runtime pipeline oracle (left) against this build (right), each behind that oracle's guard:
+
+- the regressions and the sample;
+- the construction witnesses, whose reports in-process and across processes must be equal;
+- four candidate mutations (`--replace`), each a `discrepancy` in the uninterrupted run;
+- a candidate that imports outside its inventory, and a runner that exits or writes a malformed or invalid reply:
+  `harness-failure`;
+- one accepted control per route of `admitExternal`, which builds a recipe's value inside a root and admits it through
+  that root's public API (host globals, script storage, or a substituted checkpoint binding).
+
+With `FUZZ_ACCEPTANCE=1` it also runs `tools/runtime-differential/acceptance.json`, every pair of which must be
+`equivalent`. `run.mjs --oracle [--manifest FILE]` runs a campaign the same way, each line naming the oracle's commit and
+the candidate's closure digest. A runner that never answers, or fails before it opens its pipes, is bounded only by the
+job's deadline. A behaviour changed after the pin shows as a difference, which only a new seal removes.
 
 ## Implemented Phase 1 deterministic property harness
 

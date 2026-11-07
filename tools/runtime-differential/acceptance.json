@@ -1,0 +1,8 @@
+{
+  "regressions": { "seeds": [1, 5, 42], "routes": ["legacy"] },
+  "generated": [
+    { "seed": 1, "from": 0, "count": 100, "route": "legacy" },
+    { "seed": 7, "from": 0, "count": 100, "route": "legacy" }
+  ],
+  "inputs": []
+}

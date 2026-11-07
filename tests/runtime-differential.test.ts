@@ -1391,9 +1391,10 @@ for (const route of ROUTES_TO_RESTORE)
 
 interface Exits {
   exitStatus(reports: readonly Pick<DifferentialReport, "verdict">[]): number;
+  verdictCounts(reports: readonly Pick<DifferentialReport, "verdict">[]): Record<string, number>;
 }
-// EVIDENCE: validation: the CLI's exit module exports `exitStatus` of this shape.
-const { exitStatus } = (await import(path.join(tools, "exit.mjs"))) as Exits;
+// EVIDENCE: validation: the CLI's exit module exports `exitStatus` and `verdictCounts` of this shape.
+const { exitStatus, verdictCounts } = (await import(path.join(tools, "exit.mjs"))) as Exits;
 
 test("the campaign CLI's decision: 0 identity, an unsupported route or censored, 1 a difference, 2 a failure", () => {
   const verdict = (kind: string, because?: string) => ({
@@ -1416,6 +1417,23 @@ test("the campaign CLI's decision: 0 identity, an unsupported route or censored,
   assert.equal(exitStatus([verdict("not-compared", "admission-rejected")]), 1);
   assert.equal(exitStatus([verdict("not-compared", "admission-rejected"), verdict("surprise")]), 2);
   assert.equal(exitStatus([verdict("surprise")]), 2);
+  // The summary counts an unsupported route by the side the verdict names, so a refusal on one side alone shows.
+  const refused = (side: "left" | "right") => ({
+    verdict: { kind: "not-compared", side, because: "unsupported-route" } as const,
+  });
+  assert.deepEqual(
+    verdictCounts([
+      refused("left"),
+      refused("right"),
+      refused("right"),
+      verdict("not-compared", "censored"),
+    ]),
+    {
+      "not-compared:unsupported-route:left": 1,
+      "not-compared:unsupported-route:right": 2,
+      "not-compared:censored": 1,
+    },
+  );
 });
 
 /**
