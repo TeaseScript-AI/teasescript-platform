@@ -469,8 +469,10 @@ for (const target of ["an answer", "the pacing skip"] as const)
     await settle();
     assert.equal(result.kind, "answered");
     assert.equal(host.hostError.value, null);
-    const ops = posted.ops().filter((op) => op !== "observeInput");
-    assert.equal(ops.length, 1, `one op besides the input's observations: ${ops.join(", ")}`);
+    // The input's op is posted once. The clock's own observations at the timer's deadline also travel in sections of
+    // the session now (`observeTime`, as the clock observes at its queue turn), so the tracker sees them too.
+    const ops = posted.ops().filter((op) => op !== "observeInput" && op !== "observeTime");
+    assert.equal(ops.length, 1, `one op besides the observations: ${ops.join(", ")}`);
   });
 
 /** A provider that keeps what it stored, records each write, and settles each as `settle` decides. */
