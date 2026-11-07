@@ -15,7 +15,7 @@ import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.j
 import { DebugCaches, debugOps } from "./ops/debug.js";
 import { inputOps } from "./ops/input.js";
 import { mediaOps } from "./ops/media.js";
-import { persistenceOps } from "./ops/persistence.js";
+import { persistenceOps, type PlanTextSlot } from "./ops/persistence.js";
 import { resourceOps } from "./ops/resources.js";
 import { sessionOps } from "./ops/session.js";
 import { traceOps } from "./ops/trace.js";
@@ -140,6 +140,8 @@ export interface PlayerOpsContext {
   traceId: number;
   /** The serial of the newest tracing intent the host applied (`alignTrace`); `0` before any. */
   traceIntent: number;
+  /** The held plans' canonical JSON, per token, while a save or a Continue may need it (`ops/persistence.ts`). */
+  readonly planTexts: Map<string, PlanTextSlot>;
 }
 
 /**
@@ -197,6 +199,7 @@ export function playerOpsContext(): PlayerOpsContext {
     trace: null,
     traceId: 0,
     traceIntent: 0,
+    planTexts: new Map(),
   };
 }
 
@@ -276,6 +279,9 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
         plans.clear();
         context.sources.clear();
         context.debug.clear();
+        for (const slot of context.planTexts.values())
+          if (slot.timer !== null) clearTimeout(slot.timer);
+        context.planTexts.clear();
         sessions.clear();
         return { result: null };
       },
@@ -285,7 +291,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     ...inputOps(context),
     ...mediaOps(context),
     ...resourceOps(context),
-    ...persistenceOps(),
+    ...persistenceOps(context),
     ...traceOps(context),
   };
 }

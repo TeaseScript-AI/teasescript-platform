@@ -5,6 +5,8 @@ import {
   type BridgeResult,
   type SectionSend,
 } from "./engine-bridge/client.js";
+import type { InterpreterEvent } from "../src/runtime/events.js";
+import type { KeptRestore } from "./engine-bridge/ops/persistence.js";
 import type { StartOptions } from "./engine-bridge/ops/session.js";
 import type { CallViewReply, Introduction, Publication } from "./engine-bridge/session-protocol.js";
 import type { PlayerSession } from "./runtime-view.js";
@@ -166,6 +168,29 @@ export class PlayerBridge {
     );
     // EVIDENCE: validation: the op's result comes from the same build as its caller expects it.
     return reply.result as R;
+  }
+
+  /**
+   * Restores a kept session in the host against its held plan `plan`; resolves with its first publication, or why it
+   * does not go on: another plan, or an ended session. The engine's refusal of the state rejects, with its details.
+   */
+  async restoreKept(
+    plan: string,
+    planJson: string,
+    snapshotJson: string,
+    events: readonly InterpreterEvent[],
+  ): Promise<PlayerSession | "otherPlan" | "ended"> {
+    const reply = await this.#client.request("restoreKept", {
+      plan,
+      planJson,
+      snapshotJson,
+      events,
+    });
+    // EVIDENCE: validation: `restoreKept` replies from the same build with its outcome and, restored, the new session.
+    const outcome = reply.result as KeptRestore;
+    if (outcome.kind !== "restored") return outcome.kind;
+    // EVIDENCE: validation: a restored session's reply carries its id and introduction.
+    return this.open(reply.session!, reply.view as Introduction);
   }
 
   /** Sends one op of `session` from its store's revision (or `basis`); resolves with its result once applied. */
