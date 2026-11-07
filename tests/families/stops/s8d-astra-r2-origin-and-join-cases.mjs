@@ -1,7 +1,7 @@
 // original subject origins, joins and argument-literal cases; astra-m4-s8d-review-r2-evidence, archived Python/shell
 // evidence (R/astra-m4-s8d-review-r2-evidence/make-cases.py).
 const generated = (() => {
-  let cases, expr, extra, family, form, literal, name, operand, pre, source, use, want;
+  let cases, expr, extra, family, form, literal, name, operand, pre, source, use, _want;
   cases = [];
   function add(name, source) {
     cases.push({ name: name, source: source + "\nexit\n" });
@@ -52,7 +52,7 @@ const generated = (() => {
       add(`${family}-${form}`, pre + use(expr));
     }
   }
-  for ([name, pre, operand, want] of [
+  for ([name, pre, operand, _want] of [
     ["sum", "let amount = 8\n", "(amount-3)*2", "10"],
     ["member", "let pouch = {coins: 14}\n", "pouch.coins", "14"],
     ["index", "let scores = [6, 11]\n", "scores[1]", "11"],

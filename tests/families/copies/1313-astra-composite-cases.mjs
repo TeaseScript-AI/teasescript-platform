@@ -134,11 +134,9 @@ const outputs = (() => {
         add(
           `composite-${variation}-${depth}-${reversed}`,
           `let xs=[${members}]\nlet answer:integer=${access}\nsay xs[1].${"box.".repeat(depth)}p2`,
-          {
-            ...(variation === "defaults" || variation === "otherwise"
-              ? { origins: { text: access, pattern: "load|fromJson|hostValue|otherHost" } }
-              : {}),
-          },
+          variation === "defaults" || variation === "otherwise"
+            ? { origins: { text: access, pattern: "load|fromJson|hostValue|otherHost" } }
+            : {},
         );
       }
   for (const [name, generate] of Object.entries(growth)) add(`growth-small-${name}`, generate(4));
@@ -158,9 +156,9 @@ const outputs = (() => {
   return { cases0, shapes1 };
 })();
 export const cases = [...outputs.cases0];
-export const shapes = Object.fromEntries([
-  ...Object.entries(outputs.shapes1).map(([name, make]) => ["shapes1/" + name, make]),
-]);
+export const shapes = Object.fromEntries(
+  Object.entries(outputs.shapes1).map(([name, make]) => ["shapes1/" + name, make]),
+);
 export const checks = ["publication"];
 
 // the globals the recorded run passed

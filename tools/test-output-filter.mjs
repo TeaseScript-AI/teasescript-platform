@@ -3,6 +3,7 @@ import { fstatSync, globSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { shardFiles, shardOption } from "./test-shards.mjs";
 
+// oxlint-disable-next-line no-control-regex -- EVIDENCE: fixture: the pattern matches the ESC character that starts an ANSI escape sequence.
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 
 function isPassingTestLine(line) {

@@ -57,7 +57,7 @@ test("shards are disjoint and exhaustive", () => {
 test("tampered expectation and rehashed plan are rejected", () => {
   const p = makePlan("quick");
   p.cases[0].inputs[0].allowed = false;
-  const { planHash, ...body } = p;
+  const { planHash: _planHash, ...body } = p;
   p.planHash = hash(body);
   assert.throws(() => validatePlan(p));
 });

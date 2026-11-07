@@ -53,6 +53,7 @@ function analysed(
   const charge = WorkLedger.prototype.charge;
   let ledger: WorkLedger | null = null;
   WorkLedger.prototype.charge = function (this: WorkLedger, ...args) {
+    // oxlint-disable-next-line typescript/no-this-alias -- EVIDENCE: fixture: the test captures the ledger the charge ran on.
     ledger = this;
     charge.apply(this, args);
   };

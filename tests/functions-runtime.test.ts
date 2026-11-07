@@ -366,7 +366,7 @@ test("preserves ordinary built-in order before later user calls in composite exp
     'let listValue = [mark("list"), userText()]',
     'let setValue = set[mark("set"), userText()]',
     'let objectValue = { first: mark("object"), second: userText() }',
-    'let templateValue = "${mark(\"template\")}:${userText()}"',
+    'let templateValue = "${mark("template")}:${userText()}"',
     'let binaryValue = markNumber(1, "binary") + userNumber()',
     'let rangeValue = markNumber(1, "range")..userNumber()',
     "let indexedValue = sourceList()[indexUser()]",
