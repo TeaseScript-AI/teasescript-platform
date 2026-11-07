@@ -559,3 +559,43 @@ test("a session read for an import is let go of in the host when its review is r
   host.discardSessionReview(read);
   await assert.rejects(committed(read), /No session read for an import/);
 });
+
+test("a review being imported cannot be discarded: the composable refuses, and the import keeps its session", async (context) => {
+  stubBrowser(context);
+  const { session } = await exported(context);
+  const at = browser();
+  const host = await page(context, at, SAVED_PHOTO);
+  const read = await readForImport(host, session);
+  const review = await host.reviewSessionImport(read);
+  // The import holds at its saved values' replacement, before it reads its session from the host.
+  let finish!: () => void;
+  let reached!: () => void;
+  const gate = new Promise<void>((resolve) => (finish = resolve));
+  const arrived = new Promise<void>((resolve) => (reached = resolve));
+  const replace = at.provider.replace.bind(at.provider);
+  context.mock.method(
+    at.provider,
+    "replace",
+    async (entries: readonly RuntimeScriptStorageEntrySnapshot[]) => {
+      reached();
+      await gate;
+      await replace(entries);
+    },
+  );
+  const done = host.importSession(review).catch((error: unknown) => error);
+  await arrived;
+  assert.throws(
+    () => host.discardSessionReview(read),
+    /A review being imported cannot be discarded/,
+  );
+  finish();
+  assert.equal(await done, undefined, "the import failed");
+  assert.ok((await at.kept.session(SCOPE)) !== null, "the imported session is kept");
+  // Settled, the review is the dialog's to let go of.
+  host.discardSessionReview(read);
+  const bridge = await host.bridge;
+  await assert.rejects(
+    bridge.client.request("transferCommit", { ticket: read.ticket }),
+    /No session read for an import/,
+  );
+});

@@ -2336,8 +2336,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     return (await asTransferError(host.client.request("readTransfer", input)))
       .result as PlayerTransferRead;
   }
-  /** Lets go of a session read for an import that will not be imported: cancelled, replaced, or refused. */
+  /** The tickets of the session imports under way, which `discardSessionReview` refuses. */
+  const importedTickets = new Set<string>();
+  /**
+   * Lets go of a session read for an import that will not be imported: cancelled, replaced, or refused. Throws for one
+   * whose import runs: that import still needs it, and lets the dialog go of it once it settles.
+   */
   function discardSessionReview(transfer: SessionTransferRead): void {
+    if (importedTickets.has(transfer.ticket))
+      throw new Error(
+        "A review being imported cannot be discarded: its import still needs the session read for it.",
+      );
     void bridge?.client.request("releaseTransfer", { ticket: transfer.ticket }).catch(() => {});
   }
   /**
@@ -2376,6 +2385,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const sessions = ctx.kept(keptSessions);
     let failure: string | null = null;
     let ranToEnd = false;
+    importedTickets.add(transfer.ticket);
     try {
       ranToEnd = await owned(ctx, async () => {
         const replaceSession = async (): Promise<void> => {
@@ -2464,6 +2474,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (unexpected !== null) throw unexpected.error;
       });
     } finally {
+      importedTickets.delete(transfer.ticket);
       releaseImporting();
     }
     // A stale import says nothing: the page moved on.
