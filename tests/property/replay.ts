@@ -526,7 +526,7 @@ function assertCheckpointRoundTripAndResume(): void {
 }
 
 function assertSameSeedIsDeterministic(seed: number, index: number): void {
-  const plan = compilePlan('let value = randomInteger(1..=100)\nsay "\${value}"\nexit');
+  const plan = compilePlan('let value = randomInteger(1..=100)\nsay "${value}"\nexit');
   const runtimeSeed = caseSeed(seed, index);
   const first = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: runtimeSeed }));
   const second = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: runtimeSeed }));

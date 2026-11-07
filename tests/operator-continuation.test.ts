@@ -29,10 +29,9 @@ function diagnosticCodes(source: string): string[] {
 }
 
 test("every binary operator may start a continued line inside parentheses", () => {
-  const operators = [
-    ...["*", "/", "%", "+", "-", "..", "..=", "otherwise"],
-    ...["==", "!=", "<", "<=", ">", ">=", "and", "or"],
-  ];
+  const arithmetic = ["*", "/", "%", "+", "-", "..", "..=", "otherwise"];
+  const comparison = ["==", "!=", "<", "<=", ">", ">=", "and", "or"];
+  const operators = [...arithmetic, ...comparison];
   for (const operator of operators) assertParsesAsOneLine(`let r = (a${BREAK}${operator} b)`);
   assertParsesAsOneLine(`let r = (a${BREAK}is integer)`);
   assertParsesAsOneLine(`let r = (a${BREAK}is not string)`);

@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { configurations, validatePlan } from "./plan.mjs";
 import { writeJson, hash } from "./json.mjs";

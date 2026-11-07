@@ -159,7 +159,7 @@ export const cases = (() => {
       'let count = 2\nfunction make { return [count, "bad"] }\nsay make()\nexit',
     ],
   );
-  const { extras: extras } = (() => {
+  const { extras } = (() => {
     const extras = [
       [
         "parse-direct",
@@ -192,7 +192,7 @@ export const cases = (() => {
     return { extras };
   })();
   cases.push(...extras);
-  const { dischargeCases: dischargeCases } = (() => {
+  const { dischargeCases } = (() => {
     const dischargeCases = [
       [
         "parse-stored-text",
@@ -204,7 +204,7 @@ export const cases = (() => {
     return { dischargeCases };
   })();
   cases.push(...dischargeCases);
-  const { readCases: readCases } = (() => {
+  const { readCases } = (() => {
     const readCases = [
       [
         "read-copy",
@@ -230,7 +230,7 @@ export const cases = (() => {
     return { readCases };
   })();
   cases.push(...readCases);
-  const { matrix: matrix } = (() => {
+  const { matrix } = (() => {
     const prefix = "let count: integer = 2\nlet base: integer[] = [1]\nlet src = [1, 2]\n";
     const values = {
       scalar: ["integer", "9"],
@@ -516,7 +516,7 @@ export const cases = (() => {
     ["rv-union-list", "let quantity: integer | boolean = 3\nsay [quantity]\nexit"],
     ["rv-nullable-object", "let quantity: integer? = 3\nsay {part: quantity}\nexit"],
   );
-  const { formerExceptions: formerExceptions } = (() => {
+  const { formerExceptions } = (() => {
     const formerExceptions = [
       [
         "x1165-list-default",

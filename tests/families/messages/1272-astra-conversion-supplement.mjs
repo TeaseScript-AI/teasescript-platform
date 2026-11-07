@@ -3,7 +3,7 @@
 export const cases = (() => {
   let annotation, before, cases, decl, expr, init, label, name, place, suffix, value;
   cases = [];
-  function add(name, source, hosts = ["bad", 2]) {
+  function add(name, source, _hosts = ["bad", 2]) {
     cases.push({ name: name, source: source + "\n" });
   }
   for (init of ['["a"]', "[3]"]) {
