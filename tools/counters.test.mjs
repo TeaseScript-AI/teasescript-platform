@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
@@ -79,6 +79,14 @@ const NOT_COUNTED = {
     line: (w) => `<!-- ${w} -->`,
     wrap: (body) => `<template>\n${body}\n</template>\n`,
   },
+  "block comment opened by a slash": { file: "src/slash.ts", line: (w) => `/*/ ${w} */` },
+  // Inside a character class a regular expression can hold `//` and the word, as a text search would read them.
+  "regular expression": { file: "src/regex.ts", line: (w) => `const r = /[//${w}]/;` },
+  "Vue script inside an HTML comment": {
+    file: "src/Commented.vue",
+    line: (w) => `// ${w}`,
+    wrap: (body) => `<template><p>x</p></template>\n<!--\n<script>\n${body}\n</script>\n-->\n`,
+  },
   Markdown: { file: "docs/notes.md", line: (w) => `// ${w}` },
   "untracked file": { file: "src/untracked.ts", line: (w) => `// ${w}`, untracked: true },
 };
@@ -133,6 +141,10 @@ const SITES = [
   [null, 'const s = "test.skip(";'],
   [null, 'test("m", (t) => { story.skip(); });'],
   [null, "function n(t) { t.skip(); }"],
+  ["skip", 'test("o", async (t) => { await t.test("sub", () => { t.skip(); }); });'],
+  [null, 'test("p", (t) => { function helper(t) { t.skip(); } });'],
+  [null, 'test("q", (t) => { { const t = story; t.todo(); } });'],
+  [null, "test(() => t.skip(), (t) => {});"],
 ];
 
 let fixture;
@@ -191,7 +203,7 @@ test("the lists count their entries, the structure signals come from structure-r
   );
   assert.deepEqual([c.largeFiles, c.broadFolders, c.longFunctions], [1, 1, 1]);
   assert.deepEqual(c.largestFile, { file: "src/big.ts", lines: 1103 });
-  assert.equal(c.longestFunction.name, "big");
+  assert.deepEqual(c.longestFunction, { file: "src/big.ts", name: "big", lines: 1102 });
   assert.equal(result.commit, git(fixture.root, "rev-parse", "HEAD"));
   const text = run(fixture.root);
   assert.equal(text.status, 0, text.stderr);
@@ -213,13 +225,45 @@ test("a missing list is absent, and a list of another shape or a ROOT that is no
     assert.equal(c[key], null, key);
   assert.match(run(root).stdout, /^Comment external names \(may grow\): absent$/mu);
 
-  const malformed = checkout({ "tools/oxlint/comment-forecasts-allowed.json": "{}" });
-  const m = run(malformed, "--json");
-  assert.equal(m.status, 2);
-  assert.match(m.stderr, /comment-forecasts-allowed\.json is not an array/u);
+  for (const [file, text, message] of [
+    [
+      "tools/oxlint/comment-forecasts-allowed.json",
+      "{}",
+      /comment-forecasts-allowed\.json is not an array/u,
+    ],
+    [
+      ".oxlintrc.json",
+      '{"overrides": null}',
+      /\.oxlintrc\.json is not an object whose `overrides`/u,
+    ],
+    [
+      ".oxlintrc.json",
+      '{"overrides": [{"files": null}]}',
+      /\.oxlintrc\.json is not overrides with `files`/u,
+    ],
+  ]) {
+    const m = run(checkout({ [file]: text }), "--json");
+    assert.equal(m.status, 2, text);
+    assert.match(m.stderr, message);
+  }
 
   const notCheckout = mkdtempSync(path.join(tmpdir(), "counters-test-"));
   folders.push(notCheckout);
   assert.equal(run(notCheckout).status, 2);
   assert.equal(run(path.join(fixture.root, "src")).status, 2);
+});
+
+test("SIGTERM stops structure-report, removes the temporary folder and exits 143", async () => {
+  const temporary = mkdtempSync(path.join(tmpdir(), "counters-test-"));
+  folders.push(temporary);
+  const child = spawn(process.execPath, [tool, fixture.root], {
+    env: { ...process.env, TMPDIR: temporary },
+    stdio: "ignore",
+  });
+  const exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
+  // The tool creates its folder just before it starts structure-report, which takes a second to load its parser.
+  while (readdirSync(temporary).length === 0) await new Promise((r) => setTimeout(r, 10));
+  child.kill("SIGTERM");
+  assert.equal(await exited, 143);
+  assert.deepEqual(readdirSync(temporary), []);
 });
