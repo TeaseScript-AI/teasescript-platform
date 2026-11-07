@@ -9,6 +9,7 @@ import {
   each,
   indexed,
   joined,
+  mapped,
   sliced,
   some,
   sorted,
@@ -57,32 +58,54 @@ test("each charged helper charges every item it takes, a repeated one too, and n
   assert.equal(walk.units(), 3);
 });
 
-test("a charge that stops the analysis stops each helper's body, copy and sort before it runs", () => {
-  // (a ledger with no room: its first charge throws)
+test("a charge that stops the analysis stops each helper's body, read, copy, join and sort before it runs", () => {
+  // (a ledger with no room: its first charge throws; each item read, mapped or tested is an observed effect, and
+  // `copied` is `mapped` with no effect of its own)
   const stopped = (): WorkLedger => new WorkLedger(0);
-  let body = 0;
-  assert.throws(() => {
-    for (const _ of each(stopped(), C, [1, 2, 3])) body += 1;
-  });
-  assert.throws(() => {
-    for (const _ of indexed(stopped(), C, [1, 2, 3])) body += 1;
-  });
-  assert.equal(body, 0);
-  const tested: number[] = [];
-  assert.throws(() =>
-    some(stopped(), C, [1, 2], (item) => {
-      tested.push(item);
-      return false;
-    }),
-  );
-  assert.deepEqual(tested, []);
+  let effects = 0;
+  const observed = (): string[] => {
+    const items: string[] = [];
+    for (let at = 0; at < 2; at += 1)
+      Object.defineProperty(items, at, {
+        enumerable: true,
+        get: () => {
+          effects += 1;
+          return "a";
+        },
+      });
+    return items;
+  };
+  const positions = {
+    length: 2,
+    at: (): string => {
+      effects += 1;
+      return "a";
+    },
+  };
+  const counted = (item: number): number => {
+    effects += 1;
+    return item;
+  };
+  const runs: readonly (readonly [string, () => unknown])[] = [
+    [
+      "each",
+      () => {
+        for (const item of each(stopped(), C, [1, 2, 3])) counted(item);
+      },
+    ],
+    ["indexed", () => [...indexed(stopped(), C, positions)]],
+    ["some", () => some(stopped(), C, [1, 2], (item) => counted(item) < 0)],
+    ["mapped", () => mapped(stopped(), C, [1, 2], counted)],
+    ["sliced", () => sliced(stopped(), C, observed(), 0)],
+    ["joined", () => joined(stopped(), C, observed(), ".")],
+  ];
+  for (const [name, run] of runs) {
+    effects = 0;
+    assert.throws(run, name);
+    assert.equal(effects, 0, name);
+  }
   const items = [3, 1, 2];
   assert.throws(() => sorted(stopped(), C, items));
+  assert.throws(() => copied(stopped(), C, [1, 2]));
   assert.deepEqual(items, [3, 1, 2]);
-  for (const copy of [
-    () => sliced(stopped(), C, [1, 2], 0),
-    () => copied(stopped(), C, [1, 2]),
-    () => joined(stopped(), C, ["a", "b"], "."),
-  ])
-    assert.throws(copy);
 });
