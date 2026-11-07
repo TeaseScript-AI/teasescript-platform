@@ -296,12 +296,11 @@ test("a stop the oracle's own questions would make is never published: at the le
   assert.ok(request !== null);
   const full = publicationParts(files, MODES[0]!, GLOBALS);
   assert.ok(full !== null);
+  // (the route stops where its plan or diagnostics differ from the natural allowance's)
+  const natural = publishedRoute(files, GLOBALS).text;
   const stops = (allowance: number) =>
-    withTestAllowance(allowance, () => publishedRoute(files, GLOBALS).text).includes(
-      '"kind":"budget"',
-    );
-  const total = analyseCore(request).budget.total;
-  let [low, high] = [total - 1, 2 * total];
+    withTestAllowance(allowance, () => publishedRoute(files, GLOBALS).text) !== natural;
+  let [low, high] = [1, analyseCore(request).budget.total];
   assert.ok(stops(low));
   while (stops(high)) {
     [low, high] = [high, 2 * high];
