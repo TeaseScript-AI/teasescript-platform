@@ -38,6 +38,17 @@ const NATIVE_READS = new Set(["get", "keys", "values", "pop"]);
 const KEY_WALK = "src/type-inference/core/contract/key-ids.ts:keyWalk";
 const KEY_WALK_PREFIX = "src/type-inference/core/contract/key-ids.ts:KeyWalk.prefix";
 const PATH_STEPS = "src/type-inference/core/contract/key-ids.ts:PathSteps";
+/** The iterable and generator types, whose element is their first type argument. */
+const ITERABLES = new Set([
+  "Iterable",
+  "IterableIterator",
+  "Iterator",
+  "IteratorObject",
+  "Generator",
+  "MapIterator",
+  "SetIterator",
+  "ArrayIterator",
+]);
 /** The demand and proof objects' callable properties, which the solver calls. */
 const DEMAND_CALLBACKS = new Set(["make", "signature"]);
 
@@ -94,6 +105,9 @@ export function objectsLanguage({
       return "primitive";
     return checker.isArrayLikeType(type) ? "array" : "object";
   };
+  /** Whether every value of a type is a primitive, `null` or `undefined`. */
+  const primitiveOnly = (type) =>
+    type.isUnion() ? type.types.every(primitiveOnly) : ["primitive", "none"].includes(kind(type));
   /** The element type of a collection type (an array, a Set, a Map's values, an iterable), or `undefined`. */
   const elementOf = (type) => {
     if (checker.isArrayLikeType(type)) return checker.getIndexTypeOfType(type, ts.IndexKind.Number);
@@ -101,6 +115,7 @@ export function objectsLanguage({
     const args = type.aliasTypeArguments ?? checker.getTypeArguments?.(type) ?? [];
     if (name === "Set" || name === "ReadonlySet") return args[0];
     if (name === "Map" || name === "ReadonlyMap" || name === "WeakMap") return args[1];
+    if (name !== undefined && ITERABLES.has(name)) return args[0];
     return undefined;
   };
   /**
@@ -127,6 +142,32 @@ export function objectsLanguage({
     typeof checker.isTypeAssignableTo === "function"
       ? checker.isTypeAssignableTo(a, b)
       : checker.typeToString(a) === checker.typeToString(b);
+  /** A value that carries nothing in: a primitive literal, `null`, a boolean, an empty array. */
+  const trivial = (e) =>
+    ts.isLiteralExpression(e) ||
+    ts.isPrefixUnaryExpression(e) ||
+    [ts.SyntaxKind.NullKeyword, ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword].includes(
+      e.kind,
+    ) ||
+    (ts.isArrayLiteralExpression(e) && e.elements.length === 0);
+  /** The module's exported functions' declarations (an export list's included), each once. */
+  const exportedFunctions = () => {
+    const module = checker.getSymbolAtLocation(sourceFile);
+    const found = new Set();
+    for (const exported of module === undefined ? [] : checker.getExportsOfModule(module)) {
+      const declaration = original(exported)?.valueDeclaration;
+      if (declaration === undefined || !local(declaration)) continue;
+      if (ts.isFunctionDeclaration(declaration)) found.add(declaration);
+      else if (
+        ts.isVariableDeclaration(declaration) &&
+        declaration.initializer !== undefined &&
+        (ts.isArrowFunction(strip(declaration.initializer)) ||
+          ts.isFunctionExpression(strip(declaration.initializer)))
+      )
+        found.add(declaration);
+    }
+    return found;
+  };
   const fresh = (e) =>
     ts.isArrayLiteralExpression(e) ||
     ts.isObjectLiteralExpression(e) ||
@@ -283,8 +324,7 @@ export function objectsLanguage({
       const at = helper === undefined ? undefined : COLLECTION_ARGUMENT.get(helper);
       return at === undefined ? "a callback's parameter" : origin(fn.parent.arguments[at]);
     }
-    if (ts.isFunctionDeclaration(fn) && ts.getCombinedModifierFlags(fn) & ts.ModifierFlags.Export)
-      return null;
+    if (ts.isFunctionDeclaration(fn) && exportedFunctions().has(fn)) return null;
     const index = fn.parameters.indexOf(parameter);
     const owner = ts.isConstructorDeclaration(fn) ? fn.parent : fn;
     const name = owner.name;
@@ -356,13 +396,9 @@ export function objectsLanguage({
       checker.getTypeAtLocation(declaration),
       ts.IndexKind.Number,
     );
-    if (
-      element === undefined ||
-      kind(element) !== "primitive" ||
-      (element.isUnion() && element.types.some((t) => kind(t) !== "primitive"))
-    )
+    if (element === undefined || !primitiveOnly(element) || kind(element) === "none")
       return reject(call, "sorted-elements", "`sorted` over elements that are not primitive");
-    // never aliased: read only by `.length`, as `sorted`'s array, or as a source of a helper's literal array
+    // never aliased: read only by `.length`, as `sorted`'s array, or as a source `concatenated` copies the elements of
     const visit = (node) => {
       if (
         ts.isIdentifier(node) &&
@@ -375,7 +411,7 @@ export function objectsLanguage({
           (ts.isCallExpression(p) && helperOf(p) === "sorted" && p.arguments[2] === node) ||
           (ts.isArrayLiteralExpression(p) &&
             ts.isCallExpression(p.parent) &&
-            helperOf(p.parent) !== undefined);
+            helperOf(p.parent) === "concatenated");
         if (!read) reject(node, "sorted-alias", "alias of an array `sorted` sorts");
       }
       ts.forEachChild(node, visit);
@@ -528,25 +564,45 @@ export function objectsLanguage({
     if (k === "primitive" || k === "none") return true;
     if (k === "array") {
       const element = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-      return element !== undefined && entryType(element) && kind(element) !== "array";
+      return element !== undefined && primitiveOnly(element);
     }
     const declaration = (type.getSymbol() ?? type.aliasSymbol)?.declarations?.find((d) =>
       ts.isClassLike(d),
     );
     return declaration !== undefined && !local(declaration) && outsideClass(declaration);
   };
-  const visit = (node) => {
-    if (
-      ts.isFunctionDeclaration(node) &&
-      ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export
-    )
-      for (const parameter of node.parameters)
+  // the module's entries, by its exports (an export list included): function declarations only
+  for (const declaration of exportedFunctions())
+    if (ts.isFunctionDeclaration(declaration)) {
+      for (const parameter of declaration.parameters)
         if (!entryType(checker.getTypeAtLocation(parameter)))
           reject(
             parameter,
             "entry-parameter",
             "entry parameter but a primitive, a native array of primitives or an audited class",
           );
+    } else reject(declaration, "export-form", "exported function but a function declaration");
+  /** Whether a captured value in an annotated aggregate is typed otherwise than its place in it (a widening alias). */
+  const widened = (e) => {
+    e = strip(e);
+    if (ts.isArrayLiteralExpression(e)) return e.elements.some(widened);
+    if (ts.isObjectLiteralExpression(e))
+      return e.properties.some((member) =>
+        ts.isPropertyAssignment(member)
+          ? widened(member.initializer)
+          : ts.isShorthandPropertyAssignment(member)
+            ? differs(member.name)
+            : false,
+      );
+    if (trivial(e) || ts.isNewExpression(e)) return false;
+    return differs(e);
+  };
+  const differs = (e) => {
+    const place = checker.getContextualType(e);
+    const given = checker.getTypeAtLocation(e);
+    return place !== undefined && (!assignable(place, given) || !assignable(given, place));
+  };
+  const visit = (node) => {
     if (ts.isCallExpression(node) || ts.isNewExpression(node)) checkCall(node);
     else if (ts.isTaggedTemplateExpression(node))
       reject(node, "tagged-template", "tagged template");
@@ -582,12 +638,14 @@ export function objectsLanguage({
     if (
       ts.isVariableDeclaration(node) &&
       node.type !== undefined &&
-      node.initializer !== undefined &&
-      !fresh(strip(node.initializer))
+      node.initializer !== undefined
     ) {
+      const value = strip(node.initializer);
       const declared = checker.getTypeFromTypeNode(node.type);
       const given = checker.getTypeAtLocation(node.initializer);
-      if (!assignable(declared, given) || !assignable(given, declared))
+      if (
+        fresh(value) ? widened(value) : !assignable(declared, given) || !assignable(given, declared)
+      )
         reject(node, "widening", "binding typed otherwise than its value (a widening alias)");
     }
     if (
@@ -596,7 +654,10 @@ export function objectsLanguage({
     )
       reject(node, "mixed-elements", "collection of mixed element kinds");
     if (
-      (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node) || ts.isCallExpression(node)) &&
+      (ts.isIdentifier(node) ||
+        ts.isPropertyAccessExpression(node) ||
+        ts.isCallExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
       !ts.isPartOfTypeNode(node) &&
       valuePosition(node)
     ) {
