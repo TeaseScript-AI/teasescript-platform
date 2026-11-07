@@ -311,22 +311,22 @@ export class PlayerBridge {
   section<T>(session: PlayerSession, body: (section: SessionSection) => Promise<T>): Promise<T> {
     this.#own(session);
     return this.#client.section(session.id, (send: SectionSend) => {
-      const bridge = this;
+      const shown = () => this.latest(session) ?? session;
       return body({
         send: (op, args, options = {}) =>
-          bridge.#send(
+          this.#send(
             session.id,
             (onReply) =>
               send(
                 op,
                 args,
-                options.basis ?? bridge.latest(session)?.revision ?? session.revision,
+                options.basis ?? this.latest(session)?.revision ?? session.revision,
                 onReply,
               ),
             options.publish,
           ),
         get session() {
-          return bridge.latest(session) ?? session;
+          return shown();
         },
       });
     });
