@@ -3728,6 +3728,130 @@ test("the route rule's error stands where a run can bring the null unchecked, an
   }
 });
 
+test("the tested-producer rule admits its closed set of forms over every axis, and anything else is the route rule's error (AD-1, #1073 PR 4)", () => {
+  // (the open-set rule: the expected outcome comes from the rule's own table, never from the engine. A test removes the
+  // offending kind where it holds (H) or where it fails (F); `not` swaps the two; a position takes H, F or neither; an
+  // exit kind leaves for good. A use with a check on every route warns; any other is the error)
+  const KINDS = {
+    null: {
+      declare: 'function f { if askBoolean("f") { return null }\n return 1 }\n',
+      forms: [
+        ["f() != null", true, false],
+        ["f() == null", false, true],
+        ["f() is integer", true, false],
+        ["f() is integer?", false, true],
+        ["f() != 2", false, false],
+      ],
+    },
+    string: {
+      declare: 'function f: integer | string { if askBoolean("f") { return "s" }\n return 1 }\n',
+      forms: [
+        ["f() is integer", true, false],
+        ["f() is string", false, true],
+        ["f() is not string", true, false],
+        // (where `f() != null` fails, the value tested is null: not a string)
+        ["f() != null", false, true],
+        ["f() != 2", false, false],
+      ],
+    },
+  } as const;
+  type Proof = (holds: boolean, fails: boolean) => boolean;
+  const USE = "repeat f() {}";
+  const COMPARE = "f() > 0";
+  const H: Proof = (holds) => holds;
+  const F: Proof = (_, fails) => fails;
+  const NEVER: Proof = () => false;
+  // (each position: its source around a condition `C` and an exit `E`, what proves it, and the exit kinds it takes)
+  const ANY = ["exit", "end", "return", "goto", "continue", "break"] as const;
+  const TOP = ["exit", "end", "goto"] as const;
+  const POSITIONS: readonly (readonly [
+    string,
+    (c: string, e: string) => string,
+    Proof,
+    readonly string[],
+  ])[] = [
+    ["then arm", (c) => `if ${c} { ${USE} }`, H, ["none"]],
+    ["else arm", (c) => `if ${c} { say "n" } else { ${USE} }`, F, ["none"]],
+    ["else-if arm", (c) => `if ${c} { say "n" } else if askBoolean("e") { ${USE} }`, F, ["none"]],
+    ["nested in then arm", (c) => `if ${c} { if askBoolean("e") { ${USE} } }`, H, ["none"]],
+    ["loop body", (c) => `while ${c} { ${USE}\nbreak }`, H, ["none"]],
+    ["after an and", (c) => `if ${c} and ${COMPARE} { say "y" }`, H, ["none"]],
+    ["after an or", (c) => `if ${c} or ${COMPARE} { say "y" }`, F, ["none"]],
+    ["before an and", (c) => `if ${COMPARE} and ${c} { say "y" }`, NEVER, ["none"]],
+    ["past a while", (c) => `while ${c} { say "w" }\n${USE}`, F, ["none"]],
+    [
+      "past a while a break leaves",
+      (c) => `while ${c} { if askBoolean("b") { break } }\n${USE}`,
+      NEVER,
+      ["none"],
+    ],
+    ["past a leaving then arm", (c, e) => `if ${c} { ${e} }\n${USE}`, F, ANY],
+    [
+      "past a leaving then arm with an else",
+      (c, e) => `if ${c} { ${e} } else { say "y" }\n${USE}`,
+      F,
+      ANY,
+    ],
+    ["past a leaving else arm", (c, e) => `if ${c} { say "y" } else { ${e} }\n${USE}`, H, ANY],
+    [
+      "past a guard in both arms",
+      (c, e) => `if askBoolean("s") { if ${c} { ${e} } } else { if ${c} { ${e} } }\n${USE}`,
+      F,
+      ANY,
+    ],
+    [
+      "past a guard in one arm",
+      (c, e) => `if askBoolean("s") { if ${c} { ${e} } }\n${USE}`,
+      NEVER,
+      ANY,
+    ],
+    [
+      "past a guard a label follows",
+      (c, e) => `if askBoolean("g") { goto back }\nif ${c} { ${e} }\nlabel back\n${USE}`,
+      NEVER,
+      TOP,
+    ],
+    ["past a loop holding a guard", (c, e) => `repeat 2 { if ${c} { ${e} } }\n${USE}`, NEVER, ANY],
+  ];
+  // (an exit kind's frame: `return` in a function, `continue` and `break` in a loop, `goto` to a label after the use)
+  const framed = (exit: string, body: string): string =>
+    exit === "return"
+      ? `function h {\n${body}\n}\nh()\n`
+      : exit === "continue" || exit === "break"
+        ? `repeat 2 {\n${body}\n}\n`
+        : exit === "goto"
+          ? `${body}\nlabel done\n`
+          : `${body}\n`;
+  const statement = (exit: string): string => (exit === "goto" ? "goto done" : exit);
+  const covered = new Set<string>();
+  const wrong: string[] = [];
+  for (const [kind, { declare, forms }] of Object.entries(KINDS))
+    for (const [test, holds, fails] of forms)
+      for (const negated of [false, true])
+        for (const [position, make, proof, exits] of POSITIONS)
+          for (const exit of exits) {
+            const condition = negated ? `not (${test})` : test;
+            const source = declare + framed(exit, make(condition, statement(exit))) + "exit\n";
+            const checked = negated ? proof(fails, holds) : proof(holds, fails);
+            const request = coreRequest([{ path: "main.tease", source }]);
+            assert.ok(request !== null, source);
+            const error = inBothOrders(() =>
+              analyseCore(request).diagnostics.some((d) => d.class === "compile-error"),
+            );
+            if (error === checked)
+              wrong.push(`${checked ? "warning" : "error"} expected: ${source}`);
+            covered.add([kind, test, negated, position, exit].join(" | "));
+          }
+  assert.deepEqual(wrong, []);
+  // (the coverage check: every kind, form, polarity, position and exit kind it takes, each once)
+  const expected = Object.values(KINDS).reduce(
+    (sum, { forms }) =>
+      sum + forms.length * 2 * POSITIONS.reduce((count, [, , , exits]) => count + exits.length, 0),
+    0,
+  );
+  assert.equal(covered.size, expected);
+});
+
 test("no production code selects the core: only tests reach the candidate entry", () => {
   const root = process.cwd();
   for (const directory of ["src", "playground", "player", "tools"])
