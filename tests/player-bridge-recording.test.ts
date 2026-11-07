@@ -202,11 +202,14 @@ interface TapeArguments {
   readonly targetMs: number;
 }
 
-/** What a step shows, comparable across the three runs. */
-const shownOf = (session: Pick<PlayerSession, "state" | "events">) => ({
-  state: session.state,
-  events: [...session.events],
-});
+/**
+ * What a step shows, comparable across the three runs: a publication's critical view (L5f), so the adapter's own
+ * session is compared without its active calls.
+ */
+const shownOf = (session: Pick<PlayerSession, "state" | "events">) => {
+  const { calls: _calls, ...state } = { calls: undefined, ...session.state };
+  return { state, events: [...session.events] };
+};
 
 /** The tape over the bridge: each step's result and what shows after it; envelope refusals in between record nothing. */
 async function overBridge(bridge: PlayerBridge, inProcess: boolean) {
