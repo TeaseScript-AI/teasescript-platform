@@ -424,11 +424,16 @@ export class Values {
     // nearest candidate, §13.2 (2), #1073)
     if (read.def !== null && program.dom.dominates(g.node, read.def.node))
       return contract.entered(root, read.items);
-    if (fails !== null)
+    // (U5: a check on every route that the compiler cannot keep names what dropped it, the failing event's word, V30 §13)
+    if (fails !== null) {
+      const worded = read.items.map((item): Item =>
+        item.tag === "empty" ? item : { ...item, context: fails, tested: true },
+      );
       return contract.entered(
         root,
-        read.guardable && guards.narrowed(key, at!) ? marked(read.items) : read.items,
+        read.guardable && guards.narrowed(key, at!) ? marked(worded) : worded,
       );
+    }
     // (an exact definition before G's entry is the value G tested, filtered by G's form)
     if (read.def !== null)
       return contract.entered(

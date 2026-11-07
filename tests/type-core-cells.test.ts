@@ -689,17 +689,19 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "warning-runtime-check",
     "unknown unknown",
   ],
+  // (AD-1, TABLE r4.52: the parse's `null` default reaches the member by a route without a check, the route rule's
+  // error, as F15's `load` default does in the expectation set; the receiver's unknown keeps its warnings)
   [
     "F25 an unknown receiver's reverse",
     'let raw = fromJson("\\"abc\\"", default: null, files: false)\nlet text: string = raw.reverse()',
-    "warning-runtime-check",
-    "unknown unknown unknown",
+    "compile-error",
+    "unknown - unknown",
   ],
   [
     "F7 an unknown receiver's remove",
     'let raw = fromJson("{}", default: null, files: false)\nlet text: string = raw.remove("key")',
-    "warning-runtime-check",
-    "unknown unknown unknown unknown",
+    "compile-error",
+    "unknown unknown - unknown",
   ],
   // X7, H1, G1(b) (r4.25; Astra B4): a dead call registers no handler; a live one before the read does
   [
