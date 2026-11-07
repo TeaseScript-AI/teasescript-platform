@@ -1770,12 +1770,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       importing.value = false;
     };
   }
-  /** Runs `operation`, which ends without effect where its ownership went stale. */
-  async function owned(operation: () => Promise<void>): Promise<void> {
+  /** Runs `operation`, which ends without effect where its ownership went stale; resolves to whether it ran to its end. */
+  async function owned(operation: () => Promise<void>): Promise<boolean> {
     try {
       await operation();
+      return true;
     } catch (error) {
       if (!(error instanceof StaleOperation)) throw error;
+      return false;
     }
   }
   /** Settles `event` in the lease and posts the host messages it implies, on the connection the page has. */
@@ -1985,6 +1987,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       ctx.check();
       const plan = scriptPlan;
       const found = plan === null ? {} : await restoreKept(plan, ctx);
+      if ("session" in found && !ctx.current()) bridgeOf(found.session).release(found.session);
       ctx.check();
       if ("session" in found) {
         ctx.commit(() => {
@@ -2255,8 +2258,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const owner = ++preparation;
     const ctx = persistenceOwnership(owner);
     let failure: string | null = null;
+    let ranToEnd = false;
     try {
-      await owned(async () => {
+      ranToEnd = await owned(async () => {
         try {
           // A session being kept is kept before the import replaces it.
           while (keeping !== null) await keeping;
@@ -2322,7 +2326,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     } finally {
       releaseImporting();
     }
-    if (failure !== null && ctx.current()) throw new StorageTransferError(failure);
+    // A stale import says nothing: the page moved on.
+    if (failure !== null && ranToEnd) throw new StorageTransferError(failure);
   }
 
   /**
