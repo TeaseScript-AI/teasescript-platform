@@ -111,10 +111,17 @@ function repository({ conflict = false, slowOxlint = false } = {}) {
 }
 
 const tool = fileURLToPath(new URL("./check-changed.mjs", import.meta.url));
-// (without `agent-prettier` on `PATH`, so the stand-in Prettier runs wherever the test does)
-const environment = { ...process.env, PATH: dirname(process.execPath) + ":/usr/bin:/bin" };
+// Each run gets a temporary folder of its own (`TMPDIR`), so other runs of the tool on this machine cannot change what
+// is left in it. (Without `agent-prettier` on `PATH`, so the stand-in Prettier runs wherever the test does.)
+const runTmp = mkdtempSync(join(tmpdir(), "check-changed-test-"));
+process.on("exit", () => rmSync(runTmp, { recursive: true, force: true }));
+const environment = {
+  ...process.env,
+  TMPDIR: runTmp,
+  PATH: dirname(process.execPath) + ":/usr/bin:/bin",
+};
 const leftovers = () =>
-  readdirSync(tmpdir()).filter((name) => name.startsWith("check-changed-merged-"));
+  readdirSync(runTmp).filter((name) => name.startsWith("check-changed-merged-"));
 
 test(
   "--merged checks the merge in a temporary worktree and removes it",
