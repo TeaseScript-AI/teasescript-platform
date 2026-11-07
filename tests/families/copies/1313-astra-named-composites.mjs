@@ -10,7 +10,7 @@ const corpus = (() => {
       where = "amid",
       reads = true,
       object = true,
-      binding = (i) => `load("k", default: hostValue)`,
+      binding = (_i) => `load("k", default: hostValue)`,
     } = {},
   ) {
     const elements = Array.from({ length: k }, (_, i) => `l${i}`);

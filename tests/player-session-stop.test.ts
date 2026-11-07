@@ -819,7 +819,7 @@ for (const atDraw of [false, true])
     };
     await until(() => typeof binding("a") === "string", "the first photo was not taken");
     const taken = binding("a");
-    assert.ok(typeof taken === "string" && /:1$/u.test(taken));
+    assert.ok(typeof taken === "string" && taken.endsWith(":1"));
     // The store numbers its photos: the next one taken is the second.
     const next = taken.replace(/:1$/u, ":2");
     const release = holdEncoding();
@@ -895,7 +895,7 @@ test("a photo held back at a random draw the capture's observation reaches is re
   await host.activate();
   await until(() => typeof binding("first") === "string", "the first photo was not taken");
   const first = binding("first");
-  assert.ok(typeof first === "string" && /:1$/u.test(first));
+  assert.ok(typeof first === "string" && first.endsWith(":1"));
   const heldBack = first.replace(/:1$/u, ":2");
   const release = holdEncoding();
   context.after(release);

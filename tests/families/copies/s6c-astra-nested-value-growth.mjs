@@ -2,7 +2,7 @@
 // (R/astra-m4-s6c-review-evidence/scales.mjs).
 export const sizes = [64, 128];
 const corpus = (() => {
-  const { scaleCases: scaleCases } = (() => {
+  const { scaleCases } = (() => {
     function scaleCases(k, depth = 3) {
       const rows = (fn) => Array.from({ length: k }, (_, i) => fn(i));
       const fields = rows((i) => `p${i}:1`).join(",");

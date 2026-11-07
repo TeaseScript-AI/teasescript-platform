@@ -1,4 +1,4 @@
-import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
+import type { PlaceId, SourceSite } from "../../graph.js";
 import { operandsOf, type Strip } from "../carriers.js";
 import type { Admission } from "../admission.js";
 import type { MixedSteps } from "../result.js";
@@ -306,10 +306,20 @@ export function literalElements(
   const conflicts = new Map<string, readonly (readonly string[])[]>();
   // (per key, the paths where what the elements definitely hold meets, A2's)
   const atCopies = new Map<string, ReadonlySet<string>>();
-  // (a literal of two elements or more that lands in no written type: its elements are compared)
+  // (an element that may give a concrete kind: every one but a value proved to hold only `null`, which decides nothing,
+  // ADR 0021 §1.3's `deciding`, and has no descendants: #1857)
+  const contributes = (d: Definition): boolean => {
+    const own = d.value === undefined ? [] : (program.hasOf.get(d.value) ?? []);
+    return !(own.length === 1 && own[0]!.type.kind === "atom" && own[0]!.type.name === "null");
+  };
+  // (a literal of two elements or more that may give a concrete kind, landing in no written type: its elements are
+  // compared; with one at most, no pair of them can be mixed, at its root or below it, #1857)
   const compared = (cell: PlaceId, list: readonly Definition[]): boolean => {
     const owner = program.cellOwner.get(cell);
-    return owner?.kind === "cell" && list.length >= 2 && contract.landsIn(owner.owner, []) === null;
+    if (owner?.kind !== "cell") return false;
+    let concrete = 0;
+    for (const d of list) if (contributes(d) && ++concrete === 2) break;
+    return concrete >= 2 && contract.landsIn(owner.owner, []) === null;
   };
   // (the compared elements' own structures, announced before any is asked, so a nest of them is listed inside first
   // whichever cell the order takes first: #1444)
@@ -494,11 +504,11 @@ export function literalElements(
           // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
           // decider on the path; an element whose structure holds no source holds no copy (#1106: k literals nested
           // in each other asked each other's stops)
-          const copied =
+          const decider =
             identity === null
               ? null
-              : (drive(admission, earliestDecider(admission, d.value, d.node, path, null))?.term ??
-                null);
+              : drive(admission, earliestDecider(admission, d.value, d.node, path, null));
+          const copied = decider?.term ?? null;
           const kinds = [...new Set(own.map(family))];
           // (the kinds its error names: below the element, with any null the earliest may hold there, as its written
           // type is described; the null decides nothing, #1753)
@@ -506,7 +516,19 @@ export function literalElements(
           if (copied !== null) {
             const written = typeTags(copied);
             const tags = written.filter((tag) => tag !== "null");
-            first.set(at, { tags, written: true, own: below ? written : tags, d });
+            // (its leaf's null by the form rule's copy case, as the later element's (`mayHoldNull`): at the deciding
+            // copy's own level as it is read, narrowed, below it by the copied term. #1901, Astra r1's B1 on #1908; from
+            // the decider already asked, so no walk down the element, Codex r3)
+            const leafNull =
+              decider!.own === true
+                ? occurrenceNull(admission, d.value, d.node, path)
+                : written.includes("null");
+            first.set(at, {
+              tags,
+              written: true,
+              own: below && leafNull ? [...tags, "null"] : tags,
+              d,
+            });
           } else if (kinds.length === 1) {
             const nulls = below && items.some((item) => item.tag === "null");
             first.set(at, { tags: kinds, written: false, own: nulls ? [...own, "null"] : own, d });
@@ -1442,15 +1464,16 @@ function mayHoldNull(
     return program.opOf.get(at)?.kind === "fallback"
       ? operandNull(admission, at, from)
       : occurrenceNull(admission, at, from);
-  const term = (path: readonly string[]): TypeTerm | null =>
-    drive(admission, earliestDecider(admission, at, from, path, null))?.term ?? null;
-  const copied = holdsSource(admission, at) ? term(steps) : null;
-  // (a copy's term where the copy decides the layer from above, its parent layer's term too: `b: string?[]` in
-  // `[[1],b]`; one whose own level the layer is, `atom` in `{v:atom}`, as it is read there, narrowed: Codex r1 on #1819)
-  if (copied !== null)
-    return term(keptSlice(admission.work, steps, 0, steps.length - 1)) !== null
-      ? typeTags(copied).includes("null")
-      : occurrenceNull(admission, at, from, steps);
+  const decided = holdsSource(admission, at)
+    ? drive(admission, earliestDecider(admission, at, from, steps, null))
+    : null;
+  // (a copy's term where the deciding copy stands above the layer, which lies below its own level: `b: string?[]` in
+  // `[[1],b]`, `d`'s element in `held = d + [2]`; where the layer is the deciding copy's own level, `atom` in
+  // `{v:atom}`, as it is read there, narrowed: Codex r1 on #1819, #1901)
+  if (decided !== null && decided.term !== null)
+    return decided.own === true
+      ? occurrenceNull(admission, at, from, steps)
+      : typeTags(decided.term).includes("null");
   const key = contract.copiedKey(at) ?? contract.resultKey(at);
   if (key !== null) {
     const path = joinSteps(stepsArray(keyStepsIn(contract, key)), steps);

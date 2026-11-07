@@ -62,7 +62,6 @@ import {
   readlinkSync,
   readSync,
   renameSync,
-  rmdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -738,7 +737,7 @@ export async function planned(baseline, area, plan, first = false) {
   const top = pathOf(baseline, "baseline");
   areaName(area);
   const id = hash(plan);
-  const { shards, places } = parsePlan(plan);
+  const { shards, places: _places } = parsePlan(plan);
   const outcome = await gate(baseline, (text) => {
     const record = recorded(text).get(area);
     // (a writer that plans an area of the table first, `first`, plans it in the table's count; an adopted seed's PLAN

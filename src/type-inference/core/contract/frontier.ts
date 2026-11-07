@@ -2,6 +2,7 @@ import type { PlaceId } from "../../graph.js";
 import { joinParts, keep, keptParts, keptSteps } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
+import { marked } from "../guards.js";
 import { makeItem, mergeItems, REASON, type Item } from "../items.js";
 import { selectsElement } from "../method-categories.js";
 import { positions } from "../positions.js";
@@ -11,8 +12,8 @@ import { entered, ingressLeafOf } from "./ingress.js";
 import { canonicalKey, isKeyId, keyDepthIn, stepsArray, type PathRef } from "./key-ids.js";
 import { hostAt, propertyOnly, unknownItem } from "./kinds.js";
 import { lackingAt, pathAt } from "./literal-index.js";
-import { marksNothing } from "./marks.js";
-import type { IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
+import { depthOf, markStart, markStep, marksNothing, type MarkResidual } from "./marks.js";
+import type { Holder, IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
 
 /*
  * #1655: a read below a push, one step at a time. A prefix's key entry below its own root (`p1 = p1.q`, a copy cycle
@@ -26,6 +27,13 @@ import type { IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
  * `n`. The writing edge overwrites every writer but a pure `missing`'s, whose earliest token the join keeps, and every
  * other field the merge joins, so the join is the native nested answer there (HEAD 0, TABLE r4.385). A closure outside
  * the eligible grammar declines: the native reader answers.
+ *
+ * #1784: a route through a marking entry or literal read (its guard bit, or its holder's mark at the rest below it,
+ * §3.2) reaches `mark` nodes: the same nodes, their leaves `marked`. A holder's mark depends on the rest's first
+ * `depthOf` steps, so its route is a `hold` node carrying the residual states of the mark automaton those steps leave,
+ * until they decide it (or the path ends). Marking each leaf and then joining is native's join of marked answers exactly where no native-value leaf is
+ * reached marked (HEAD 1: `marked` commutes with `mergePair` per item unless a context ranked after `"branch"` meets a
+ * null one, and only a native value carries one): such a leaf declines (`marks-native`).
  */
 
 type FNode =
@@ -45,7 +53,20 @@ type FNode =
       readonly id: number;
     }
   | { readonly kind: "leaf"; readonly item: Item }
-  | { readonly kind: "native"; readonly value: PlaceId };
+  | { readonly kind: "native"; readonly value: PlaceId }
+  /** #1784: `inner` reached through a marking route: its leaves `marked`. */
+  | { readonly kind: "mark"; readonly inner: number }
+  /**
+   * #1784: `inner` (neither marked nor held) reached below entries whose holders' marks the rest decides: its pending
+   * set (`internPending`), the states of their marks' automaton the steps taken since each entry left (`markStart`).
+   */
+  | { readonly kind: "hold"; readonly inner: number; readonly set: number };
+
+/** A holder's mark a route newly takes: the holder and the steps since its entry, their arena path (`pathAt`). */
+interface Route {
+  readonly holder: Holder;
+  readonly path: number;
+}
 
 /** A node one step below another: `Sum(node, step)`, its nodes as found, each passed once to every reader. */
 interface Goal {
@@ -54,6 +75,8 @@ interface Goal {
   readonly value: Set<number>;
   /** Its readers while it is not final; a final goal's nodes are read as they stand. */
   readers: ((node: number) => void)[] | null;
+  /** #1784: per base node it holds held, the union of the pending sets it reached it with (`gain`). */
+  holds?: Map<number, number>;
 }
 
 /** The answer a pushed read takes from the graph: its leaves' items and the values read natively at its end. */
@@ -101,7 +124,7 @@ class Frontier {
   readonly sets = new Map<string, number>();
   readonly members: (readonly number[])[] = [];
   readonly below = new Map<number, Map<string, number>>();
-  /** Per node, the leaves at it (`Term`'s closure), once final. */
+  /** Per state (a node, twice it plus one where reached marked), the leaves at it (`Term`'s closure), once final. */
   readonly leaves = new Map<number, readonly number[]>();
   /** Per pushed slot, its reach, or `null` where its closure declined. */
   readonly reads = new Map<string, Reach | null>();
@@ -126,6 +149,15 @@ class Frontier {
   tasks: (readonly [(node: number) => void, number])[] = [];
   /** Whether a build runs (`drain`): none starts inside another. */
   draining = false;
+  /**
+   * #1784: the pending sets holds carry, interned apart from their nodes (`internPending`): their members (states of
+   * the pass's mark automaton, ascending), ids by their names; per set and step, its advance (`advance`); per pair,
+   * their union.
+   */
+  readonly pendingSets: (readonly number[])[] = [];
+  readonly pendingIds = new Map<string, number>();
+  readonly advances = new Map<number, Map<string, Decision>>();
+  readonly unions = new Map<string, number>();
 
   public constructor(readonly contract: Contract) {}
 }
@@ -206,6 +238,8 @@ function rootNode(frontier: Frontier, place: PlaceId): number {
     const to: PlaceId[] = [];
     for (const entry of contract.prefixStores(keyOf(at, [])).list) {
       step(frontier);
+      // (#1784: a marking whole copy joins the component too: every member then reaches every leaf of it marked, through
+      // that copy's marked edge, `rules`, and a marked item absorbs its unmarked twin in the join)
       if (entry.key !== undefined && !isKeyId(entry.key) && keyPath(entry.key).length === 0)
         to.push(keyPlace(entry.key));
     }
@@ -301,6 +335,186 @@ function leafNode(frontier: Frontier, name: string, item: () => Item): number {
 
 function nativeNode(frontier: Frontier, value: PlaceId): number {
   return nodeId(frontier, joinParts("n", value), () => ({ kind: "native", value }));
+}
+
+/** #1784: `inner` reached marked: once (marking is idempotent), any holder's pending mark below it moot. */
+function markNode(frontier: Frontier, inner: number): number {
+  let at = inner;
+  for (let node = frontier.nodes[at]!; node.kind === "mark" || node.kind === "hold";) {
+    if (node.kind === "mark") return at;
+    at = node.inner;
+    node = frontier.nodes[at]!;
+  }
+  return nodeId(frontier, joinParts("M", at), () => ({ kind: "mark", inner: at }));
+}
+
+/** #1784: holders' marks newly pending at a step, decided once for every node they reach (`decide`). */
+interface Decision {
+  /** One of them marks at the steps taken: every node is reached marked. */
+  readonly marked: boolean;
+  /** The set of those not decided yet (`internPending`), or -1 for none. */
+  readonly rest: number;
+}
+
+/** #1784: a set of pending states, interned once: its id; -1 for none. */
+function internPending(
+  frontier: Frontier,
+  states: ReadonlySet<number> | readonly number[],
+): number {
+  const list = [...states].sort((a, b) => a - b);
+  if (list.length === 0) return -1;
+  const name = list.join(",");
+  const known = frontier.pendingIds.get(name);
+  if (known !== undefined) return known;
+  step(frontier, list.length);
+  frontier.contract.keepText(name.length);
+  const id = frontier.pendingSets.length;
+  frontier.pendingSets.push(list);
+  frontier.pendingIds.set(name, id);
+  return id;
+}
+
+/** #1784: a residual of the mark automaton as a decision: marked, or its states pending (one set). */
+function decided(frontier: Frontier, residual: MarkResidual): Decision {
+  return residual.marked
+    ? { marked: true, rest: -1 }
+    : { marked: false, rest: internPending(frontier, residual.states) };
+}
+
+/**
+ * #1784: what holders' marks newly taken at a step make of the nodes they reach, decided once (it depends on the
+ * holders and the steps, never the node): each holder's automaton walked by its steps (`markStart`), marked where one
+ * accepts, else the states left pending, one set of them (marking is idempotent, so a state pending twice is pending
+ * once; none left marks nothing). A holder whose depth no bound holds declines (`marks-depth`).
+ */
+function decide(frontier: Frontier, adds: readonly Route[]): Decision {
+  const { contract } = frontier;
+  const rest = new Set<number>();
+  for (const each of adds) {
+    step(frontier);
+    if (depthOf(contract, each.holder) === Infinity) throw new Decline("marks-depth");
+    const residual = markStart(contract, each.holder, each.path);
+    if (residual.marked) return { marked: true, rest: -1 };
+    for (const state of residual.states) rest.add(state);
+  }
+  return { marked: false, rest: internPending(frontier, rest) };
+}
+
+/** #1784: a pending set one step further (`markStep` of its states), once per set and step. */
+function advance(frontier: Frontier, set: number, s: string): Decision {
+  let bySteps = frontier.advances.get(set);
+  const known = bySteps?.get(s);
+  if (known !== undefined) return known;
+  step(frontier);
+  const decision = decided(frontier, markStep(frontier.contract, frontier.pendingSets[set]!, s));
+  if (bySteps === undefined) frontier.advances.set(set, (bySteps = new Map()));
+  bySteps.set(s, decision);
+  return decision;
+}
+
+/** #1784: the union of two pending sets, once per pair. */
+function unionPending(frontier: Frontier, a: number, b: number): number {
+  if (a < 0 || a === b) return b;
+  if (b < 0) return a;
+  const name = a < b ? `${a},${b}` : `${b},${a}`;
+  const known = frontier.unions.get(name);
+  if (known !== undefined) return known;
+  const states = new Set<number>();
+  for (const each of [...frontier.pendingSets[a]!, ...frontier.pendingSets[b]!]) {
+    step(frontier);
+    states.add(each);
+  }
+  const id = internPending(frontier, states);
+  frontier.unions.set(name, id);
+  return id;
+}
+
+/**
+ * #1784: `node` reached with a decision's marks: marked where it marks; else its pending set with the decision's, their
+ * union (a whole-copy cycle adding the same ones again adds nothing new); a node with none pending is its own.
+ */
+function pendingBelow(frontier: Frontier, node: number, decision: Decision): number {
+  const at = frontier.nodes[node]!;
+  if (at.kind === "mark") return node;
+  const inner = at.kind === "hold" ? at.inner : node;
+  if (decision.marked) return markNode(frontier, inner);
+  if (decision.rest < 0) return node;
+  const set = at.kind === "hold" ? unionPending(frontier, at.set, decision.rest) : decision.rest;
+  return nodeId(frontier, joinParts("H", inner, set), () => ({ kind: "hold", inner, set }));
+}
+
+/** An entry, or a literal's read: its guard bit, its mark holder and its ingress (`annotated`'s). */
+interface MarkedRead {
+  readonly guarded: boolean;
+  readonly holder: PrefixEntry["holder"];
+  readonly ingress: PrefixEntry["ingress"];
+  readonly value?: PlaceId;
+}
+
+/**
+ * #1784: what an entry or a literal's read makes of a node it gives at `steps` below it, or `null` where it marks
+ * nothing: its guard bit marks it, its holder's mark as the rest decides it (`decide`); an ingress of its own
+ * declines (`ingress`).
+ */
+function routeOf(
+  frontier: Frontier,
+  read: MarkedRead,
+  steps: readonly string[],
+): ((node: number) => number) | null {
+  const { contract } = frontier;
+  if (
+    read.ingress !== undefined &&
+    !(read.value !== undefined && read.ingress === ingressLeafOf(contract, read.value))
+  )
+    throw new Decline("ingress");
+  if (read.guarded) return (node) => markNode(frontier, node);
+  if (marksNothing(contract, read.holder)) return null;
+  const path = steps.reduce((at, step) => pathAt(contract, at, step), 0);
+  const decision = decide(frontier, [{ holder: read.holder!, path }]);
+  return (node) => pendingBelow(frontier, node, decision);
+}
+
+/**
+ * #1784: a component's own marking whole copies at one step, read once together: the component's summary one step
+ * below, reached through every one of them. Its unmarked summary is each member's already, so the copies' routes
+ * together give it marked where one of them marks: a guard bit, or a holder deciding marked; their holders still
+ * pending, one hold of them all (marked where any marks, as separate routes beside the unmarked summary give it).
+ */
+function selfMarks(
+  frontier: Frontier,
+  root: number,
+  copies: readonly PrefixEntry[],
+  s: string,
+  into: (node: number) => void,
+): void {
+  const { contract } = frontier;
+  const pending: Route[] = [];
+  let guarded = false;
+  for (const entry of copies) {
+    step(frontier);
+    if (
+      entry.ingress !== undefined &&
+      !(entry.value !== undefined && entry.ingress === ingressLeafOf(contract, entry.value))
+    )
+      throw new Decline("ingress");
+    if (entry.guarded) guarded = true;
+    else if (!marksNothing(contract, entry.holder))
+      pending.push({ holder: entry.holder!, path: pathAt(contract, 0, s) });
+  }
+  const decision: Decision = guarded ? { marked: true, rest: -1 } : decide(frontier, pending);
+  if (!decision.marked && decision.rest < 0) return;
+  below(frontier, root, [s], 0, (found) => into(pendingBelow(frontier, found, decision)));
+}
+
+/** `into` through a read's marks (`routeOf`). */
+function marking(
+  frontier: Frontier,
+  read: MarkedRead,
+  steps: readonly string[],
+  into: (node: number) => void,
+): (node: number) => void {
+  const route = routeOf(frontier, read, steps);
+  return route === null ? into : (node) => into(route(node));
 }
 
 /** A literal's root as a node: a plain record or scalar literal (no cell, no selection). */
@@ -422,8 +636,28 @@ function below(
   for (const found of goal.value) frontier.tasks.push([next, found]);
 }
 
-function gain(frontier: Frontier, goal: Goal, node: number): void {
+function gain(frontier: Frontier, goal: Goal, found: number): void {
   step(frontier);
+  // #1784: a base node reached held with several pending sets is reached with their union: marked where any marks. A
+  // marked leaf absorbs its unmarked twin in the join (guarded makes it `pos`, `"branch"` beats no context, every other
+  // field equal), so the alternatives together give what their union gives, and a set the union holds adds nothing; so
+  // each base node's held states in a goal form one growing chain, not every combination of its pending marks (Codex
+  // r3 B3).
+  let node = found;
+  const at = frontier.nodes[found]!;
+  if (at.kind === "hold") {
+    goal.holds ??= new Map();
+    const known = goal.holds.get(at.inner);
+    const set = known === undefined ? at.set : unionPending(frontier, known, at.set);
+    if (set === known) return;
+    goal.holds.set(at.inner, set);
+    if (set !== at.set)
+      node = nodeId(frontier, joinParts("H", at.inner, set), () => ({
+        kind: "hold",
+        inner: at.inner,
+        set,
+      }));
+  }
   if (goal.value.has(node)) return;
   goal.value.add(node);
   keep(frontier.contract.work, 1);
@@ -444,9 +678,19 @@ function rules(frontier: Frontier, goal: Goal): void {
     return into(goal.node);
   }
   if (node.kind === "native") throw new Decline("native");
+  if (node.kind === "mark")
+    return below(frontier, node.inner, [s], 0, (found) => into(markNode(frontier, found)));
+  if (node.kind === "hold") {
+    const decision = advance(frontier, node.set, s);
+    return below(frontier, node.inner, [s], 0, (found) =>
+      into(pendingBelow(frontier, found, decision)),
+    );
+  }
   if (node.kind === "key") {
     const below = keptSteps(contract.work, node.path, [s]);
     const inside = new Set(node.members);
+    // (#1784: the component's own marking whole copies, read once together below, `selfMarks`)
+    const own: PrefixEntry[] = [];
     for (const member of node.members) {
       if (holds(contract, member, below)) into(keyNode(frontier, member, below));
       if (node.path.length === 0 && positions() && contract.wrapperHop(member, s) !== null)
@@ -455,20 +699,23 @@ function rules(frontier: Frontier, goal: Goal): void {
       if (stores.subs !== null || stores.also.length > 0) throw new Decline("layers");
       for (const entry of stores.list) {
         step(frontier);
-        // (a whole copy of a member: the component's own summary, which adds nothing to itself)
+        // (a whole copy of a member: the component's own summary, which adds nothing to itself, or, marking, adds that
+        // summary marked)
         if (
           node.path.length === 0 &&
           entry.key !== undefined &&
           !isKeyId(entry.key) &&
           keyPath(entry.key).length === 0 &&
           inside.has(keyPlace(entry.key)) &&
-          entry.w !== null &&
-          plainRead(contract, entry)
-        )
+          entry.w !== null
+        ) {
+          if (!plainRead(contract, entry)) own.push(entry);
           continue;
+        }
         stepEntry(frontier, entry, s, into);
       }
     }
+    if (own.length > 0) selfMarks(frontier, goal.node, own, s, into);
     return;
   }
   // a literal's index node: its child at the step, F11's `missing` where an object lacks it, its reads one step below
@@ -487,21 +734,13 @@ function rules(frontier: Frontier, goal: Goal): void {
       ),
     );
   for (const read of at.reads) {
-    if (!plainRead(contract, read)) throw new Decline("marks");
-    eachValue(frontier, read.value, (found) => below(frontier, found, [s], 0, into));
+    const marked = marking(frontier, read, [s], into);
+    eachValue(frontier, read.value, (found) => below(frontier, found, [s], 0, marked));
   }
 }
 
 /** Whether an entry or a literal's read carries no mark and no ingress of its own (`annotated` leaves it as it is). */
-function plainRead(
-  contract: Contract,
-  read: {
-    readonly guarded: boolean;
-    readonly holder: PrefixEntry["holder"];
-    readonly ingress: PrefixEntry["ingress"];
-    readonly value?: PlaceId;
-  },
-): boolean {
+function plainRead(contract: Contract, read: MarkedRead): boolean {
   if (read.guarded || !marksNothing(contract, read.holder)) return false;
   return (
     read.ingress === undefined ||
@@ -520,7 +759,7 @@ function stepEntry(
   if (entry.unk !== undefined || entry.empty === true || entry.elem !== undefined)
     throw new Decline("entry");
   if (entry.w === null) throw new Decline("writer");
-  if (!plainRead(contract, entry)) throw new Decline("marks");
+  const marked = marking(frontier, entry, [s], into);
   if (entry.key !== undefined) {
     if (isKeyId(entry.key)) throw new Decline("cursor");
     const path = keyPath(entry.key);
@@ -530,13 +769,13 @@ function stepEntry(
       rootNode(frontier, keyPlace(entry.key)),
       keptSteps(contract.work, path, [s]),
       0,
-      into,
+      marked,
     );
   }
   const at = entry.at ?? [];
   properties(at);
   const steps = keptSteps(contract.work, at, [s]);
-  eachValue(frontier, entry.value!, (found) => below(frontier, found, steps, 0, into));
+  eachValue(frontier, entry.value!, (found) => below(frontier, found, steps, 0, marked));
 }
 
 /**
@@ -631,7 +870,13 @@ function termOf(frontier: Frontier, id: number): { leaves: number[]; next: numbe
   const leaves: number[] = [];
   const next: number[] = [];
   step(frontier);
-  const value = (v: PlaceId): void => {
+  // (a value read through a marking read: its nodes, a native one too, the route's, `leavesOf` marking their leaves)
+  const value = (v: PlaceId, route: ((node: number) => number) | null = null): void => {
+    const native = (): void => {
+      const leaf = nativeNode(frontier, v);
+      if (route === null) leaves.push(leaf);
+      else next.push(route(leaf));
+    };
     step(frontier);
     const binding = program.occurrenceOf.get(v);
     if (
@@ -642,16 +887,19 @@ function termOf(frontier: Frontier, id: number): { leaves: number[]; next: numbe
       // (a value the graph models stands for its nodes; one it declines is read natively)
       const before = frontier.pending.length;
       try {
-        next.push(...collect(frontier, (then) => eachValue(frontier, v, then)));
+        for (const found of collect(frontier, (then) => eachValue(frontier, v, then)))
+          next.push(route === null ? found : route(found));
       } catch (error) {
         // (a decline inside a summary's build declines the read; one at the value itself reads it natively)
         if (!(error instanceof Decline) || frontier.pending.length !== before) throw error;
         frontier.draining = false;
-        leaves.push(nativeNode(frontier, v));
+        native();
       }
-    } else leaves.push(nativeNode(frontier, v));
+    } else native();
   };
   if (node.kind === "leaf" || node.kind === "native") leaves.push(id);
+  else if (node.kind === "mark" || node.kind === "hold")
+    throw new Error("A marked node's leaves are its inner node's (`leavesOf`'s states).");
   else if (node.kind === "key") {
     for (const member of node.members)
       for (const d of definitions.byKey.get(keyOf(member, node.path)) ?? []) {
@@ -666,36 +914,70 @@ function termOf(frontier: Frontier, id: number): { leaves: number[]; next: numbe
       leaves.push(
         leafNode(frontier, joinParts("t", node.literal, node.id, tag), () => makeItem(tag, token)),
       );
-    for (const read of node.at.reads) {
-      if (!plainRead(contract, read)) throw new Decline("marks");
-      value(read.value);
-    }
+    for (const read of node.at.reads) value(read.value, routeOf(frontier, read, []));
     for (const other of node.at.others) leaves.push(nativeNode(frontier, other.value));
   }
   return { leaves, next };
 }
 
-/** The leaves at each of `start`'s nodes and every node ε below it: Tarjan's components, one leaf list each. */
+/**
+ * #1784: a node as `leavesOf` reads it, a state: a marked node is its inner node's marked, a held one its inner node's
+ * unmarked (its pending states accept nothing yet: an accepting one has marked it); twice the node, plus one where
+ * marked.
+ */
+function stateOf(frontier: Frontier, start: number, mark: boolean): number {
+  let [node, marked] = [start, mark];
+  for (;;) {
+    const at = frontier.nodes[node]!;
+    // (a step per marked or held node resolved: a graph without marks charges as before)
+    if (at.kind === "mark" || at.kind === "hold") step(frontier);
+    if (at.kind === "mark") [node, marked] = [at.inner, true];
+    else if (at.kind === "hold") node = at.inner;
+    else return node * 2 + (marked ? 1 : 0);
+  }
+}
+
+/** #1784: a leaf reached marked: its item `marked`; a native value's declines (`marks-native`, HEAD 1's condition). */
+function markedLeaf(frontier: Frontier, leaf: number): number {
+  const node = frontier.nodes[leaf]!;
+  if (node.kind !== "leaf") throw new Decline("marks-native");
+  return nodeId(frontier, joinParts("ml", leaf), () => ({
+    kind: "leaf",
+    item: marked([node.item])[0]!,
+  }));
+}
+
+/**
+ * The leaves at each of `start`'s nodes and every node ε below it: Tarjan's components over states (a node, marked or
+ * not: `stateOf`), one leaf list each, a marked state's leaves its node's own `marked`.
+ */
 function leavesOf(frontier: Frontier, start: readonly number[]): Set<number> {
   const index = new Map<number, number>();
   const low = new Map<number, number>();
   const open: number[] = [];
   const held = new Set<number>();
+  const terms = new Map<number, { readonly leaves: number[]; readonly next: number[] }>();
   const own = new Map<
     number,
     { readonly leaves: readonly number[]; readonly next: readonly number[] }
   >();
-  const frames: { readonly node: number; readonly next: readonly number[]; at: number }[] = [];
-  const enter = (node: number): void => {
-    const term = termOf(frontier, node);
-    index.set(node, index.size);
-    low.set(node, index.size - 1);
-    open.push(node);
-    held.add(node);
-    own.set(node, term);
-    frames.push({ node, next: term.next, at: 0 });
+  const frames: { readonly state: number; readonly next: readonly number[]; at: number }[] = [];
+  const enter = (state: number): void => {
+    const node = state >> 1;
+    const marked = (state & 1) === 1;
+    let term = terms.get(node);
+    if (term === undefined) terms.set(node, (term = termOf(frontier, node)));
+    const leaves = marked ? term.leaves.map((leaf) => markedLeaf(frontier, leaf)) : term.leaves;
+    const next = term.next.map((to) => stateOf(frontier, to, marked));
+    index.set(state, index.size);
+    low.set(state, index.size - 1);
+    open.push(state);
+    held.add(state);
+    own.set(state, { leaves, next });
+    frames.push({ state, next, at: 0 });
   };
-  for (const root of start) {
+  const roots = start.map((node) => stateOf(frontier, node, false));
+  for (const root of roots) {
     if (frontier.leaves.has(root) || index.has(root)) continue;
     enter(root);
     while (frames.length > 0) {
@@ -705,21 +987,21 @@ function leavesOf(frontier: Frontier, start: readonly number[]): Set<number> {
         step(frontier);
         if (frontier.leaves.has(to)) continue;
         if (!index.has(to)) enter(to);
-        else if (held.has(to)) low.set(top.node, Math.min(low.get(top.node)!, index.get(to)!));
+        else if (held.has(to)) low.set(top.state, Math.min(low.get(top.state)!, index.get(to)!));
         continue;
       }
       frames.pop();
       if (frames.length > 0) {
-        const parent = frames.at(-1)!.node;
-        low.set(parent, Math.min(low.get(parent)!, low.get(top.node)!));
+        const parent = frames.at(-1)!.state;
+        low.set(parent, Math.min(low.get(parent)!, low.get(top.state)!));
       }
-      if (low.get(top.node) !== index.get(top.node)) continue;
+      if (low.get(top.state) !== index.get(top.state)) continue;
       const members: number[] = [];
       for (;;) {
         const member = open.pop()!;
         held.delete(member);
         members.push(member);
-        if (member === top.node) break;
+        if (member === top.state) break;
       }
       // (a component's leaves: its members' own and those of every component below it, finished already)
       const union = new Set<number>();
@@ -738,7 +1020,7 @@ function leavesOf(frontier: Frontier, start: readonly number[]): Set<number> {
     }
   }
   const out = new Set<number>();
-  for (const root of start)
+  for (const root of roots)
     for (const leaf of frontier.leaves.get(root)!) {
       step(frontier);
       out.add(leaf);
@@ -849,6 +1131,8 @@ export function pushedFacts(contract: Contract): {
   readonly goals: number;
   readonly edges: number;
   readonly sets: number;
+  /** #1784: the marks pending in the interned pending sets, each set's once. */
+  readonly pending: number;
   readonly reads: number;
   readonly declines: ReadonlyMap<string, number>;
 } {
@@ -865,9 +1149,78 @@ export function pushedFacts(contract: Contract): {
     goals,
     edges,
     sets: frontier?.members.length ?? 0,
+    pending: frontier?.pendingSets.reduce((all, set) => all + set.length, 0) ?? 0,
     reads: [...(frontier?.reads.values() ?? [])].filter((read) => read !== null).length,
     declines: frontier?.declines ?? new Map(),
   };
+}
+
+/**
+ * Test-only, #1784: the hold state's invariant over the pass's graph. Every marked or held node's inner node is neither
+ * (nesting depth 1); every pending set holds each automaton state once, every union of two both; and per goal, each base node has one canonical
+ * pending set, the union of every pending set it was reached with, every held state of it the goal holds being a subset
+ * (absorbed). Its violations, the largest pending set, and the held states and base nodes per goal.
+ */
+export function pushedInvariant(contract: Contract): {
+  readonly violations: readonly string[];
+  readonly largest: number;
+  readonly held: number;
+  readonly bases: number;
+} {
+  const frontier = FRONTIERS.get(contract);
+  const violations: string[] = [];
+  if (frontier === undefined) return { violations, largest: 0, held: 0, bases: 0 };
+  const nameOf = (each: number): string => String(each);
+  frontier.nodes.forEach((node, id) => {
+    if (node.kind !== "mark" && node.kind !== "hold") return;
+    const inner = frontier.nodes[node.inner]!.kind;
+    if (inner === "mark" || inner === "hold")
+      violations.push(`node ${id}: ${node.kind} of ${inner}`);
+  });
+  let largest = 0;
+  frontier.pendingSets.forEach((set, id) => {
+    largest = Math.max(largest, set.length);
+    if (new Set(set.map(nameOf)).size !== set.length)
+      violations.push(`pending set ${id}: a mark twice`);
+  });
+  // (each union of two sets holds every state of both)
+  for (const [name, id] of frontier.unions) {
+    const [a, b] = name.split(",").map(Number);
+    if (a === undefined || b === undefined) continue;
+    const union = new Set(id < 0 ? [] : frontier.pendingSets[id]!);
+    if ([...frontier.pendingSets[a]!, ...frontier.pendingSets[b]!].some((each) => !union.has(each)))
+      violations.push(`the union of pending sets ${a} and ${b}: a state missing`);
+  }
+  let [held, bases] = [0, 0];
+  for (const bySteps of frontier.goals.values())
+    for (const goal of bySteps.values()) {
+      const canonical = goal.holds ?? new Map<number, number>();
+      const seen = new Set<number>();
+      for (const id of goal.value) {
+        const node = frontier.nodes[id]!;
+        if (node.kind !== "hold") continue;
+        held += 1;
+        seen.add(node.inner);
+        const union = canonical.get(node.inner);
+        const names = new Set(
+          (union === undefined ? [] : frontier.pendingSets[union]!).map(nameOf),
+        );
+        if (frontier.pendingSets[node.set]!.some((each) => !names.has(nameOf(each))))
+          violations.push(
+            `goal ${goal.node} at ${goal.step}: a held state of ${node.inner} outside its union`,
+          );
+        if (
+          union !== undefined &&
+          ![...goal.value].some((other) => {
+            const at = frontier.nodes[other]!;
+            return at.kind === "hold" && at.inner === node.inner && at.set === union;
+          })
+        )
+          violations.push(`goal ${goal.node} at ${goal.step}: the union of ${node.inner} not held`);
+      }
+      bases += seen.size;
+    }
+  return { violations, largest, held, bases };
 }
 
 /**

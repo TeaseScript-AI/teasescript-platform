@@ -666,7 +666,7 @@ test("restores mixed ordinary and user-call evaluation at every instruction boun
       'let listValue = [random(), mark("list")]',
       'let setValue = set[randomInteger(1..=3), mark("set")]',
       'let objectValue = { first: random(), second: mark("object") }',
-      'let templateValue = "${random()}:${mark(\"template\")}"',
+      'let templateValue = "${random()}:${mark("template")}"',
       "let binaryValue = random() + mark(2)",
       "let rolled = roll() + mark(4)",
       "let rangeValue = randomInteger(0..=1)..mark(3)",

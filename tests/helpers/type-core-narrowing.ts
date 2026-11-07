@@ -12,6 +12,7 @@ import { HandlerIndex } from "../../src/type-inference/core/handlers.js";
 import type { ContextWord, ItemTag } from "../../src/type-inference/core/items.js";
 import { pathKey, stablePath, type Narrowing } from "../../src/type-inference/core/narrowing.js";
 import { CoreProgram, type CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
+import { ReceivingDomain } from "../../src/type-inference/core/receiving-domain.js";
 import { Solver, withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { Values } from "../../src/type-inference/core/values.js";
 
@@ -34,6 +35,7 @@ export function narrowingPass(request: CoreAnalysisRequest): CorePass {
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
     solver: new Solver(program.scope),
+    receivingDomain: new ReceivingDomain(),
   };
   const pass: CorePass = {
     ...parts,

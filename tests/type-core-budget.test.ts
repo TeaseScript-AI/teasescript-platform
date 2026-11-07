@@ -707,6 +707,7 @@ test("the stores' syntax looks at a cut source or a wide written type a bounded 
     let captured: Consumers | undefined;
     const check = Consumers.prototype.check;
     Consumers.prototype.check = function (this: Consumers) {
+      // oxlint-disable-next-line typescript/no-this-alias -- EVIDENCE: fixture: the test captures the consumer the check ran on.
       captured = this;
       return check.call(this);
     };

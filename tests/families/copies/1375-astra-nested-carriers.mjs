@@ -1,7 +1,7 @@
 // original nested carriers, selections and copies; #1375 Astra review r1
 // (R/astra-m4-g3-p1-review-evidence/generate.py).
 export const cases = (() => {
-  let backwards, cases, container, depth, entries, expr, i, leaf, n, pre, read, style, val;
+  let backwards, cases, container, depth, entries, expr, _i, leaf, n, pre, read, style, val;
   cases = [];
   function add(n, s) {
     cases.push({ name: n, source: s + "\nexit\n" });
@@ -11,7 +11,7 @@ export const cases = (() => {
       for (style of ["index", "first", "choice"]) {
         val = leaf;
         read = "tree";
-        for (i of Array.from({ length: depth - 0 }, (_, i) => i + 0)) {
+        for (_i of Array.from({ length: depth - 0 }, (_, i) => i + 0)) {
           val = "[{q: " + val + "}]";
           read =
             style === "choice"

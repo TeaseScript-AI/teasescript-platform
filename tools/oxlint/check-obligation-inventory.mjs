@@ -986,6 +986,7 @@ export function obligationInventoryDiagnostics(program, root, files) {
   }
   for (let grown = true; grown;) {
     grown = false;
+    // oxlint-disable-next-line unicorn/no-useless-spread -- EVIDENCE: invariant: the loop adds to `creating`, so it iterates a copy.
     for (const derivation of [...creating])
       for (const callee of directCalls(derivation))
         if (!creating.has(callee)) {

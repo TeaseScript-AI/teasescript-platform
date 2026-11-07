@@ -273,9 +273,9 @@ const outputs = (() => {
   return { cases0, shapes1 };
 })();
 const generated = [...outputs.cases0];
-export const shapes = Object.fromEntries([
-  ...Object.entries(outputs.shapes1).map(([name, make]) => ["shapes1/" + name, make]),
-]);
+export const shapes = Object.fromEntries(
+  Object.entries(outputs.shapes1).map(([name, make]) => ["shapes1/" + name, make]),
+);
 export const checks = ["publication"];
 
 // The programs its auxiliary drivers built from this library (scan-count.mjs, axes.mjs, trace.mjs, reproduce.mjs and

@@ -1,7 +1,7 @@
 // #1188, Astra design review (R/astra-m4-i1188-design-review-evidence/probe/matrix.mjs): the admission matrix as the
 // review froze it (out/matrix.json, 148 entries), for its differential and premise runs.
 const generated = (() => {
-  const { shapes: shapes } = (() => {
+  const { shapes } = (() => {
     const rows = (n, f) => Array.from({ length: n }, (_, i) => f(i));
     const fields = (n, value = "t", prefix = "f") =>
       rows(n, (i) => `${prefix}${i}:${value}`).join(",");

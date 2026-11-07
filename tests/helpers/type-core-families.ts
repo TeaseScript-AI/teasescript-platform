@@ -4216,7 +4216,7 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
   },
   ...(["choices", "gets"] as const).map((use) => ({
     name: `A8-same-source-chained-alias-${use}`,
-    measures: `S6c, A8: k aliases of one k-field record, each of the one before, as ${use === "choices" ? "options of one choice" : "\`get\` defaults in one literal"}, every field read`,
+    measures: `S6c, A8: k aliases of one k-field record, each of the one before, as ${use === "choices" ? "options of one choice" : "`get` defaults in one literal"}, every field read`,
     // 47,447 / 94,966 and 72,526 / 145,230 units at k = 64, 128 (2.0078, 2.0099; `main` 3.46, 3.64)
     program: (k: number) =>
       main(

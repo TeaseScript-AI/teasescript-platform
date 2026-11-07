@@ -203,10 +203,11 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
     // (the type the top scan waited on, given to it as it goes on)
     let given: TypeTerm | null = null;
     // the top scan's type is taken, the scan below it goes on, or is taken again where its cycle grew meanwhile
-    const resolved = (term: TypeTerm | null): void => {
+    const resolved = (term: TypeTerm | null, own = false): void => {
       const done = pending.pop()!;
       keepText(admission.work, done.key.length);
       admission.inherited.set(done.key, term);
+      admission.inheritedOwn.set(done.key, term !== null && own);
       waiting.delete(done.key);
       const below = pending.at(-1);
       if (below !== undefined && below.cycle !== cycleOf(admission, below.key))
@@ -220,7 +221,10 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
         top.steps === null ? { done: true as const, value: null } : top.steps.next(given);
       given = null;
       if (step.done === true) {
-        resolved(step.value === null ? null : optionalOf(step.value.copied, step.value.nullable));
+        resolved(
+          step.value === null ? null : optionalOf(step.value.copied, step.value.nullable),
+          step.value?.own === true,
+        );
         continue;
       }
       const needed = step.value;
@@ -353,7 +357,7 @@ function stopSteps(
   admission: Admission,
   stops: Stops,
 ): { readonly root: boolean; readonly deeper: ReadonlySet<string> } {
-  const known = admission.stopSteps.get(stops);
+  const known = admission.pass.receivingDomain.stopSteps.get(stops);
   if (known !== undefined) return known;
   let root = false;
   const deeper = new Set<string>();
@@ -365,7 +369,7 @@ function stopSteps(
     }
   keep(admission.work, 1 + deeper.size);
   const found = { root, deeper };
-  admission.stopSteps.set(stops, found);
+  admission.pass.receivingDomain.stopSteps.set(stops, found);
   return found;
 }
 
@@ -384,7 +388,11 @@ function* wrapped(
   first: string,
   frontier: Frontier,
   own: () => Waiting,
-): Inheriting<{ readonly copied: TypeTerm | null; readonly nullable: boolean } | null> {
+): Inheriting<{
+  readonly copied: TypeTerm | null;
+  readonly nullable: boolean;
+  readonly own?: boolean;
+} | null> {
   const { program, values, contract } = admission.pass;
   const decl = scanHop(admission, place, first)!.decl;
   // (a cursor's path read by its id: G3 stage 1)
@@ -406,16 +414,18 @@ function* wrapped(
   }
   const rest = contract.pathSteps(frontier.rest);
   const written = writtenOf(program.place(frontier.place).kind);
+  const inherited = { value: false };
   const copied =
     written !== null
       ? permittedAt(written, rest)
       : admission.inheriting.has(frontier.place)
-        ? yield* inheritedInto(admission, frontier.place, rest, key)
+        ? yield* inheritedInto(admission, frontier.place, rest, key, inherited)
         : null;
   if (copied === null) return null;
   return {
     copied,
     nullable: typeTags(copied).includes("null") || value.items.some((item) => item.tag === "null"),
+    own: written !== null ? rest.length === 0 : inherited.value,
   };
 }
 
@@ -433,10 +443,16 @@ export function drive<T>(admission: Admission, steps: Inheriting<T>): T {
 function* answerOf(
   admission: Admission,
   key: CanonicalKey,
-): Inheriting<{ readonly copied: TypeTerm | null; readonly nullable: boolean } | null> {
+): Inheriting<{
+  readonly copied: TypeTerm | null;
+  readonly nullable: boolean;
+  readonly own?: boolean;
+} | null> {
   const known = admission.inherited.get(key);
   const term = known !== undefined ? known : yield key;
-  return term === null ? null : { copied: term, nullable: false };
+  return term === null
+    ? null
+    : { copied: term, nullable: false, own: admission.inheritedOwn.get(key) === true };
 }
 
 /**
