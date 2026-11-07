@@ -458,6 +458,14 @@ async function keepingPage(context: TestContext, kept: KeptSessionStore, delayMs
   for (const [name, value] of Object.entries({
     document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
     window: new EventTarget(),
+    // A Start primes the audio elements it may need.
+    Audio: class {
+      src = "";
+      play = async () => {};
+      pause() {}
+      load() {}
+      removeAttribute() {}
+    },
   })) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
     Object.defineProperty(globalThis, name, { configurable: true, value });
