@@ -168,8 +168,8 @@ test("saved data comes back whole from the host, as the main realm's reader give
 });
 
 /*
- * The transfer ops' family: each op of `transferOps` with each of its declared outcomes, some malformed arguments of
- * each, and each refusal the reader and the review make (`player/session-transfer-read.ts`). Refusal messages are
+ * The transfer ops' family: each op of `transferOps` with each of its declared outcomes, every malformed argument its
+ * forms give (`ARGUMENTS`), and each refusal the reader and the review make (`player/session-transfer-read.ts`). Refusal messages are
  * written here; commit contents are compared with a direct-reader result. Every row runs in-process and over a Node
  * Worker. The coverage check compares the rows with the ops, their declared outcomes, and each `StorageTransferError`
  * the reader's source raises.
@@ -499,25 +499,6 @@ async function transferRows(): Promise<Row[]> {
       medium((m) => ({ ...m, kind: "audio" })),
       refusedWith("Photo or file 1 is damaged: its kind, type, size, or dimensions are not valid."),
     ),
-    {
-      op: "readTransfer",
-      outcome: "malformed",
-      run: (bridge) => answerOf(bridge.client.request("readTransfer", {})),
-      expected: MALFORMED("readTransfer"),
-    },
-    {
-      op: "readTransfer",
-      outcome: "malformed",
-      run: (bridge) =>
-        answerOf(bridge.client.request("readTransfer", { text: "{}", bytes: bundleBytes })),
-      expected: MALFORMED("readTransfer"),
-    },
-    {
-      op: "readTransfer",
-      outcome: "malformed",
-      run: (bridge) => answerOf(bridge.client.request("readTransfer", { text: 1 })),
-      expected: MALFORMED("readTransfer"),
-    },
     // reviewTransfer
     reviewRow("reviewed", plainText, { answer: null }),
     reviewRow(
@@ -602,34 +583,6 @@ async function transferRows(): Promise<Row[]> {
       },
       expected: { name: "Error", message: "No plan 'p0' is held." },
     },
-    {
-      op: "reviewTransfer",
-      outcome: "malformed",
-      run: (bridge) =>
-        answerOf(bridge.client.request("reviewTransfer", { ticket: "t1", scope: SCOPE })),
-      expected: MALFORMED("reviewTransfer"),
-    },
-    {
-      op: "reviewTransfer",
-      outcome: "malformed",
-      run: (bridge) =>
-        answerOf(bridge.client.request("reviewTransfer", { ticket: 1, scope: SCOPE, plan: "p1" })),
-      expected: MALFORMED("reviewTransfer"),
-    },
-    {
-      op: "reviewTransfer",
-      outcome: "malformed",
-      run: (bridge) =>
-        answerOf(
-          bridge.client.request("reviewTransfer", {
-            ticket: "t1",
-            scope: SCOPE,
-            plan: "p1",
-            extra: true,
-          }),
-        ),
-      expected: MALFORMED("reviewTransfer"),
-    },
     // transferCommit
     {
       op: "transferCommit",
@@ -671,18 +624,6 @@ async function transferRows(): Promise<Row[]> {
       run: (bridge) => answerOf(bridge.client.request("transferCommit", { ticket: "t0" })),
       expected: NO_TICKET,
     },
-    {
-      op: "transferCommit",
-      outcome: "malformed",
-      run: (bridge) => answerOf(bridge.client.request("transferCommit", { ticket: 1 })),
-      expected: MALFORMED("transferCommit"),
-    },
-    {
-      op: "transferCommit",
-      outcome: "malformed",
-      run: (bridge) => answerOf(bridge.client.request("transferCommit", null)),
-      expected: MALFORMED("transferCommit"),
-    },
     // releaseTransfer
     {
       op: "releaseTransfer",
@@ -701,14 +642,78 @@ async function transferRows(): Promise<Row[]> {
       run: (bridge) => answerOf(bridge.client.request("releaseTransfer", { ticket: "t0" })),
       expected: { answer: null },
     },
-    {
-      op: "releaseTransfer",
-      outcome: "malformed",
-      run: (bridge) =>
-        answerOf(bridge.client.request("releaseTransfer", { ticket: "t1", extra: 1 })),
-      expected: MALFORMED("releaseTransfer"),
-    },
+    ...malformedRows(),
   ];
+}
+
+/** The classes of a transfer op's argument values, each with values of other classes, which no op accepts for it. */
+const WRONG_VALUES = {
+  string: [1, null, true, {}, [], new Uint8Array([1])],
+  bytes: ["text", null, 1, [1, 2], {}],
+} as const satisfies Record<string, readonly unknown[]>;
+type ValueClass = keyof typeof WRONG_VALUES;
+/** A value of each class, as a valid argument holds it. */
+const VALID_VALUES: Readonly<Record<ValueClass, unknown>> = {
+  string: "t1",
+  bytes: new Uint8Array([1]),
+};
+
+/** Each transfer op's argument forms: one or more alternatives, each its fields with their value classes. */
+const ARGUMENTS = {
+  readTransfer: [{ text: "string" }, { bytes: "bytes" }],
+  reviewTransfer: [{ ticket: "string", scope: "string", plan: "string" }],
+  transferCommit: [{ ticket: "string" }],
+  releaseTransfer: [{ ticket: "string" }],
+} as const satisfies Record<TransferOp, readonly Readonly<Record<string, ValueClass>>[]>;
+
+/**
+ * Every malformed argument of each op, from its forms: no record; each form with a field missing, an extra field, or a
+ * field of another class; two forms' fields together. Each must be refused before the op runs.
+ */
+function malformedArguments(op: TransferOp): { readonly what: string; readonly args: unknown }[] {
+  const forms: readonly Readonly<Record<string, ValueClass>>[] = ARGUMENTS[op];
+  const valid = (form: Readonly<Record<string, ValueClass>>) =>
+    Object.fromEntries(Object.entries(form).map(([field, kind]) => [field, VALID_VALUES[kind]]));
+  const found: { what: string; args: unknown }[] = [
+    { what: "null", args: null },
+    { what: "a string", args: "t1" },
+    { what: "a list", args: [] },
+  ];
+  forms.forEach((form, index) => {
+    const whole = valid(form);
+    found.push({ what: `form ${index + 1} with an extra field`, args: { ...whole, extra: 1 } });
+    for (const [field, kind] of Object.entries(form)) {
+      const { [field]: _left, ...without } = whole;
+      found.push({ what: `form ${index + 1} without ${field}`, args: without });
+      for (const wrong of WRONG_VALUES[kind])
+        found.push({
+          what: `form ${index + 1} with ${field} as ${JSON.stringify(wrong) ?? String(wrong)}`,
+          args: { ...whole, [field]: wrong },
+        });
+    }
+    forms
+      .slice(index + 1)
+      .forEach((other, offset) =>
+        found.push({
+          what: `forms ${index + 1} and ${index + offset + 2} together`,
+          args: { ...whole, ...valid(other) },
+        }),
+      );
+  });
+  return found;
+}
+
+/** The malformed rows of every op. */
+function malformedRows(): Row[] {
+  // EVIDENCE: invariant: the keys of `ARGUMENTS`, declared literally above.
+  return (Object.keys(ARGUMENTS) as TransferOp[]).flatMap((op) =>
+    malformedArguments(op).map(({ args }) => ({
+      op,
+      outcome: "malformed",
+      run: (bridge: PlayerBridge) => answerOf(bridge.client.request(op, args)),
+      expected: MALFORMED(op),
+    })),
+  );
 }
 
 test("every transfer op's argument forms, outcomes and refusals answer as written, in-process and in a Worker", async () => {
@@ -786,7 +791,13 @@ test("the transfer family covers every op, outcome and refusal of the reader", a
   const messages = rows.flatMap(({ expected }) =>
     "message" in expected ? [expected.message] : [],
   );
-  for (const refusal of readerRefusals()) {
+  const refusals = readerRefusals();
+  for (const message of Object.keys(UNREACHED))
+    assert.ok(
+      refusals.some((refusal) => refusal.test(message)),
+      `${message} is no refusal of the reader`,
+    );
+  for (const refusal of refusals) {
     const reached = messages.some((message) => refusal.test(message));
     const unreached = Object.keys(UNREACHED).some((message) => refusal.test(message));
     assert.ok(
