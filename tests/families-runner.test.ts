@@ -4178,3 +4178,91 @@ test("a publication run's unit limit grants its oracle's units per cell its ques
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+/**
+ * A built tree's library whose publication of `aborts` ends the process as V8's heap abort does, in the sharing-off
+ * source-order mode, where `aborting`; else answers it, leaving 2 nodes unanswered (`memory`) in the reversed modes.
+ */
+const abortingLibrary = (aborting: boolean): string => `import { createHash } from "node:crypto";
+import { writeSync } from "node:fs";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+export function publicationHashes(files, mode) {
+  const source = files[0].source;
+  if (${aborting} && source === "aborts" && mode.unshared && !mode.reversed) {
+    writeSync(2, "FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory\\n");
+    process.exit(134);
+  }
+  const parts = [createHash("sha256").update(source).digest("hex")];
+  return !${aborting} && source === "aborts" && mode.reversed
+    ? { parts, unanswered: 2, unansweredBy: { reason: "memory", node: 7 } }
+    : { parts, unanswered: 0 };
+}
+`;
+
+test("a base whose run ends its process leaves the head's runs from that one on to a fresh child of the head alone, each recorded as the head's own outcome beside the base's stall (#1837)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const built = (name: string, aborting: boolean) => {
+      const tree = join(directory, name);
+      mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+      writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(
+        join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+        abortingLibrary(aborting),
+      );
+      return tree;
+    };
+    const [base, head] = [built("base", true), built("head", false)];
+    const folder = join(directory, "area");
+    mkdirSync(folder);
+    writeFileSync(
+      join(folder, "g.mjs"),
+      `export const cases = ${JSON.stringify(["aborts", "fine"].map((name) => [name, name]))};\n`,
+    );
+    const work = join(directory, "aborts.work.jsonl");
+    const ran = spawnSync(process.execPath, [runner, folder, base, head, "--work", work], {
+      encoding: "utf8",
+    });
+    assert.equal(ran.status, 1, ran.stderr);
+    const lines = readFileSync(work, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const aborted = lines.find((line) => line.source === "aborts");
+    assert.match(aborted.stalled, /FATAL ERROR: .*heap out of memory/);
+    // (the source-order runs both trees ended; from the base's abort on, the head's own outcome per run)
+    assert.deepEqual(aborted.afterBase, [
+      { mode: "src-off", check: "publication", head: { answered: true } },
+      {
+        mode: "rev-on",
+        check: "publication",
+        head: { unanswered: 2, by: { reason: "memory", node: 7 } },
+      },
+      {
+        mode: "rev-off",
+        check: "publication",
+        head: { unanswered: 2, by: { reason: "memory", node: 7 } },
+      },
+    ]);
+    // (the other source runs on, both trees, in a child of both)
+    const fine = lines.find((line) => line.source === "fine");
+    assert.equal(fine.stalled, undefined);
+    assert.equal(fine.runs.length, 4);
+    // (the stall index still names the base's stall as inherited)
+    const judged = spawnSync(process.execPath, [stalls, work], { encoding: "utf8" });
+    const verdicts = judged.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .filter((line) => line.source === "aborts");
+    assert.deepEqual(
+      verdicts.map(({ verdict }) => verdict),
+      ["inherited"],
+      judged.stdout,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

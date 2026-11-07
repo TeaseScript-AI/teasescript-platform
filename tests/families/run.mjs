@@ -11,7 +11,9 @@
 // child process: a run (a source's mode and check on one tree) whose charged units pass `--units` times its program's
 // allowance (`units`, the same on every machine, #1647; a publication run's, also its oracle's units per cell for each
 // cell its own questions returned, #1837), or a source that takes more than `--memory` MB of heap or ends
-// the process (a fatal V8 error), is counted as stalled, with the reason, and the next source runs in a fresh process. A
+// the process (a fatal V8 error), is counted as stalled, with the reason, and the next source runs in a fresh process;
+// where the base's run ended the process, the head's runs from that one on run alone in a fresh child, each recorded
+// beside the stall as the head's own outcome (`afterBase`, #1837). A
 // run that takes longer than `--timeout` seconds, the safety net, does work no ledger charges: it is counted apart
 // (`uncharged`, named by its run, on stderr and in `--out`), never a stall, and the next source runs. A run
 // that throws on either tree is an exception, never compared (#1439): printed to stderr with its source, mode and
@@ -352,7 +354,7 @@ if (process.argv[2] === "--child") {
    * it, with each tree's units, allowance and milliseconds (`spent`); and each tree's start of a run (`start`), from
    * which the runner times it (its safety net, #1647).
    */
-  const compared = async ({ files, checks, globals, seq }) => {
+  const compared = async ({ files, checks, globals, seq, from = 0 }) => {
     let parsed = true;
     let index = 0;
     for (const mode of head.MODES) {
@@ -367,6 +369,11 @@ if (process.argv[2] === "--child") {
             (oracle) => oracle.stopSet(files, mode, globals, allowance),
           ]);
       for (const [check, run] of runs) {
+        // (a rerun after the base aborted starts at the run it cut, #1837)
+        if (index < from) {
+          index += 1;
+          continue;
+        }
         // compared by hash, so that the base's text is not held while the head runs
         const used = { work: [], allowance: [], ms: [] };
         const results = [];
@@ -510,17 +517,22 @@ if (process.argv[2] === "--child") {
   // fail before the first source when a tree has no library
   await Promise.all(roots.map(oracles));
 
-  let child = null;
-  /** A child process, keeping the end of its error output: a fatal V8 error says there why the process ended. */
-  const fresh = () => {
+  /** The child that runs both trees, and the one that runs the head alone after the base aborted (#1837). */
+  const slots = { both: { child: null, roots }, head: { child: null, roots: roots.slice(-1) } };
+  /**
+   * A child process of `slot`'s trees, keeping the end of its error output: a fatal V8 error says there why the process
+   * ended. Only the child of both trees writes the progress record (`--work`).
+   */
+  const fresh = (slot) => {
     const created = fork(
       fileURLToPath(import.meta.url),
       [
         "--child",
         JSON.stringify({
-          roots,
+          roots: slot.roots,
           allowances,
-          progress: progress === undefined ? undefined : pathOf(progress, "outside"),
+          progress:
+            progress === undefined || slot !== slots.both ? undefined : pathOf(progress, "outside"),
           units,
         }),
       ],
@@ -540,7 +552,7 @@ if (process.argv[2] === "--child") {
   // a runner stopped by a signal stops its child first (it would go on analysing), then ends by that signal
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
     process.once(signal, () => {
-      child?.kill("SIGKILL");
+      for (const { child } of Object.values(slots)) child?.kill("SIGKILL");
       process.kill(process.pid, signal);
     });
   /**
@@ -584,11 +596,11 @@ if (process.argv[2] === "--child") {
    * closes. Each ended run's mode, check and each tree's units, allowance and milliseconds (`spent`), and with `--work`,
    * at a stall or the safety net, the run then going on (`cutOf`).
    */
-  const analysed = (message) =>
+  const analysed = (message, slot = slots.both) =>
     new Promise((resolve) => {
       // a child that ended between sources (its channel closed) is replaced, not given the next source
-      if (child?.connected !== true) child = fresh();
-      const current = child;
+      if (slot.child?.connected !== true) slot.child = fresh(slot);
+      const current = slot.child;
       const runs = [];
       const spent = [];
       let going = null;
@@ -633,17 +645,56 @@ if (process.argv[2] === "--child") {
         current.off("message", onMessage).off("error", onError).off("close", onClose);
         const cut = "stalled" in result || expired !== undefined;
         if (cut) {
-          child = null;
+          slot.child = null;
           current.kill("SIGKILL");
         }
-        const record = cut ? cutOf(message.seq, spent.length, ended ?? Date.now()) : undefined;
+        const record =
+          cut && slot === slots.both
+            ? cutOf(message.seq, spent.length, ended ?? Date.now())
+            : undefined;
         if (record !== undefined) spent.push(record);
-        resolve({ ...(expired === undefined ? result : { uncharged: expired }), runs, spent });
+        resolve({
+          ...(expired === undefined ? result : { uncharged: expired }),
+          runs,
+          spent,
+          // (the tree whose run the stall cut, from its start message)
+          ...(cut && going !== null ? { cutTree: going.tree } : {}),
+        });
       };
       arm();
       current.on("message", onMessage).on("error", onError).on("close", onClose);
       current.send(message);
     });
+
+  /**
+   * A head's result alone, as a record says it: an exception's first line; for a publication, unparsed, why it left
+   * nodes unanswered, or answered; for a stop run, ended.
+   */
+  const aloneOutcome = (check, result) =>
+    result.thrown !== undefined
+      ? { thrown: result.thrown.split("\n", 1)[0] }
+      : check !== "publication"
+        ? { ended: true }
+        : result.value.unparsed
+          ? { unparsed: true }
+          : result.value.unanswered > 0
+            ? { unanswered: result.value.unanswered, by: result.value.unansweredBy }
+            : { answered: true };
+  /**
+   * The head's runs of `message` from run `from` on, alone in a fresh child (#1837): each run's mode, check and
+   * outcome (`aloneOutcome`), and the head's own stall where its child ended too.
+   */
+  const aloneAfter = async (message, from) => {
+    const alone = await analysed({ ...message, from }, slots.head);
+    return [
+      ...alone.runs.map(({ result, mode, check }) => ({
+        mode,
+        check,
+        head: aloneOutcome(check, result),
+      })),
+      ...(alone.stalled === undefined ? [] : [{ head: { stalled: alone.stalled } }]),
+    ];
+  };
 
   const folder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), area);
   // each generator's sources in this shard, and with `--store` all of them (the area's PLAN)
@@ -858,13 +909,19 @@ if (process.argv[2] === "--child") {
       const before = { ...row };
       row.sources += 1;
       sequence += 1;
-      const reply = await analysed({
-        files: source.files,
-        checks,
-        globals: source.globals,
-        seq: sequence,
-      });
+      const message = { files: source.files, checks, globals: source.globals, seq: sequence };
+      const reply = await analysed(message);
       const inputs = { files: source.files, globals: source.globals };
+      // a base whose run ended its process (a fatal V8 error or a signal, not the unit limit or the safety net) leaves
+      // the head's runs from that one on unrun: they run alone in a fresh child, so that each is recorded as the
+      // head's own outcome beside the base's stall, never lost with it (#1837)
+      const afterBase =
+        roots.length === 2 &&
+        reply.cutTree === 0 &&
+        reply.stalled !== undefined &&
+        reply.stalled !== "units"
+          ? await aloneAfter(message, reply.runs.length)
+          : undefined;
       const line = stored.get(placeOf(name, source));
       const kept = line === undefined ? undefined : JSON.parse(line);
       const results = {};
@@ -945,7 +1002,13 @@ if (process.argv[2] === "--child") {
       // (with a baseline, one tree may stall where the other threw)
       if (stalled !== undefined) {
         row.stalled += 1;
-        record({ generator: name, source: source.name, stalled, ...inputs });
+        record({
+          generator: name,
+          source: source.name,
+          stalled,
+          ...(afterBase === undefined ? {} : { afterBase }),
+          ...inputs,
+        });
       }
       if (uncharged !== undefined) {
         row.uncharged += 1;
@@ -974,6 +1037,7 @@ if (process.argv[2] === "--child") {
               .map((key) => [key, row[key] - before[key]]),
           ),
           ...(stalled === undefined ? {} : { stalled }),
+          ...(afterBase === undefined ? {} : { afterBase }),
           ...(uncharged === undefined ? {} : { uncharged }),
           ...(left.length === 0 ? {} : { unanswered: left }),
         });
@@ -982,7 +1046,7 @@ if (process.argv[2] === "--child") {
     total.generators += 1;
     for (const key of counts) total[key] += row[key];
   }
-  child?.kill();
+  for (const { child } of Object.values(slots)) child?.kill();
   if (progress !== undefined) rmSync(pathOf(progress, "outside"), { force: true });
   const ended = { ...total, units, timeout: seconds, node: process.version };
   if (storing !== undefined) {

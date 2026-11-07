@@ -842,7 +842,10 @@ function publishedElements<Occurrence>(
     // analyses' heaps are never held at once: with sharing off each can take a gigabyte, #1603)
     const analysed = analysedElements(request, bindings, each);
     releaseLastException();
-    return { ...analysed, route: JSON.stringify(publishedRoute(files, globals).text) };
+    const route = JSON.stringify(publishedRoute(files, globals).text);
+    // (and the route's own analysis, held the same way after its compile returns)
+    releaseLastException();
+    return { ...analysed, route };
   });
 }
 

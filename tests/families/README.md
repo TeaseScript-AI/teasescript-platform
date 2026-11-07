@@ -31,7 +31,10 @@ store checks) against the largest `allowance` of a ledger it charged, max(30 M, 
 on every machine, so a stall is too. A run that ends past its allowance but within the limit (a budget stop, TSV076) is
 an outcome, not a stall. A source that takes more than `--memory` MB of heap, or that ends its analysing process (a
 fatal V8 error), stalls as well. A stall is counted with its reason (`units`, or how the process ended; `--out`), and
-the runner goes on with the next source. The wall clock is only a safety net, `--timeout` seconds a run (60 in CI,
+the runner goes on with the next source. Where the base's run ended the process, the head's runs from that one on run
+alone in a fresh child, each recorded beside the stall as the head's own outcome (`afterBase` on the source's `--work`
+line and in `--out`: answered, unanswered and why, unparsed, an exception, or its own stall), so that the head's result
+is never lost with the base's process (#1837). The wall clock is only a safety net, `--timeout` seconds a run (60 in CI,
 which sets `CI=true` and runs only the runner's own tests): a run that reaches it does work no ledger charges (#1424's
 class), and is reported as a defect with its source and run (`uncharged`, on stderr and in `--out`), counted apart,
 never as a stall. The limit and the safety net were derived from a measured corpus ("The unit limit and the safety
