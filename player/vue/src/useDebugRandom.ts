@@ -80,45 +80,31 @@ export function useDebugRandom(player: PlayerSessionHost) {
     { immediate: true },
   );
   // What the draw's site took, as the host's history gave it: read again when another draw shows or the history changed.
-  // A draw is the same while its session, site and ID are, also when a publication shows it again; draw IDs repeat
-  // across sessions. Only the reply to the latest read shows, and only while its draw does; another draw shows nothing
-  // until its own.
+  // Only the reply to the latest read shows, and only while its draw does (`sameDraw`); another draw shows nothing until
+  // its own.
   const tried = shallowRef<{ readonly site: string; readonly tried: DebugRandomTried } | null>(
     null,
   );
-  const sameDraw = (
-    one: { readonly drawId: number; readonly site: string } | null,
-    other: { readonly drawId: number; readonly site: string } | null,
-    oneLineage: PlayerSession["lineage"] | null,
-    otherLineage: PlayerSession["lineage"] | null,
-  ) =>
-    one !== null &&
-    other !== null &&
-    one.drawId === other.drawId &&
-    one.site === other.site &&
-    oneLineage === otherLineage;
   let reads = 0;
+  // What was read last: the same draw at the same revision, shown again by a newer publication, reads nothing anew.
+  let readFor: { readonly identity: DrawIdentity | null; readonly revision: number } | null = null;
   watch(
-    [
-      () => draw.value?.drawId ?? null,
-      () => draw.value?.site ?? null,
-      () => player.session.value?.lineage ?? null,
-      player.randomRevision,
-    ],
-    ([drawId, site, lineage], previous) => {
-      if (drawId !== previous?.[0] || site !== previous?.[1] || lineage !== previous?.[2])
-        tried.value = null;
+    [() => drawIdentity(draw.value, player.session.value), player.randomRevision],
+    ([identity, revision]) => {
+      if (readFor !== null && sameDraw(identity, readFor.identity) && revision === readFor.revision)
+        return;
+      if (!sameDraw(identity, readFor?.identity ?? null)) tried.value = null;
+      readFor = { identity, revision };
       const read = ++reads;
-      const current = draw.value;
-      if (current === null) return;
-      void player.randomTried(current.site).then((view) => {
-        const shownLineage = player.session.value?.lineage ?? null;
-        if (read !== reads || !sameDraw(draw.value, current, shownLineage, lineage)) return;
+      if (identity === null) return;
+      void player.randomTried(identity.site).then((view) => {
+        if (read !== reads || !sameDraw(drawIdentity(draw.value, player.session.value), identity))
+          return;
         tried.value =
           view === null
             ? null
             : {
-                site: current.site,
+                site: identity.site,
                 tried: { history: view.history, first: view.first, counts: new Map(view.counts) },
               };
       });
@@ -146,21 +132,25 @@ export function useDebugRandom(player: PlayerSessionHost) {
     { immediate: true },
   );
 
-  /** The draw the picker resolves now, so a second click on it does nothing until the first is answered. */
-  const resolving = ref<number | null>(null);
+  // The picker's resolutions in flight, each of one draw: a second click on that draw does nothing until the first is
+  // answered, and each clears only its own when it ends. Another draw, such as a replacement session's with the same ID,
+  // resolves meanwhile.
+  const resolving = new Map<object, DrawIdentity>();
   /**
    * Resolves the paused draw in the host with `outcome`, naturally, or with its site's least-tried outcome (Least
    * tried); the outcome goes into the site's history. `false` when the engine did not take it.
    */
   async function resolve(outcome: RandomOutcome | "natural" | "untried"): Promise<boolean> {
-    const current = draw.value;
-    if (current === null || resolving.value === current.drawId) return false;
-    resolving.value = current.drawId;
+    const identity = drawIdentity(draw.value, player.session.value);
+    if (identity === null || [...resolving.values()].some((each) => sameDraw(each, identity)))
+      return false;
+    const token = {};
+    resolving.set(token, identity);
     try {
-      const result = await player.resolveRandomDraw(current.drawId, outcome, true);
+      const result = await player.resolveRandomDraw(identity.drawId, outcome, true);
       return result?.kind === "resolved";
     } finally {
-      if (resolving.value === current.drawId) resolving.value = null;
+      resolving.delete(token);
     }
   }
   /** Resolves the paused draw once as Prefer untried would: Least tried. */
@@ -204,6 +194,35 @@ export function useDebugRandom(player: PlayerSessionHost) {
     /** The draw's site's earlier outcomes as code lines, as `tried` gives them. */
     historyLines,
   };
+}
+
+/**
+ * A draw's identity: the session it waits in (its lineage), its site and its ID. Draw IDs repeat across sessions, so
+ * the picker's history cache, its replies and its resolution guard all decide a draw's sameness here.
+ */
+interface DrawIdentity {
+  readonly lineage: PlayerSession["lineage"];
+  readonly site: string;
+  readonly drawId: number;
+}
+
+function drawIdentity(
+  draw: { readonly drawId: number; readonly site: string } | null,
+  session: PlayerSession | null,
+): DrawIdentity | null {
+  return draw === null || session === null
+    ? null
+    : { lineage: session.lineage, site: draw.site, drawId: draw.drawId };
+}
+
+function sameDraw(one: DrawIdentity | null, other: DrawIdentity | null): boolean {
+  return (
+    one !== null &&
+    other !== null &&
+    one.lineage === other.lineage &&
+    one.site === other.site &&
+    one.drawId === other.drawId
+  );
 }
 
 export interface DebugRandomTried {

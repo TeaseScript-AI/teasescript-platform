@@ -221,7 +221,7 @@ export function alignRandom(context: PlayerOpsContext, intent: RandomIntent): vo
   random.settings = new Map(intent.control?.sites ?? []);
   if (intent.control === null) random.control = null;
   else if (random.owner !== intent.owner || random.control === null)
-    random.control = ownerControl(random, intent.owner);
+    random.control = ownerControl(context, intent.owner);
   random.owner = intent.owner;
 }
 
@@ -230,13 +230,16 @@ export function alignRandom(context: PlayerOpsContext, intent: RandomIntent): vo
  * `owner` still holds them and Choose outcomes is on; otherwise every draw goes on naturally and nothing is recorded,
  * as for a session of a Player that ended.
  */
-function ownerControl(random: RandomState, owner: number): RandomControlOptions {
+function ownerControl(context: PlayerOpsContext, owner: number): RandomControlOptions {
   const natural: RandomDecision = { kind: "natural" };
   return Object.freeze({
-    decide: (draw: RandomDrawView): RandomDecision =>
-      random.owner === owner && random.control !== null
-        ? decideDraw(random.settings, random.history, draw)
-        : natural,
+    decide: (draw: RandomDrawView): RandomDecision => {
+      // Through the one gate to the random state, as every other access is.
+      const owned = ownedRandom(context, owner);
+      return owned !== null && owned.control !== null
+        ? decideDraw(owned.settings, owned.history, draw)
+        : natural;
+    },
   });
 }
 

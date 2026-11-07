@@ -5,7 +5,7 @@ import type {
 import { checkedOutcome } from "../../../src/runtime/random/random-kinds.js";
 import { resumePlayerRuntimeRandomDraw } from "../../runtime-adapter.js";
 import type { RandomTried } from "../../random-decisions.js";
-import { exactly, isRecord } from "../argument-checks.js";
+import { everyItem, exactly, isRecord } from "../argument-checks.js";
 import {
   alignRandom,
   isRandomIntent,
@@ -36,8 +36,31 @@ export interface ResolveDrawResult {
 /** What `randomTried` replies: what the site took and the history's revision, or `null` for another Player's session. */
 export type RandomTriedView = (RandomTried & { readonly revision: number }) | null;
 
+/**
+ * Whether `value` has a random outcome's shape: its kind and that kind's fields, exactly. Whether the draw takes it is
+ * the engine's check (`checkedOutcome`), which follows.
+ */
+function isOutcomeShape(value: unknown): value is RandomOutcome {
+  if (!isRecord(value)) return false;
+  switch (value.kind) {
+    case "number":
+      return exactly(value, ["kind", "value"]) && typeof value.value === "number";
+    case "boolean":
+      return exactly(value, ["kind", "value"]) && typeof value.value === "boolean";
+    case "index":
+      return exactly(value, ["kind", "index"]) && Number.isSafeInteger(value.index);
+    case "order":
+      return (
+        exactly(value, ["kind", "order"]) &&
+        everyItem(value.order, (index) => Number.isSafeInteger(index))
+      );
+    default:
+      return false;
+  }
+}
+
 const isResolution = (value: unknown): value is DrawResolution =>
-  value === "natural" || value === "untried" || (isRecord(value) && typeof value.kind === "string");
+  value === "natural" || value === "untried" || isOutcomeShape(value);
 
 export function randomOps(context: PlayerOpsContext): BridgeOps {
   return {

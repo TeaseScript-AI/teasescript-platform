@@ -545,6 +545,52 @@ test("the picker reads a replacement session's history, also at a draw with the 
   );
 });
 
+// Final review F1, C2's draw-identity family: the picker's resolution guard is per draw identity, as its cache is. While
+// the previous session's resolution waits behind its turn, the replacement's draw with the same ID resolves, and the
+// earlier resolution clears only its own guard.
+test("a replacement session's draw with the same ID resolves while the previous one's resolution waits", async (context) => {
+  const plan = compiled('showButton "Waiting"\nexit');
+  const { host, random } = await mount(context, plan);
+  const bridge = await host.bridge;
+  const prepare = async (source: string) => {
+    const reply = await bridge.client.request("prepare", {
+      source: { kind: "source", script: source },
+    });
+    // EVIDENCE: validation: `prepare` replies from the same build with its result.
+    return (reply.result as { readonly plan: string }).plan;
+  };
+  const first = await bridge.start(
+    await prepare('let first = chance(50)\nshowButton "Done"\nexit'),
+    {},
+    false,
+    { owner: 1 },
+  );
+  const second = await bridge.start(
+    await prepare('let second = randomInteger(1..=6)\nshowButton "Done"\nexit'),
+    {},
+    false,
+    { owner: 1 },
+  );
+  assert.equal(first.state.randomDraw!.drawId, second.state.randomDraw!.drawId);
+  host.showSession(first);
+  await settle(context);
+  // The first session's turn is held, so its resolution waits.
+  let release = () => {};
+  const holding = bridge.section(first, () => new Promise<void>((done) => (release = done)));
+  const earlier = random.resolve("natural");
+  host.showSession(second);
+  await settle(context);
+  assert.equal(random.draw.value?.site, second.state.randomDraw!.site);
+  assert.equal(await random.resolve("natural"), true, "the replacement's draw is another draw");
+  release();
+  await holding;
+  assert.equal(
+    await earlier,
+    false,
+    "the earlier session no longer shows, so its resolution ends as nothing",
+  );
+});
+
 // L5i.4: the history is the host's while the Debug features run. Choose outcomes off and on keeps it; their end forgets it.
 test("a site's history lasts through Choose outcomes off and on, and goes when the Debug features end", async (context) => {
   const plan = compiled(

@@ -500,9 +500,11 @@ test("every session op is classified, and only adoptCatchUp reads a session past
   assert.match(readers[0]!, /adoptPlayerRuntimeCatchUp\(held\.publication/u);
 });
 
-// The caller inventory of Continue's boundary (Sol plan P5, code r1 C3): every call that introduces or restores a
-// session on the main side, each classified. Only a Start carries its Player's random ownership (`startRandom()`); a
-// restore takes it at its adoption. An unclassified call fails, so a new way in is classified before it ships.
+// The caller inventory of Continue's boundary (Sol plan P5, code r1 C3): the calls that introduce or restore a session
+// in `usePlayerSession.ts` and `useDebugRewind.ts`, by these callee spellings (`startedSession`, `introduceNow`,
+// `prepareRestore`, `publishRewound`, `host.start`, `rewind.publish`), each classified. Only a Start carries its Player's
+// random ownership (`startRandom()`); a restore takes it at its adoption. A new such call in those files fails until it
+// is classified. A new module, or an indirection under another name, needs adding here.
 const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
   "player/vue/src/usePlayerSession.ts": [
     ["prepareRestore(found.session, found.marks)", "restore: a kept session"],
@@ -521,8 +523,9 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
   ],
 };
 
-// Every main-side sender of a random op, each classified: only `adoptRandom` gives a session a Player's control, and
-// only at the invariant's points; a settings change never does (orchestrator 2's ruling on P5's fourth occurrence).
+// The senders of a random op in `usePlayerSession.ts`, found by their op names as string literals, each classified: only
+// `adoptRandom` gives a session a Player's control, and only at the invariant's points; a settings change never does
+// (orchestrator 2's ruling on P5's fourth occurrence). A sender in another module needs adding here.
 const RANDOM_SENDERS: readonly (readonly [string, string])[] = [
   ['op: "randomControl" | "adoptRandom",', "the senders' type"],
   ['"randomControl",', "not adopting: a settings change (`flushRandom`)"],
@@ -531,7 +534,7 @@ const RANDOM_SENDERS: readonly (readonly [string, string])[] = [
   ['.request("releaseRandom",', "releasing: Continue before its kept draw went on"],
 ];
 
-test("every main-side sender of a random op is classified as adopting or not", () => {
+test("every random-op sender in the composable is classified as adopting or not", () => {
   const lines = readFileSync(
     new URL("../../player/vue/src/usePlayerSession.ts", import.meta.url),
     "utf8",
@@ -563,7 +566,7 @@ test("every main-side sender of a random op is classified as adopting or not", (
   );
 });
 
-test("every main-side introduction of a session is classified as a Start or a restore", () => {
+test("every session introduction in the composable and rewind is classified as a Start or a restore", () => {
   const callee =
     /\b(startedSession|introduceNow|prepareRestore|publishRewound|host\.start|rewind\.publish)\(/u;
   const definition = /function (startedSession|prepareRestore|publishRewound)\(/u;

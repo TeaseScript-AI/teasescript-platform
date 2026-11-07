@@ -224,7 +224,6 @@ test("the lifecycle cases are each feasible case once, named by their axes", () 
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
-/** Settles the connection: its queue holds nothing before a request sent now, and the replies' continuations ran. */
 // The sessions the test's Players showed, by ID: their turns hold work sent `after` them, as random intents are.
 const shownSessions = new Map<string, PlayerSession>();
 
@@ -570,17 +569,20 @@ for (const each of CASES) {
 for (const name of SETTING_NAMES)
   for (const sequence of SEQUENCE_NAMES) {
     const setting = SETTINGS[name];
-    test(`${name} on a bridge that never becomes ready: ${sequence}`, async (context) => {
-      const gate = deferred<PlayerBridge>();
-      const { player } = mounted(context, gate.promise);
-      const changes = SEQUENCES[sequence];
-      for (const on of changes) setting.set(player, on);
-      gate.reject(new Error("No engine host."));
-      await assert.rejects(player.bridge, /No engine host/u);
-      setting.set(player, !(changes.at(-1) ?? false));
-      await turn();
-      assert.equal(player.traceId.value, null, sequence);
-    });
+    // Tracing only: a Player whose bridge never became ready names no trace. Random control has no Player-side state to
+    // check there, so it has no case (final review F8).
+    if (name === "tracing")
+      test(`${name} on a bridge that never becomes ready: ${sequence}`, async (context) => {
+        const gate = deferred<PlayerBridge>();
+        const { player } = mounted(context, gate.promise);
+        const changes = SEQUENCES[sequence];
+        for (const on of changes) setting.set(player, on);
+        gate.reject(new Error("No engine host."));
+        await assert.rejects(player.bridge, /No engine host/u);
+        setting.set(player, !(changes.at(-1) ?? false));
+        await turn();
+        assert.equal(player.traceId.value, null, sequence);
+      });
 
     test(`${name} on a bridge lost after it was ready: ${sequence}`, async (context) => {
       const { bridge, minted } = backend(context, setting);
