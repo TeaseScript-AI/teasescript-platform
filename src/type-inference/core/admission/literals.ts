@@ -1992,7 +1992,11 @@ const LAYERS = new WeakMap<
     readonly count: { value: number };
   }
 >();
-/** Per pass, `layersOf`'s keys and answers for the dict fact (#1762), as `LAYERS` holds the null fact's. */
+/**
+ * Per pass, `layersOf`'s keys and answers for the dict fact (#1762), as `LAYERS` holds the null fact's. Apart from
+ * `SET_LAYERS`: a value's answer is kept from its second ask under a key and a sentence asks dict, then set, once each,
+ * so one shared memo would give a third ask the other fact's answer.
+ */
 const DICT_LAYERS = new WeakMap<
   object,
   {
@@ -2002,7 +2006,7 @@ const DICT_LAYERS = new WeakMap<
     readonly count: { value: number };
   }
 >();
-/** Per pass, the same for the set fact (#1825). */
+/** Per pass, the same for the set fact (#1825), apart from `DICT_LAYERS` for the reason given there. */
 const SET_LAYERS = new WeakMap<
   object,
   {
