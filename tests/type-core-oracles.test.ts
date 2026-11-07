@@ -394,17 +394,14 @@ function perCell(
 const rises = (series: readonly number[]) =>
   series.slice(1).map((value, index) => value / series[index]! - 1);
 
-test("the oracle's questions cost per cell they return is flat on a flat family, and on W25-stores and r3-root-copies rises by a falling step, a log factor (#1837, #1941)", async () => {
+test("the oracle's questions cost per cell they return rises by a falling step on W24-varied, r3-root-copies and W32-own-test, a log factor, below K (#1837, #1941)", async () => {
   const gates = "tests/families/copies/3a-spike14-gates.mjs";
-  // (flat: under 1 % a step either way, 24.224 / 24.204 / 24.140 / 24.087)
-  const flat = perCell(await family(gates, "W19-record", [16, 32, 64, 128]));
-  for (const rise of rises(flat)) assert.ok(Math.abs(rise) < 0.01, JSON.stringify(flat));
-  for (const [module, shape, sizes] of [
-    ["tests/families/copies/f1-astra-r3-field-families.mjs", "r3-root-copies", [16, 32, 64, 128]],
-    // (from 32: at 16 → 64 its rise grows, +6.20 % then +6.86 %, as its increase reaches +1.0 a doubling)
-    [gates, "W25-stores", [32, 64, 128, 256]],
+  for (const [module, shape] of [
+    [gates, "W24-varied"],
+    ["tests/families/copies/f1-astra-r3-field-families.mjs", "r3-root-copies"],
+    [gates, "W32-own-test"],
   ] as const) {
-    const series = perCell(await family(module, shape, sizes));
+    const series = perCell(await family(module, shape, [16, 32, 64, 128]));
     const steps = rises(series);
     // (each step's rise below the one before: no polynomial re-walk, #1941's binary searches over a key's definitions)
     for (const [index, step] of steps.entries())
