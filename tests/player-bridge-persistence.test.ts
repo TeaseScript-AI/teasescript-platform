@@ -15,6 +15,7 @@ import {
 import type { PlayerSession } from "../player/runtime-view.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
+import { malformedArguments } from "./helpers/argument-forms.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
@@ -301,4 +302,33 @@ test("a session-free read names an op of ReadOps, with that op's arguments, and 
     return [keep, checkpoint];
   };
   assert.equal(typeof typed, "function");
+});
+
+test("captureStorage reads the shown state's saved values in the host, at its revision, in-process and in a Worker", async () => {
+  const [inProcess, remote] = await onBoth(async (bridge) => {
+    const plan = await prepared(bridge);
+    const session = await bridge.start(
+      plan,
+      { ...START, scriptStorage: [{ key: "score", value: 3 }], persistentScriptStorage: true },
+      false,
+    );
+    await bridge.request(session, "observeTime", { atMs: 2_500, media: [] });
+    const shown = bridge.latest(session)!;
+    const capture = await bridge.read(shown, "captureStorage");
+    assert.equal(capture.revision, shown.revision);
+    // Malformed arguments, each form the op's one form gives, are refused before it runs.
+    const refused: string[] = [];
+    for (const { id, args } of malformedArguments([{ required: { session: "string" } }]))
+      await bridge.client.request("captureStorage", args).then(
+        () => refused.push(`${id}: accepted`),
+        (error: unknown) => {
+          if (!(error instanceof BridgeRequestError) || error.code !== "arguments")
+            refused.push(`${id}: ${String(error)}`);
+        },
+      );
+    assert.deepEqual(refused, []);
+    return { entries: capture.entries, persistent: capture.persistent };
+  });
+  assert.deepEqual(remote, inProcess);
+  assert.deepEqual(inProcess, { entries: [{ key: "score", value: 3 }], persistent: true });
 });
