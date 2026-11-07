@@ -54,7 +54,10 @@ interface RandomHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   activate(): Promise<void>;
-  start(next: PlayerRuntimeSession | PlayerSession, paused?: boolean): void;
+  showSession(
+    next: PlayerRuntimeSession | PlayerSession,
+    options?: { readonly inspecting: boolean },
+  ): void;
   prepareInput(): true | Promise<boolean>;
   prepareRestore(restored: PlayerRuntimeSession | PlayerSession): void;
   readonly rewind: {
@@ -365,14 +368,14 @@ test("a restored state waits at its draw for the picker only once input adopts i
   const atDraw = host.session.value!;
   // Shown for inspection, as Debug's rewind shows a state it restored: no picker, so the inspection controls work.
   const asked = () => random.draw.value?.drawId ?? null;
-  host.start(atDraw, true);
+  host.showSession(atDraw, { inspecting: true });
   assert.equal(asked(), null);
   assert.equal(await host.prepareInput(), true);
   assert.equal(asked(), atDraw.state.randomDraw!.drawId);
   assert.equal(await random.resolve({ kind: "boolean", value: true }), true);
   assert.deepEqual(said(host), ["Hit: true"]);
   // Adopted after Choose outcomes was turned off, it goes on naturally.
-  host.start(host.session.value!, true);
+  host.showSession(host.session.value!, { inspecting: true });
   random.enabled.value = false;
   await settle(context);
   assert.notEqual(host.session.value?.state.randomDraw, null, "an inspected state stays as it was");
@@ -529,9 +532,9 @@ test("the picker reads a replacement session's history, also at a draw with the 
   const first = await bridge.start(a, {}, false, { owner: 1 });
   const second = await bridge.start(b, {}, false, { owner: 1 });
   assert.equal(first.state.randomDraw!.drawId, second.state.randomDraw!.drawId);
-  host.start(first);
+  host.showSession(first);
   await settle(context);
-  host.start(second);
+  host.showSession(second);
   await settle(context);
   const site = second.state.randomDraw!.site;
   const actual = await host.randomTried(site);

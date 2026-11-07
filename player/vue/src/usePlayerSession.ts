@@ -1668,14 +1668,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session.value = null;
   }
 
-  // Starts or restores a session; its scene time continues from the persisted observation, so a
-  // gap while no Player ran is not consumed. A state Debug's rewind restored is published `paused` for inspection.
-  function start(next: PlayerSession, paused = false) {
+  // Shows a session a Start began or a restore brought, as the Player's from now on; its scene time continues from the
+  // persisted observation, so a gap while no Player ran is not consumed. `inspecting`: a state Debug's rewind restored,
+  // shown for inspection, which takes input, Debug's random control and the clock only once input adopts it.
+  function showSession(
+    next: PlayerSession,
+    { inspecting: forInspection }: { readonly inspecting: boolean } = { inspecting: false },
+  ) {
     // A failed write concerns the run it happened in.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
     reportedMedia = new Set();
     debugEdits.value = null;
-    inspecting.value = paused;
+    inspecting.value = forInspection;
     rewound.value = null;
     device.reset();
     loads.clear();
@@ -1684,15 +1688,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     interactionReset.value++;
     jumpedRevision.value = -1;
     // An inspected state takes Debug's random control only once input adopts it (`adoptInspected` below).
-    if (!paused) adoptRandom(next);
+    if (!forInspection) adoptRandom(next);
     session.value = next;
     clock.rebase();
-    if (!paused) {
+    if (!forInspection) {
       applyDebugMode();
       settleUncontrolledDraw();
     }
     // The session that runs is the one a reload continues in its room.
-    if (!paused) keepSessionLater();
+    if (!forInspection) keepSessionLater();
   }
   // Publishes the result of a completed runtime action. Input to an inspected state is evaluated only once
   // `prepareInput` adopted it, so a result for the inspected state itself is never published.
@@ -2681,7 +2685,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         ? create.session()
         : startedSession(create, { debugMode }, "restore");
     if (next instanceof Promise) throw new Error("A rewound state is a factory's session.");
-    start(next, state.paused);
+    showSession(next, { inspecting: state.paused });
     rewoundGeneration = generation.value;
     debugEdits.value = state.marks.editedWhileDebugging;
     rewound.value = state.marks.rewoundWhileDebugging;
@@ -2794,7 +2798,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     camera.release();
     activation.value = {
       kind: "start",
-      begin: () => startedSession(create, { debugMode }),
+      begin: () => startedSession(create, { debugMode }, "start"),
       ...(outdated === undefined ? {} : { outdated }),
     };
     prepareActivation("start");
@@ -3002,8 +3006,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function startedSession(
     create: PlayerSessionStart,
     recording: { readonly debugMode: boolean },
-    /** A restore, as Debug's rewind publishes one, takes no Start ownership of Debug's random control. */
-    kind: "start" | "restore" = "start",
+    /** What `create` makes: a Start's fresh session, or a restore (Debug's rewind), which takes no Start ownership. */
+    kind: "start" | "restore",
   ): PlayerSession | Promise<PlayerSession> {
     const random = kind === "start" ? startRandom() : undefined;
     const host = requireBridge();
@@ -3069,7 +3073,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   function started(pending: Activation, next: PlayerSession) {
     if (continuing?.id === next.id) continuing = null;
-    start(next);
+    showSession(next);
     // A new session replaces the one kept before.
     if (pending.kind === "start") {
       kept = { plan: false, count: 0, last: null };
@@ -3366,7 +3370,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** A section of the shown session for input (`runtime-input.ts`). */
     inputSection,
     publishJump,
-    start,
+    showSession,
     update,
     prepareInput,
     /** Debug's rewind (DEBUGGER.md "Rewind"): how the session host shows the states it restores. */

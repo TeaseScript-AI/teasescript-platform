@@ -498,7 +498,7 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
   "player/vue/src/usePlayerSession.ts": [
     ["prepareRestore(found.session, found.marks)", "restore: a kept session"],
     ['startedSession(create, { debugMode }, "restore")', "restore: Debug's rewind"],
-    ["begin: () => startedSession(create, { debugMode })", "start: Start"],
+    ['begin: () => startedSession(create, { debugMode }, "start")', "start: Start"],
     ["introduceNow(requireBridge(), () => given)", "restore: a raw restore"],
     ["return introduceNow(", "by kind: `startedSession`'s factory, with `random`"],
     [
@@ -547,7 +547,7 @@ test("every main-side sender of a random op is classified as adopting or not", (
   assert.deepEqual(
     calls.map((line) => line.trim()),
     [
-      "if (!paused) adoptRandom(next);",
+      "if (!forInspection) adoptRandom(next);",
       "if (session.value !== null) adoptRandom(session.value);",
       "adoptRandom(continued);",
     ],
