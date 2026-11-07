@@ -25,7 +25,7 @@ export function mediaOps(_context: PlayerOpsContext): BridgeOps {
           readonly report: MediaLoadReport;
         };
         held.endCatchUp();
-        const result = reportPlayerRuntimeMediaLoad(held.current, mediaId, report);
+        const result = reportPlayerRuntimeMediaLoad(held.sessionForOperation(), mediaId, report);
         return publishing(held, result.session, result.outcome);
       },
       false,

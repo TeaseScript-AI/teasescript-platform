@@ -150,7 +150,7 @@ export function hatch<R>(
   const held = heldOf(backend, session);
   const store = backend.bridge.store(session)!;
   const adopt = (next: PlayerRuntimeSession): PlayerSession => {
-    if (next === held.current) return store.session;
+    if (next === held.sessionForOperation()) return store.session;
     // A session that only attached a trace or recorder keeps its revision: nothing is published.
     if (next.revision === held.revision) held.keep(next);
     else {
@@ -159,7 +159,7 @@ export function hatch<R>(
     }
     return store.session;
   };
-  const result = op(held.current);
+  const result = op(held.sessionForOperation());
   if (isAdapterSession(result)) {
     // EVIDENCE: validation: `isAdapterSession` checked the result, which `Hatched` maps to the store's session.
     return adopt(result) as Hatched<R>;

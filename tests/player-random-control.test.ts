@@ -425,51 +425,60 @@ test("a held session's next read attaches a changed control only after ending a 
   );
   const context = playerOpsContext();
   const held = new HeldSession(createPlayerRuntimeSession(plan, START), "p1", context, 1, null);
-  held.beginCatchUp(beginPlayerRuntimeCatchUp(held.current, 1_000));
+  held.beginCatchUp(beginPlayerRuntimeCatchUp(held.sessionForOperation(), 1_000));
   alignRandom(context, intentOf(1, 1, []));
   // The publication as it is keeps the catch-up; reading the session ends it and attaches.
   void held.publication;
   assert.notEqual(held.catchUp, null);
-  const current = held.current;
+  const current = held.sessionForOperation();
   assert.equal(held.catchUp, null);
   assert.notEqual(observePlayerRuntimeTime(current, 1_000, []).session.state.randomDraw, null);
 });
 
-// The op-table invariant: every session op reads its session through `current`, which attaches a changed control only
+// The op-table invariant: every session op runs its session through `sessionForOperation`, which attaches a changed control only
 // after ending a catch-up; only `adoptCatchUp` reads the publication as it is, to adopt the copy it made.
-const SESSION_OPS: Readonly<Record<string, "ends a catch-up" | "reads current" | "adopts">> = {
-  continue: "reads current",
+const SESSION_OPS: Readonly<
+  Record<
+    string,
+    | "ends a catch-up"
+    | "runs through sessionForOperation"
+    | "steps the copy"
+    | "reads a view"
+    | "adopts"
+  >
+> = {
+  continue: "runs through sessionForOperation",
   observeTime: "ends a catch-up",
   observeInput: "ends a catch-up",
   stepTime: "ends a catch-up",
   beginCatchUp: "ends a catch-up",
-  stepCatchUp: "reads current",
+  stepCatchUp: "steps the copy",
   adoptCatchUp: "adopts",
   dropCatchUp: "ends a catch-up",
   skipPacing: "ends a catch-up",
-  viewCalls: "reads current",
-  beginRecording: "reads current",
-  restartTrace: "reads current",
-  setDebugMode: "reads current",
-  resolveDraw: "reads current",
+  viewCalls: "reads a view",
+  beginRecording: "runs through sessionForOperation",
+  restartTrace: "runs through sessionForOperation",
+  setDebugMode: "runs through sessionForOperation",
+  resolveDraw: "runs through sessionForOperation",
   reportMediaLoad: "ends a catch-up",
-  submitComposer: "reads current",
-  selectChoice: "reads current",
-  activateButton: "reads current",
-  stepFormField: "reads current",
-  dismissFormField: "reads current",
-  clearFormField: "reads current",
-  draftForm: "reads current",
-  submitForm: "reads current",
-  cancelForm: "reads current",
-  skipImage: "reads current",
-  answerImage: "reads current",
-  openUrl: "reads current",
-  closePopup: "reads current",
-  closeExport: "reads current",
-  pressPermanentButton: "reads current",
-  completeStorageWrite: "reads current",
-  applyStorageEdit: "reads current",
+  submitComposer: "runs through sessionForOperation",
+  selectChoice: "runs through sessionForOperation",
+  activateButton: "runs through sessionForOperation",
+  stepFormField: "runs through sessionForOperation",
+  dismissFormField: "runs through sessionForOperation",
+  clearFormField: "runs through sessionForOperation",
+  draftForm: "runs through sessionForOperation",
+  submitForm: "runs through sessionForOperation",
+  cancelForm: "runs through sessionForOperation",
+  skipImage: "runs through sessionForOperation",
+  answerImage: "runs through sessionForOperation",
+  openUrl: "runs through sessionForOperation",
+  closePopup: "runs through sessionForOperation",
+  closeExport: "runs through sessionForOperation",
+  pressPermanentButton: "runs through sessionForOperation",
+  completeStorageWrite: "runs through sessionForOperation",
+  applyStorageEdit: "runs through sessionForOperation",
   answerCapture: "ends a catch-up",
   answerFileStore: "ends a catch-up",
   answerLock: "ends a catch-up",

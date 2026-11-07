@@ -64,7 +64,7 @@ function answerOp<A>(
       const { actionId, answer: given, held: media } = args as AnswerArguments<A>;
       held.endCatchUp();
       const result = answer(
-        held.current,
+        held.sessionForOperation(),
         actionId,
         given,
         media === null ? undefined : admissionOf(media),

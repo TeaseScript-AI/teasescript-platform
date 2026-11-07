@@ -112,7 +112,7 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
         const revision = () => owned?.history.revision ?? context.random.history.revision;
         if ((record !== null || outcome === "untried") && owned === null)
           return { result: { outcome: { kind: "notOwned" }, revision: revision() }, view: null };
-        const current = held.current;
+        const current = held.sessionForOperation();
         const draw = current.state.randomDraw;
         let resolved: "natural" | RandomOutcome = outcome === "untried" ? "natural" : outcome;
         if (outcome === "untried" && draw !== null && draw.drawId === drawId) {

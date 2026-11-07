@@ -88,7 +88,7 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
       (held, args) => {
         // EVIDENCE: validation: checkArguments accepted `on` as a boolean.
         const { on } = args as { readonly on: boolean };
-        const result = setPlayerRuntimeDebugMode(held.current, on);
+        const result = setPlayerRuntimeDebugMode(held.sessionForOperation(), on);
         return publishing(held, result.session, result.outcome);
       },
       false,
@@ -110,7 +110,9 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
           readonly request: DebugViewRequest;
         };
         const held = heldSession(sessions, session);
-        return { result: debugViewOf(held.current, context.trace, context.traceId, request) };
+        return {
+          result: debugViewOf(held.sessionForOperation(), context.trace, context.traceId, request),
+        };
       },
     },
   };
