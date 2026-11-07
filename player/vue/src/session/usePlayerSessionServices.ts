@@ -1,15 +1,15 @@
 import { shallowRef, watch, type Ref } from "vue";
-import { FileStoreService } from "../../../stored-files.js";
-import { LockService, type LockDialog } from "../../../lock-service.js";
+import { FileStoreService } from "../../../media/stored-files.js";
+import { LockService, type LockDialog } from "../../../encryption/lock-service.js";
 import {
   CaptureService,
   type PlayerDiagnostic,
   type SessionCamera,
-} from "../../../session-camera.js";
-import type { CapturedMediaStore } from "../../../captured-media.js";
-import type { PlayerSession } from "../../../runtime-view.js";
-import type { ServiceSection } from "../../../player-bridge.js";
-import type { PlayerSessionOptions } from "../usePlayerSession.js";
+} from "../../../media/session-camera.js";
+import type { CapturedMediaStore } from "../../../media/captured-media.js";
+import type { PlayerSession } from "../../../runtime/runtime-view.js";
+import type { ServiceSection } from "../../../runtime/player-bridge.js";
+import type { PlayerSessionOptions } from "./usePlayerSession.js";
 
 /*
  * The services that answer a script's requests in service sections, moved from `usePlayerSession` unchanged: photo

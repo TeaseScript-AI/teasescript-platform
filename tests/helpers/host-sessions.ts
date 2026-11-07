@@ -1,5 +1,5 @@
-import type { PlayerBridge } from "../../player/player-bridge.js";
-import type { PlayerRuntimeSession } from "../../player/runtime-adapter.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import { loadPlayerModule } from "./player-modules.js";
 

@@ -6,8 +6,8 @@ import { parentHostPort } from "../../player/engine-bridge/node-port.js";
 import { playerBridgeOps, playerOpsContext } from "../../player/engine-bridge/player-ops.js";
 import { startBridgeHost } from "../../player/engine-bridge/worker-host.js";
 import { plainRecording } from "./plain-recording.js";
-import { DebugRecorder } from "../../player/debug-recorder.js";
-import { restorePlayerRuntimeSessionAt } from "../../player/runtime-adapter.js";
+import { DebugRecorder } from "../../player/debug/debug-recorder.js";
+import { restorePlayerRuntimeSessionAt } from "../../player/runtime/runtime-adapter.js";
 
 /*
  * The Player's engine Worker, as `node-worker.ts` runs it, plus two test ops. `restoreForTest` restores a snapshot of a

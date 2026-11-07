@@ -10,8 +10,8 @@ import {
   replayDebugExport,
   type DebugExport,
   type DebugReplayResult,
-} from "../player/debug-export.js";
-import { DebugRecorder } from "../player/debug-recorder.js";
+} from "../player/debug/debug-export.js";
+import { DebugRecorder } from "../player/debug/debug-recorder.js";
 import {
   advancePlayerRuntimeTime,
   answeredByPlayerInput,
@@ -35,13 +35,13 @@ import {
   stepPlayerRuntimeFormField,
   submitPlayerRuntimeForm,
   playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   activePlayerRuntimeCapture,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeForeground,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 import {
   createCheckpoint,
   DEFAULT_TEMPORAL_CONTEXT,

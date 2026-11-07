@@ -4,9 +4,12 @@ import test from "node:test";
 import {
   createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
-import { playerRuntimeForeground } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../player/runtime/runtime-view.js";
 import {
   readPlayerTransferFile,
   readPlayerTransferText,
@@ -17,8 +20,11 @@ import {
   sessionTransferText,
   type SessionTransfer,
   type SessionTransferMedium,
-} from "../player/session-transfer.js";
-import { storageTransferFile, StorageTransferError } from "../player/storage-transfer.js";
+} from "../player/persistence/session-transfer.js";
+import {
+  storageTransferFile,
+  StorageTransferError,
+} from "../player/persistence/storage-transfer.js";
 
 const scope = "development-package:story";
 const photo = "captured-media:11111111-1111-4111-8111-111111111111:1";

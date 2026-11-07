@@ -112,7 +112,7 @@ which appears when the host persists script storage.
 Debugging stays apart from normal play. Each script with storage has a normal room, its own saved data and the session
 the Player keeps for it ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), and a debug room with a
 session, saved values, and photos of its own, kept in the IndexedDB database `teasescript-debug-rooms`
-(`player/kept-sessions.ts`). A plain URL opens the normal room; `room=debug` opens the debug room, made from a copy of
+(`player/persistence/kept-sessions.ts`). A plain URL opens the normal room; `room=debug` opens the debug room, made from a copy of
 the script's own saved values and photos as they are now when there is none yet. The development preview opens the
 debug room while it starts with the Debug menu on, and with `room=debug`.
 
@@ -140,7 +140,7 @@ debug room while it starts with the Debug menu on, and with `room=debug`.
 
 In the debug room, the Debug panel's **Random draws** section, above the tabs, lets a developer choose the outcomes of
 the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug features run
-(`player/vue/src/useDebugRandom.ts`). Normal play never pauses at a draw.
+(`player/vue/src/debug/random/useDebugRandom.ts`). Normal play never pauses at a draw.
 
 - **Choose outcomes**, off on every load, pauses the session at every random draw and asks for its outcome, unless that
   draw's site is set to go on by itself; its collapsed explanation reads "The script pauses at every random draw so you
@@ -184,7 +184,7 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
   was made for, such as the same plan restored. A plan the Worker has no sources for, as in playback of a published
   plan, shows no code.
 - **Not modal**: while the picker asks, the page stays visible, and only an explicit allowlist takes input
-  (`player/vue/src/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
+  (`player/vue/src/debug/random/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
   controls without a notice's action, panel resizing, and the Debug panel's tabs with Now, Variables, and Log. The tools
   menu, the sidebar's `Ctrl/Meta+B`, Settings, the panel's switches and buttons, the Storage tab's controls, and the
   chat wait for the outcome.
@@ -193,7 +193,7 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
 
 ### Rewind
 
-While the Debug features run, Debug's rewind (`player/debug-history.ts`) keeps a **point** for every interaction the
+While the Debug features run, Debug's rewind (`player/debug/debug-history.ts`) keeps a **point** for every interaction the
 session newly presents (`askChoice`, a button, an ask, or `askImage`), the one shown when Debug is turned on included;
 an ask that a timer, media, or permanent-button block suspended and shows again is the same point. A point holds the
 validated state as checkpoint JSON, which includes the session's storage view, and the events that led to it, which
@@ -243,7 +243,7 @@ previewed before download; a selected photo carries its original bytes and links
 The technical report, always included, locates the failure without runtime values. Replay data discloses state that
 copies saved values, answers, and session text, so it requires all three.
 
-`player/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
+`player/debug/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
 `version: 6`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
@@ -262,7 +262,7 @@ the engine refuses meanwhile are not recorded; only a resolution of a draw that 
 anchor is a `resumeRandomDraw` call of its own. Replay decides each recorded draw as recorded, every other one
 naturally, and pauses where the call stood paused. It adds no plan, snapshot, or checkpoint revision.
 
-In every build, the Player's `player/debug-recorder.ts` records each session from its Start or Continue: the anchor
+In every build, the Player's `player/debug/debug-recorder.ts` records each session from its Start or Continue: the anchor
 before its first call and copies of every call's plain arguments and results, beside the session and outside its state.
 When the record would outgrow its retention (4,096 calls or 2 Mi characters of argument JSON, diagnostic tuning rather
 than a script limit), it starts again from the state before the Player's next call, never dropping a call in between. A
@@ -277,7 +277,7 @@ calls. For that, the recorder keeps logging calls after the record froze without
 it cannot copy, it starts that log again at the Player's next call.
 
 The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
-session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile. The
+session, the record, and the photos frozen then (`player/debug/debug-export-assembly.ts`), so play may continue meanwhile. The
 technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
 where the browser can hash, the incident as the session's actual state shows it, also a state it cannot export, the
 storage editor's and the rewind's marks, the sequence and kind of the last 256 events, and what the Player itself observed, as Debug's Now view and the notices show it: the

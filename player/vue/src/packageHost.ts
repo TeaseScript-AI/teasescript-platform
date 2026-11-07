@@ -3,7 +3,7 @@ import {
   loadDevelopmentPackage,
 } from "../../../playground/package-catalog.js";
 import { DEMO_PLAYER_PROFILE } from "../../demo-player-profile.js";
-import type { PlayerProject } from "../../runtime-adapter.js";
+import type { PlayerProject } from "../../runtime/runtime-adapter.js";
 
 // The trusted host for a package of the playground server's development package root (#570), opened with
 // `?package=<id>`: it loads the package's `.tease` files, images, audio, and video from the server and resolves the

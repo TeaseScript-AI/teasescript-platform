@@ -7,8 +7,8 @@ import {
 } from "../../src/runtime/actions/model.js";
 import { hatch } from "../../player/engine-bridge/in-process.js";
 import { instructionFacts } from "../../player/engine-bridge/instruction-facts.js";
-import type { PlayerBridge } from "../../player/player-bridge.js";
-import type { PlayerRuntimeSession } from "../../player/runtime-adapter.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import {
   playerRuntimeCalls,
   playerRuntimeDebugCountdown,
@@ -19,12 +19,12 @@ import {
   type PlayerRuntimeDebugCountdown,
   type PlayerRuntimeDebugNow,
   type PlayerSession,
-} from "../../player/runtime-view.js";
+} from "../../player/runtime/runtime-view.js";
 
 /*
  * Player Debug's readers as tests use them (L5f). The readers run in the main realm on a published view; this file
  * gives them an adapter session's view, as its publication carries it, and compares each result with the frozen oracle
- * below: the readers as they were before L5f moved them (`player/runtime-adapter.ts` at d6e83b181, lines 646–923,
+ * below: the readers as they were before L5f moved them (`player/runtime/runtime-adapter.ts` at d6e83b181, lines 646–923,
  * verbatim but for their names), which read the plan itself, not the instruction facts a publication carries.
  */
 

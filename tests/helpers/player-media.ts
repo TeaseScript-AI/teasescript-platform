@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { MediaDevice, type MediaDeviceElement } from "../../player/media-device.js";
+import { MediaDevice, type MediaDeviceElement } from "../../player/media/media-device.js";
 import {
   advancePlayerRuntimeTime,
   observePlayerRuntimeTime,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
-} from "../../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../../player/compile-project.js";
-import { playerRuntimeMedia } from "../../player/runtime-view.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import { playerRuntimeMedia } from "../../player/runtime/runtime-view.js";
 import type { MediaLoadReport } from "../../src/index.js";
 
 // A deterministic stand-in for HTMLAudioElement: tests move `position` to simulate what was actually played.

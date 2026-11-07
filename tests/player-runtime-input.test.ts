@@ -5,21 +5,21 @@ import test, { before, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { effectScope, watch, type Ref } from "vue";
 
-import type * as CompileProject from "../player/compile-project.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import type * as RuntimeAdapter from "../player/runtime-adapter.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import type * as RuntimeAdapter from "../player/runtime/runtime-adapter.js";
 import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import {
   playerRuntimeForeground,
   playerRuntimePacingGate,
   type PlayerSession,
   type PlayerSessionView,
-} from "../player/runtime-view.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+} from "../player/runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import {
   presentedAction,
@@ -81,16 +81,16 @@ let adapter: typeof RuntimeAdapter;
 let input: RuntimeInput;
 
 before(async () => {
-  const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
+  const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
   // EVIDENCE: validation: the bundle the composable runs in, whose facade reaches its sessions.
   facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
-  compiler = (await loadPlayerModule("player/compile-project.ts")) as typeof compiler;
+  compiler = (await loadPlayerModule("player/runtime/compile-project.ts")) as typeof compiler;
   // EVIDENCE: validation: the bundle's adapter, whose sessions the facade's host holds.
-  adapter = (await loadPlayerModule("player/runtime-adapter.ts")) as typeof adapter;
+  adapter = (await loadPlayerModule("player/runtime/runtime-adapter.ts")) as typeof adapter;
   input = await runtimeInput();
 });
 
@@ -747,11 +747,14 @@ test("only the composer takes the composer's writable model", () => {
   const takers = files.filter((file) => {
     const source = readFileSync(join(sources, file), "utf8");
     return (
-      file !== "useComposerFields.ts" &&
+      file !== "interaction/useComposerFields.ts" &&
       (/\buseComposerModel\b/.test(source) ||
         /import\s*\*\s*as\s+\w+\s+from\s*["'][^"']*useComposerFields["']/.test(source))
     );
   });
-  assert.ok(files.includes("Composer.vue") && files.includes("RuntimeInteraction.vue"));
-  assert.deepEqual(takers, ["Composer.vue"]);
+  assert.ok(
+    files.includes("interaction/Composer.vue") &&
+      files.includes("interaction/RuntimeInteraction.vue"),
+  );
+  assert.deepEqual(takers, ["interaction/Composer.vue"]);
 });

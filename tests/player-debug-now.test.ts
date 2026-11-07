@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { RuntimeDebugContext } from "../src/index.js";
-import { playerDebugImageOrigin } from "../player/debug-variables.js";
-import { debugStageImageStatus } from "../player/presentation.js";
+import { playerDebugImageOrigin } from "../player/debug/debug-variables.js";
+import { debugStageImageStatus } from "../player/presentation/presentation.js";
 import {
   activatePlayerRuntimeButton,
   advancePlayerRuntimeTime,
@@ -15,9 +15,9 @@ import {
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import { debugCalls, debugNow } from "./helpers/debug-readers.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 
 // Player Debug's Now view (DEBUGGER.md "Player Debug") locates the session from canonical state: package paths with
 // every folder, one-based lines of the authored source, calls innermost first, and every timer, hidden ones included.

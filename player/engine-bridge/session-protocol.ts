@@ -2,7 +2,7 @@ import type { InterpreterEvent } from "../../src/runtime/events.js";
 import type { RuntimeSessionCall } from "../../src/runtime/session.js";
 import type { InstructionFacts } from "./instruction-facts.js";
 import type { PlanMetadata } from "./player-ops.js";
-import type { PlayerRuntimeState } from "../runtime-adapter.js";
+import type { PlayerRuntimeState } from "../runtime/runtime-adapter.js";
 
 /*
  * What a session op's reply carries in `view` (the L5 reply contract). The host keeps one cursor per session: how many

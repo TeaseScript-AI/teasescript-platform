@@ -4,7 +4,7 @@ import {
   createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshotJson,
   restorePlayerRuntimeSessionAt,
-} from "../../runtime-adapter.js";
+} from "../../runtime/runtime-adapter.js";
 import { everyItem, exactly, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import type { BridgeOps, HostSessions } from "../worker-host.js";

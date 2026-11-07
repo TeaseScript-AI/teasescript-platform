@@ -182,7 +182,7 @@ message's `[data-explain-values]`, the log lines under
 the Log tab, and the latest announcement in `[data-debug-announcement]`. The Storage tab (`DebugStorage.vue`) reads
 the saved values through the session host's `readSavedData`, which in the debug room are the debug room's own,
 refreshes on its `savedDataRevision`, renders each value as the flat, paged outline of `storageOutline`
-(`player/storage-preview.ts`, `StorageValue.vue`), and loads a thumbnail through `savedPhoto` only once it is in view,
+(`player/persistence/storage-preview.ts`, `StorageValue.vue`), and loads a thumbnail through `savedPhoto` only once it is in view,
 keyed by its reference. `StorageEditDialog.vue` edits through the host's `editSavedData`, which stores the edit through
 the provider first, then applies it with the recorded `applyPlayerRuntimeStorageEdit`. It refuses an edit (`busy`)
 while a script write waits for the host; a script write issued meanwhile settles first, and the session then follows
@@ -192,7 +192,7 @@ turns the value trace on (`setDebugTracing`): the engine's host keeps it as the 
 and every session operation there records into it. A setting made before the host is reachable waits as the Player's,
 and only its latest goes once the host is reachable, while the Player lives. The Variables tab (`DebugVariables.vue`, `DebugTraceRows.vue`) and
 the Now tab's Stage image origin show views the host makes from its session and trace (`debugView`,
-`player/debug-view.ts`), with `player/debug-variables.ts`: `playerDebugVariables` groups live variables, and
+`player/debug/debug-view.ts`), with `player/debug/debug-variables.ts`: `playerDebugVariables` groups live variables, and
 `playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened. The tabs keep
 the selection, the opened rows, the pages and the filter, send them with each request (`useDebugView.ts`), and show a
 reply only while it is of the shown publication and trace, from the first reply on. `PlayerApp`

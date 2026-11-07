@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   ChangedContentMeasurement,
   type MeasuringVirtualizer,
-} from "../player/transcript-measurement.js";
+} from "../player/presentation/transcript-measurement.js";
 
 /** A virtualizer scrolled to 1,000 px in `direction`, having measured rows `a` and `b` at 300 px high. */
 function scrolled(direction: MeasuringVirtualizer["scrollDirection"]): MeasuringVirtualizer {

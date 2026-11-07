@@ -5,10 +5,10 @@ import {
   type PlanValidationError,
   type RandomSite,
 } from "../../src/playback.js";
-import type { PlayerProject, PlayerScriptDiagnostic } from "../runtime-adapter.js";
-import type { ScriptIdentity } from "../script-identity.js";
-import { planLockNeeds, playerRuntimeStageImages } from "../plan-metadata.js";
-import { DebugRecorder } from "../debug-recorder.js";
+import type { PlayerProject, PlayerScriptDiagnostic } from "../runtime/runtime-adapter.js";
+import type { ScriptIdentity } from "../runtime/script-identity.js";
+import { planLockNeeds, playerRuntimeStageImages } from "../runtime/plan-metadata.js";
+import { DebugRecorder } from "../debug/debug-recorder.js";
 import { MAIN_FILE_PATH } from "../../src/project-paths.js";
 import { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
@@ -228,8 +228,8 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
   /** A source's result, after the compiler loads: the only op the host awaits. */
   const compile = async (script: string | PlayerProject): Promise<PrepareResult> => {
     const [{ compilePlayerProject }, { scriptIdentity }] = await Promise.all([
-      import("../compile-project.js"),
-      import("../script-identity.js"),
+      import("../runtime/compile-project.js"),
+      import("../runtime/script-identity.js"),
     ]);
     const compilation = compilePlayerProject(script);
     const identity = scriptIdentity(script);

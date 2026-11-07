@@ -22,7 +22,7 @@ let useStagePhoto: (
 
 // Load the real Vue composable through the existing build tool, like the Player session host tests.
 before(async () => {
-  const module = await loadPlayerModule("player/vue/src/useStagePhoto.ts");
+  const module = await loadPlayerModule("player/vue/src/stage/useStagePhoto.ts");
   assert.equal(typeof module.useStagePhoto, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export was checked callable just above.
   useStagePhoto = module.useStagePhoto as typeof useStagePhoto;

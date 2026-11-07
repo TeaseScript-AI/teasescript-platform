@@ -6,10 +6,13 @@ import {
   openPlayerRuntimeUrl,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import { debugNow } from "./helpers/debug-readers.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { playerRuntimeForeground, playerRuntimeUrlRequest } from "../player/runtime-view.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  playerRuntimeForeground,
+  playerRuntimeUrlRequest,
+} from "../player/runtime/runtime-view.js";
 import { openUrlTab, type UrlTab } from "../player/url-tab.js";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
-import type * as CompileProject from "../player/compile-project.js";
-import type * as RuntimeAdapter from "../player/runtime-adapter.js";
-import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
+import type * as RuntimeAdapter from "../player/runtime/runtime-adapter.js";
+import type { PlayerRuntimeSession } from "../player/runtime/runtime-adapter.js";
 import type { RandomDrawResolutionOutcome } from "../src/index.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { loadHostFacade, onHostAll } from "./helpers/host-sessions.js";
@@ -38,14 +38,14 @@ let runtime: typeof RuntimeAdapter & typeof CompileProject;
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const time: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDevelopmentTime.ts",
+    "player/vue/src/debug/useDevelopmentTime.ts",
   );
   const adapter = {
-    ...(await loadPlayerModule("player/runtime-adapter.ts")),
-    ...(await loadPlayerModule("player/compile-project.ts")),
+    ...(await loadPlayerModule("player/runtime/runtime-adapter.ts")),
+    ...(await loadPlayerModule("player/runtime/compile-project.ts")),
   };
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof time.useDevelopmentTime, "function");

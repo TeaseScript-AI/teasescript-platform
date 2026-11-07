@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MessageUpdateAnnouncer } from "../player/message-update-announcer.js";
+import { MessageUpdateAnnouncer } from "../player/presentation/message-update-announcer.js";
 
 /** An announcer on a manual clock: `advance` runs the scheduled flushes that come due. */
 function announcer() {

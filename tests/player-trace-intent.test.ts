@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
-import type { DebugView, DebugViewRequest } from "../player/debug-view.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
+import type { DebugView, DebugViewRequest } from "../player/debug/debug-view.js";
 import { connectBridge } from "../player/engine-bridge/client.js";
 import { heldTrace, introduceNow } from "../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult, TracingIntent } from "../player/engine-bridge/player-ops.js";
-import { PlayerBridge } from "../player/player-bridge.js";
-import type { PlayerSession } from "../player/runtime-view.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";

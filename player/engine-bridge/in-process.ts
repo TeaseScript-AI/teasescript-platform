@@ -1,13 +1,13 @@
 import type { InstructionPlan, MediaProgressReport } from "../../src/playback.js";
-import type { DebugRecording } from "../debug-recorder.js";
+import type { DebugRecording } from "../debug/debug-recorder.js";
 import {
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../runtime-adapter.js";
-import type { PlayerSession } from "../runtime-view.js";
-import { PlayerBridge } from "../player-bridge.js";
+} from "../runtime/runtime-adapter.js";
+import type { PlayerSession } from "../runtime/runtime-view.js";
+import { PlayerBridge } from "../runtime/player-bridge.js";
 import { openBridge, type ClientPort } from "./client.js";
 import {
   alignTrace,

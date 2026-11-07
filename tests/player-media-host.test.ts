@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, shallowRef, type Ref } from "vue";
 
-import type * as CompileProject from "../player/compile-project.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
 import type { BridgeClient } from "../player/engine-bridge/client.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import type { PlayerSession } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 /*
@@ -44,17 +44,17 @@ let facade: typeof InProcess;
 let compiler: typeof CompileProject;
 
 before(async () => {
-  const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
+  const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-  const photos = await loadPlayerModule("player/vue/src/stagePhotos.ts");
+  const photos = await loadPlayerModule("player/vue/src/stage/stagePhotos.ts");
   assert.equal(typeof photos.usePlanPhotoPreload, "function");
   // EVIDENCE: validation: the real module's export, checked callable just above.
   usePlanPhotoPreload = photos.usePlanPhotoPreload as typeof usePlanPhotoPreload;
   // EVIDENCE: validation: the bundle the composable runs in, whose host it uses.
   facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
-  compiler = (await loadPlayerModule("player/compile-project.ts")) as typeof compiler;
+  compiler = (await loadPlayerModule("player/runtime/compile-project.ts")) as typeof compiler;
 });
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };

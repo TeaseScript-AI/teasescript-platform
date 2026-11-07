@@ -1,22 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { beginRecordingNow, heldPlan, heldRecording } from "../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import { startBridgeHost, type HostPort } from "../player/engine-bridge/worker-host.js";
 import { playerBridgeOps } from "../player/engine-bridge/player-ops.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
 import {
   observePlayerRuntimeTime,
   playerRuntimeSnapshot,
   restorePlayerRuntimeSessionAt,
   stepPlayerRuntimeTime,
-} from "../player/runtime-adapter.js";
-import type { PlayerSession } from "../player/runtime-view.js";
-import { PublicationGapError, SessionStore } from "../player/session-store.js";
+} from "../player/runtime/runtime-adapter.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
+import { PublicationGapError, SessionStore } from "../player/persistence/session-store.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";

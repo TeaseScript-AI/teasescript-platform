@@ -1,5 +1,5 @@
 import type { MediaLoadReport } from "../../../src/playback.js";
-import { reportPlayerRuntimeMediaLoad } from "../../runtime-adapter.js";
+import { reportPlayerRuntimeMediaLoad } from "../../runtime/runtime-adapter.js";
 import { exactly, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import type { BridgeOps } from "../worker-host.js";

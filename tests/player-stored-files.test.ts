@@ -3,18 +3,18 @@ import { createHash } from "node:crypto";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
-import { CapturedMediaStore } from "../player/captured-media.js";
+import { CapturedMediaStore } from "../player/media/captured-media.js";
 import {
   playerRuntimeSnapshot,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
-import type { PlayerSession } from "../player/runtime-view.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import { answerFileStore } from "../player/stored-files.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { answerFileStore } from "../player/media/stored-files.js";
 import type {
   RuntimeFileStoreActionSnapshot,
   RuntimeFileToStore,
@@ -173,7 +173,7 @@ let usePlayerSession: (options: {
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 before(async () => {
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.

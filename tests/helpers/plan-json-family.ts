@@ -1,9 +1,9 @@
-import type { CapturedMediaRepository } from "../../player/captured-media.js";
-import type { KeptRoomStore, KeptSessionStore } from "../../player/kept-sessions.js";
-import type { ScriptStorageProvider } from "../../player/script-storage.js";
+import type { CapturedMediaRepository } from "../../player/media/captured-media.js";
+import type { KeptRoomStore, KeptSessionStore } from "../../player/persistence/kept-sessions.js";
+import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 
 /*
- * The plan JSON's lifetime family (`player/plan-json-lease.ts`), declared once for both of its witness layers: the
+ * The plan JSON's lifetime family (`player/persistence/plan-json-lease.ts`), declared once for both of its witness layers: the
  * pure family (`player-plan-json-lease.test.ts`) and the composable's (`player-session-keep.test.ts`). A producer is an
  * op of the host that reads or writes a plan's canonical JSON. Every op of `persistenceOps` is either a producer, with
  * its outcomes, or classified here as not one; the coverage check compares this with the ops themselves, so a new op
