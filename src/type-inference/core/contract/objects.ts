@@ -1,14 +1,18 @@
-import type { PlaceId } from "../../graph.js";
-import { joinParts, joinSteps, keptSteps } from "../budget.js";
-import type { Contract } from "../contract.js";
 import {
-  keyOf,
-  keyPlace,
-  SELECTED_TEXT,
-  SELECTED_VALUE,
-  sortCost,
-  type Key,
-} from "../definitions.js";
+  each,
+  steps,
+  some,
+  copied,
+  sorted,
+  indexed,
+  concatenated,
+  sliced,
+  joined,
+} from "../narrowing-iteration.js";
+import type { PlaceId } from "../../graph.js";
+import { joinParts, keptArray } from "../budget.js";
+import type { Contract } from "../contract.js";
+import { keyOf, keyPlace, SELECTED_TEXT, SELECTED_VALUE, type Key } from "../definitions.js";
 import { firstWriter, type Writer } from "../items.js";
 import { stepName } from "../program.js";
 import type { ProofDemand, Proven, Work } from "../solver.js";
@@ -20,7 +24,7 @@ import {
   keyWalk,
   memberStepOf,
   restRef,
-  stepsArray,
+  isPathSteps,
   stepsRest,
 } from "./key-ids.js";
 import { ABSENT, heldReference } from "./kinds.js";
@@ -46,20 +50,25 @@ export function objectsAt(
   value: PlaceId,
   rest: readonly string[],
 ): ProofDemand<ObjectsProof> {
+  contract.work.charge("objectSteps");
   const site = contract.pass.program.places[value]?.site ?? null;
   return {
-    key: joinParts("ob", value, rest),
+    key: joinParts("ob", value, joined(contract.work, "objectSteps", rest, ".")),
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
     proves: true,
     // #1668: K, the objects query's own run names provenance, never the read's items
-    make: () => valueObjects(contract, value, rest),
+    make: () => {
+      contract.work.charge("objectSteps");
+      return valueObjects(contract, value, rest);
+    },
   };
 }
 
 /** `objectsAt` for a key (`contractOf`'s read of it and a property below), once per key. */
 export function keyObjects(contract: Contract, asked: Key): ProofDemand<ObjectsProof> {
+  contract.work.charge("objectSteps");
   const key = canonicalKey(contract, asked);
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   return {
@@ -69,7 +78,10 @@ export function keyObjects(contract: Contract, asked: Key): ProofDemand<ObjectsP
     offset: site?.start ?? -1,
     proves: true,
     // #1668: K, the objects query's own run names provenance, never the read's items
-    make: () => keyObjectsMade(contract, key),
+    make: () => {
+      contract.work.charge("objectSteps");
+      return keyObjectsMade(contract, key);
+    },
   };
 }
 
@@ -85,34 +97,34 @@ export function* absentWriterAt(
   rest: readonly string[],
   step: string,
 ): Work<{ readonly covered: boolean; readonly writer: Writer | null }> {
+  contract.work.charge("objectSteps");
   const { program, definitions, lists, solver } = contract.pass;
   let writer: Writer | null = null;
   const first = objectsAt(contract, value, rest);
   const seen = new Set<string>([first.key]);
   const open: ProofDemand<ObjectsProof>[] = [first];
-  while (open.length > 0) {
+  for (const _ of steps(program.work, "objectSteps", () => open.length > 0)) {
     // #1668: K, a query's proof names the writer of a read's `missing`, none of its items
     const { proof: node } = yield* solver.proven(open.pop()!);
     if (node === null || !node.complete) return UNCOVERED;
-    program.work.charge("objectSteps");
-    for (const { key, place, path } of node.keys) {
-      program.work.charge("objectSteps");
+    for (const { key, place, path } of each(program.work, "objectSteps", node.keys)) {
       // (the read at the property is a key's own demand: stopped there, it answers no `missing` the query names)
       const below = keyBelowIn(contract, key, [step]);
       if (contract.keyStopped(below)) return UNCOVERED;
-      for (const d of definitions.byKey.get(below) ?? []) {
-        program.work.charge("objectSteps");
+      for (const d of each(program.work, "objectSteps", definitions.byKey.get(below) ?? [])) {
         if (lists.live(d)) return UNCOVERED;
       }
       const written = writtenOf(program.place(place).kind);
-      if (written !== null && termAt(written, joinSteps(path, [step])) !== null) return UNCOVERED;
+      if (
+        written !== null &&
+        termAt(written, concatenated<string>(program.work, "objectSteps", [path, [step]])) !== null
+      )
+        return UNCOVERED;
     }
-    for (const each of node.prior) {
-      program.work.charge("objectSteps");
-      writer = firstWriter(writer, each);
+    for (const prior of each(program.work, "objectSteps", node.prior)) {
+      writer = firstWriter(writer, prior);
     }
-    for (const { literal, path } of node.lists) {
-      program.work.charge("objectSteps");
+    for (const { literal, path } of each(program.work, "objectSteps", node.lists)) {
       const index = contract.literalIndex(literal);
       const below = nodeAt(contract, index, path)?.children.get(step);
       if (below !== undefined && below.reads.length + below.others.length + below.exact.length > 0)
@@ -120,8 +132,7 @@ export function* absentWriterAt(
       writer = firstWriter(writer, lackingAt(contract, index, path, step));
     }
     // (each edge read, a child already seen too: a dense graph's edges, not only its nodes)
-    for (const child of node.children) {
-      program.work.charge("objectSteps");
+    for (const child of each(program.work, "objectSteps", node.children)) {
       if (!seen.has(child.key)) {
         contract.keepText(child.key.length);
         seen.add(child.key);
@@ -146,25 +157,30 @@ class Gathered {
   readonly #children = new Map<string, ProofDemand<ObjectsProof>>();
   complete = true;
 
-  public constructor(private readonly contract: Contract) {}
+  public constructor(private readonly contract: Contract) {
+    contract.work.charge("objectSteps");
+  }
 
   public list(site: ObjectSite): void {
+    this.contract.work.charge("objectSteps");
     this.#add(this.#lists, joinParts(site.literal, site.path), site);
   }
 
   public writer(writer: Writer | null): void {
+    this.contract.work.charge("objectSteps");
     if (writer !== null)
       this.#add(this.#prior, joinParts(writer.kind, writer.file, writer.start), writer);
   }
 
   public key(key: ObjectsProof["keys"][number]): void {
+    this.contract.work.charge("objectSteps");
     this.#add(this.#keys, joinParts("k", key.key), key);
   }
 
   /** A query this one reads: its node among this one's, or this one declined. */
   public *from(demand: ProofDemand<ObjectsProof>): Work<void> {
-    // (every visit charged, one after a decline too: its callers stop at the first, `literalObjects`)
-    this.contract.pass.program.work.charge("objectSteps");
+    this.contract.work.charge("objectSteps");
+    // (every visit is charged before decline or duplicate paths).
     if (!this.complete) return;
     // #1668: K, a query this one reads, for its proof alone
     const { proof } = yield* this.contract.pass.solver.proven(demand);
@@ -184,56 +200,76 @@ class Gathered {
   }
 
   public proven(): Proven<ObjectsProof> {
-    if (!this.complete) return { items: [], proof: DECLINED };
+    this.contract.work.charge("objectSteps");
+    if (!this.complete) return { items: [], proof: declined(this.contract) };
     const { contract } = this;
     // (its own parts and the queries it reads, by their names: equal for equal parts and readers, which a cycle of
     // queries reaches at once, each reader's support read through its own demand)
-    const names = [...this.#lists.keys(), ...this.#prior.keys(), ...this.#keys.keys()];
-    const children = [...this.#children.keys()];
-    // (its parts sorted for the signature and copied into the proof, each charged)
-    contract.pass.program.work.charge(
-      "objectSteps",
-      sortCost(names.length) + sortCost(children.length),
-    );
+    const work = contract.work;
+    const names = concatenated<string>(work, "objectSteps", [
+      this.#lists.keys(),
+      this.#prior.keys(),
+      this.#keys.keys(),
+    ]);
+    const children = copied(work, "objectSteps", this.#children.keys());
     contract.keep(2 * (names.length + children.length));
-    names.sort();
-    children.sort();
+    sorted(work, "objectSteps", names);
+    sorted(work, "objectSteps", children);
     return {
       items: [],
       proof: {
         complete: true,
-        lists: [...this.#lists.values()],
-        prior: [...this.#prior.values()],
-        keys: [...this.#keys.values()],
-        children: [...this.#children.values()],
+        lists: copied(work, "objectSteps", this.#lists.values()),
+        prior: copied(work, "objectSteps", this.#prior.values()),
+        keys: copied(work, "objectSteps", this.#keys.values()),
+        children: copied(work, "objectSteps", this.#children.values()),
         signature: () => {
+          contract.work.charge("objectSteps");
           contract.pass.program.work.charge("sigItems", names.length + children.length + 1);
-          return joinParts(...names, "<", ...children);
+          return joined(
+            work,
+            "objectSteps",
+            concatenated<string>(work, "objectSteps", [names, ["<"], children]),
+            "|",
+          );
         },
       },
     };
   }
 
   #add<T>(map: Map<string, T>, name: string, value: T): void {
+    this.contract.work.charge("objectSteps");
     if (map.has(name)) return;
     this.contract.keepText(name.length);
     map.set(name, value);
   }
 }
 
-const DECLINED: ObjectsProof = {
-  complete: false,
-  lists: [],
-  prior: [],
-  keys: [],
-  children: [],
-  signature: () => "declined",
-};
+function declined(contract: Contract): ObjectsProof {
+  contract.work.charge("objectSteps");
+  return {
+    complete: false,
+    lists: [],
+    prior: [],
+    keys: [],
+    children: [],
+    signature: () => {
+      contract.work.charge("objectSteps");
+      return "declined";
+    },
+  };
+}
 
 /** Whether a path holds a choice's selection step, which the query does not follow. */
 function selecting(contract: Contract, rest: readonly string[]): boolean {
-  contract.pass.program.work.charge("objectSteps", 1 + rest.length);
-  return rest.some((step) => step === SELECTED_VALUE || step === SELECTED_TEXT);
+  contract.work.charge("objectSteps");
+  contract.pass.program.work.charge("objectSteps", rest.length);
+  return some(
+    contract.work,
+    "objectSteps",
+    rest,
+    (step) => step === SELECTED_VALUE || step === SELECTED_TEXT,
+  );
 }
 
 /** `objectsAt`'s run: by the value's route (`valueRoute`), as `valueAt` reads it at `rest` and a property below. */
@@ -242,8 +278,8 @@ function* valueObjects(
   value: PlaceId,
   rest: readonly string[],
 ): Work<Proven<ObjectsProof>> {
+  contract.work.charge("objectSteps");
   const { program } = contract.pass;
-  program.work.charge("objectSteps");
   const out = new Gathered(contract);
   if (selecting(contract, rest)) {
     out.complete = false;
@@ -270,7 +306,10 @@ function* valueObjects(
         objectsAt(
           contract,
           projection.owner,
-          keptSteps(contract.work, [stepName(projection.step)], rest),
+          keptArray(
+            contract.work,
+            concatenated<string>(contract.work, "objectSteps", [[stepName(projection.step)], rest]),
+          ),
         ),
       );
       return out.proven();
@@ -295,7 +334,14 @@ function* valueObjects(
       // #1668: R, a receiver decision
       if (heldReference(yield* contract.valueReceiver(operation.receiver))) break;
       yield* out.from(
-        objectsAt(contract, operation.receiver, keptSteps(contract.work, ["element"], rest)),
+        objectsAt(
+          contract,
+          operation.receiver,
+          keptArray(
+            contract.work,
+            concatenated<string>(contract.work, "objectSteps", [["element"], rest]),
+          ),
+        ),
       );
       yield* out.from(objectsAt(contract, operation.fallback, rest));
       return out.proven();
@@ -318,6 +364,7 @@ function* literalObjects(
   literal: PlaceId,
   rest: readonly string[],
 ): Work<void> {
+  contract.work.charge("objectSteps");
   const { program, definitions } = contract.pass;
   if (!program.hasOf.has(literal) && (definitions.cellDefs.get(literal) ?? []).length === 0) {
     out.complete = false;
@@ -326,30 +373,40 @@ function* literalObjects(
   const index = contract.literalIndex(literal);
   let node = index.root;
   let id = 0;
-  for (let length = 0; ; length += 1) {
-    program.work.charge("objectSteps");
-    const below = rest.slice(length);
+  let length = 0;
+  for (const _ of steps(program.work, "objectSteps", () => true)) {
+    let below: readonly string[] | undefined;
+    const belowSteps = (): readonly string[] => {
+      contract.work.charge("objectSteps");
+      return (below ??= sliced(program.work, "objectSteps", rest, length));
+    };
     // (each group and entry visited charged, and the walk stops at the first decline: nothing after it changes it)
-    for (const group of readGroupsAt(contract, node.reads, false)) {
-      program.work.charge("objectSteps");
+    for (const group of each(
+      program.work,
+      "objectSteps",
+      readGroupsAt(contract, node.reads, false),
+    )) {
       // (a mixed class reads its other members where their answers differ: that depends on the property)
       if (group.rest.length > 0 && group.mixed !== 0) out.complete = false;
-      for (const entry of group.read) {
+      for (const entry of each(program.work, "objectSteps", group.read)) {
         if (!out.complete) return;
-        yield* out.from(objectsAt(contract, entry.value, below));
+        yield* out.from(objectsAt(contract, entry.value, belowSteps()));
       }
       if (!out.complete) return;
     }
     const groups = othersAt(contract, node.others, false);
-    for (const group of contract.othersBelowOf.get(groups) ?? groups) {
-      program.work.charge("objectSteps");
+    for (const group of each(
+      program.work,
+      "objectSteps",
+      contract.othersBelowOf.get(groups) ?? groups,
+    )) {
       if (group === null || (group.rest.length > 0 && group.mixed !== 0)) {
         out.complete = false;
         return;
       }
-      for (const entry of group.read) {
+      for (const entry of each(program.work, "objectSteps", group.read)) {
         if (!out.complete) return;
-        yield* out.from(objectsAt(contract, entry.value, below));
+        yield* out.from(objectsAt(contract, entry.value, belowSteps()));
       }
       if (!out.complete) return;
     }
@@ -368,6 +425,7 @@ function* literalObjects(
     if (child === undefined) return;
     id = pathAt(contract, id, step);
     node = child;
+    length += 1;
   }
 }
 
@@ -378,7 +436,7 @@ function* entryObjects(
   entry: PrefixEntry,
   rest: readonly string[],
 ): Work<void> {
-  contract.pass.program.work.charge("objectSteps");
+  contract.work.charge("objectSteps");
   // (an opaque or deferred store: its unknown beside a `missing` joins their reasons)
   if (entry.unk !== undefined) {
     out.complete = false;
@@ -390,7 +448,17 @@ function* entryObjects(
   if (entry.elem !== undefined) {
     if (rest[0] === "element")
       yield* out.from(
-        objectsAt(contract, entry.elem, keptSteps(contract.work, entry.at ?? [], rest.slice(1))),
+        objectsAt(
+          contract,
+          entry.elem,
+          keptArray(
+            contract.work,
+            concatenated<string>(contract.work, "objectSteps", [
+              entry.at ?? [],
+              sliced(contract.work, "objectSteps", rest, 1),
+            ]),
+          ),
+        ),
       );
     return;
   }
@@ -404,7 +472,14 @@ function* entryObjects(
     return;
   }
   yield* out.from(
-    objectsAt(contract, entry.value!, keptSteps(contract.work, entry.at ?? [], rest)),
+    objectsAt(
+      contract,
+      entry.value!,
+      keptArray(
+        contract.work,
+        concatenated<string>(contract.work, "objectSteps", [entry.at ?? [], rest]),
+      ),
+    ),
   );
 }
 
@@ -414,12 +489,17 @@ function* entryObjects(
  * unknowns below a prefix that holds no structure declines.
  */
 function* keyObjectsMade(contract: Contract, key: Key): Work<Proven<ObjectsProof>> {
+  contract.work.charge("objectSteps");
   const { program } = contract.pass;
-  program.work.charge("objectSteps");
   const out = new Gathered(contract);
   const walk = keyWalk(contract, key);
   const { place } = walk;
-  const path = stepsArray(walk.path);
+  const path = isPathSteps(walk.path)
+    ? keptArray(
+        contract.work,
+        copied(contract.work, "objectSteps", indexed(contract.work, "objectSteps", walk.path)),
+      )
+    : walk.path;
   if (
     contract.keyStopped(key) ||
     program.places[place] === undefined ||
@@ -446,19 +526,28 @@ function* keyObjectsMade(contract: Contract, key: Key): Work<Proven<ObjectsProof
   }
   // (a property below it: its own stores and the written type there, which `absentWriterAt` asks)
   out.key({ key, place, path });
-  for (let length = path.length; length >= 0 && length > receiver.floor; length -= 1) {
-    program.work.charge("objectSteps");
+  let length = path.length;
+  for (const _ of steps(
+    program.work,
+    "objectSteps",
+    () => length >= 0 && length > receiver.floor,
+  )) {
     const stores = contract.prefixStores(walk.prefix(length));
     // (#1466's layers of a replaced source's stores: not followed)
     if (stores.subs !== null || stores.also.length > 0) {
       out.complete = false;
       return out.proven();
     }
-    const below = path.slice(length);
-    for (const entry of stores.list) {
-      yield* entryObjects(contract, out, entry, below);
+    let below: readonly string[] | undefined;
+    const belowSteps = (): readonly string[] => {
+      contract.work.charge("objectSteps");
+      return (below ??= sliced(program.work, "objectSteps", path, length));
+    };
+    for (const entry of each(program.work, "objectSteps", stores.list)) {
+      yield* entryObjects(contract, out, entry, belowSteps());
       if (!out.complete) return out.proven();
     }
+    length -= 1;
   }
   return out.proven();
 }

@@ -19,7 +19,10 @@ import { Project, ts } from "ts-morph";
  * Text the modules make follows the kept-text rule (TABLE r4.58, `tests/type-core-kept.test.ts`), not this one. Calls
  * from the rest of the core into these modules are outside this check: in part 1 only `guards.ts` makes the index.
  */
+const OBJECTS_FILE = "src/type-inference/core/contract/objects.ts";
+
 const CHARGED_FILES = [
+  OBJECTS_FILE,
   "src/type-inference/core/narrowing.ts",
   "src/type-inference/core/narrowing-events.ts",
   "src/type-inference/core/narrowing-routes.ts",
@@ -140,11 +143,62 @@ const FILED = [
 
 const OUTSIDE = new Set([...CONSTANT, ...CHARGING, ...STEP, ...FILED]);
 
+/** Fixed lookups, lazy iterators and existing charged core boundaries used by objects.ts. */
+const OBJECTS_OUTSIDE = new Set([
+  // Fixed work or lazy handles, consumed by a checked loop.
+  "lib:Map.keys",
+  ...core("type-inference/core/contract.ts", [
+    "Contract.work",
+    "Contract.keyStopped",
+    "Contract.keep",
+    "Contract.keepText",
+  ]),
+  ...core("type-inference/core/program.ts", [
+    "CoreProgram.place",
+    "CoreProgram.isHost",
+    "stepName",
+  ]),
+  ...core("type-inference/core/contract/terms.ts", ["writtenOf"]),
+  ...core("type-inference/core/items.ts", ["firstWriter"]),
+  ...core("type-inference/core/contract/value-kinds.ts", ["valueRoute", "resultOf"]),
+  ...core("type-inference/core/method-categories.ts", ["measuresLength"]),
+  ...core("type-inference/core/contract/kinds.ts", ["heldReference"]),
+  ...core("type-inference/core/contract/literal-index.ts", ["nodeAt", "pathAt"]),
+  ...core("type-inference/core/contract/key-ids.ts", ["isPathSteps", "restRef", "stepsRest"]),
+  // Solver/index/receiver boundaries and inherited key/type bridges; the report names their accounting exceptions.
+  ...core("type-inference/core/solver.ts", ["Solver.proven"]),
+  ...core("type-inference/core/contract.ts", [
+    "Contract.literalIndex",
+    "Contract.valueReceiver",
+    "Contract.prefixStores",
+  ]),
+  ...core("type-inference/core/contract/literal-index.ts", ["lackingAt"]),
+  ...core("type-inference/core/contract/others.ts", ["readGroupsAt", "othersAt"]),
+  ...core("type-inference/core/contract/key-contract.ts", ["receiverWalk"]),
+  ...core("type-inference/core/contract/frontier.ts", ["pushedSlot"]),
+  ...core("type-inference/core/contract/terms.ts", ["termAt"]),
+  ...core("type-inference/core/contract/key-ids.ts", [
+    "canonicalKey",
+    "keyBelowIn",
+    "keyWalk",
+    "KeyWalk.prefix",
+    "memberStepOf",
+  ]),
+]);
+
 /** The conversions to text, constant only for a primitive. */
 const CONVERSIONS = new Set(["lib:Number", "lib:String"]);
 
 /** The collection constructors that walk an argument. */
 const WALKING_CONSTRUCTORS = new Set(["lib:Map", "lib:Set", "lib:WeakMap", "lib:WeakSet"]);
+
+/** The checker's configured scope, so a fixture can run through it as `checkChargedIteration` does. */
+export const CONFIGURED = Object.freeze({
+  files: CHARGED_FILES,
+  iteration: ITERATION_FILE,
+  charge: CHARGE,
+  outside: OUTSIDE,
+});
 
 /** The diagnostics of the narrowing modules of the repository at `root`. */
 export function checkChargedIteration(root) {
@@ -288,7 +342,66 @@ export function chargedIterationDiagnostics(program, root, rules) {
   for (const file of rules.files) {
     const sourceFile = program.getSourceFile(resolve(root, file));
     if (sourceFile === undefined) throw new Error(`${file} is not in the program.`);
+    const outside =
+      file === OBJECTS_FILE ? new Set([...rules.outside, ...OBJECTS_OUTSIDE]) : rules.outside;
     const visit = (node) => {
+      // Unresolved/opaque calls could hide a native copy (including an any-cast method).
+      if (file === OBJECTS_FILE && ts.isCallExpression(node)) {
+        const expression = ts.isPropertyAccessExpression(node.expression)
+          ? node.expression.name
+          : node.expression;
+        const target = declarationOf(expression);
+        if (target === undefined)
+          report(node, "An unresolved call escapes charged-work checking. Name a typed callable.");
+        else if (
+          fileOf(target.declaration) === OBJECTS_FILE &&
+          !ts.isFunctionLike(target.declaration) &&
+          !(
+            ts.isVariableDeclaration(target.declaration) &&
+            target.declaration.initializer !== undefined &&
+            ts.isFunctionLike(target.declaration.initializer)
+          )
+        )
+          report(node, "An opaque local callable has no checked body. Name its charged function.");
+      }
+      if (file === OBJECTS_FILE && ts.isClassLike(node) && (node.heritageClauses?.length ?? 0) > 0)
+        report(
+          node,
+          "Class inheritance can copy through a base constructor. Use an explicit charged operation.",
+        );
+      // A local constructor alias bypasses the ordinary declaration check; fail closed in the newly covered module.
+      if (file === OBJECTS_FILE && ts.isNewExpression(node)) {
+        const target = declarationOf(node.expression);
+        if (
+          target === undefined ||
+          (!ts.isClassLike(target.declaration) && !WALKING_CONSTRUCTORS.has(nameOf(target)))
+        )
+          report(node, "A constructor alias escapes charged-copy checking. Name the constructor.");
+      }
+      // Instance fields run before a constructor body: only fixed, non-calling initializers here.
+      if (
+        file === OBJECTS_FILE &&
+        ts.isPropertyDeclaration(node) &&
+        node.initializer !== undefined
+      ) {
+        const value = node.initializer;
+        const fixed =
+          ts.isLiteralExpression(value) ||
+          value.kind === ts.SyntaxKind.TrueKeyword ||
+          value.kind === ts.SyntaxKind.FalseKeyword ||
+          value.kind === ts.SyntaxKind.NullKeyword ||
+          (ts.isNewExpression(value) &&
+            (value.arguments?.length ?? 0) === 0 &&
+            (() => {
+              const target = declarationOf(value.expression);
+              return target !== undefined && WALKING_CONSTRUCTORS.has(nameOf(target));
+            })());
+        if (!fixed)
+          report(
+            value,
+            "A field initializer can run before entry charging. Move it into the charged constructor.",
+          );
+      }
       // a body repeats as often as it is entered: a recursion, a function used as a value, a call through anything
       if (ts.isFunctionLike(node) && node.body !== undefined && !iterated(node)) {
         const first = ts.isBlock(node.body) ? node.body.statements[0] : undefined;
@@ -354,7 +467,7 @@ export function chargedIterationDiagnostics(program, root, rules) {
           const where = fileOf(target.declaration);
           if (!charged.has(where) && where !== rules.iteration) {
             const name = nameOf(target);
-            if (!rules.outside.has(name))
+            if (!outside.has(name))
               report(
                 node,
                 `\`${name}\` is not in OUTSIDE (tools/oxlint/check-charged-iteration.mjs): list it with why a call ` +
