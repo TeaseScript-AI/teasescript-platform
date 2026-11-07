@@ -33,9 +33,11 @@ import {
  * The side port across processes (docs/TESTING.md "Differential harness"): each side is a root's runner
  * (`tools/runtime-differential/run-root.mjs`), one process per root, called synchronously over a pair of named pipes
  * (`mkfifo`). The launcher writes a request line and blocks reading the reply line, so the lockstep driver's one
- * control flow runs unchanged. A runner that exits, closes its pipe, or writes a malformed line is that side's
- * `harness-failure` at the call. A runner that never answers blocks until the job's deadline; that case is a limit of
- * the written bar, with no timeout of its own.
+ * control flow runs unchanged. Lines are decoded as UTF-8 only once complete. A reply is checked whole: its sequence,
+ * exactly one answer, and that answer's shape for its operation, a failure or stop only of the asking side's own. A
+ * runner that exits, closes its pipe, or writes anything else is that side's `harness-failure` where it was lost, and
+ * stays lost. A runner that never answers blocks until the job's deadline; that case is a limit of the written bar,
+ * with no timeout of its own.
  */
 
 const runner = fileURLToPath(
@@ -70,7 +72,7 @@ export class Runner {
   readonly #write: number;
   readonly #read: number;
   readonly #stderr: string;
-  #buffer = "";
+  #buffer: Buffer = Buffer.alloc(0);
   #seq = 0;
   /** The first loss, raised again by every later call: a lost runner's stream is never read again. */
   #lost: RunnerLost | null = null;
@@ -128,8 +130,11 @@ export class Runner {
     return (lines.find((line) => /^\w*Error\b/u.test(line)) ?? lines.at(-1) ?? "").slice(0, 400);
   }
 
-  /** Sends one request and blocks for its reply; a runner lost at it, or before, raises its first loss. */
-  public call(op: string, stage: string, args: unknown): Reply {
+  /**
+   * Sends one request and blocks for its reply; a runner lost at it, or before, raises its first loss. The reply must
+   * be an object of exactly its request's `seq` and one answer, which `valid` accepts; anything else loses the runner.
+   */
+  public call(op: string, stage: string, args: unknown, valid: (reply: Reply) => boolean): Reply {
     if (this.#lost !== null) throw this.#lost;
     const lose = (what: string) => {
       const detail = this.diagnostic();
@@ -148,28 +153,31 @@ export class Runner {
     }
     const line = this.readLine();
     if (line === null) throw lose("closed its pipe");
-    let reply: { readonly seq?: unknown } & Partial<Reply>;
+    let parsed: unknown;
     try {
-      // EVIDENCE: validation: checked below for its sequence and for exactly one of its three answers.
-      reply = JSON.parse(line) as typeof reply;
+      parsed = JSON.parse(line);
     } catch {
       throw lose(`wrote a malformed line: ${line.slice(0, 80)}`);
     }
-    if (reply.seq !== seq || !("value" in reply || "failure" in reply || "stop" in reply))
+    if (!isObject(parsed) || parsed["seq"] !== seq)
       throw lose(`answered out of order: ${line.slice(0, 80)}`);
-    // EVIDENCE: validation: the reply has its request's sequence and one of the three answers.
-    return reply as Reply;
+    const keys = Object.keys(parsed);
+    const tag = keys.find((key) => key !== "seq");
+    if (keys.length !== 2 || (tag !== "value" && tag !== "failure" && tag !== "stop"))
+      throw lose(`wrote a malformed reply: ${line.slice(0, 80)}`);
+    // EVIDENCE: validation: the reply is an object of its request's sequence and exactly one of the three answer tags.
+    const reply = { [tag]: parsed[tag] } as Reply;
+    if (!valid(reply)) throw lose(`wrote a malformed reply to ${op}: ${line.slice(0, 80)}`);
+    return reply;
   }
 
+  /** The next line, its bytes decoded only once it is complete, so a character split between reads stays whole. */
   private readLine(): string | null {
     const chunk = Buffer.alloc(1 << 16);
-    for (;;) {
-      const at = this.#buffer.indexOf("\n");
-      if (at >= 0) {
-        const line = this.#buffer.slice(0, at);
-        this.#buffer = this.#buffer.slice(at + 1);
-        return line;
-      }
+    const parts: Buffer[] = [this.#buffer];
+    let length = this.#buffer.length;
+    let at = this.#buffer.indexOf(0x0a);
+    while (at < 0) {
       let read;
       try {
         read = fs.readSync(this.#read, chunk, 0, chunk.length, null);
@@ -177,8 +185,14 @@ export class Runner {
         return null;
       }
       if (read === 0) return null;
-      this.#buffer += chunk.toString("utf8", 0, read);
+      const found = chunk.subarray(0, read).indexOf(0x0a);
+      if (found >= 0) at = length + found;
+      parts.push(Buffer.from(chunk.subarray(0, read)));
+      length += read;
     }
+    const bytes = Buffer.concat(parts, length);
+    this.#buffer = bytes.subarray(at + 1);
+    return bytes.toString("utf8", 0, at);
   }
 
   /** Ends the runner: closing its requests ends its loop. */
@@ -199,6 +213,157 @@ interface Texts {
   readonly traces: string;
 }
 
+/*
+ * What a runner may answer, checked before the driver sees it: each guard accepts exactly what a `LocalPort` returns
+ * for its operation, and a failure or a stop only of the asking side's own kinds.
+ */
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** An object with exactly `keys`. */
+function hasExactly(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  if (!isObject(value)) return false;
+  const own = Object.keys(value);
+  return own.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+const isCount = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && Number(value) >= 0;
+const isText = (value: unknown): value is string => typeof value === "string";
+const STAGES: readonly string[] = [
+  "compile",
+  "probe",
+  "setup",
+  "opening",
+  "step",
+  "capture",
+  "restore",
+];
+
+function isOutcome(value: unknown): value is SideOutcome {
+  if (!isObject(value)) return false;
+  switch (value["kind"]) {
+    case "completed":
+    case "waiting":
+      return hasExactly(value, ["kind"]);
+    case "structured-fault":
+      return (
+        hasExactly(value, ["kind", "code", "path", "span", "pc"]) &&
+        isText(value["code"]) &&
+        isText(value["path"]) &&
+        isCount(value["pc"])
+      );
+    case "compile-rejected":
+      return hasExactly(value, ["kind", "diagnostics"]);
+    case "unsupported-route":
+    case "censored":
+      return hasExactly(value, ["kind", "reason"]) && isText(value["reason"]);
+    case "admission-rejected":
+      return hasExactly(value, ["kind", "error"]) && isText(value["error"]);
+    case "serializer-failure":
+    case "harness-failure":
+      return (
+        hasExactly(value, ["kind", "stage", "member", "error"]) &&
+        STAGES.includes(String(value["stage"])) &&
+        isText(value["member"]) &&
+        isText(value["error"])
+      );
+    default:
+      return false;
+  }
+}
+
+/** A classified failure of `side` itself, as a port reports one: a harness or serializer failure. */
+function isOwnFailure(value: unknown, side: SideName): value is ClassifiedSideFailure {
+  if (!hasExactly(value, ["side", "outcome"]) || value["side"] !== side) return false;
+  const outcome = value["outcome"];
+  return (
+    isOutcome(outcome) &&
+    (outcome.kind === "harness-failure" || outcome.kind === "serializer-failure")
+  );
+}
+
+/** The one stop a port raises: its own fresh session refusing the input. */
+function isOwnStop(value: unknown, side: SideName): boolean {
+  if (!hasExactly(value, ["verdict", "outcome"])) return false;
+  const { verdict, outcome } = value;
+  return (
+    hasExactly(verdict, ["kind", "side", "because"]) &&
+    verdict["kind"] === "not-compared" &&
+    verdict["side"] === side &&
+    verdict["because"] === "admission-rejected" &&
+    hasExactly(outcome, ["side", "outcome"]) &&
+    outcome["side"] === side &&
+    isOutcome(outcome["outcome"]) &&
+    outcome["outcome"].kind === "admission-rejected"
+  );
+}
+
+const isNull = (value: unknown): value is null => value === null;
+const isDigest = (value: unknown): value is string =>
+  isText(value) && /^[0-9a-f]{64}$/u.test(value);
+
+function isCompiled(value: unknown): value is CompiledFacts {
+  if (!isObject(value)) return false;
+  if (value["kind"] === "plan" || value["kind"] === "rejected")
+    return hasExactly(value, ["kind", "diagnostics"]);
+  return (
+    value["kind"] === "unsupported" &&
+    hasExactly(value, ["kind", "reason"]) &&
+    isText(value["reason"])
+  );
+}
+
+function isProbe(value: unknown): value is ProbeFacts {
+  return (
+    hasExactly(value, ["steps", "waits", "emitting", "faulted"]) &&
+    isCount(value["steps"]) &&
+    Array.isArray(value["waits"]) &&
+    value["waits"].every(isCount) &&
+    Array.isArray(value["emitting"]) &&
+    value["emitting"].every(isCount) &&
+    typeof value["faulted"] === "boolean"
+  );
+}
+
+function isNext(value: unknown): value is NextFacts {
+  if (!isObject(value)) return false;
+  if (value["kind"] === "go") return hasExactly(value, ["kind"]);
+  return (
+    value["kind"] === "end" && hasExactly(value, ["kind", "outcome"]) && isOutcome(value["outcome"])
+  );
+}
+
+function isRestored(value: unknown): value is { readonly run: number; readonly live: boolean } {
+  return (
+    hasExactly(value, ["run", "live"]) &&
+    isCount(value["run"]) &&
+    typeof value["live"] === "boolean"
+  );
+}
+
+function isTexts(value: unknown): value is Texts {
+  return (
+    hasExactly(value, ["state", "traces"]) && isText(value["state"]) && isText(value["traces"])
+  );
+}
+
+function isAdmission(value: unknown): value is Admission {
+  if (!isObject(value)) return false;
+  if (value["accepted"] === true)
+    return hasExactly(value, ["accepted", "digest"]) && isDigest(value["digest"]);
+  const error = value["error"];
+  return (
+    value["accepted"] === false &&
+    hasExactly(value, ["accepted", "error"]) &&
+    hasExactly(error, ["name", "code", "path", "info", "message"]) &&
+    isText(error["name"]) &&
+    isText(error["message"])
+  );
+}
+
 /** One side of a pair, in a root's runner. */
 class RemotePort implements SidePort {
   public constructor(
@@ -209,7 +374,7 @@ class RemotePort implements SidePort {
 
   /** Starts the pair on this side's runner. */
   public begin(context: PortContext): void {
-    this.call("begin", {
+    this.call("begin", isNull, {
       side: this.side,
       input: context.input,
       route: context.route,
@@ -218,11 +383,21 @@ class RemotePort implements SidePort {
     });
   }
 
-  /** One operation on the runner's port: its answer, or the stop or side failure it raised there, raised here. */
-  private call<T>(op: string, args: unknown = null): T {
+  /**
+   * One operation on the runner's port: its answer, which `valid` accepts, or the stop or side failure it raised there,
+   * raised here. A failure or a stop must be this side's own, as only a side's own port raises them.
+   */
+  private call<T>(op: string, valid: (value: unknown) => value is T, args: unknown = null): T {
     let reply: Reply;
+    const side = this.side;
     try {
-      reply = this.runner.call(op, this.attribution.cursor.stage, args);
+      reply = this.runner.call(op, this.attribution.cursor.stage, args, (answer) =>
+        "value" in answer
+          ? valid(answer.value)
+          : "failure" in answer
+            ? isOwnFailure(answer.failure, side)
+            : isOwnStop(answer.stop, side),
+      );
     } catch (error) {
       if (!(error instanceof RunnerLost)) throw error;
       // The side's failure is where the runner was lost, also when a later call raises it again.
@@ -239,60 +414,79 @@ class RemotePort implements SidePort {
     }
     if ("failure" in reply) throw new PortFailure(reply.failure);
     if ("stop" in reply) throw new Stop(reply.stop.verdict, reply.stop.outcome);
-    // A record comes as the two texts `canonicalText` wrote of its parts.
-    // EVIDENCE: validation: the runner answers `op` with what its `LocalPort` returned, whose type the caller names.
+    // EVIDENCE: validation: `valid` accepted the value, a type guard for `T`.
     return reply.value as T;
   }
 
-  /** A record the runner wrote: its texts, read back into the record they write. */
-  private record(texts: Texts): PortRecord {
-    // EVIDENCE: validation: the text is `canonicalText` of a record's state, which `JSON.parse` reads back.
-    const state = JSON.parse(texts.state) as SideRecord["state"];
-    // EVIDENCE: validation: the text is `canonicalText` of a record's traces, which `JSON.parse` reads back.
-    const traces = JSON.parse(texts.traces) as SideRecord["traces"];
-    return { record: { state, traces }, texts };
+  /** A record the runner wrote, as its texts and the record they read back into; texts that do not read lose it. */
+  private record(op: "opening" | "apply", run: number): PortRecord {
+    const read: { record?: SideRecord } = {};
+    const texts = this.call(
+      op,
+      (value): value is Texts => {
+        if (!isTexts(value)) return false;
+        try {
+          // EVIDENCE: validation: the texts are `canonicalText` of a record's parts, which `JSON.parse` reads back.
+          read.record = {
+            state: JSON.parse(value.state),
+            traces: JSON.parse(value.traces),
+          } as SideRecord;
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { run },
+    );
+    if (read.record === undefined) throw new Error("A validated record has been read.");
+    return { record: read.record, texts };
   }
 
   public compile(): CompiledFacts {
-    return this.call<CompiledFacts>("compile");
+    return this.call("compile", isCompiled);
   }
 
   public planDigest(): string {
-    return this.call<string>("planDigest");
+    return this.call("planDigest", isDigest);
   }
 
   public probe(): ProbeFacts {
-    return this.call<ProbeFacts>("probe");
+    return this.call("probe", isProbe);
   }
 
   public start(): void {
-    this.call<null>("start");
+    this.call("start", isNull);
   }
 
   public opening(run: number): PortRecord {
-    return this.record(this.call<Texts>("opening", { run }));
+    return this.record("opening", run);
   }
 
   public next(run: number): NextFacts {
-    return this.call<NextFacts>("next", { run });
+    return this.call("next", isNext, { run });
   }
 
   public apply(run: number): PortRecord {
-    return this.record(this.call<Texts>("apply", { run }));
+    return this.record("apply", run);
   }
 
   public capture(state: number): void {
-    this.call<null>("capture", { state });
+    this.call("capture", isNull, { state });
   }
 
   public restore(tail: RestoreTail, cut: number): { readonly run: number; readonly live: boolean } {
-    return this.call<{ readonly run: number; readonly live: boolean }>("restore", { tail, cut });
+    return this.call("restore", isRestored, { tail, cut });
   }
 
   /** The runner's latched failure; a runner lost when asked is that failure itself, so the verdict still leaves. */
   public pending(): ClassifiedSideFailure | null {
+    const side = this.side;
     try {
-      return this.call<ClassifiedSideFailure | null>("pending");
+      return this.call(
+        "pending",
+        (value): value is ClassifiedSideFailure | null =>
+          value === null || isOwnFailure(value, side),
+      );
     } catch (error) {
       if (error instanceof PortFailure) return error.failure;
       throw error;
@@ -377,9 +571,12 @@ export type Admission =
  * admission when the runner is the oracle root's (2f Part B).
  */
 export function admitExternal(runner: Runner, recipe: Recipe, route: AdmissionRoute): Admission {
-  const reply = runner.call("admit", "admit", { recipe, route });
-  if (!("value" in reply))
-    throw new Error(`The ${runner.label} runner could not admit: ${canonicalText(reply)}`);
-  // EVIDENCE: validation: the runner answers an admission as `{ accepted, digest }` or `{ accepted, error }`.
-  return reply.value as Admission;
+  const reply = runner.call(
+    "admit",
+    "admit",
+    { recipe, route },
+    (answer) => "value" in answer && isAdmission(answer.value),
+  );
+  // EVIDENCE: validation: `Runner.call` accepted only a value that `isAdmission` accepts.
+  return (reply as { readonly value: Admission }).value;
 }

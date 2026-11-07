@@ -191,7 +191,7 @@ test("the pinned oracle and this build, each in its root's runner, are equivalen
  * `createFreshRuntimeSession` it wraps, in a runner for the cross-process one; the two reports must be equal.
  */
 const WITNESS_MODULE = `// Test-only session wrappers (tests/runtime-differential-oracle.oracle.ts).
-import { appendFileSync } from "node:fs";
+import fs, { appendFileSync } from "node:fs";
 const unreadable = () => new Proxy({}, { get: () => { throw new Error("unreadable draw"); } });
 const throwCallback = (options) => { options?.randomControl?.decide?.(unreadable()); };
 function counted(session, each) {
@@ -200,6 +200,17 @@ function counted(session, each) {
   session.executeInstruction = (traced) => { steps += 1; return each(steps, () => execute(traced)); };
   return () => steps;
 }
+/** Replaces this runner's next reply line by \`forged(reply)\`, as a candidate that writes to its pipe could. */
+const forgeNextReply = (forged) => {
+  const write = fs.writeSync;
+  fs.writeSync = function (fd, data, ...rest) {
+    let reply;
+    try { reply = typeof data === "string" ? JSON.parse(data) : undefined; } catch {}
+    if (!Number.isInteger(reply?.seq)) return write.call(this, fd, data, ...rest);
+    fs.writeSync = write;
+    return write.call(this, fd, JSON.stringify(forged(reply)) + "\\n", ...rest);
+  };
+};
 const diverging = (session, options, extra) => {
   counted(session, (steps, run) => {
     if (extra && steps === 4) throwCallback(options);
@@ -231,6 +242,23 @@ export const wraps = {
   },
   "exit-right": (session) => {
     counted(session, (steps, run) => { if (steps === 2) process.exit(3); return run(); });
+    return session;
+  },
+  "two-answers-right": (session) => {
+    forgeNextReply((reply) => ({ ...reply, stop: { verdict: { kind: "equivalent" }, outcome: null } }));
+    return session;
+  },
+  "foreign-stop-right": (session) => {
+    forgeNextReply(({ seq }) => ({ seq, stop: { verdict: { kind: "equivalent" }, outcome: null } }));
+    return session;
+  },
+  "null-reply-right": (session) => {
+    forgeNextReply(() => null);
+    return session;
+  },
+  "hidden-global": (session) => {
+    const exported = session.exportTrustedSnapshot.bind(session);
+    session.exportTrustedSnapshot = () => ({ ...exported(), globals: [] });
     return session;
   },
   "malformed-right": (session) => {
@@ -348,11 +376,15 @@ test(
 );
 
 test(
-  "a runner that exits or writes a malformed line mid-run is that side's harness failure",
+  "a runner that exits or writes a malformed line or reply mid-run is that side's harness failure",
   withWitnesses(() => {
     for (const [key, reason] of [
       ["exit-right", /closed its pipe|cannot be written to/u],
       ["malformed-right", /malformed line/u],
+      // The true answer with an `equivalent` stop beside it, an `equivalent` stop alone, and a reply that is no object.
+      ["two-answers-right", /malformed reply/u],
+      ["foreign-stop-right", /malformed reply/u],
+      ["null-reply-right", /out of order/u],
     ] as const) {
       const report = remoteDifferentialRun(
         { left: witnessRunner(undefined), right: witnessRunner(key) },
@@ -537,25 +569,49 @@ test("a candidate that imports outside its inventory is its side's harness failu
   assert.equal(unknown.verdict.kind, "mapping-failure", JSON.stringify(unknown.verdict));
 });
 
-test("each admission route accepts its control on both roots alike, and a defect is the root's own rejection", () => {
-  const routes: readonly AdmissionRoute[] = ["global", "storage", "checkpoint"];
-  for (const route of routes) {
-    const control = { builder: "mixedNest", depth: 6 } as const;
-    const left = admitExternal(oracle, control, route);
-    const right = admitExternal(candidate, control, route);
-    assert.equal(left.accepted, true, `${route}: ${JSON.stringify(left)}`);
-    assert.deepEqual(right, left, route);
-  }
-  for (const route of ["global", "checkpoint"] as const) {
-    const defect = admitExternal(oracle, { builder: "cycleAt", depth: 3 }, route);
-    assert.equal(defect.accepted, false, route);
-    if (!defect.accepted) assert.notEqual(defect.error.message, "", route);
-    assert.deepEqual(
-      admitExternal(candidate, { builder: "cycleAt", depth: 3 }, route),
-      defect,
-      route,
+test(
+  "each admission route accepts its control on both roots alike, a defect is the root's own rejection, and an envelope failure is never one",
+  withWitnesses(() => {
+    const routes: readonly AdmissionRoute[] = ["global", "storage", "checkpoint"];
+    for (const route of routes) {
+      const control = { builder: "mixedNest", depth: 6 } as const;
+      const left = admitExternal(oracle, control, route);
+      const right = admitExternal(candidate, control, route);
+      assert.equal(left.accepted, true, `${route}: ${JSON.stringify(left)}`);
+      assert.deepEqual(right, left, route);
+    }
+    for (const route of ["global", "checkpoint"] as const) {
+      const defect = admitExternal(oracle, { builder: "cycleAt", depth: 3 }, route);
+      assert.equal(defect.accepted, false, route);
+      if (!defect.accepted) assert.notEqual(defect.error.message, "", route);
+      assert.deepEqual(
+        admitExternal(candidate, { builder: "cycleAt", depth: 3 }, route),
+        defect,
+        route,
+      );
+    }
+    // The admission succeeds, then the envelope cannot read the admitted value: the harness's failure, not a rejection.
+    assert.throws(
+      () =>
+        admitExternal(witnessRunner("hidden-global"), { builder: "mixedNest", depth: 6 }, "global"),
+      /closed its pipe|cannot be written to/u,
     );
-  }
+  }),
+);
+
+test("a source of multibyte characters longer than one pipe read crosses both pipes intact", () => {
+  const input = single("multibyte", `say "${"€".repeat(24_000)}", instant\nexit\n`, { seed: 1 });
+  const local = differentialRun(input, CUTS);
+  assert.deepEqual(local.verdict, { kind: "equivalent" });
+  const remote = remoteDifferentialRun(
+    {
+      left: runner("multibyte-left", checkout, candidateFiles),
+      right: runner("multibyte-right", checkout, candidateFiles),
+    },
+    input,
+    CUTS,
+  );
+  assert.deepEqual(stable(remote), stable(local));
 });
 
 test("the campaign CLI's oracle mode runs both roots and names them on every line", () => {

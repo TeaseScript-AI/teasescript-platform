@@ -60,20 +60,24 @@ const compiler = await load("src/compiler.ts");
 const backend = await load("src/type-inference/core/backend.ts");
 const adapter = side.buildAdapter(options.root, { index, compiler, backend });
 
-let buffer = "";
+// A line's bytes are decoded only once it is complete, so a character split between reads stays whole.
+let buffer = Buffer.alloc(0);
 const chunk = Buffer.alloc(1 << 16);
 function readLine() {
-  for (;;) {
-    const at = buffer.indexOf("\n");
-    if (at >= 0) {
-      const line = buffer.slice(0, at);
-      buffer = buffer.slice(at + 1);
-      return line;
-    }
+  const parts = [buffer];
+  let length = buffer.length;
+  let at = buffer.indexOf(0x0a);
+  while (at < 0) {
     const read = fs.readSync(requests, chunk, 0, chunk.length, null);
     if (read === 0) return null;
-    buffer += chunk.toString("utf8", 0, read);
+    const found = chunk.subarray(0, read).indexOf(0x0a);
+    if (found >= 0) at = length + found;
+    parts.push(Buffer.from(chunk.subarray(0, read)));
+    length += read;
   }
+  const bytes = Buffer.concat(parts, length);
+  buffer = bytes.subarray(at + 1);
+  return bytes.toString("utf8", 0, at);
 }
 
 /** The value of a recipe (`tests/helpers/runtime-differential-remote.ts` `Recipe`), built here, in the root's process. */
@@ -137,40 +141,39 @@ const planOf = (source, globals = []) => {
 const bindingIn = (snapshot, name) =>
   snapshot.frames.flatMap((frame) => frame.bindings).find((binding) => binding.name === name);
 
-/** Admits `recipe`'s value through `route`: what the root's public API accepted, or the first error it threw. */
+/**
+ * Admits `recipe`'s value through `route`: what the root's public API accepted, or the error its admitting call threw.
+ * Only that call is inside the catch: the envelope's preparation and its reading of the admitted value are the
+ * harness's, and their failures escape, which ends this runner and is the caller's harness failure, never a rejection.
+ */
 function admit(recipe, route) {
   const value = build(recipe);
+  let call;
+  let read;
+  if (route === "global") {
+    const plan = planOf("let copy = hostValue\nexit\n", ["hostValue"]);
+    call = () => index.createFreshRuntimeSession(plan, { seed: 1, globals: { hostValue: value } });
+    read = (session) =>
+      session.exportTrustedSnapshot().globals.find((binding) => binding.name === "hostValue").value;
+  } else if (route === "storage") {
+    const plan = planOf("exit\n");
+    call = () =>
+      index.createFreshRuntimeSession(plan, { seed: 1, scriptStorage: [{ key: "held", value }] });
+    read = (session) =>
+      session.exportTrustedSnapshot().scriptStorage.find((entry) => entry.key === "held").value;
+  } else if (route === "checkpoint") {
+    const session = index.createFreshRuntimeSession(planOf("let held = 0\nwait 1 ms\nexit\n"), {
+      seed: 1,
+    });
+    session.run();
+    const copy = JSON.parse(comparison.canonicalText(session.exportCheckpoint()));
+    bindingIn(copy.snapshot, "held").value = value;
+    call = () => index.restoreRuntimeSession(copy);
+    read = (restored) => bindingIn(restored.exportTrustedSnapshot(), "held").value;
+  } else throw new Error(`unknown admission route ${route}`);
+  let admitted;
   try {
-    let admittedValue;
-    if (route === "global") {
-      const session = index.createFreshRuntimeSession(
-        planOf("let copy = hostValue\nexit\n", ["hostValue"]),
-        { seed: 1, globals: { hostValue: value } },
-      );
-      admittedValue = session
-        .exportTrustedSnapshot()
-        .globals.find((binding) => binding.name === "hostValue").value;
-    } else if (route === "storage") {
-      const session = index.createFreshRuntimeSession(planOf("exit\n"), {
-        seed: 1,
-        scriptStorage: [{ key: "held", value }],
-      });
-      admittedValue = session
-        .exportTrustedSnapshot()
-        .scriptStorage.find((entry) => entry.key === "held").value;
-    } else if (route === "checkpoint") {
-      const session = index.createFreshRuntimeSession(planOf("let held = 0\nwait 1 ms\nexit\n"), {
-        seed: 1,
-      });
-      session.run();
-      const copy = JSON.parse(comparison.canonicalText(session.exportCheckpoint()));
-      bindingIn(copy.snapshot, "held").value = value;
-      admittedValue = bindingIn(
-        index.restoreRuntimeSession(copy).exportTrustedSnapshot(),
-        "held",
-      ).value;
-    } else throw new Error(`unknown admission route ${route}`);
-    return { accepted: true, digest: comparison.canonicalDigest(admittedValue) };
+    admitted = call();
   } catch (error) {
     return {
       accepted: false,
@@ -183,6 +186,7 @@ function admit(recipe, route) {
       },
     };
   }
+  return { accepted: true, digest: comparison.canonicalDigest(read(admitted)) };
 }
 
 let attribution = null;

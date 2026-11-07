@@ -21,8 +21,8 @@
 // own process itself. A real broken pipe reaches the process as an `EPIPE` error on the stream, which the bar covers.
 // The boundary cases are signals raised with `process.kill(process.pid, "SIGPIPE")`: as the summary finishes, at
 // stderr's `prefinish`, and during the decision; Node may not deliver them before it exits. The engine does none of
-// these; a fatal abort exits 134. With `--oracle`, a runner that exits, closes its pipe or writes a malformed line is its
-// side's harness failure (exit 2); a runner that never answers, or fails before it opens its pipes, blocks until the
+// these; a fatal abort exits 134. With `--oracle`, a runner that exits, closes its pipe or writes a malformed or invalid
+// reply is its side's harness failure (exit 2); a runner that never answers, or fails before it opens its pipes, blocks until the
 // job's deadline, which bounds it.
 
 import fs from "node:fs";

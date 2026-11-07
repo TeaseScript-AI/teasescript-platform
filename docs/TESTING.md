@@ -510,7 +510,8 @@ pinned oracle root of the runtime pipeline oracle (left) against this build (rig
 - the regressions and the sample;
 - the construction witnesses, whose reports in-process and across processes must be equal;
 - four candidate mutations (`--replace`), each a `discrepancy` in the uninterrupted run;
-- a candidate that imports outside its inventory, and a runner that exits or writes a malformed line: `harness-failure`;
+- a candidate that imports outside its inventory, and a runner that exits or writes a malformed or invalid reply:
+  `harness-failure`;
 - one accepted control per route of `admitExternal`, which builds a recipe's value inside a root and admits it through
   that root's public API (host globals, script storage, or a substituted checkpoint binding).
 
