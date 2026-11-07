@@ -209,6 +209,10 @@ const OBJECTS_OUTSIDE = new Set([
  * each with what it does with it. Any other allowed call handed one fails: it could walk it for one charge.
  */
 const OBJECTS_COLLECTIONS = new Set([
+  // no walk: a collection stored, looked up or added whole, as one value
+  ...["Array.push", "Map.get", "Map.has", "Map.set", "Set.add", "Set.has", "WeakMap.get"].map(
+    (name) => `lib:${name}`,
+  ),
   // no walk: an instanceof test, a record's rest or the array itself, a lazy view of the steps
   ...core("type-inference/core/contract/key-ids.ts", ["isPathSteps", "stepsRest", "restRef"]),
   // charged as they build: each entry of a list once (`invSteps`), the list's groups kept per list
