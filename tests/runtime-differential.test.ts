@@ -22,8 +22,10 @@ import {
   type RuntimeSessionView,
   type SerializableRuntimeValue,
 } from "../src/index.js";
+import { Attribution } from "./helpers/runtime-differential-side.js";
 import {
   differentialRun,
+  differentialRunOn,
   thisBuild,
   type DifferentialOptions,
   type DifferentialInput,
@@ -198,7 +200,7 @@ test("a bounded seeded sample of generated programs is equivalent on both routes
   const randomMode = (program: GeneratedProgram) =>
     program.tags.includes("rng")
       ? programs.filter((item) => item.tags.includes("rng")).indexOf(program) % 2 === 1
-        ? "choose"
+        ? "choose-natural"
         : "natural"
       : undefined;
   for (const program of programs) {
@@ -1693,4 +1695,60 @@ test.after(() => {
     };
   });
   console.log(JSON.stringify({ differentialCost: summary }));
+});
+
+test("a mismatch limit is a positive safe integer, and any other is refused before either side's run starts", () => {
+  const limits = {
+    absent: undefined,
+    one: 1,
+    ten: 10,
+    "the largest safe integer": Number.MAX_SAFE_INTEGER,
+    zero: 0,
+    negative: -1,
+    "a fraction": 1.5,
+    NaN: Number.NaN,
+    Infinity: Number.POSITIVE_INFINITY,
+    "-Infinity": Number.NEGATIVE_INFINITY,
+    "2^53": 2 ** 53,
+  };
+  const admitted = new Set(["absent", "one", "ten", "the largest safe integer"]);
+  const names = new Set<string>();
+  for (const [label, limit] of Object.entries(limits)) {
+    const options = limit === undefined ? {} : { limit };
+    if (admitted.has(label)) {
+      // A limit only bounds what a discrepancy reports: equal values stay equal, on every restore route.
+      assert.equal(compareStructures({ a: [1] }, { a: [1] }, options).equal, true, label);
+      assert.deepEqual(
+        differentialRun(FAULT_INPUT, { ...CUTS, ...options }).verdict,
+        { kind: "equivalent" },
+        label,
+      );
+      names.add(`compareStructures ${label}`).add(`differential ${label}`);
+      continue;
+    }
+    assert.throws(() => compareStructures(1, 1, options), RangeError, label);
+    names.add(`compareStructures ${label}`);
+    let ports = 0;
+    assert.throws(
+      () =>
+        differentialRunOn(
+          new Attribution(),
+          () => {
+            ports += 1;
+            throw new Error("no side may start");
+          },
+          FAULT_INPUT,
+          { ...CUTS, ...options },
+        ),
+      RangeError,
+      label,
+    );
+    assert.equal(ports, 0, `${label}: no side's run started`);
+    assert.throws(() => differentialRun(FAULT_INPUT, { ...CUTS, ...options }), RangeError, label);
+    names.add(`differential ${label}`);
+  }
+  // Every limit was checked at both entries.
+  for (const label of Object.keys(limits))
+    for (const entry of ["compareStructures", "differential"])
+      assert.ok(names.has(`${entry} ${label}`));
 });

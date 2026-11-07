@@ -54,9 +54,12 @@ export interface DifferentialInput {
   readonly fresh?: FreshRuntimeOptions;
   /**
    * Random control through the harness's decision callback, whose calls are logged and compared: `natural` keeps each
-   * natural result, `choose` chooses it as an input with a receipt. Absent leaves every draw natural, without control.
+   * natural result; `choose-natural` answers each draw with a `choose` decision of its natural outcome, an input with a
+   * receipt, and a draw whose natural result is a failure with the natural decision. It covers the receipts and the
+   * control path, never another outcome: `tests/controlled-random-explorer.test.ts` chooses those. Absent leaves every
+   * draw natural, without control.
    */
-  readonly random?: "natural" | "choose";
+  readonly random?: "natural" | "choose-natural";
 }
 
 /** What a pipeline gave for an input and route. */
@@ -215,7 +218,10 @@ export interface DifferentialOptions {
   readonly maxSteps?: number;
   /** A corruption of a side's records, in the harness and never in the engine: the sensitivity controls. */
   readonly inject?: (record: SideRecord, at: InjectionSite) => SideRecord;
-  /** The most mismatches a discrepancy reports; 10 by default. */
+  /**
+   * The most mismatches a discrepancy reports: a positive safe integer, 10 by default. Any other value throws a
+   * `RangeError` before either side's run starts (`mismatchLimit`).
+   */
   readonly limit?: number;
   /**
    * The host, one per run, made by this factory for each side's uninterrupted run (and the cut probe's, as `left`). The driver

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { types } from "node:util";
 import vm from "node:vm";
 
 import {
@@ -12,7 +13,7 @@ import {
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import { BRIDGE_VERSION, type BuildIdentity } from "../player/engine-bridge/protocol.js";
 import { decodeMessage, encodeMessage, NATIVE_NESTING } from "../player/engine-bridge/transport.js";
-import { cloneGraphDifference } from "./helpers/clone-graph.js";
+import { cloneGraphDifference, cloneKind, KIND_OF_TYPE } from "./helpers/clone-graph.js";
 
 /*
  * The bridge's depth-safe transport (#1877): which path a message takes, that every path carries what native clone
@@ -113,6 +114,8 @@ const ForeignObject = vm.runInNewContext("Object") as ObjectConstructor;
 const ForeignEntry = vm.runInNewContext(
   "(class Entry { constructor(key, value) { this.key = key; this.value = value; } })",
 ) as typeof Entry;
+/** The fixture classes whose instances native clone carries as records. */
+const RECORD_CLASSES = { classes: [Entry, TaggedEntry, ForeignEntry] };
 
 /** Every kind of value the family puts under a chain: forms, keys, leaves and the kinds native clone copies as records. */
 function variety() {
@@ -155,7 +158,7 @@ test("a message crosses as it is up to the switch, and flat above it, from the s
     assert.equal(height(message) <= NATIVE_NESTING, path === "as is", label);
     assert.equal(pathOf(message), path, label);
     const expected = nativeCarries(message) ? structuredClone(message) : message;
-    assert.equal(cloneGraphDifference(cross(message), expected), null, label);
+    assert.equal(cloneGraphDifference(cross(message), expected, RECORD_CLASSES), null, label);
   }
 });
 
@@ -182,7 +185,7 @@ test("each kind a record can be is measured: class instances, tagged ones, other
     };
     assert.equal(nativeCarries(message), false, `${label}: too deep for native clone`);
     assert.equal(pathOf(message), "original flattened", label);
-    assert.equal(cloneGraphDifference(cross(message), message), null, label);
+    assert.equal(cloneGraphDifference(cross(message), message, RECORD_CLASSES), null, label);
   }
 });
 
@@ -212,6 +215,98 @@ test("shared objects and cycles stay shared, at every path", () => {
     );
   }
   assert.equal(pathOf({ cyclicRecord }), "clone flattened", "a cycle is flattened");
+});
+
+/** Eight bytes, the same at offsets 0 and 3, so two views there differ only by their offset. */
+const twinBytes = () => new Uint8Array([5, 6, 5, 5, 6, 5, 6, 5]).buffer;
+
+test("the comparator tells apart what native clone keeps, and refuses every kind it does not compare", () => {
+  const kinds = {
+    date: [new Date(0), new Date(1)],
+    regexp: [/x+/gu, /x+/giu],
+    "typed array": [new Uint16Array([1, 2]), new Uint16Array([1, 3])],
+    "data view": [new DataView(new ArrayBuffer(4)), new DataView(new ArrayBuffer(5))],
+    buffer: [new Uint8Array([1, 2]).buffer, new Uint8Array([1, 3]).buffer],
+    map: [new Map([["a", 1]]), new Map([["a", 2]])],
+    set: [new Set([1]), new Set([2])],
+    array: [
+      [1, 2],
+      [1, 3],
+    ],
+    record: [{ a: 1 }, { a: 2 }],
+    "comma keys": [
+      { "a,b": undefined, c: undefined },
+      { a: undefined, "b,c": undefined },
+    ],
+  } as const;
+  const unsupported = {
+    "an ArrayBuffer": new ArrayBuffer(1),
+    "a resizable buffer": new ArrayBuffer(1, { maxByteLength: 2 }),
+    "a shared buffer": new SharedArrayBuffer(1),
+    "a boxed number": Object(1),
+    "an Error": new Error("e"),
+    "a Blob": new Blob(["x"]),
+    "a File": new File(["x"], "x.txt"),
+    "an unlisted class": new (class Unlisted {})(),
+  } as const;
+  const admitted = {
+    plain: { a: 1 },
+    "a listed class": new Entry("a", 1),
+    "a listed tagged class": new TaggedEntry("a", 1),
+    "another realm's object": vm.runInNewContext("({ a: 1 })"),
+    "another realm's listed class": new ForeignEntry("a", 1),
+    "a null prototype": Object.assign(Object.create(null), { a: 1 }),
+    "another realm's Date": vm.runInNewContext("new Date(5)"),
+    "another realm's Map": vm.runInNewContext("new Map([[1, 2]])"),
+    "another realm's Set": vm.runInNewContext("new Set([1])"),
+  };
+  const offset = () => {
+    const [left, right] = [twinBytes(), twinBytes()];
+    return [new Uint8Array(left, 3, 2), new Uint8Array(right, 0, 2)];
+  };
+  const shared = twinBytes();
+  const split = { a: new Uint8Array(shared, 0, 4), b: new Uint8Array(shared, 4, 4) };
+  const [one, two] = [twinBytes(), twinBytes()];
+  const apart = { a: new Uint8Array(one, 0, 4), b: new Uint8Array(two, 4, 4) };
+  const cases: [name: string, actual: unknown, expected: unknown, equal: boolean][] = [];
+  for (const [kind, [value, other]] of Object.entries(kinds)) {
+    cases.push([`kind ${kind}: equal`, structuredClone(value), value, true]);
+    cases.push([`kind ${kind}: differs`, structuredClone(other), value, false]);
+  }
+  for (const [kind, value] of Object.entries(unsupported)) {
+    cases.push([`unsupported ${kind}: expected`, {}, value, false]);
+    cases.push([`unsupported ${kind}: actual`, value, {}, false]);
+  }
+  for (const [form, value] of Object.entries(admitted))
+    cases.push([`admitted ${form}: equal`, structuredClone(value), value, true]);
+  const [atThree, atZero] = offset();
+  cases.push(["view offset: differs", atZero, atThree, false]);
+  cases.push([
+    "view length: differs",
+    new Uint8Array(twinBytes(), 0, 3),
+    new Uint8Array(twinBytes(), 0, 2),
+    false,
+  ]);
+  cases.push(["aliasing one buffer: equal", structuredClone(split), split, true]);
+  cases.push(["aliasing one buffer as two: differs", structuredClone(apart), split, false]);
+  cases.push(["aliasing two buffers as one: differs", structuredClone(split), apart, false]);
+  // A fixed buffer must not stand for a shared one, though both are `isAnyArrayBuffer`.
+  cases.push(["veto shared buffer: differs", new ArrayBuffer(8), new SharedArrayBuffer(8), false]);
+  for (const [name, actual, expected, equal] of cases)
+    assert.equal(cloneGraphDifference(actual, expected, RECORD_CLASSES) === null, equal, name);
+
+  // Every axis value was generated: each kind both ways, each unsupported kind in both positions, each admitted form.
+  const names = new Set(cases.map(([name]) => name));
+  for (const kind of Object.keys(kinds))
+    for (const outcome of ["equal", "differs"]) assert.ok(names.has(`kind ${kind}: ${outcome}`));
+  for (const kind of Object.keys(unsupported))
+    for (const position of ["expected", "actual"])
+      assert.ok(names.has(`unsupported ${kind}: ${position}`));
+  for (const form of Object.keys(admitted)) assert.ok(names.has(`admitted ${form}: equal`));
+  // The kind table names exactly the predicates this Node has, so a new kind of object cannot pass as a record.
+  assert.deepEqual(Object.keys(KIND_OF_TYPE).sort(), Object.keys(types).sort());
+  assert.equal(cloneKind(new SharedArrayBuffer(1)), "unsupported");
+  assert.equal(cloneKind(new Float64Array(1)), "view");
 });
 
 test("what native clone refuses is refused at every depth it can read, also inside a Proxy", () => {
@@ -290,6 +385,7 @@ test("through a worker thread, deep values cross both ways, and a deep refusal i
         cloneGraphDifference(
           reply.result,
           nativeCarries(message) ? structuredClone(message) : message,
+          RECORD_CLASSES,
         ),
         null,
       );
