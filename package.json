@@ -37,7 +37,7 @@
     "test:player:preview": "node tools/player-preview-checks.mjs",
     "test:player:firefox-camera": "node tools/player-firefox-camera.mjs",
     "dev:player": "vite --config player/vue/vite.config.ts",
-    "test:verification": "node --test tools/run-parallel.test.mjs tools/test-shards.test.mjs tools/check-changed.test.mjs tools/check-shas.test.mjs tools/ci-test-counts.test.mjs tools/benchmark-runtime.test.mjs",
+    "test:verification": "node --test tools/run-parallel.test.mjs tools/test-shards.test.mjs tools/check-changed.test.mjs tools/check-shas.test.mjs tools/ci-test-counts.test.mjs tools/benchmark-runtime.test.mjs tools/knip-entries.test.mjs",
     "test:families": "node tests/families/check.mjs",
     "test:lint:design": "node --test tools/design-lint/test.mjs"
   },
