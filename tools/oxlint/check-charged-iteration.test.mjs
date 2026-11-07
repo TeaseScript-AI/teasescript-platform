@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Project, ts } from "ts-morph";
 
-import { chargedIterationDiagnostics } from "./check-charged-iteration.mjs";
+import { CONFIGURED, chargedIterationDiagnostics } from "./check-charged-iteration.mjs";
 
 const ITERATION = `
 import type { WorkLedger } from "./budget.js";
@@ -259,4 +259,55 @@ const number = Number(items);
 export const all = [table, text, sum, size, number];
 `;
   assert.deepEqual(rejected(sourceText), [6, 15, 16, 17, 19]);
+});
+
+test("the configured checker covers objects.ts: a raw loop there is rejected, a charged one accepted (#1747)", () => {
+  // (through the configured scope itself: dropping objects.ts from it lets the raw loop pass, and this fails)
+  const project = new Project({
+    useInMemoryFileSystem: true,
+    compilerOptions: {
+      strict: true,
+      target: ts.ScriptTarget.ES2023,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      lib: ["lib.es2023.d.ts"],
+    },
+  });
+  const [chargeFile] = CONFIGURED.charge.split(":");
+  project.createSourceFile(`/repo/${chargeFile}`, BUDGET);
+  project.createSourceFile(`/repo/${CONFIGURED.iteration}`, ITERATION);
+  const objects = CONFIGURED.files.find((file) => file.endsWith("/objects.ts"));
+  assert.ok(objects !== undefined, "objects.ts is in the configured scope");
+  for (const file of CONFIGURED.files)
+    if (file !== objects) project.createSourceFile(`/repo/${file}`, "export {};\n");
+  project.createSourceFile(
+    `/repo/${objects}`,
+    `
+import { each } from "../narrowing-iteration.js";
+import type { WorkLedger } from "../budget.js";
+declare const work: WorkLedger;
+declare const items: readonly number[];
+export function raw(): number {
+  work.charge("objectSteps");
+  let total = 0;
+  for (const item of items) total += item;
+  return total;
+}
+export function charged(): number {
+  work.charge("objectSteps");
+  let total = 0;
+  for (const item of each(work, "objectSteps", items)) total += item;
+  return total;
+}
+`,
+  );
+  const lines = chargedIterationDiagnostics(
+    project.getProgram().compilerObject,
+    "/repo",
+    CONFIGURED,
+  )
+    .filter(({ fileName }) => fileName.endsWith("/objects.ts"))
+    .map(({ line }) => line);
+  // (the raw loop's line, and nothing in the charged function)
+  assert.deepEqual(lines, [10]);
 });
