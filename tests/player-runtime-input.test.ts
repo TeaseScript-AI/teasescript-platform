@@ -152,10 +152,16 @@ async function mount(
 
 /**
  * The ops each section of `bridge` posts, in order, with their arguments; `on(op, …)` runs once when `op` is posted, and
- * `replied` lists the replies' ops as they arrive.
+ * `replied` lists the replies' ops as they arrive; each post says whether its own reply has.
  */
 function track(context: TestContext, bridge: PlayerBridge) {
-  const posts: { readonly op: string; readonly args: Record<string, unknown> }[] = [];
+  // Each post, with whether its own reply has arrived.
+  const posts: {
+    readonly op: string;
+    readonly args: Record<string, unknown>;
+    readonly basis: number | null;
+    replied: boolean;
+  }[] = [];
   const replied: string[] = [];
   const hooks = new Map<string, () => void>();
   const section = bridge.client.section.bind(bridge.client);
@@ -167,12 +173,14 @@ function track(context: TestContext, bridge: PlayerBridge) {
         body((op, args, basis, onReply) => {
           // EVIDENCE: fixture: the ops of this file's tests post record arguments.
           const record = args as Record<string, unknown>;
-          posts.push({ op, args: record });
+          const post = { op, args: record, basis, replied: false };
+          posts.push(post);
           const sent = send(op, args, basis, onReply);
           const hook = hooks.get(op);
           hooks.delete(op);
           hook?.();
           return sent.then((reply) => {
+            post.replied = true;
             replied.push(op);
             return reply;
           });
@@ -447,6 +455,11 @@ for (const target of ["an answer", "the pacing skip"] as const)
       source: { kind: "source", script: "exit" },
     });
     const shown = host.session.value!;
+    // The input waits for its turn behind a section of the session, so the page hide's observation is admitted while
+    // the input's own has not run yet, and that one, at its turn, retires it.
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => (open = resolve));
+    const holding = bridge.section(shown, () => opened);
     const answering =
       target === "an answer"
         ? answer(host, input.intents.choice(options(shown)[1]!.id, "button"))
@@ -456,18 +469,48 @@ for (const target of ["an answer", "the pacing skip"] as const)
             (session) => playerRuntimePacingGate(session)?.actionId,
             input.intents.pacing,
           );
-    const changed = facade.observeNow(shown, 20, []);
+    // A page-hide opportunity for the stale session: the clock's observation, queued behind the input.
+    window.dispatchEvent(new Event("pagehide"));
+    const changed = facade.hatch(shown, (current) =>
+      adapter.observePlayerRuntimeTime(current, 20, []),
+    );
     assert.notEqual(
       changed.session.revision,
       shown.revision,
       "the facade call changed the session",
     );
+    open();
+    await holding;
     await compiling;
     const result = await answering;
+    const answeredShown = host.session.value;
     await settle();
     assert.equal(result.kind, "answered");
     assert.equal(host.hostError.value, null);
-    assert.equal(posted.ops().filter((op) => op !== "observeInput").length, 1);
+    // The input's op is posted once.
+    const ops = posted.ops().filter((op) => op !== "observeInput" && op !== "observeTime");
+    assert.equal(ops.length, 1, `one op besides the observations: ${ops.join(", ")}`);
+    // The clock's observations travel in sections of the session (`observeTime`, at their queue turn), so the tracker
+    // sees them. The page hide's is queued last, behind the input, whose own observation retires it: it still reaches
+    // the host (the barrier), and publishes nothing, so the input's publication stays shown.
+    const observations = posted.posts.filter((post) => post.op === "observeTime");
+    const hidden = observations.at(-1);
+    assert.ok(hidden !== undefined, "the page hide's observation reaches the host");
+    assert.equal(posted.ops().at(-1), "observeTime", "queued behind the input");
+    // Its own reply arrives a host delay later; only then can it have published.
+    for (let waited = 0; !hidden.replied; waited += 10) {
+      assert.ok(waited < 2_000, "the page hide's observation has its reply");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await settle();
+    assert.equal(host.session.value, answeredShown, "the retired observation publishes nothing");
+    // A deadline observation can come before it: the 10 ms script timer races this test's setup under the 50 ms host
+    // delay, so there is none or one, admitted before the synchronous steps above and only for the stale session
+    // (revision 1), which the facade call then replaced. A second one, or one for the shown session, fails.
+    const deadlines = observations.slice(0, -1);
+    assert.ok(deadlines.length <= 1, `at most one deadline observation: ${deadlines.length}`);
+    for (const deadline of deadlines)
+      assert.equal(deadline.basis, shown.revision, "for the stale session");
   });
 
 /** A provider that keeps what it stored, records each write, and settles each as `settle` decides. */

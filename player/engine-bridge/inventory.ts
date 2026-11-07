@@ -139,10 +139,7 @@ export const WORKER_MODULES: readonly string[] = [
   "player/engine-bridge/in-process.ts",
 ];
 
-/** Main-realm modules whose imports are not judged until activation removes them. */
-export const EXEMPT_UNTIL_ACTIVATION: readonly string[] = [];
-
-/** A main-realm import of a value from Worker-side code, and the family that removes it. */
+/** A main-realm import of a value from Worker-side code, and the bridge family it belongs to. */
 export interface RatchetEntry {
   readonly importer: string;
   readonly target: string;
@@ -320,12 +317,6 @@ export const RATCHET: readonly RatchetEntry[] = [
     importer: "player/vue/src/usePlayerSession.ts",
     target: "player/engine-bridge/in-process.ts",
     name: "introduceNow",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useRuntimeSceneClock.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "observeNow",
     family: "L5i",
   },
   // activation

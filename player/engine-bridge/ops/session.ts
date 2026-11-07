@@ -37,6 +37,15 @@ import {
 import type { CallViewReply, Introduction, Publication } from "../session-protocol.js";
 import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host.js";
 
+/** What adopting an op's result session did (`HeldSession.adoptResult`). */
+export type Adoption =
+  | { readonly kind: "same" }
+  | { readonly kind: "kept" }
+  | { readonly kind: "published"; readonly view: Publication };
+
+const SAME: Adoption = Object.freeze({ kind: "same" });
+const KEPT: Adoption = Object.freeze({ kind: "kept" });
+
 /**
  * A session the host holds: the adapter's session at its latest publication, and how many of its events the host has
  * handed out (the cursor every publication starts from). A late observation's catch-up stays inside it.
@@ -180,6 +189,22 @@ export class HeldSession implements HostSession {
     });
   }
 
+  /**
+   * Adopts `next`, the session an op returned, and says what it did: the session itself changes nothing (`same`);
+   * another of the same revision, as a trace-only or recorder wrapper, is kept without publishing (`kept`); a new
+   * revision is published once, with the events after the cursor (`published`). The UI never received a same-revision
+   * publication: the main side's store drops one whose revision is not newer than its own (`SessionStore.apply`). What
+   * the op returns and whether it ends a catch-up stay its own.
+   */
+  adoptResult(next: PlayerRuntimeSession): Adoption {
+    if (next === this.#current) return SAME;
+    if (next.revision === this.#current.revision) {
+      this.keep(next);
+      return KEPT;
+    }
+    return { kind: "published", view: this.publish(next) };
+  }
+
   /** The latest publication's call view, with its instruction facts: with the calls when `calls`, else none. */
   callView(calls: boolean): CallViewReply {
     const current = this.#current;
@@ -267,15 +292,15 @@ function heldOf(session: { readonly value: HostSession } | null): HeldSession {
 const ended = (_error: unknown, session: HostSession | null): boolean =>
   session instanceof HeldSession && session.broken;
 
-/** A session op that publishes `next` when it differs from the session it ran on. */
+/** A session op's outcome: `result`, with the publication of `next` when it is a new revision (`adoptResult`). */
 export function publishing(
   held: HeldSession,
   next: PlayerRuntimeSession,
   result: unknown,
 ): OpOutcome {
-  if (next === held.sessionForOperation()) return { result, view: null };
-  const view = held.publish(next);
-  return { result, eventsThrough: view.eventsThrough, view };
+  const adoption = held.adoptResult(next);
+  if (adoption.kind !== "published") return { result, view: null };
+  return { result, eventsThrough: adoption.view.eventsThrough, view: adoption.view };
 }
 
 /** An op of an existing session, which reads its basis unless `readsBasis` is false. */
