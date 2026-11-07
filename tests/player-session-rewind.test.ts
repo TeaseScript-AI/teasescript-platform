@@ -910,6 +910,10 @@ test("the call view follows the shown session through Back and Return while a de
  * under way, which completes or fails as it would. A read that settles by rejection fails its step; a failed adoption
  * that still owns the page says so. Unmounting ends Debug's features and the Player together; a lost connection settles
  * every read it held by rejection.
+ *
+ * This family is where "no stale failure notice after the page moved on" is proven: with the read held, each end of
+ * the page's lifecycle (replacement, stop, unmount, loss), and the notice observed on the page. The source check of
+ * `player-persistence-operations-source.test.ts` sees only how the read's settlement is wired, not what it says.
  */
 const EXIT_AXES = {
   read: ["back", "adopt"],

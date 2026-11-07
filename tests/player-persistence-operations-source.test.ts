@@ -826,11 +826,11 @@ test("every place of the host that reaches a store or the host is an operation, 
 });
 
 /**
- * Each read of an adoption's saved values (`captureStorage`) in `source`, and whether it settles only through
- * `settleAdoption`: a `.then` whose reply and rejection callbacks each call it and nothing else, awaited as it is, with
- * nothing chained after it. `settleAdoption` is referenced nowhere else, and the adoption's failure notice
- * (`playerNotices.rewindNotAdopted()`) is published only inside it. With the problems of `settleAdoption` itself: its
- * first statement must return unless `ownsShown(...)` holds.
+ * Each read of an adoption's saved values (`captureStorage`) in `source`, and how its settlement is wired: a `.then`
+ * whose reply and rejection callbacks each call `settleAdoption` and nothing else, awaited as it is, with nothing chained
+ * after it; `settleAdoption` referenced nowhere else; and `settleAdoption`'s first statement returning unless
+ * `ownsShown(...)` holds. What a settlement says is not seen here: that no stale failure notice shows once the page moved
+ * on is the rewind read family's (`player-session-rewind.test.ts`).
  */
 function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: string[] } {
   const problems: string[] = [];
@@ -845,7 +845,6 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
     callback.body.expression.text === "settleAdoption";
   // The `settleAdoption` references the admitted reads' callbacks make; any other is a second settlement.
   const admitted = new Set<ts.Node>();
-  let inSettlement = false;
   const visit = (node: ts.Node) => {
     if (
       ts.isIdentifier(node) &&
@@ -855,15 +854,6 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
     )
       problems.push(
         `${line(node)}: settleAdoption is reached outside the adoption read's settlement`,
-      );
-    if (
-      !inSettlement &&
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      node.expression.name.text === "rewindNotAdopted"
-    )
-      problems.push(
-        `${line(node)}: the adoption's failure notice is published outside settleAdoption`,
       );
     if (ts.isStringLiteralLike(node) && node.text === "captureStorage") {
       const read = node.parent;
@@ -903,10 +893,6 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
         ts.isReturnStatement(first.thenStatement);
       if (!guarded)
         problems.push(`${line(node)}: settleAdoption does not begin with its ownership check`);
-      inSettlement = true;
-      ts.forEachChild(node, visit);
-      inSettlement = false;
-      return;
     }
     ts.forEachChild(node, visit);
   };
@@ -914,7 +900,7 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
   return { reads, problems };
 }
 
-test("an adoption's read settles, by reply and by rejection, only through settleAdoption and its ownership check", () => {
+test("an adoption's read reaches settleAdoption only from its two callbacks, with nothing chained after it, and settleAdoption begins with its ownership check", () => {
   const { reads, problems } = adoptionSettlements(
     ts.createSourceFile(
       MAIN,
@@ -939,7 +925,7 @@ test("an adoption's read settles, by reply and by rejection, only through settle
   );
   assert.equal(of('const c = await host.read(s, "captureStorage");').length, 1);
   assert.equal(of("async function settleAdoption() { await write(); }").length, 1);
-  // A second settlement chained after the read's: a further caller of settleAdoption, or the failure notice outside it.
+  // A second settlement chained after the read's, which calls settleAdoption again, is found.
   const read =
     'await host.read(s, "captureStorage").then((c) => settleAdoption(o, s, { capture: c }), (e) => settleAdoption(o, s, { error: e }))';
   assert.deepEqual(of(`async function f() { ${read}; }`), []);
@@ -953,12 +939,6 @@ test("an adoption's read settles, by reply and by rejection, only through settle
       "1: settleAdoption is reached outside the adoption read's settlement",
       "1: settleAdoption is reached outside the adoption read's settlement",
     ],
-  );
-  assert.deepEqual(
-    of(
-      `async function f() { const w = ${read}; if (!w && !disposed) notices.publish(playerNotices.rewindNotAdopted()); }`,
-    ),
-    ["1: the adoption's failure notice is published outside settleAdoption"],
   );
 });
 
