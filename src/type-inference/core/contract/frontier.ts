@@ -1185,7 +1185,8 @@ export function pushedInvariant(contract: Contract): {
   });
   // (each union of two sets holds every state of both)
   for (const [name, id] of frontier.unions) {
-    const [a, b] = name.split(",").map(Number) as [number, number];
+    const [a, b] = name.split(",").map(Number);
+    if (a === undefined || b === undefined) continue;
     const union = new Set(id < 0 ? [] : frontier.pendingSets[id]!);
     if ([...frontier.pendingSets[a]!, ...frontier.pendingSets[b]!].some((each) => !union.has(each)))
       violations.push(`the union of pending sets ${a} and ${b}: a state missing`);
