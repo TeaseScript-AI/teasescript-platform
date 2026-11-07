@@ -29,7 +29,7 @@ import { serviceSection } from "./helpers/service-section.js";
  * Player error stop, which `bridgeLost` reports once, and no caller reports it again or leaves its rejection unhandled
  * (L5g). The cases come from the Player's consumers of bridge requests: those whose handling L5g changed must fail with
  * that handling reverted; the ones that were already safe are controls. A loss is injected as the client meets a real
- * one, so the composable runs on its own in-process engine (the topology the L5 series has until L5i): the client
+ * one, so the composable runs on its own in-process engine (the topology the L5 series keeps it on): the client
  * rejects everything pending and posts nothing more (`terminate`), and its loss listeners run in the same tick.
  */
 

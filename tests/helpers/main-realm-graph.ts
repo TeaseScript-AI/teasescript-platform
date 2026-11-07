@@ -35,7 +35,7 @@ export interface MainRealmGraphOptions {
   readonly allowedSource: ReadonlySet<string>;
   /** The Player modules that run in the engine Worker. */
   readonly workerModules: ReadonlySet<string>;
-  /** Main-realm modules whose imports are not judged (until activation removes them). */
+  /** Main-realm modules whose imports are not judged. */
   readonly exempt: ReadonlySet<string>;
 }
 
