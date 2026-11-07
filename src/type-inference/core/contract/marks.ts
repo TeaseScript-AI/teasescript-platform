@@ -990,3 +990,21 @@ export function annotated(
         );
   return entry.guarded || marksAt(contract, entry.holder, rest) ? marked(annotated) : annotated;
 }
+
+/** #2005: a compiled state of the pass's mark automaton, read only: its steps, its epsilon edges and its acceptance. */
+export function markState(
+  contract: Contract,
+  id: number,
+): {
+  readonly next: ReadonlyMap<string, number>;
+  readonly epsilon: readonly number[];
+  readonly accepting: boolean;
+} {
+  return automatonOf(contract).states[id]!;
+}
+
+/** #2005: whether a holder's mark holds at its own root, the empty rest (its automaton compiled). */
+export function rootAccepts(contract: Contract, holder: Holder): boolean {
+  const automaton = automatonOf(contract);
+  return automaton.states[compiled(contract, automaton, holder)]!.accepting;
+}
