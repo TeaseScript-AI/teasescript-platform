@@ -219,11 +219,13 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
       "BridgeClient.section",
       "BridgeClient.signal",
       "beginRecordingNow",
-      "hatch",
       "introduceNow",
     ],
   ],
-  "player/vue/src/useDebugRewind.ts useDebugRewind > back > step:callback": ["read", ["hatch"]],
+  "player/vue/src/useDebugRewind.ts useDebugRewind > back > step:callback": [
+    "read",
+    ["BridgeClient.request"],
+  ],
   "player/vue/src/useDebugRewind.ts useDebugRewind > forward": [
     "creation",
     [
@@ -236,7 +238,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/useDebugRewind.ts useDebugRewind > resume": [
     "resume",
-    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal", "hatch"],
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
   ],
   "player/vue/src/useDebugRewind.ts useDebugRewind > returnToSession": [
     "resume",
@@ -278,11 +280,11 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/useDevelopmentTime.ts useDevelopmentTime > advanceBy": [
     "own observation",
-    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal", "hatch"],
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
   ],
   "player/vue/src/useDevelopmentTime.ts useDevelopmentTime > skip": [
     "own observation",
-    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal", "hatch"],
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
   ],
   "player/vue/src/useDevelopmentTime.ts useDevelopmentTime > watch:callback#2 > setTimeout:callback":
     ["own observation", ["BridgeClient.request", "BridgeClient.section"]],
@@ -404,7 +406,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["lifecycle", ["BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > pressPermanentButton": [
     "own observation",
-    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal", "hatch"],
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
   ],
   "player/vue/src/usePlayerSession.ts usePlayerSession > reportHostError > then:callback.1": [
     "lifecycle",
@@ -668,6 +670,7 @@ const ADOPTIONS: Readonly<Record<string, readonly [Adoption, readonly string[]]>
 };
 /** The adoption census's followed escapes: the op tables' `run` members, and the facade's exposures. */
 const ADOPTION_ESCAPES: readonly string[] = [
+  "player/engine-bridge/ops/history.ts historyOps > captureStorage > run {run}",
   "player/engine-bridge/ops/transfer.ts transferOps > readTransfer > run {run}",
   "player/engine-bridge/ops/transfer.ts transferOps > releaseTransfer > run {run}",
   "player/engine-bridge/ops/transfer.ts transferOps > reviewTransfer > run {run}",
