@@ -472,6 +472,7 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
     const a = groups(questions2, questions2, "alike");
     assert.deepEqual(a.rows, {
       "unanswered: questions": [0, 0],
+      "unanswered: read-depth": [0, 0],
       "unanswered: stopped": [0, 0],
       "unanswered: unknown": [0, 0],
       unansweredAlike: [4, 1],
