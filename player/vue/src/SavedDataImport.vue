@@ -144,8 +144,10 @@ function drop(event: DragEvent) {
   const files = event.dataTransfer?.files;
   if (!files || files.length === 0) return;
   if (files.length > 1) {
-    // Refusing this drop also discards a reading that is still pending, so it cannot become the review.
+    // Refusing this drop also discards a reading that is still pending, so it cannot become the review, and leaves
+    // the session review shown.
     attempt++;
+    leaveSessionReview();
     step.value = { kind: "input", problem: "Drop one exported file." };
     return;
   }
