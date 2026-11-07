@@ -47,6 +47,7 @@ import {
   wideSet,
   type StructurePath,
 } from "./helpers/runtime-state-comparison.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
 
 /*
  * The differential harness run against this build itself (docs/TESTING.md "Differential harness"): every retained
@@ -287,6 +288,62 @@ test("a 10,000-level host list runs, restores and compares on the supported path
   assert.equal(JSON.stringify(-0), "0");
   assert.notEqual(canonicalDigest(zero), canonicalDigest(negative));
   assert.ok(Object.is(JSON.parse(canonicalText(-0)), -0));
+});
+
+test("10,000-level host values that nest sets run, restore and compare, with no exact-key fallback", () => {
+  // In CI lists, objects, dicts and sets in turn; on demand also a chain of two-member sets (about 26 s).
+  const values: [string, SerializableRuntimeValue][] = [["deep-host-nest", mixedNest(DEPTH)]];
+  if (process.env.FUZZ_ACCEPTANCE === "1")
+    values.push(["deep-host-set-chain", deepSetChain(DEPTH)]);
+  for (const [name, hostValue] of values) {
+    const { report, counts } = withValidationTestStatistics((finish) => ({
+      report: pair(single(name, DEEP_SOURCE, { seed: 1, globals: { hostValue } })),
+      counts: finish().counts,
+    }));
+    assert.deepEqual(report.verdict, { kind: "equivalent" }, name);
+    assert.deepEqual(report.outcomes.left, { kind: "completed" }, name);
+    // Every validation printed the sets' members, and none fell back to a whole key.
+    assert.ok((counts.setValidationPrints ?? 0) > 0, name);
+    assert.equal(counts.setValidationExactKeys, undefined, name);
+  }
+
+  // A detached copy with the leaf inside the innermost set changed differs at that path only.
+  const compiled = compileSource(DEEP_SOURCE, { globals: ["hostValue"] });
+  const snapshot = createFreshRuntimeSession(compiled.plan!, {
+    seed: 1,
+    globals: { hostValue: mixedNest(DEPTH) },
+  }).exportTrustedSnapshot();
+  // EVIDENCE: validation: `canonicalText` writes JSON, which `JSON.parse` reads back as plain data.
+  const copy = JSON.parse(canonicalText(snapshot)) as typeof snapshot;
+  const index = copy.globals.findIndex((binding) => binding.name === "hostValue");
+  const path: (string | number)[] = ["globals", index, "value"];
+  let at = copy.globals[index]!.value;
+  let replace = (_value: SerializableRuntimeValue): void => {};
+  let sets = 0;
+  // `mixedNest` holds one part at every level: a list's or set's item, an object's or dict's value.
+  while (typeof at === "object" && at !== null) {
+    const node = at;
+    if (node.kind === "list" || node.kind === "set") {
+      if (node.kind === "set") sets += 1;
+      path.push("items", 0);
+      replace = (value) => {
+        node.items[0] = value;
+      };
+      at = node.items[0]!;
+    } else if (node.kind === "object" || node.kind === "dict") {
+      const part = node.kind === "object" ? node.properties[0]! : node.entries[0]!;
+      path.push(node.kind === "object" ? "properties" : "entries", 0, "value");
+      replace = (value) => {
+        part.value = value;
+      };
+      at = part.value;
+    } else break;
+  }
+  assert.equal(sets, DEPTH / 4);
+  replace(1);
+  const comparison = compareStructures(snapshot, copy);
+  assert.equal(comparison.mismatches.length, 1);
+  assert.deepEqual(comparison.mismatches[0], { path, oracle: "0", candidate: "1" });
 });
 
 const CHOICES =

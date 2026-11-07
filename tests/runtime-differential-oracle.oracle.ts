@@ -20,14 +20,24 @@ import {
   type PipelineAdapter,
   type Route,
 } from "./helpers/runtime-differential.js";
+import { COLLIDING_A, COLLIDING_B } from "./helpers/colliding-texts.js";
+import { firstDuplicate, holdsHandle, nestedSetFamily } from "./helpers/nested-set-family.js";
 import {
   admitExternal,
+  plainRecipe,
   remoteDifferentialRun,
   Runner,
+  type Admission,
   type AdmissionRoute,
+  type Recipe,
 } from "./helpers/runtime-differential-remote.js";
 import { checkout, scratch, sealedManifest } from "./helpers/runtime-oracle.js";
-import { IDENTITY, renderPath } from "./helpers/runtime-state-comparison.js";
+import {
+  deepSetChain,
+  IDENTITY,
+  mixedNest,
+  renderPath,
+} from "./helpers/runtime-state-comparison.js";
 
 // The oracle binding of the differential harness (docs/TESTING.md "Differential harness"): the lockstep driver over two
 // roots' runners, the pinned oracle root (left) against this checkout's build (right), each in a process of its own
@@ -598,6 +608,166 @@ test(
     );
   }),
 );
+
+/*
+ * Nested-set admission against the frozen boundary (#1904, plan-r4 §8 R-setdepth): the pinned root validates sets with
+ * the per-member key the candidate replaced by bottom-up prints, so equal admissions on both are the same admission.
+ * Each case declares its outcome first, so two roots that reject alike never pass for an accepted value. Frozen depths
+ * stay at 1,024 levels or less: deeper, the pinned root's validator itself grows with the square of the depth.
+ */
+const ACCEPTANCE = process.env.FUZZ_ACCEPTANCE === "1";
+const ADMISSION_ROUTES: readonly AdmissionRoute[] = ["global", "storage", "checkpoint"];
+
+/** Both roots' admission of `recipe` by `route`, `accepted` as declared on the oracle, and equal on the candidate. */
+function admittedAlike(
+  label: string,
+  recipe: Recipe,
+  route: AdmissionRoute,
+  accepted: boolean,
+): Admission {
+  const left = admitExternal(oracle, recipe, route);
+  const shown = left.accepted ? "accepted" : `${left.error.name}: ${left.error.message}`;
+  assert.equal(left.accepted, accepted, `${label} on ${route}, oracle: ${shown}`);
+  assert.deepEqual(admitExternal(candidate, recipe, route), left, `${label} on ${route}`);
+  return left;
+}
+
+const list = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+  kind: "list",
+  items,
+});
+const set = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+  kind: "set",
+  items,
+});
+const object = (...parts: [string, SerializableRuntimeValue][]): SerializableRuntimeValue => ({
+  kind: "object",
+  properties: parts.map(([name, value]) => ({ name, value })),
+});
+const dict = (...parts: [string, SerializableRuntimeValue][]): SerializableRuntimeValue => ({
+  kind: "dict",
+  entries: parts.map(([key, value]) => ({ key, value })),
+});
+
+test("a seeded nested-set family is admitted on host globals by both roots as an independent oracle expects", () => {
+  let duplicates = 0;
+  let identities = 0;
+  let accepted = 0;
+  for (const value of nestedSetFamily(1904, ACCEPTANCE ? 20_000 : 200)) {
+    const duplicate = firstDuplicate(value, "globals.hostValue");
+    const handle = duplicate === null && holdsHandle(value);
+    const admission = admittedAlike(
+      "family",
+      plainRecipe(value),
+      "global",
+      duplicate === null && !handle,
+    );
+    if (admission.accepted) accepted += 1;
+    else if (duplicate !== null) {
+      duplicates += 1;
+      assert.equal(admission.error.message, duplicate);
+    } else {
+      identities += 1;
+      assert.match(admission.error.message, /only the runtime creates/u);
+    }
+  }
+  // Every outcome is represented.
+  assert.ok(
+    duplicates > 0 && identities > 0 && accepted > 0,
+    `${duplicates}/${identities}/${accepted}`,
+  );
+});
+
+test("collisions, precedence, == classes and recipes are admitted alike on every route", () => {
+  const unsupported: SerializableRuntimeValue = JSON.parse('{"kind":"unsupported"}');
+  const wrapped = [
+    (text: string) => list(text),
+    (text: string) => set(text),
+    (text: string) => object(["v", text]),
+    (text: string) => dict(["k", text]),
+  ];
+  const plain: [string, SerializableRuntimeValue, boolean][] = [
+    // Members whose prints collide are compared whole.
+    ...wrapped.flatMap((wrap, index): [string, SerializableRuntimeValue, boolean][] => [
+      [`collision ${index}`, set(wrap(COLLIDING_A), wrap(COLLIDING_B)), true],
+      [
+        `colliding duplicate ${index}`,
+        set(wrap(COLLIDING_A), wrap(COLLIDING_B), wrap(COLLIDING_A)),
+        false,
+      ],
+    ]),
+    ["nested collision", set(set(list(COLLIDING_A)), set(list(COLLIDING_B))), true],
+    // Every member is validated before the set compares them, and inner sets before outer ones.
+    ["malformed after a duplicate", set(list(0), list(0), unsupported), false],
+    ["inner duplicate", set(set(0, 0), set(0, 0)), false],
+    ["nested duplicate", list(set(list(1)), set(list(2), list(2))), false],
+    // Equal by ==: sets, objects and dicts in any order, -0 and 0.
+    ["reordered set", set(set(1, 2), set(2, 1)), false],
+    ["reordered object", set(object(["a", 1], ["b", 2]), object(["b", 2], ["a", 1])), false],
+    ["reordered dict", set(dict(["a", 1], ["b", 2]), dict(["b", 2], ["a", 1])), false],
+    ["signed zero", set(list(0), list(-0)), false],
+    // Unequal: kinds of scalars, list order, an object and a dict, empty collections.
+    ["scalar kinds", set(list(1), list("1"), list(true), list(null)), true],
+    ["list order", set(list(1, 2), list(2, 1)), true],
+    ["object and dict", set(object(["a", 1]), dict(["a", 1]), list(set()), list(list())), true],
+  ];
+  const recipes: [string, Recipe, boolean][] = [
+    ...[1, 64, 256].flatMap((depth): [string, Recipe, boolean][] => [
+      [`mixedNest ${depth}`, { builder: "mixedNest", depth }, true],
+      [`deepSetChain ${depth}`, { builder: "deepSetChain", depth }, true],
+    ]),
+    ...[3, 1000].flatMap((width): [string, Recipe, boolean][] => [
+      [`wideSet ${width}`, { builder: "wideSet", width }, true],
+      ...[0, Math.floor(width / 2), width - 1].map((duplicateAt): [string, Recipe, boolean] => [
+        `wideSet ${width} duplicate ${duplicateAt}`,
+        { builder: "wideSet", width, duplicateAt },
+        false,
+      ]),
+    ]),
+    ...(["accessorAt", "cycleAt", "holeAt", "prototypeAt", "nonFiniteAt"] as const).flatMap(
+      (builder) =>
+        [1, 256].map((depth): [string, Recipe, boolean] => [
+          `${builder} ${depth}`,
+          { builder, depth },
+          false,
+        ]),
+    ),
+  ];
+  for (const route of ADMISSION_ROUTES) {
+    for (const [label, value, accepted] of plain)
+      admittedAlike(label, plainRecipe(value), route, accepted);
+    for (const [label, recipe, accepted] of recipes) admittedAlike(label, recipe, route, accepted);
+  }
+  for (const builder of ["mixedNest", "deepSetChain"] as const)
+    admittedAlike(`${builder} 1024`, { builder, depth: 1024 }, "global", true);
+
+  // A text that does not parse ends its runner: the harness's failure, never a root's rejection.
+  assert.throws(
+    () =>
+      admitExternal(
+        runner("plain-unparsed", checkout, candidateFiles),
+        { builder: "plain", text: "{" },
+        "global",
+      ),
+    /closed its pipe|cannot be written to/u,
+  );
+});
+
+test("a nested host value runs, restores and compares alike on both roots", () => {
+  const source = 'let copy = hostValue\nwait 1 ms\nsay "done", instant\nexit\n';
+  const values: [string, SerializableRuntimeValue][] = [["mixedNest 64", mixedNest(64)]];
+  // On demand: a chain of sets, where the pinned root's 65 validations cost about 14 s.
+  if (ACCEPTANCE) values.push(["deepSetChain 1024", deepSetChain(1024)]);
+  for (const [name, hostValue] of values) {
+    const report = remoteDifferentialRun(
+      { left: oracle, right: candidate },
+      single(name, source, { seed: 1, globals: { hostValue } }),
+      CUTS,
+    );
+    assert.deepEqual(report.verdict, { kind: "equivalent" }, name);
+    assert.deepEqual(report.outcomes.left, { kind: "completed" }, name);
+  }
+});
 
 test("a source of multibyte characters longer than one pipe read crosses both pipes intact", () => {
   const input = single("multibyte", `say "${"€".repeat(24_000)}", instant\nexit\n`, { seed: 1 });
