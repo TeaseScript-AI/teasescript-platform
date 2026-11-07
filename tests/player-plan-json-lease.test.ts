@@ -1,18 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import test from "node:test";
 
-import { debugOps } from "../player/engine-bridge/ops/debug.js";
-import { inputOps } from "../player/engine-bridge/ops/input.js";
-import { mediaOps } from "../player/engine-bridge/ops/media.js";
-import { persistenceOps } from "../player/engine-bridge/ops/persistence.js";
-import { resourceOps } from "../player/engine-bridge/ops/resources.js";
-import { sessionOps } from "../player/engine-bridge/ops/session.js";
-import { traceOps } from "../player/engine-bridge/ops/trace.js";
-import { transferOps } from "../player/engine-bridge/ops/transfer.js";
 import { playerBridgeOps, playerOpsContext } from "../player/engine-bridge/player-ops.js";
-import type { BridgeOps } from "../player/engine-bridge/worker-host.js";
 import {
   EMPTY_PLAN_JSON_LEASE,
   settle,
@@ -26,7 +15,6 @@ import {
   RETIREMENTS,
   caseName,
   familyCases,
-  planJsonModule,
   unclassifiedOps,
   type FamilyCase,
   type Producer,
@@ -188,44 +176,11 @@ function run(c: LayerCase) {
 
 const CASES = [...layerCases()];
 
-/** The composed host's ops by the module that makes them (`playerBridgeOps`), its own as `player-ops.ts`. */
-const MODULES: Readonly<
-  Record<string, (context: ReturnType<typeof playerOpsContext>) => BridgeOps>
-> = {
-  "ops/session.ts": sessionOps,
-  "ops/debug.ts": debugOps,
-  "ops/input.ts": inputOps,
-  "ops/media.ts": mediaOps,
-  "ops/resources.ts": resourceOps,
-  "ops/persistence.ts": persistenceOps,
-  "ops/transfer.ts": transferOps,
-  "ops/trace.ts": traceOps,
-};
-
 test("every op of the host is classified: a producer of the family, or named as none", () => {
-  const context = playerOpsContext();
-  const composed = Object.keys(playerBridgeOps(context));
-  const byModule = Object.entries(MODULES).map(
-    ([path, ops]) => [path, Object.keys(ops(context))] as const,
-  );
-  const own = composed.filter((op) => !byModule.some(([, ops]) => ops.includes(op)));
-  // Each op of the composed host is its own or one module's, so no op escapes the rule below.
-  assert.deepEqual([...own, ...byModule.flatMap(([, ops]) => ops)].sort(), [...composed].sort());
-  const source = (path: string) =>
-    readFileSync(resolve(process.cwd(), "player/engine-bridge", path), "utf8");
-  // The ops of a module that names the plan JSON are each classified; the others' are no producers.
-  const named = [...byModule, ["player-ops.ts", own] as const].filter(([path]) =>
-    planJsonModule(source(path)),
-  );
-  const classified = named.flatMap(([, ops]) => ops);
-  assert.deepEqual(unclassifiedOps(Object.fromEntries(classified.map((op) => [op, null]))), []);
-  for (const op of Object.keys(NOT_PRODUCERS))
-    assert.ok(classified.includes(op), `${op} is an op of a module that names the plan JSON`);
-  for (const producer of Object.keys(PRODUCERS))
-    assert.ok(
-      classified.includes(producer),
-      `${producer} is an op of a module that names the plan JSON`,
-    );
+  const composed = Object.keys(playerBridgeOps(playerOpsContext()));
+  assert.deepEqual(unclassifiedOps(Object.fromEntries(composed.map((op) => [op, null]))), []);
+  for (const op of [...Object.keys(PRODUCERS), ...Object.keys(NOT_PRODUCERS)])
+    assert.ok(composed.includes(op), `${op} is an op of the composed host`);
 });
 
 test("the generated family holds every declared obligation and every pair of values that can meet", () => {

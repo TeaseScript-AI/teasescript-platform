@@ -5,9 +5,9 @@ import type { ScriptStorageProvider } from "../../player/script-storage.js";
 /*
  * The plan JSON's lifetime family (`player/plan-json-lease.ts`), declared once for both of its witness layers: the
  * pure family (`player-plan-json-lease.test.ts`) and the composable's (`player-session-keep.test.ts`). A producer is an
- * op of the host that reads or writes a plan's canonical JSON. Every op of the composed host whose module names the plan
- * JSON (`planJsonModule`) is either a producer, with its outcomes, or classified here as not one; the coverage check
- * compares this with the ops themselves, so a new op fails until it is classified and both layers drive it.
+ * op of the host that reads or writes a plan's canonical JSON. Every op of the composed host (`playerBridgeOps`) is
+ * either a producer, with its outcomes, or classified here as not one; the coverage check compares this with the ops
+ * themselves, so a new op fails until it is classified, and a producer until both layers drive it.
  */
 
 /**
@@ -30,7 +30,12 @@ export const PRODUCERS = {
 } as const;
 export type Producer = keyof typeof PRODUCERS;
 
-/** The ops that touch no plan JSON a reader could keep, and why. */
+const SESSION_OP =
+  "a held session's step, input or view: the session holds its plan, whose JSON it never writes";
+const SERVICE_OP = "a held session's answer from a service of the page: no plan";
+const DEBUG_SOURCE_OP = "Debug's source view of a held plan, from its sources, not its JSON";
+
+/** Every other op of the composed host (`playerBridgeOps`), and why it touches no plan JSON a reader could keep. */
 export const NOT_PRODUCERS = {
   releasePlanText: "cleanup: the one remover of a reserved plan JSON",
   captureCheckpoint: "a whole checkpoint, which holds the plan inside it; no plan JSON of its own",
@@ -44,14 +49,42 @@ export const NOT_PRODUCERS = {
   debugView: "a held session's trace view",
   restartTrace: "a held session's trace, begun anew",
   setDebugMode: "a held session's Debug state",
+  start: SESSION_OP,
+  continue: SESSION_OP,
+  observeTime: SESSION_OP,
+  observeInput: SESSION_OP,
+  stepTime: SESSION_OP,
+  beginCatchUp: SESSION_OP,
+  stepCatchUp: SESSION_OP,
+  adoptCatchUp: SESSION_OP,
+  dropCatchUp: SESSION_OP,
+  skipPacing: SESSION_OP,
+  viewCalls: SESSION_OP,
+  beginRecording: SESSION_OP,
+  submitComposer: SESSION_OP,
+  selectChoice: SESSION_OP,
+  activateButton: SESSION_OP,
+  stepFormField: SESSION_OP,
+  dismissFormField: SESSION_OP,
+  clearFormField: SESSION_OP,
+  draftForm: SESSION_OP,
+  submitForm: SESSION_OP,
+  cancelForm: SESSION_OP,
+  skipImage: SESSION_OP,
+  answerImage: SESSION_OP,
+  openUrl: SESSION_OP,
+  closePopup: SESSION_OP,
+  closeExport: SESSION_OP,
+  pressPermanentButton: SESSION_OP,
+  completeStorageWrite: SESSION_OP,
+  applyStorageEdit: SESSION_OP,
+  reportMediaLoad: SESSION_OP,
+  answerCapture: SERVICE_OP,
+  answerFileStore: SERVICE_OP,
+  answerLock: SERVICE_OP,
+  drawCode: DEBUG_SOURCE_OP,
+  codeLines: DEBUG_SOURCE_OP,
 } as const;
-
-/**
- * Whether the source of an ops module names the plan JSON: its slots, their reader, or the module that holds them. The
- * ops of every other module are no producers by this rule; those of a module that does are each classified here.
- */
-export const planJsonModule = (source: string) =>
-  /\bplanTexts\b|\breadPlanText\b|\/persistence\.js["']/.test(source);
 
 /** Where the page's plan stands when the producer's reply arrives: still current, replaced by another, or closed. */
 export const RETIREMENTS = ["current", "replaced", "disposed"] as const;
