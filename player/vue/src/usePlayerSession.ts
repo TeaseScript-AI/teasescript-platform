@@ -52,6 +52,7 @@ import {
 } from "../../engine-bridge/in-process.js";
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
 import type { RandomIntent, TracingIntent } from "../../engine-bridge/player-ops.js";
+import type { StorageCapture } from "../../engine-bridge/ops/history.js";
 import type { KeepCapture } from "../../engine-bridge/ops/persistence.js";
 import type {
   DrawResolution,
@@ -2832,32 +2833,68 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     adoption = adoptShown(session.value).finally(() => (adoption = null));
     return adoption;
   }
+  /**
+   * Whether the adoption that began in generation `owner` on the shown session `shown` still owns the page: it is mounted,
+   * no Start or rewind replaced the session, the state is still inspected and not stopped, and the shown session is
+   * `shown`'s, at `capture`'s revision when there is one.
+   */
+  function ownsShown(
+    owner: number,
+    shown: PlayerSession,
+    capture?: { readonly revision: number },
+  ): boolean {
+    return (
+      !disposed &&
+      generation.value === owner &&
+      inspecting.value &&
+      !stopped.value &&
+      session.value?.lineage === shown.lineage &&
+      (capture === undefined ||
+        (session.value.revision === capture.revision && shown.revision === capture.revision))
+    );
+  }
+  /**
+   * Settles an adoption's read: when the adoption no longer owns the page, nothing is written and nothing is said,
+   * however the read settled. Owning it, a failed read says so; a capture writes its saved values. Resolves to whether
+   * they were written (or needed none).
+   */
+  async function settleAdoption(
+    owner: number,
+    shown: PlayerSession,
+    outcome: { readonly capture: StorageCapture } | { readonly error: unknown },
+  ): Promise<boolean> {
+    if (!ownsShown(owner, shown, "capture" in outcome ? outcome.capture : undefined)) return false;
+    if (!("capture" in outcome)) {
+      notices.publish(playerNotices.rewindNotAdopted());
+      return false;
+    }
+    try {
+      if (scriptStorage && outcome.capture.persistent)
+        await scriptStorage.replace(outcome.capture.entries);
+      return true;
+    } catch {
+      if (ownsShown(owner, shown)) notices.publish(playerNotices.rewindNotAdopted());
+      return false;
+    }
+  }
   async function adoptShown(shown: PlayerSession): Promise<boolean> {
     const owner = generation.value;
     rewindWork.value = "adopt";
+    let written: boolean;
     try {
-      // The adopted state's saved values, read in the host; nothing else runs meanwhile (`rewindWork`).
-      const adopted = await bridgeOf(shown).read(shown, "captureStorage");
-      // Moved on during the read: nothing is written, and nothing is said.
-      if (
-        disposed ||
-        generation.value !== owner ||
-        !inspecting.value ||
-        stopped.value ||
-        session.value?.lineage !== shown.lineage ||
-        session.value.revision !== adopted.revision ||
-        shown.revision !== adopted.revision
-      )
-        return false;
-      if (scriptStorage && adopted.persistent) await scriptStorage.replace(adopted.entries);
-    } catch {
-      if (!disposed) notices.publish(playerNotices.rewindNotAdopted());
-      return false;
+      // The adopted state's saved values, read in the host while the adoption holds the rewind's work; each way the
+      // read settles goes through `settleAdoption`, which first asks whether the adoption still owns the page.
+      written = await bridgeOf(shown)
+        .read(shown, "captureStorage")
+        .then(
+          (capture) => settleAdoption(owner, shown, { capture }),
+          (error: unknown) => settleAdoption(owner, shown, { error }),
+        );
     } finally {
       rewindWork.value = null;
     }
     // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
-    if (disposed || generation.value !== owner || !inspecting.value || stopped.value) return false;
+    if (!written || !ownsShown(owner, shown)) return false;
     notices.dismiss(playerNoticeKeys.rewindNotAdopted);
     savedDataRevision.value++;
     rewindAdopted?.();
