@@ -86,12 +86,12 @@ const intentOf = (
   resetAt = 0,
 ): RandomIntent => ({ owner, control: sites === null ? null : { sites }, resetAt, intent });
 
-/** Sends `intent`, after `session`'s earlier requests when given, which it then adopts. */
-function control(bridge: PlayerBridge, intent: RandomIntent, session?: PlayerSession) {
+/** Sends `intent`, after `ahead`'s earlier requests when given; it adopts no session. */
+function control(bridge: PlayerBridge, intent: RandomIntent, ahead?: PlayerSession) {
   return bridge.client.request(
     "randomControl",
-    session === undefined ? { intent } : { intent, session: session.id },
-    session === undefined ? {} : { after: session.id },
+    { intent },
+    ahead === undefined ? {} : { after: ahead.id },
   );
 }
 
@@ -512,6 +512,48 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
   ],
 };
 
+// Every main-side sender of a random op, each classified: only `adoptRandom` gives a session a Player's control, and
+// only at the invariant's points; a settings change never does (orchestrator 2's ruling on P5's fourth occurrence).
+const RANDOM_SENDERS: readonly (readonly [string, string])[] = [
+  ['op: "randomControl" | "adoptRandom",', "the senders' type"],
+  ['"randomControl",', "not adopting: a settings change (`flushRandom`)"],
+  ['"randomControl",', "not adopting: the Player's teardown"],
+  ['"adoptRandom",', "adopting: `adoptRandom`, the one adoption"],
+  ['.request("releaseRandom",', "releasing: Continue before its kept draw went on"],
+];
+
+test("every main-side sender of a random op is classified as adopting or not", () => {
+  const lines = readFileSync(
+    new URL("../../player/vue/src/usePlayerSession.ts", import.meta.url),
+    "utf8",
+  )
+    .split("\n")
+    .filter((line) => /"(randomControl|adoptRandom|releaseRandom)"/u.test(line));
+  assert.equal(lines.length, RANDOM_SENDERS.length, lines.map((line) => line.trim()).join(" / "));
+  const left = [...lines];
+  for (const [anchor, kind] of RANDOM_SENDERS) {
+    const at = left.findIndex((line) => line.includes(anchor));
+    assert.notEqual(at, -1, `${kind} at ${anchor}`);
+    left.splice(at, 1);
+  }
+  // `adoptRandom` is called only at the invariant's points.
+  const composable = readFileSync(
+    new URL("../../player/vue/src/usePlayerSession.ts", import.meta.url),
+    "utf8",
+  );
+  const calls = composable
+    .split("\n")
+    .filter((line) => /\badoptRandom\(/u.test(line) && !/function adoptRandom/u.test(line));
+  assert.deepEqual(
+    calls.map((line) => line.trim()),
+    [
+      "if (!paused) adoptRandom(next);",
+      "if (session.value !== null) adoptRandom(session.value);",
+      "adoptRandom(continued);",
+    ],
+  );
+});
+
 test("every main-side introduction of a session is classified as a Start or a restore", () => {
   const callee =
     /\b(startedSession|introduceNow|prepareRestore|publishRewound|host\.start|rewind\.publish)\(/u;
@@ -575,6 +617,23 @@ test("malformed random arguments are refused before anything runs", async () => 
       JSON.stringify(args),
     );
   await assert.rejects(bridge.client.request("randomTried", { session: session.id }), refused);
+  // A settings change names no session: only `adoptRandom` gives one control.
+  await assert.rejects(
+    bridge.client.request("randomControl", { intent: intentOf(1, 3, []), session: session.id }),
+    refused,
+  );
+  for (const args of [
+    { session: session.id },
+    { intent: intentOf(1, 3, []) },
+    { session: 1, intent: intentOf(1, 3, []) },
+  ])
+    await assert.rejects(bridge.client.request("adoptRandom", args), refused, JSON.stringify(args));
+  for (const args of [{}, { session: 1 }, { session: session.id, more: 1 }])
+    await assert.rejects(
+      bridge.client.request("releaseRandom", args),
+      refused,
+      JSON.stringify(args),
+    );
   await assert.rejects(
     bridge.start("p1", START, false, { owner: 1, intent: intentOf(2, 1, []) }),
     refused,

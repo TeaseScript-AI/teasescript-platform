@@ -41,31 +41,51 @@ const isResolution = (value: unknown): value is DrawResolution =>
 
 export function randomOps(context: PlayerOpsContext): BridgeOps {
   return {
-    // The Player's random intent, on the Worker itself (`after` the session it names): the host aligns to it, and with
-    // `session` it gives that session the intent's owner's control from its next op on, as Start and Continue do. With
-    // `release` instead, the session gives up any Player's control from its next op on, as a Continue's restored
-    // session does until its kept draw went on naturally.
+    // The Player's random intent, on the Worker itself, sent `after` the shown session so it applies before that
+    // session's next op: the host aligns to it. It gives no session to anyone (`adoptRandom` does).
     randomControl: {
       session: "none",
       checkArguments: (args) =>
-        isRecord(args) &&
-        (exactly(args, ["intent"], ["session"])
-          ? isRandomIntent(args.intent) &&
-            (args.session === undefined || typeof args.session === "string")
-          : exactly(args, ["session", "release"]) &&
-            typeof args.session === "string" &&
-            args.release === true),
-      run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted an intent with a session's ID, or a session's release.
-        const { intent, session, release } = args as {
-          readonly intent?: RandomIntent;
-          readonly session?: string;
-          readonly release?: true;
-        };
-        if (intent !== undefined) alignRandom(context, intent);
-        const held = session === undefined ? undefined : sessions.get(session);
-        if (held instanceof HeldSession) held.adopt(release === true ? null : intent!.owner);
+        isRecord(args) && exactly(args, ["intent"]) && isRandomIntent(args.intent),
+      run: (args) => {
+        // EVIDENCE: validation: checkArguments accepted the intent.
+        alignRandom(context, (args as { readonly intent: RandomIntent }).intent);
         return { result: { revision: context.random.history.revision } };
+      },
+    },
+    // Gives `session` the intent's owner's random control from its next op on, at one of the points that adopt a
+    // session (a Start, input adopting an inspected state, Continue after its kept draw went on); the intent it carries
+    // aligns first, so the session runs with the control it was adopted under.
+    adoptRandom: {
+      session: "none",
+      checkArguments: (args) =>
+        isRecord(args) &&
+        exactly(args, ["session", "intent"]) &&
+        typeof args.session === "string" &&
+        isRandomIntent(args.intent),
+      run: (args, sessions) => {
+        // EVIDENCE: validation: checkArguments accepted the session's ID and the intent.
+        const { session, intent } = args as {
+          readonly session: string;
+          readonly intent: RandomIntent;
+        };
+        alignRandom(context, intent);
+        const held = sessions.get(session);
+        if (held instanceof HeldSession) held.adopt(intent.owner);
+        return { result: { revision: context.random.history.revision } };
+      },
+    },
+    // Takes any Player's random control from `session` from its next op on, as a Continue's restored session gives it
+    // up until its kept draw went on naturally.
+    releaseRandom: {
+      session: "none",
+      checkArguments: (args) =>
+        isRecord(args) && exactly(args, ["session"]) && typeof args.session === "string",
+      run: (args, sessions) => {
+        // EVIDENCE: validation: checkArguments accepted the session's ID.
+        const held = sessions.get((args as { readonly session: string }).session);
+        if (held instanceof HeldSession) held.adopt(null);
+        return { result: null };
       },
     },
     // Resolves the draw the session is paused at. With `record`, its outcome goes into the history first, so the draws

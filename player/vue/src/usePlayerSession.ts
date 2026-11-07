@@ -635,8 +635,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let lastRandom: RandomIntent | undefined;
   // The host's history's revision, from its latest reply: what `randomTried` reads again for.
   const randomRevision = ref(0);
-  /** Sends the pending random intent, while this Player lives, after `shown`'s earlier requests, which it adopts. */
-  function flushRandom(host: PlayerBridge, shown: PlayerSession | null) {
+  /**
+   * Sends the pending random intent, while this Player lives, after the earlier requests of `ahead` (the shown session),
+   * so that session's next op runs with it. It gives no session this Player's control: only `adoptRandom` does.
+   */
+  function flushRandom(host: PlayerBridge, ahead: PlayerSession | null) {
     if (!pendingRandom || disposed || randomOwner === null) return;
     pendingRandom = false;
     const intent = host.nextRandomIntent();
@@ -647,30 +650,43 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       intent,
     });
     resetRequested = false;
-    sendRandom(host, lastRandom, shown);
+    sendRandomRequest(
+      host,
+      "randomControl",
+      { intent: lastRandom },
+      ahead === null ? {} : { after: ahead.id },
+    );
   }
-  /** Sends `intent` after `shown`'s earlier requests, so `shown` runs with it from its next op on. */
-  function sendRandom(host: PlayerBridge, intent: RandomIntent, shown: PlayerSession | null) {
-    host.client
-      .request(
-        "randomControl",
-        shown === null ? { intent } : { intent, session: shown.id },
-        shown === null ? {} : { after: shown.id },
-      )
-      .then(
-        (reply) => {
-          // EVIDENCE: validation: `randomControl` replies from the same build with the history's revision.
-          const { revision } = reply.result as { readonly revision: number };
-          if (!disposed) randomRevision.value = revision;
-        },
-        (error: unknown) => {
-          if (!endsQuietly(error) && !disposed) reportHostError(error);
-        },
-      );
+  /** Sends a random op on the Worker itself; its reply gives the history's revision. */
+  function sendRandomRequest(
+    host: PlayerBridge,
+    op: "randomControl" | "adoptRandom",
+    args: Record<string, unknown>,
+    options: { readonly after?: string },
+  ) {
+    host.client.request(op, args, options).then(
+      (reply) => {
+        // EVIDENCE: validation: the random ops reply from the same build with the history's revision.
+        const { revision } = reply.result as { readonly revision: number };
+        if (!disposed) randomRevision.value = revision;
+      },
+      (error: unknown) => {
+        if (!endsQuietly(error) && !disposed) reportHostError(error);
+      },
+    );
   }
-  /** Gives `next` this Player's random control from its next op on, as Start and Continue do: the former attach. */
+  /**
+   * Adopts `next`: gives it this Player's random control from its next op on. Only the invariant's points call it: a
+   * Start's session shown, input adopting an inspected state, Continue after its kept draw went on.
+   */
   function adoptRandom(next: PlayerSession) {
-    if (lastRandom !== undefined && !disposed) sendRandom(bridgeOf(next), lastRandom, next);
+    if (lastRandom === undefined || disposed) return;
+    sendRandomRequest(
+      bridgeOf(next),
+      "adoptRandom",
+      { session: next.id, intent: lastRandom },
+      { after: next.id },
+    );
   }
   /** What a Start carries: this Player, whose session it is, and its newest random intent. */
   const startRandom = () =>
@@ -2849,11 +2865,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // a Start or an adoption gave this Player's control first gives it up (`adoptRandom` below takes it again).
         if (lastRandom !== undefined)
           void host.client
-            .request(
-              "randomControl",
-              { session: restored.id, release: true },
-              { after: restored.id },
-            )
+            .request("releaseRandom", { session: restored.id }, { after: restored.id })
             .catch(() => {});
         // Only the activation that began it goes on after each reply: a replaced one touches no trace or recorder.
         const owner = activationToken;

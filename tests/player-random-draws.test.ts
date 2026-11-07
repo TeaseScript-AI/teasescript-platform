@@ -26,6 +26,7 @@ import {
   type RandomSite,
   type RuntimeScriptStorageEntrySnapshot,
 } from "../src/index.js";
+import { coverageGaps, product } from "./helpers/family-coverage.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
 import { drawCode, fileCode, outcomeLines } from "../player/random-draw-code.js";
@@ -382,11 +383,12 @@ test("a restored state waits at its draw for the picker only once input adopts i
   assert.equal(said(host).length, 2);
 });
 
-// L5i.4, Sol plan P5 and code r1 C3, the invariant of Continue's boundary: a session takes Debug's random control only
-// from a fresh Start or an explicit adoption, never from a restore, an inspection, or a Continue before its kept draw
-// went on naturally. Over every way a restore reaches the Player, with Choose outcomes on and the state kept at the first
-// of two draws: an inspected one is no Player's; Continue finishes both draws naturally, then takes the control; input
-// that adopts an inspected one takes it, and the picker asks at its draw.
+// L5i.4, Sol plan P5, code r1 C3 and r2 (orchestrator 2's ruling (b)), the invariant of Continue's boundary: a session
+// takes Debug's random control only from a fresh Start or an explicit adoption, never from a restore, an inspection, a
+// settings change, or a Continue before its kept draw went on naturally. Over every way a restore reaches the Player,
+// crossed with the settings changes made before it is adopted, with Choose outcomes on and the state kept at the first
+// of two draws: an inspected one is no Player's, also after a settings change; Continue finishes both draws naturally,
+// then takes the control; input that adopts an inspected one takes it, and the picker asks at its draw.
 const RESTORE_PATHS = [
   "a raw restore, Continue",
   "a kept restore, Continue",
@@ -394,14 +396,38 @@ const RESTORE_PATHS = [
   "a rewound state, input adopts it",
   "a Start's own session, Continue",
 ] as const;
+/** What changes before the restore is adopted: nothing, a site's Next time, or Choose outcomes off and on. */
+const TRANSITIONS = ["none", "Next time", "off and on"] as const;
+const BOUNDARY_CASES = RESTORE_PATHS.flatMap((path) =>
+  TRANSITIONS.map((transition) => ({ path, transition, name: `${path}; settings: ${transition}` })),
+);
 const TWO_DRAWS =
   'let a = chance(50)\nlet b = chance(50)\nsay "${a} ${b}", instant\nshowButton "Next"\nexit';
-for (const path of RESTORE_PATHS)
-  test(`Continue's boundary: ${path}`, async (context) => {
+
+test("Continue's boundary covers every restore path with every settings change", () => {
+  const observed = BOUNDARY_CASES.map(({ path, transition }) => ({ path, transition }));
+  const feasible = product({ path: [...RESTORE_PATHS], transition: [...TRANSITIONS] });
+  assert.deepEqual(coverageGaps(feasible, observed, { tuples: true }), []);
+  assert.equal(new Set(BOUNDARY_CASES.map((each) => each.name)).size, BOUNDARY_CASES.length);
+});
+
+for (const { path, transition, name } of BOUNDARY_CASES)
+  test(`Continue's boundary: ${name}`, async (context) => {
     const plan = compiled(TWO_DRAWS);
     const { host, random } = await mount(context, plan);
     const bridge = await host.bridge;
-    const [site = ""] = listRandomSites(plan).map((each) => each.id);
+    const sites = listRandomSites(plan).map((each) => each.id);
+    const [site = ""] = sites;
+    // The settings change, made while the restore is not yet adopted.
+    const change = async () => {
+      if (transition === "Next time") random.setNext(sites[1] ?? "", "random");
+      else if (transition === "off and on") {
+        random.enabled.value = false;
+        await settle(context);
+        random.enabled.value = true;
+      }
+      await settle(context);
+    };
     // Kept at its first draw, as a session the adapter's own control paused there.
     const kept = createPlayerRuntimeSession(plan, { randomControl: {} });
     const keptDraw = kept.state.randomDraw!.drawId;
@@ -435,23 +461,49 @@ for (const path of RESTORE_PATHS)
       assert.equal(
         await host.randomTried(site),
         null,
-        `${path}: an inspected state is no Player's`,
+        `${name}: an inspected state is no Player's`,
       );
+      await change();
+      assert.equal(await host.randomTried(site), null, `${name}: a settings change adopts nothing`);
       if (path === "a rewound state, input adopts it") {
         assert.equal(await host.prepareInput(), true);
         await settle(context);
-        assert.equal(random.draw.value?.drawId, keptDraw, `${path}: the picker asks at its draw`);
-        assert.notEqual(await host.randomTried(site), null, `${path}: adopted`);
+        assert.equal(random.draw.value?.drawId, keptDraw, `${name}: the picker asks at its draw`);
+        assert.notEqual(await host.randomTried(site), null, `${name}: adopted`);
         return;
       }
       host.prepareRestore(host.session.value!);
     }
+    if (!path.startsWith("a rewound state")) await change();
     await host.activate();
     await settle(context);
-    assert.equal(random.draw.value, null, `${path}: no draw waits: both went on naturally`);
-    assert.equal(said(host).length, 1, `${path}: the run after the kept draw finished`);
-    assert.notEqual(await host.randomTried(site), null, `${path}: then it takes the control`);
+    assert.equal(random.draw.value, null, `${name}: no draw waits: both went on naturally`);
+    assert.equal(said(host).length, 1, `${name}: the run after the kept draw finished`);
+    assert.notEqual(await host.randomTried(site), null, `${name}: then it takes the control`);
   });
+
+// The ruling's check: a session adopted once needs no other adoption. A settings change while an input-adopted restore
+// runs applies to it through its ownership: its second draw goes on by itself, decided and recorded by the new setting.
+test("a settings change applies to an input-adopted restore through its ownership", async (context) => {
+  const plan = compiled(TWO_DRAWS);
+  const { host, random } = await mount(context, plan);
+  const [, second = ""] = listRandomSites(plan).map((each) => each.id);
+  const kept = createPlayerRuntimeSession(plan, { randomControl: {} });
+  const point = createPlayerRuntimeRestorePoint(kept);
+  host.rewind.publish(({ recorder }) => restorePlayerRuntimeSession(point, recorder), {
+    paused: true,
+    marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
+  });
+  await settle(context);
+  assert.equal(await host.prepareInput(), true);
+  await settle(context);
+  assert.notEqual(random.draw.value, null, "adopted, it waits at its draw");
+  random.setNext(second, "untried");
+  assert.equal(await random.resolve("natural"), true);
+  await settle(context);
+  assert.equal(random.draw.value, null, "the second draw went on by itself");
+  assert.equal((await triedOf(host, second)).history.length, 1, "decided under the new setting");
+});
 
 // Sol code r1 C2: draw IDs repeat across sessions, so the picker's history is of the shown session's draw.
 test("the picker reads a replacement session's history, also at a draw with the same ID", async (context) => {
